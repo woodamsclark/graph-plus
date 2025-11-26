@@ -37,7 +37,34 @@ async function buildGraph(app) {
     y: 0,
     z: 0
   }));
-  return { nodes };
+  const nodeByPath = /* @__PURE__ */ new Map();
+  for (const n of nodes)
+    nodeByPath.set(n.id, n);
+  const edges = [];
+  const edgeSet = /* @__PURE__ */ new Set();
+  for (const file of files) {
+    const cache = app.metadataCache.getFileCache(file);
+    if (!cache || !cache.links)
+      continue;
+    for (const linkEntry of cache.links) {
+      const linkPath = linkEntry.link;
+      if (!linkPath)
+        continue;
+      const destFile = app.metadataCache.getFirstLinkpathDest(linkPath, file.path);
+      if (!destFile)
+        continue;
+      if (!nodeByPath.has(destFile.path))
+        continue;
+      const sourceId = file.path;
+      const targetId = destFile.path;
+      const key = `${sourceId}->${targetId}`;
+      if (!edgeSet.has(key)) {
+        edges.push({ sourceId, targetId });
+        edgeSet.add(key);
+      }
+    }
+  }
+  return { nodes, edges };
 }
 
 // graph/layout2d.ts
@@ -67,8 +94,15 @@ function createRenderer2D(options) {
   const canvas = options.canvas;
   const ctx = canvas.getContext("2d");
   let graph = null;
+  let nodeById = /* @__PURE__ */ new Map();
   function setGraph(g) {
     graph = g;
+    nodeById = /* @__PURE__ */ new Map();
+    if (graph && graph.nodes) {
+      for (const n of graph.nodes) {
+        nodeById.set(n.id, n);
+      }
+    }
   }
   function resize(width, height) {
     canvas.width = Math.max(1, Math.floor(width));
@@ -87,6 +121,22 @@ function createRenderer2D(options) {
     if (!graph)
       return;
     const radius = 5;
+    if (graph.edges && graph.edges.length > 0) {
+      ctx.save();
+      ctx.beginPath();
+      for (const edge of graph.edges) {
+        const src = nodeById.get(edge.sourceId);
+        const tgt = nodeById.get(edge.targetId);
+        if (!src || !tgt)
+          continue;
+        ctx.moveTo(src.x, src.y);
+        ctx.lineTo(tgt.x, tgt.y);
+      }
+      ctx.strokeStyle = "#888888";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+    }
     ctx.save();
     ctx.fillStyle = "#66ccff";
     ctx.strokeStyle = "#0d3b4e";
