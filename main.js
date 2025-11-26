@@ -35,7 +35,10 @@ async function buildGraph(app) {
     label: file.basename,
     x: 0,
     y: 0,
-    z: 0
+    z: 0,
+    inDegree: 0,
+    outDegree: 0,
+    totalDegree: 0
   }));
   const nodeByPath = /* @__PURE__ */ new Map();
   for (const n of nodes)
@@ -63,6 +66,20 @@ async function buildGraph(app) {
         edgeSet.add(key);
       }
     }
+  }
+  const nodeByIdForMetrics = /* @__PURE__ */ new Map();
+  for (const n of nodes)
+    nodeByIdForMetrics.set(n.id, n);
+  for (const e of edges) {
+    const src = nodeByIdForMetrics.get(e.sourceId);
+    const tgt = nodeByIdForMetrics.get(e.targetId);
+    if (!src || !tgt)
+      continue;
+    src.outDegree += 1;
+    tgt.inDegree += 1;
+  }
+  for (const n of nodes) {
+    n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
   }
   return { nodes, edges };
 }
@@ -95,6 +112,12 @@ function createRenderer2D(options) {
   const ctx = canvas.getContext("2d");
   let graph = null;
   let nodeById = /* @__PURE__ */ new Map();
+  let minDegree = 0;
+  let maxDegree = 0;
+  const MIN_RADIUS = 4;
+  const MAX_RADIUS = 14;
+  const MIN_GLOW_ALPHA = 0.05;
+  const MAX_GLOW_ALPHA = 0.35;
   function setGraph(g) {
     graph = g;
     nodeById = /* @__PURE__ */ new Map();
@@ -103,6 +126,21 @@ function createRenderer2D(options) {
         nodeById.set(n.id, n);
       }
     }
+    minDegree = Infinity;
+    maxDegree = -Infinity;
+    if (graph && graph.nodes) {
+      for (const n of graph.nodes) {
+        const d = n.totalDegree || 0;
+        if (d < minDegree)
+          minDegree = d;
+        if (d > maxDegree)
+          maxDegree = d;
+      }
+    }
+    if (!isFinite(minDegree))
+      minDegree = 0;
+    if (!isFinite(maxDegree))
+      maxDegree = 0;
   }
   function resize(width, height) {
     canvas.width = Math.max(1, Math.floor(width));
@@ -120,7 +158,20 @@ function createRenderer2D(options) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!graph)
       return;
-    const radius = 5;
+    function getDegreeNormalized(node) {
+      const d = node.totalDegree || 0;
+      if (maxDegree <= minDegree)
+        return 0.5;
+      return (d - minDegree) / (maxDegree - minDegree);
+    }
+    function getNodeRadius(node) {
+      const t = getDegreeNormalized(node);
+      return MIN_RADIUS + t * (MAX_RADIUS - MIN_RADIUS);
+    }
+    function getGlowAlpha(node) {
+      const t = getDegreeNormalized(node);
+      return MIN_GLOW_ALPHA + t * (MAX_GLOW_ALPHA - MIN_GLOW_ALPHA);
+    }
     if (graph.edges && graph.edges.length > 0) {
       ctx.save();
       ctx.beginPath();
@@ -137,23 +188,33 @@ function createRenderer2D(options) {
       ctx.stroke();
       ctx.restore();
     }
-    ctx.save();
-    ctx.fillStyle = "#66ccff";
-    ctx.strokeStyle = "#0d3b4e";
-    ctx.lineWidth = 1;
     ctx.font = "10px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     for (const node of graph.nodes) {
+      const radius = getNodeRadius(node);
+      const glowAlpha = getGlowAlpha(node);
+      const glowRadius = radius * 1.8;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(102,204,255,${glowAlpha})`;
+      ctx.fill();
+      ctx.restore();
+      ctx.save();
       ctx.beginPath();
       ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = "#66ccff";
       ctx.fill();
+      ctx.strokeStyle = "#0d3b4e";
+      ctx.lineWidth = 1;
       ctx.stroke();
+      ctx.restore();
+      ctx.save();
       ctx.fillStyle = "#222";
       ctx.fillText(node.label, node.x, node.y + radius + 4);
-      ctx.fillStyle = "#66ccff";
+      ctx.restore();
     }
-    ctx.restore();
   }
   function destroy() {
     graph = null;

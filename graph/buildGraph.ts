@@ -6,6 +6,9 @@ export interface GraphNode {
   x: number;
   y: number;
   z: number;
+  inDegree: number;
+  outDegree: number;
+  totalDegree: number;
 }
 
 export interface GraphEdge {
@@ -27,6 +30,9 @@ export async function buildGraph(app: App): Promise<GraphData> {
     x: 0,
     y: 0,
     z: 0,
+    inDegree: 0,
+    outDegree: 0,
+    totalDegree: 0,
   }));
 
   // map for resolving paths to nodes
@@ -56,6 +62,22 @@ export async function buildGraph(app: App): Promise<GraphData> {
         edgeSet.add(key);
       }
     }
+  }
+
+  // compute in/out/total degrees
+  const nodeByIdForMetrics = new Map<string, GraphNode>();
+  for (const n of nodes) nodeByIdForMetrics.set(n.id, n);
+
+  for (const e of edges) {
+    const src = nodeByIdForMetrics.get(e.sourceId);
+    const tgt = nodeByIdForMetrics.get(e.targetId);
+    if (!src || !tgt) continue;
+    src.outDegree += 1;
+    tgt.inDegree += 1;
+  }
+
+  for (const n of nodes) {
+    n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
   }
 
   return { nodes, edges };
