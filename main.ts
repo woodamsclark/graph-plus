@@ -18,6 +18,13 @@ export interface GlowSettings {
 
 export interface GreaterGraphSettings {
   glow: GlowSettings;
+  physics?: {
+    repulsionStrength?: number;
+    springStrength?: number;
+    springLength?: number;
+    centerPull?: number;
+    damping?: number;
+  };
 }
 
 export const DEFAULT_SETTINGS: GreaterGraphSettings = {
@@ -34,6 +41,13 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
       distanceInnerRadiusMultiplier: 1.0,
       distanceOuterRadiusMultiplier: 2.5,
       distanceCurveSteepness: 2.0,
+  },
+  physics: {
+    repulsionStrength: 4000,
+    springStrength: 0.08,
+    springLength: 80,
+    centerPull: 0.02,
+    damping: 0.85,
   },
 };
 
@@ -272,6 +286,81 @@ class GreaterGraphSettingTab extends PluginSettingTab {
           const num = Number(value);
           if (!isNaN(num) && num > 0) {
             glow.distanceCurveSteepness = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    // Physics settings
+    const phys = this.plugin.settings.physics || {};
+
+    containerEl.createEl('h2', { text: 'Greater Graph – Physics' });
+
+    new Setting(containerEl)
+      .setName('Repulsion strength')
+      .setDesc('Controls node-node repulsion strength (higher = more separation).')
+      .addText((text) =>
+        text.setValue(String(phys.repulsionStrength ?? 4000)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && num >= 0) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.repulsionStrength = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Spring strength')
+      .setDesc('Spring force constant for edges (higher = stiffer).')
+      .addText((text) =>
+        text.setValue(String(phys.springStrength ?? 0.08)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && num >= 0) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.springStrength = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Spring length')
+      .setDesc('Preferred length (px) for edge springs.')
+      .addText((text) =>
+        text.setValue(String(phys.springLength ?? 80)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && num >= 0) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.springLength = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Center pull')
+      .setDesc('Force pulling nodes toward center (small value).')
+      .addText((text) =>
+        text.setValue(String(phys.centerPull ?? 0.02)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && num >= 0) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.centerPull = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Damping')
+      .setDesc('Velocity damping (0-1). Higher values reduce motion faster.')
+      .addText((text) =>
+        text.setValue(String(phys.damping ?? 0.85)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && num >= 0 && num <= 1) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.damping = num;
             await this.plugin.saveSettings();
           }
         })

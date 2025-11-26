@@ -5,15 +5,30 @@ export interface Simulation {
   stop(): void;
   tick(dt: number): void;
   reset(): void;
+  setOptions(opts: Partial<{
+    repulsionStrength: number;
+    springStrength: number;
+    springLength: number;
+    centerPull: number;
+    damping: number;
+  }>): void;
 }
 
-export function createSimulation(nodes: GraphNode[], edges: GraphEdge[]): Simulation {
-  // physics parameters (tweak as needed)
-  const repulsionStrength = 4000; // larger -> stronger repulsion
-  const springStrength = 0.08; // spring force constant
-  const springLength = 80; // preferred length in pixels
-  const centerPull = 0.02; // pull toward origin
-  const damping = 0.85; // velocity damping per tick
+export interface SimulationOptions {
+  repulsionStrength: number;
+  springStrength: number;
+  springLength: number;
+  centerPull: number;
+  damping: number;
+}
+
+export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options?: Partial<SimulationOptions>): Simulation {
+  // physics parameters (defaults)
+  let repulsionStrength = options?.repulsionStrength ?? 4000;
+  let springStrength = options?.springStrength ?? 0.08;
+  let springLength = options?.springLength ?? 80;
+  let centerPull = options?.centerPull ?? 0.02;
+  let damping = options?.damping ?? 0.85;
 
   let running = false;
 
@@ -117,5 +132,14 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[]): Simula
     }
   }
 
-  return { start, stop, tick, reset };
+  function setOptions(opts: Partial<SimulationOptions>) {
+    if (!opts) return;
+    if (typeof opts.repulsionStrength === 'number') repulsionStrength = opts.repulsionStrength;
+    if (typeof opts.springStrength === 'number') springStrength = opts.springStrength;
+    if (typeof opts.springLength === 'number') springLength = opts.springLength;
+    if (typeof opts.centerPull === 'number') centerPull = opts.centerPull;
+    if (typeof opts.damping === 'number') damping = opts.damping;
+  }
+
+  return { start, stop, tick, reset, setOptions };
 }

@@ -138,7 +138,11 @@ class Graph2DController {
     this.renderer.resize(rect.width || 300, rect.height || 200);
 
     // create simulation operating on the same node objects
-    this.simulation = createSimulation(this.graph.nodes, this.graph.edges);
+    this.simulation = createSimulation(
+      this.graph.nodes,
+      this.graph.edges,
+      (this.plugin as any).settings?.physics
+    );
     // start simulation and animation loop
     this.simulation.start();
     this.running = true;
@@ -175,11 +179,16 @@ class Graph2DController {
     // register settings listener to apply settings live
     if ((this.plugin as any).registerSettingsListener) {
       this.settingsUnregister = (this.plugin as any).registerSettingsListener(() => {
-        if (this.renderer && (this.plugin as any).settings) {
+        if ((this.plugin as any).settings) {
           const glow = (this.plugin as any).settings.glow;
-          if ((this.renderer as any).setGlowSettings) {
+          if (this.renderer && (this.renderer as any).setGlowSettings) {
             (this.renderer as any).setGlowSettings(glow);
             this.renderer.render();
+          }
+
+          const phys = (this.plugin as any).settings.physics;
+          if (this.simulation && phys && (this.simulation as any).setOptions) {
+            (this.simulation as any).setOptions(phys);
           }
         }
       });
