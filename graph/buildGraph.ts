@@ -6,6 +6,8 @@ export interface GraphNode {
   x: number;
   y: number;
   z: number;
+  filePath: string;
+  file?: TFile;
   inDegree: number;
   outDegree: number;
   totalDegree: number;
@@ -26,6 +28,8 @@ export async function buildGraph(app: App): Promise<GraphData> {
 
   const nodes: GraphNode[] = files.map((file) => ({
     id: file.path,
+    filePath: file.path,
+    file: file,
     label: file.basename,
     x: 0,
     y: 0,

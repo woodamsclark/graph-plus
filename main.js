@@ -33,6 +33,8 @@ async function buildGraph(app) {
   const files = app.vault.getMarkdownFiles();
   const nodes = files.map((file) => ({
     id: file.path,
+    filePath: file.path,
+    file,
     label: file.basename,
     x: 0,
     y: 0,
@@ -125,8 +127,13 @@ function createRenderer2D(options) {
   let neighborBoost = glowOptions?.neighborBoostFactor ?? 1;
   let dimFactor = glowOptions?.dimFactor ?? 0.25;
   let hoverHighlightDepth = glowOptions?.hoverHighlightDepth ?? 1;
+  let distanceInnerMultiplier = glowOptions?.distanceInnerRadiusMultiplier ?? 1;
+  let distanceOuterMultiplier = glowOptions?.distanceOuterRadiusMultiplier ?? 2.5;
+  let distanceCurveSteepness = glowOptions?.distanceCurveSteepness ?? 2;
   let hoveredNodeId = null;
   let hoverHighlightSet = /* @__PURE__ */ new Set();
+  let mouseX = 0;
+  let mouseY = 0;
   function setGraph(g) {
     graph = g;
     nodeById = /* @__PURE__ */ new Map();
@@ -176,21 +183,57 @@ function createRenderer2D(options) {
     return minCenterAlpha + t * (maxCenterAlpha - minCenterAlpha);
   }
   function getCenterAlpha(node) {
-    let alpha = getBaseCenterAlpha(node);
-    if (hoveredNodeId === node.id) {
-      alpha = Math.min(1, alpha * hoverBoost);
-    } else if (hoveredNodeId !== null) {
-      if (hoverHighlightSet && hoverHighlightSet.size > 0) {
-        if (hoverHighlightSet.has(node.id)) {
-          alpha = Math.min(1, alpha * neighborBoost);
-        } else {
-          alpha = alpha * dimFactor;
-        }
-      } else {
-        alpha = alpha * dimFactor;
-      }
+    const base = getBaseCenterAlpha(node);
+    if (!hoveredNodeId)
+      return clamp01(base);
+    const inDepth = hoverHighlightSet.has(node.id);
+    const isHovered = node.id === hoveredNodeId;
+    if (!inDepth)
+      return clamp01(base * dimFactor);
+    const distFactor = getMouseDistanceFactor(node);
+    if (isHovered) {
+      const boost = 1 + (hoverBoost - 1) * distFactor;
+      return clamp01(base * boost);
+    } else {
+      const boost = 1 + (neighborBoost - 1) * distFactor;
+      return clamp01(base * boost);
     }
-    return alpha;
+  }
+  function clamp01(v) {
+    if (v <= 0)
+      return 0;
+    if (v >= 1)
+      return 1;
+    return v;
+  }
+  function applySCurve(p, steepness) {
+    if (p <= 0)
+      return 0;
+    if (p >= 1)
+      return 1;
+    const k = steepness <= 0 ? 1e-4 : steepness;
+    const a = Math.pow(p, k);
+    const b = Math.pow(1 - p, k);
+    if (a + b === 0)
+      return 0.5;
+    return a / (a + b);
+  }
+  function getMouseDistanceFactor(node) {
+    const radius = getNodeRadius(node);
+    const innerR = radius * distanceInnerMultiplier;
+    const outerR = radius * distanceOuterMultiplier;
+    if (outerR <= innerR || outerR <= 0)
+      return 0;
+    const dx = mouseX - node.x;
+    const dy = mouseY - node.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist <= innerR)
+      return 1;
+    if (dist >= outerR)
+      return 0;
+    const t = (dist - innerR) / (outerR - innerR);
+    const proximity = 1 - t;
+    return applySCurve(proximity, distanceCurveSteepness);
   }
   function render() {
     if (!ctx)
@@ -221,9 +264,6 @@ function createRenderer2D(options) {
       ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
       ctx.fillStyle = "#66ccff";
       ctx.fill();
-      ctx.strokeStyle = "#0d3b4e";
-      ctx.lineWidth = 1;
-      ctx.stroke();
       ctx.restore();
       ctx.save();
       ctx.fillStyle = "#222";
@@ -252,10 +292,15 @@ function createRenderer2D(options) {
     neighborBoost = glow.neighborBoostFactor ?? neighborBoost;
     dimFactor = glow.dimFactor ?? dimFactor;
     hoverHighlightDepth = glow.hoverHighlightDepth ?? hoverHighlightDepth;
+    distanceInnerMultiplier = glow.distanceInnerRadiusMultiplier ?? distanceInnerMultiplier;
+    distanceOuterMultiplier = glow.distanceOuterRadiusMultiplier ?? distanceOuterMultiplier;
+    distanceCurveSteepness = glow.distanceCurveSteepness ?? distanceCurveSteepness;
   }
-  function setHoverContext(hoveredId, highlightedIds) {
+  function setHoverState(hoveredId, highlightedIds, mx, my) {
     hoveredNodeId = hoveredId;
     hoverHighlightSet = highlightedIds ? new Set(highlightedIds) : /* @__PURE__ */ new Set();
+    mouseX = mx || 0;
+    mouseY = my || 0;
   }
   return {
     setGraph,
@@ -265,7 +310,7 @@ function createRenderer2D(options) {
     setHoveredNode,
     getNodeRadiusForHit,
     setGlowSettings,
-    setHoverContext
+    setHoverState
   };
 }
 
@@ -292,6 +337,11 @@ var GraphView = class extends import_obsidian.ItemView {
     const container = this.containerEl.createDiv({ cls: "greater-graph-view" });
     this.controller = new Graph2DController(this.app, container, this.plugin);
     await this.controller.init();
+    if (this.controller) {
+      this.controller.setNodeClickHandler((node) => {
+        void this.openNodeFile(node);
+      });
+    }
   }
   onResize() {
     const rect = this.containerEl.getBoundingClientRect();
@@ -302,6 +352,29 @@ var GraphView = class extends import_obsidian.ItemView {
     this.controller = null;
     this.containerEl.empty();
   }
+  async openNodeFile(node) {
+    if (!node)
+      return;
+    const app = this.app;
+    let file = null;
+    if (node.file) {
+      file = node.file;
+    } else if (node.filePath) {
+      const af = app.vault.getAbstractFileByPath(node.filePath);
+      if (af instanceof import_obsidian.TFile)
+        file = af;
+    }
+    if (!file) {
+      console.warn("Greater Graph: could not resolve file for node", node);
+      return;
+    }
+    const leaf = app.workspace.getLeaf(false);
+    try {
+      await leaf.openFile(file);
+    } catch (e) {
+      console.error("Greater Graph: failed to open file", e);
+    }
+  }
 };
 var Graph2DController = class {
   app;
@@ -310,9 +383,11 @@ var Graph2DController = class {
   renderer = null;
   graph = null;
   adjacency = null;
+  onNodeClick = null;
   plugin;
   mouseMoveHandler = null;
   mouseLeaveHandler = null;
+  mouseClickHandler = null;
   settingsUnregister = null;
   constructor(app, containerEl, plugin) {
     this.app = app;
@@ -353,8 +428,19 @@ var Graph2DController = class {
     this.mouseLeaveHandler = () => {
       this.clearHover();
     };
+    this.mouseClickHandler = (ev) => {
+      if (!this.canvas)
+        return;
+      if (ev.button !== 0)
+        return;
+      const rect2 = this.canvas.getBoundingClientRect();
+      const x = ev.clientX - rect2.left;
+      const y = ev.clientY - rect2.top;
+      this.handleClick(x, y);
+    };
     this.canvas.addEventListener("mousemove", this.mouseMoveHandler);
     this.canvas.addEventListener("mouseleave", this.mouseLeaveHandler);
+    this.canvas.addEventListener("click", this.mouseClickHandler);
     if (this.plugin.registerSettingsListener) {
       this.settingsUnregister = this.plugin.registerSettingsListener(() => {
         if (this.renderer && this.plugin.settings) {
@@ -380,12 +466,47 @@ var Graph2DController = class {
     this.canvas = null;
     this.renderer = null;
     this.graph = null;
+    this.onNodeClick = null;
     if (this.settingsUnregister) {
       try {
         this.settingsUnregister();
       } catch (e) {
       }
       this.settingsUnregister = null;
+    }
+  }
+  setNodeClickHandler(handler) {
+    this.onNodeClick = handler;
+  }
+  hitTestNode(x, y) {
+    if (!this.graph || !this.renderer)
+      return null;
+    let closest = null;
+    let closestDist = Infinity;
+    const hitPadding = 6;
+    for (const node of this.graph.nodes) {
+      const dx = x - node.x;
+      const dy = y - node.y;
+      const distSq = dx * dx + dy * dy;
+      const nodeRadius = this.renderer.getNodeRadiusForHit ? this.renderer.getNodeRadiusForHit(node) : 8;
+      const hitR = nodeRadius + hitPadding;
+      if (distSq <= hitR * hitR && distSq < closestDist) {
+        closestDist = distSq;
+        closest = node;
+      }
+    }
+    return closest;
+  }
+  handleClick(x, y) {
+    if (!this.graph || !this.onNodeClick)
+      return;
+    const node = this.hitTestNode(x, y);
+    if (!node)
+      return;
+    try {
+      this.onNodeClick(node);
+    } catch (e) {
+      console.error("Graph2DController.onNodeClick handler error", e);
     }
   }
   handleHover(x, y) {
@@ -426,8 +547,8 @@ var Graph2DController = class {
         }
       }
     }
-    if (this.renderer.setHoverContext) {
-      this.renderer.setHoverContext(newId, highlightSet);
+    if (this.renderer.setHoverState) {
+      this.renderer.setHoverState(newId, highlightSet, x, y);
     }
     if (this.renderer.setHoveredNode) {
       this.renderer.setHoveredNode(newId);
@@ -437,8 +558,8 @@ var Graph2DController = class {
   clearHover() {
     if (!this.renderer)
       return;
-    if (this.renderer.setHoverContext)
-      this.renderer.setHoverContext(null, /* @__PURE__ */ new Set());
+    if (this.renderer.setHoverState)
+      this.renderer.setHoverState(null, /* @__PURE__ */ new Set(), 0, 0);
     if (this.renderer.setHoveredNode)
       this.renderer.setHoveredNode(null);
     this.renderer.render();
@@ -456,7 +577,10 @@ var DEFAULT_SETTINGS = {
     hoverBoostFactor: 1.6,
     neighborBoostFactor: 1.2,
     dimFactor: 0.3,
-    hoverHighlightDepth: 1
+    hoverHighlightDepth: 1,
+    distanceInnerRadiusMultiplier: 1,
+    distanceOuterRadiusMultiplier: 2.5,
+    distanceCurveSteepness: 2
   }
 };
 var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
@@ -603,6 +727,33 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         const num = Number(value);
         if (!isNaN(num) && Number.isInteger(num) && num >= 0) {
           glow.hoverHighlightDepth = Math.max(0, Math.floor(num));
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Inner distance multiplier").setDesc("Distance (in node radii) where distance-based glow is fully active.").addText(
+      (text) => text.setValue(String(glow.distanceInnerRadiusMultiplier ?? 1)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num > 0) {
+          glow.distanceInnerRadiusMultiplier = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Outer distance multiplier").setDesc("Distance (in node radii) beyond which the mouse has no effect on glow.").addText(
+      (text) => text.setValue(String(glow.distanceOuterRadiusMultiplier ?? 2.5)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num > (glow.distanceInnerRadiusMultiplier ?? 0)) {
+          glow.distanceOuterRadiusMultiplier = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Distance curve steepness").setDesc("Controls how quickly glow ramps up as the cursor approaches a node. Higher values = steeper S-curve.").addText(
+      (text) => text.setValue(String(glow.distanceCurveSteepness ?? 2)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num > 0) {
+          glow.distanceCurveSteepness = num;
           await this.plugin.saveSettings();
         }
       })

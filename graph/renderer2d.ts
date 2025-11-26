@@ -11,6 +11,9 @@ export interface GlowSettings {
   neighborBoostFactor?: number;
   dimFactor?: number;
   hoverHighlightDepth?: number;
+  distanceInnerRadiusMultiplier?: number;
+  distanceOuterRadiusMultiplier?: number;
+  distanceCurveSteepness?: number;
 }
 
 export interface Renderer2DOptions {
@@ -26,7 +29,7 @@ export interface Renderer2D {
   setHoveredNode(nodeId: string | null): void;
   getNodeRadiusForHit(node: any): number;
   setGlowSettings(glow: GlowSettings): void;
-  setHoverContext(hoveredId: string | null, highlightedIds: Set<string>): void;
+  setHoverState(hoveredId: string | null, highlightedIds: Set<string>, mouseX: number, mouseY: number): void;
 }
 
 export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
@@ -48,8 +51,13 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let neighborBoost = glowOptions?.neighborBoostFactor ?? 1.0;
   let dimFactor = glowOptions?.dimFactor ?? 0.25;
   let hoverHighlightDepth = glowOptions?.hoverHighlightDepth ?? 1;
+  let distanceInnerMultiplier = glowOptions?.distanceInnerRadiusMultiplier ?? 1.0;
+  let distanceOuterMultiplier = glowOptions?.distanceOuterRadiusMultiplier ?? 2.5;
+  let distanceCurveSteepness = glowOptions?.distanceCurveSteepness ?? 2.0;
   let hoveredNodeId: string | null = null;
   let hoverHighlightSet: Set<string> = new Set();
+  let mouseX = 0;
+  let mouseY = 0;
 
   function setGraph(g: GraphData) {
     graph = g;
@@ -103,23 +111,63 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   }
 
   function getCenterAlpha(node: any) {
-    let alpha = getBaseCenterAlpha(node);
-    if (hoveredNodeId === node.id) {
-      alpha = Math.min(1.0, alpha * hoverBoost);
-    } else if (hoveredNodeId !== null) {
-      // when there's an active hover, boost highlighted neighbors and dim others
-      if (hoverHighlightSet && hoverHighlightSet.size > 0) {
-        if (hoverHighlightSet.has(node.id)) {
-          alpha = Math.min(1.0, alpha * neighborBoost);
-        } else {
-          alpha = alpha * dimFactor;
-        }
-      } else {
-        // no highlight set provided, apply a mild dim to non-hovered nodes
-        alpha = alpha * dimFactor;
-      }
+    const base = getBaseCenterAlpha(node);
+
+    // no hover active
+    if (!hoveredNodeId) return clamp01(base);
+
+    const inDepth = hoverHighlightSet.has(node.id);
+    const isHovered = node.id === hoveredNodeId;
+
+    // outside highlight depth -> dimmed, no distance effect
+    if (!inDepth) return clamp01(base * dimFactor);
+
+    // within depth -> apply distance-based factor
+    const distFactor = getMouseDistanceFactor(node); // 0..1
+
+    if (isHovered) {
+      // hovered node reaches max hover as mouse approaches
+      const boost = 1 + (hoverBoost - 1) * distFactor;
+      return clamp01(base * boost);
+    } else {
+      // neighbor nodes get interpolated boost based on distance
+      const boost = 1 + (neighborBoost - 1) * distFactor;
+      return clamp01(base * boost);
     }
-    return alpha;
+  }
+
+  function clamp01(v: number) {
+    if (v <= 0) return 0;
+    if (v >= 1) return 1;
+    return v;
+  }
+
+  function applySCurve(p: number, steepness: number) {
+    if (p <= 0) return 0;
+    if (p >= 1) return 1;
+    const k = steepness <= 0 ? 0.0001 : steepness;
+    const a = Math.pow(p, k);
+    const b = Math.pow(1 - p, k);
+    if (a + b === 0) return 0.5;
+    return a / (a + b);
+  }
+
+  function getMouseDistanceFactor(node: any) {
+    const radius = getNodeRadius(node);
+    const innerR = radius * distanceInnerMultiplier;
+    const outerR = radius * distanceOuterMultiplier;
+    if (outerR <= innerR || outerR <= 0) return 0;
+
+    const dx = mouseX - node.x;
+    const dy = mouseY - node.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist <= innerR) return 1;
+    if (dist >= outerR) return 0;
+
+    // normalize so 0 = outerR, 1 = innerR
+    const t = (dist - innerR) / (outerR - innerR); // 0..1 where 0=inner,1=outer
+    const proximity = 1 - t; // 1 near inner, 0 near outer
+    return applySCurve(proximity, distanceCurveSteepness);
   }
 
   function render() {
@@ -175,9 +223,9 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
       ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
       ctx.fillStyle = '#66ccff';
       ctx.fill();
-      ctx.strokeStyle = '#0d3b4e';
-      ctx.lineWidth = 1;
-      ctx.stroke();
+      //ctx.strokeStyle = '#0d3b4e';
+      //ctx.lineWidth = 1;
+      //ctx.stroke();
       ctx.restore();
 
       // label below node
@@ -211,11 +259,16 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     neighborBoost = glow.neighborBoostFactor ?? neighborBoost;
     dimFactor = glow.dimFactor ?? dimFactor;
     hoverHighlightDepth = glow.hoverHighlightDepth ?? hoverHighlightDepth;
+    distanceInnerMultiplier = glow.distanceInnerRadiusMultiplier ?? distanceInnerMultiplier;
+    distanceOuterMultiplier = glow.distanceOuterRadiusMultiplier ?? distanceOuterMultiplier;
+    distanceCurveSteepness = glow.distanceCurveSteepness ?? distanceCurveSteepness;
   }
 
-  function setHoverContext(hoveredId: string | null, highlightedIds: Set<string>) {
+  function setHoverState(hoveredId: string | null, highlightedIds: Set<string>, mx: number, my: number) {
     hoveredNodeId = hoveredId;
     hoverHighlightSet = highlightedIds ? new Set(highlightedIds) : new Set();
+    mouseX = mx || 0;
+    mouseY = my || 0;
   }
 
   return {
@@ -226,7 +279,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     setHoveredNode,
     getNodeRadiusForHit,
     setGlowSettings,
-    setHoverContext,
+    setHoverState,
   };
 }
 

@@ -11,6 +11,9 @@ export interface GlowSettings {
   neighborBoostFactor?: number;
   dimFactor?: number;
   hoverHighlightDepth?: number;
+  distanceInnerRadiusMultiplier?: number;
+  distanceOuterRadiusMultiplier?: number;
+  distanceCurveSteepness?: number;
 }
 
 export interface GreaterGraphSettings {
@@ -28,6 +31,9 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     neighborBoostFactor: 1.2,
     dimFactor: 0.3,
     hoverHighlightDepth: 1,
+      distanceInnerRadiusMultiplier: 1.0,
+      distanceOuterRadiusMultiplier: 2.5,
+      distanceCurveSteepness: 2.0,
   },
 };
 
@@ -227,6 +233,45 @@ class GreaterGraphSettingTab extends PluginSettingTab {
           const num = Number(value);
           if (!isNaN(num) && Number.isInteger(num) && num >= 0) {
             glow.hoverHighlightDepth = Math.max(0, Math.floor(num));
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Inner distance multiplier')
+      .setDesc('Distance (in node radii) where distance-based glow is fully active.')
+      .addText((text) =>
+        text.setValue(String(glow.distanceInnerRadiusMultiplier ?? 1.0)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && num > 0) {
+            glow.distanceInnerRadiusMultiplier = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Outer distance multiplier')
+      .setDesc('Distance (in node radii) beyond which the mouse has no effect on glow.')
+      .addText((text) =>
+        text.setValue(String(glow.distanceOuterRadiusMultiplier ?? 2.5)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && num > (glow.distanceInnerRadiusMultiplier ?? 0)) {
+            glow.distanceOuterRadiusMultiplier = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Distance curve steepness')
+      .setDesc('Controls how quickly glow ramps up as the cursor approaches a node. Higher values = steeper S-curve.')
+      .addText((text) =>
+        text.setValue(String(glow.distanceCurveSteepness ?? 2.0)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && num > 0) {
+            glow.distanceCurveSteepness = num;
             await this.plugin.saveSettings();
           }
         })

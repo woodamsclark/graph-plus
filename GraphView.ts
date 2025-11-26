@@ -1,4 +1,4 @@
-import { App, ItemView, WorkspaceLeaf, Plugin } from 'obsidian';
+import { App, ItemView, WorkspaceLeaf, Plugin, TFile } from 'obsidian';
 import { buildGraph, GraphData } from './graph/buildGraph';
 import { layoutGraph2D } from './graph/layout2d';
 import { createRenderer2D, Renderer2D } from './graph/renderer2d';
@@ -31,6 +31,14 @@ export class GraphView extends ItemView {
     const container = this.containerEl.createDiv({ cls: 'greater-graph-view' });
     this.controller = new Graph2DController(this.app, container, this.plugin);
     await this.controller.init();
+    // wire node click -> open note
+    if (this.controller) {
+      this.controller.setNodeClickHandler((node: any) => {
+        // open file for node
+        // fire-and-forget
+        void this.openNodeFile(node);
+      });
+    }
   }
 
   onResize() {
@@ -43,6 +51,35 @@ export class GraphView extends ItemView {
     this.controller = null;
     this.containerEl.empty();
   }
+
+  private async openNodeFile(node: any): Promise<void> {
+    if (!node) return;
+    const app = this.app;
+
+    let file: TFile | null = null;
+    if ((node as any).file) {
+      file = (node as any).file as TFile;
+    } else if ((node as any).filePath) {
+      const af = app.vault.getAbstractFileByPath((node as any).filePath);
+      if (af instanceof TFile) file = af;
+    }
+
+    if (!file) {
+      // couldn't resolve file
+      // eslint-disable-next-line no-console
+      console.warn('Greater Graph: could not resolve file for node', node);
+      return;
+    }
+
+    // open in active leaf
+    const leaf = app.workspace.getLeaf(false);
+    try {
+      await leaf.openFile(file);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('Greater Graph: failed to open file', e);
+    }
+  }
 }
 
 class Graph2DController {
@@ -52,9 +89,11 @@ class Graph2DController {
   private renderer: Renderer2D | null = null;
   private graph: GraphData | null = null;
   private adjacency: Map<string, string[]> | null = null;
+  private onNodeClick: ((node: any) => void) | null = null;
   private plugin: Plugin;
   private mouseMoveHandler: ((e: MouseEvent) => void) | null = null;
   private mouseLeaveHandler: (() => void) | null = null;
+  private mouseClickHandler: ((e: MouseEvent) => void) | null = null;
   private settingsUnregister: (() => void) | null = null;
 
   constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
@@ -106,8 +145,19 @@ class Graph2DController {
       this.clearHover();
     };
 
+    this.mouseClickHandler = (ev: MouseEvent) => {
+      if (!this.canvas) return;
+      // only handle primary (left) button
+      if (ev.button !== 0) return;
+      const rect = this.canvas.getBoundingClientRect();
+      const x = ev.clientX - rect.left;
+      const y = ev.clientY - rect.top;
+      this.handleClick(x, y);
+    };
+
     this.canvas.addEventListener('mousemove', this.mouseMoveHandler);
     this.canvas.addEventListener('mouseleave', this.mouseLeaveHandler);
+    this.canvas.addEventListener('click', this.mouseClickHandler);
 
     // register settings listener to apply settings live
     if ((this.plugin as any).registerSettingsListener) {
@@ -136,6 +186,7 @@ class Graph2DController {
     this.canvas = null;
     this.renderer = null;
     this.graph = null;
+    this.onNodeClick = null;
     if (this.settingsUnregister) {
       try {
         this.settingsUnregister();
@@ -143,6 +194,44 @@ class Graph2DController {
         // ignore
       }
       this.settingsUnregister = null;
+    }
+  }
+
+  setNodeClickHandler(handler: ((node: any) => void) | null) {
+    this.onNodeClick = handler;
+  }
+
+  private hitTestNode(x: number, y: number) {
+    if (!this.graph || !this.renderer) return null;
+    let closest: any = null;
+    let closestDist = Infinity;
+    const hitPadding = 6;
+    for (const node of this.graph.nodes) {
+      const dx = x - node.x;
+      const dy = y - node.y;
+      const distSq = dx * dx + dy * dy;
+      const nodeRadius = this.renderer.getNodeRadiusForHit
+        ? this.renderer.getNodeRadiusForHit(node)
+        : 8;
+      const hitR = nodeRadius + hitPadding;
+      if (distSq <= hitR * hitR && distSq < closestDist) {
+        closestDist = distSq;
+        closest = node;
+      }
+    }
+    return closest;
+  }
+
+  handleClick(x: number, y: number): void {
+    if (!this.graph || !this.onNodeClick) return;
+    const node = this.hitTestNode(x, y);
+    if (!node) return;
+    try {
+      this.onNodeClick(node);
+    } catch (e) {
+      // ignore handler errors
+      // eslint-disable-next-line no-console
+      console.error('Graph2DController.onNodeClick handler error', e);
     }
   }
 
@@ -190,8 +279,8 @@ class Graph2DController {
       }
     }
 
-    if (this.renderer.setHoverContext) {
-      this.renderer.setHoverContext(newId, highlightSet);
+    if ((this.renderer as any).setHoverState) {
+      (this.renderer as any).setHoverState(newId, highlightSet, x, y);
     }
     if (this.renderer.setHoveredNode) {
       this.renderer.setHoveredNode(newId);
@@ -201,7 +290,7 @@ class Graph2DController {
 
   clearHover(): void {
     if (!this.renderer) return;
-    if (this.renderer.setHoverContext) this.renderer.setHoverContext(null, new Set());
+    if ((this.renderer as any).setHoverState) (this.renderer as any).setHoverState(null, new Set(), 0, 0);
     if (this.renderer.setHoveredNode) this.renderer.setHoveredNode(null);
     this.renderer.render();
   }
