@@ -122,7 +122,11 @@ function createRenderer2D(options) {
   let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.05;
   let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.35;
   let hoverBoost = glowOptions?.hoverBoostFactor ?? 1.5;
+  let neighborBoost = glowOptions?.neighborBoostFactor ?? 1;
+  let dimFactor = glowOptions?.dimFactor ?? 0.25;
+  let hoverHighlightDepth = glowOptions?.hoverHighlightDepth ?? 1;
   let hoveredNodeId = null;
+  let hoverHighlightSet = /* @__PURE__ */ new Set();
   function setGraph(g) {
     graph = g;
     nodeById = /* @__PURE__ */ new Map();
@@ -175,6 +179,16 @@ function createRenderer2D(options) {
     let alpha = getBaseCenterAlpha(node);
     if (hoveredNodeId === node.id) {
       alpha = Math.min(1, alpha * hoverBoost);
+    } else if (hoveredNodeId !== null) {
+      if (hoverHighlightSet && hoverHighlightSet.size > 0) {
+        if (hoverHighlightSet.has(node.id)) {
+          alpha = Math.min(1, alpha * neighborBoost);
+        } else {
+          alpha = alpha * dimFactor;
+        }
+      } else {
+        alpha = alpha * dimFactor;
+      }
     }
     return alpha;
   }
@@ -184,22 +198,6 @@ function createRenderer2D(options) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!graph)
       return;
-    if (graph.edges && graph.edges.length > 0) {
-      ctx.save();
-      ctx.beginPath();
-      for (const edge of graph.edges) {
-        const src = nodeById.get(edge.sourceId);
-        const tgt = nodeById.get(edge.targetId);
-        if (!src || !tgt)
-          continue;
-        ctx.moveTo(src.x, src.y);
-        ctx.lineTo(tgt.x, tgt.y);
-      }
-      ctx.strokeStyle = "#888888";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.restore();
-    }
     ctx.font = "10px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
@@ -251,6 +249,13 @@ function createRenderer2D(options) {
     minCenterAlpha = glow.minCenterAlpha;
     maxCenterAlpha = glow.maxCenterAlpha;
     hoverBoost = glow.hoverBoostFactor;
+    neighborBoost = glow.neighborBoostFactor ?? neighborBoost;
+    dimFactor = glow.dimFactor ?? dimFactor;
+    hoverHighlightDepth = glow.hoverHighlightDepth ?? hoverHighlightDepth;
+  }
+  function setHoverContext(hoveredId, highlightedIds) {
+    hoveredNodeId = hoveredId;
+    hoverHighlightSet = highlightedIds ? new Set(highlightedIds) : /* @__PURE__ */ new Set();
   }
   return {
     setGraph,
@@ -259,7 +264,8 @@ function createRenderer2D(options) {
     destroy,
     setHoveredNode,
     getNodeRadiusForHit,
-    setGlowSettings
+    setGlowSettings,
+    setHoverContext
   };
 }
 
@@ -303,6 +309,7 @@ var Graph2DController = class {
   canvas = null;
   renderer = null;
   graph = null;
+  adjacency = null;
   plugin;
   mouseMoveHandler = null;
   mouseLeaveHandler = null;
@@ -321,6 +328,17 @@ var Graph2DController = class {
     this.canvas = canvas;
     this.renderer = createRenderer2D({ canvas, glow: this.plugin.settings?.glow });
     this.graph = await buildGraph(this.app);
+    this.adjacency = /* @__PURE__ */ new Map();
+    if (this.graph && this.graph.edges) {
+      for (const e of this.graph.edges) {
+        if (!this.adjacency.has(e.sourceId))
+          this.adjacency.set(e.sourceId, []);
+        if (!this.adjacency.has(e.targetId))
+          this.adjacency.set(e.targetId, []);
+        this.adjacency.get(e.sourceId).push(e.targetId);
+        this.adjacency.get(e.targetId).push(e.sourceId);
+      }
+    }
     const rect = this.containerEl.getBoundingClientRect();
     this.renderer.setGraph(this.graph);
     this.renderer.resize(rect.width || 300, rect.height || 200);
@@ -388,13 +406,41 @@ var Graph2DController = class {
       }
     }
     const newId = closest ? closest.id : null;
-    this.renderer.setHoveredNode(newId);
+    const depth = this.plugin.settings?.glow?.hoverHighlightDepth ?? 1;
+    const highlightSet = /* @__PURE__ */ new Set();
+    if (newId && this.adjacency && depth > 0) {
+      const q = [{ id: newId, d: 0 }];
+      const seen = /* @__PURE__ */ new Set([newId]);
+      while (q.length > 0) {
+        const cur = q.shift();
+        if (cur.d > 0)
+          highlightSet.add(cur.id);
+        if (cur.d >= depth)
+          continue;
+        const neighbors = this.adjacency.get(cur.id) || [];
+        for (const nb of neighbors) {
+          if (!seen.has(nb)) {
+            seen.add(nb);
+            q.push({ id: nb, d: cur.d + 1 });
+          }
+        }
+      }
+    }
+    if (this.renderer.setHoverContext) {
+      this.renderer.setHoverContext(newId, highlightSet);
+    }
+    if (this.renderer.setHoveredNode) {
+      this.renderer.setHoveredNode(newId);
+    }
     this.renderer.render();
   }
   clearHover() {
     if (!this.renderer)
       return;
-    this.renderer.setHoveredNode(null);
+    if (this.renderer.setHoverContext)
+      this.renderer.setHoverContext(null, /* @__PURE__ */ new Set());
+    if (this.renderer.setHoveredNode)
+      this.renderer.setHoveredNode(null);
     this.renderer.render();
   }
 };
@@ -407,7 +453,10 @@ var DEFAULT_SETTINGS = {
     glowRadiusMultiplier: 2,
     minCenterAlpha: 0.1,
     maxCenterAlpha: 0.4,
-    hoverBoostFactor: 1.5
+    hoverBoostFactor: 1.6,
+    neighborBoostFactor: 1.2,
+    dimFactor: 0.3,
+    hoverHighlightDepth: 1
   }
 };
 var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
@@ -527,6 +576,33 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         const num = Number(value);
         if (!isNaN(num) && num >= 1) {
           glow.hoverBoostFactor = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Neighbor glow boost").setDesc("Multiplier applied to nodes within the highlight depth (excluding hovered node).").addText(
+      (text) => text.setValue(String(glow.neighborBoostFactor ?? 1.2)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 1) {
+          glow.neighborBoostFactor = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Dim factor for distant nodes").setDesc("Multiplier (0\u20131) applied to nodes outside the highlight depth.").addText(
+      (text) => text.setValue(String(glow.dimFactor ?? 0.3)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 0 && num <= 1) {
+          glow.dimFactor = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Highlight depth").setDesc("Graph distance (in hops) from the hovered node that will be highlighted.").addText(
+      (text) => text.setValue(String(glow.hoverHighlightDepth ?? 1)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && Number.isInteger(num) && num >= 0) {
+          glow.hoverHighlightDepth = Math.max(0, Math.floor(num));
           await this.plugin.saveSettings();
         }
       })

@@ -8,6 +8,9 @@ export interface GlowSettings {
   minCenterAlpha: number;
   maxCenterAlpha: number;
   hoverBoostFactor: number;
+  neighborBoostFactor?: number;
+  dimFactor?: number;
+  hoverHighlightDepth?: number;
 }
 
 export interface GreaterGraphSettings {
@@ -21,7 +24,10 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     glowRadiusMultiplier: 2.0,
     minCenterAlpha: 0.10,
     maxCenterAlpha: 0.40,
-    hoverBoostFactor: 1.5,
+    hoverBoostFactor: 1.6,
+    neighborBoostFactor: 1.2,
+    dimFactor: 0.3,
+    hoverHighlightDepth: 1,
   },
 };
 
@@ -182,6 +188,45 @@ class GreaterGraphSettingTab extends PluginSettingTab {
           const num = Number(value);
           if (!isNaN(num) && num >= 1.0) {
             glow.hoverBoostFactor = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Neighbor glow boost')
+      .setDesc('Multiplier applied to nodes within the highlight depth (excluding hovered node).')
+      .addText((text) =>
+        text.setValue(String(glow.neighborBoostFactor ?? 1.2)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && num >= 1.0) {
+            glow.neighborBoostFactor = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Dim factor for distant nodes')
+      .setDesc('Multiplier (0–1) applied to nodes outside the highlight depth.')
+      .addText((text) =>
+        text.setValue(String(glow.dimFactor ?? 0.3)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && num >= 0 && num <= 1) {
+            glow.dimFactor = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Highlight depth')
+      .setDesc('Graph distance (in hops) from the hovered node that will be highlighted.')
+      .addText((text) =>
+        text.setValue(String(glow.hoverHighlightDepth ?? 1)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && Number.isInteger(num) && num >= 0) {
+            glow.hoverHighlightDepth = Math.max(0, Math.floor(num));
             await this.plugin.saveSettings();
           }
         })

@@ -8,6 +8,9 @@ export interface GlowSettings {
   minCenterAlpha: number;
   maxCenterAlpha: number;
   hoverBoostFactor: number;
+  neighborBoostFactor?: number;
+  dimFactor?: number;
+  hoverHighlightDepth?: number;
 }
 
 export interface Renderer2DOptions {
@@ -23,6 +26,7 @@ export interface Renderer2D {
   setHoveredNode(nodeId: string | null): void;
   getNodeRadiusForHit(node: any): number;
   setGlowSettings(glow: GlowSettings): void;
+  setHoverContext(hoveredId: string | null, highlightedIds: Set<string>): void;
 }
 
 export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
@@ -41,7 +45,11 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.05;
   let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.35;
   let hoverBoost = glowOptions?.hoverBoostFactor ?? 1.5;
+  let neighborBoost = glowOptions?.neighborBoostFactor ?? 1.0;
+  let dimFactor = glowOptions?.dimFactor ?? 0.25;
+  let hoverHighlightDepth = glowOptions?.hoverHighlightDepth ?? 1;
   let hoveredNodeId: string | null = null;
+  let hoverHighlightSet: Set<string> = new Set();
 
   function setGraph(g: GraphData) {
     graph = g;
@@ -98,6 +106,18 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     let alpha = getBaseCenterAlpha(node);
     if (hoveredNodeId === node.id) {
       alpha = Math.min(1.0, alpha * hoverBoost);
+    } else if (hoveredNodeId !== null) {
+      // when there's an active hover, boost highlighted neighbors and dim others
+      if (hoverHighlightSet && hoverHighlightSet.size > 0) {
+        if (hoverHighlightSet.has(node.id)) {
+          alpha = Math.min(1.0, alpha * neighborBoost);
+        } else {
+          alpha = alpha * dimFactor;
+        }
+      } else {
+        // no highlight set provided, apply a mild dim to non-hovered nodes
+        alpha = alpha * dimFactor;
+      }
     }
     return alpha;
   }
@@ -109,7 +129,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     if (!graph) return;
 
     // Draw edges first so nodes appear on top
-    if ((graph as any).edges && (graph as any).edges.length > 0) {
+/*    if ((graph as any).edges && (graph as any).edges.length > 0) {
       ctx.save();
       ctx.beginPath();
       for (const edge of (graph as any).edges) {
@@ -119,11 +139,11 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         ctx.moveTo(src.x, src.y);
         ctx.lineTo(tgt.x, tgt.y);
       }
-      ctx.strokeStyle = '#888888';
-      ctx.lineWidth = 1;
-      ctx.stroke();
+      //ctx.strokeStyle = '#888888';
+      //ctx.lineWidth = 1;
+      //ctx.stroke();
       ctx.restore();
-    }
+    }*/
 
     // Draw node glows (radial gradient), node bodies, and labels
     ctx.font = '10px sans-serif';
@@ -188,6 +208,14 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     minCenterAlpha = glow.minCenterAlpha;
     maxCenterAlpha = glow.maxCenterAlpha;
     hoverBoost = glow.hoverBoostFactor;
+    neighborBoost = glow.neighborBoostFactor ?? neighborBoost;
+    dimFactor = glow.dimFactor ?? dimFactor;
+    hoverHighlightDepth = glow.hoverHighlightDepth ?? hoverHighlightDepth;
+  }
+
+  function setHoverContext(hoveredId: string | null, highlightedIds: Set<string>) {
+    hoveredNodeId = hoveredId;
+    hoverHighlightSet = highlightedIds ? new Set(highlightedIds) : new Set();
   }
 
   return {
@@ -198,6 +226,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     setHoveredNode,
     getNodeRadiusForHit,
     setGlowSettings,
+    setHoverContext,
   };
 }
 

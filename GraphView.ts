@@ -51,6 +51,7 @@ class Graph2DController {
   private canvas: HTMLCanvasElement | null = null;
   private renderer: Renderer2D | null = null;
   private graph: GraphData | null = null;
+  private adjacency: Map<string, string[]> | null = null;
   private plugin: Plugin;
   private mouseMoveHandler: ((e: MouseEvent) => void) | null = null;
   private mouseLeaveHandler: (() => void) | null = null;
@@ -75,6 +76,17 @@ class Graph2DController {
 
     // build graph
     this.graph = await buildGraph(this.app);
+
+    // build adjacency map (undirected) for hover BFS
+    this.adjacency = new Map();
+    if (this.graph && this.graph.edges) {
+      for (const e of this.graph.edges) {
+        if (!this.adjacency.has(e.sourceId)) this.adjacency.set(e.sourceId, []);
+        if (!this.adjacency.has(e.targetId)) this.adjacency.set(e.targetId, []);
+        this.adjacency.get(e.sourceId)!.push(e.targetId);
+        this.adjacency.get(e.targetId)!.push(e.sourceId);
+      }
+    }
 
     // initial layout + render
     const rect = this.containerEl.getBoundingClientRect();
@@ -158,13 +170,39 @@ class Graph2DController {
     }
 
     const newId = closest ? closest.id : null;
-    this.renderer.setHoveredNode(newId);
+    // compute highlight set up to configured depth
+    const depth = (this.plugin as any).settings?.glow?.hoverHighlightDepth ?? 1;
+    const highlightSet = new Set<string>();
+    if (newId && this.adjacency && depth > 0) {
+      const q: Array<{ id: string; d: number }> = [{ id: newId, d: 0 }];
+      const seen = new Set<string>([newId]);
+      while (q.length > 0) {
+        const cur = q.shift()!;
+        if (cur.d > 0) highlightSet.add(cur.id);
+        if (cur.d >= depth) continue;
+        const neighbors = this.adjacency.get(cur.id) || [];
+        for (const nb of neighbors) {
+          if (!seen.has(nb)) {
+            seen.add(nb);
+            q.push({ id: nb, d: cur.d + 1 });
+          }
+        }
+      }
+    }
+
+    if (this.renderer.setHoverContext) {
+      this.renderer.setHoverContext(newId, highlightSet);
+    }
+    if (this.renderer.setHoveredNode) {
+      this.renderer.setHoveredNode(newId);
+    }
     this.renderer.render();
   }
 
   clearHover(): void {
     if (!this.renderer) return;
-    this.renderer.setHoveredNode(null);
+    if (this.renderer.setHoverContext) this.renderer.setHoverContext(null, new Set());
+    if (this.renderer.setHoveredNode) this.renderer.setHoveredNode(null);
     this.renderer.render();
   }
 }
