@@ -1,0 +1,16 @@
+{
+  "name": "greater-graph",
+  "version": "0.1.0",
+  "description": "Greater Graph Obsidian plugin (v0) - minimal 2D node view",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "build": "node esbuild.config.js",
+    "watch": "node esbuild.config.js --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.18.11",
+    "typescript": "^5.1.6",
+    "@types/node": "^20.5.1"
+  }
+}
