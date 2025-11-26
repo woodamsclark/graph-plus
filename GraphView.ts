@@ -2,6 +2,7 @@ import { App, ItemView, WorkspaceLeaf, Plugin, TFile } from 'obsidian';
 import { buildGraph, GraphData } from './graph/buildGraph';
 import { layoutGraph2D } from './graph/layout2d';
 import { createRenderer2D, Renderer2D } from './graph/renderer2d';
+import { createSimulation, Simulation } from './graph/simulation';
 
 export const GREATER_GRAPH_VIEW_TYPE = 'greater-graph-view';
 
@@ -94,6 +95,10 @@ class Graph2DController {
   private mouseMoveHandler: ((e: MouseEvent) => void) | null = null;
   private mouseLeaveHandler: (() => void) | null = null;
   private mouseClickHandler: ((e: MouseEvent) => void) | null = null;
+  private simulation: Simulation | null = null;
+  private animationFrame: number | null = null;
+  private lastTime: number | null = null;
+  private running: boolean = false;
   private settingsUnregister: (() => void) | null = null;
 
   constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
@@ -131,6 +136,14 @@ class Graph2DController {
     const rect = this.containerEl.getBoundingClientRect();
     this.renderer.setGraph(this.graph);
     this.renderer.resize(rect.width || 300, rect.height || 200);
+
+    // create simulation operating on the same node objects
+    this.simulation = createSimulation(this.graph.nodes, this.graph.edges);
+    // start simulation and animation loop
+    this.simulation.start();
+    this.running = true;
+    this.lastTime = null;
+    this.animationFrame = requestAnimationFrame(this.animationLoop);
 
     // mouse events for hover
     this.mouseMoveHandler = (ev: MouseEvent) => {
@@ -173,6 +186,19 @@ class Graph2DController {
     }
   }
 
+  private animationLoop = (timestamp: number) => {
+    if (!this.running) return;
+
+    if (!this.lastTime) this.lastTime = timestamp;
+    const dt = (timestamp - this.lastTime) / 1000; // seconds
+    this.lastTime = timestamp;
+
+    if (this.simulation) this.simulation.tick(dt);
+    if (this.renderer) this.renderer.render();
+
+    this.animationFrame = requestAnimationFrame(this.animationLoop);
+  };
+
   resize(width: number, height: number): void {
     if (!this.renderer) return;
     this.renderer.resize(width, height);
@@ -186,6 +212,20 @@ class Graph2DController {
     this.canvas = null;
     this.renderer = null;
     this.graph = null;
+    if (this.simulation) {
+      try {
+        this.simulation.stop();
+      } catch (e) {}
+      this.simulation = null;
+    }
+    if (this.animationFrame) {
+      try {
+        cancelAnimationFrame(this.animationFrame);
+      } catch (e) {}
+      this.animationFrame = null;
+      this.lastTime = null;
+      this.running = false;
+    }
     this.onNodeClick = null;
     if (this.settingsUnregister) {
       try {

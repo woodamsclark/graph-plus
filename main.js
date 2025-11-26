@@ -39,6 +39,8 @@ async function buildGraph(app) {
     x: 0,
     y: 0,
     z: 0,
+    vx: 0,
+    vy: 0,
     inDegree: 0,
     outDegree: 0,
     totalDegree: 0
@@ -317,6 +319,110 @@ function createRenderer2D(options) {
   };
 }
 
+// graph/simulation.ts
+function createSimulation(nodes, edges) {
+  const repulsionStrength = 4e3;
+  const springStrength = 0.08;
+  const springLength = 80;
+  const centerPull = 0.02;
+  const damping = 0.85;
+  let running = false;
+  const nodeById = /* @__PURE__ */ new Map();
+  for (const n of nodes)
+    nodeById.set(n.id, n);
+  function applyRepulsion() {
+    const N = nodes.length;
+    for (let i = 0; i < N; i++) {
+      const a = nodes[i];
+      for (let j = i + 1; j < N; j++) {
+        const b = nodes[j];
+        let dx = a.x - b.x;
+        let dy = a.y - b.y;
+        let distSq = dx * dx + dy * dy + 0.01;
+        const force = repulsionStrength / distSq;
+        const dist = Math.sqrt(distSq);
+        if (dist > 0) {
+          const fx = dx / dist * force;
+          const fy = dy / dist * force;
+          a.vx = (a.vx || 0) + fx;
+          a.vy = (a.vy || 0) + fy;
+          b.vx = (b.vx || 0) - fx;
+          b.vy = (b.vy || 0) - fy;
+        } else {
+          const fx = (Math.random() - 0.5) * 0.1;
+          const fy = (Math.random() - 0.5) * 0.1;
+          a.vx = (a.vx || 0) + fx;
+          a.vy = (a.vy || 0) + fy;
+          b.vx = (b.vx || 0) - fx;
+          b.vy = (b.vy || 0) - fy;
+        }
+      }
+    }
+  }
+  function applySprings() {
+    if (!edges)
+      return;
+    for (const e of edges) {
+      const a = nodeById.get(e.sourceId);
+      const b = nodeById.get(e.targetId);
+      if (!a || !b)
+        continue;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
+      const diff = dist - springLength;
+      const f = springStrength * diff;
+      const fx = dx / dist * f;
+      const fy = dy / dist * f;
+      a.vx = (a.vx || 0) + fx;
+      a.vy = (a.vy || 0) + fy;
+      b.vx = (b.vx || 0) - fx;
+      b.vy = (b.vy || 0) - fy;
+    }
+  }
+  function applyCentering() {
+    for (const n of nodes) {
+      n.vx = (n.vx || 0) + -n.x * centerPull;
+      n.vy = (n.vy || 0) + -n.y * centerPull;
+    }
+  }
+  function applyDamping() {
+    for (const n of nodes) {
+      n.vx = (n.vx || 0) * damping;
+      n.vy = (n.vy || 0) * damping;
+    }
+  }
+  function integrate(dt) {
+    const scale = dt * 60;
+    for (const n of nodes) {
+      n.x += (n.vx || 0) * scale;
+      n.y += (n.vy || 0) * scale;
+    }
+  }
+  function tick(dt) {
+    if (!running)
+      return;
+    applyRepulsion();
+    applySprings();
+    applyCentering();
+    applyDamping();
+    integrate(dt);
+  }
+  function start() {
+    running = true;
+  }
+  function stop() {
+    running = false;
+  }
+  function reset() {
+    for (const n of nodes) {
+      n.vx = 0;
+      n.vy = 0;
+    }
+  }
+  return { start, stop, tick, reset };
+}
+
 // GraphView.ts
 var GREATER_GRAPH_VIEW_TYPE = "greater-graph-view";
 var GraphView = class extends import_obsidian.ItemView {
@@ -391,6 +497,10 @@ var Graph2DController = class {
   mouseMoveHandler = null;
   mouseLeaveHandler = null;
   mouseClickHandler = null;
+  simulation = null;
+  animationFrame = null;
+  lastTime = null;
+  running = false;
   settingsUnregister = null;
   constructor(app, containerEl, plugin) {
     this.app = app;
@@ -420,6 +530,11 @@ var Graph2DController = class {
     const rect = this.containerEl.getBoundingClientRect();
     this.renderer.setGraph(this.graph);
     this.renderer.resize(rect.width || 300, rect.height || 200);
+    this.simulation = createSimulation(this.graph.nodes, this.graph.edges);
+    this.simulation.start();
+    this.running = true;
+    this.lastTime = null;
+    this.animationFrame = requestAnimationFrame(this.animationLoop);
     this.mouseMoveHandler = (ev) => {
       if (!this.canvas)
         return;
@@ -456,6 +571,19 @@ var Graph2DController = class {
       });
     }
   }
+  animationLoop = (timestamp) => {
+    if (!this.running)
+      return;
+    if (!this.lastTime)
+      this.lastTime = timestamp;
+    const dt = (timestamp - this.lastTime) / 1e3;
+    this.lastTime = timestamp;
+    if (this.simulation)
+      this.simulation.tick(dt);
+    if (this.renderer)
+      this.renderer.render();
+    this.animationFrame = requestAnimationFrame(this.animationLoop);
+  };
   resize(width, height) {
     if (!this.renderer)
       return;
@@ -469,6 +597,22 @@ var Graph2DController = class {
     this.canvas = null;
     this.renderer = null;
     this.graph = null;
+    if (this.simulation) {
+      try {
+        this.simulation.stop();
+      } catch (e) {
+      }
+      this.simulation = null;
+    }
+    if (this.animationFrame) {
+      try {
+        cancelAnimationFrame(this.animationFrame);
+      } catch (e) {
+      }
+      this.animationFrame = null;
+      this.lastTime = null;
+      this.running = false;
+    }
     this.onNodeClick = null;
     if (this.settingsUnregister) {
       try {

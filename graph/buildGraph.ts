@@ -8,6 +8,8 @@ export interface GraphNode {
   z: number;
   filePath: string;
   file?: TFile;
+  vx?: number;
+  vy?: number;
   inDegree: number;
   outDegree: number;
   totalDegree: number;
@@ -34,6 +36,8 @@ export async function buildGraph(app: App): Promise<GraphData> {
     x: 0,
     y: 0,
     z: 0,
+    vx: 0,
+    vy: 0,
     inDegree: 0,
     outDegree: 0,
     totalDegree: 0,
