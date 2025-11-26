@@ -262,6 +262,10 @@ class Graph2DController {
     // compute highlight set up to configured depth
     const depth = (this.plugin as any).settings?.glow?.hoverHighlightDepth ?? 1;
     const highlightSet = new Set<string>();
+    if (newId) {
+      highlightSet.add(newId); // ✅ include hovered node at depth 0
+    }
+
     if (newId && this.adjacency && depth > 0) {
       const q: Array<{ id: string; d: number }> = [{ id: newId, d: 0 }];
       const seen = new Set<string>([newId]);

@@ -113,9 +113,15 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   function getCenterAlpha(node: any) {
     const base = getBaseCenterAlpha(node);
 
-    // no hover active
-    if (!hoveredNodeId) return clamp01(base);
+ // CASE 1: No hovered node yet → only distance-based glow, no depth/dimming
+    if (!hoveredNodeId) {
+        const distFactor = getMouseDistanceFactor(node); // 0 far, 1 near
+        // use neighborBoost here (or hoverBoost if you prefer stronger)
+        const boost = 1 + (neighborBoost - 1) * distFactor;
+        return clamp01(base * boost);
+  }
 
+// CASE 2: There *is* a hovered node → apply depth + distance logic
     const inDepth = hoverHighlightSet.has(node.id);
     const isHovered = node.id === hoveredNodeId;
 

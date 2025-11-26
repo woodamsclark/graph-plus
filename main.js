@@ -184,8 +184,11 @@ function createRenderer2D(options) {
   }
   function getCenterAlpha(node) {
     const base = getBaseCenterAlpha(node);
-    if (!hoveredNodeId)
-      return clamp01(base);
+    if (!hoveredNodeId) {
+      const distFactor2 = getMouseDistanceFactor(node);
+      const boost = 1 + (neighborBoost - 1) * distFactor2;
+      return clamp01(base * boost);
+    }
     const inDepth = hoverHighlightSet.has(node.id);
     const isHovered = node.id === hoveredNodeId;
     if (!inDepth)
@@ -529,6 +532,9 @@ var Graph2DController = class {
     const newId = closest ? closest.id : null;
     const depth = this.plugin.settings?.glow?.hoverHighlightDepth ?? 1;
     const highlightSet = /* @__PURE__ */ new Set();
+    if (newId) {
+      highlightSet.add(newId);
+    }
     if (newId && this.adjacency && depth > 0) {
       const q = [{ id: newId, d: 0 }];
       const seen = /* @__PURE__ */ new Set([newId]);
