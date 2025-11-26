@@ -25,7 +25,7 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian2 = require("obsidian");
 
-// GraphView.ts
+// GraphView2.ts
 var import_obsidian = require("obsidian");
 
 // graph/buildGraph.ts
@@ -109,6 +109,23 @@ function layoutGraph2D(graph, options) {
     node.y = margin + row * cellHeight + cellHeight / 2;
     node.z = 0;
   }
+  if (options.centerOnLargestNode) {
+    const centerX = options.centerX ?? width / 2;
+    const centerY = options.centerY ?? height / 2;
+    let centerNode = null;
+    let maxDeg = -Infinity;
+    for (const n of nodes) {
+      const d = n.totalDegree || 0;
+      if (d > maxDeg) {
+        maxDeg = d;
+        centerNode = n;
+      }
+    }
+    if (centerNode) {
+      centerNode.x = centerX;
+      centerNode.y = centerY;
+    }
+  }
 }
 
 // graph/renderer2d.ts
@@ -165,9 +182,6 @@ function createRenderer2D(options) {
     canvas.height = Math.max(1, Math.floor(height));
     canvas.style.width = "100%";
     canvas.style.height = "100%";
-    if (graph) {
-      layoutGraph2D(graph, { width: canvas.width, height: canvas.height, margin: 32 });
-    }
     render();
   }
   function getDegreeNormalized(node) {
@@ -320,12 +334,49 @@ function createRenderer2D(options) {
 }
 
 // graph/simulation.ts
-function createSimulation(nodes, edges) {
-  const repulsionStrength = 4e3;
-  const springStrength = 0.08;
-  const springLength = 80;
-  const centerPull = 0.02;
-  const damping = 0.85;
+function createSimulation(nodes, edges, options) {
+  let repulsionStrength = options?.repulsionStrength ?? 1500;
+  let springStrength = options?.springStrength ?? 0.04;
+  let springLength = options?.springLength ?? 100;
+  let centerPull = options?.centerPull ?? 0;
+  let damping = options?.damping ?? 0.9;
+  let centerX = typeof options?.centerX === "number" ? options.centerX : void 0;
+  let centerY = typeof options?.centerY === "number" ? options.centerY : void 0;
+  let centerNodeId = options?.centerNodeId ?? null;
+  if (typeof centerX !== "number" || typeof centerY !== "number") {
+    if (nodes && nodes.length > 0) {
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const n of nodes) {
+        const x = n.x ?? 0;
+        const y = n.y ?? 0;
+        if (x < minX)
+          minX = x;
+        if (x > maxX)
+          maxX = x;
+        if (y < minY)
+          minY = y;
+        if (y > maxY)
+          maxY = y;
+      }
+      if (!isFinite(minX) || !isFinite(maxX)) {
+        centerX = 0;
+      } else {
+        centerX = (minX + maxX) / 2;
+      }
+      if (!isFinite(minY) || !isFinite(maxY)) {
+        centerY = 0;
+      } else {
+        centerY = (minY + maxY) / 2;
+      }
+    } else {
+      centerX = 0;
+      centerY = 0;
+    }
+  }
+  let centerNode = null;
+  if (centerNodeId && nodes) {
+    centerNode = nodes.find((n) => n.id === centerNodeId) || null;
+  }
   let running = false;
   const nodeById = /* @__PURE__ */ new Map();
   for (const n of nodes)
@@ -339,8 +390,12 @@ function createSimulation(nodes, edges) {
         let dx = a.x - b.x;
         let dy = a.y - b.y;
         let distSq = dx * dx + dy * dy + 0.01;
-        const force = repulsionStrength / distSq;
-        const dist = Math.sqrt(distSq);
+        const minDist = 40;
+        let dist = Math.sqrt(distSq);
+        if (dist < 0.01)
+          dist = 0.01;
+        const clamped = Math.max(dist, minDist);
+        const force = repulsionStrength / (clamped * clamped);
         if (dist > 0) {
           const fx = dx / dist * force;
           const fy = dy / dist * force;
@@ -371,7 +426,7 @@ function createSimulation(nodes, edges) {
       const dy = b.y - a.y;
       const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
       const diff = dist - springLength;
-      const f = springStrength * diff;
+      const f = springStrength * Math.tanh(diff / 50);
       const fx = dx / dist * f;
       const fy = dy / dist * f;
       a.vx = (a.vx || 0) + fx;
@@ -381,15 +436,33 @@ function createSimulation(nodes, edges) {
     }
   }
   function applyCentering() {
+    if (centerPull <= 0)
+      return;
+    const cx = centerX ?? 0;
+    const cy = centerY ?? 0;
     for (const n of nodes) {
-      n.vx = (n.vx || 0) + -n.x * centerPull;
-      n.vy = (n.vy || 0) + -n.y * centerPull;
+      const x = (n.x || 0) - cx;
+      const y = (n.y || 0) - cy;
+      const r = Math.sqrt(x * x + y * y) + 1e-3;
+      const pull = centerPull * (r / 200);
+      n.vx = (n.vx || 0) + -(x / r) * pull;
+      n.vy = (n.vy || 0) + -(y / r) * pull;
+    }
+    if (centerNode) {
+      const dx = (centerNode.x || 0) - cx;
+      const dy = (centerNode.y || 0) - cy;
+      centerNode.vx = (centerNode.vx || 0) - dx * centerPull * 0.5;
+      centerNode.vy = (centerNode.vy || 0) - dy * centerPull * 0.5;
     }
   }
   function applyDamping() {
     for (const n of nodes) {
       n.vx = (n.vx || 0) * damping;
       n.vy = (n.vy || 0) * damping;
+      if (Math.abs(n.vx) < 1e-3)
+        n.vx = 0;
+      if (Math.abs(n.vy) < 1e-3)
+        n.vy = 0;
     }
   }
   function integrate(dt) {
@@ -420,10 +493,32 @@ function createSimulation(nodes, edges) {
       n.vy = 0;
     }
   }
-  return { start, stop, tick, reset };
+  function setOptions(opts) {
+    if (!opts)
+      return;
+    if (typeof opts.repulsionStrength === "number")
+      repulsionStrength = opts.repulsionStrength;
+    if (typeof opts.springStrength === "number")
+      springStrength = opts.springStrength;
+    if (typeof opts.springLength === "number")
+      springLength = opts.springLength;
+    if (typeof opts.centerPull === "number")
+      centerPull = opts.centerPull;
+    if (typeof opts.damping === "number")
+      damping = opts.damping;
+    if (typeof opts.centerX === "number")
+      centerX = opts.centerX;
+    if (typeof opts.centerY === "number")
+      centerY = opts.centerY;
+    if (typeof opts.centerNodeId === "string") {
+      centerNodeId = opts.centerNodeId;
+      centerNode = nodes.find((n) => n.id === centerNodeId) || null;
+    }
+  }
+  return { start, stop, tick, reset, setOptions };
 }
 
-// GraphView.ts
+// GraphView2.ts
 var GREATER_GRAPH_VIEW_TYPE = "greater-graph-view";
 var GraphView = class extends import_obsidian.ItemView {
   controller = null;
@@ -447,9 +542,7 @@ var GraphView = class extends import_obsidian.ItemView {
     this.controller = new Graph2DController(this.app, container, this.plugin);
     await this.controller.init();
     if (this.controller) {
-      this.controller.setNodeClickHandler((node) => {
-        void this.openNodeFile(node);
-      });
+      this.controller.setNodeClickHandler((node) => void this.openNodeFile(node));
     }
   }
   onResize() {
@@ -466,9 +559,9 @@ var GraphView = class extends import_obsidian.ItemView {
       return;
     const app = this.app;
     let file = null;
-    if (node.file) {
+    if (node.file)
       file = node.file;
-    } else if (node.filePath) {
+    else if (node.filePath) {
       const af = app.vault.getAbstractFileByPath(node.filePath);
       if (af instanceof import_obsidian.TFile)
         file = af;
@@ -528,9 +621,33 @@ var Graph2DController = class {
       }
     }
     const rect = this.containerEl.getBoundingClientRect();
+    const centerX = (rect.width || 300) / 2;
+    const centerY = (rect.height || 200) / 2;
     this.renderer.setGraph(this.graph);
+    layoutGraph2D(this.graph, {
+      width: rect.width || 300,
+      height: rect.height || 200,
+      margin: 32,
+      centerX,
+      centerY,
+      centerOnLargestNode: true
+    });
     this.renderer.resize(rect.width || 300, rect.height || 200);
-    this.simulation = createSimulation(this.graph.nodes, this.graph.edges);
+    let centerNodeId = void 0;
+    if (this.graph && this.graph.nodes && this.graph.nodes.length > 0) {
+      let maxDeg = -Infinity;
+      for (const n of this.graph.nodes) {
+        if ((n.totalDegree || 0) > maxDeg) {
+          maxDeg = n.totalDegree || 0;
+          centerNodeId = n.id;
+        }
+      }
+    }
+    this.simulation = createSimulation(
+      this.graph.nodes,
+      this.graph.edges,
+      Object.assign({}, this.plugin.settings?.physics || {}, { centerX, centerY, centerNodeId })
+    );
     this.simulation.start();
     this.running = true;
     this.lastTime = null;
@@ -538,22 +655,20 @@ var Graph2DController = class {
     this.mouseMoveHandler = (ev) => {
       if (!this.canvas)
         return;
-      const rect2 = this.canvas.getBoundingClientRect();
-      const x = ev.clientX - rect2.left;
-      const y = ev.clientY - rect2.top;
+      const r = this.canvas.getBoundingClientRect();
+      const x = ev.clientX - r.left;
+      const y = ev.clientY - r.top;
       this.handleHover(x, y);
     };
-    this.mouseLeaveHandler = () => {
-      this.clearHover();
-    };
+    this.mouseLeaveHandler = () => this.clearHover();
     this.mouseClickHandler = (ev) => {
       if (!this.canvas)
         return;
       if (ev.button !== 0)
         return;
-      const rect2 = this.canvas.getBoundingClientRect();
-      const x = ev.clientX - rect2.left;
-      const y = ev.clientY - rect2.top;
+      const r = this.canvas.getBoundingClientRect();
+      const x = ev.clientX - r.left;
+      const y = ev.clientY - r.top;
       this.handleClick(x, y);
     };
     this.canvas.addEventListener("mousemove", this.mouseMoveHandler);
@@ -561,11 +676,15 @@ var Graph2DController = class {
     this.canvas.addEventListener("click", this.mouseClickHandler);
     if (this.plugin.registerSettingsListener) {
       this.settingsUnregister = this.plugin.registerSettingsListener(() => {
-        if (this.renderer && this.plugin.settings) {
+        if (this.plugin.settings) {
           const glow = this.plugin.settings.glow;
-          if (this.renderer.setGlowSettings) {
+          if (this.renderer && this.renderer.setGlowSettings) {
             this.renderer.setGlowSettings(glow);
             this.renderer.render();
+          }
+          const phys = this.plugin.settings.physics;
+          if (this.simulation && phys && this.simulation.setOptions) {
+            this.simulation.setOptions(phys);
           }
         }
       });
@@ -574,9 +693,14 @@ var Graph2DController = class {
   animationLoop = (timestamp) => {
     if (!this.running)
       return;
-    if (!this.lastTime)
+    if (!this.lastTime) {
       this.lastTime = timestamp;
-    const dt = (timestamp - this.lastTime) / 1e3;
+      this.animationFrame = requestAnimationFrame(this.animationLoop);
+      return;
+    }
+    let dt = (timestamp - this.lastTime) / 1e3;
+    if (dt > 0.05)
+      dt = 0.05;
     this.lastTime = timestamp;
     if (this.simulation)
       this.simulation.tick(dt);
@@ -588,12 +712,16 @@ var Graph2DController = class {
     if (!this.renderer)
       return;
     this.renderer.resize(width, height);
+    const centerX = width / 2;
+    const centerY = height / 2;
+    if (this.simulation && this.simulation.setOptions) {
+      this.simulation.setOptions({ centerX, centerY });
+    }
   }
   destroy() {
     this.renderer?.destroy();
-    if (this.canvas && this.canvas.parentElement) {
+    if (this.canvas && this.canvas.parentElement)
       this.canvas.parentElement.removeChild(this.canvas);
-    }
     this.canvas = null;
     this.renderer = null;
     this.graph = null;
@@ -676,9 +804,8 @@ var Graph2DController = class {
     const newId = closest ? closest.id : null;
     const depth = this.plugin.settings?.glow?.hoverHighlightDepth ?? 1;
     const highlightSet = /* @__PURE__ */ new Set();
-    if (newId) {
+    if (newId)
       highlightSet.add(newId);
-    }
     if (newId && this.adjacency && depth > 0) {
       const q = [{ id: newId, d: 0 }];
       const seen = /* @__PURE__ */ new Set([newId]);
@@ -697,12 +824,10 @@ var Graph2DController = class {
         }
       }
     }
-    if (this.renderer.setHoverState) {
+    if (this.renderer.setHoverState)
       this.renderer.setHoverState(newId, highlightSet, x, y);
-    }
-    if (this.renderer.setHoveredNode) {
+    if (this.renderer.setHoveredNode)
       this.renderer.setHoveredNode(newId);
-    }
     this.renderer.render();
   }
   clearHover() {
@@ -731,6 +856,14 @@ var DEFAULT_SETTINGS = {
     distanceInnerRadiusMultiplier: 1,
     distanceOuterRadiusMultiplier: 2.5,
     distanceCurveSteepness: 2
+  },
+  physics: {
+    // calmer, Obsidian-like defaults
+    repulsionStrength: 10,
+    springStrength: 0.04,
+    springLength: 130,
+    centerPull: 4e-4,
+    damping: 0.92
   }
 };
 var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
@@ -904,6 +1037,58 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         const num = Number(value);
         if (!isNaN(num) && num > 0) {
           glow.distanceCurveSteepness = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    const phys = this.plugin.settings.physics || {};
+    containerEl.createEl("h2", { text: "Greater Graph \u2013 Physics" });
+    new import_obsidian2.Setting(containerEl).setName("Repulsion strength").setDesc("Controls node-node repulsion strength (higher = more separation).").addText(
+      (text) => text.setValue(String(phys.repulsionStrength ?? 4e3)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.repulsionStrength = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Spring strength").setDesc("Spring force constant for edges (higher = stiffer).").addText(
+      (text) => text.setValue(String(phys.springStrength ?? 0.08)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.springStrength = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Spring length").setDesc("Preferred length (px) for edge springs.").addText(
+      (text) => text.setValue(String(phys.springLength ?? 80)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.springLength = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Center pull").setDesc("Force pulling nodes toward center (small value).").addText(
+      (text) => text.setValue(String(phys.centerPull ?? 0.02)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.centerPull = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Damping").setDesc("Velocity damping (0-1). Higher values reduce motion faster.").addText(
+      (text) => text.setValue(String(phys.damping ?? 0.85)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 0 && num <= 1) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.damping = num;
           await this.plugin.saveSettings();
         }
       })

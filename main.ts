@@ -1,5 +1,5 @@
 import { App, Plugin, PluginSettingTab, Setting } from 'obsidian';
-import { GraphView, GREATER_GRAPH_VIEW_TYPE } from './GraphView';
+import { GraphView, GREATER_GRAPH_VIEW_TYPE } from './GraphView2';
 
 export interface GlowSettings {
   minNodeRadius: number;
@@ -43,11 +43,12 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
       distanceCurveSteepness: 2.0,
   },
   physics: {
-    repulsionStrength: 4000,
-    springStrength: 0.08,
-    springLength: 80,
-    centerPull: 0.02,
-    damping: 0.85,
+    // calmer, Obsidian-like defaults
+    repulsionStrength: 10,
+    springStrength: 0.04,
+    springLength: 130,
+    centerPull: 0.0004,
+    damping: 0.92,
   },
 };
 
@@ -70,6 +71,7 @@ export default class GreaterGraphPlugin extends Plugin {
   }
 
   async activateView() {
+    // Change this to open as a tab
     const leaves = this.app.workspace.getLeavesOfType(GREATER_GRAPH_VIEW_TYPE);
     if (leaves.length === 0) {
       const rightLeaf = this.app.workspace.getRightLeaf(false);
@@ -118,6 +120,8 @@ export default class GreaterGraphPlugin extends Plugin {
     }
   }
 }
+
+// SETTINGS TAB
 
 class GreaterGraphSettingTab extends PluginSettingTab {
   plugin: GreaterGraphPlugin;

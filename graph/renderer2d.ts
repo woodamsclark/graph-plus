@@ -1,5 +1,4 @@
 import { GraphData } from './buildGraph';
-import { layoutGraph2D } from './layout2d';
 
 export interface GlowSettings {
   minNodeRadius: number;
@@ -88,9 +87,9 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     canvas.style.width = '100%';
     canvas.style.height = '100%';
 
-    if (graph) {
-      layoutGraph2D(graph, { width: canvas.width, height: canvas.height, margin: 32 });
-    }
+//    if (graph) {
+//      layoutGraph2D(graph, { width: canvas.width, height: canvas.height, margin: 32 });
+//    }
     render();
   }
 

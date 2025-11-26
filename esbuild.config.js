@@ -5,4 +5,8 @@ require('esbuild').build({
   format: 'cjs',
   platform: 'node',
   external: ['obsidian', 'electron'],
-}).catch(() => process.exit(1));
+}).catch((e) => {
+  console.error('esbuild error:', e && e.message ? e.message : e);
+  if (e && e.errors) console.error(e.errors);
+  process.exit(1);
+});

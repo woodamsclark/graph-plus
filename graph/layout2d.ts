@@ -4,6 +4,10 @@ export interface Layout2DOptions {
   width: number;
   height: number;
   margin?: number;
+  // New optional centering options
+  centerX?: number;
+  centerY?: number;
+  centerOnLargestNode?: boolean;
 }
 
 export function layoutGraph2D(graph: GraphData, options: Layout2DOptions): void {
@@ -27,5 +31,24 @@ export function layoutGraph2D(graph: GraphData, options: Layout2DOptions): void 
     node.x = margin + col * cellWidth + cellWidth / 2;
     node.y = margin + row * cellHeight + cellHeight / 2;
     node.z = 0;
+  }
+
+  // If requested, place the largest node at the provided center
+  if (options.centerOnLargestNode) {
+    const centerX = options.centerX ?? width / 2;
+    const centerY = options.centerY ?? height / 2;
+    let centerNode: typeof nodes[0] | null = null;
+    let maxDeg = -Infinity;
+    for (const n of nodes) {
+      const d = (n.totalDegree || 0);
+      if (d > maxDeg) {
+        maxDeg = d;
+        centerNode = n;
+      }
+    }
+    if (centerNode) {
+      centerNode.x = centerX;
+      centerNode.y = centerY;
+    }
   }
 }

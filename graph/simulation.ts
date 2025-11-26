@@ -20,15 +20,57 @@ export interface SimulationOptions {
   springLength: number;
   centerPull: number;
   damping: number;
+  // new optional fields
+  centerX?: number;
+  centerY?: number;
+  centerNodeId?: string;
 }
 
 export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options?: Partial<SimulationOptions>): Simulation {
   // physics parameters (defaults)
-  let repulsionStrength = options?.repulsionStrength ?? 4000;
-  let springStrength = options?.springStrength ?? 0.08;
-  let springLength = options?.springLength ?? 80;
-  let centerPull = options?.centerPull ?? 0.02;
-  let damping = options?.damping ?? 0.85;
+  let repulsionStrength = options?.repulsionStrength ?? 1500;
+  let springStrength = options?.springStrength ?? 0.04;
+  let springLength = options?.springLength ?? 100;
+  let centerPull = options?.centerPull ?? 0.00;
+  let damping = options?.damping ?? 0.9;
+
+  // center options: prefer explicitly provided values; otherwise compute
+  // a reasonable default (bounding-box center of current node positions)
+  let centerX: number | undefined = typeof options?.centerX === 'number' ? options!.centerX : undefined;
+  let centerY: number | undefined = typeof options?.centerY === 'number' ? options!.centerY : undefined;
+  let centerNodeId = options?.centerNodeId ?? null;
+  // If center not provided, compute bounding-box center from node positions
+  if (typeof centerX !== 'number' || typeof centerY !== 'number') {
+    if (nodes && nodes.length > 0) {
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const n of nodes) {
+        const x = (n.x ?? 0);
+        const y = (n.y ?? 0);
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+      if (!isFinite(minX) || !isFinite(maxX)) {
+        centerX = 0;
+      } else {
+        centerX = (minX + maxX) / 2;
+      }
+      if (!isFinite(minY) || !isFinite(maxY)) {
+        centerY = 0;
+      } else {
+        centerY = (minY + maxY) / 2;
+      }
+    } else {
+      centerX = 0;
+      centerY = 0;
+    }
+  }
+  let centerNode: GraphNode | null = null;
+
+  if (centerNodeId && nodes) {
+    centerNode = nodes.find((n) => n.id === centerNodeId) || null;
+  }
 
   let running = false;
 
@@ -44,8 +86,12 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
         let dx = a.x - b.x;
         let dy = a.y - b.y;
         let distSq = dx * dx + dy * dy + 0.01;
-        const force = repulsionStrength / distSq;
-        const dist = Math.sqrt(distSq);
+        // introduce a minimum separation distance to avoid huge forces
+        const minDist = 40;
+        let dist = Math.sqrt(distSq);
+        if (dist < 0.01) dist = 0.01;
+        const clamped = Math.max(dist, minDist);
+        const force = repulsionStrength / (clamped * clamped);
         if (dist > 0) {
           const fx = (dx / dist) * force;
           const fy = (dy / dist) * force;
@@ -75,7 +121,8 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
       const dy = b.y - a.y;
       const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
       const diff = dist - springLength;
-      const f = springStrength * diff;
+      // use a tamed/non-linear spring to avoid explosive forces
+      const f = springStrength * Math.tanh(diff / 50);
       const fx = (dx / dist) * f;
       const fy = (dy / dist) * f;
       a.vx = (a.vx || 0) + fx;
@@ -86,9 +133,27 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
   }
 
   function applyCentering() {
+    if (centerPull <= 0) return;
+    // use local numeric center variables to avoid undefined checks
+    const cx = centerX ?? 0;
+    const cy = centerY ?? 0;
+
+    // 1) Pull every node gently toward the screen center
     for (const n of nodes) {
-      n.vx = (n.vx || 0) + -n.x * centerPull;
-      n.vy = (n.vy || 0) + -n.y * centerPull;
+      const x = (n.x || 0) - cx;
+      const y = (n.y || 0) - cy;
+      const r = Math.sqrt(x * x + y * y) + 0.001;
+      const pull = centerPull * (r / 200);
+      n.vx = (n.vx || 0) + -(x / r) * pull;
+      n.vy = (n.vy || 0) + -(y / r) * pull;
+    }
+
+    // 2) Extra gentle correction to keep center node near screen center
+    if (centerNode) {
+      const dx = (centerNode.x || 0) - cx;
+      const dy = (centerNode.y || 0) - cy;
+      centerNode.vx = (centerNode.vx || 0) - dx * centerPull * 0.5;
+      centerNode.vy = (centerNode.vy || 0) - dy * centerPull * 0.5;
     }
   }
 
@@ -96,6 +161,9 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
     for (const n of nodes) {
       n.vx = (n.vx || 0) * damping;
       n.vy = (n.vy || 0) * damping;
+
+      if (Math.abs(n.vx) < 0.001) n.vx = 0;
+      if (Math.abs(n.vy) < 0.001) n.vy = 0;
     }
   }
 
@@ -139,6 +207,13 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
     if (typeof opts.springLength === 'number') springLength = opts.springLength;
     if (typeof opts.centerPull === 'number') centerPull = opts.centerPull;
     if (typeof opts.damping === 'number') damping = opts.damping;
+
+    if (typeof opts.centerX === 'number') centerX = opts.centerX;
+    if (typeof opts.centerY === 'number') centerY = opts.centerY;
+    if (typeof opts.centerNodeId === 'string') {
+      centerNodeId = opts.centerNodeId;
+      centerNode = nodes.find((n) => n.id === centerNodeId) || null;
+    }
   }
 
   return { start, stop, tick, reset, setOptions };
