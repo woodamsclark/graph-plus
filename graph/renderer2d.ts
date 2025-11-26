@@ -22,6 +22,7 @@ export interface Renderer2D {
   destroy(): void;
   setHoveredNode(nodeId: string | null): void;
   getNodeRadiusForHit(node: any): number;
+  setGlowSettings(glow: GlowSettings): void;
 }
 
 export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
@@ -34,12 +35,12 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let minDegree = 0;
   let maxDegree = 0;
 
-  const MIN_RADIUS = glowOptions?.minNodeRadius ?? 4;
-  const MAX_RADIUS = glowOptions?.maxNodeRadius ?? 14;
-  const GLOW_MULTIPLIER = glowOptions?.glowRadiusMultiplier ?? 2.0;
-  const MIN_CENTER_ALPHA = glowOptions?.minCenterAlpha ?? 0.05;
-  const MAX_CENTER_ALPHA = glowOptions?.maxCenterAlpha ?? 0.35;
-  const HOVER_BOOST = glowOptions?.hoverBoostFactor ?? 1.5;
+  let minRadius = glowOptions?.minNodeRadius ?? 4;
+  let maxRadius = glowOptions?.maxNodeRadius ?? 14;
+  let glowMultiplier = glowOptions?.glowRadiusMultiplier ?? 2.0;
+  let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.05;
+  let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.35;
+  let hoverBoost = glowOptions?.hoverBoostFactor ?? 1.5;
   let hoveredNodeId: string | null = null;
 
   function setGraph(g: GraphData) {
@@ -85,18 +86,18 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
   function getNodeRadius(node: any) {
     const t = getDegreeNormalized(node);
-    return MIN_RADIUS + t * (MAX_RADIUS - MIN_RADIUS);
+    return minRadius + t * (maxRadius - minRadius);
   }
 
   function getBaseCenterAlpha(node: any) {
     const t = getDegreeNormalized(node);
-    return MIN_CENTER_ALPHA + t * (MAX_CENTER_ALPHA - MIN_CENTER_ALPHA);
+    return minCenterAlpha + t * (maxCenterAlpha - minCenterAlpha);
   }
 
   function getCenterAlpha(node: any) {
     let alpha = getBaseCenterAlpha(node);
     if (hoveredNodeId === node.id) {
-      alpha = Math.min(1.0, alpha * HOVER_BOOST);
+      alpha = Math.min(1.0, alpha * hoverBoost);
     }
     return alpha;
   }
@@ -132,7 +133,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     for (const node of graph.nodes) {
       const radius = getNodeRadius(node);
       const centerAlpha = getCenterAlpha(node);
-      const glowRadius = radius * GLOW_MULTIPLIER;
+      const glowRadius = radius * glowMultiplier;
 
       // radial gradient glow
       const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
@@ -179,6 +180,16 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     return getNodeRadius(node);
   }
 
+  function setGlowSettings(glow: GlowSettings) {
+    if (!glow) return;
+    minRadius = glow.minNodeRadius;
+    maxRadius = glow.maxNodeRadius;
+    glowMultiplier = glow.glowRadiusMultiplier;
+    minCenterAlpha = glow.minCenterAlpha;
+    maxCenterAlpha = glow.maxCenterAlpha;
+    hoverBoost = glow.hoverBoostFactor;
+  }
+
   return {
     setGraph,
     resize,
@@ -186,6 +197,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     destroy,
     setHoveredNode,
     getNodeRadiusForHit,
+    setGlowSettings,
   };
 }
 

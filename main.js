@@ -116,12 +116,12 @@ function createRenderer2D(options) {
   let nodeById = /* @__PURE__ */ new Map();
   let minDegree = 0;
   let maxDegree = 0;
-  const MIN_RADIUS = glowOptions?.minNodeRadius ?? 4;
-  const MAX_RADIUS = glowOptions?.maxNodeRadius ?? 14;
-  const GLOW_MULTIPLIER = glowOptions?.glowRadiusMultiplier ?? 2;
-  const MIN_CENTER_ALPHA = glowOptions?.minCenterAlpha ?? 0.05;
-  const MAX_CENTER_ALPHA = glowOptions?.maxCenterAlpha ?? 0.35;
-  const HOVER_BOOST = glowOptions?.hoverBoostFactor ?? 1.5;
+  let minRadius = glowOptions?.minNodeRadius ?? 4;
+  let maxRadius = glowOptions?.maxNodeRadius ?? 14;
+  let glowMultiplier = glowOptions?.glowRadiusMultiplier ?? 2;
+  let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.05;
+  let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.35;
+  let hoverBoost = glowOptions?.hoverBoostFactor ?? 1.5;
   let hoveredNodeId = null;
   function setGraph(g) {
     graph = g;
@@ -165,16 +165,16 @@ function createRenderer2D(options) {
   }
   function getNodeRadius(node) {
     const t = getDegreeNormalized(node);
-    return MIN_RADIUS + t * (MAX_RADIUS - MIN_RADIUS);
+    return minRadius + t * (maxRadius - minRadius);
   }
   function getBaseCenterAlpha(node) {
     const t = getDegreeNormalized(node);
-    return MIN_CENTER_ALPHA + t * (MAX_CENTER_ALPHA - MIN_CENTER_ALPHA);
+    return minCenterAlpha + t * (maxCenterAlpha - minCenterAlpha);
   }
   function getCenterAlpha(node) {
     let alpha = getBaseCenterAlpha(node);
     if (hoveredNodeId === node.id) {
-      alpha = Math.min(1, alpha * HOVER_BOOST);
+      alpha = Math.min(1, alpha * hoverBoost);
     }
     return alpha;
   }
@@ -206,7 +206,7 @@ function createRenderer2D(options) {
     for (const node of graph.nodes) {
       const radius = getNodeRadius(node);
       const centerAlpha = getCenterAlpha(node);
-      const glowRadius = radius * GLOW_MULTIPLIER;
+      const glowRadius = radius * glowMultiplier;
       const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
       gradient.addColorStop(0, `rgba(102,204,255,${centerAlpha})`);
       gradient.addColorStop(0.4, `rgba(102,204,255,${centerAlpha * 0.5})`);
@@ -242,13 +242,24 @@ function createRenderer2D(options) {
   function getNodeRadiusForHit(node) {
     return getNodeRadius(node);
   }
+  function setGlowSettings(glow) {
+    if (!glow)
+      return;
+    minRadius = glow.minNodeRadius;
+    maxRadius = glow.maxNodeRadius;
+    glowMultiplier = glow.glowRadiusMultiplier;
+    minCenterAlpha = glow.minCenterAlpha;
+    maxCenterAlpha = glow.maxCenterAlpha;
+    hoverBoost = glow.hoverBoostFactor;
+  }
   return {
     setGraph,
     resize,
     render,
     destroy,
     setHoveredNode,
-    getNodeRadiusForHit
+    getNodeRadiusForHit,
+    setGlowSettings
   };
 }
 
@@ -295,6 +306,7 @@ var Graph2DController = class {
   plugin;
   mouseMoveHandler = null;
   mouseLeaveHandler = null;
+  settingsUnregister = null;
   constructor(app, containerEl, plugin) {
     this.app = app;
     this.containerEl = containerEl;
@@ -325,6 +337,17 @@ var Graph2DController = class {
     };
     this.canvas.addEventListener("mousemove", this.mouseMoveHandler);
     this.canvas.addEventListener("mouseleave", this.mouseLeaveHandler);
+    if (this.plugin.registerSettingsListener) {
+      this.settingsUnregister = this.plugin.registerSettingsListener(() => {
+        if (this.renderer && this.plugin.settings) {
+          const glow = this.plugin.settings.glow;
+          if (this.renderer.setGlowSettings) {
+            this.renderer.setGlowSettings(glow);
+            this.renderer.render();
+          }
+        }
+      });
+    }
   }
   resize(width, height) {
     if (!this.renderer)
@@ -339,6 +362,13 @@ var Graph2DController = class {
     this.canvas = null;
     this.renderer = null;
     this.graph = null;
+    if (this.settingsUnregister) {
+      try {
+        this.settingsUnregister();
+      } catch (e) {
+      }
+      this.settingsUnregister = null;
+    }
   }
   handleHover(x, y) {
     if (!this.graph || !this.renderer)
@@ -382,6 +412,7 @@ var DEFAULT_SETTINGS = {
 };
 var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
   settings = DEFAULT_SETTINGS;
+  settingsListeners = [];
   async onload() {
     await this.loadSettings();
     this.registerView(GREATER_GRAPH_VIEW_TYPE, (leaf) => new GraphView(leaf, this));
@@ -415,6 +446,24 @@ var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
   }
   async saveSettings() {
     await this.saveData(this.settings);
+    this.notifySettingsChanged();
+  }
+  registerSettingsListener(listener) {
+    this.settingsListeners.push(listener);
+    return () => {
+      const idx = this.settingsListeners.indexOf(listener);
+      if (idx !== -1)
+        this.settingsListeners.splice(idx, 1);
+    };
+  }
+  notifySettingsChanged() {
+    for (const l of this.settingsListeners) {
+      try {
+        l();
+      } catch (e) {
+        console.error("Greater Graph settings listener error:", e);
+      }
+    }
   }
 };
 var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {

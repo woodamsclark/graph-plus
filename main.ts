@@ -27,6 +27,7 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
 
 export default class GreaterGraphPlugin extends Plugin {
   settings: GreaterGraphSettings = DEFAULT_SETTINGS;
+  private settingsListeners: Array<() => void> = [];
 
   async onload() {
     await this.loadSettings();
@@ -68,6 +69,27 @@ export default class GreaterGraphPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+    this.notifySettingsChanged();
+  }
+
+  registerSettingsListener(listener: () => void) {
+    this.settingsListeners.push(listener);
+    // return an unregister function
+    return () => {
+      const idx = this.settingsListeners.indexOf(listener);
+      if (idx !== -1) this.settingsListeners.splice(idx, 1);
+    };
+  }
+
+  notifySettingsChanged() {
+    for (const l of this.settingsListeners) {
+      try {
+        l();
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('Greater Graph settings listener error:', e);
+      }
+    }
   }
 }
 

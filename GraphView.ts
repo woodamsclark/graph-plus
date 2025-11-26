@@ -54,6 +54,7 @@ class Graph2DController {
   private plugin: Plugin;
   private mouseMoveHandler: ((e: MouseEvent) => void) | null = null;
   private mouseLeaveHandler: (() => void) | null = null;
+  private settingsUnregister: (() => void) | null = null;
 
   constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
     this.app = app;
@@ -95,6 +96,19 @@ class Graph2DController {
 
     this.canvas.addEventListener('mousemove', this.mouseMoveHandler);
     this.canvas.addEventListener('mouseleave', this.mouseLeaveHandler);
+
+    // register settings listener to apply settings live
+    if ((this.plugin as any).registerSettingsListener) {
+      this.settingsUnregister = (this.plugin as any).registerSettingsListener(() => {
+        if (this.renderer && (this.plugin as any).settings) {
+          const glow = (this.plugin as any).settings.glow;
+          if ((this.renderer as any).setGlowSettings) {
+            (this.renderer as any).setGlowSettings(glow);
+            this.renderer.render();
+          }
+        }
+      });
+    }
   }
 
   resize(width: number, height: number): void {
@@ -110,6 +124,14 @@ class Graph2DController {
     this.canvas = null;
     this.renderer = null;
     this.graph = null;
+    if (this.settingsUnregister) {
+      try {
+        this.settingsUnregister();
+      } catch (e) {
+        // ignore
+      }
+      this.settingsUnregister = null;
+    }
   }
 
   handleHover(x: number, y: number): void {
