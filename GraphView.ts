@@ -29,7 +29,7 @@ export class GraphView extends ItemView {
   async onOpen() {
     this.containerEl.empty();
     const container = this.containerEl.createDiv({ cls: 'greater-graph-view' });
-    this.controller = new Graph2DController(this.app, container);
+    this.controller = new Graph2DController(this.app, container, this.plugin);
     await this.controller.init();
   }
 
@@ -51,10 +51,14 @@ class Graph2DController {
   private canvas: HTMLCanvasElement | null = null;
   private renderer: Renderer2D | null = null;
   private graph: GraphData | null = null;
+  private plugin: Plugin;
+  private mouseMoveHandler: ((e: MouseEvent) => void) | null = null;
+  private mouseLeaveHandler: (() => void) | null = null;
 
-  constructor(app: App, containerEl: HTMLElement) {
+  constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
     this.app = app;
     this.containerEl = containerEl;
+    this.plugin = plugin;
   }
 
   async init(): Promise<void> {
@@ -66,7 +70,7 @@ class Graph2DController {
     this.containerEl.appendChild(canvas);
     this.canvas = canvas;
 
-    this.renderer = createRenderer2D({ canvas });
+    this.renderer = createRenderer2D({ canvas, glow: (this.plugin as any).settings?.glow });
 
     // build graph
     this.graph = await buildGraph(this.app);
@@ -75,6 +79,22 @@ class Graph2DController {
     const rect = this.containerEl.getBoundingClientRect();
     this.renderer.setGraph(this.graph);
     this.renderer.resize(rect.width || 300, rect.height || 200);
+
+    // mouse events for hover
+    this.mouseMoveHandler = (ev: MouseEvent) => {
+      if (!this.canvas) return;
+      const rect = this.canvas.getBoundingClientRect();
+      const x = ev.clientX - rect.left;
+      const y = ev.clientY - rect.top;
+      this.handleHover(x, y);
+    };
+
+    this.mouseLeaveHandler = () => {
+      this.clearHover();
+    };
+
+    this.canvas.addEventListener('mousemove', this.mouseMoveHandler);
+    this.canvas.addEventListener('mouseleave', this.mouseLeaveHandler);
   }
 
   resize(width: number, height: number): void {
@@ -90,5 +110,39 @@ class Graph2DController {
     this.canvas = null;
     this.renderer = null;
     this.graph = null;
+  }
+
+  handleHover(x: number, y: number): void {
+    if (!this.graph || !this.renderer) return;
+
+    // simple hit test: find closest node within hit radius
+    let closest: any = null;
+    let closestDist = Infinity;
+    // use a hit radius based on max node radius
+    const hitPadding = 6;
+
+    for (const node of this.graph.nodes) {
+      const dx = x - node.x;
+      const dy = y - node.y;
+      const distSq = dx * dx + dy * dy;
+      const nodeRadius = this.renderer.getNodeRadiusForHit
+        ? this.renderer.getNodeRadiusForHit(node)
+        : 8;
+      const hitR = nodeRadius + hitPadding;
+      if (distSq <= hitR * hitR && distSq < closestDist) {
+        closestDist = distSq;
+        closest = node;
+      }
+    }
+
+    const newId = closest ? closest.id : null;
+    this.renderer.setHoveredNode(newId);
+    this.renderer.render();
+  }
+
+  clearHover(): void {
+    if (!this.renderer) return;
+    this.renderer.setHoveredNode(null);
+    this.renderer.render();
   }
 }

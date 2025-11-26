@@ -1,8 +1,18 @@
 import { GraphData } from './buildGraph';
 import { layoutGraph2D } from './layout2d';
 
+export interface GlowSettings {
+  minNodeRadius: number;
+  maxNodeRadius: number;
+  glowRadiusMultiplier: number;
+  minCenterAlpha: number;
+  maxCenterAlpha: number;
+  hoverBoostFactor: number;
+}
+
 export interface Renderer2DOptions {
   canvas: HTMLCanvasElement;
+  glow?: GlowSettings;
 }
 
 export interface Renderer2D {
@@ -10,10 +20,13 @@ export interface Renderer2D {
   resize(width: number, height: number): void;
   render(): void;
   destroy(): void;
+  setHoveredNode(nodeId: string | null): void;
+  getNodeRadiusForHit(node: any): number;
 }
 
 export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   const canvas = options.canvas;
+  const glowOptions = options.glow;
   const ctx = canvas.getContext('2d');
   let graph: GraphData | null = null;
   let nodeById: Map<string, any> = new Map();
@@ -21,10 +34,13 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let minDegree = 0;
   let maxDegree = 0;
 
-  const MIN_RADIUS = 4;
-  const MAX_RADIUS = 14;
-  const MIN_GLOW_ALPHA = 0.05;
-  const MAX_GLOW_ALPHA = 0.35;
+  const MIN_RADIUS = glowOptions?.minNodeRadius ?? 4;
+  const MAX_RADIUS = glowOptions?.maxNodeRadius ?? 14;
+  const GLOW_MULTIPLIER = glowOptions?.glowRadiusMultiplier ?? 2.0;
+  const MIN_CENTER_ALPHA = glowOptions?.minCenterAlpha ?? 0.05;
+  const MAX_CENTER_ALPHA = glowOptions?.maxCenterAlpha ?? 0.35;
+  const HOVER_BOOST = glowOptions?.hoverBoostFactor ?? 1.5;
+  let hoveredNodeId: string | null = null;
 
   function setGraph(g: GraphData) {
     graph = g;
@@ -61,27 +77,35 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     render();
   }
 
+  function getDegreeNormalized(node: any) {
+    const d = (node.totalDegree || 0);
+    if (maxDegree <= minDegree) return 0.5;
+    return (d - minDegree) / (maxDegree - minDegree);
+  }
+
+  function getNodeRadius(node: any) {
+    const t = getDegreeNormalized(node);
+    return MIN_RADIUS + t * (MAX_RADIUS - MIN_RADIUS);
+  }
+
+  function getBaseCenterAlpha(node: any) {
+    const t = getDegreeNormalized(node);
+    return MIN_CENTER_ALPHA + t * (MAX_CENTER_ALPHA - MIN_CENTER_ALPHA);
+  }
+
+  function getCenterAlpha(node: any) {
+    let alpha = getBaseCenterAlpha(node);
+    if (hoveredNodeId === node.id) {
+      alpha = Math.min(1.0, alpha * HOVER_BOOST);
+    }
+    return alpha;
+  }
+
   function render() {
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (!graph) return;
-    function getDegreeNormalized(node: any) {
-      const d = (node.totalDegree || 0);
-      if (maxDegree <= minDegree) return 0.5;
-      return (d - minDegree) / (maxDegree - minDegree);
-    }
-
-    function getNodeRadius(node: any) {
-      const t = getDegreeNormalized(node);
-      return MIN_RADIUS + t * (MAX_RADIUS - MIN_RADIUS);
-    }
-
-    function getGlowAlpha(node: any) {
-      const t = getDegreeNormalized(node);
-      return MIN_GLOW_ALPHA + t * (MAX_GLOW_ALPHA - MIN_GLOW_ALPHA);
-    }
-
 
     // Draw edges first so nodes appear on top
     if ((graph as any).edges && (graph as any).edges.length > 0) {
@@ -99,21 +123,28 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
       ctx.stroke();
       ctx.restore();
     }
-    // Draw node glows, node bodies, and labels
+
+    // Draw node glows (radial gradient), node bodies, and labels
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
 
     for (const node of graph.nodes) {
       const radius = getNodeRadius(node);
-      const glowAlpha = getGlowAlpha(node);
+      const centerAlpha = getCenterAlpha(node);
+      const glowRadius = radius * GLOW_MULTIPLIER;
 
-      // glow halo
-      const glowRadius = radius * 1.8;
+      // radial gradient glow
+      const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
+      gradient.addColorStop(0.0, `rgba(102,204,255,${centerAlpha})`);
+      gradient.addColorStop(0.4, `rgba(102,204,255,${centerAlpha * 0.5})`);
+      gradient.addColorStop(0.8, `rgba(102,204,255,${centerAlpha * 0.15})`);
+      gradient.addColorStop(1.0, `rgba(102,204,255,0)`);
+
       ctx.save();
       ctx.beginPath();
       ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(102,204,255,${glowAlpha})`;
+      ctx.fillStyle = gradient;
       ctx.fill();
       ctx.restore();
 
@@ -140,10 +171,21 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     graph = null;
   }
 
+  function setHoveredNode(nodeId: string | null) {
+    hoveredNodeId = nodeId;
+  }
+
+  function getNodeRadiusForHit(node: any) {
+    return getNodeRadius(node);
+  }
+
   return {
     setGraph,
     resize,
     render,
     destroy,
+    setHoveredNode,
+    getNodeRadiusForHit,
   };
 }
+

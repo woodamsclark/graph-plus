@@ -19,6 +19,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // main.ts
 var main_exports = {};
 __export(main_exports, {
+  DEFAULT_SETTINGS: () => DEFAULT_SETTINGS,
   default: () => GreaterGraphPlugin
 });
 module.exports = __toCommonJS(main_exports);
@@ -109,15 +110,19 @@ function layoutGraph2D(graph, options) {
 // graph/renderer2d.ts
 function createRenderer2D(options) {
   const canvas = options.canvas;
+  const glowOptions = options.glow;
   const ctx = canvas.getContext("2d");
   let graph = null;
   let nodeById = /* @__PURE__ */ new Map();
   let minDegree = 0;
   let maxDegree = 0;
-  const MIN_RADIUS = 4;
-  const MAX_RADIUS = 14;
-  const MIN_GLOW_ALPHA = 0.05;
-  const MAX_GLOW_ALPHA = 0.35;
+  const MIN_RADIUS = glowOptions?.minNodeRadius ?? 4;
+  const MAX_RADIUS = glowOptions?.maxNodeRadius ?? 14;
+  const GLOW_MULTIPLIER = glowOptions?.glowRadiusMultiplier ?? 2;
+  const MIN_CENTER_ALPHA = glowOptions?.minCenterAlpha ?? 0.05;
+  const MAX_CENTER_ALPHA = glowOptions?.maxCenterAlpha ?? 0.35;
+  const HOVER_BOOST = glowOptions?.hoverBoostFactor ?? 1.5;
+  let hoveredNodeId = null;
   function setGraph(g) {
     graph = g;
     nodeById = /* @__PURE__ */ new Map();
@@ -152,26 +157,33 @@ function createRenderer2D(options) {
     }
     render();
   }
+  function getDegreeNormalized(node) {
+    const d = node.totalDegree || 0;
+    if (maxDegree <= minDegree)
+      return 0.5;
+    return (d - minDegree) / (maxDegree - minDegree);
+  }
+  function getNodeRadius(node) {
+    const t = getDegreeNormalized(node);
+    return MIN_RADIUS + t * (MAX_RADIUS - MIN_RADIUS);
+  }
+  function getBaseCenterAlpha(node) {
+    const t = getDegreeNormalized(node);
+    return MIN_CENTER_ALPHA + t * (MAX_CENTER_ALPHA - MIN_CENTER_ALPHA);
+  }
+  function getCenterAlpha(node) {
+    let alpha = getBaseCenterAlpha(node);
+    if (hoveredNodeId === node.id) {
+      alpha = Math.min(1, alpha * HOVER_BOOST);
+    }
+    return alpha;
+  }
   function render() {
     if (!ctx)
       return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!graph)
       return;
-    function getDegreeNormalized(node) {
-      const d = node.totalDegree || 0;
-      if (maxDegree <= minDegree)
-        return 0.5;
-      return (d - minDegree) / (maxDegree - minDegree);
-    }
-    function getNodeRadius(node) {
-      const t = getDegreeNormalized(node);
-      return MIN_RADIUS + t * (MAX_RADIUS - MIN_RADIUS);
-    }
-    function getGlowAlpha(node) {
-      const t = getDegreeNormalized(node);
-      return MIN_GLOW_ALPHA + t * (MAX_GLOW_ALPHA - MIN_GLOW_ALPHA);
-    }
     if (graph.edges && graph.edges.length > 0) {
       ctx.save();
       ctx.beginPath();
@@ -193,12 +205,17 @@ function createRenderer2D(options) {
     ctx.textBaseline = "top";
     for (const node of graph.nodes) {
       const radius = getNodeRadius(node);
-      const glowAlpha = getGlowAlpha(node);
-      const glowRadius = radius * 1.8;
+      const centerAlpha = getCenterAlpha(node);
+      const glowRadius = radius * GLOW_MULTIPLIER;
+      const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
+      gradient.addColorStop(0, `rgba(102,204,255,${centerAlpha})`);
+      gradient.addColorStop(0.4, `rgba(102,204,255,${centerAlpha * 0.5})`);
+      gradient.addColorStop(0.8, `rgba(102,204,255,${centerAlpha * 0.15})`);
+      gradient.addColorStop(1, `rgba(102,204,255,0)`);
       ctx.save();
       ctx.beginPath();
       ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(102,204,255,${glowAlpha})`;
+      ctx.fillStyle = gradient;
       ctx.fill();
       ctx.restore();
       ctx.save();
@@ -219,11 +236,19 @@ function createRenderer2D(options) {
   function destroy() {
     graph = null;
   }
+  function setHoveredNode(nodeId) {
+    hoveredNodeId = nodeId;
+  }
+  function getNodeRadiusForHit(node) {
+    return getNodeRadius(node);
+  }
   return {
     setGraph,
     resize,
     render,
-    destroy
+    destroy,
+    setHoveredNode,
+    getNodeRadiusForHit
   };
 }
 
@@ -248,7 +273,7 @@ var GraphView = class extends import_obsidian.ItemView {
   async onOpen() {
     this.containerEl.empty();
     const container = this.containerEl.createDiv({ cls: "greater-graph-view" });
-    this.controller = new Graph2DController(this.app, container);
+    this.controller = new Graph2DController(this.app, container, this.plugin);
     await this.controller.init();
   }
   onResize() {
@@ -267,9 +292,13 @@ var Graph2DController = class {
   canvas = null;
   renderer = null;
   graph = null;
-  constructor(app, containerEl) {
+  plugin;
+  mouseMoveHandler = null;
+  mouseLeaveHandler = null;
+  constructor(app, containerEl, plugin) {
     this.app = app;
     this.containerEl = containerEl;
+    this.plugin = plugin;
   }
   async init() {
     const canvas = document.createElement("canvas");
@@ -278,11 +307,24 @@ var Graph2DController = class {
     canvas.tabIndex = 0;
     this.containerEl.appendChild(canvas);
     this.canvas = canvas;
-    this.renderer = createRenderer2D({ canvas });
+    this.renderer = createRenderer2D({ canvas, glow: this.plugin.settings?.glow });
     this.graph = await buildGraph(this.app);
     const rect = this.containerEl.getBoundingClientRect();
     this.renderer.setGraph(this.graph);
     this.renderer.resize(rect.width || 300, rect.height || 200);
+    this.mouseMoveHandler = (ev) => {
+      if (!this.canvas)
+        return;
+      const rect2 = this.canvas.getBoundingClientRect();
+      const x = ev.clientX - rect2.left;
+      const y = ev.clientY - rect2.top;
+      this.handleHover(x, y);
+    };
+    this.mouseLeaveHandler = () => {
+      this.clearHover();
+    };
+    this.canvas.addEventListener("mousemove", this.mouseMoveHandler);
+    this.canvas.addEventListener("mouseleave", this.mouseLeaveHandler);
   }
   resize(width, height) {
     if (!this.renderer)
@@ -298,17 +340,57 @@ var Graph2DController = class {
     this.renderer = null;
     this.graph = null;
   }
+  handleHover(x, y) {
+    if (!this.graph || !this.renderer)
+      return;
+    let closest = null;
+    let closestDist = Infinity;
+    const hitPadding = 6;
+    for (const node of this.graph.nodes) {
+      const dx = x - node.x;
+      const dy = y - node.y;
+      const distSq = dx * dx + dy * dy;
+      const nodeRadius = this.renderer.getNodeRadiusForHit ? this.renderer.getNodeRadiusForHit(node) : 8;
+      const hitR = nodeRadius + hitPadding;
+      if (distSq <= hitR * hitR && distSq < closestDist) {
+        closestDist = distSq;
+        closest = node;
+      }
+    }
+    const newId = closest ? closest.id : null;
+    this.renderer.setHoveredNode(newId);
+    this.renderer.render();
+  }
+  clearHover() {
+    if (!this.renderer)
+      return;
+    this.renderer.setHoveredNode(null);
+    this.renderer.render();
+  }
 };
 
 // main.ts
+var DEFAULT_SETTINGS = {
+  glow: {
+    minNodeRadius: 4,
+    maxNodeRadius: 14,
+    glowRadiusMultiplier: 2,
+    minCenterAlpha: 0.1,
+    maxCenterAlpha: 0.4,
+    hoverBoostFactor: 1.5
+  }
+};
 var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
+  settings = DEFAULT_SETTINGS;
   async onload() {
+    await this.loadSettings();
     this.registerView(GREATER_GRAPH_VIEW_TYPE, (leaf) => new GraphView(leaf, this));
     this.addCommand({
       id: "open-greater-graph",
       name: "Open Greater Graph",
       callback: () => this.activateView()
     });
+    this.addSettingTab(new GreaterGraphSettingTab(this.app, this));
   }
   async activateView() {
     const leaves = this.app.workspace.getLeavesOfType(GREATER_GRAPH_VIEW_TYPE);
@@ -325,4 +407,84 @@ var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
   }
   onunload() {
   }
+  async loadSettings() {
+    const data = await this.loadData();
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data || {});
+    if (!this.settings.glow)
+      this.settings.glow = DEFAULT_SETTINGS.glow;
+  }
+  async saveSettings() {
+    await this.saveData(this.settings);
+  }
 };
+var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
+  plugin;
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.createEl("h2", { text: "Greater Graph \u2013 Glow Settings" });
+    const glow = this.plugin.settings.glow;
+    new import_obsidian2.Setting(containerEl).setName("Minimum node radius").setDesc("Minimum radius for the smallest node (in pixels).").addText(
+      (text) => text.setValue(String(glow.minNodeRadius)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num > 0) {
+          glow.minNodeRadius = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Maximum node radius").setDesc("Maximum radius for the most connected node (in pixels).").addText(
+      (text) => text.setValue(String(glow.maxNodeRadius)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= glow.minNodeRadius) {
+          glow.maxNodeRadius = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Glow radius multiplier").setDesc("Glow radius as a multiple of the node radius.").addText(
+      (text) => text.setValue(String(glow.glowRadiusMultiplier)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num > 0) {
+          glow.glowRadiusMultiplier = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Minimum center glow opacity").setDesc("Opacity (0\u20131) at the glow center for the least connected node.").addText(
+      (text) => text.setValue(String(glow.minCenterAlpha)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 0 && num <= 1) {
+          glow.minCenterAlpha = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Maximum center glow opacity").setDesc("Opacity (0\u20131) at the glow center for the most connected node.").addText(
+      (text) => text.setValue(String(glow.maxCenterAlpha)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 0 && num <= 1) {
+          glow.maxCenterAlpha = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Hover glow boost").setDesc("Multiplier applied to the center glow when a node is hovered.").addText(
+      (text) => text.setValue(String(glow.hoverBoostFactor)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 1) {
+          glow.hoverBoostFactor = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+  }
+};
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  DEFAULT_SETTINGS
+});
