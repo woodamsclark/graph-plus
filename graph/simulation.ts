@@ -196,6 +196,7 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
       if (pinnedNodes.has(n.id)) continue;
       n.vx = (n.vx || 0) * damping;
       n.vy = (n.vy || 0) * damping;
+      // future: n.vz = (n.vz || 0) * damping; // keep z dynamics disabled for now
 
       if (Math.abs(n.vx) < 0.001) n.vx = 0;
       if (Math.abs(n.vy) < 0.001) n.vy = 0;
@@ -236,6 +237,8 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
       if (pinnedNodes.has(n.id)) continue;
       n.x += (n.vx || 0) * scale;
       n.y += (n.vy || 0) * scale;
+      // keep z static during Step 1 (no change in visuals):
+      // n.z += (n.vz || 0) * scale;
     }
   }
 

@@ -1,5 +1,7 @@
 import { App, TFile } from 'obsidian';
 
+export type GraphNodeType = 'note' | 'tag';
+
 export interface GraphNode {
   id: string;
   label: string;
@@ -10,6 +12,8 @@ export interface GraphNode {
   file?: TFile;
   vx?: number;
   vy?: number;
+  vz?: number;
+  type?: GraphNodeType;
   inDegree: number;
   outDegree: number;
   totalDegree: number;
@@ -43,6 +47,8 @@ export async function buildGraph(app: App, options?: { countDuplicates?: boolean
     z: 0,
     vx: 0,
     vy: 0,
+    vz: 0,
+    type: 'note',
     inDegree: 0,
     outDegree: 0,
     totalDegree: 0,

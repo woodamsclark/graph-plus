@@ -41,6 +41,8 @@ async function buildGraph(app, options) {
     z: 0,
     vx: 0,
     vy: 0,
+    vz: 0,
+    type: "note",
     inDegree: 0,
     outDegree: 0,
     totalDegree: 0
