@@ -12,6 +12,8 @@ export interface Simulation {
     centerPull: number;
     damping: number;
   }>): void;
+  // pinned node control: prevent physics from moving these nodes
+  setPinnedNodes?(ids: Set<string>): void;
 }
 
 export interface SimulationOptions {
@@ -76,6 +78,8 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
 
   const nodeById = new Map<string, GraphNode>();
   for (const n of nodes) nodeById.set(n.id, n);
+  // set of node ids that should be pinned (physics skip)
+  let pinnedNodes = new Set<string>();
 
   function applyRepulsion() {
     const N = nodes.length;
@@ -95,17 +99,26 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
         if (dist > 0) {
           const fx = (dx / dist) * force;
           const fy = (dy / dist) * force;
-          a.vx = (a.vx || 0) + fx;
-          a.vy = (a.vy || 0) + fy;
-          b.vx = (b.vx || 0) - fx;
-          b.vy = (b.vy || 0) - fy;
+          // apply to non-pinned nodes only
+          if (!pinnedNodes.has(a.id)) {
+            a.vx = (a.vx || 0) + fx;
+            a.vy = (a.vy || 0) + fy;
+          }
+          if (!pinnedNodes.has(b.id)) {
+            b.vx = (b.vx || 0) - fx;
+            b.vy = (b.vy || 0) - fy;
+          }
         } else {
           const fx = (Math.random() - 0.5) * 0.1;
           const fy = (Math.random() - 0.5) * 0.1;
-          a.vx = (a.vx || 0) + fx;
-          a.vy = (a.vy || 0) + fy;
-          b.vx = (b.vx || 0) - fx;
-          b.vy = (b.vy || 0) - fy;
+          if (!pinnedNodes.has(a.id)) {
+            a.vx = (a.vx || 0) + fx;
+            a.vy = (a.vy || 0) + fy;
+          }
+          if (!pinnedNodes.has(b.id)) {
+            b.vx = (b.vx || 0) - fx;
+            b.vy = (b.vy || 0) - fy;
+          }
         }
       }
     }
@@ -125,10 +138,14 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
       const f = springStrength * Math.tanh(diff / 50);
       const fx = (dx / dist) * f;
       const fy = (dy / dist) * f;
-      a.vx = (a.vx || 0) + fx;
-      a.vy = (a.vy || 0) + fy;
-      b.vx = (b.vx || 0) - fx;
-      b.vy = (b.vy || 0) - fy;
+      if (!pinnedNodes.has(a.id)) {
+        a.vx = (a.vx || 0) + fx;
+        a.vy = (a.vy || 0) + fy;
+      }
+      if (!pinnedNodes.has(b.id)) {
+        b.vx = (b.vx || 0) - fx;
+        b.vy = (b.vy || 0) - fy;
+      }
     }
   }
 
@@ -140,6 +157,7 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
 
     // 1) Pull every node gently toward the screen center
     for (const n of nodes) {
+      if (pinnedNodes.has(n.id)) continue;
       const x = (n.x || 0) - cx;
       const y = (n.y || 0) - cy;
       const r = Math.sqrt(x * x + y * y) + 0.001;
@@ -159,6 +177,7 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
 
   function applyDamping() {
     for (const n of nodes) {
+      if (pinnedNodes.has(n.id)) continue;
       n.vx = (n.vx || 0) * damping;
       n.vy = (n.vy || 0) * damping;
 
@@ -171,6 +190,7 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
     // scale by 60 so dt around 1/60 gives reasonable movement
     const scale = dt * 60;
     for (const n of nodes) {
+      if (pinnedNodes.has(n.id)) continue;
       n.x += (n.vx || 0) * scale;
       n.y += (n.vy || 0) * scale;
     }
@@ -216,5 +236,9 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
     }
   }
 
-  return { start, stop, tick, reset, setOptions };
+  function setPinnedNodes(ids: Set<string>) {
+    pinnedNodes = new Set(ids || []);
+  }
+
+  return { start, stop, tick, reset, setOptions, setPinnedNodes };
 }

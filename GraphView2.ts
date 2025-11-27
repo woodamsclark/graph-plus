@@ -135,6 +135,17 @@ class Graph2DController {
   private isPanning: boolean = false;
   private lastPanX: number = 0;
   private lastPanY: number = 0;
+  // drag tracking for momentum and click suppression
+  private hasDragged: boolean = false;
+  private preventClick: boolean = false;
+  private downScreenX: number = 0;
+  private downScreenY: number = 0;
+  private lastWorldX: number = 0;
+  private lastWorldY: number = 0;
+  private lastDragTime: number = 0;
+  private dragVx: number = 0;
+  private dragVy: number = 0;
+  private readonly momentumScale: number = 0.12;
 
   constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
     this.app = app;
@@ -209,11 +220,34 @@ class Graph2DController {
 
       // If currently dragging a node, move it to the world coords under the cursor
       if (this.draggingNode) {
+        const now = performance.now();
         const world = (this.renderer as any).screenToWorld(screenX, screenY);
+
+        // Movement threshold for considering this a drag (in screen pixels)
+        if (!this.hasDragged) {
+          const dxs = screenX - this.downScreenX;
+          const dys = screenY - this.downScreenY;
+          if (Math.sqrt(dxs * dxs + dys * dys) > 4) {
+            this.hasDragged = true;
+            this.preventClick = true;
+          }
+        }
+
+        // compute instantaneous velocity in world-space
+        const dt = Math.max((now - this.lastDragTime) / 1000, 1e-6);
+        this.dragVx = (world.x - this.lastWorldX) / dt;
+        this.dragVy = (world.y - this.lastWorldY) / dt;
+
+        // override node position and zero velocities so physics doesn't move it
         this.draggingNode.x = world.x;
         this.draggingNode.y = world.y;
         this.draggingNode.vx = 0;
         this.draggingNode.vy = 0;
+
+        this.lastWorldX = world.x;
+        this.lastWorldY = world.y;
+        this.lastDragTime = now;
+
         this.renderer.render();
         return;
       }
@@ -237,6 +271,11 @@ class Graph2DController {
     this.mouseClickHandler = (ev: MouseEvent) => {
       if (!this.canvas) return;
       if (ev.button !== 0) return;
+      // If a recent drag occurred, suppress this click
+      if (this.preventClick) {
+        this.preventClick = false;
+        return;
+      }
       const r = this.canvas.getBoundingClientRect();
       const x = ev.clientX - r.left;
       const y = ev.clientY - r.top;
@@ -261,10 +300,21 @@ class Graph2DController {
       const screenY = ev.clientY - r.top;
       const world = (this.renderer as any).screenToWorld(screenX, screenY);
 
+      // initialize drag tracking
+      this.hasDragged = false;
+      this.preventClick = false;
+      this.downScreenX = screenX;
+      this.downScreenY = screenY;
+      this.lastWorldX = world.x;
+      this.lastWorldY = world.y;
+      this.lastDragTime = performance.now();
+
       // Hit-test in world coords to see if a node was clicked
       const hit = this.hitTestNode(world.x, world.y);
       if (hit) {
         this.draggingNode = hit;
+        // pin this node in the simulation so physics won't move it while dragging
+        try { if (this.simulation && (this.simulation as any).setPinnedNodes) (this.simulation as any).setPinnedNodes(new Set([hit.id])); } catch (e) {}
         this.canvas.style.cursor = 'grabbing';
       } else {
         // start panning
@@ -278,8 +328,23 @@ class Graph2DController {
     this.mouseUpHandler = (ev: MouseEvent) => {
       if (!this.canvas) return;
       if (ev.button !== 0) return;
+
+      // If we were dragging a node, apply momentum if it was dragged
+      if (this.draggingNode) {
+        if (this.hasDragged) {
+          try {
+            this.draggingNode.vx = this.dragVx * this.momentumScale;
+            this.draggingNode.vy = this.dragVy * this.momentumScale;
+          } catch (e) {}
+        }
+        // unpin node so physics resumes
+        try { if (this.simulation && (this.simulation as any).setPinnedNodes) (this.simulation as any).setPinnedNodes(new Set()); } catch (e) {}
+      }
+
+      // reset dragging / panning state
       this.isPanning = false;
       this.draggingNode = null;
+      // preventClick remains true if a drag occurred; click handler will clear it
       this.canvas.style.cursor = 'default';
     };
 
