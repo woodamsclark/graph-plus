@@ -145,7 +145,8 @@ class Graph2DController {
   private lastDragTime: number = 0;
   private dragVx: number = 0;
   private dragVy: number = 0;
-  private readonly momentumScale: number = 0.12;
+  private momentumScale: number = 0.12;
+  private dragThreshold: number = 4;
 
   constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
     this.app = app;
@@ -207,6 +208,13 @@ class Graph2DController {
       Object.assign({}, (this.plugin as any).settings?.physics || {}, { centerX, centerY, centerNodeId })
     );
 
+    // read interaction settings (drag momentum / threshold)
+    try {
+      const interaction = (this.plugin as any).settings?.interaction || {};
+      this.momentumScale = interaction.momentumScale ?? this.momentumScale;
+      this.dragThreshold = interaction.dragThreshold ?? this.dragThreshold;
+    } catch (e) {}
+
     this.simulation.start();
     this.running = true;
     this.lastTime = null;
@@ -227,7 +235,7 @@ class Graph2DController {
         if (!this.hasDragged) {
           const dxs = screenX - this.downScreenX;
           const dys = screenY - this.downScreenY;
-          if (Math.sqrt(dxs * dxs + dys * dys) > 4) {
+          if (Math.sqrt(dxs * dxs + dys * dys) > this.dragThreshold) {
             this.hasDragged = true;
             this.preventClick = true;
           }
@@ -367,6 +375,12 @@ class Graph2DController {
           if (this.simulation && phys && (this.simulation as any).setOptions) {
             (this.simulation as any).setOptions(phys);
           }
+          // update interaction settings live
+          try {
+            const interaction = (this.plugin as any).settings?.interaction || {};
+            this.momentumScale = interaction.momentumScale ?? this.momentumScale;
+            this.dragThreshold = interaction.dragThreshold ?? this.dragThreshold;
+          } catch (e) {}
         }
       });
     }

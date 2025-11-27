@@ -50,38 +50,26 @@ async function buildGraph(app) {
     nodeByPath.set(n.id, n);
   const edges = [];
   const edgeSet = /* @__PURE__ */ new Set();
-  for (const file of files) {
-    const cache = app.metadataCache.getFileCache(file);
-    if (!cache || !cache.links)
-      continue;
-    for (const linkEntry of cache.links) {
-      const linkPath = linkEntry.link;
-      if (!linkPath)
+  const resolved = app.metadataCache.resolvedLinks || {};
+  for (const sourcePath of Object.keys(resolved)) {
+    const targets = resolved[sourcePath] || {};
+    for (const targetPath of Object.keys(targets)) {
+      if (!nodeByPath.has(sourcePath) || !nodeByPath.has(targetPath))
         continue;
-      const destFile = app.metadataCache.getFirstLinkpathDest(linkPath, file.path);
-      if (!destFile)
-        continue;
-      if (!nodeByPath.has(destFile.path))
-        continue;
-      const sourceId = file.path;
-      const targetId = destFile.path;
-      const key = `${sourceId}->${targetId}`;
+      const key = `${sourcePath}->${targetPath}`;
       if (!edgeSet.has(key)) {
-        edges.push({ sourceId, targetId });
+        edges.push({ sourceId: sourcePath, targetId: targetPath });
         edgeSet.add(key);
       }
     }
   }
-  const nodeByIdForMetrics = /* @__PURE__ */ new Map();
-  for (const n of nodes)
-    nodeByIdForMetrics.set(n.id, n);
   for (const e of edges) {
-    const src = nodeByIdForMetrics.get(e.sourceId);
-    const tgt = nodeByIdForMetrics.get(e.targetId);
+    const src = nodeByPath.get(e.sourceId);
+    const tgt = nodeByPath.get(e.targetId);
     if (!src || !tgt)
       continue;
-    src.outDegree += 1;
-    tgt.inDegree += 1;
+    src.outDegree = (src.outDegree || 0) + 1;
+    tgt.inDegree = (tgt.inDegree || 0) + 1;
   }
   for (const n of nodes) {
     n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
@@ -511,6 +499,7 @@ function createSimulation(nodes, edges, options) {
   const nodeById = /* @__PURE__ */ new Map();
   for (const n of nodes)
     nodeById.set(n.id, n);
+  let pinnedNodes = /* @__PURE__ */ new Set();
   function applyRepulsion() {
     const N = nodes.length;
     for (let i = 0; i < N; i++) {
@@ -529,17 +518,25 @@ function createSimulation(nodes, edges, options) {
         if (dist > 0) {
           const fx = dx / dist * force;
           const fy = dy / dist * force;
-          a.vx = (a.vx || 0) + fx;
-          a.vy = (a.vy || 0) + fy;
-          b.vx = (b.vx || 0) - fx;
-          b.vy = (b.vy || 0) - fy;
+          if (!pinnedNodes.has(a.id)) {
+            a.vx = (a.vx || 0) + fx;
+            a.vy = (a.vy || 0) + fy;
+          }
+          if (!pinnedNodes.has(b.id)) {
+            b.vx = (b.vx || 0) - fx;
+            b.vy = (b.vy || 0) - fy;
+          }
         } else {
           const fx = (Math.random() - 0.5) * 0.1;
           const fy = (Math.random() - 0.5) * 0.1;
-          a.vx = (a.vx || 0) + fx;
-          a.vy = (a.vy || 0) + fy;
-          b.vx = (b.vx || 0) - fx;
-          b.vy = (b.vy || 0) - fy;
+          if (!pinnedNodes.has(a.id)) {
+            a.vx = (a.vx || 0) + fx;
+            a.vy = (a.vy || 0) + fy;
+          }
+          if (!pinnedNodes.has(b.id)) {
+            b.vx = (b.vx || 0) - fx;
+            b.vy = (b.vy || 0) - fy;
+          }
         }
       }
     }
@@ -559,10 +556,14 @@ function createSimulation(nodes, edges, options) {
       const f = springStrength * Math.tanh(diff / 50);
       const fx = dx / dist * f;
       const fy = dy / dist * f;
-      a.vx = (a.vx || 0) + fx;
-      a.vy = (a.vy || 0) + fy;
-      b.vx = (b.vx || 0) - fx;
-      b.vy = (b.vy || 0) - fy;
+      if (!pinnedNodes.has(a.id)) {
+        a.vx = (a.vx || 0) + fx;
+        a.vy = (a.vy || 0) + fy;
+      }
+      if (!pinnedNodes.has(b.id)) {
+        b.vx = (b.vx || 0) - fx;
+        b.vy = (b.vy || 0) - fy;
+      }
     }
   }
   function applyCentering() {
@@ -571,6 +572,8 @@ function createSimulation(nodes, edges, options) {
     const cx = centerX ?? 0;
     const cy = centerY ?? 0;
     for (const n of nodes) {
+      if (pinnedNodes.has(n.id))
+        continue;
       const x = (n.x || 0) - cx;
       const y = (n.y || 0) - cy;
       const r = Math.sqrt(x * x + y * y) + 1e-3;
@@ -587,6 +590,8 @@ function createSimulation(nodes, edges, options) {
   }
   function applyDamping() {
     for (const n of nodes) {
+      if (pinnedNodes.has(n.id))
+        continue;
       n.vx = (n.vx || 0) * damping;
       n.vy = (n.vy || 0) * damping;
       if (Math.abs(n.vx) < 1e-3)
@@ -598,6 +603,8 @@ function createSimulation(nodes, edges, options) {
   function integrate(dt) {
     const scale = dt * 60;
     for (const n of nodes) {
+      if (pinnedNodes.has(n.id))
+        continue;
       n.x += (n.vx || 0) * scale;
       n.y += (n.vy || 0) * scale;
     }
@@ -645,14 +652,34 @@ function createSimulation(nodes, edges, options) {
       centerNode = nodes.find((n) => n.id === centerNodeId) || null;
     }
   }
-  return { start, stop, tick, reset, setOptions };
+  function setPinnedNodes(ids) {
+    pinnedNodes = new Set(ids || []);
+  }
+  return { start, stop, tick, reset, setOptions, setPinnedNodes };
 }
 
 // GraphView2.ts
 var GREATER_GRAPH_VIEW_TYPE = "greater-graph-view";
+function debounce(fn, wait = 300, immediate = false) {
+  let timeout = null;
+  return (...args) => {
+    const later = () => {
+      timeout = null;
+      if (!immediate)
+        fn(...args);
+    };
+    const callNow = immediate && timeout === null;
+    if (timeout)
+      window.clearTimeout(timeout);
+    timeout = window.setTimeout(later, wait);
+    if (callNow)
+      fn(...args);
+  };
+}
 var GraphView = class extends import_obsidian.ItemView {
   controller = null;
   plugin;
+  scheduleGraphRefresh = null;
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
@@ -674,6 +701,19 @@ var GraphView = class extends import_obsidian.ItemView {
     if (this.controller) {
       this.controller.setNodeClickHandler((node) => void this.openNodeFile(node));
     }
+    if (!this.scheduleGraphRefresh) {
+      this.scheduleGraphRefresh = debounce(() => {
+        try {
+          this.controller?.refreshGraph();
+        } catch (e) {
+          console.error("Greater Graph: refreshGraph error", e);
+        }
+      }, 500, true);
+    }
+    this.registerEvent(this.app.vault.on("create", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
+    this.registerEvent(this.app.vault.on("delete", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
+    this.registerEvent(this.app.vault.on("rename", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
+    this.registerEvent(this.app.metadataCache.on("changed", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
   }
   onResize() {
     const rect = this.containerEl.getBoundingClientRect();
@@ -728,9 +768,24 @@ var Graph2DController = class {
   wheelHandler = null;
   mouseDownHandler = null;
   mouseUpHandler = null;
-  isDragging = false;
   lastDragX = 0;
   lastDragY = 0;
+  draggingNode = null;
+  isPanning = false;
+  lastPanX = 0;
+  lastPanY = 0;
+  // drag tracking for momentum and click suppression
+  hasDragged = false;
+  preventClick = false;
+  downScreenX = 0;
+  downScreenY = 0;
+  lastWorldX = 0;
+  lastWorldY = 0;
+  lastDragTime = 0;
+  dragVx = 0;
+  dragVy = 0;
+  momentumScale = 0.12;
+  dragThreshold = 4;
   constructor(app, containerEl, plugin) {
     this.app = app;
     this.containerEl = containerEl;
@@ -784,17 +839,55 @@ var Graph2DController = class {
       this.graph.edges,
       Object.assign({}, this.plugin.settings?.physics || {}, { centerX, centerY, centerNodeId })
     );
+    try {
+      const interaction = this.plugin.settings?.interaction || {};
+      this.momentumScale = interaction.momentumScale ?? this.momentumScale;
+      this.dragThreshold = interaction.dragThreshold ?? this.dragThreshold;
+    } catch (e) {
+    }
     this.simulation.start();
     this.running = true;
     this.lastTime = null;
     this.animationFrame = requestAnimationFrame(this.animationLoop);
     this.mouseMoveHandler = (ev) => {
-      if (!this.canvas)
+      if (!this.canvas || !this.renderer)
         return;
       const r = this.canvas.getBoundingClientRect();
-      const x = ev.clientX - r.left;
-      const y = ev.clientY - r.top;
-      this.handleHover(x, y);
+      const screenX = ev.clientX - r.left;
+      const screenY = ev.clientY - r.top;
+      if (this.draggingNode) {
+        const now = performance.now();
+        const world = this.renderer.screenToWorld(screenX, screenY);
+        if (!this.hasDragged) {
+          const dxs = screenX - this.downScreenX;
+          const dys = screenY - this.downScreenY;
+          if (Math.sqrt(dxs * dxs + dys * dys) > this.dragThreshold) {
+            this.hasDragged = true;
+            this.preventClick = true;
+          }
+        }
+        const dt = Math.max((now - this.lastDragTime) / 1e3, 1e-6);
+        this.dragVx = (world.x - this.lastWorldX) / dt;
+        this.dragVy = (world.y - this.lastWorldY) / dt;
+        this.draggingNode.x = world.x;
+        this.draggingNode.y = world.y;
+        this.draggingNode.vx = 0;
+        this.draggingNode.vy = 0;
+        this.lastWorldX = world.x;
+        this.lastWorldY = world.y;
+        this.lastDragTime = now;
+        this.renderer.render();
+        return;
+      }
+      if (this.isPanning) {
+        const dx = screenX - this.lastPanX;
+        const dy = screenY - this.lastPanY;
+        this.renderer.panBy(dx, dy);
+        this.lastPanX = screenX;
+        this.lastPanY = screenY;
+        return;
+      }
+      this.handleHover(screenX, screenY);
     };
     this.mouseLeaveHandler = () => this.clearHover();
     this.mouseClickHandler = (ev) => {
@@ -802,6 +895,10 @@ var Graph2DController = class {
         return;
       if (ev.button !== 0)
         return;
+      if (this.preventClick) {
+        this.preventClick = false;
+        return;
+      }
       const r = this.canvas.getBoundingClientRect();
       const x = ev.clientX - r.left;
       const y = ev.clientY - r.top;
@@ -819,20 +916,56 @@ var Graph2DController = class {
       this.renderer.render();
     };
     this.mouseDownHandler = (ev) => {
-      if (!this.canvas || ev.button !== 0)
+      if (!this.canvas || ev.button !== 0 || !this.renderer)
         return;
-      this.isDragging = true;
       const r = this.canvas.getBoundingClientRect();
-      this.lastDragX = ev.clientX - r.left;
-      this.lastDragY = ev.clientY - r.top;
-      this.canvas.style.cursor = "grabbing";
+      const screenX = ev.clientX - r.left;
+      const screenY = ev.clientY - r.top;
+      const world = this.renderer.screenToWorld(screenX, screenY);
+      this.hasDragged = false;
+      this.preventClick = false;
+      this.downScreenX = screenX;
+      this.downScreenY = screenY;
+      this.lastWorldX = world.x;
+      this.lastWorldY = world.y;
+      this.lastDragTime = performance.now();
+      const hit = this.hitTestNode(world.x, world.y);
+      if (hit) {
+        this.draggingNode = hit;
+        try {
+          if (this.simulation && this.simulation.setPinnedNodes)
+            this.simulation.setPinnedNodes(/* @__PURE__ */ new Set([hit.id]));
+        } catch (e) {
+        }
+        this.canvas.style.cursor = "grabbing";
+      } else {
+        this.isPanning = true;
+        this.lastPanX = screenX;
+        this.lastPanY = screenY;
+        this.canvas.style.cursor = "grab";
+      }
     };
     this.mouseUpHandler = (ev) => {
       if (!this.canvas)
         return;
       if (ev.button !== 0)
         return;
-      this.isDragging = false;
+      if (this.draggingNode) {
+        if (this.hasDragged) {
+          try {
+            this.draggingNode.vx = this.dragVx * this.momentumScale;
+            this.draggingNode.vy = this.dragVy * this.momentumScale;
+          } catch (e) {
+          }
+        }
+        try {
+          if (this.simulation && this.simulation.setPinnedNodes)
+            this.simulation.setPinnedNodes(/* @__PURE__ */ new Set());
+        } catch (e) {
+        }
+      }
+      this.isPanning = false;
+      this.draggingNode = null;
       this.canvas.style.cursor = "default";
     };
     this.canvas.addEventListener("mousemove", this.mouseMoveHandler);
@@ -852,6 +985,12 @@ var Graph2DController = class {
           const phys = this.plugin.settings.physics;
           if (this.simulation && phys && this.simulation.setOptions) {
             this.simulation.setOptions(phys);
+          }
+          try {
+            const interaction = this.plugin.settings?.interaction || {};
+            this.momentumScale = interaction.momentumScale ?? this.momentumScale;
+            this.dragThreshold = interaction.dragThreshold ?? this.dragThreshold;
+          } catch (e) {
           }
         }
       });
@@ -883,6 +1022,60 @@ var Graph2DController = class {
     const centerY = height / 2;
     if (this.simulation && this.simulation.setOptions) {
       this.simulation.setOptions({ centerX, centerY });
+    }
+  }
+  // Rebuilds the graph and restarts the simulation. Safe to call repeatedly.
+  async refreshGraph() {
+    if (!this.canvas)
+      return;
+    try {
+      const newGraph = await buildGraph(this.app);
+      this.graph = newGraph;
+      this.adjacency = /* @__PURE__ */ new Map();
+      if (this.graph && this.graph.edges) {
+        for (const e of this.graph.edges) {
+          if (!this.adjacency.has(e.sourceId))
+            this.adjacency.set(e.sourceId, []);
+          if (!this.adjacency.has(e.targetId))
+            this.adjacency.set(e.targetId, []);
+          this.adjacency.get(e.sourceId).push(e.targetId);
+          this.adjacency.get(e.targetId).push(e.sourceId);
+        }
+      }
+      const rect = this.containerEl.getBoundingClientRect();
+      const width = rect.width || 300;
+      const height = rect.height || 200;
+      const centerX = width / 2;
+      const centerY = height / 2;
+      if (this.renderer && this.graph) {
+        this.renderer.setGraph(this.graph);
+        layoutGraph2D(this.graph, {
+          width,
+          height,
+          margin: 32,
+          centerX,
+          centerY,
+          centerOnLargestNode: true
+        });
+        this.renderer.resize(width, height);
+      }
+      if (this.simulation) {
+        try {
+          this.simulation.stop();
+        } catch (e) {
+        }
+        this.simulation = null;
+      }
+      this.simulation = createSimulation(
+        this.graph && this.graph.nodes || [],
+        this.graph && this.graph.edges || [],
+        Object.assign({}, this.plugin.settings?.physics || {}, { centerX, centerY })
+      );
+      this.simulation.start();
+      if (this.renderer)
+        this.renderer.render();
+    } catch (e) {
+      console.error("Greater Graph: failed to refresh graph", e);
     }
   }
   destroy() {
@@ -955,18 +1148,6 @@ var Graph2DController = class {
   handleHover(screenX, screenY) {
     if (!this.graph || !this.renderer)
       return;
-    if (this.isDragging) {
-      const worldPrev = this.renderer.screenToWorld(this.lastDragX, this.lastDragY);
-      const r = this.canvas.getBoundingClientRect();
-      const curX = screenX;
-      const curY = screenY;
-      const dx = curX - this.lastDragX;
-      const dy = curY - this.lastDragY;
-      this.renderer.panBy(dx, dy);
-      this.lastDragX = curX;
-      this.lastDragY = curY;
-      return;
-    }
     const world = this.renderer.screenToWorld(screenX, screenY);
     let closest = null;
     let closestDist = Infinity;
@@ -1051,6 +1232,10 @@ var DEFAULT_SETTINGS = {
     springLength: 130,
     centerPull: 4e-4,
     damping: 0.92
+  },
+  interaction: {
+    momentumScale: 0.12,
+    dragThreshold: 4
   }
 };
 var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
@@ -1298,6 +1483,28 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         if (!isNaN(num) && num >= 0 && num <= 1) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
           this.plugin.settings.physics.damping = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    containerEl.createEl("h2", { text: "Interaction" });
+    const interaction = this.plugin.settings.interaction || {};
+    new import_obsidian2.Setting(containerEl).setName("Drag momentum scale").setDesc("Multiplier applied to the sampled drag velocity when releasing a dragged node.").addText(
+      (text) => text.setValue(String(interaction.momentumScale ?? 0.12)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 0) {
+          this.plugin.settings.interaction = this.plugin.settings.interaction || {};
+          this.plugin.settings.interaction.momentumScale = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Drag threshold (px)").setDesc("Screen-space movement (pixels) required to count as a drag rather than a click.").addText(
+      (text) => text.setValue(String(interaction.dragThreshold ?? 4)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 0) {
+          this.plugin.settings.interaction = this.plugin.settings.interaction || {};
+          this.plugin.settings.interaction.dragThreshold = num;
           await this.plugin.saveSettings();
         }
       })

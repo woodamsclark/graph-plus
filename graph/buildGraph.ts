@@ -49,39 +49,29 @@ export async function buildGraph(app: App): Promise<GraphData> {
 
   const edges: GraphEdge[] = [];
   const edgeSet = new Set<string>();
-
-  for (const file of files) {
-    const cache: any = app.metadataCache.getFileCache(file);
-    if (!cache || !cache.links) continue;
-
-    for (const linkEntry of cache.links) {
-      const linkPath = linkEntry.link;
-      if (!linkPath) continue;
-
-      const destFile = app.metadataCache.getFirstLinkpathDest(linkPath, file.path);
-      if (!destFile) continue;
-      if (!nodeByPath.has(destFile.path)) continue;
-
-      const sourceId = file.path;
-      const targetId = destFile.path;
-      const key = `${sourceId}->${targetId}`;
+  // Prefer using Obsidian's resolvedLinks map so our edges match the
+  // core graph connections exactly. `resolvedLinks` maps sourcePath -> { destPath: count }
+  // and already resolves linkpaths; iterate that structure instead of walking per-file caches.
+  const resolved: any = (app.metadataCache as any).resolvedLinks || {};
+  for (const sourcePath of Object.keys(resolved)) {
+    const targets = resolved[sourcePath] || {};
+    for (const targetPath of Object.keys(targets)) {
+      // only add edges between files we actually included as nodes
+      if (!nodeByPath.has(sourcePath) || !nodeByPath.has(targetPath)) continue;
+      const key = `${sourcePath}->${targetPath}`;
       if (!edgeSet.has(key)) {
-        edges.push({ sourceId, targetId });
+        edges.push({ sourceId: sourcePath, targetId: targetPath });
         edgeSet.add(key);
       }
     }
   }
-
-  // compute in/out/total degrees
-  const nodeByIdForMetrics = new Map<string, GraphNode>();
-  for (const n of nodes) nodeByIdForMetrics.set(n.id, n);
-
+  // compute in/out/total degrees directly from edges
   for (const e of edges) {
-    const src = nodeByIdForMetrics.get(e.sourceId);
-    const tgt = nodeByIdForMetrics.get(e.targetId);
+    const src = nodeByPath.get(e.sourceId);
+    const tgt = nodeByPath.get(e.targetId);
     if (!src || !tgt) continue;
-    src.outDegree += 1;
-    tgt.inDegree += 1;
+    src.outDegree = (src.outDegree || 0) + 1;
+    tgt.inDegree = (tgt.inDegree || 0) + 1;
   }
 
   for (const n of nodes) {

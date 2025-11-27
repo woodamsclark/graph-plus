@@ -29,6 +29,10 @@ export interface GreaterGraphSettings {
     centerPull?: number;
     damping?: number;
   };
+  interaction?: {
+    momentumScale?: number;
+    dragThreshold?: number; // in screen pixels
+  };
 }
 
 export const DEFAULT_SETTINGS: GreaterGraphSettings = {
@@ -57,6 +61,10 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     springLength: 130,
     centerPull: 0.0004,
     damping: 0.92,
+  },
+  interaction: {
+    momentumScale: 0.12,
+    dragThreshold: 4,
   },
 };
 
@@ -410,6 +418,38 @@ class GreaterGraphSettingTab extends PluginSettingTab {
           if (!isNaN(num) && num >= 0 && num <= 1) {
             this.plugin.settings.physics = this.plugin.settings.physics || {};
             this.plugin.settings.physics.damping = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+    // Interaction settings (drag momentum / thresholds)
+    containerEl.createEl('h2', { text: 'Interaction' });
+
+    const interaction = this.plugin.settings.interaction || {};
+
+    new Setting(containerEl)
+      .setName('Drag momentum scale')
+      .setDesc('Multiplier applied to the sampled drag velocity when releasing a dragged node.')
+      .addText((text) =>
+        text.setValue(String(interaction.momentumScale ?? 0.12)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && num >= 0) {
+            this.plugin.settings.interaction = this.plugin.settings.interaction || {};
+            this.plugin.settings.interaction.momentumScale = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Drag threshold (px)')
+      .setDesc('Screen-space movement (pixels) required to count as a drag rather than a click.')
+      .addText((text) =>
+        text.setValue(String(interaction.dragThreshold ?? 4)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && num >= 0) {
+            this.plugin.settings.interaction = this.plugin.settings.interaction || {};
+            this.plugin.settings.interaction.dragThreshold = num;
             await this.plugin.saveSettings();
           }
         })
