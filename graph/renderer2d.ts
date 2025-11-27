@@ -42,6 +42,7 @@ export interface Renderer2D {
   panBy(screenDx: number, screenDy: number): void;
   screenToWorld(screenX: number, screenY: number): { x: number; y: number };
   setRenderOptions?(opts: { mutualDoubleLines?: boolean }): void;
+  worldToScreen?(worldX: number, worldY: number): { x: number; y: number };
 }
 
 export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
@@ -550,6 +551,10 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     return { x: (screenX - offsetX) / scale, y: (screenY - offsetY) / scale };
   }
 
+  function worldToScreen(worldX: number, worldY: number) {
+    return { x: worldX * scale + offsetX, y: worldY * scale + offsetY };
+  }
+
   function zoomAt(screenX: number, screenY: number, factor: number) {
     if (factor <= 0) return;
     const worldBefore = screenToWorld(screenX, screenY);
@@ -578,6 +583,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     setGlowSettings,
     setHoverState,
     setRenderOptions,
+    worldToScreen,
     zoomAt,
     panBy,
     screenToWorld,

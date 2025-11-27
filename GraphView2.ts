@@ -1,4 +1,4 @@
-import { App, ItemView, WorkspaceLeaf, Plugin, TFile } from 'obsidian';
+import { App, ItemView, WorkspaceLeaf, Plugin, TFile, MarkdownRenderer } from 'obsidian';
 import { buildGraph, GraphData } from './graph/buildGraph';
 import { layoutGraph2D } from './graph/layout2d';
 import { createRenderer2D, Renderer2D } from './graph/renderer2d';
@@ -147,6 +147,11 @@ class Graph2DController {
   private dragVy: number = 0;
   private momentumScale: number = 0.12;
   private dragThreshold: number = 4;
+  // modifier preview state: show note preview when meta (cmd) or ctrl is held while hovering
+  private modifierActive: boolean = false;
+  private keyDownHandler: ((e: KeyboardEvent) => void) | null = null;
+  private keyUpHandler: ((e: KeyboardEvent) => void) | null = null;
+  private previewEl: HTMLElement | null = null;
   // persistence
   private saveNodePositionsDebounced: (() => void) | null = null;
 
@@ -337,6 +342,35 @@ class Graph2DController {
       this.handleHover(screenX, screenY);
     };
 
+    // Key handlers for modifier (Cmd / Ctrl) to trigger previews
+    this.keyDownHandler = (ev: KeyboardEvent) => {
+      const was = this.modifierActive;
+      this.modifierActive = Boolean(ev.metaKey || ev.ctrlKey);
+      if (!was && this.modifierActive) {
+        // modifier became active — if we're currently hovering a node, show preview
+        try { if (this.canvas) { const r = this.canvas.getBoundingClientRect(); const mx = (this.lastPanX || 0); } } catch (e) {}
+        // call handleHover to possibly show preview for the currently hovered node
+        if (this.canvas) {
+          const ev2 = (window as any).lastMouseEvent as MouseEvent | undefined;
+          if (ev2) {
+            const r = this.canvas.getBoundingClientRect();
+            const screenX = ev2.clientX - r.left;
+            const screenY = ev2.clientY - r.top;
+            this.handleHover(screenX, screenY);
+          }
+        }
+      }
+    };
+
+    this.keyUpHandler = (ev: KeyboardEvent) => {
+      const was = this.modifierActive;
+      this.modifierActive = Boolean(ev.metaKey || ev.ctrlKey);
+      // If modifier released, hide preview
+      if (was && !this.modifierActive) this.hideNotePreview();
+    };
+    window.addEventListener('keydown', this.keyDownHandler);
+    window.addEventListener('keyup', this.keyUpHandler);
+
     this.mouseLeaveHandler = () => this.clearHover();
 
     this.mouseClickHandler = (ev: MouseEvent) => {
@@ -420,6 +454,9 @@ class Graph2DController {
       // save positions after a drag ends (debounced)
       try { if (this.saveNodePositionsDebounced) this.saveNodePositionsDebounced(); } catch (e) {}
     };
+
+    // track last mouse event globally for keyboard-triggered previews
+    window.addEventListener('mousemove', (e: MouseEvent) => { (window as any).lastMouseEvent = e; });
 
     this.canvas.addEventListener('mousemove', this.mouseMoveHandler);
     this.canvas.addEventListener('mouseleave', this.mouseLeaveHandler);
@@ -598,6 +635,64 @@ class Graph2DController {
     return closest;
   }
 
+  private async showNotePreviewForNode(node: any) {
+    if (!node || !node.file) return;
+    if (!this.canvas || !this.renderer) return;
+    // create preview element if needed
+    if (!this.previewEl) {
+      this.previewEl = document.createElement('div');
+      this.previewEl.className = 'greater-graph-note-preview';
+      // basic styling; themes can override in CSS
+      Object.assign(this.previewEl.style, {
+        position: 'absolute',
+        zIndex: '9999',
+        background: 'var(--background-primary, #fff)',
+        color: 'var(--text-normal, #000)',
+        border: '1px solid var(--interactive-border, rgba(0,0,0,0.08))',
+        boxShadow: '0 6px 18px rgba(0,0,0,0.15)',
+        padding: '8px',
+        borderRadius: '6px',
+        maxWidth: '420px',
+        maxHeight: '360px',
+        overflow: 'auto',
+      });
+      this.containerEl.appendChild(this.previewEl);
+    }
+
+    try {
+      const file: TFile = node.file as TFile;
+      const md = await this.app.vault.read(file);
+      // clear previous
+      this.previewEl.innerHTML = '';
+      // render markdown into preview element using plugin as component
+      await MarkdownRenderer.render(md, this.previewEl, file.path, this.plugin as any);
+    } catch (e) {
+      // fallback: show filename
+      this.previewEl!.innerText = node.label || (node.filePath || 'Preview');
+    }
+
+    // position preview near node screen coords
+    try {
+      const ws = (this.renderer as any).worldToScreen ? (this.renderer as any).worldToScreen(node.x, node.y) : { x: node.x, y: node.y };
+      // offset slightly to the right and above
+      const left = Math.round(ws.x + 12);
+      const top = Math.round(ws.y - 12);
+      // ensure within container bounds
+      const rect = this.containerEl.getBoundingClientRect();
+      const maxLeft = rect.width - 24;
+      const maxTop = rect.height - 24;
+      this.previewEl.style.left = Math.min(left, maxLeft) + 'px';
+      this.previewEl.style.top = Math.max(4, Math.min(top, maxTop)) + 'px';
+    } catch (e) {}
+  }
+
+  private hideNotePreview() {
+    if (this.previewEl && this.previewEl.parentElement) {
+      try { this.previewEl.parentElement.removeChild(this.previewEl); } catch (e) {}
+    }
+    this.previewEl = null;
+  }
+
   handleClick(screenX: number, screenY: number): void {
     if (!this.graph || !this.onNodeClick || !this.renderer) return;
     const world = (this.renderer as any).screenToWorld(screenX, screenY);
@@ -634,6 +729,16 @@ class Graph2DController {
     this.renderer.render();
     // inform simulation of mouse world coords and hovered node so it can apply local attraction
     try { if (this.simulation && (this.simulation as any).setMouseAttractor) (this.simulation as any).setMouseAttractor(world.x, world.y, newId); } catch (e) {}
+
+    // If modifier key is active and there's a hovered node, show preview; otherwise hide
+    try {
+      if (this.modifierActive && newId) {
+        const node = this.graph!.nodes.find((n) => n.id === newId);
+        if (node) this.showNotePreviewForNode(node);
+      } else {
+        this.hideNotePreview();
+      }
+    } catch (e) {}
   }
 
   clearHover(): void {
