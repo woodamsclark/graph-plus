@@ -82,12 +82,13 @@ export default class GreaterGraphPlugin extends Plugin {
     // Change this to open as a tab
     const leaves = this.app.workspace.getLeavesOfType(GREATER_GRAPH_VIEW_TYPE);
     if (leaves.length === 0) {
-      const rightLeaf = this.app.workspace.getRightLeaf(false);
-      await rightLeaf.setViewState({
+      // open in the main area as a new tab/leaf
+      const leaf = this.app.workspace.getLeaf(true);
+      await leaf.setViewState({
         type: GREATER_GRAPH_VIEW_TYPE,
         active: true,
       });
-      this.app.workspace.revealLeaf(rightLeaf);
+      this.app.workspace.revealLeaf(leaf);
     } else {
       this.app.workspace.revealLeaf(leaves[0]);
     }

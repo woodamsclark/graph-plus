@@ -95,23 +95,20 @@ function layoutGraph2D(graph, options) {
   const nodes = graph.nodes;
   if (!nodes || nodes.length === 0)
     return;
-  const cols = Math.ceil(Math.sqrt(nodes.length));
-  const rows = Math.ceil(nodes.length / cols);
-  const innerWidth = Math.max(1, width - 2 * margin);
-  const innerHeight = Math.max(1, height - 2 * margin);
-  const cellWidth = innerWidth / cols;
-  const cellHeight = innerHeight / rows;
+  const centerX = options.centerX ?? width / 2;
+  const centerY = options.centerY ?? height / 2;
+  const jitter = typeof options.jitter === "number" ? options.jitter : 8;
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
-    const row = Math.floor(i / cols);
-    const col = i % cols;
-    node.x = margin + col * cellWidth + cellWidth / 2;
-    node.y = margin + row * cellHeight + cellHeight / 2;
+    const rx = (Math.random() * 2 - 1) * jitter;
+    const ry = (Math.random() * 2 - 1) * jitter;
+    node.x = centerX + rx;
+    node.y = centerY + ry;
     node.z = 0;
   }
   if (options.centerOnLargestNode) {
-    const centerX = options.centerX ?? width / 2;
-    const centerY = options.centerY ?? height / 2;
+    const centerX2 = options.centerX ?? width / 2;
+    const centerY2 = options.centerY ?? height / 2;
     let centerNode = null;
     let maxDeg = -Infinity;
     for (const n of nodes) {
@@ -122,8 +119,8 @@ function layoutGraph2D(graph, options) {
       }
     }
     if (centerNode) {
-      centerNode.x = centerX;
-      centerNode.y = centerY;
+      centerNode.x = centerX2;
+      centerNode.y = centerY2;
     }
   }
 }
@@ -1072,12 +1069,12 @@ var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
   async activateView() {
     const leaves = this.app.workspace.getLeavesOfType(GREATER_GRAPH_VIEW_TYPE);
     if (leaves.length === 0) {
-      const rightLeaf = this.app.workspace.getRightLeaf(false);
-      await rightLeaf.setViewState({
+      const leaf = this.app.workspace.getLeaf(true);
+      await leaf.setViewState({
         type: GREATER_GRAPH_VIEW_TYPE,
         active: true
       });
-      this.app.workspace.revealLeaf(rightLeaf);
+      this.app.workspace.revealLeaf(leaf);
     } else {
       this.app.workspace.revealLeaf(leaves[0]);
     }

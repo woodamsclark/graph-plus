@@ -8,6 +8,8 @@ export interface Layout2DOptions {
   centerX?: number;
   centerY?: number;
   centerOnLargestNode?: boolean;
+  // optional initial jitter (px) applied around center
+  jitter?: number;
 }
 
 export function layoutGraph2D(graph: GraphData, options: Layout2DOptions): void {
@@ -15,21 +17,19 @@ export function layoutGraph2D(graph: GraphData, options: Layout2DOptions): void 
   const nodes = graph.nodes;
   if (!nodes || nodes.length === 0) return;
 
-  const cols = Math.ceil(Math.sqrt(nodes.length));
-  const rows = Math.ceil(nodes.length / cols);
+  const centerX = options.centerX ?? width / 2;
+  const centerY = options.centerY ?? height / 2;
+  const jitter = typeof options.jitter === 'number' ? options.jitter : 8;
 
-  const innerWidth = Math.max(1, width - 2 * margin);
-  const innerHeight = Math.max(1, height - 2 * margin);
-
-  const cellWidth = innerWidth / cols;
-  const cellHeight = innerHeight / rows;
-
+  // Place all nodes initially very near the center with a small random
+  // jitter so the physics simulation can separate them without being
+  // perfectly overlapped. The jitter is intentionally small (default 8px).
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
-    const row = Math.floor(i / cols);
-    const col = i % cols;
-    node.x = margin + col * cellWidth + cellWidth / 2;
-    node.y = margin + row * cellHeight + cellHeight / 2;
+    const rx = (Math.random() * 2 - 1) * jitter; // -jitter..jitter
+    const ry = (Math.random() * 2 - 1) * jitter;
+    node.x = centerX + rx;
+    node.y = centerY + ry;
     node.z = 0;
   }
 
