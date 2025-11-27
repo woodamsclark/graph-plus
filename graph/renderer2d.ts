@@ -20,6 +20,8 @@ export interface GlowSettings {
   nodeColor?: string;
   labelColor?: string;
   edgeColor?: string;
+  // optional explicit glow radius in world/pixel units. If provided, overrides multiplier-based radius.
+  glowRadiusPx?: number;
 }
 
 export interface Renderer2DOptions {
@@ -54,6 +56,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let minRadius = glowOptions?.minNodeRadius ?? 4;
   let maxRadius = glowOptions?.maxNodeRadius ?? 14;
   let glowMultiplier = glowOptions?.glowRadiusMultiplier ?? 2.0;
+  // explicit glow radius in world units (pixels). If set, this value is used instead of radius*glowMultiplier
+  let glowRadiusPx: number | null = glowOptions?.glowRadiusPx ?? null;
   let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.05;
   let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.35;
   let hoverBoost = glowOptions?.hoverBoostFactor ?? 1.5;
@@ -351,7 +355,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     for (const node of graph.nodes) {
       const radius = getNodeRadius(node);
       const centerAlpha = getCenterAlpha(node);
-      const glowRadius = radius * glowMultiplier;
+      // compute glow radius: explicit pixel radius wins, otherwise use multiplier * node radius
+      const glowRadius = (glowRadiusPx != null && isFinite(glowRadiusPx) && glowRadiusPx > 0) ? glowRadiusPx : radius * glowMultiplier;
 
       const focus = nodeFocusMap.get(node.id) ?? 1;
       const focused = focus > 0.01;
@@ -431,6 +436,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     minRadius = glow.minNodeRadius;
     maxRadius = glow.maxNodeRadius;
     glowMultiplier = glow.glowRadiusMultiplier;
+    glowRadiusPx = (typeof glow.glowRadiusPx === 'number') ? glow.glowRadiusPx : glowRadiusPx;
     minCenterAlpha = glow.minCenterAlpha;
     maxCenterAlpha = glow.maxCenterAlpha;
     hoverBoost = glow.hoverBoostFactor;

@@ -126,6 +126,7 @@ function createRenderer2D(options) {
   let minRadius = glowOptions?.minNodeRadius ?? 4;
   let maxRadius = glowOptions?.maxNodeRadius ?? 14;
   let glowMultiplier = glowOptions?.glowRadiusMultiplier ?? 2;
+  let glowRadiusPx = glowOptions?.glowRadiusPx ?? null;
   let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.05;
   let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.35;
   let hoverBoost = glowOptions?.hoverBoostFactor ?? 1.5;
@@ -396,7 +397,7 @@ function createRenderer2D(options) {
     for (const node of graph.nodes) {
       const radius = getNodeRadius(node);
       const centerAlpha = getCenterAlpha(node);
-      const glowRadius = radius * glowMultiplier;
+      const glowRadius = glowRadiusPx != null && isFinite(glowRadiusPx) && glowRadiusPx > 0 ? glowRadiusPx : radius * glowMultiplier;
       const focus = nodeFocusMap.get(node.id) ?? 1;
       const focused = focus > 0.01;
       if (focused) {
@@ -463,6 +464,7 @@ function createRenderer2D(options) {
     minRadius = glow.minNodeRadius;
     maxRadius = glow.maxNodeRadius;
     glowMultiplier = glow.glowRadiusMultiplier;
+    glowRadiusPx = typeof glow.glowRadiusPx === "number" ? glow.glowRadiusPx : glowRadiusPx;
     minCenterAlpha = glow.minCenterAlpha;
     maxCenterAlpha = glow.maxCenterAlpha;
     hoverBoost = glow.hoverBoostFactor;
@@ -937,7 +939,11 @@ var Graph2DController = class {
     canvas.tabIndex = 0;
     this.containerEl.appendChild(canvas);
     this.canvas = canvas;
-    this.renderer = createRenderer2D({ canvas, glow: this.plugin.settings?.glow });
+    const initialGlow = Object.assign({}, this.plugin.settings?.glow || {});
+    const initialPhys = this.plugin.settings?.physics || {};
+    if (typeof initialPhys.mouseAttractionRadius === "number")
+      initialGlow.glowRadiusPx = initialPhys.mouseAttractionRadius;
+    this.renderer = createRenderer2D({ canvas, glow: initialGlow });
     this.graph = await buildGraph(this.app);
     const vaultId = this.app.vault.getName();
     const allSaved = this.plugin.settings?.nodePositions || {};
@@ -1150,7 +1156,11 @@ var Graph2DController = class {
         if (this.plugin.settings) {
           const glow = this.plugin.settings.glow;
           if (this.renderer && this.renderer.setGlowSettings) {
-            this.renderer.setGlowSettings(glow);
+            const phys2 = this.plugin.settings?.physics || {};
+            const glowWithRadius = Object.assign({}, glow || {});
+            if (typeof phys2.mouseAttractionRadius === "number")
+              glowWithRadius.glowRadiusPx = phys2.mouseAttractionRadius;
+            this.renderer.setGlowSettings(glowWithRadius);
             this.renderer.render();
           }
           const phys = this.plugin.settings.physics;
@@ -1540,15 +1550,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       })
     );
-    new import_obsidian2.Setting(containerEl).setName("Glow radius multiplier").setDesc("Glow radius as a multiple of the node radius.").addText(
-      (text) => text.setValue(String(glow.glowRadiusMultiplier)).onChange(async (value) => {
-        const num = Number(value);
-        if (!isNaN(num) && num > 0) {
-          glow.glowRadiusMultiplier = num;
-          await this.plugin.saveSettings();
-        }
-      })
-    );
+    new import_obsidian2.Setting(containerEl).setName("");
     new import_obsidian2.Setting(containerEl).setName("Minimum center glow opacity").setDesc("Opacity (0\u20131) at the glow center for the least connected node.").addText(
       (text) => text.setValue(String(glow.minCenterAlpha)).onChange(async (value) => {
         const num = Number(value);

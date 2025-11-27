@@ -185,7 +185,12 @@ class Graph2DController {
     this.containerEl.appendChild(canvas);
     this.canvas = canvas;
 
-    this.renderer = createRenderer2D({ canvas, glow: (this.plugin as any).settings?.glow });
+    // When creating renderer, pass glow settings and prefer explicit glowRadiusPx derived
+    // from physics.mouseAttractionRadius so glow matches mouse attraction radius.
+    const initialGlow = Object.assign({}, (this.plugin as any).settings?.glow || {});
+    const initialPhys = (this.plugin as any).settings?.physics || {};
+    if (typeof initialPhys.mouseAttractionRadius === 'number') initialGlow.glowRadiusPx = initialPhys.mouseAttractionRadius;
+    this.renderer = createRenderer2D({ canvas, glow: initialGlow });
 
     this.graph = await buildGraph(this.app);
 
@@ -423,7 +428,11 @@ class Graph2DController {
         if ((this.plugin as any).settings) {
           const glow = (this.plugin as any).settings.glow;
           if (this.renderer && (this.renderer as any).setGlowSettings) {
-            (this.renderer as any).setGlowSettings(glow);
+            // ensure glow radius matches physics mouse attraction radius
+            const phys = (this.plugin as any).settings?.physics || {};
+            const glowWithRadius = Object.assign({}, glow || {});
+            if (typeof phys.mouseAttractionRadius === 'number') glowWithRadius.glowRadiusPx = phys.mouseAttractionRadius;
+            (this.renderer as any).setGlowSettings(glowWithRadius);
             this.renderer.render();
           }
           const phys = (this.plugin as any).settings.physics;

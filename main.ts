@@ -204,17 +204,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Glow radius multiplier')
-      .setDesc('Glow radius as a multiple of the node radius.')
-      .addText((text) =>
-        text.setValue(String(glow.glowRadiusMultiplier)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num > 0) {
-            glow.glowRadiusMultiplier = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+      .setName('')
 
     new Setting(containerEl)
       .setName('Minimum center glow opacity')
