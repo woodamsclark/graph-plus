@@ -1333,7 +1333,8 @@ var Graph2DController = class {
   previewLockNodeId = null;
   previewPollTimer = null;
   controlsEl = null;
-  controlsVisible = true;
+  controlsVisible = false;
+  // start minimized by default
   // Screen-space tracking for cursor attractor
   lastMouseX = null;
   lastMouseY = null;
@@ -2335,6 +2336,15 @@ var Graph2DController = class {
       this.containerEl.style.position = "relative";
       this.containerEl.appendChild(panel);
       this.controlsEl = panel;
+      if (!this.controlsVisible) {
+        for (let i = 1; i < panel.children.length; i++) {
+          const ch = panel.children[i];
+          ch.dataset["__savedDisplay"] = ch.style.display || "";
+          ch.style.display = "none";
+        }
+        panel.style.overflow = "hidden";
+        panel.style.maxHeight = "36px";
+      }
       try {
         const headerActions = this.containerEl.closest(".workspace-leaf")?.querySelector(".view-header .view-actions");
         if (headerActions) {

@@ -178,7 +178,7 @@ class Graph2DController {
   private previewLockNodeId: string | null = null;
   private previewPollTimer: number | null = null;
   private controlsEl: HTMLElement | null = null;
-  private controlsVisible: boolean = true;
+  private controlsVisible: boolean = false; // start minimized by default
   // Screen-space tracking for cursor attractor
   private lastMouseX: number | null = null;
   private lastMouseY: number | null = null;
@@ -1036,6 +1036,16 @@ class Graph2DController {
       this.containerEl.style.position = 'relative';
       this.containerEl.appendChild(panel);
       this.controlsEl = panel;
+      // start minimized: collapse content without toggling state
+      if (!this.controlsVisible) {
+        for (let i = 1; i < panel.children.length; i++) {
+          const ch = panel.children[i] as HTMLElement;
+          ch.dataset['__savedDisplay'] = ch.style.display || '';
+          ch.style.display = 'none';
+        }
+        panel.style.overflow = 'hidden';
+        panel.style.maxHeight = '36px';
+      }
 
       // also try to add a gear to the view header area if available
       try {
