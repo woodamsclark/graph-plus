@@ -508,7 +508,7 @@ class Graph2DController {
       }
 
       // Default: treat as hover; pass the original event for preview modifier detection
-      this.handleHover(screenX, screenY, ev);
+      this.updateHoverFromCoords(screenX, screenY, ev);
     };
 
     this.mouseLeaveHandler = () => { this.clearHover(); this.lastPreviewedNodeId = null; };
@@ -1307,6 +1307,14 @@ class Graph2DController {
       }
     } catch (e) {}
     if (this.simulation) this.simulation.tick(dt);
+    // Recompute hover even when the cursor is stationary so nodes moving
+    // under the pointer (due to physics or attractor) receive hover visuals.
+    // Respect preview locks and active interactions.
+    try {
+      if (this.lastMouseX != null && this.lastMouseY != null) {
+        this.updateHoverFromCoords(this.lastMouseX, this.lastMouseY);
+      }
+    } catch (e) {}
     // update camera animation/following
     try { this.updateCameraAnimation(timestamp); } catch (e) {}
     if (this.renderer) this.renderer.render();
@@ -1635,6 +1643,22 @@ class Graph2DController {
     const node = this.hitTestNodeScreen(screenX, screenY);
     if (!node) return;
     try { this.onNodeClick(node); } catch (e) { console.error('Graph2DController.onNodeClick handler error', e); }
+  }
+
+  // Reusable hover updater: computes hover from screen coords and respects
+  // existing preview/drag/pan locks. Accepts an optional MouseEvent so the
+  // preview modifier detection can still run when available.
+  private updateHoverFromCoords(screenX: number, screenY: number, ev?: MouseEvent): void {
+    if (!this.graph || !this.renderer) return;
+    // Respect preview lock and active interactions; handleHover already
+    // contains the logic we want, so delegate to it. Passing through the
+    // optional MouseEvent allows preview-modifier behavior when called from
+    // mousemove. When called from the RAF loop, ev will be undefined.
+    // Avoid updating hover while dragging or panning.
+    if (this.draggingNode || this.isPanning) return;
+    // If preview popover is currently locked, do not override it from RAF.
+    if (this.previewLockNodeId) return;
+    try { this.handleHover(screenX, screenY, ev); } catch (e) {}
   }
 
   handleHover(screenX: number, screenY: number, ev?: MouseEvent): void {

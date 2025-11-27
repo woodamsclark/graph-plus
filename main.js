@@ -1800,7 +1800,7 @@ var Graph2DController = class {
         this.lastPanY = screenY;
         return;
       }
-      this.handleHover(screenX, screenY, ev);
+      this.updateHoverFromCoords(screenX, screenY, ev);
     };
     this.mouseLeaveHandler = () => {
       this.clearHover();
@@ -2928,6 +2928,12 @@ var Graph2DController = class {
     if (this.simulation)
       this.simulation.tick(dt);
     try {
+      if (this.lastMouseX != null && this.lastMouseY != null) {
+        this.updateHoverFromCoords(this.lastMouseX, this.lastMouseY);
+      }
+    } catch (e) {
+    }
+    try {
       this.updateCameraAnimation(timestamp);
     } catch (e) {
     }
@@ -3296,6 +3302,21 @@ var Graph2DController = class {
       this.onNodeClick(node);
     } catch (e) {
       console.error("Graph2DController.onNodeClick handler error", e);
+    }
+  }
+  // Reusable hover updater: computes hover from screen coords and respects
+  // existing preview/drag/pan locks. Accepts an optional MouseEvent so the
+  // preview modifier detection can still run when available.
+  updateHoverFromCoords(screenX, screenY, ev) {
+    if (!this.graph || !this.renderer)
+      return;
+    if (this.draggingNode || this.isPanning)
+      return;
+    if (this.previewLockNodeId)
+      return;
+    try {
+      this.handleHover(screenX, screenY, ev);
+    } catch (e) {
     }
   }
   handleHover(screenX, screenY, ev) {
