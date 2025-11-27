@@ -4,7 +4,6 @@ import { GraphView, GREATER_GRAPH_VIEW_TYPE } from './GraphView2.ts';
 export interface GlowSettings {
   minNodeRadius: number;
   maxNodeRadius: number;
-  glowRadiusMultiplier: number;
   minCenterAlpha: number;
   maxCenterAlpha: number;
   hoverBoostFactor: number;
@@ -51,7 +50,6 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
   glow: {
     minNodeRadius: 4,
     maxNodeRadius: 14,
-    glowRadiusMultiplier: 2.0,
     minCenterAlpha: 0.10,
     maxCenterAlpha: 0.40,
     hoverBoostFactor: 1.6,

@@ -125,7 +125,7 @@ function createRenderer2D(options) {
   let maxDegree = 0;
   let minRadius = glowOptions?.minNodeRadius ?? 4;
   let maxRadius = glowOptions?.maxNodeRadius ?? 14;
-  let glowMultiplier = glowOptions?.glowRadiusMultiplier ?? 2;
+  const DEFAULT_GLOW_MULTIPLIER = 2;
   let glowRadiusPx = glowOptions?.glowRadiusPx ?? null;
   let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.05;
   let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.35;
@@ -397,7 +397,7 @@ function createRenderer2D(options) {
     for (const node of graph.nodes) {
       const radius = getNodeRadius(node);
       const centerAlpha = getCenterAlpha(node);
-      const glowRadius = glowRadiusPx != null && isFinite(glowRadiusPx) && glowRadiusPx > 0 ? glowRadiusPx : radius * glowMultiplier;
+      const glowRadius = glowRadiusPx != null && isFinite(glowRadiusPx) && glowRadiusPx > 0 ? glowRadiusPx : radius * DEFAULT_GLOW_MULTIPLIER;
       const focus = nodeFocusMap.get(node.id) ?? 1;
       const focused = focus > 0.01;
       if (focused) {
@@ -463,7 +463,6 @@ function createRenderer2D(options) {
       return;
     minRadius = glow.minNodeRadius;
     maxRadius = glow.maxNodeRadius;
-    glowMultiplier = glow.glowRadiusMultiplier;
     glowRadiusPx = typeof glow.glowRadiusPx === "number" ? glow.glowRadiusPx : glowRadiusPx;
     minCenterAlpha = glow.minCenterAlpha;
     maxCenterAlpha = glow.maxCenterAlpha;
@@ -1428,7 +1427,6 @@ var DEFAULT_SETTINGS = {
   glow: {
     minNodeRadius: 4,
     maxNodeRadius: 14,
-    glowRadiusMultiplier: 2,
     minCenterAlpha: 0.1,
     maxCenterAlpha: 0.4,
     hoverBoostFactor: 1.6,

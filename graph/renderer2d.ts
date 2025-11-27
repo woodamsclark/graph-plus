@@ -3,7 +3,7 @@ import { GraphData } from './buildGraph';
 export interface GlowSettings {
   minNodeRadius: number;
   maxNodeRadius: number;
-  glowRadiusMultiplier: number;
+  // removed: glowRadiusMultiplier (now driven by mouse attraction radius)
   minCenterAlpha: number;
   maxCenterAlpha: number;
   hoverBoostFactor: number;
@@ -55,8 +55,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
   let minRadius = glowOptions?.minNodeRadius ?? 4;
   let maxRadius = glowOptions?.maxNodeRadius ?? 14;
-  let glowMultiplier = glowOptions?.glowRadiusMultiplier ?? 2.0;
-  // explicit glow radius in world units (pixels). If set, this value is used instead of radius*glowMultiplier
+  const DEFAULT_GLOW_MULTIPLIER = 2.0;
+  // explicit glow radius in world units (pixels). If set, this value is used instead of radius*DEFAULT_GLOW_MULTIPLIER
   let glowRadiusPx: number | null = glowOptions?.glowRadiusPx ?? null;
   let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.05;
   let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.35;
@@ -356,7 +356,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
       const radius = getNodeRadius(node);
       const centerAlpha = getCenterAlpha(node);
       // compute glow radius: explicit pixel radius wins, otherwise use multiplier * node radius
-      const glowRadius = (glowRadiusPx != null && isFinite(glowRadiusPx) && glowRadiusPx > 0) ? glowRadiusPx : radius * glowMultiplier;
+      const glowRadius = (glowRadiusPx != null && isFinite(glowRadiusPx) && glowRadiusPx > 0) ? glowRadiusPx : radius * DEFAULT_GLOW_MULTIPLIER;
 
       const focus = nodeFocusMap.get(node.id) ?? 1;
       const focused = focus > 0.01;
@@ -435,7 +435,6 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     if (!glow) return;
     minRadius = glow.minNodeRadius;
     maxRadius = glow.maxNodeRadius;
-    glowMultiplier = glow.glowRadiusMultiplier;
     glowRadiusPx = (typeof glow.glowRadiusPx === 'number') ? glow.glowRadiusPx : glowRadiusPx;
     minCenterAlpha = glow.minCenterAlpha;
     maxCenterAlpha = glow.maxCenterAlpha;
