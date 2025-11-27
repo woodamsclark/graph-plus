@@ -888,48 +888,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       }));
     
-    // Mouse attractor settings
-    addSliderSetting(containerEl, {
-      name: 'Mouse attraction radius (px)',
-      desc: 'Maximum distance (in pixels) from cursor where the attraction applies.',
-      value: phys.mouseAttractionRadius ?? 80,
-      min: 0,
-      max: 400,
-      step: 1,
-      resetValue: DEFAULT_SETTINGS.physics!.mouseAttractionRadius,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionRadius = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionRadius = DEFAULT_SETTINGS.physics!.mouseAttractionRadius;
-          await this.plugin.saveSettings();
-        }
-      },
-    });
-
-    addSliderSetting(containerEl, {
-      name: 'Mouse attraction strength',
-      desc: 'Base force scale applied toward the cursor when within radius (higher = stronger pull).',
-      value: phys.mouseAttractionStrength ?? 0.15,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.physics!.mouseAttractionStrength,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionStrength = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionStrength = DEFAULT_SETTINGS.physics!.mouseAttractionStrength;
-          await this.plugin.saveSettings();
-        }
-      },
-    });
+    // (Mouse attraction controls below — single copy retained later in the settings)
 
     // Plane stiffness controls (UI 0..1 -> internal = ui * 0.02)
       const notePlaneUi = Math.min(1, Math.max(0, (phys.notePlaneStiffness ?? DEFAULT_SETTINGS.physics!.notePlaneStiffness) / 0.02));

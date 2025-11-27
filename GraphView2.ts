@@ -1171,8 +1171,8 @@ class Graph2DController {
         { key: 'springLength', label: 'Spring len', step: '1' },
         { key: 'centerPull', label: 'Center pull', step: '0.0001' },
         { key: 'damping', label: 'Damping', step: '0.01' },
-        { key: 'mouseAttractionRadius', label: 'Attract radius', step: '1' },
-        { key: 'mouseAttractionStrength', label: 'Attract strength', step: '0.01' },
+        // mouseAttractionRadius and mouseAttractionStrength are managed
+        // in the global Settings panel (main.ts) to avoid duplicate controls.
         { key: 'mouseAttractionExponent', label: 'Attract exponent', step: '0.1' },
       ];
       for (const f of physFields) {

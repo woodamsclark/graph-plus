@@ -2769,8 +2769,8 @@ var Graph2DController = class {
         { key: "springLength", label: "Spring len", step: "1" },
         { key: "centerPull", label: "Center pull", step: "0.0001" },
         { key: "damping", label: "Damping", step: "0.01" },
-        { key: "mouseAttractionRadius", label: "Attract radius", step: "1" },
-        { key: "mouseAttractionStrength", label: "Attract strength", step: "0.01" },
+        // mouseAttractionRadius and mouseAttractionStrength are managed
+        // in the global Settings panel (main.ts) to avoid duplicate controls.
         { key: "mouseAttractionExponent", label: "Attract exponent", step: "0.1" }
       ];
       for (const f of physFields) {
@@ -4344,46 +4344,6 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       this.plugin.settings.showTags = Boolean(v);
       await this.plugin.saveSettings();
     }));
-    addSliderSetting(containerEl, {
-      name: "Mouse attraction radius (px)",
-      desc: "Maximum distance (in pixels) from cursor where the attraction applies.",
-      value: phys.mouseAttractionRadius ?? 80,
-      min: 0,
-      max: 400,
-      step: 1,
-      resetValue: DEFAULT_SETTINGS.physics.mouseAttractionRadius,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionRadius = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionRadius = DEFAULT_SETTINGS.physics.mouseAttractionRadius;
-          await this.plugin.saveSettings();
-        }
-      }
-    });
-    addSliderSetting(containerEl, {
-      name: "Mouse attraction strength",
-      desc: "Base force scale applied toward the cursor when within radius (higher = stronger pull).",
-      value: phys.mouseAttractionStrength ?? 0.15,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.physics.mouseAttractionStrength,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionStrength = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionStrength = DEFAULT_SETTINGS.physics.mouseAttractionStrength;
-          await this.plugin.saveSettings();
-        }
-      }
-    });
     const notePlaneUi = Math.min(1, Math.max(0, (phys.notePlaneStiffness ?? DEFAULT_SETTINGS.physics.notePlaneStiffness) / 0.02));
     addSliderSetting(containerEl, {
       name: "Note plane stiffness (z)",
