@@ -183,151 +183,269 @@ class GreaterGraphSettingTab extends PluginSettingTab {
 
     const glow = this.plugin.settings.glow;
 
-    new Setting(containerEl)
-      .setName('Minimum node radius')
-      .setDesc('Minimum radius for the smallest node (in pixels).')
-      .addText((text) =>
-        text.setValue(String(glow.minNodeRadius)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num > 0) {
-            glow.minNodeRadius = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    // helper to create a slider with reset button inside a Setting
+    const addSliderSetting = (parent: HTMLElement, opts: { name: string; desc?: string; value: number; min: number; max: number; step?: number; onChange: (v: number) => Promise<void> | void; resetValue?: number | undefined; }) => {
+      const s = new Setting(parent).setName(opts.name).setDesc(opts.desc || '');
+      const wrap = document.createElement('div');
+      wrap.style.display = 'flex';
+      wrap.style.alignItems = 'center';
+      wrap.style.gap = '8px';
 
-    new Setting(containerEl)
-      .setName('Maximum node radius')
-      .setDesc('Maximum radius for the most connected node (in pixels).')
-      .addText((text) =>
-        text.setValue(String(glow.maxNodeRadius)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= glow.minNodeRadius) {
-            glow.maxNodeRadius = num;
-            await this.plugin.saveSettings();
+      const range = document.createElement('input');
+      range.type = 'range';
+      range.min = String(opts.min);
+      range.max = String(opts.max);
+      range.step = String(opts.step ?? (opts.step === 0 ? 0 : (opts.step || 1)));
+      range.value = String(opts.value);
+      range.style.flex = '1';
+
+      const label = document.createElement('div');
+      label.textContent = String(opts.value);
+      label.style.minWidth = '56px';
+      label.style.textAlign = 'right';
+
+      range.addEventListener('input', (e) => { label.textContent = (e.target as HTMLInputElement).value; });
+      range.addEventListener('change', async (e) => { const v = Number((e.target as HTMLInputElement).value); await opts.onChange(v); });
+
+      const rbtn = document.createElement('button');
+      rbtn.type = 'button';
+      rbtn.textContent = '↺';
+      rbtn.title = 'Reset to default';
+      rbtn.style.border = 'none';
+      rbtn.style.background = 'transparent';
+      rbtn.style.cursor = 'pointer';
+      rbtn.addEventListener('click', async () => {
+        try {
+          if (typeof opts.resetValue === 'number') {
+            range.value = String(opts.resetValue);
+            label.textContent = range.value;
+            await opts.onChange(Number(range.value));
+          } else {
+            // if resetValue undefined -> delete stored setting by calling onChange with NaN
+            await opts.onChange(NaN as any);
           }
-        })
-      );
+        } catch (e) {}
+      });
+
+      wrap.appendChild(range);
+      wrap.appendChild(label);
+      wrap.appendChild(rbtn);
+      (s as any).controlEl.appendChild(wrap);
+      return { range, label, reset: rbtn };
+    };
+
+    // Minimum node radius
+    addSliderSetting(containerEl, {
+      name: 'Minimum node radius',
+      desc: 'Minimum radius for the smallest node (in pixels).',
+      value: glow.minNodeRadius,
+      min: 1,
+      max: 40,
+      step: 1,
+      resetValue: DEFAULT_SETTINGS.glow.minNodeRadius,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v > 0) {
+          glow.minNodeRadius = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.minNodeRadius = DEFAULT_SETTINGS.glow.minNodeRadius;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
+
+    addSliderSetting(containerEl, {
+      name: 'Maximum node radius',
+      desc: 'Maximum radius for the most connected node (in pixels).',
+      value: glow.maxNodeRadius,
+      min: 4,
+      max: 120,
+      step: 1,
+      resetValue: DEFAULT_SETTINGS.glow.maxNodeRadius,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= glow.minNodeRadius) {
+          glow.maxNodeRadius = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.maxNodeRadius = DEFAULT_SETTINGS.glow.maxNodeRadius;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
     new Setting(containerEl)
       .setName('')
 
-    new Setting(containerEl)
-      .setName('Minimum center glow opacity')
-      .setDesc('Opacity (0–1) at the glow center for the least connected node.')
-      .addText((text) =>
-        text.setValue(String(glow.minCenterAlpha)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 0 && num <= 1) {
-            glow.minCenterAlpha = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Minimum center glow opacity',
+      desc: 'Opacity (0–1) at the glow center for the least connected node.',
+      value: glow.minCenterAlpha,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.glow.minCenterAlpha,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+          glow.minCenterAlpha = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.minCenterAlpha = DEFAULT_SETTINGS.glow.minCenterAlpha;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Maximum center glow opacity')
-      .setDesc('Opacity (0–1) at the glow center for the most connected node.')
-      .addText((text) =>
-        text.setValue(String(glow.maxCenterAlpha)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 0 && num <= 1) {
-            glow.maxCenterAlpha = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Maximum center glow opacity',
+      desc: 'Opacity (0–1) at the glow center for the most connected node.',
+      value: glow.maxCenterAlpha,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.glow.maxCenterAlpha,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+          glow.maxCenterAlpha = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.maxCenterAlpha = DEFAULT_SETTINGS.glow.maxCenterAlpha;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Hover glow boost')
-      .setDesc('Multiplier applied to the center glow when a node is hovered.')
-      .addText((text) =>
-        text.setValue(String(glow.hoverBoostFactor)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 1.0) {
-            glow.hoverBoostFactor = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Hover glow boost',
+      desc: 'Multiplier applied to the center glow when a node is hovered.',
+      value: glow.hoverBoostFactor,
+      min: 1,
+      max: 5,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.glow.hoverBoostFactor,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 1.0) {
+          glow.hoverBoostFactor = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.hoverBoostFactor = DEFAULT_SETTINGS.glow.hoverBoostFactor;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Neighbor glow boost')
-      .setDesc('Multiplier applied to nodes within the highlight depth (excluding hovered node).')
-      .addText((text) =>
-        text.setValue(String(glow.neighborBoostFactor ?? 1.2)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 1.0) {
-            glow.neighborBoostFactor = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Neighbor glow boost',
+      desc: 'Multiplier applied to nodes within the highlight depth (excluding hovered node).',
+      value: glow.neighborBoostFactor ?? 1.2,
+      min: 1,
+      max: 5,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.glow.neighborBoostFactor,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 1.0) {
+          glow.neighborBoostFactor = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.neighborBoostFactor = DEFAULT_SETTINGS.glow.neighborBoostFactor;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Dim factor for distant nodes')
-      .setDesc('Multiplier (0–1) applied to nodes outside the highlight depth.')
-      .addText((text) =>
-        text.setValue(String(glow.dimFactor ?? 0.3)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 0 && num <= 1) {
-            glow.dimFactor = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Dim factor for distant nodes',
+      desc: 'Multiplier (0–1) applied to nodes outside the highlight depth.',
+      value: glow.dimFactor ?? 0.3,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.glow.dimFactor,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+          glow.dimFactor = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.dimFactor = DEFAULT_SETTINGS.glow.dimFactor;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Highlight depth')
-      .setDesc('Graph distance (in hops) from the hovered node that will be highlighted.')
-      .addText((text) =>
-        text.setValue(String(glow.hoverHighlightDepth ?? 1)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && Number.isInteger(num) && num >= 0) {
-            glow.hoverHighlightDepth = Math.max(0, Math.floor(num));
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Highlight depth',
+      desc: 'Graph distance (in hops) from the hovered node that will be highlighted.',
+      value: glow.hoverHighlightDepth ?? 1,
+      min: 0,
+      max: 6,
+      step: 1,
+      resetValue: DEFAULT_SETTINGS.glow.hoverHighlightDepth,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && Number.isInteger(v) && v >= 0) {
+          glow.hoverHighlightDepth = Math.max(0, Math.floor(v));
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.hoverHighlightDepth = DEFAULT_SETTINGS.glow.hoverHighlightDepth;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Inner distance multiplier')
-      .setDesc('Distance (in node radii) where distance-based glow is fully active.')
-      .addText((text) =>
-        text.setValue(String(glow.distanceInnerRadiusMultiplier ?? 1.0)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num > 0) {
-            glow.distanceInnerRadiusMultiplier = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Inner distance multiplier',
+      desc: 'Distance (in node radii) where distance-based glow is fully active.',
+      value: glow.distanceInnerRadiusMultiplier ?? 1.0,
+      min: 0.1,
+      max: 3,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.glow.distanceInnerRadiusMultiplier,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v > 0) {
+          glow.distanceInnerRadiusMultiplier = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.distanceInnerRadiusMultiplier = DEFAULT_SETTINGS.glow.distanceInnerRadiusMultiplier;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Outer distance multiplier')
-      .setDesc('Distance (in node radii) beyond which the mouse has no effect on glow.')
-      .addText((text) =>
-        text.setValue(String(glow.distanceOuterRadiusMultiplier ?? 2.5)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num > (glow.distanceInnerRadiusMultiplier ?? 0)) {
-            glow.distanceOuterRadiusMultiplier = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Outer distance multiplier',
+      desc: 'Distance (in node radii) beyond which the mouse has no effect on glow.',
+      value: glow.distanceOuterRadiusMultiplier ?? 2.5,
+      min: 0.5,
+      max: 6,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.glow.distanceOuterRadiusMultiplier,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v > (glow.distanceInnerRadiusMultiplier ?? 0)) {
+          glow.distanceOuterRadiusMultiplier = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.distanceOuterRadiusMultiplier = DEFAULT_SETTINGS.glow.distanceOuterRadiusMultiplier;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Distance curve steepness')
-      .setDesc('Controls how quickly glow ramps up as the cursor approaches a node. Higher values = steeper S-curve.')
-      .addText((text) =>
-        text.setValue(String(glow.distanceCurveSteepness ?? 2.0)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num > 0) {
-            glow.distanceCurveSteepness = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Distance curve steepness',
+      desc: 'Controls how quickly glow ramps up as the cursor approaches a node. Higher values = steeper S-curve.',
+      value: glow.distanceCurveSteepness ?? 2.0,
+      min: 0.1,
+      max: 8,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.glow.distanceCurveSteepness,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v > 0) {
+          glow.distanceCurveSteepness = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.distanceCurveSteepness = DEFAULT_SETTINGS.glow.distanceCurveSteepness;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
     // Focus / dimming controls
     new Setting(containerEl)
@@ -385,38 +503,50 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     // Color overrides (optional)
     containerEl.createEl('h2', { text: 'Colors' });
 
-    new Setting(containerEl)
-      .setName('Node color (override)')
-      .setDesc('Optional CSS color string to override the theme accent for node fill. Leave empty to use the active theme.')
-      .addText((text) =>
-        text.setValue(String(glow.nodeColor ?? '')).onChange(async (value) => {
-          const v = value.trim();
-          glow.nodeColor = v === '' ? undefined : v;
-          await this.plugin.saveSettings();
-        })
-      );
+    {
+      const s = new Setting(containerEl)
+        .setName('Node color (override)')
+        .setDesc('Optional CSS color string to override the theme accent for node fill. Leave empty to use the active theme.');
+      let txt: any = null;
+      s.addText((t) => { txt = t; return t.setValue(String(glow.nodeColor ?? '')).onChange(async (value) => {
+        const v = value.trim();
+        glow.nodeColor = v === '' ? undefined : v;
+        await this.plugin.saveSettings();
+      }); });
+      const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
+      rb.addEventListener('click', async () => { glow.nodeColor = undefined; await this.plugin.saveSettings(); if (txt) (txt as any).setValue(''); });
+      (s as any).controlEl.appendChild(rb);
+    }
 
-    new Setting(containerEl)
-      .setName('Edge color (override)')
-      .setDesc('Optional CSS color string to override edge stroke color. Leave empty to use a theme-appropriate color.')
-      .addText((text) =>
-        text.setValue(String(glow.edgeColor ?? '')).onChange(async (value) => {
-          const v = value.trim();
-          glow.edgeColor = v === '' ? undefined : v;
-          await this.plugin.saveSettings();
-        })
-      );
+    {
+      const s = new Setting(containerEl)
+        .setName('Edge color (override)')
+        .setDesc('Optional CSS color string to override edge stroke color. Leave empty to use a theme-appropriate color.');
+      let txt: any = null;
+      s.addText((t) => { txt = t; return t.setValue(String(glow.edgeColor ?? '')).onChange(async (value) => {
+        const v = value.trim();
+        glow.edgeColor = v === '' ? undefined : v;
+        await this.plugin.saveSettings();
+      }); });
+      const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
+      rb.addEventListener('click', async () => { glow.edgeColor = undefined; await this.plugin.saveSettings(); if (txt) (txt as any).setValue(''); });
+      (s as any).controlEl.appendChild(rb);
+    }
 
-    new Setting(containerEl)
-      .setName('Label color (override)')
-      .setDesc('Optional CSS color string to override label text color. Leave empty to use the active theme text color.')
-      .addText((text) =>
-        text.setValue(String(glow.labelColor ?? '')).onChange(async (value) => {
-          const v = value.trim();
-          glow.labelColor = v === '' ? undefined : v;
-          await this.plugin.saveSettings();
-        })
-      );
+    {
+      const s = new Setting(containerEl)
+        .setName('Label color (override)')
+        .setDesc('Optional CSS color string to override label text color. Leave empty to use the active theme text color.');
+      let txt: any = null;
+      s.addText((t) => { txt = t; return t.setValue(String(glow.labelColor ?? '')).onChange(async (value) => {
+        const v = value.trim();
+        glow.labelColor = v === '' ? undefined : v;
+        await this.plugin.saveSettings();
+      }); });
+      const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
+      rb.addEventListener('click', async () => { glow.labelColor = undefined; await this.plugin.saveSettings(); if (txt) (txt as any).setValue(''); });
+      (s as any).controlEl.appendChild(rb);
+    }
 
     new Setting(containerEl)
       .setName('Use interface font for labels')
@@ -431,75 +561,110 @@ class GreaterGraphSettingTab extends PluginSettingTab {
 
     containerEl.createEl('h2', { text: 'Greater Graph – Physics' });
 
-    new Setting(containerEl)
-      .setName('Repulsion strength')
-      .setDesc('Controls node-node repulsion strength (higher = more separation).')
-      .addText((text) =>
-        text.setValue(String(phys.repulsionStrength ?? 4000)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 0) {
-            this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.repulsionStrength = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Repulsion strength',
+      desc: 'Controls node-node repulsion strength (higher = more separation).',
+      value: phys.repulsionStrength ?? 4000,
+      min: 0,
+      max: 10000,
+      step: 1,
+      resetValue: DEFAULT_SETTINGS.physics!.repulsionStrength,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.repulsionStrength = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.repulsionStrength = DEFAULT_SETTINGS.physics!.repulsionStrength;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Spring strength')
-      .setDesc('Spring force constant for edges (higher = stiffer).')
-      .addText((text) =>
-        text.setValue(String(phys.springStrength ?? 0.08)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 0) {
-            this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.springStrength = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Spring strength',
+      desc: 'Spring force constant for edges (higher = stiffer).',
+      value: phys.springStrength ?? 0.08,
+      min: 0,
+      max: 0.2,
+      step: 0.001,
+      resetValue: DEFAULT_SETTINGS.physics!.springStrength,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.springStrength = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.springStrength = DEFAULT_SETTINGS.physics!.springStrength;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Spring length')
-      .setDesc('Preferred length (px) for edge springs.')
-      .addText((text) =>
-        text.setValue(String(phys.springLength ?? 80)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 0) {
-            this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.springLength = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Spring length',
+      desc: 'Preferred length (px) for edge springs.',
+      value: phys.springLength ?? 80,
+      min: 10,
+      max: 500,
+      step: 1,
+      resetValue: DEFAULT_SETTINGS.physics!.springLength,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.springLength = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.springLength = DEFAULT_SETTINGS.physics!.springLength;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Center pull')
-      .setDesc('Force pulling nodes toward center (small value).')
-      .addText((text) =>
-        text.setValue(String(phys.centerPull ?? 0.02)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 0) {
-            this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.centerPull = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Center pull',
+      desc: 'Force pulling nodes toward center (small value).',
+      value: phys.centerPull ?? 0.02,
+      min: 0,
+      max: 0.01,
+      step: 0.0001,
+      resetValue: DEFAULT_SETTINGS.physics!.centerPull,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.centerPull = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.centerPull = DEFAULT_SETTINGS.physics!.centerPull;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Damping')
-      .setDesc('Velocity damping (0-1). Higher values reduce motion faster.')
-      .addText((text) =>
-        text.setValue(String(phys.damping ?? 0.85)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 0 && num <= 1) {
-            this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.damping = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Damping',
+      desc: 'Velocity damping (0-1). Higher values reduce motion faster.',
+      value: phys.damping ?? 0.85,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.physics!.damping,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.damping = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.damping = DEFAULT_SETTINGS.physics!.damping;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
     // Count duplicate links option
     new Setting(containerEl)
@@ -519,78 +684,113 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       }));
     
     // Mouse attractor settings
-    new Setting(containerEl)
-      .setName('Mouse attraction radius (px)')
-      .setDesc('Maximum distance (in pixels) from cursor where the attraction applies.')
-      .addText((text) =>
-        text.setValue(String(phys.mouseAttractionRadius ?? 80)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 0) {
-            this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.mouseAttractionRadius = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Mouse attraction radius (px)',
+      desc: 'Maximum distance (in pixels) from cursor where the attraction applies.',
+      value: phys.mouseAttractionRadius ?? 80,
+      min: 0,
+      max: 400,
+      step: 1,
+      resetValue: DEFAULT_SETTINGS.physics!.mouseAttractionRadius,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionRadius = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionRadius = DEFAULT_SETTINGS.physics!.mouseAttractionRadius;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Mouse attraction strength')
-      .setDesc('Base force scale applied toward the cursor when within radius (higher = stronger pull).')
-      .addText((text) =>
-        text.setValue(String(phys.mouseAttractionStrength ?? 0.15)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 0) {
-            this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.mouseAttractionStrength = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Mouse attraction strength',
+      desc: 'Base force scale applied toward the cursor when within radius (higher = stronger pull).',
+      value: phys.mouseAttractionStrength ?? 0.15,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.physics!.mouseAttractionStrength,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionStrength = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionStrength = DEFAULT_SETTINGS.physics!.mouseAttractionStrength;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Mouse attraction exponent')
-      .setDesc('How sharply attraction ramps as the cursor approaches (typical values: 3–4).')
-      .addText((text) =>
-        text.setValue(String(phys.mouseAttractionExponent ?? 3.5)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num > 0) {
-            this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.mouseAttractionExponent = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Mouse attraction exponent',
+      desc: 'How sharply attraction ramps as the cursor approaches (typical values: 3–4).',
+      value: phys.mouseAttractionExponent ?? 3.5,
+      min: 0.1,
+      max: 10,
+      step: 0.1,
+      resetValue: DEFAULT_SETTINGS.physics!.mouseAttractionExponent,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v > 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionExponent = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionExponent = DEFAULT_SETTINGS.physics!.mouseAttractionExponent;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
     // Interaction settings (drag momentum / thresholds)
     containerEl.createEl('h2', { text: 'Interaction' });
 
     const interaction = this.plugin.settings.interaction || {};
 
-    new Setting(containerEl)
-      .setName('Drag momentum scale')
-      .setDesc('Multiplier applied to the sampled drag velocity when releasing a dragged node.')
-      .addText((text) =>
-        text.setValue(String(interaction.momentumScale ?? 0.12)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 0) {
-            this.plugin.settings.interaction = this.plugin.settings.interaction || {};
-            this.plugin.settings.interaction.momentumScale = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Drag momentum scale',
+      desc: 'Multiplier applied to the sampled drag velocity when releasing a dragged node.',
+      value: interaction.momentumScale ?? 0.12,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.interaction!.momentumScale,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0) {
+          this.plugin.settings.interaction = this.plugin.settings.interaction || {};
+          this.plugin.settings.interaction.momentumScale = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.interaction = this.plugin.settings.interaction || {};
+          this.plugin.settings.interaction.momentumScale = DEFAULT_SETTINGS.interaction!.momentumScale;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Drag threshold (px)')
-      .setDesc('Screen-space movement (pixels) required to count as a drag rather than a click.')
-      .addText((text) =>
-        text.setValue(String(interaction.dragThreshold ?? 4)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 0) {
-            this.plugin.settings.interaction = this.plugin.settings.interaction || {};
-            this.plugin.settings.interaction.dragThreshold = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Drag threshold (px)',
+      desc: 'Screen-space movement (pixels) required to count as a drag rather than a click.',
+      value: interaction.dragThreshold ?? 4,
+      min: 0,
+      max: 40,
+      step: 1,
+      resetValue: DEFAULT_SETTINGS.interaction!.dragThreshold,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0) {
+          this.plugin.settings.interaction = this.plugin.settings.interaction || {};
+          this.plugin.settings.interaction.dragThreshold = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.interaction = this.plugin.settings.interaction || {};
+          this.plugin.settings.interaction.dragThreshold = DEFAULT_SETTINGS.interaction!.dragThreshold;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
   }
 }

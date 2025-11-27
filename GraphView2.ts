@@ -515,7 +515,7 @@ class Graph2DController {
       title.appendChild(closeBtn);
       panel.appendChild(title);
 
-      const makeRow = (labelText: string, inputEl: HTMLElement) => {
+      const makeRow = (labelText: string, inputEl: HTMLElement, resetCb?: () => void) => {
         const row = document.createElement('div');
         row.style.display = 'flex';
         row.style.alignItems = 'center';
@@ -525,9 +525,28 @@ class Graph2DController {
         label.textContent = labelText;
         label.style.marginRight = '8px';
         label.style.flex = '1';
+        const rightWrap = document.createElement('div');
+        rightWrap.style.display = 'flex';
+        rightWrap.style.alignItems = 'center';
+        rightWrap.style.gap = '6px';
         inputEl.style.flex = '0 0 auto';
+        rightWrap.appendChild(inputEl);
+        if (resetCb) {
+          const rbtn = document.createElement('button');
+          rbtn.type = 'button';
+          rbtn.title = 'Reset to default';
+          rbtn.textContent = '↺';
+          rbtn.style.border = 'none';
+          rbtn.style.background = 'transparent';
+          rbtn.style.cursor = 'pointer';
+          rbtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            try { resetCb(); } catch (err) {}
+          });
+          rightWrap.appendChild(rbtn);
+        }
         row.appendChild(label);
-        row.appendChild(inputEl);
+        row.appendChild(rightWrap);
         return row;
       };
 
@@ -544,7 +563,16 @@ class Graph2DController {
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
         } catch (e) {}
       });
-      panel.appendChild(makeRow('Node color', nodeColor));
+      panel.appendChild(makeRow('Node color', nodeColor, async () => {
+        try {
+          (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+          (this.plugin as any).settings.glow.nodeColor = undefined;
+          await (this.plugin as any).saveSettings();
+          // update UI: if possible clear color input to theme-derived value
+          try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
+          try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+        } catch (e) {}
+      }));
 
       // Edge color
       const edgeColor = document.createElement('input');
@@ -559,7 +587,15 @@ class Graph2DController {
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
         } catch (e) {}
       });
-      panel.appendChild(makeRow('Edge color', edgeColor));
+      panel.appendChild(makeRow('Edge color', edgeColor, async () => {
+        try {
+          (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+          (this.plugin as any).settings.glow.edgeColor = undefined;
+          await (this.plugin as any).saveSettings();
+          try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
+          try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+        } catch (e) {}
+      }));
 
       // Count duplicate links toggle
       const countDup = document.createElement('input');
@@ -574,7 +610,14 @@ class Graph2DController {
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
         } catch (e) {}
       });
-      panel.appendChild(makeRow('Count duplicate links', countDup));
+      panel.appendChild(makeRow('Count duplicate links', countDup, async () => {
+        try {
+          (this.plugin as any).settings.countDuplicateLinks = undefined as any;
+          await (this.plugin as any).saveSettings();
+          try { this.graph = await buildGraph(this.app, { countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks) }); if (this.renderer) (this.renderer as any).setGraph(this.graph); } catch (e) {}
+          try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+        } catch (e) {}
+      }));
 
       // Physics settings group
       const phys = (this.plugin as any).settings?.physics || {};
@@ -589,12 +632,39 @@ class Graph2DController {
         { key: 'mouseAttractionExponent', label: 'Attract exponent', step: '0.1' },
       ];
       for (const f of physFields) {
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.step = f.step || '1';
-        input.value = String((phys as any)[f.key] ?? '');
-        input.style.width = '80px';
-        input.addEventListener('change', async (e) => {
+        const wrap = document.createElement('div');
+        wrap.style.display = 'flex';
+        wrap.style.alignItems = 'center';
+        wrap.style.gap = '6px';
+
+        const range = document.createElement('input');
+        range.type = 'range';
+        // sensible defaults per-key
+        switch (f.key) {
+          case 'repulsionStrength': range.min = '0'; range.max = '10000'; range.step = '1'; break;
+          case 'springStrength': range.min = '0'; range.max = '0.2'; range.step = '0.001'; break;
+          case 'springLength': range.min = '10'; range.max = '500'; range.step = '1'; break;
+          case 'centerPull': range.min = '0'; range.max = '0.01'; range.step = '0.0001'; break;
+          case 'damping': range.min = '0'; range.max = '1'; range.step = '0.01'; break;
+          case 'mouseAttractionRadius': range.min = '0'; range.max = '400'; range.step = '1'; break;
+          case 'mouseAttractionStrength': range.min = '0'; range.max = '1'; range.step = '0.01'; break;
+          case 'mouseAttractionExponent': range.min = '0.1'; range.max = '10'; range.step = '0.1'; break;
+          default: range.min = '0'; range.max = '100'; range.step = '1';
+        }
+        const current = (phys as any)[f.key];
+        range.value = String(Number.isFinite(current) ? current : Number(range.min));
+        range.style.width = '120px';
+
+        const valueLabel = document.createElement('div');
+        valueLabel.textContent = String(range.value);
+        valueLabel.style.minWidth = '48px';
+        valueLabel.style.textAlign = 'right';
+
+        range.addEventListener('input', (e) => {
+          valueLabel.textContent = (e.target as HTMLInputElement).value;
+        });
+
+        range.addEventListener('change', async (e) => {
           try {
             (this.plugin as any).settings.physics = (this.plugin as any).settings.physics || {};
             const val = Number((e.target as HTMLInputElement).value);
@@ -605,7 +675,22 @@ class Graph2DController {
             try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
           } catch (e) {}
         });
-        panel.appendChild(makeRow(f.label, input));
+
+        wrap.appendChild(range);
+        wrap.appendChild(valueLabel);
+        panel.appendChild(makeRow(f.label, wrap, async () => {
+          try {
+            (this.plugin as any).settings.physics = (this.plugin as any).settings.physics || {};
+            delete (this.plugin as any).settings.physics[f.key];
+            await (this.plugin as any).saveSettings();
+            // restore UI to default from settings object if available
+            const def = (this.plugin as any).settings.physics[f.key];
+            range.value = def !== undefined ? String(def) : String(range.min);
+            valueLabel.textContent = range.value;
+            try { if (this.simulation && (this.simulation as any).setOptions) (this.simulation as any).setOptions((this.plugin as any).settings.physics); } catch (e) {}
+            try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+          } catch (e) {}
+        }));
       }
 
       // append to container
