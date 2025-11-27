@@ -22,6 +22,13 @@ export interface GlowSettings {
   edgeColor?: string;
   // optional explicit glow radius in world/pixel units. If provided, overrides multiplier-based radius.
   glowRadiusPx?: number;
+  // node sizing options
+  useWeightedDegree?: boolean;
+  // 'auto' uses logarithmic mapping; 'log' forces log1p; 'linear' uses linear mapping
+  nodeSizeScalingMode?: 'auto' | 'log' | 'linear';
+  // percentile clipping (0-100)
+  percentileLow?: number;
+  percentileHigh?: number;
 }
 
 export interface Renderer2DOptions {
@@ -42,7 +49,6 @@ export interface Renderer2D {
   panBy(screenDx: number, screenDy: number): void;
   screenToWorld(screenX: number, screenY: number): { x: number; y: number };
   setRenderOptions?(opts: { mutualDoubleLines?: boolean }): void;
-  worldToScreen?(worldX: number, worldY: number): { x: number; y: number };
 }
 
 export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
@@ -54,6 +60,15 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   // degree-based styling params
   let minDegree = 0;
   let maxDegree = 0;
+  // precomputed sizing stats for node radius mapping
+  let sizePercentileLowVal = 0;
+  let sizePercentileHighVal = 0;
+  let sizeVmin = 0; // log1p(pLow)
+  let sizeVmax = 0; // log1p(pHigh)
+  let sizeScalingMode: 'auto' | 'log' | 'linear' = glowOptions?.nodeSizeScalingMode ?? 'auto';
+  let sizeUseWeighted = Boolean(glowOptions?.useWeightedDegree);
+  let sizePercentileLow = typeof glowOptions?.percentileLow === 'number' ? glowOptions!.percentileLow! : 5;
+  let sizePercentileHigh = typeof glowOptions?.percentileHigh === 'number' ? glowOptions!.percentileHigh! : 95;
   // edge count stats
   let minEdgeCount = 1;
   let maxEdgeCount = 1;
@@ -172,6 +187,69 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     }
     if (!isFinite(minDegree)) minDegree = 0;
     if (!isFinite(maxDegree)) maxDegree = 0;
+
+    // Precompute sizing percentiles and log bounds for efficient per-frame radius mapping
+    computeSizeStats();
+  }
+
+  function computeSizeStats() {
+    sizeScalingMode = glowOptions?.nodeSizeScalingMode ?? sizeScalingMode;
+    sizeUseWeighted = Boolean(glowOptions?.useWeightedDegree) || sizeUseWeighted;
+    sizePercentileLow = typeof glowOptions?.percentileLow === 'number' ? glowOptions.percentileLow : sizePercentileLow;
+    sizePercentileHigh = typeof glowOptions?.percentileHigh === 'number' ? glowOptions.percentileHigh : sizePercentileHigh;
+
+    if (!graph || !graph.nodes || graph.nodes.length === 0) {
+      sizePercentileLowVal = 0;
+      sizePercentileHighVal = 0;
+      sizeVmin = 0;
+      sizeVmax = 0;
+      return;
+    }
+
+    // collect degree metric values (non-negative)
+    const vals: number[] = [];
+    for (const n of graph.nodes) {
+      let d = 0;
+      if (sizeUseWeighted) d = Number((n as any).weightedInDegree ?? (n as any).weightedDegree ?? (n as any).inDegree ?? 0);
+      else d = Number((n as any).inDegree ?? 0);
+      if (!isFinite(d) || d < 0) d = 0;
+      vals.push(d);
+    }
+
+    vals.sort((a, b) => a - b);
+
+    const n = vals.length;
+    function percentile(sorted: number[], p: number) {
+      if (sorted.length === 0) return 0;
+      const clippedP = Math.max(0, Math.min(100, p));
+      if (sorted.length === 1) return sorted[0];
+      const idx = (clippedP / 100) * (sorted.length - 1);
+      const lo = Math.floor(idx);
+      const hi = Math.ceil(idx);
+      if (lo === hi) return sorted[lo];
+      const frac = idx - lo;
+      return sorted[lo] * (1 - frac) + sorted[hi] * frac;
+    }
+
+    // If too few nodes, fall back to min/max
+    if (n < 5) {
+      sizePercentileLowVal = vals[0] ?? 0;
+      sizePercentileHighVal = vals[n - 1] ?? 0;
+    } else {
+      const pLow = Math.max(0, Math.min(100, sizePercentileLow));
+      const pHigh = Math.max(pLow, Math.min(100, sizePercentileHigh));
+      sizePercentileLowVal = percentile(vals, pLow);
+      sizePercentileHighVal = percentile(vals, pHigh);
+    }
+
+    if (!isFinite(sizePercentileLowVal)) sizePercentileLowVal = 0;
+    if (!isFinite(sizePercentileHighVal)) sizePercentileHighVal = 0;
+
+    // ensure pHigh >= pLow
+    if (sizePercentileHighVal < sizePercentileLowVal) sizePercentileHighVal = sizePercentileLowVal;
+
+    sizeVmin = Math.log1p(sizePercentileLowVal);
+    sizeVmax = Math.log1p(sizePercentileHighVal);
   }
 
   function resize(width: number, height: number) {
@@ -208,8 +286,37 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   }
 
   function getBaseNodeRadius(node: any) {
-    const t = getDegreeNormalized(node);
-    return minRadius + t * (maxRadius - minRadius);
+    // Compute radius based on configured degree metric and scaling mode.
+    // degree raw value
+    let dRaw = sizeUseWeighted
+      ? Number((node as any).weightedInDegree ?? (node as any).weightedDegree ?? (node as any).inDegree ?? 0)
+      : Number((node as any).inDegree ?? 0);
+    if (!isFinite(dRaw) || dRaw < 0) dRaw = 0;
+
+    // If all degrees are zero or pLow/pHigh collapsed, return midpoint
+    if ((sizePercentileHighVal === 0 && sizePercentileLowVal === 0) || (sizePercentileHighVal === sizePercentileLowVal)) {
+      return minRadius + 0.5 * (maxRadius - minRadius);
+    }
+
+    // clamp to percentile bounds
+    const dClamped = Math.max(sizePercentileLowVal, Math.min(sizePercentileHighVal, dRaw));
+
+    let t = 0.5;
+    const mode = sizeScalingMode || 'auto';
+    if (mode === 'linear') {
+      t = sizePercentileHighVal === sizePercentileLowVal ? 0.5 : (dClamped - sizePercentileLowVal) / (sizePercentileHighVal - sizePercentileLowVal);
+    } else {
+      // log or auto: use log1p mapping
+      const v = Math.log1p(dClamped);
+      if (sizeVmax === sizeVmin) t = 0.5;
+      else t = (v - sizeVmin) / (sizeVmax - sizeVmin);
+    }
+    if (!isFinite(t)) t = 0.5;
+    // clamp
+    t = Math.max(0, Math.min(1, t));
+    // optional small easing for visual balance
+    const eased = Math.pow(t, 0.9);
+    return minRadius + eased * (maxRadius - minRadius);
   }
 
   function getBaseCenterAlpha(node: any) {
@@ -521,6 +628,13 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   }
 
   function setGlowSettings(glow: GlowSettings) {
+    // update sizing options if provided and recompute stats
+    if (typeof glow.nodeSizeScalingMode === 'string') sizeScalingMode = glow.nodeSizeScalingMode;
+    if (typeof glow.useWeightedDegree === 'boolean') sizeUseWeighted = glow.useWeightedDegree;
+    if (typeof glow.percentileLow === 'number') sizePercentileLow = glow.percentileLow;
+    if (typeof glow.percentileHigh === 'number') sizePercentileHigh = glow.percentileHigh;
+    // recompute precomputed stats when glow settings change
+    try { computeSizeStats(); } catch (e) {}
     if (!glow) return;
     minRadius = glow.minNodeRadius;
     maxRadius = glow.maxNodeRadius;
@@ -551,10 +665,6 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     return { x: (screenX - offsetX) / scale, y: (screenY - offsetY) / scale };
   }
 
-  function worldToScreen(worldX: number, worldY: number) {
-    return { x: worldX * scale + offsetX, y: worldY * scale + offsetY };
-  }
-
   function zoomAt(screenX: number, screenY: number, factor: number) {
     if (factor <= 0) return;
     const worldBefore = screenToWorld(screenX, screenY);
@@ -583,7 +693,6 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     setGlowSettings,
     setHoverState,
     setRenderOptions,
-    worldToScreen,
     zoomAt,
     panBy,
     screenToWorld,

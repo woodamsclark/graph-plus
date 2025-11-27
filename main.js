@@ -574,6 +574,9 @@ function createRenderer2D(options) {
   function screenToWorld(screenX, screenY) {
     return { x: (screenX - offsetX) / scale, y: (screenY - offsetY) / scale };
   }
+  function worldToScreen(worldX, worldY) {
+    return { x: worldX * scale + offsetX, y: worldY * scale + offsetY };
+  }
   function zoomAt(screenX, screenY, factor) {
     if (factor <= 0)
       return;
@@ -603,6 +606,7 @@ function createRenderer2D(options) {
     setGlowSettings,
     setHoverState,
     setRenderOptions,
+    worldToScreen,
     zoomAt,
     panBy,
     screenToWorld
@@ -987,6 +991,11 @@ var Graph2DController = class {
   dragVy = 0;
   momentumScale = 0.12;
   dragThreshold = 4;
+  // modifier preview state: show note preview when meta (cmd) or ctrl is held while hovering
+  modifierActive = false;
+  keyDownHandler = null;
+  keyUpHandler = null;
+  previewEl = null;
   // persistence
   saveNodePositionsDebounced = null;
   saveNodePositions() {
@@ -1154,6 +1163,36 @@ var Graph2DController = class {
       }
       this.handleHover(screenX, screenY);
     };
+    this.keyDownHandler = (ev) => {
+      const was = this.modifierActive;
+      this.modifierActive = Boolean(ev.metaKey || ev.ctrlKey);
+      if (!was && this.modifierActive) {
+        try {
+          if (this.canvas) {
+            const r = this.canvas.getBoundingClientRect();
+            const mx = this.lastPanX || 0;
+          }
+        } catch (e) {
+        }
+        if (this.canvas) {
+          const ev2 = window.lastMouseEvent;
+          if (ev2) {
+            const r = this.canvas.getBoundingClientRect();
+            const screenX = ev2.clientX - r.left;
+            const screenY = ev2.clientY - r.top;
+            this.handleHover(screenX, screenY);
+          }
+        }
+      }
+    };
+    this.keyUpHandler = (ev) => {
+      const was = this.modifierActive;
+      this.modifierActive = Boolean(ev.metaKey || ev.ctrlKey);
+      if (was && !this.modifierActive)
+        this.hideNotePreview();
+    };
+    window.addEventListener("keydown", this.keyDownHandler);
+    window.addEventListener("keyup", this.keyUpHandler);
     this.mouseLeaveHandler = () => this.clearHover();
     this.mouseClickHandler = (ev) => {
       if (!this.canvas)
@@ -1238,6 +1277,9 @@ var Graph2DController = class {
       } catch (e) {
       }
     };
+    window.addEventListener("mousemove", (e) => {
+      window.lastMouseEvent = e;
+    });
     this.canvas.addEventListener("mousemove", this.mouseMoveHandler);
     this.canvas.addEventListener("mouseleave", this.mouseLeaveHandler);
     this.canvas.addEventListener("click", this.mouseClickHandler);
@@ -1439,6 +1481,58 @@ var Graph2DController = class {
     }
     return closest;
   }
+  async showNotePreviewForNode(node) {
+    if (!node || !node.file)
+      return;
+    if (!this.canvas || !this.renderer)
+      return;
+    if (!this.previewEl) {
+      this.previewEl = document.createElement("div");
+      this.previewEl.className = "greater-graph-note-preview";
+      Object.assign(this.previewEl.style, {
+        position: "absolute",
+        zIndex: "9999",
+        background: "var(--background-primary, #fff)",
+        color: "var(--text-normal, #000)",
+        border: "1px solid var(--interactive-border, rgba(0,0,0,0.08))",
+        boxShadow: "0 6px 18px rgba(0,0,0,0.15)",
+        padding: "8px",
+        borderRadius: "6px",
+        maxWidth: "420px",
+        maxHeight: "360px",
+        overflow: "auto"
+      });
+      this.containerEl.appendChild(this.previewEl);
+    }
+    try {
+      const file = node.file;
+      const md = await this.app.vault.read(file);
+      this.previewEl.innerHTML = "";
+      await import_obsidian.MarkdownRenderer.render(md, this.previewEl, file.path, this.plugin);
+    } catch (e) {
+      this.previewEl.innerText = node.label || (node.filePath || "Preview");
+    }
+    try {
+      const ws = this.renderer.worldToScreen ? this.renderer.worldToScreen(node.x, node.y) : { x: node.x, y: node.y };
+      const left = Math.round(ws.x + 12);
+      const top = Math.round(ws.y - 12);
+      const rect = this.containerEl.getBoundingClientRect();
+      const maxLeft = rect.width - 24;
+      const maxTop = rect.height - 24;
+      this.previewEl.style.left = Math.min(left, maxLeft) + "px";
+      this.previewEl.style.top = Math.max(4, Math.min(top, maxTop)) + "px";
+    } catch (e) {
+    }
+  }
+  hideNotePreview() {
+    if (this.previewEl && this.previewEl.parentElement) {
+      try {
+        this.previewEl.parentElement.removeChild(this.previewEl);
+      } catch (e) {
+      }
+    }
+    this.previewEl = null;
+  }
   handleClick(screenX, screenY) {
     if (!this.graph || !this.onNodeClick || !this.renderer)
       return;
@@ -1503,6 +1597,16 @@ var Graph2DController = class {
     try {
       if (this.simulation && this.simulation.setMouseAttractor)
         this.simulation.setMouseAttractor(world.x, world.y, newId);
+    } catch (e) {
+    }
+    try {
+      if (this.modifierActive && newId) {
+        const node = this.graph.nodes.find((n) => n.id === newId);
+        if (node)
+          this.showNotePreviewForNode(node);
+      } else {
+        this.hideNotePreview();
+      }
     } catch (e) {
     }
   }
