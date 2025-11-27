@@ -45,8 +45,8 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
   let springLength = options?.springLength ?? 100;
   let centerPull = options?.centerPull ?? 0.00;
   let damping = options?.damping ?? 0.9;
-  let notePlaneStiffness = options?.notePlaneStiffness ?? 0.02;
-  let tagPlaneStiffness = options?.tagPlaneStiffness ?? 0.02;
+  let notePlaneStiffness = options?.notePlaneStiffness ?? 0;
+  let tagPlaneStiffness = options?.tagPlaneStiffness ?? 0;
 
   // mouse attractor defaults
   let mouseAttractionRadius = options?.mouseAttractionRadius ?? 80;

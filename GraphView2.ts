@@ -132,6 +132,8 @@ class Graph2DController {
   private lastDragX: number = 0;
   private lastDragY: number = 0;
   private draggingNode: any | null = null;
+  private dragStartDepth: number = 0;
+  private dragOffsetWorld: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
   private isPanning: boolean = false;
   private lastPanX: number = 0;
   private lastPanY: number = 0;
@@ -144,6 +146,17 @@ class Graph2DController {
   private panStartY: number = 0;
   private panStartTargetX: number = 0;
   private panStartTargetY: number = 0;
+  // pending right-click focus state
+  private pendingFocusNode: any | null = null;
+  private pendingFocusDownX: number = 0;
+  private pendingFocusDownY: number = 0;
+  // camera follow / animation state
+  private cameraAnimStart: number | null = null;
+  private cameraAnimDuration: number = 300; // ms
+  private cameraAnimFrom: any = null;
+  private cameraAnimTo: any = null;
+  private isCameraFollowing: boolean = false;
+  private cameraFollowNode: any | null = null;
   // drag tracking for momentum and click suppression
   private hasDragged: boolean = false;
   private preventClick: boolean = false;
@@ -342,7 +355,20 @@ class Graph2DController {
       // If currently dragging a node, move it to the world coords under the cursor
       if (this.draggingNode) {
         const now = performance.now();
-        const world = (this.renderer as any).screenToWorld(screenX, screenY);
+        // map screen -> world at the stored camera-space depth so dragging respects yaw/pitch
+        let world: any = null;
+        try {
+          const cam = (this.renderer as any).getCamera();
+          const width = this.canvas ? this.canvas.width : (this.containerEl.getBoundingClientRect().width || 300);
+          const height = this.canvas ? this.canvas.height : (this.containerEl.getBoundingClientRect().height || 200);
+          if ((this.renderer as any).screenToWorldAtDepth) {
+            world = (this.renderer as any).screenToWorldAtDepth(screenX, screenY, this.dragStartDepth, width, height, cam);
+          } else {
+            world = (this.renderer as any).screenToWorld(screenX, screenY);
+          }
+        } catch (e) {
+          world = (this.renderer as any).screenToWorld(screenX, screenY);
+        }
 
         // Movement threshold for considering this a drag (in screen pixels)
         if (!this.hasDragged) {
@@ -356,17 +382,19 @@ class Graph2DController {
 
         // compute instantaneous velocity in world-space
         const dt = Math.max((now - this.lastDragTime) / 1000, 1e-6);
-        this.dragVx = (world.x - this.lastWorldX) / dt;
-        this.dragVy = (world.y - this.lastWorldY) / dt;
+        this.dragVx = ((world.x + this.dragOffsetWorld.x) - this.lastWorldX) / dt;
+        this.dragVy = ((world.y + this.dragOffsetWorld.y) - this.lastWorldY) / dt;
 
         // override node position and zero velocities so physics doesn't move it
-        this.draggingNode.x = world.x;
-        this.draggingNode.y = world.y;
+        this.draggingNode.x = world.x + this.dragOffsetWorld.x;
+        this.draggingNode.y = world.y + this.dragOffsetWorld.y;
+        this.draggingNode.z = (world.z || 0) + this.dragOffsetWorld.z;
         this.draggingNode.vx = 0;
         this.draggingNode.vy = 0;
+        this.draggingNode.vz = 0;
 
-        this.lastWorldX = world.x;
-        this.lastWorldY = world.y;
+        this.lastWorldX = this.draggingNode.x;
+        this.lastWorldY = this.draggingNode.y;
         this.lastDragTime = now;
 
         this.renderer.render();
@@ -375,8 +403,31 @@ class Graph2DController {
         return;
       }
 
+      // If right-button is held and we had a pending focus, treat sufficient movement as orbit start
+      try {
+        if ((ev.buttons & 2) === 2 && this.pendingFocusNode) {
+          const dx = screenX - this.pendingFocusDownX;
+          const dy = screenY - this.pendingFocusDownY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const dragThreshold = 8;
+          if (dist > dragThreshold) {
+            // begin orbiting and cancel the pending focus
+            this.isOrbiting = true;
+            // set lastOrbit to the original down position so motion is continuous
+            this.lastOrbitX = this.pendingFocusDownX;
+            this.lastOrbitY = this.pendingFocusDownY;
+            // clear pending focus
+            this.pendingFocusNode = null;
+            // cancel following if active
+            if (this.isCameraFollowing) { this.isCameraFollowing = false; this.cameraFollowNode = null; }
+          }
+        }
+      } catch (e) {}
+
       // Orbit (right mouse button drag)
       if (this.isOrbiting) {
+        // user interaction cancels camera following
+        if (this.isCameraFollowing) { this.isCameraFollowing = false; this.cameraFollowNode = null; }
         const dx = screenX - this.lastOrbitX;
         const dy = screenY - this.lastOrbitY;
         this.lastOrbitX = screenX;
@@ -398,6 +449,8 @@ class Graph2DController {
 
       // Middle-button pan: move camera target
       if (this.isMiddlePanning) {
+        // user interaction cancels camera following
+        if (this.isCameraFollowing) { this.isCameraFollowing = false; this.cameraFollowNode = null; }
         const dx = screenX - this.panStartX;
         const dy = screenY - this.panStartY;
         try {
@@ -413,6 +466,8 @@ class Graph2DController {
 
       // Legacy 2D panning (left drag on empty) remains
       if (this.isPanning) {
+        // user interaction cancels camera following
+        if (this.isCameraFollowing) { this.isCameraFollowing = false; this.cameraFollowNode = null; }
         const dx = screenX - this.lastPanX;
         const dy = screenY - this.lastPanY;
         (this.renderer as any).panBy(dx, dy);
@@ -447,9 +502,18 @@ class Graph2DController {
     this.wheelHandler = (ev: WheelEvent) => {
       if (!this.canvas || !this.renderer) return;
       ev.preventDefault();
-      const factor = ev.deltaY < 0 ? 1.1 : 0.9;
-      (this.renderer as any).zoomAt(ev.clientX, ev.clientY, factor);
-      (this.renderer as any).render();
+      try {
+        // any user wheel action cancels camera following
+        this.isCameraFollowing = false;
+        this.cameraFollowNode = null;
+        const cam = (this.renderer as any).getCamera();
+        const zoomSpeed = 0.0015;
+        const factor = Math.exp(ev.deltaY * zoomSpeed);
+        let distance = (cam.distance || 1000) * factor;
+        distance = Math.max(200, Math.min(8000, distance));
+        (this.renderer as any).setCamera({ distance });
+        (this.renderer as any).render();
+      } catch (e) {}
     };
 
     this.mouseDownHandler = (ev: MouseEvent) => {
@@ -457,13 +521,22 @@ class Graph2DController {
       const r = this.canvas.getBoundingClientRect();
       const screenX = ev.clientX - r.left;
       const screenY = ev.clientY - r.top;
-      // Right button -> start orbit if on empty space
+      // Right button -> either mark pending focus on node or pending focus on empty (origin)
+      // We don't start orbit immediately; if the user drags beyond a threshold we'll begin orbiting.
       if (ev.button === 2) {
         const hitNode = this.hitTestNodeScreen(screenX, screenY);
-        if (!hitNode) {
-          this.isOrbiting = true;
-          this.lastOrbitX = screenX;
-          this.lastOrbitY = screenY;
+        if (hitNode) {
+          // pending focus on this node
+          this.pendingFocusNode = hitNode;
+          this.pendingFocusDownX = screenX;
+          this.pendingFocusDownY = screenY;
+          ev.preventDefault();
+          return;
+        } else {
+          // pending focus to reset to origin (0,0,0) if click (no drag)
+          this.pendingFocusNode = '__origin__';
+          this.pendingFocusDownX = screenX;
+          this.pendingFocusDownY = screenY;
           ev.preventDefault();
           return;
         }
@@ -503,9 +576,28 @@ class Graph2DController {
           this.lastPanY = screenY;
           this.canvas.style.cursor = 'grab';
         } else {
+          // begin 3D-aware drag: compute camera-space depth and world offset at click
           this.draggingNode = hit;
-          // pin this node in the simulation so physics won't move it while dragging
-          try { if (this.simulation && (this.simulation as any).setPinnedNodes) (this.simulation as any).setPinnedNodes(new Set([hit.id])); } catch (e) {}
+          try {
+            const cam = (this.renderer as any).getCamera();
+            const proj = (this.renderer as any).getProjectedNode ? (this.renderer as any).getProjectedNode(hit) : null;
+            const depth = proj ? proj.depth : 1000;
+            this.dragStartDepth = depth;
+            const width = this.canvas ? this.canvas.width : (this.containerEl.getBoundingClientRect().width || 300);
+            const height = this.canvas ? this.canvas.height : (this.containerEl.getBoundingClientRect().height || 200);
+            const screenXClient = proj ? proj.x : screenX;
+            const screenYClient = proj ? proj.y : screenY;
+            const worldAtCursor = (this.renderer as any).screenToWorldAtDepth ? (this.renderer as any).screenToWorldAtDepth(screenXClient, screenYClient, depth, width, height, cam) : (this.renderer as any).screenToWorld(screenXClient, screenYClient);
+            this.dragOffsetWorld = {
+              x: (hit.x || 0) - (worldAtCursor.x || 0),
+              y: (hit.y || 0) - (worldAtCursor.y || 0),
+              z: (hit.z || 0) - (worldAtCursor.z || 0),
+            };
+            // pin this node in the simulation so physics won't move it while dragging
+            try { if (this.simulation && (this.simulation as any).setPinnedNodes) (this.simulation as any).setPinnedNodes(new Set([hit.id])); } catch (e) {}
+          } catch (e) {
+            this.dragOffsetWorld = { x: 0, y: 0, z: 0 };
+          }
           this.canvas.style.cursor = 'grabbing';
         }
       } else {
@@ -519,7 +611,29 @@ class Graph2DController {
 
     this.mouseUpHandler = (ev: MouseEvent) => {
       if (!this.canvas) return;
-      if (ev.button === 2) this.isOrbiting = false;
+      if (ev.button === 2) {
+        // consume pending focus click if present
+        if (this.pendingFocusNode) {
+          const dx = ev.clientX - (this.canvas.getBoundingClientRect().left + this.pendingFocusDownX);
+          const dy = ev.clientY - (this.canvas.getBoundingClientRect().top + this.pendingFocusDownY);
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const clickThreshold = 8;
+          if (dist <= clickThreshold) {
+            try {
+              if (this.pendingFocusNode === '__origin__') {
+                // focus origin but do not enable follow
+                this.focusCameraOnNode({ x: 0, y: 0, z: 0 });
+                this.isCameraFollowing = false;
+                this.cameraFollowNode = null;
+              } else {
+                this.focusCameraOnNode(this.pendingFocusNode);
+              }
+            } catch (e) {}
+          }
+          this.pendingFocusNode = null;
+        }
+        this.isOrbiting = false;
+      }
       if (ev.button === 1) this.isMiddlePanning = false;
       if (ev.button !== 0) return;
 
@@ -550,7 +664,7 @@ class Graph2DController {
     this.canvas.addEventListener('wheel', this.wheelHandler, { passive: false });
     this.canvas.addEventListener('mousedown', this.mouseDownHandler);
     window.addEventListener('mouseup', this.mouseUpHandler);
-    this.canvas.addEventListener('contextmenu', (e) => { if (this.isOrbiting) e.preventDefault(); });
+    this.canvas.addEventListener('contextmenu', (e) => { if (this.isOrbiting || this.pendingFocusNode) e.preventDefault(); });
 
     if ((this.plugin as any).registerSettingsListener) {
       this.settingsUnregister = (this.plugin as any).registerSettingsListener(() => {
@@ -969,6 +1083,8 @@ class Graph2DController {
     if (dt > 0.05) dt = 0.05;
     this.lastTime = timestamp;
     if (this.simulation) this.simulation.tick(dt);
+    // update camera animation/following
+    try { this.updateCameraAnimation(timestamp); } catch (e) {}
     if (this.renderer) this.renderer.render();
     // periodically persist node positions (debounced)
     try { if (this.saveNodePositionsDebounced) this.saveNodePositionsDebounced(); } catch (e) {}
@@ -982,6 +1098,80 @@ class Graph2DController {
     const centerY = height / 2;
     if (this.simulation && (this.simulation as any).setOptions) {
       (this.simulation as any).setOptions({ centerX, centerY });
+    }
+  }
+
+  private focusCameraOnNode(node: any) {
+    // Start an animated camera focus and enable following of the node.
+    if (!this.renderer || !node) return;
+    try {
+      const cam = (this.renderer as any).getCamera();
+      const from = {
+        targetX: cam.targetX ?? 0,
+        targetY: cam.targetY ?? 0,
+        targetZ: cam.targetZ ?? 0,
+        distance: cam.distance ?? 1000,
+        yaw: cam.yaw ?? 0,
+        pitch: cam.pitch ?? 0,
+      };
+      const toDistance = Math.max(200, Math.min(3000, (from.distance || 1000) * 0.6));
+      const to = {
+        targetX: node.x ?? 0,
+        targetY: node.y ?? 0,
+        targetZ: node.z ?? 0,
+        distance: toDistance,
+        yaw: from.yaw,
+        pitch: from.pitch,
+      };
+      this.cameraAnimStart = performance.now();
+      this.cameraAnimDuration = 300;
+      this.cameraAnimFrom = from;
+      this.cameraAnimTo = to;
+      this.isCameraFollowing = true;
+      this.cameraFollowNode = node;
+    } catch (e) {}
+  }
+
+  private updateCameraAnimation(now: number) {
+    if (!this.renderer) return;
+    if (this.cameraAnimStart == null) {
+      // If following without an active animation, smoothly interpolate camera target to node each frame
+      if (this.isCameraFollowing && this.cameraFollowNode) {
+        const n = this.cameraFollowNode;
+        try {
+          const cam = (this.renderer as any).getCamera();
+          const followAlpha = 0.12; // smoothing factor per frame (0-1)
+          const curX = cam.targetX ?? 0;
+          const curY = cam.targetY ?? 0;
+          const curZ = cam.targetZ ?? 0;
+          const newX = curX + ((n.x ?? 0) - curX) * followAlpha;
+          const newY = curY + ((n.y ?? 0) - curY) * followAlpha;
+          const newZ = curZ + ((n.z ?? 0) - curZ) * followAlpha;
+          (this.renderer as any).setCamera({ targetX: newX, targetY: newY, targetZ: newZ });
+        } catch (e) {}
+      }
+      return;
+    }
+    const t = Math.min(1, (now - this.cameraAnimStart) / this.cameraAnimDuration);
+    // easeOutQuad
+    const ease = 1 - (1 - t) * (1 - t);
+    const from = this.cameraAnimFrom || {};
+    const to = this.cameraAnimTo || {};
+    const lerp = (a: number, b: number) => a + (b - a) * ease;
+    const cameraState: any = {};
+    if (typeof from.targetX === 'number' && typeof to.targetX === 'number') cameraState.targetX = lerp(from.targetX, to.targetX);
+    if (typeof from.targetY === 'number' && typeof to.targetY === 'number') cameraState.targetY = lerp(from.targetY, to.targetY);
+    if (typeof from.targetZ === 'number' && typeof to.targetZ === 'number') cameraState.targetZ = lerp(from.targetZ, to.targetZ);
+    if (typeof from.distance === 'number' && typeof to.distance === 'number') cameraState.distance = lerp(from.distance, to.distance);
+    if (typeof from.yaw === 'number' && typeof to.yaw === 'number') cameraState.yaw = lerp(from.yaw, to.yaw);
+    if (typeof from.pitch === 'number' && typeof to.pitch === 'number') cameraState.pitch = lerp(from.pitch, to.pitch);
+    try { (this.renderer as any).setCamera(cameraState); } catch (e) {}
+    // At end of animation, clear anim state but keep follow active so camera follows node
+    if (t >= 1) {
+      this.cameraAnimStart = null;
+      this.cameraAnimFrom = null;
+      this.cameraAnimTo = null;
+      // keep isCameraFollowing = true and cameraFollowNode set
     }
   }
 

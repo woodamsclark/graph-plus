@@ -43,9 +43,11 @@ export interface Renderer2D {
   zoomAt(screenX: number, screenY: number, factor: number): void;
   panBy(screenDx: number, screenDy: number): void;
   screenToWorld(screenX: number, screenY: number): { x: number; y: number };
+  screenToWorldAtDepth?(screenX: number, screenY: number, zCam: number, width: number, height: number, cam: Camera): { x: number; y: number; z: number };
   setRenderOptions?(opts: { mutualDoubleLines?: boolean; showTags?: boolean }): void;
   // projection helpers for hit-testing
   getNodeScreenPosition?(node: any): { x: number; y: number };
+  getProjectedNode?(node: any): { x: number; y: number; depth: number };
   getScale?(): number;
   // camera controls
   setCamera?(cam: Partial<Camera>): void;
@@ -676,9 +678,55 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     return { x: (screenX - offsetX) / scale, y: (screenY - offsetY) / scale };
   }
 
+  // Convert a screen point (pixels, canvas coords) to a world position at a given camera-space depth.
+  // zCam is the distance along the camera forward axis from the camera to the point (camera-space Z).
+  function screenToWorldAtDepth(
+    sx: number,
+    sy: number,
+    zCam: number,
+    width: number,
+    height: number,
+    cam: Camera
+  ) {
+    const { yaw, pitch, distance, targetX, targetY, targetZ, zoom } = cam;
+
+    // first convert screen coords into projected px/py (same space as projectWorld produced)
+    const px = (sx - offsetX) / scale;
+    const py = (sy - offsetY) / scale;
+
+    const focal = 800; // match projectWorld
+    const perspective = (zoom * focal) / (zCam || 0.0001);
+
+    // camera-space x/y
+    const xCam = px / perspective;
+    const yCam = py / perspective;
+    let cx = xCam;
+    let cy = yCam;
+    let cz = zCam;
+
+    // Undo pitch (rotate around X axis by -pitch)
+    const cosP = Math.cos(pitch);
+    const sinP = Math.sin(pitch);
+    const wy = cy * cosP + cz * sinP;
+    const wz1 = -cy * sinP + cz * cosP;
+
+    // Undo yaw (rotate around Y axis by -yaw)
+    const cosY = Math.cos(yaw);
+    const sinY = Math.sin(yaw);
+    const wx = cx * cosY + wz1 * sinY;
+    const wz = -cx * sinY + wz1 * cosY;
+
+    return { x: wx + targetX, y: wy + targetY, z: wz + targetZ };
+  }
+
   function getNodeScreenPosition(node: any): { x: number; y: number } {
     const p = projectWorld(node);
     return { x: p.x * scale + offsetX, y: p.y * scale + offsetY };
+  }
+
+  function getProjectedNode(node: any): { x: number; y: number; depth: number } {
+    const p = projectWorld(node);
+    return { x: p.x * scale + offsetX, y: p.y * scale + offsetY, depth: p.depth };
   }
 
   function getScale() { return scale; }
@@ -712,7 +760,9 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     zoomAt,
     panBy,
     screenToWorld,
+      screenToWorldAtDepth,
     getNodeScreenPosition,
+      getProjectedNode,
     getScale,
     setCamera,
     getCamera,

@@ -244,6 +244,7 @@ function createRenderer2D(options) {
   let minEdgeCount = 1;
   let maxEdgeCount = 1;
   let drawMutualDoubleLines = true;
+  let showTags = true;
   let minRadius = glowOptions?.minNodeRadius ?? 4;
   let maxRadius = glowOptions?.maxNodeRadius ?? 14;
   const DEFAULT_GLOW_MULTIPLIER = 2;
@@ -320,12 +321,41 @@ function createRenderer2D(options) {
   let offsetY = 0;
   const minScale = 0.25;
   const maxScale = 4;
-  const TAG_Z_PROJ = 0.6;
-  function getDrawPosition(node) {
-    if (node && node.type === "tag") {
-      return { x: (node.x || 0) + (node.z || 0) * TAG_Z_PROJ, y: node.y || 0 };
-    }
-    return { x: node.x || 0, y: node.y || 0 };
+  let camera = {
+    yaw: Math.PI / 6,
+    pitch: Math.PI / 8,
+    distance: 1200,
+    targetX: 0,
+    targetY: 0,
+    targetZ: 0,
+    zoom: 1
+  };
+  function setCamera(newCamera) {
+    camera = { ...camera, ...newCamera };
+  }
+  function getCamera() {
+    return camera;
+  }
+  function projectWorld(node) {
+    const { yaw, pitch, distance, targetX, targetY, targetZ, zoom } = camera;
+    const wx = (node.x || 0) - targetX;
+    const wy = (node.y || 0) - targetY;
+    const wz = (node.z || 0) - targetZ;
+    const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
+    const xz = wx * cosYaw - wz * sinYaw;
+    const zz = wx * sinYaw + wz * cosYaw;
+    const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+    const yz = wy * cosP - zz * sinP;
+    const zz2 = wy * sinP + zz * cosP;
+    const camZ = distance;
+    const dz = camZ - zz2;
+    const eps = 1e-4;
+    const safeDz = dz < eps ? eps : dz;
+    const focal = 800;
+    const perspective = zoom * focal / safeDz;
+    const px = xz * perspective;
+    const py = yz * perspective;
+    return { x: px, y: py, depth: dz };
   }
   function setGraph(g) {
     graph = g;
@@ -442,7 +472,7 @@ function createRenderer2D(options) {
     const outerR = radius * distanceOuterMultiplier;
     if (outerR <= innerR || outerR <= 0)
       return 0;
-    const p = getDrawPosition(node);
+    const p = projectWorld(node);
     const dx = mouseX - p.x;
     const dy = mouseY - p.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -586,8 +616,10 @@ function createRenderer2D(options) {
         const tgt = nodeById.get(edge.targetId);
         if (!src || !tgt)
           continue;
-        const srcP = getDrawPosition(src);
-        const tgtP = getDrawPosition(tgt);
+        if (!showTags && (src.type === "tag" || tgt.type === "tag"))
+          continue;
+        const srcP = projectWorld(src);
+        const tgtP = projectWorld(tgt);
         const srcF = nodeFocusMap.get(edge.sourceId) ?? 1;
         const tgtF = nodeFocusMap.get(edge.targetId) ?? 1;
         const edgeFocus = (srcF + tgtF) * 0.5;
@@ -652,7 +684,9 @@ function createRenderer2D(options) {
     } catch (e) {
     }
     for (const node of graph.nodes) {
-      const p = getDrawPosition(node);
+      if (!showTags && node.type === "tag")
+        continue;
+      const p = projectWorld(node);
       const baseRadius = getBaseNodeRadius(node);
       const radius = getNodeRadius(node);
       const centerAlpha = getCenterAlpha(node);
@@ -660,7 +694,8 @@ function createRenderer2D(options) {
       const focus = nodeFocusMap.get(node.id) ?? 1;
       const focused = focus > 0.01;
       if (focused) {
-        const accentRgb = colorToRgb(themeNodeColor);
+        const nodeColorOverride = node && node.type === "tag" ? "#8000ff" : themeNodeColor;
+        const accentRgb = colorToRgb(nodeColorOverride);
         const dimCenter = clamp01(getBaseCenterAlpha(node) * dimFactor);
         const fullCenter = centerAlpha;
         const blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
@@ -679,7 +714,8 @@ function createRenderer2D(options) {
         ctx.save();
         ctx.beginPath();
         ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-        const accent = colorToRgb(themeNodeColor);
+        const bodyColorOverride = node && node.type === "tag" ? "#8000ff" : themeNodeColor;
+        const accent = colorToRgb(bodyColorOverride);
         ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${bodyAlpha})`;
         ctx.fill();
         ctx.restore();
@@ -724,6 +760,8 @@ function createRenderer2D(options) {
       return;
     if (typeof opts.mutualDoubleLines === "boolean")
       drawMutualDoubleLines = opts.mutualDoubleLines;
+    if (typeof opts.showTags === "boolean")
+      showTags = opts.showTags;
   }
   function setGlowSettings(glow) {
     if (!glow)
@@ -754,9 +792,34 @@ function createRenderer2D(options) {
   function screenToWorld(screenX, screenY) {
     return { x: (screenX - offsetX) / scale, y: (screenY - offsetY) / scale };
   }
+  function screenToWorldAtDepth(sx, sy, zCam, width, height, cam) {
+    const { yaw, pitch, distance, targetX, targetY, targetZ, zoom } = cam;
+    const px = (sx - offsetX) / scale;
+    const py = (sy - offsetY) / scale;
+    const focal = 800;
+    const perspective = zoom * focal / (zCam || 1e-4);
+    const xCam = px / perspective;
+    const yCam = py / perspective;
+    let cx = xCam;
+    let cy = yCam;
+    let cz = zCam;
+    const cosP = Math.cos(pitch);
+    const sinP = Math.sin(pitch);
+    const wy = cy * cosP + cz * sinP;
+    const wz1 = -cy * sinP + cz * cosP;
+    const cosY = Math.cos(yaw);
+    const sinY = Math.sin(yaw);
+    const wx = cx * cosY + wz1 * sinY;
+    const wz = -cx * sinY + wz1 * cosY;
+    return { x: wx + targetX, y: wy + targetY, z: wz + targetZ };
+  }
   function getNodeScreenPosition(node) {
-    const p = getDrawPosition(node);
+    const p = projectWorld(node);
     return { x: p.x * scale + offsetX, y: p.y * scale + offsetY };
+  }
+  function getProjectedNode(node) {
+    const p = projectWorld(node);
+    return { x: p.x * scale + offsetX, y: p.y * scale + offsetY, depth: p.depth };
   }
   function getScale() {
     return scale;
@@ -764,15 +827,10 @@ function createRenderer2D(options) {
   function zoomAt(screenX, screenY, factor) {
     if (factor <= 0)
       return;
-    const worldBefore = screenToWorld(screenX, screenY);
-    scale *= factor;
-    if (scale < minScale)
-      scale = minScale;
-    if (scale > maxScale)
-      scale = maxScale;
-    const worldAfter = worldBefore;
-    offsetX = screenX - worldAfter.x * scale;
-    offsetY = screenY - worldAfter.y * scale;
+    const cam = getCamera();
+    let newDistance = cam.distance / factor;
+    newDistance = Math.max(200, Math.min(5e3, newDistance));
+    setCamera({ distance: newDistance });
     render();
   }
   function panBy(screenDx, screenDy) {
@@ -793,8 +851,12 @@ function createRenderer2D(options) {
     zoomAt,
     panBy,
     screenToWorld,
+    screenToWorldAtDepth,
     getNodeScreenPosition,
-    getScale
+    getProjectedNode,
+    getScale,
+    setCamera,
+    getCamera
   };
 }
 
@@ -805,11 +867,14 @@ function createSimulation(nodes, edges, options) {
   let springLength = options?.springLength ?? 100;
   let centerPull = options?.centerPull ?? 0;
   let damping = options?.damping ?? 0.9;
+  let notePlaneStiffness = options?.notePlaneStiffness ?? 0;
+  let tagPlaneStiffness = options?.tagPlaneStiffness ?? 0;
   let mouseAttractionRadius = options?.mouseAttractionRadius ?? 80;
   let mouseAttractionStrength = options?.mouseAttractionStrength ?? 0.15;
   let mouseAttractionExponent = options?.mouseAttractionExponent ?? 3.5;
   let centerX = typeof options?.centerX === "number" ? options.centerX : void 0;
   let centerY = typeof options?.centerY === "number" ? options.centerY : void 0;
+  let centerZ = typeof options?.centerZ === "number" ? options.centerZ : 0;
   let centerNodeId = options?.centerNodeId ?? null;
   if (typeof centerX !== "number" || typeof centerY !== "number") {
     if (nodes && nodes.length > 0) {
@@ -861,35 +926,26 @@ function createSimulation(nodes, edges, options) {
         const b = nodes[j];
         let dx = a.x - b.x;
         let dy = a.y - b.y;
-        let distSq = dx * dx + dy * dy + 0.01;
+        let dz = (a.z || 0) - (b.z || 0);
+        let distSq = dx * dx + dy * dy + dz * dz;
+        if (distSq === 0)
+          distSq = 1e-4;
+        const dist = Math.sqrt(distSq);
         const minDist = 40;
-        let dist = Math.sqrt(distSq);
-        if (dist < 0.01)
-          dist = 0.01;
-        const clamped = Math.max(dist, minDist);
-        const force = repulsionStrength / (clamped * clamped);
-        if (dist > 0) {
-          const fx = dx / dist * force;
-          const fy = dy / dist * force;
-          if (!pinnedNodes.has(a.id)) {
-            a.vx = (a.vx || 0) + fx;
-            a.vy = (a.vy || 0) + fy;
-          }
-          if (!pinnedNodes.has(b.id)) {
-            b.vx = (b.vx || 0) - fx;
-            b.vy = (b.vy || 0) - fy;
-          }
-        } else {
-          const fx = (Math.random() - 0.5) * 0.1;
-          const fy = (Math.random() - 0.5) * 0.1;
-          if (!pinnedNodes.has(a.id)) {
-            a.vx = (a.vx || 0) + fx;
-            a.vy = (a.vy || 0) + fy;
-          }
-          if (!pinnedNodes.has(b.id)) {
-            b.vx = (b.vx || 0) - fx;
-            b.vy = (b.vy || 0) - fy;
-          }
+        const effectiveDist = Math.max(dist, minDist);
+        const force = repulsionStrength / (effectiveDist * effectiveDist);
+        const fx = dx / dist * force;
+        const fy = dy / dist * force;
+        const fz = dz / dist * force;
+        if (!pinnedNodes.has(a.id)) {
+          a.vx = (a.vx || 0) + fx;
+          a.vy = (a.vy || 0) + fy;
+          a.vz = (a.vz || 0) + fz;
+        }
+        if (!pinnedNodes.has(b.id)) {
+          b.vx = (b.vx || 0) - fx;
+          b.vy = (b.vy || 0) - fy;
+          b.vz = (b.vz || 0) - fz;
         }
       }
     }
@@ -904,18 +960,22 @@ function createSimulation(nodes, edges, options) {
         continue;
       const dx = b.x - a.x;
       const dy = b.y - a.y;
-      const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
-      const diff = dist - springLength;
-      const f = springStrength * Math.tanh(diff / 50);
+      const dz = (b.z || 0) - (a.z || 0);
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-4;
+      const displacement = dist - springLength;
+      const f = springStrength * Math.tanh(displacement / 50);
       const fx = dx / dist * f;
       const fy = dy / dist * f;
+      const fz = dz / dist * f;
       if (!pinnedNodes.has(a.id)) {
         a.vx = (a.vx || 0) + fx;
         a.vy = (a.vy || 0) + fy;
+        a.vz = (a.vz || 0) + fz;
       }
       if (!pinnedNodes.has(b.id)) {
         b.vx = (b.vx || 0) - fx;
         b.vy = (b.vy || 0) - fy;
+        b.vz = (b.vz || 0) - fz;
       }
     }
   }
@@ -924,21 +984,24 @@ function createSimulation(nodes, edges, options) {
       return;
     const cx = centerX ?? 0;
     const cy = centerY ?? 0;
+    const cz = centerZ ?? 0;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
-      const x = (n.x || 0) - cx;
-      const y = (n.y || 0) - cy;
-      const r = Math.sqrt(x * x + y * y) + 1e-3;
-      const pull = centerPull * (r / 200);
-      n.vx = (n.vx || 0) + -(x / r) * pull;
-      n.vy = (n.vy || 0) + -(y / r) * pull;
+      const dx = cx - (n.x || 0);
+      const dy = cy - (n.y || 0);
+      const dz = cz - (n.z || 0);
+      n.vx = (n.vx || 0) + dx * centerPull;
+      n.vy = (n.vy || 0) + dy * centerPull;
+      n.vz = (n.vz || 0) + dz * centerPull;
     }
     if (centerNode) {
-      const dx = (centerNode.x || 0) - cx;
-      const dy = (centerNode.y || 0) - cy;
-      centerNode.vx = (centerNode.vx || 0) - dx * centerPull * 0.5;
-      centerNode.vy = (centerNode.vy || 0) - dy * centerPull * 0.5;
+      const dx = (centerX ?? 0) - (centerNode.x || 0);
+      const dy = (centerY ?? 0) - (centerNode.y || 0);
+      const dz = (centerZ ?? 0) - (centerNode.z || 0);
+      centerNode.vx = (centerNode.vx || 0) + dx * centerPull * 0.5;
+      centerNode.vy = (centerNode.vy || 0) + dy * centerPull * 0.5;
+      centerNode.vz = (centerNode.vz || 0) + dz * centerPull * 0.5;
     }
   }
   function applyDamping() {
@@ -947,10 +1010,13 @@ function createSimulation(nodes, edges, options) {
         continue;
       n.vx = (n.vx || 0) * damping;
       n.vy = (n.vy || 0) * damping;
+      n.vz = (n.vz || 0) * damping;
       if (Math.abs(n.vx) < 1e-3)
         n.vx = 0;
       if (Math.abs(n.vy) < 1e-3)
         n.vy = 0;
+      if (Math.abs(n.vz) < 1e-3)
+        n.vz = 0;
     }
   }
   function applyMouseAttraction() {
@@ -978,28 +1044,46 @@ function createSimulation(nodes, edges, options) {
     node.vx = (node.vx || 0) + fx;
     node.vy = (node.vy || 0) + fy;
   }
+  function applyPlaneConstraints() {
+    const noteK = notePlaneStiffness ?? 0;
+    const tagK = tagPlaneStiffness ?? 0;
+    if (noteK === 0 && tagK === 0)
+      return;
+    for (const n of nodes) {
+      if (pinnedNodes.has(n.id))
+        continue;
+      if (n.type === "note" && noteK > 0) {
+        const dz = 0 - (n.z || 0);
+        n.vz = (n.vz || 0) + dz * noteK;
+      } else if (n.type === "tag" && tagK > 0) {
+        const dx = 0 - (n.x || 0);
+        n.vx = (n.vx || 0) + dx * tagK;
+      }
+    }
+  }
   function integrate(dt) {
     const scale = dt * 60;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
-      if (n.type === "tag") {
-        n.vx = 0;
-        n.x = 0;
-      } else {
-        n.z = 0;
-        n.vz = 0;
-      }
       n.x += (n.vx || 0) * scale;
       n.y += (n.vy || 0) * scale;
+      n.z = (n.z || 0) + (n.vz || 0) * scale;
+      if (n.type === "note" && Math.abs(n.z) < 1e-4)
+        n.z = 0;
+      if (n.type === "tag" && Math.abs(n.x) < 1e-4)
+        n.x = 0;
     }
   }
   function tick(dt) {
     if (!running)
       return;
+    if (!nodes.length)
+      return;
     applyRepulsion();
     applySprings();
     applyCentering();
+    applyPlaneConstraints();
     applyMouseAttraction();
     applyDamping();
     integrate(dt);
@@ -1033,10 +1117,16 @@ function createSimulation(nodes, edges, options) {
       centerX = opts.centerX;
     if (typeof opts.centerY === "number")
       centerY = opts.centerY;
+    if (typeof opts.centerZ === "number")
+      centerZ = opts.centerZ;
     if (typeof opts.centerNodeId === "string") {
       centerNodeId = opts.centerNodeId;
       centerNode = nodes.find((n) => n.id === centerNodeId) || null;
     }
+    if (typeof opts.notePlaneStiffness === "number")
+      notePlaneStiffness = opts.notePlaneStiffness;
+    if (typeof opts.tagPlaneStiffness === "number")
+      tagPlaneStiffness = opts.tagPlaneStiffness;
     if (typeof opts.mouseAttractionRadius === "number")
       mouseAttractionRadius = opts.mouseAttractionRadius;
     if (typeof opts.mouseAttractionStrength === "number")
@@ -1168,9 +1258,32 @@ var Graph2DController = class {
   lastDragX = 0;
   lastDragY = 0;
   draggingNode = null;
+  dragStartDepth = 0;
+  dragOffsetWorld = { x: 0, y: 0, z: 0 };
   isPanning = false;
   lastPanX = 0;
   lastPanY = 0;
+  // Camera interaction (Phase 4)
+  isOrbiting = false;
+  lastOrbitX = 0;
+  lastOrbitY = 0;
+  isMiddlePanning = false;
+  panStartX = 0;
+  panStartY = 0;
+  panStartTargetX = 0;
+  panStartTargetY = 0;
+  // pending right-click focus state
+  pendingFocusNode = null;
+  pendingFocusDownX = 0;
+  pendingFocusDownY = 0;
+  // camera follow / animation state
+  cameraAnimStart = null;
+  cameraAnimDuration = 300;
+  // ms
+  cameraAnimFrom = null;
+  cameraAnimTo = null;
+  isCameraFollowing = false;
+  cameraFollowNode = null;
   // drag tracking for momentum and click suppression
   hasDragged = false;
   preventClick = false;
@@ -1218,6 +1331,44 @@ var Graph2DController = class {
       console.error("Greater Graph: saveNodePositions error", e);
     }
   }
+  // Recreate the physics simulation, optionally excluding tag nodes.
+  recreateSimulation(showTags, extraOpts) {
+    try {
+      if (this.simulation) {
+        try {
+          this.simulation.stop();
+        } catch (e) {
+        }
+      }
+      if (!this.graph)
+        return;
+      const physOpts = Object.assign({}, this.plugin.settings?.physics || {});
+      const rect = this.containerEl.getBoundingClientRect();
+      const centerX = extraOpts && typeof extraOpts.centerX === "number" ? extraOpts.centerX : rect.width / 2;
+      const centerY = extraOpts && typeof extraOpts.centerY === "number" ? extraOpts.centerY : rect.height / 2;
+      const centerNodeId = extraOpts?.centerNodeId;
+      let simNodes = this.graph.nodes;
+      let simEdges = this.graph.edges || [];
+      if (!showTags) {
+        const tagSet = /* @__PURE__ */ new Set();
+        simNodes = this.graph.nodes.filter((n) => {
+          if (n.type === "tag") {
+            tagSet.add(n.id);
+            return false;
+          }
+          return true;
+        });
+        simEdges = (this.graph.edges || []).filter((e) => !tagSet.has(e.sourceId) && !tagSet.has(e.targetId));
+      }
+      this.simulation = createSimulation(simNodes, simEdges, Object.assign({}, physOpts, { centerX, centerY, centerNodeId }));
+      try {
+        this.simulation.start();
+      } catch (e) {
+      }
+    } catch (e) {
+      console.error("Failed to recreate simulation", e);
+    }
+  }
   constructor(app, containerEl, plugin) {
     this.app = app;
     this.containerEl = containerEl;
@@ -1238,8 +1389,9 @@ var Graph2DController = class {
     this.renderer = createRenderer2D({ canvas, glow: initialGlow });
     try {
       const drawDouble = Boolean(this.plugin.settings?.mutualLinkDoubleLine);
+      const showTags = this.plugin.settings?.showTags !== false;
       if (this.renderer && this.renderer.setRenderOptions)
-        this.renderer.setRenderOptions({ mutualDoubleLines: drawDouble });
+        this.renderer.setRenderOptions({ mutualDoubleLines: drawDouble, showTags });
     } catch (e) {
     }
     this.graph = await buildGraph(this.app, { countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks) });
@@ -1296,18 +1448,14 @@ var Graph2DController = class {
         }
       }
     }
-    this.simulation = createSimulation(
-      this.graph.nodes,
-      this.graph.edges,
-      Object.assign({}, this.plugin.settings?.physics || {}, { centerX, centerY, centerNodeId })
-    );
+    const showTagsInitial = this.plugin.settings?.showTags !== false;
+    this.recreateSimulation(showTagsInitial, { centerX, centerY, centerNodeId });
     try {
       const interaction = this.plugin.settings?.interaction || {};
       this.momentumScale = interaction.momentumScale ?? this.momentumScale;
       this.dragThreshold = interaction.dragThreshold ?? this.dragThreshold;
     } catch (e) {
     }
-    this.simulation.start();
     this.running = true;
     this.lastTime = null;
     this.animationFrame = requestAnimationFrame(this.animationLoop);
@@ -1322,7 +1470,19 @@ var Graph2DController = class {
       const screenY = ev.clientY - r.top;
       if (this.draggingNode) {
         const now = performance.now();
-        const world = this.renderer.screenToWorld(screenX, screenY);
+        let world = null;
+        try {
+          const cam = this.renderer.getCamera();
+          const width = this.canvas ? this.canvas.width : this.containerEl.getBoundingClientRect().width || 300;
+          const height = this.canvas ? this.canvas.height : this.containerEl.getBoundingClientRect().height || 200;
+          if (this.renderer.screenToWorldAtDepth) {
+            world = this.renderer.screenToWorldAtDepth(screenX, screenY, this.dragStartDepth, width, height, cam);
+          } else {
+            world = this.renderer.screenToWorld(screenX, screenY);
+          }
+        } catch (e) {
+          world = this.renderer.screenToWorld(screenX, screenY);
+        }
         if (!this.hasDragged) {
           const dxs = screenX - this.downScreenX;
           const dys = screenY - this.downScreenY;
@@ -1332,14 +1492,16 @@ var Graph2DController = class {
           }
         }
         const dt = Math.max((now - this.lastDragTime) / 1e3, 1e-6);
-        this.dragVx = (world.x - this.lastWorldX) / dt;
-        this.dragVy = (world.y - this.lastWorldY) / dt;
-        this.draggingNode.x = world.x;
-        this.draggingNode.y = world.y;
+        this.dragVx = (world.x + this.dragOffsetWorld.x - this.lastWorldX) / dt;
+        this.dragVy = (world.y + this.dragOffsetWorld.y - this.lastWorldY) / dt;
+        this.draggingNode.x = world.x + this.dragOffsetWorld.x;
+        this.draggingNode.y = world.y + this.dragOffsetWorld.y;
+        this.draggingNode.z = (world.z || 0) + this.dragOffsetWorld.z;
         this.draggingNode.vx = 0;
         this.draggingNode.vy = 0;
-        this.lastWorldX = world.x;
-        this.lastWorldY = world.y;
+        this.draggingNode.vz = 0;
+        this.lastWorldX = this.draggingNode.x;
+        this.lastWorldY = this.draggingNode.y;
         this.lastDragTime = now;
         this.renderer.render();
         try {
@@ -1349,7 +1511,72 @@ var Graph2DController = class {
         }
         return;
       }
+      try {
+        if ((ev.buttons & 2) === 2 && this.pendingFocusNode) {
+          const dx = screenX - this.pendingFocusDownX;
+          const dy = screenY - this.pendingFocusDownY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const dragThreshold = 8;
+          if (dist > dragThreshold) {
+            this.isOrbiting = true;
+            this.lastOrbitX = this.pendingFocusDownX;
+            this.lastOrbitY = this.pendingFocusDownY;
+            this.pendingFocusNode = null;
+            if (this.isCameraFollowing) {
+              this.isCameraFollowing = false;
+              this.cameraFollowNode = null;
+            }
+          }
+        }
+      } catch (e) {
+      }
+      if (this.isOrbiting) {
+        if (this.isCameraFollowing) {
+          this.isCameraFollowing = false;
+          this.cameraFollowNode = null;
+        }
+        const dx = screenX - this.lastOrbitX;
+        const dy = screenY - this.lastOrbitY;
+        this.lastOrbitX = screenX;
+        this.lastOrbitY = screenY;
+        try {
+          const cam = this.renderer.getCamera();
+          const yawSpeed = 5e-3;
+          const pitchSpeed = 5e-3;
+          let newYaw = cam.yaw - dx * yawSpeed;
+          let newPitch = cam.pitch - dy * pitchSpeed;
+          const maxPitch = Math.PI / 2 - 0.1;
+          const minPitch = -maxPitch;
+          newPitch = Math.max(minPitch, Math.min(maxPitch, newPitch));
+          this.renderer.setCamera({ yaw: newYaw, pitch: newPitch });
+          this.renderer.render();
+        } catch (e) {
+        }
+        return;
+      }
+      if (this.isMiddlePanning) {
+        if (this.isCameraFollowing) {
+          this.isCameraFollowing = false;
+          this.cameraFollowNode = null;
+        }
+        const dx = screenX - this.panStartX;
+        const dy = screenY - this.panStartY;
+        try {
+          const cam = this.renderer.getCamera();
+          const panSpeed = cam.distance * 1e-3 / Math.max(1e-4, cam.zoom);
+          const newTargetX = this.panStartTargetX - dx * panSpeed;
+          const newTargetY = this.panStartTargetY + dy * panSpeed;
+          this.renderer.setCamera({ targetX: newTargetX, targetY: newTargetY });
+          this.renderer.render();
+        } catch (e) {
+        }
+        return;
+      }
       if (this.isPanning) {
+        if (this.isCameraFollowing) {
+          this.isCameraFollowing = false;
+          this.cameraFollowNode = null;
+        }
         const dx = screenX - this.lastPanX;
         const dy = screenY - this.lastPanY;
         this.renderer.panBy(dx, dy);
@@ -1381,19 +1608,56 @@ var Graph2DController = class {
       if (!this.canvas || !this.renderer)
         return;
       ev.preventDefault();
-      const r = this.canvas.getBoundingClientRect();
-      const x = ev.clientX - r.left;
-      const y = ev.clientY - r.top;
-      const factor = ev.deltaY < 0 ? 1.1 : 0.9;
-      this.renderer.zoomAt(x, y, factor);
-      this.renderer.render();
+      try {
+        this.isCameraFollowing = false;
+        this.cameraFollowNode = null;
+        const cam = this.renderer.getCamera();
+        const zoomSpeed = 15e-4;
+        const factor = Math.exp(ev.deltaY * zoomSpeed);
+        let distance = (cam.distance || 1e3) * factor;
+        distance = Math.max(200, Math.min(8e3, distance));
+        this.renderer.setCamera({ distance });
+        this.renderer.render();
+      } catch (e) {
+      }
     };
     this.mouseDownHandler = (ev) => {
-      if (!this.canvas || ev.button !== 0 || !this.renderer)
+      if (!this.canvas || !this.renderer)
         return;
       const r = this.canvas.getBoundingClientRect();
       const screenX = ev.clientX - r.left;
       const screenY = ev.clientY - r.top;
+      if (ev.button === 2) {
+        const hitNode = this.hitTestNodeScreen(screenX, screenY);
+        if (hitNode) {
+          this.pendingFocusNode = hitNode;
+          this.pendingFocusDownX = screenX;
+          this.pendingFocusDownY = screenY;
+          ev.preventDefault();
+          return;
+        } else {
+          this.pendingFocusNode = "__origin__";
+          this.pendingFocusDownX = screenX;
+          this.pendingFocusDownY = screenY;
+          ev.preventDefault();
+          return;
+        }
+      }
+      if (ev.button === 1) {
+        try {
+          const cam = this.renderer.getCamera();
+          this.isMiddlePanning = true;
+          this.panStartX = screenX;
+          this.panStartY = screenY;
+          this.panStartTargetX = cam.targetX;
+          this.panStartTargetY = cam.targetY;
+          ev.preventDefault();
+          return;
+        } catch (e) {
+        }
+      }
+      if (ev.button !== 0)
+        return;
       const world = this.renderer.screenToWorld(screenX, screenY);
       this.hasDragged = false;
       this.preventClick = false;
@@ -1412,9 +1676,27 @@ var Graph2DController = class {
         } else {
           this.draggingNode = hit;
           try {
-            if (this.simulation && this.simulation.setPinnedNodes)
-              this.simulation.setPinnedNodes(/* @__PURE__ */ new Set([hit.id]));
+            const cam = this.renderer.getCamera();
+            const proj = this.renderer.getProjectedNode ? this.renderer.getProjectedNode(hit) : null;
+            const depth = proj ? proj.depth : 1e3;
+            this.dragStartDepth = depth;
+            const width = this.canvas ? this.canvas.width : this.containerEl.getBoundingClientRect().width || 300;
+            const height = this.canvas ? this.canvas.height : this.containerEl.getBoundingClientRect().height || 200;
+            const screenXClient = proj ? proj.x : screenX;
+            const screenYClient = proj ? proj.y : screenY;
+            const worldAtCursor = this.renderer.screenToWorldAtDepth ? this.renderer.screenToWorldAtDepth(screenXClient, screenYClient, depth, width, height, cam) : this.renderer.screenToWorld(screenXClient, screenYClient);
+            this.dragOffsetWorld = {
+              x: (hit.x || 0) - (worldAtCursor.x || 0),
+              y: (hit.y || 0) - (worldAtCursor.y || 0),
+              z: (hit.z || 0) - (worldAtCursor.z || 0)
+            };
+            try {
+              if (this.simulation && this.simulation.setPinnedNodes)
+                this.simulation.setPinnedNodes(/* @__PURE__ */ new Set([hit.id]));
+            } catch (e) {
+            }
           } catch (e) {
+            this.dragOffsetWorld = { x: 0, y: 0, z: 0 };
           }
           this.canvas.style.cursor = "grabbing";
         }
@@ -1428,6 +1710,30 @@ var Graph2DController = class {
     this.mouseUpHandler = (ev) => {
       if (!this.canvas)
         return;
+      if (ev.button === 2) {
+        if (this.pendingFocusNode) {
+          const dx = ev.clientX - (this.canvas.getBoundingClientRect().left + this.pendingFocusDownX);
+          const dy = ev.clientY - (this.canvas.getBoundingClientRect().top + this.pendingFocusDownY);
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const clickThreshold = 8;
+          if (dist <= clickThreshold) {
+            try {
+              if (this.pendingFocusNode === "__origin__") {
+                this.focusCameraOnNode({ x: 0, y: 0, z: 0 });
+                this.isCameraFollowing = false;
+                this.cameraFollowNode = null;
+              } else {
+                this.focusCameraOnNode(this.pendingFocusNode);
+              }
+            } catch (e) {
+            }
+          }
+          this.pendingFocusNode = null;
+        }
+        this.isOrbiting = false;
+      }
+      if (ev.button === 1)
+        this.isMiddlePanning = false;
       if (ev.button !== 0)
         return;
       if (this.draggingNode) {
@@ -1459,6 +1765,10 @@ var Graph2DController = class {
     this.canvas.addEventListener("wheel", this.wheelHandler, { passive: false });
     this.canvas.addEventListener("mousedown", this.mouseDownHandler);
     window.addEventListener("mouseup", this.mouseUpHandler);
+    this.canvas.addEventListener("contextmenu", (e) => {
+      if (this.isOrbiting || this.pendingFocusNode)
+        e.preventDefault();
+    });
     if (this.plugin.registerSettingsListener) {
       this.settingsUnregister = this.plugin.registerSettingsListener(() => {
         if (this.plugin.settings) {
@@ -1471,8 +1781,9 @@ var Graph2DController = class {
             this.renderer.setGlowSettings(glowWithRadius);
             try {
               const drawDouble = Boolean(this.plugin.settings?.mutualLinkDoubleLine);
+              const showTags = this.plugin.settings?.showTags !== false;
               if (this.renderer && this.renderer.setRenderOptions)
-                this.renderer.setRenderOptions({ mutualDoubleLines: drawDouble });
+                this.renderer.setRenderOptions({ mutualDoubleLines: drawDouble, showTags });
             } catch (e) {
             }
             this.renderer.render();
@@ -1822,6 +2133,43 @@ var Graph2DController = class {
         } catch (e) {
         }
       }));
+      const showTagsChk = document.createElement("input");
+      showTagsChk.type = "checkbox";
+      showTagsChk.checked = this.plugin.settings?.showTags !== false;
+      showTagsChk.addEventListener("change", async (e) => {
+        try {
+          this.plugin.settings.showTags = e.target.checked;
+          await this.plugin.saveSettings();
+          const drawDouble = Boolean(this.plugin.settings?.mutualLinkDoubleLine);
+          const showTags = this.plugin.settings?.showTags !== false;
+          if (this.renderer && this.renderer.setRenderOptions)
+            this.renderer.setRenderOptions({ mutualDoubleLines: drawDouble, showTags });
+          if (this.renderer && this.renderer.render)
+            this.renderer.render();
+          try {
+            this.recreateSimulation(showTags);
+          } catch (e2) {
+          }
+        } catch (e2) {
+        }
+      });
+      panel.appendChild(makeRow("Show tag nodes", showTagsChk, async () => {
+        try {
+          this.plugin.settings.showTags = true;
+          await this.plugin.saveSettings();
+          const drawDouble = Boolean(this.plugin.settings?.mutualLinkDoubleLine);
+          const showTags = this.plugin.settings?.showTags !== false;
+          if (this.renderer && this.renderer.setRenderOptions)
+            this.renderer.setRenderOptions({ mutualDoubleLines: drawDouble, showTags });
+          if (this.renderer && this.renderer.render)
+            this.renderer.render();
+          try {
+            this.recreateSimulation(showTags);
+          } catch (e) {
+          }
+        } catch (e) {
+        }
+      }));
       const phys = this.plugin.settings?.physics || {};
       const physFields = [
         { key: "repulsionStrength", label: "Repulsion", step: "1" },
@@ -2004,6 +2352,10 @@ var Graph2DController = class {
     this.lastTime = timestamp;
     if (this.simulation)
       this.simulation.tick(dt);
+    try {
+      this.updateCameraAnimation(timestamp);
+    } catch (e) {
+    }
     if (this.renderer)
       this.renderer.render();
     try {
@@ -2021,6 +2373,86 @@ var Graph2DController = class {
     const centerY = height / 2;
     if (this.simulation && this.simulation.setOptions) {
       this.simulation.setOptions({ centerX, centerY });
+    }
+  }
+  focusCameraOnNode(node) {
+    if (!this.renderer || !node)
+      return;
+    try {
+      const cam = this.renderer.getCamera();
+      const from = {
+        targetX: cam.targetX ?? 0,
+        targetY: cam.targetY ?? 0,
+        targetZ: cam.targetZ ?? 0,
+        distance: cam.distance ?? 1e3,
+        yaw: cam.yaw ?? 0,
+        pitch: cam.pitch ?? 0
+      };
+      const toDistance = Math.max(200, Math.min(3e3, (from.distance || 1e3) * 0.6));
+      const to = {
+        targetX: node.x ?? 0,
+        targetY: node.y ?? 0,
+        targetZ: node.z ?? 0,
+        distance: toDistance,
+        yaw: from.yaw,
+        pitch: from.pitch
+      };
+      this.cameraAnimStart = performance.now();
+      this.cameraAnimDuration = 300;
+      this.cameraAnimFrom = from;
+      this.cameraAnimTo = to;
+      this.isCameraFollowing = true;
+      this.cameraFollowNode = node;
+    } catch (e) {
+    }
+  }
+  updateCameraAnimation(now) {
+    if (!this.renderer)
+      return;
+    if (this.cameraAnimStart == null) {
+      if (this.isCameraFollowing && this.cameraFollowNode) {
+        const n = this.cameraFollowNode;
+        try {
+          const cam = this.renderer.getCamera();
+          const followAlpha = 0.12;
+          const curX = cam.targetX ?? 0;
+          const curY = cam.targetY ?? 0;
+          const curZ = cam.targetZ ?? 0;
+          const newX = curX + ((n.x ?? 0) - curX) * followAlpha;
+          const newY = curY + ((n.y ?? 0) - curY) * followAlpha;
+          const newZ = curZ + ((n.z ?? 0) - curZ) * followAlpha;
+          this.renderer.setCamera({ targetX: newX, targetY: newY, targetZ: newZ });
+        } catch (e) {
+        }
+      }
+      return;
+    }
+    const t = Math.min(1, (now - this.cameraAnimStart) / this.cameraAnimDuration);
+    const ease = 1 - (1 - t) * (1 - t);
+    const from = this.cameraAnimFrom || {};
+    const to = this.cameraAnimTo || {};
+    const lerp = (a, b) => a + (b - a) * ease;
+    const cameraState = {};
+    if (typeof from.targetX === "number" && typeof to.targetX === "number")
+      cameraState.targetX = lerp(from.targetX, to.targetX);
+    if (typeof from.targetY === "number" && typeof to.targetY === "number")
+      cameraState.targetY = lerp(from.targetY, to.targetY);
+    if (typeof from.targetZ === "number" && typeof to.targetZ === "number")
+      cameraState.targetZ = lerp(from.targetZ, to.targetZ);
+    if (typeof from.distance === "number" && typeof to.distance === "number")
+      cameraState.distance = lerp(from.distance, to.distance);
+    if (typeof from.yaw === "number" && typeof to.yaw === "number")
+      cameraState.yaw = lerp(from.yaw, to.yaw);
+    if (typeof from.pitch === "number" && typeof to.pitch === "number")
+      cameraState.pitch = lerp(from.pitch, to.pitch);
+    try {
+      this.renderer.setCamera(cameraState);
+    } catch (e) {
+    }
+    if (t >= 1) {
+      this.cameraAnimStart = null;
+      this.cameraAnimFrom = null;
+      this.cameraAnimTo = null;
     }
   }
   // Rebuilds the graph and restarts the simulation. Safe to call repeatedly.
@@ -2374,6 +2806,11 @@ var DEFAULT_SETTINGS = {
     springLength: 130,
     centerPull: 4e-4,
     damping: 0.92,
+    notePlaneStiffness: 0,
+    tagPlaneStiffness: 0,
+    centerX: 0,
+    centerY: 0,
+    centerZ: 0,
     mouseAttractionRadius: 80,
     mouseAttractionStrength: 0.15,
     mouseAttractionExponent: 3.5
@@ -2383,7 +2820,8 @@ var DEFAULT_SETTINGS = {
     dragThreshold: 4
   },
   nodePositions: {},
-  mutualLinkDoubleLine: true
+  mutualLinkDoubleLine: true,
+  showTags: true
 };
 var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
   settings = DEFAULT_SETTINGS;
@@ -2932,6 +3370,10 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       this.plugin.settings.mutualLinkDoubleLine = Boolean(v);
       await this.plugin.saveSettings();
     }));
+    new import_obsidian2.Setting(containerEl).setName("Show tag nodes").setDesc("Toggle visibility of tag nodes and their edges in the graph.").addToggle((t) => t.setValue(this.plugin.settings.showTags !== false).onChange(async (v) => {
+      this.plugin.settings.showTags = Boolean(v);
+      await this.plugin.saveSettings();
+    }));
     addSliderSetting(containerEl, {
       name: "Mouse attraction radius (px)",
       desc: "Maximum distance (in pixels) from cursor where the attraction applies.",
@@ -3030,6 +3472,46 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         } else if (Number.isNaN(v)) {
           this.plugin.settings.interaction = this.plugin.settings.interaction || {};
           this.plugin.settings.interaction.dragThreshold = DEFAULT_SETTINGS.interaction.dragThreshold;
+          await this.plugin.saveSettings();
+        }
+      }
+    });
+    addSliderSetting(containerEl, {
+      name: "Note plane stiffness (z)",
+      desc: "Pull strength keeping notes near z = 0 (soft constraint).",
+      value: phys.notePlaneStiffness ?? DEFAULT_SETTINGS.physics.notePlaneStiffness,
+      min: 0,
+      max: 0.2,
+      step: 1e-3,
+      resetValue: DEFAULT_SETTINGS.physics.notePlaneStiffness,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.notePlaneStiffness = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.notePlaneStiffness = DEFAULT_SETTINGS.physics.notePlaneStiffness;
+          await this.plugin.saveSettings();
+        }
+      }
+    });
+    addSliderSetting(containerEl, {
+      name: "Tag plane stiffness (x)",
+      desc: "Pull strength keeping tags near x = 0 (soft constraint).",
+      value: phys.tagPlaneStiffness ?? DEFAULT_SETTINGS.physics.tagPlaneStiffness,
+      min: 0,
+      max: 0.2,
+      step: 1e-3,
+      resetValue: DEFAULT_SETTINGS.physics.tagPlaneStiffness,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.tagPlaneStiffness = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.tagPlaneStiffness = DEFAULT_SETTINGS.physics.tagPlaneStiffness;
           await this.plugin.saveSettings();
         }
       }
