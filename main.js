@@ -153,6 +153,49 @@ function createRenderer2D(options) {
   let hoverHighlightSet = /* @__PURE__ */ new Set();
   let mouseX = 0;
   let mouseY = 0;
+  let themeNodeColor = "#66ccff";
+  let themeLabelColor = "#222";
+  let themeEdgeColor = "#888888";
+  function parseHexColor(hex) {
+    if (!hex)
+      return null;
+    hex = hex.trim();
+    if (hex.startsWith("#"))
+      hex = hex.slice(1);
+    if (hex.length === 3) {
+      const r = parseInt(hex[0] + hex[0], 16);
+      const g = parseInt(hex[1] + hex[1], 16);
+      const b = parseInt(hex[2] + hex[2], 16);
+      return { r, g, b };
+    }
+    if (hex.length === 6) {
+      const r = parseInt(hex.slice(0, 2), 16);
+      const g = parseInt(hex.slice(2, 4), 16);
+      const b = parseInt(hex.slice(4, 6), 16);
+      return { r, g, b };
+    }
+    return null;
+  }
+  function parseRgbString(s) {
+    const m = s.match(/rgba?\(([^)]+)\)/);
+    if (!m)
+      return null;
+    const parts = m[1].split(",").map((p) => Number(p.trim()));
+    if (parts.length < 3)
+      return null;
+    return { r: parts[0], g: parts[1], b: parts[2] };
+  }
+  function colorToRgb(color) {
+    if (!color)
+      return { r: 102, g: 204, b: 255 };
+    const fromHex = parseHexColor(color);
+    if (fromHex)
+      return fromHex;
+    const fromRgb = parseRgbString(color);
+    if (fromRgb)
+      return fromRgb;
+    return { r: 102, g: 204, b: 255 };
+  }
   let scale = 1;
   let offsetX = 0;
   let offsetY = 0;
@@ -266,8 +309,45 @@ function createRenderer2D(options) {
     if (!graph)
       return;
     ctx.save();
+    if (glowOptions?.nodeColor)
+      themeNodeColor = glowOptions.nodeColor;
+    if (glowOptions?.labelColor)
+      themeLabelColor = glowOptions.labelColor;
+    if (glowOptions?.edgeColor)
+      themeEdgeColor = glowOptions.edgeColor;
+    try {
+      const cs = window.getComputedStyle(canvas);
+      const nodeVar = cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
+      const labelVar = cs.getPropertyValue("--text-normal") || cs.getPropertyValue("--text");
+      const edgeVar = cs.getPropertyValue("--text-muted") || cs.getPropertyValue("--text-faint") || cs.getPropertyValue("--text-normal");
+      if (!glowOptions?.nodeColor && nodeVar && nodeVar.trim())
+        themeNodeColor = nodeVar.trim();
+      if (!glowOptions?.labelColor && labelVar && labelVar.trim())
+        themeLabelColor = labelVar.trim();
+      if (!glowOptions?.edgeColor && edgeVar && edgeVar.trim())
+        themeEdgeColor = edgeVar.trim();
+    } catch (e) {
+    }
+    ctx.save();
     ctx.translate(offsetX, offsetY);
     ctx.scale(scale, scale);
+    if (graph.edges && graph.edges.length > 0) {
+      ctx.save();
+      ctx.beginPath();
+      for (const edge of graph.edges) {
+        const src = nodeById.get(edge.sourceId);
+        const tgt = nodeById.get(edge.targetId);
+        if (!src || !tgt)
+          continue;
+        ctx.moveTo(src.x, src.y);
+        ctx.lineTo(tgt.x, tgt.y);
+      }
+      const edgeRgb = colorToRgb(themeEdgeColor);
+      ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},0.65)`;
+      ctx.lineWidth = Math.max(1, 1 / Math.max(1e-4, scale));
+      ctx.stroke();
+      ctx.restore();
+    }
     ctx.font = "10px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
@@ -276,10 +356,11 @@ function createRenderer2D(options) {
       const centerAlpha = getCenterAlpha(node);
       const glowRadius = radius * glowMultiplier;
       const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
-      gradient.addColorStop(0, `rgba(102,204,255,${centerAlpha})`);
-      gradient.addColorStop(0.4, `rgba(102,204,255,${centerAlpha * 0.5})`);
-      gradient.addColorStop(0.8, `rgba(102,204,255,${centerAlpha * 0.15})`);
-      gradient.addColorStop(1, `rgba(102,204,255,0)`);
+      const accentRgb = colorToRgb(themeNodeColor);
+      gradient.addColorStop(0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${centerAlpha})`);
+      gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${centerAlpha * 0.5})`);
+      gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${centerAlpha * 0.15})`);
+      gradient.addColorStop(1, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0)`);
       ctx.save();
       ctx.beginPath();
       ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
@@ -289,11 +370,11 @@ function createRenderer2D(options) {
       ctx.save();
       ctx.beginPath();
       ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-      ctx.fillStyle = "#66ccff";
+      ctx.fillStyle = themeNodeColor;
       ctx.fill();
       ctx.restore();
       ctx.save();
-      ctx.fillStyle = "#222";
+      ctx.fillStyle = themeLabelColor;
       ctx.fillText(node.label, node.x, node.y + radius + 4);
       ctx.restore();
     }
@@ -374,7 +455,6 @@ function createSimulation(nodes, edges, options) {
   let springLength = options?.springLength ?? 100;
   let centerPull = options?.centerPull ?? 0;
   let damping = options?.damping ?? 0.9;
-  let linkForceMultiplier = options?.linkForceMultiplier ?? 1;
   let centerX = typeof options?.centerX === "number" ? options.centerX : void 0;
   let centerY = typeof options?.centerY === "number" ? options.centerY : void 0;
   let centerNodeId = options?.centerNodeId ?? null;
@@ -461,9 +541,7 @@ function createSimulation(nodes, edges, options) {
       const dy = b.y - a.y;
       const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
       const diff = dist - springLength;
-      const weight = e.linkStrength ?? 1;
-      const springK = springStrength * weight * (linkForceMultiplier ?? 1);
-      const f = springK * Math.tanh(diff / 50);
+      const f = springStrength * Math.tanh(diff / 50);
       const fx = dx / dist * f;
       const fy = dy / dist * f;
       a.vx = (a.vx || 0) + fx;
@@ -543,8 +621,6 @@ function createSimulation(nodes, edges, options) {
       centerPull = opts.centerPull;
     if (typeof opts.damping === "number")
       damping = opts.damping;
-    if (typeof opts.linkForceMultiplier === "number")
-      linkForceMultiplier = opts.linkForceMultiplier;
     if (typeof opts.centerX === "number")
       centerX = opts.centerX;
     if (typeof opts.centerY === "number")
@@ -947,7 +1023,11 @@ var DEFAULT_SETTINGS = {
     hoverHighlightDepth: 1,
     distanceInnerRadiusMultiplier: 1,
     distanceOuterRadiusMultiplier: 2.5,
-    distanceCurveSteepness: 2
+    distanceCurveSteepness: 2,
+    // color overrides left undefined by default to follow theme
+    nodeColor: void 0,
+    labelColor: void 0,
+    edgeColor: void 0
   },
   physics: {
     // calmer, Obsidian-like defaults
@@ -1131,6 +1211,28 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
           glow.distanceCurveSteepness = num;
           await this.plugin.saveSettings();
         }
+      })
+    );
+    containerEl.createEl("h2", { text: "Colors" });
+    new import_obsidian2.Setting(containerEl).setName("Node color (override)").setDesc("Optional CSS color string to override the theme accent for node fill. Leave empty to use the active theme.").addText(
+      (text) => text.setValue(String(glow.nodeColor ?? "")).onChange(async (value) => {
+        const v = value.trim();
+        glow.nodeColor = v === "" ? void 0 : v;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Edge color (override)").setDesc("Optional CSS color string to override edge stroke color. Leave empty to use a theme-appropriate color.").addText(
+      (text) => text.setValue(String(glow.edgeColor ?? "")).onChange(async (value) => {
+        const v = value.trim();
+        glow.edgeColor = v === "" ? void 0 : v;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Label color (override)").setDesc("Optional CSS color string to override label text color. Leave empty to use the active theme text color.").addText(
+      (text) => text.setValue(String(glow.labelColor ?? "")).onChange(async (value) => {
+        const v = value.trim();
+        glow.labelColor = v === "" ? void 0 : v;
+        await this.plugin.saveSettings();
       })
     );
     const phys = this.plugin.settings.physics || {};

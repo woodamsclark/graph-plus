@@ -13,6 +13,9 @@ export interface GlowSettings {
   distanceInnerRadiusMultiplier?: number;
   distanceOuterRadiusMultiplier?: number;
   distanceCurveSteepness?: number;
+  nodeColor?: string;
+  labelColor?: string;
+  edgeColor?: string;
 }
 
 export interface Renderer2DOptions {
@@ -61,6 +64,47 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let mouseX = 0;
   let mouseY = 0;
 
+  // theme-derived colors (updated each render)
+  let themeNodeColor = '#66ccff';
+  let themeLabelColor = '#222';
+  let themeEdgeColor = '#888888';
+
+  function parseHexColor(hex: string) {
+    if (!hex) return null;
+    hex = hex.trim();
+    if (hex.startsWith('#')) hex = hex.slice(1);
+    if (hex.length === 3) {
+      const r = parseInt(hex[0] + hex[0], 16);
+      const g = parseInt(hex[1] + hex[1], 16);
+      const b = parseInt(hex[2] + hex[2], 16);
+      return { r, g, b };
+    }
+    if (hex.length === 6) {
+      const r = parseInt(hex.slice(0, 2), 16);
+      const g = parseInt(hex.slice(2, 4), 16);
+      const b = parseInt(hex.slice(4, 6), 16);
+      return { r, g, b };
+    }
+    return null;
+  }
+
+  function parseRgbString(s: string) {
+    const m = s.match(/rgba?\(([^)]+)\)/);
+    if (!m) return null;
+    const parts = m[1].split(',').map((p) => Number(p.trim()));
+    if (parts.length < 3) return null;
+    return { r: parts[0], g: parts[1], b: parts[2] };
+  }
+
+  function colorToRgb(color: string) {
+    if (!color) return { r: 102, g: 204, b: 255 };
+    const fromHex = parseHexColor(color);
+    if (fromHex) return fromHex;
+    const fromRgb = parseRgbString(color);
+    if (fromRgb) return fromRgb;
+    // fallback to default
+    return { r: 102, g: 204, b: 255 };
+  }
   // camera state
   let scale = 1;
   let offsetX = 0;
@@ -192,11 +236,28 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     if (!graph) return;
 
     ctx.save();
+      // Allow settings overrides first, then fall back to theme CSS vars
+      if (glowOptions?.nodeColor) themeNodeColor = glowOptions.nodeColor;
+      if (glowOptions?.labelColor) themeLabelColor = glowOptions.labelColor;
+      if (glowOptions?.edgeColor) themeEdgeColor = glowOptions.edgeColor;
+      try {
+        const cs = window.getComputedStyle(canvas);
+        const nodeVar = cs.getPropertyValue('--interactive-accent') || cs.getPropertyValue('--accent-1') || cs.getPropertyValue('--accent');
+        const labelVar = cs.getPropertyValue('--text-normal') || cs.getPropertyValue('--text');
+        const edgeVar = cs.getPropertyValue('--text-muted') || cs.getPropertyValue('--text-faint') || cs.getPropertyValue('--text-normal');
+        if (!glowOptions?.nodeColor && nodeVar && nodeVar.trim()) themeNodeColor = nodeVar.trim();
+        if (!glowOptions?.labelColor && labelVar && labelVar.trim()) themeLabelColor = labelVar.trim();
+        if (!glowOptions?.edgeColor && edgeVar && edgeVar.trim()) themeEdgeColor = edgeVar.trim();
+      } catch (e) {
+        // ignore (e.g., server-side build environment)
+      }
+
+      ctx.save();
     ctx.translate(offsetX, offsetY);
     ctx.scale(scale, scale);
 
     // Draw edges first so nodes appear on top
-/*    if ((graph as any).edges && (graph as any).edges.length > 0) {
+    if ((graph as any).edges && (graph as any).edges.length > 0) {
       ctx.save();
       ctx.beginPath();
       for (const edge of (graph as any).edges) {
@@ -206,11 +267,13 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         ctx.moveTo(src.x, src.y);
         ctx.lineTo(tgt.x, tgt.y);
       }
-      //ctx.strokeStyle = '#888888';
-      //ctx.lineWidth = 1;
-      //ctx.stroke();
+      const edgeRgb = colorToRgb(themeEdgeColor);
+      ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},0.65)`;
+      // keep stroke visually ~1px regardless of zoom
+      ctx.lineWidth = Math.max(1, 1 / Math.max(0.0001, scale));
+      ctx.stroke();
       ctx.restore();
-    }*/
+    }
 
     // Draw node glows (radial gradient), node bodies, and labels
     ctx.font = '10px sans-serif';
@@ -224,10 +287,11 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
       // radial gradient glow
       const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
-      gradient.addColorStop(0.0, `rgba(102,204,255,${centerAlpha})`);
-      gradient.addColorStop(0.4, `rgba(102,204,255,${centerAlpha * 0.5})`);
-      gradient.addColorStop(0.8, `rgba(102,204,255,${centerAlpha * 0.15})`);
-      gradient.addColorStop(1.0, `rgba(102,204,255,0)`);
+      const accentRgb = colorToRgb(themeNodeColor);
+      gradient.addColorStop(0.0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${centerAlpha})`);
+      gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${centerAlpha * 0.5})`);
+      gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${centerAlpha * 0.15})`);
+      gradient.addColorStop(1.0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0)`);
 
       ctx.save();
       ctx.beginPath();
@@ -240,16 +304,13 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
       ctx.save();
       ctx.beginPath();
       ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-      ctx.fillStyle = '#66ccff';
+      ctx.fillStyle = themeNodeColor;
       ctx.fill();
-      //ctx.strokeStyle = '#0d3b4e';
-      //ctx.lineWidth = 1;
-      //ctx.stroke();
       ctx.restore();
 
       // label below node
       ctx.save();
-      ctx.fillStyle = '#222';
+      ctx.fillStyle = themeLabelColor;
       ctx.fillText(node.label, node.x, node.y + radius + 4);
       ctx.restore();
     }

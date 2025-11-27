@@ -11,6 +11,11 @@
   display: block;
 }
 
+/* Match Obsidian pane background so canvas doesn't look out of place */
+.greater-graph-view canvas {
+  background-color: var(--background-primary);
+}
+
 .greater-graph-overlay {
   position: absolute;
   top: 8px;

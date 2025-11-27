@@ -14,6 +14,10 @@ export interface GlowSettings {
   distanceInnerRadiusMultiplier?: number;
   distanceOuterRadiusMultiplier?: number;
   distanceCurveSteepness?: number;
+  // optional color overrides (CSS color strings). If unset, theme vars are used.
+  nodeColor?: string;
+  labelColor?: string;
+  edgeColor?: string;
 }
 
 export interface GreaterGraphSettings {
@@ -41,6 +45,10 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
       distanceInnerRadiusMultiplier: 1.0,
       distanceOuterRadiusMultiplier: 2.5,
       distanceCurveSteepness: 2.0,
+      // color overrides left undefined by default to follow theme
+      nodeColor: undefined,
+      labelColor: undefined,
+      edgeColor: undefined,
   },
   physics: {
     // calmer, Obsidian-like defaults
@@ -292,6 +300,42 @@ class GreaterGraphSettingTab extends PluginSettingTab {
             glow.distanceCurveSteepness = num;
             await this.plugin.saveSettings();
           }
+        })
+      );
+
+    // Color overrides (optional)
+    containerEl.createEl('h2', { text: 'Colors' });
+
+    new Setting(containerEl)
+      .setName('Node color (override)')
+      .setDesc('Optional CSS color string to override the theme accent for node fill. Leave empty to use the active theme.')
+      .addText((text) =>
+        text.setValue(String(glow.nodeColor ?? '')).onChange(async (value) => {
+          const v = value.trim();
+          glow.nodeColor = v === '' ? undefined : v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Edge color (override)')
+      .setDesc('Optional CSS color string to override edge stroke color. Leave empty to use a theme-appropriate color.')
+      .addText((text) =>
+        text.setValue(String(glow.edgeColor ?? '')).onChange(async (value) => {
+          const v = value.trim();
+          glow.edgeColor = v === '' ? undefined : v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Label color (override)')
+      .setDesc('Optional CSS color string to override label text color. Leave empty to use the active theme text color.')
+      .addText((text) =>
+        text.setValue(String(glow.labelColor ?? '')).onChange(async (value) => {
+          const v = value.trim();
+          glow.labelColor = v === '' ? undefined : v;
+          await this.plugin.saveSettings();
         })
       );
 
