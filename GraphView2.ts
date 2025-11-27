@@ -597,6 +597,80 @@ class Graph2DController {
         } catch (e) {}
       }));
 
+      // Background color (in-view)
+      const bgColor = document.createElement('input');
+      bgColor.type = 'color';
+      // allow background color to be stored at plugin.settings.glow.backgroundColor
+      bgColor.value = (this.plugin as any).settings?.glow?.backgroundColor || (getComputedStyle(this.containerEl).getPropertyValue('--background-primary') || '#ffffff').trim();
+      bgColor.addEventListener('input', async (e) => {
+        try {
+          (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+          (this.plugin as any).settings.glow.backgroundColor = (e.target as HTMLInputElement).value;
+          await (this.plugin as any).saveSettings();
+          try { this.containerEl.style.background = (this.plugin as any).settings.glow.backgroundColor || ''; } catch (e) {}
+          try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+        } catch (e) {}
+      });
+      panel.appendChild(makeRow('Background color', bgColor, async () => {
+        try {
+          (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+          delete (this.plugin as any).settings.glow.backgroundColor;
+          await (this.plugin as any).saveSettings();
+          try { this.containerEl.style.background = ''; } catch (e) {}
+          try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+        } catch (e) {}
+      }));
+
+      // Node size range controls (min/max radius)
+      const minSizeWrap = document.createElement('div');
+      minSizeWrap.style.display = 'flex'; minSizeWrap.style.alignItems = 'center'; minSizeWrap.style.gap = '6px';
+      const minRange = document.createElement('input');
+      minRange.type = 'range'; minRange.min = '1'; minRange.max = '60'; minRange.step = '1';
+      const curMin = (this.plugin as any).settings?.glow?.minNodeRadius ?? 4;
+      minRange.value = String(curMin);
+      const minLabel = document.createElement('div'); minLabel.textContent = String(minRange.value); minLabel.style.minWidth = '36px'; minLabel.style.textAlign='right';
+      minRange.addEventListener('input', (e) => { minLabel.textContent = (e.target as HTMLInputElement).value; });
+      minRange.addEventListener('change', async (e) => {
+        try {
+          (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+          const v = Number((e.target as HTMLInputElement).value);
+          (this.plugin as any).settings.glow.minNodeRadius = v;
+          await (this.plugin as any).saveSettings();
+          try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
+          try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+        } catch (e) {}
+      });
+      minSizeWrap.appendChild(minRange); minSizeWrap.appendChild(minLabel);
+
+      const maxSizeWrap = document.createElement('div');
+      maxSizeWrap.style.display = 'flex'; maxSizeWrap.style.alignItems = 'center'; maxSizeWrap.style.gap = '6px';
+      const maxRange = document.createElement('input');
+      maxRange.type = 'range'; maxRange.min = '4'; maxRange.max = '120'; maxRange.step = '1';
+      const curMax = (this.plugin as any).settings?.glow?.maxNodeRadius ?? 14;
+      maxRange.value = String(curMax);
+      const maxLabel = document.createElement('div'); maxLabel.textContent = String(maxRange.value); maxLabel.style.minWidth = '36px'; maxLabel.style.textAlign='right';
+      maxRange.addEventListener('input', (e) => { maxLabel.textContent = (e.target as HTMLInputElement).value; });
+      maxRange.addEventListener('change', async (e) => {
+        try {
+          (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+          const v = Number((e.target as HTMLInputElement).value);
+          (this.plugin as any).settings.glow.maxNodeRadius = v;
+          await (this.plugin as any).saveSettings();
+          try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
+          try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+        } catch (e) {}
+      });
+      maxSizeWrap.appendChild(maxRange); maxSizeWrap.appendChild(maxLabel);
+
+      // row for node size min
+      panel.appendChild(makeRow('Node min radius', minSizeWrap, async () => {
+        try { delete (this.plugin as any).settings.glow.minNodeRadius; await (this.plugin as any).saveSettings(); minRange.value = String(4); minLabel.textContent = minRange.value; if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+      }));
+      // row for node size max
+      panel.appendChild(makeRow('Node max radius', maxSizeWrap, async () => {
+        try { delete (this.plugin as any).settings.glow.maxNodeRadius; await (this.plugin as any).saveSettings(); maxRange.value = String(14); maxLabel.textContent = maxRange.value; if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+      }));
+
       // Count duplicate links toggle
       const countDup = document.createElement('input');
       countDup.type = 'checkbox';

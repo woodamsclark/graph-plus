@@ -1506,6 +1506,147 @@ var Graph2DController = class {
         } catch (e) {
         }
       }));
+      const bgColor = document.createElement("input");
+      bgColor.type = "color";
+      bgColor.value = this.plugin.settings?.glow?.backgroundColor || (getComputedStyle(this.containerEl).getPropertyValue("--background-primary") || "#ffffff").trim();
+      bgColor.addEventListener("input", async (e) => {
+        try {
+          this.plugin.settings.glow = this.plugin.settings.glow || {};
+          this.plugin.settings.glow.backgroundColor = e.target.value;
+          await this.plugin.saveSettings();
+          try {
+            this.containerEl.style.background = this.plugin.settings.glow.backgroundColor || "";
+          } catch (e2) {
+          }
+          try {
+            if (this.renderer && this.renderer.render)
+              this.renderer.render();
+          } catch (e2) {
+          }
+        } catch (e2) {
+        }
+      });
+      panel.appendChild(makeRow("Background color", bgColor, async () => {
+        try {
+          this.plugin.settings.glow = this.plugin.settings.glow || {};
+          delete this.plugin.settings.glow.backgroundColor;
+          await this.plugin.saveSettings();
+          try {
+            this.containerEl.style.background = "";
+          } catch (e) {
+          }
+          try {
+            if (this.renderer && this.renderer.render)
+              this.renderer.render();
+          } catch (e) {
+          }
+        } catch (e) {
+        }
+      }));
+      const minSizeWrap = document.createElement("div");
+      minSizeWrap.style.display = "flex";
+      minSizeWrap.style.alignItems = "center";
+      minSizeWrap.style.gap = "6px";
+      const minRange = document.createElement("input");
+      minRange.type = "range";
+      minRange.min = "1";
+      minRange.max = "60";
+      minRange.step = "1";
+      const curMin = this.plugin.settings?.glow?.minNodeRadius ?? 4;
+      minRange.value = String(curMin);
+      const minLabel = document.createElement("div");
+      minLabel.textContent = String(minRange.value);
+      minLabel.style.minWidth = "36px";
+      minLabel.style.textAlign = "right";
+      minRange.addEventListener("input", (e) => {
+        minLabel.textContent = e.target.value;
+      });
+      minRange.addEventListener("change", async (e) => {
+        try {
+          this.plugin.settings.glow = this.plugin.settings.glow || {};
+          const v = Number(e.target.value);
+          this.plugin.settings.glow.minNodeRadius = v;
+          await this.plugin.saveSettings();
+          try {
+            if (this.renderer && this.renderer.setGlowSettings)
+              this.renderer.setGlowSettings(this.plugin.settings.glow);
+          } catch (e2) {
+          }
+          try {
+            if (this.renderer && this.renderer.render)
+              this.renderer.render();
+          } catch (e2) {
+          }
+        } catch (e2) {
+        }
+      });
+      minSizeWrap.appendChild(minRange);
+      minSizeWrap.appendChild(minLabel);
+      const maxSizeWrap = document.createElement("div");
+      maxSizeWrap.style.display = "flex";
+      maxSizeWrap.style.alignItems = "center";
+      maxSizeWrap.style.gap = "6px";
+      const maxRange = document.createElement("input");
+      maxRange.type = "range";
+      maxRange.min = "4";
+      maxRange.max = "120";
+      maxRange.step = "1";
+      const curMax = this.plugin.settings?.glow?.maxNodeRadius ?? 14;
+      maxRange.value = String(curMax);
+      const maxLabel = document.createElement("div");
+      maxLabel.textContent = String(maxRange.value);
+      maxLabel.style.minWidth = "36px";
+      maxLabel.style.textAlign = "right";
+      maxRange.addEventListener("input", (e) => {
+        maxLabel.textContent = e.target.value;
+      });
+      maxRange.addEventListener("change", async (e) => {
+        try {
+          this.plugin.settings.glow = this.plugin.settings.glow || {};
+          const v = Number(e.target.value);
+          this.plugin.settings.glow.maxNodeRadius = v;
+          await this.plugin.saveSettings();
+          try {
+            if (this.renderer && this.renderer.setGlowSettings)
+              this.renderer.setGlowSettings(this.plugin.settings.glow);
+          } catch (e2) {
+          }
+          try {
+            if (this.renderer && this.renderer.render)
+              this.renderer.render();
+          } catch (e2) {
+          }
+        } catch (e2) {
+        }
+      });
+      maxSizeWrap.appendChild(maxRange);
+      maxSizeWrap.appendChild(maxLabel);
+      panel.appendChild(makeRow("Node min radius", minSizeWrap, async () => {
+        try {
+          delete this.plugin.settings.glow.minNodeRadius;
+          await this.plugin.saveSettings();
+          minRange.value = String(4);
+          minLabel.textContent = minRange.value;
+          if (this.renderer && this.renderer.setGlowSettings)
+            this.renderer.setGlowSettings(this.plugin.settings.glow);
+          if (this.renderer && this.renderer.render)
+            this.renderer.render();
+        } catch (e) {
+        }
+      }));
+      panel.appendChild(makeRow("Node max radius", maxSizeWrap, async () => {
+        try {
+          delete this.plugin.settings.glow.maxNodeRadius;
+          await this.plugin.saveSettings();
+          maxRange.value = String(14);
+          maxLabel.textContent = maxRange.value;
+          if (this.renderer && this.renderer.setGlowSettings)
+            this.renderer.setGlowSettings(this.plugin.settings.glow);
+          if (this.renderer && this.renderer.render)
+            this.renderer.render();
+        } catch (e) {
+        }
+      }));
       const countDup = document.createElement("input");
       countDup.type = "checkbox";
       countDup.checked = Boolean(this.plugin.settings?.countDuplicateLinks);
