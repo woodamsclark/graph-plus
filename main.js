@@ -141,6 +141,7 @@ function createRenderer2D(options) {
   let maxDegree = 0;
   let minEdgeCount = 1;
   let maxEdgeCount = 1;
+  let drawMutualDoubleLines = true;
   let minRadius = glowOptions?.minNodeRadius ?? 4;
   let maxRadius = glowOptions?.maxNodeRadius ?? 14;
   const DEFAULT_GLOW_MULTIPLIER = 2;
@@ -426,7 +427,7 @@ function createRenderer2D(options) {
           alpha = 0.08 + (0.9 - 0.08) * edgeFocus;
         ctx.save();
         ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${alpha})`;
-        const isMutual = !!edge.hasReverse;
+        const isMutual = !!edge.hasReverse && drawMutualDoubleLines;
         if (isMutual) {
           const dx = tgt.x - src.x;
           const dy = tgt.y - src.y;
@@ -538,6 +539,12 @@ function createRenderer2D(options) {
   function getNodeRadiusForHit(node) {
     return getNodeRadius(node);
   }
+  function setRenderOptions(opts) {
+    if (!opts)
+      return;
+    if (typeof opts.mutualDoubleLines === "boolean")
+      drawMutualDoubleLines = opts.mutualDoubleLines;
+  }
   function setGlowSettings(glow) {
     if (!glow)
       return;
@@ -595,6 +602,7 @@ function createRenderer2D(options) {
     getNodeRadiusForHit,
     setGlowSettings,
     setHoverState,
+    setRenderOptions,
     zoomAt,
     panBy,
     screenToWorld
@@ -1023,6 +1031,12 @@ var Graph2DController = class {
     if (typeof initialPhys.mouseAttractionRadius === "number")
       initialGlow.glowRadiusPx = initialPhys.mouseAttractionRadius;
     this.renderer = createRenderer2D({ canvas, glow: initialGlow });
+    try {
+      const drawDouble = Boolean(this.plugin.settings?.mutualLinkDoubleLine);
+      if (this.renderer && this.renderer.setRenderOptions)
+        this.renderer.setRenderOptions({ mutualDoubleLines: drawDouble });
+    } catch (e) {
+    }
     this.graph = await buildGraph(this.app, { countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks) });
     const vaultId = this.app.vault.getName();
     const allSaved = this.plugin.settings?.nodePositions || {};
@@ -1240,6 +1254,12 @@ var Graph2DController = class {
             if (typeof phys2.mouseAttractionRadius === "number")
               glowWithRadius.glowRadiusPx = phys2.mouseAttractionRadius;
             this.renderer.setGlowSettings(glowWithRadius);
+            try {
+              const drawDouble = Boolean(this.plugin.settings?.mutualLinkDoubleLine);
+              if (this.renderer && this.renderer.setRenderOptions)
+                this.renderer.setRenderOptions({ mutualDoubleLines: drawDouble });
+            } catch (e) {
+            }
             this.renderer.render();
           }
           const phys = this.plugin.settings.physics;
@@ -1541,7 +1561,8 @@ var DEFAULT_SETTINGS = {
     momentumScale: 0.12,
     dragThreshold: 4
   },
-  nodePositions: {}
+  nodePositions: {},
+  mutualLinkDoubleLine: true
 };
 var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
   settings = DEFAULT_SETTINGS;
@@ -1822,6 +1843,10 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     );
     new import_obsidian2.Setting(containerEl).setName("Count duplicate links").setDesc("If enabled, multiple links between the same two files will be counted when computing in/out degrees.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.countDuplicateLinks)).onChange(async (v) => {
       this.plugin.settings.countDuplicateLinks = Boolean(v);
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian2.Setting(containerEl).setName("Double-line mutual links").setDesc("When enabled, mutual links (A \u2194 B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.mutualLinkDoubleLine)).onChange(async (v) => {
+      this.plugin.settings.mutualLinkDoubleLine = Boolean(v);
       await this.plugin.saveSettings();
     }));
     new import_obsidian2.Setting(containerEl).setName("Mouse attraction radius (px)").setDesc("Maximum distance (in pixels) from cursor where the attraction applies.").addText(
