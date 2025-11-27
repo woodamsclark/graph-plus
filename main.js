@@ -919,6 +919,13 @@ function createRenderer2D(options) {
     offsetY += screenDy;
     render();
   }
+  function resetPanToCenter() {
+    const w = canvas.width || 1;
+    const h = canvas.height || 1;
+    offsetX = w / 2;
+    offsetY = h / 2;
+    render();
+  }
   return {
     setGraph,
     resize,
@@ -931,6 +938,7 @@ function createRenderer2D(options) {
     setRenderOptions,
     zoomAt,
     panBy,
+    resetPanToCenter,
     screenToWorld,
     screenToWorldAtDepth,
     getNodeScreenPosition,
@@ -1812,6 +1820,11 @@ var Graph2DController = class {
                   this.renderer.setCamera({ targetX: 0, targetY: 0, targetZ: 0 });
                 } catch (e) {
                 }
+                try {
+                  if (this.renderer.resetPanToCenter)
+                    this.renderer.resetPanToCenter();
+                } catch (e) {
+                }
                 this.followLockedNodeId = null;
                 this.previewLockNodeId = null;
                 this.suppressAttractorUntilMouseMove = true;
@@ -1819,6 +1832,11 @@ var Graph2DController = class {
                 const n = this.pendingFocusNode;
                 try {
                   this.renderer.setCamera({ targetX: n.x ?? 0, targetY: n.y ?? 0, targetZ: n.z ?? 0 });
+                } catch (e) {
+                }
+                try {
+                  if (this.renderer.resetPanToCenter)
+                    this.renderer.resetPanToCenter();
                 } catch (e) {
                 }
                 this.followLockedNodeId = n.id;

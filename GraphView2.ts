@@ -635,6 +635,7 @@ class Graph2DController {
               if (this.pendingFocusNode === '__origin__') {
                 // focus origin but do not enable follow
                 try { (this.renderer as any).setCamera({ targetX: 0, targetY: 0, targetZ: 0 }); } catch (e) {}
+                try { if ((this.renderer as any).resetPanToCenter) (this.renderer as any).resetPanToCenter(); } catch (e) {}
                 this.followLockedNodeId = null; this.previewLockNodeId = null;
                 // suppress the cursor attractor until user next moves the mouse
                 this.suppressAttractorUntilMouseMove = true;
@@ -642,6 +643,7 @@ class Graph2DController {
                 // Center camera onto node without changing distance; lock hover + follow until user drags/another right-click
                 const n = this.pendingFocusNode;
                 try { (this.renderer as any).setCamera({ targetX: n.x ?? 0, targetY: n.y ?? 0, targetZ: n.z ?? 0 }); } catch (e) {}
+                try { if ((this.renderer as any).resetPanToCenter) (this.renderer as any).resetPanToCenter(); } catch (e) {}
                 this.followLockedNodeId = n.id;
                 this.previewLockNodeId = n.id;
                 // suppress the cursor attractor until user next moves the mouse

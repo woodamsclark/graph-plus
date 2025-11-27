@@ -52,6 +52,7 @@ export interface Renderer2D {
   setHoverState(hoveredId: string | null, highlightedIds: Set<string>, mouseX: number, mouseY: number): void;
   zoomAt(screenX: number, screenY: number, factor: number): void;
   panBy(screenDx: number, screenDy: number): void;
+  resetPanToCenter?(): void;
   screenToWorld(screenX: number, screenY: number): { x: number; y: number };
   screenToWorldAtDepth?(screenX: number, screenY: number, zCam: number, width: number, height: number, cam: Camera): { x: number; y: number; z: number };
   setRenderOptions?(opts: { mutualDoubleLines?: boolean; showTags?: boolean }): void;
@@ -854,6 +855,14 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     render();
   }
 
+  function resetPanToCenter() {
+    const w = canvas.width || 1;
+    const h = canvas.height || 1;
+    offsetX = w / 2;
+    offsetY = h / 2;
+    render();
+  }
+
   return {
     setGraph,
     resize,
@@ -866,6 +875,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     setRenderOptions,
     zoomAt,
     panBy,
+    resetPanToCenter,
     screenToWorld,
       screenToWorldAtDepth,
     getNodeScreenPosition,
