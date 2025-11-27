@@ -26,6 +26,9 @@ export interface GlowSettings {
   tagColorAlpha?: number;
   labelColorAlpha?: number;
   edgeColorAlpha?: number;
+  // Label visibility controls
+  labelMinVisibleRadiusPx?: number;
+  labelFadeRangePx?: number;
   // maximum alpha to use for each color when hovered/highlighted
   nodeColorMaxAlpha?: number;
   tagColorMaxAlpha?: number;
@@ -131,6 +134,9 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let edgeDimMin = glowOptions?.edgeDimMin ?? 0.08;
   let edgeDimMax = glowOptions?.edgeDimMax ?? 0.9;
   let nodeMinBodyAlpha = glowOptions?.nodeMinBodyAlpha ?? 0.3;
+  // label visibility controls
+  let labelMinVisibleRadiusPx = glowOptions?.labelMinVisibleRadiusPx ?? 6;
+  let labelFadeRangePx = glowOptions?.labelFadeRangePx ?? 8;
   
 
   // theme-derived colors (updated each render)
@@ -194,6 +200,14 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     targetZ: 0,
     zoom: 1.0,
   };
+  // Base camera distance used as the scale reference: when camera.distance == baseCameraDistance => zoomScale == 1
+  const baseCameraDistance = camera.distance || 1200;
+
+  function getZoomScale() {
+    const d = camera.distance || baseCameraDistance;
+    // Avoid division by zero
+    return baseCameraDistance / Math.max(1e-6, d);
+  }
 
   function setCamera(newCamera: Partial<Camera>) {
     camera = { ...camera, ...newCamera } as Camera;
@@ -287,7 +301,9 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     } else if (isNeighbor) {
       scaleFactor = 1 + (hoverScaleMax * 0.4) * hoverScale;
     }
-    return base * scaleFactor;
+    // Apply camera zoom scale so nodes grow/shrink as camera distance changes
+    const zoomScale = getZoomScale();
+    return base * scaleFactor * zoomScale;
   }
 
   function getBaseNodeRadius(node: any) {
@@ -578,7 +594,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     const baseFontSize = 10; // world-space base font size
     const minFontSize = 6; // px (screen)
     const maxFontSize = 18; // px (screen)
-    const hideBelow = 7; // hide labels when displayed size < this (px)
+    // label visibility threshold now driven by node screen-space radius
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
 
@@ -661,16 +677,34 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         ctx.restore();
 
         // label below node (zoom-aware) - grow with hover and fade with focus
-        const displayedFontBase = baseFontSize * scale; // px on screen without hover
+        // incorporate camera zoom scale so labels scale with camera distance
+        const displayedFontBase = baseFontSize * getZoomScale(); // px on screen base before hover/scale
         // compute scaleFactor from radius/baseRadius to match node growth
         const scaleFactor = baseRadius > 0 ? radius / baseRadius : 1;
         const displayedFont = displayedFontBase * scaleFactor;
-        if (displayedFont >= hideBelow) {
+        // Compute label alpha based on node screen-space radius
+        const radiusScreenPx = radius * Math.max(0.0001, scale);
+        let labelAlphaVis = 1;
+        const minR = Math.max(0, labelMinVisibleRadiusPx);
+        const fadeRange = Math.max(0, labelFadeRangePx);
+        if (radiusScreenPx <= minR) {
+          labelAlphaVis = 0;
+        } else if (radiusScreenPx <= minR + fadeRange) {
+          const t = (radiusScreenPx - minR) / Math.max(0.0001, fadeRange);
+          labelAlphaVis = Math.max(0, Math.min(1, t));
+        } else {
+          labelAlphaVis = 1;
+        }
+        // Always show label if hovered or in highlight set
+        const isHoverOrHighlight = hoveredNodeId === node.id || (hoverHighlightSet && hoverHighlightSet.has(node.id));
+        if (isHoverOrHighlight) labelAlphaVis = Math.max(labelAlphaVis, 1);
+
+        if (labelAlphaVis > 0) {
           const clampedDisplayed = Math.max(minFontSize, Math.min(maxFontSize, displayedFont));
           const fontToSet = Math.max(1, (clampedDisplayed) / Math.max(0.0001, scale));
           ctx.save();
           ctx.font = `${fontToSet}px ${resolvedInterfaceFontFamily || 'sans-serif'}`;
-          ctx.globalAlpha = focus; // fade label in/out
+          ctx.globalAlpha = (focus) * labelAlphaVis; // fade label with focus and visibility
           // apply label alpha override if present
           const labelRgb = colorToRgb((glowOptions?.labelColor ?? labelCss) || '#ffffff');
           const useLabelAlpha = glowOptions?.labelColorAlpha ?? labelColorAlpha;
@@ -733,6 +767,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     edgeDimMin = glow.edgeDimMin ?? edgeDimMin;
     edgeDimMax = glow.edgeDimMax ?? edgeDimMax;
     nodeMinBodyAlpha = glow.nodeMinBodyAlpha ?? nodeMinBodyAlpha;
+    labelMinVisibleRadiusPx = (typeof glow.labelMinVisibleRadiusPx === 'number') ? glow.labelMinVisibleRadiusPx : labelMinVisibleRadiusPx;
+    labelFadeRangePx = (typeof glow.labelFadeRangePx === 'number') ? glow.labelFadeRangePx : labelFadeRangePx;
     nodeColorAlpha = (typeof glow.nodeColorAlpha === 'number') ? glow.nodeColorAlpha : nodeColorAlpha;
     tagColorAlpha = (typeof glow.tagColorAlpha === 'number') ? glow.tagColorAlpha : tagColorAlpha;
     labelColorAlpha = (typeof glow.labelColorAlpha === 'number') ? glow.labelColorAlpha : labelColorAlpha;

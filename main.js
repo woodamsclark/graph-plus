@@ -365,6 +365,8 @@ function createRenderer2D(options) {
   let edgeDimMin = glowOptions?.edgeDimMin ?? 0.08;
   let edgeDimMax = glowOptions?.edgeDimMax ?? 0.9;
   let nodeMinBodyAlpha = glowOptions?.nodeMinBodyAlpha ?? 0.3;
+  let labelMinVisibleRadiusPx = glowOptions?.labelMinVisibleRadiusPx ?? 6;
+  let labelFadeRangePx = glowOptions?.labelFadeRangePx ?? 8;
   let themeNodeColor = "#66ccff";
   let themeLabelColor = "#222";
   let themeEdgeColor = "#888888";
@@ -425,6 +427,11 @@ function createRenderer2D(options) {
     targetZ: 0,
     zoom: 1
   };
+  const baseCameraDistance = camera.distance || 1200;
+  function getZoomScale() {
+    const d = camera.distance || baseCameraDistance;
+    return baseCameraDistance / Math.max(1e-6, d);
+  }
   function setCamera(newCamera) {
     camera = { ...camera, ...newCamera };
   }
@@ -512,7 +519,8 @@ function createRenderer2D(options) {
     } else if (isNeighbor) {
       scaleFactor = 1 + hoverScaleMax * 0.4 * hoverScale;
     }
-    return base * scaleFactor;
+    const zoomScale = getZoomScale();
+    return base * scaleFactor * zoomScale;
   }
   function getBaseNodeRadius(node) {
     const t = getDegreeNormalized(node);
@@ -780,7 +788,6 @@ function createRenderer2D(options) {
     const baseFontSize = 10;
     const minFontSize = 6;
     const maxFontSize = 18;
-    const hideBelow = 7;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     let labelCss = themeLabelColor;
@@ -850,15 +857,30 @@ function createRenderer2D(options) {
         ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${finalBodyAlpha * effectiveUseBodyAlpha})`;
         ctx.fill();
         ctx.restore();
-        const displayedFontBase = baseFontSize * scale;
+        const displayedFontBase = baseFontSize * getZoomScale();
         const scaleFactor = baseRadius > 0 ? radius / baseRadius : 1;
         const displayedFont = displayedFontBase * scaleFactor;
-        if (displayedFont >= hideBelow) {
+        const radiusScreenPx = radius * Math.max(1e-4, scale);
+        let labelAlphaVis = 1;
+        const minR = Math.max(0, labelMinVisibleRadiusPx);
+        const fadeRange = Math.max(0, labelFadeRangePx);
+        if (radiusScreenPx <= minR) {
+          labelAlphaVis = 0;
+        } else if (radiusScreenPx <= minR + fadeRange) {
+          const t = (radiusScreenPx - minR) / Math.max(1e-4, fadeRange);
+          labelAlphaVis = Math.max(0, Math.min(1, t));
+        } else {
+          labelAlphaVis = 1;
+        }
+        const isHoverOrHighlight = hoveredNodeId === node.id || hoverHighlightSet && hoverHighlightSet.has(node.id);
+        if (isHoverOrHighlight)
+          labelAlphaVis = Math.max(labelAlphaVis, 1);
+        if (labelAlphaVis > 0) {
           const clampedDisplayed = Math.max(minFontSize, Math.min(maxFontSize, displayedFont));
           const fontToSet = Math.max(1, clampedDisplayed / Math.max(1e-4, scale));
           ctx.save();
           ctx.font = `${fontToSet}px ${resolvedInterfaceFontFamily || "sans-serif"}`;
-          ctx.globalAlpha = focus;
+          ctx.globalAlpha = focus * labelAlphaVis;
           const labelRgb = colorToRgb((glowOptions?.labelColor ?? labelCss) || "#ffffff");
           const useLabelAlpha = glowOptions?.labelColorAlpha ?? labelColorAlpha;
           ctx.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},${useLabelAlpha})`;
@@ -916,6 +938,8 @@ function createRenderer2D(options) {
     edgeDimMin = glow.edgeDimMin ?? edgeDimMin;
     edgeDimMax = glow.edgeDimMax ?? edgeDimMax;
     nodeMinBodyAlpha = glow.nodeMinBodyAlpha ?? nodeMinBodyAlpha;
+    labelMinVisibleRadiusPx = typeof glow.labelMinVisibleRadiusPx === "number" ? glow.labelMinVisibleRadiusPx : labelMinVisibleRadiusPx;
+    labelFadeRangePx = typeof glow.labelFadeRangePx === "number" ? glow.labelFadeRangePx : labelFadeRangePx;
     nodeColorAlpha = typeof glow.nodeColorAlpha === "number" ? glow.nodeColorAlpha : nodeColorAlpha;
     tagColorAlpha = typeof glow.tagColorAlpha === "number" ? glow.tagColorAlpha : tagColorAlpha;
     labelColorAlpha = typeof glow.labelColorAlpha === "number" ? glow.labelColorAlpha : labelColorAlpha;
