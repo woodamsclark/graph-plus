@@ -29,6 +29,9 @@ export interface Renderer2D {
   getNodeRadiusForHit(node: any): number;
   setGlowSettings(glow: GlowSettings): void;
   setHoverState(hoveredId: string | null, highlightedIds: Set<string>, mouseX: number, mouseY: number): void;
+  zoomAt(screenX: number, screenY: number, factor: number): void;
+  panBy(screenDx: number, screenDy: number): void;
+  screenToWorld(screenX: number, screenY: number): { x: number; y: number };
 }
 
 export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
@@ -57,6 +60,13 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let hoverHighlightSet: Set<string> = new Set();
   let mouseX = 0;
   let mouseY = 0;
+
+  // camera state
+  let scale = 1;
+  let offsetX = 0;
+  let offsetY = 0;
+  const minScale = 0.25;
+  const maxScale = 4;
 
   function setGraph(g: GraphData) {
     graph = g;
@@ -181,6 +191,10 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
     if (!graph) return;
 
+    ctx.save();
+    ctx.translate(offsetX, offsetY);
+    ctx.scale(scale, scale);
+
     // Draw edges first so nodes appear on top
 /*    if ((graph as any).edges && (graph as any).edges.length > 0) {
       ctx.save();
@@ -239,6 +253,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
       ctx.fillText(node.label, node.x, node.y + radius + 4);
       ctx.restore();
     }
+
+    ctx.restore();
   }
 
   function destroy() {
@@ -276,6 +292,28 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     mouseY = my || 0;
   }
 
+  function screenToWorld(screenX: number, screenY: number) {
+    return { x: (screenX - offsetX) / scale, y: (screenY - offsetY) / scale };
+  }
+
+  function zoomAt(screenX: number, screenY: number, factor: number) {
+    if (factor <= 0) return;
+    const worldBefore = screenToWorld(screenX, screenY);
+    scale *= factor;
+    if (scale < minScale) scale = minScale;
+    if (scale > maxScale) scale = maxScale;
+    const worldAfter = worldBefore; // keep same world point under cursor
+    offsetX = screenX - worldAfter.x * scale;
+    offsetY = screenY - worldAfter.y * scale;
+    render();
+  }
+
+  function panBy(screenDx: number, screenDy: number) {
+    offsetX += screenDx;
+    offsetY += screenDy;
+    render();
+  }
+
   return {
     setGraph,
     resize,
@@ -285,6 +323,9 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     getNodeRadiusForHit,
     setGlowSettings,
     setHoverState,
+    zoomAt,
+    panBy,
+    screenToWorld,
   };
 }
 

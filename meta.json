@@ -1,0 +1,134 @@
+{
+  "inputs": {
+    "graph/buildGraph.ts": {
+      "bytes": 2147,
+      "imports": [
+        {
+          "path": "obsidian",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "graph/layout2d.ts": {
+      "bytes": 1533,
+      "imports": [
+        {
+          "path": "./buildGraph",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "graph/renderer2d.ts": {
+      "bytes": 10507,
+      "imports": [
+        {
+          "path": "./buildGraph",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "graph/simulation.ts": {
+      "bytes": 7237,
+      "imports": [
+        {
+          "path": "./buildGraph",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "GraphView2.ts": {
+      "bytes": 12883,
+      "imports": [
+        {
+          "path": "obsidian",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "graph/buildGraph.ts",
+          "kind": "import-statement",
+          "original": "./graph/buildGraph"
+        },
+        {
+          "path": "graph/layout2d.ts",
+          "kind": "import-statement",
+          "original": "./graph/layout2d"
+        },
+        {
+          "path": "graph/renderer2d.ts",
+          "kind": "import-statement",
+          "original": "./graph/renderer2d"
+        },
+        {
+          "path": "graph/simulation.ts",
+          "kind": "import-statement",
+          "original": "./graph/simulation"
+        }
+      ],
+      "format": "esm"
+    },
+    "main.ts": {
+      "bytes": 12283,
+      "imports": [
+        {
+          "path": "obsidian",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "GraphView2.ts",
+          "kind": "import-statement",
+          "original": "./GraphView2.ts"
+        }
+      ],
+      "format": "esm"
+    }
+  },
+  "outputs": {
+    "main_temp.js": {
+      "imports": [
+        {
+          "path": "obsidian",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "obsidian",
+          "kind": "require-call",
+          "external": true
+        }
+      ],
+      "exports": [],
+      "entryPoint": "main.ts",
+      "inputs": {
+        "main.ts": {
+          "bytesInOutput": 11052
+        },
+        "GraphView2.ts": {
+          "bytesInOutput": 11697
+        },
+        "graph/buildGraph.ts": {
+          "bytesInOutput": 1611
+        },
+        "graph/layout2d.ts": {
+          "bytesInOutput": 1156
+        },
+        "graph/renderer2d.ts": {
+          "bytesInOutput": 7546
+        },
+        "graph/simulation.ts": {
+          "bytesInOutput": 5742
+        }
+      },
+      "bytes": 39853
+    }
+  }
+}

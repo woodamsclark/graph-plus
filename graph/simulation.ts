@@ -24,6 +24,8 @@ export interface SimulationOptions {
   centerX?: number;
   centerY?: number;
   centerNodeId?: string;
+  // global multiplier applied to per-edge linkStrength
+  linkForceMultiplier?: number;
 }
 
 export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options?: Partial<SimulationOptions>): Simulation {
@@ -33,6 +35,7 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
   let springLength = options?.springLength ?? 100;
   let centerPull = options?.centerPull ?? 0.00;
   let damping = options?.damping ?? 0.9;
+  let linkForceMultiplier = options?.linkForceMultiplier ?? 1.0;
 
   // center options: prefer explicitly provided values; otherwise compute
   // a reasonable default (bounding-box center of current node positions)
@@ -122,7 +125,10 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
       const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
       const diff = dist - springLength;
       // use a tamed/non-linear spring to avoid explosive forces
-      const f = springStrength * Math.tanh(diff / 50);
+      // per-edge weight (linkStrength) multiplies the global spring strength
+      const weight = (e as any).linkStrength ?? 1;
+      const springK = springStrength * weight * (linkForceMultiplier ?? 1);
+      const f = springK * Math.tanh(diff / 50);
       const fx = (dx / dist) * f;
       const fy = (dy / dist) * f;
       a.vx = (a.vx || 0) + fx;
@@ -207,6 +213,7 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
     if (typeof opts.springLength === 'number') springLength = opts.springLength;
     if (typeof opts.centerPull === 'number') centerPull = opts.centerPull;
     if (typeof opts.damping === 'number') damping = opts.damping;
+    if (typeof opts.linkForceMultiplier === 'number') linkForceMultiplier = opts.linkForceMultiplier;
 
     if (typeof opts.centerX === 'number') centerX = opts.centerX;
     if (typeof opts.centerY === 'number') centerY = opts.centerY;

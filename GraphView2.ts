@@ -89,6 +89,12 @@ class Graph2DController {
   private lastTime: number | null = null;
   private running: boolean = false;
   private settingsUnregister: (() => void) | null = null;
+  private wheelHandler: ((e: WheelEvent) => void) | null = null;
+  private mouseDownHandler: ((e: MouseEvent) => void) | null = null;
+  private mouseUpHandler: ((e: MouseEvent) => void) | null = null;
+  private isDragging: boolean = false;
+  private lastDragX: number = 0;
+  private lastDragY: number = 0;
 
   constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
     this.app = app;
@@ -174,9 +180,39 @@ class Graph2DController {
       this.handleClick(x, y);
     };
 
+    this.wheelHandler = (ev: WheelEvent) => {
+      if (!this.canvas || !this.renderer) return;
+      ev.preventDefault();
+      const r = this.canvas.getBoundingClientRect();
+      const x = ev.clientX - r.left;
+      const y = ev.clientY - r.top;
+      const factor = ev.deltaY < 0 ? 1.1 : 0.9;
+      (this.renderer as any).zoomAt(x, y, factor);
+      (this.renderer as any).render();
+    };
+
+    this.mouseDownHandler = (ev: MouseEvent) => {
+      if (!this.canvas || ev.button !== 0) return;
+      this.isDragging = true;
+      const r = this.canvas.getBoundingClientRect();
+      this.lastDragX = ev.clientX - r.left;
+      this.lastDragY = ev.clientY - r.top;
+      this.canvas.style.cursor = 'grabbing';
+    };
+
+    this.mouseUpHandler = (ev: MouseEvent) => {
+      if (!this.canvas) return;
+      if (ev.button !== 0) return;
+      this.isDragging = false;
+      this.canvas.style.cursor = 'default';
+    };
+
     this.canvas.addEventListener('mousemove', this.mouseMoveHandler);
     this.canvas.addEventListener('mouseleave', this.mouseLeaveHandler);
     this.canvas.addEventListener('click', this.mouseClickHandler);
+    this.canvas.addEventListener('wheel', this.wheelHandler, { passive: false });
+    this.canvas.addEventListener('mousedown', this.mouseDownHandler);
+    window.addEventListener('mouseup', this.mouseUpHandler);
 
     if ((this.plugin as any).registerSettingsListener) {
       this.settingsUnregister = (this.plugin as any).registerSettingsListener(() => {
@@ -248,13 +284,33 @@ class Graph2DController {
     return closest;
   }
 
-  handleClick(x: number, y: number): void { if (!this.graph || !this.onNodeClick) return; const node = this.hitTestNode(x, y); if (!node) return; try { this.onNodeClick(node); } catch (e) { console.error('Graph2DController.onNodeClick handler error', e); } }
+  handleClick(screenX: number, screenY: number): void {
+    if (!this.graph || !this.onNodeClick || !this.renderer) return;
+    const world = (this.renderer as any).screenToWorld(screenX, screenY);
+    const node = this.hitTestNode(world.x, world.y);
+    if (!node) return;
+    try { this.onNodeClick(node); } catch (e) { console.error('Graph2DController.onNodeClick handler error', e); }
+  }
 
-  handleHover(x: number, y: number): void {
+  handleHover(screenX: number, screenY: number): void {
     if (!this.graph || !this.renderer) return;
+    if (this.isDragging) {
+      // treat as panning movement
+      const worldPrev = (this.renderer as any).screenToWorld(this.lastDragX, this.lastDragY);
+      const r = this.canvas!.getBoundingClientRect();
+      const curX = screenX;
+      const curY = screenY;
+      const dx = curX - this.lastDragX;
+      const dy = curY - this.lastDragY;
+      (this.renderer as any).panBy(dx, dy);
+      this.lastDragX = curX;
+      this.lastDragY = curY;
+      return; // no hover while dragging
+    }
+    const world = (this.renderer as any).screenToWorld(screenX, screenY);
     let closest: any = null; let closestDist = Infinity; const hitPadding = 6;
     for (const node of this.graph.nodes) {
-      const dx = x - node.x; const dy = y - node.y; const distSq = dx*dx + dy*dy;
+      const dx = world.x - node.x; const dy = world.y - node.y; const distSq = dx*dx + dy*dy;
       const nodeRadius = this.renderer.getNodeRadiusForHit ? this.renderer.getNodeRadiusForHit(node) : 8;
       const hitR = nodeRadius + hitPadding;
       if (distSq <= hitR*hitR && distSq < closestDist) { closestDist = distSq; closest = node; }
@@ -271,7 +327,8 @@ class Graph2DController {
         for (const nb of neighbors) { if (!seen.has(nb)) { seen.add(nb); q.push({ id: nb, d: cur.d + 1 }); } }
       }
     }
-    if ((this.renderer as any).setHoverState) (this.renderer as any).setHoverState(newId, highlightSet, x, y);
+    if (this.canvas) this.canvas.style.cursor = newId ? 'pointer' : 'default';
+    if ((this.renderer as any).setHoverState) (this.renderer as any).setHoverState(newId, highlightSet, world.x, world.y);
     if (this.renderer.setHoveredNode) this.renderer.setHoveredNode(newId);
     this.renderer.render();
   }

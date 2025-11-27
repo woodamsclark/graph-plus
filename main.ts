@@ -1,5 +1,5 @@
 import { App, Plugin, PluginSettingTab, Setting } from 'obsidian';
-import { GraphView, GREATER_GRAPH_VIEW_TYPE } from './GraphView2';
+import { GraphView, GREATER_GRAPH_VIEW_TYPE } from './GraphView2.ts';
 
 export interface GlowSettings {
   minNodeRadius: number;
