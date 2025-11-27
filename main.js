@@ -1392,6 +1392,8 @@ var Graph2DController = class {
   // Screen-space tracking for cursor attractor
   lastMouseX = null;
   lastMouseY = null;
+  // When true, skip running the cursor attractor until the next mousemove event
+  suppressAttractorUntilMouseMove = false;
   // Simple camera follow flag
   followLockedNodeId = null;
   saveNodePositions() {
@@ -1558,6 +1560,7 @@ var Graph2DController = class {
       const screenY = ev.clientY - r.top;
       this.lastMouseX = screenX;
       this.lastMouseY = screenY;
+      this.suppressAttractorUntilMouseMove = false;
       if (this.draggingNode) {
         const now = performance.now();
         let world = null;
@@ -1811,6 +1814,7 @@ var Graph2DController = class {
                 }
                 this.followLockedNodeId = null;
                 this.previewLockNodeId = null;
+                this.suppressAttractorUntilMouseMove = true;
               } else {
                 const n = this.pendingFocusNode;
                 try {
@@ -1819,6 +1823,7 @@ var Graph2DController = class {
                 }
                 this.followLockedNodeId = n.id;
                 this.previewLockNodeId = n.id;
+                this.suppressAttractorUntilMouseMove = true;
               }
             } catch (e) {
             }
@@ -2772,6 +2777,8 @@ var Graph2DController = class {
   applyCursorAttractor() {
     const physics = this.plugin.settings?.physics || {};
     if (physics.mouseAttractionEnabled === false)
+      return;
+    if (this.suppressAttractorUntilMouseMove)
       return;
     if (this.lastMouseX == null || this.lastMouseY == null)
       return;

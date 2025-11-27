@@ -182,6 +182,8 @@ class Graph2DController {
   // Screen-space tracking for cursor attractor
   private lastMouseX: number | null = null;
   private lastMouseY: number | null = null;
+  // When true, skip running the cursor attractor until the next mousemove event
+  private suppressAttractorUntilMouseMove: boolean = false;
   // Simple camera follow flag
   private followLockedNodeId: string | null = null;
 
@@ -359,6 +361,8 @@ class Graph2DController {
       // track last mouse position in screen space for attractor
       this.lastMouseX = screenX;
       this.lastMouseY = screenY;
+      // Re-enable the cursor attractor after any programmatic camera move
+      this.suppressAttractorUntilMouseMove = false;
 
       // If currently dragging a node, move it to the world coords under the cursor
       if (this.draggingNode) {
@@ -632,12 +636,16 @@ class Graph2DController {
                 // focus origin but do not enable follow
                 try { (this.renderer as any).setCamera({ targetX: 0, targetY: 0, targetZ: 0 }); } catch (e) {}
                 this.followLockedNodeId = null; this.previewLockNodeId = null;
+                // suppress the cursor attractor until user next moves the mouse
+                this.suppressAttractorUntilMouseMove = true;
               } else {
                 // Center camera onto node without changing distance; lock hover + follow until user drags/another right-click
                 const n = this.pendingFocusNode;
                 try { (this.renderer as any).setCamera({ targetX: n.x ?? 0, targetY: n.y ?? 0, targetZ: n.z ?? 0 }); } catch (e) {}
                 this.followLockedNodeId = n.id;
                 this.previewLockNodeId = n.id;
+                // suppress the cursor attractor until user next moves the mouse
+                this.suppressAttractorUntilMouseMove = true;
               }
             } catch (e) {}
           }
@@ -1258,6 +1266,7 @@ class Graph2DController {
     const physics = (this.plugin as any).settings?.physics || {};
     // default to enabled when unset
     if (physics.mouseAttractionEnabled === false) return;
+    if (this.suppressAttractorUntilMouseMove) return;
     if (this.lastMouseX == null || this.lastMouseY == null) return;
     if (!this.renderer || !this.graph) return;
 
