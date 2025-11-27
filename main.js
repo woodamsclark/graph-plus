@@ -29,7 +29,7 @@ var import_obsidian2 = require("obsidian");
 var import_obsidian = require("obsidian");
 
 // graph/buildGraph.ts
-async function buildGraph(app) {
+async function buildGraph(app, options) {
   const files = app.vault.getMarkdownFiles();
   const nodes = files.map((file) => ({
     id: file.path,
@@ -63,13 +63,21 @@ async function buildGraph(app) {
       }
     }
   }
+  const countDuplicates = Boolean(options?.countDuplicates);
   for (const e of edges) {
     const src = nodeByPath.get(e.sourceId);
     const tgt = nodeByPath.get(e.targetId);
     if (!src || !tgt)
       continue;
-    src.outDegree = (src.outDegree || 0) + 1;
-    tgt.inDegree = (tgt.inDegree || 0) + 1;
+    if (countDuplicates) {
+      const resolved2 = app.metadataCache.resolvedLinks || {};
+      const c = resolved2[e.sourceId] && resolved2[e.sourceId][e.targetId] || 1;
+      src.outDegree = (src.outDegree || 0) + c;
+      tgt.inDegree = (tgt.inDegree || 0) + c;
+    } else {
+      src.outDegree = (src.outDegree || 0) + 1;
+      tgt.inDegree = (tgt.inDegree || 0) + 1;
+    }
   }
   for (const n of nodes) {
     n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
@@ -140,6 +148,9 @@ function createRenderer2D(options) {
   let hoverHighlightSet = /* @__PURE__ */ new Set();
   let mouseX = 0;
   let mouseY = 0;
+  let hoverScale = 0;
+  const hoverScaleMax = 0.25;
+  const hoverLerpSpeed = 0.2;
   const nodeFocusMap = /* @__PURE__ */ new Map();
   let lastRenderTime = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
   let focusSmoothingRate = glowOptions?.focusSmoothingRate ?? 8;
@@ -234,6 +245,18 @@ function createRenderer2D(options) {
     return (d - minDegree) / (maxDegree - minDegree);
   }
   function getNodeRadius(node) {
+    const base = getBaseNodeRadius(node);
+    let scaleFactor = 1;
+    const isHovered = hoveredNodeId === node.id;
+    const isNeighbor = hoverHighlightSet && hoverHighlightSet.has(node.id);
+    if (isHovered) {
+      scaleFactor = 1 + hoverScaleMax * hoverScale;
+    } else if (isNeighbor) {
+      scaleFactor = 1 + hoverScaleMax * 0.4 * hoverScale;
+    }
+    return base * scaleFactor;
+  }
+  function getBaseNodeRadius(node) {
     const t = getDegreeNormalized(node);
     return minRadius + t * (maxRadius - minRadius);
   }
@@ -355,6 +378,8 @@ function createRenderer2D(options) {
       }
     }
     updateFocusFactors();
+    const targetHover = hoveredNodeId ? 1 : 0;
+    hoverScale += (targetHover - hoverScale) * hoverLerpSpeed;
     if (graph.edges && graph.edges.length > 0) {
       const edgeRgb = colorToRgb(themeEdgeColor);
       for (const edge of graph.edges) {
@@ -395,6 +420,7 @@ function createRenderer2D(options) {
     } catch (e) {
     }
     for (const node of graph.nodes) {
+      const baseRadius = getBaseNodeRadius(node);
       const radius = getNodeRadius(node);
       const centerAlpha = getCenterAlpha(node);
       const glowRadius = glowRadiusPx != null && isFinite(glowRadiusPx) && glowRadiusPx > 0 ? glowRadiusPx : radius * DEFAULT_GLOW_MULTIPLIER;
@@ -424,7 +450,9 @@ function createRenderer2D(options) {
         ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${bodyAlpha})`;
         ctx.fill();
         ctx.restore();
-        const displayedFont = baseFontSize * scale;
+        const displayedFontBase = baseFontSize * scale;
+        const scaleFactor = baseRadius > 0 ? radius / baseRadius : 1;
+        const displayedFont = displayedFontBase * scaleFactor;
         if (displayedFont >= hideBelow) {
           const clampedDisplayed = Math.max(minFontSize, Math.min(maxFontSize, displayedFont));
           const fontToSet = Math.max(1, clampedDisplayed / Math.max(1e-4, scale));
@@ -943,7 +971,7 @@ var Graph2DController = class {
     if (typeof initialPhys.mouseAttractionRadius === "number")
       initialGlow.glowRadiusPx = initialPhys.mouseAttractionRadius;
     this.renderer = createRenderer2D({ canvas, glow: initialGlow });
-    this.graph = await buildGraph(this.app);
+    this.graph = await buildGraph(this.app, { countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks) });
     const vaultId = this.app.vault.getName();
     const allSaved = this.plugin.settings?.nodePositions || {};
     const savedPositions = allSaved[vaultId] || {};
@@ -1214,7 +1242,7 @@ var Graph2DController = class {
     if (!this.canvas)
       return;
     try {
-      const newGraph = await buildGraph(this.app);
+      const newGraph = await buildGraph(this.app, { countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks) });
       this.graph = newGraph;
       const vaultId = this.app.vault.getName();
       const allSaved = this.plugin.settings?.nodePositions || {};
@@ -1740,6 +1768,10 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       })
     );
+    new import_obsidian2.Setting(containerEl).setName("Count duplicate links").setDesc("If enabled, multiple links between the same two files will be counted when computing in/out degrees.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.countDuplicateLinks)).onChange(async (v) => {
+      this.plugin.settings.countDuplicateLinks = Boolean(v);
+      await this.plugin.saveSettings();
+    }));
     new import_obsidian2.Setting(containerEl).setName("Mouse attraction radius (px)").setDesc("Maximum distance (in pixels) from cursor where the attraction applies.").addText(
       (text) => text.setValue(String(phys.mouseAttractionRadius ?? 80)).onChange(async (value) => {
         const num = Number(value);

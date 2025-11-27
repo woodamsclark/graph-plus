@@ -25,7 +25,7 @@ export interface GraphData {
   edges: GraphEdge[];
 }
 
-export async function buildGraph(app: App): Promise<GraphData> {
+export async function buildGraph(app: App, options?: { countDuplicates?: boolean }): Promise<GraphData> {
   const files: TFile[] = app.vault.getMarkdownFiles();
 
   const nodes: GraphNode[] = files.map((file) => ({
@@ -66,12 +66,21 @@ export async function buildGraph(app: App): Promise<GraphData> {
     }
   }
   // compute in/out/total degrees directly from edges
+  const countDuplicates = Boolean(options?.countDuplicates);
   for (const e of edges) {
     const src = nodeByPath.get(e.sourceId);
     const tgt = nodeByPath.get(e.targetId);
     if (!src || !tgt) continue;
-    src.outDegree = (src.outDegree || 0) + 1;
-    tgt.inDegree = (tgt.inDegree || 0) + 1;
+    if (countDuplicates) {
+      // Use resolvedLinks counts where available to weight degrees
+      const resolved: any = (app.metadataCache as any).resolvedLinks || {};
+      const c = (resolved[e.sourceId] && resolved[e.sourceId][e.targetId]) || 1;
+      src.outDegree = (src.outDegree || 0) + c;
+      tgt.inDegree = (tgt.inDegree || 0) + c;
+    } else {
+      src.outDegree = (src.outDegree || 0) + 1;
+      tgt.inDegree = (tgt.inDegree || 0) + 1;
+    }
   }
 
   for (const n of nodes) {

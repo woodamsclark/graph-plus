@@ -71,6 +71,10 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let hoverHighlightSet: Set<string> = new Set();
   let mouseX = 0;
   let mouseY = 0;
+  // Animated hover scale state: 0 = normal, 1 = full growth
+  let hoverScale = 0;
+  const hoverScaleMax = 0.25; // +25% radius at full hover
+  const hoverLerpSpeed = 0.2; // how quickly hoverScale interpolates each frame (0-1)
   // per-node smooth focus factor (0 = dimmed, 1 = focused)
   const nodeFocusMap: Map<string, number> = new Map();
   let lastRenderTime = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
@@ -173,6 +177,20 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   }
 
   function getNodeRadius(node: any) {
+    const base = getBaseNodeRadius(node);
+    // compute per-node hover scale factor: hovered node gets full effect, neighbors get a reduced effect
+    let scaleFactor = 1;
+    const isHovered = hoveredNodeId === node.id;
+    const isNeighbor = hoverHighlightSet && hoverHighlightSet.has(node.id);
+    if (isHovered) {
+      scaleFactor = 1 + hoverScaleMax * hoverScale;
+    } else if (isNeighbor) {
+      scaleFactor = 1 + (hoverScaleMax * 0.4) * hoverScale;
+    }
+    return base * scaleFactor;
+  }
+
+  function getBaseNodeRadius(node: any) {
     const t = getDegreeNormalized(node);
     return minRadius + t * (maxRadius - minRadius);
   }
@@ -305,6 +323,10 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     }
     updateFocusFactors();
 
+    // Ease hoverScale towards target each frame (simple lerp)
+    const targetHover = hoveredNodeId ? 1 : 0;
+    hoverScale += (targetHover - hoverScale) * hoverLerpSpeed;
+
     // Draw edges first so nodes appear on top. Draw per-edge so we can dim edges
     // that are outside the focus region (at least one endpoint not focused).
     if ((graph as any).edges && (graph as any).edges.length > 0) {
@@ -353,6 +375,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     }
 
     for (const node of graph.nodes) {
+      const baseRadius = getBaseNodeRadius(node);
       const radius = getNodeRadius(node);
       const centerAlpha = getCenterAlpha(node);
       // compute glow radius: explicit pixel radius wins, otherwise use multiplier * node radius
@@ -390,11 +413,14 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         ctx.fill();
         ctx.restore();
 
-        // label below node (zoom-aware) - fade label with focus
-        const displayedFont = baseFontSize * scale; // px on screen
+        // label below node (zoom-aware) - grow with hover and fade with focus
+        const displayedFontBase = baseFontSize * scale; // px on screen without hover
+        // compute scaleFactor from radius/baseRadius to match node growth
+        const scaleFactor = baseRadius > 0 ? radius / baseRadius : 1;
+        const displayedFont = displayedFontBase * scaleFactor;
         if (displayedFont >= hideBelow) {
           const clampedDisplayed = Math.max(minFontSize, Math.min(maxFontSize, displayedFont));
-          const fontToSet = Math.max(1, clampedDisplayed / Math.max(0.0001, scale));
+          const fontToSet = Math.max(1, (clampedDisplayed) / Math.max(0.0001, scale));
           ctx.save();
           ctx.font = `${fontToSet}px sans-serif`;
           ctx.globalAlpha = focus; // fade label in/out

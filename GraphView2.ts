@@ -192,7 +192,7 @@ class Graph2DController {
     if (typeof initialPhys.mouseAttractionRadius === 'number') initialGlow.glowRadiusPx = initialPhys.mouseAttractionRadius;
     this.renderer = createRenderer2D({ canvas, glow: initialGlow });
 
-    this.graph = await buildGraph(this.app);
+    this.graph = await buildGraph(this.app, { countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks) });
 
     // Restore saved positions from plugin settings (do not override saved positions)
     const vaultId = this.app.vault.getName();
@@ -482,7 +482,7 @@ class Graph2DController {
     // If the controller has been destroyed or no canvas, abort
     if (!this.canvas) return;
     try {
-      const newGraph = await buildGraph(this.app);
+      const newGraph = await buildGraph(this.app, { countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks) });
       this.graph = newGraph;
 
       // Restore saved positions for the new graph as with init

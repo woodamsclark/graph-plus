@@ -37,6 +37,8 @@ export interface GreaterGraphSettings {
     mouseAttractionStrength?: number;
     mouseAttractionExponent?: number;
   };
+  // whether to count duplicate links (multiple links between same files) when computing in/out degrees
+  countDuplicateLinks?: boolean;
   interaction?: {
     momentumScale?: number;
     dragThreshold?: number; // in screen pixels
@@ -484,6 +486,15 @@ class GreaterGraphSettingTab extends PluginSettingTab {
           }
         })
       );
+
+    // Count duplicate links option
+    new Setting(containerEl)
+      .setName('Count duplicate links')
+      .setDesc('If enabled, multiple links between the same two files will be counted when computing in/out degrees.')
+      .addToggle((t) => t.setValue(Boolean(this.plugin.settings.countDuplicateLinks)).onChange(async (v) => {
+        this.plugin.settings.countDuplicateLinks = Boolean(v);
+        await this.plugin.saveSettings();
+      }));
     
     // Mouse attractor settings
     new Setting(containerEl)
