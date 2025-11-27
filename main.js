@@ -1740,6 +1740,36 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       })
     );
+    new import_obsidian2.Setting(containerEl).setName("Mouse attraction radius (px)").setDesc("Maximum distance (in pixels) from cursor where the attraction applies.").addText(
+      (text) => text.setValue(String(phys.mouseAttractionRadius ?? 80)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionRadius = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Mouse attraction strength").setDesc("Base force scale applied toward the cursor when within radius (higher = stronger pull).").addText(
+      (text) => text.setValue(String(phys.mouseAttractionStrength ?? 0.15)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionStrength = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Mouse attraction exponent").setDesc("How sharply attraction ramps as the cursor approaches (typical values: 3\u20134).").addText(
+      (text) => text.setValue(String(phys.mouseAttractionExponent ?? 3.5)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num > 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionExponent = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
     containerEl.createEl("h2", { text: "Interaction" });
     const interaction = this.plugin.settings.interaction || {};
     new import_obsidian2.Setting(containerEl).setName("Drag momentum scale").setDesc("Multiplier applied to the sampled drag velocity when releasing a dragged node.").addText(
