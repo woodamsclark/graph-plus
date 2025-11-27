@@ -1,4 +1,4 @@
-import { App, TFile } from 'obsidian';
+import { App, TFile, CachedMetadata } from 'obsidian';
 
 export type GraphNodeType = 'note' | 'tag';
 
@@ -77,6 +77,86 @@ export async function buildGraph(app: App, options?: { countDuplicates?: boolean
         const rawCount = Number(targets[targetPath] || 1) || 1;
         const linkCount = countDuplicates ? rawCount : 1;
         edges.push({ id: key, sourceId: sourcePath, targetId: targetPath, linkCount, hasReverse: false });
+        edgeSet.add(key);
+      }
+    }
+  }
+
+  // Build tag nodes and note->tag edges
+  // Tag node id format: `tag:<name>`; label: `#<name>`; type: 'tag'
+  const tagNodeByName = new Map<string, GraphNode>();
+  function ensureTagNode(tagName: string): GraphNode {
+    let n = tagNodeByName.get(tagName);
+    if (n) return n;
+    n = {
+      id: `tag:${tagName}`,
+      label: `#${tagName}`,
+      x: 0,
+      y: 0,
+      z: 0,
+      filePath: '',
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      type: 'tag',
+      inDegree: 0,
+      outDegree: 0,
+      totalDegree: 0,
+    };
+    nodes.push(n);
+    tagNodeByName.set(tagName, n);
+    nodeByPath.set(n.id, n);
+    return n;
+  }
+
+  function extractTags(cache: CachedMetadata | null): string[] {
+    if (!cache) return [];
+    const found: string[] = [];
+    try {
+      // inline tags: cache.tags?: Array<{ tag: string }>
+      const inline = (cache as any).tags as Array<{ tag: string }> | undefined;
+      if (Array.isArray(inline)) {
+        for (const t of inline) {
+          if (!t || !t.tag) continue;
+          const raw = t.tag.startsWith('#') ? t.tag.slice(1) : t.tag;
+          if (raw) found.push(raw);
+        }
+      }
+    } catch {}
+    try {
+      // frontmatter tags: tags or tag; can be string or array
+      const fm = (cache as any).frontmatter || {};
+      const vals: any[] = [];
+      if (fm) {
+        if (Array.isArray(fm.tags)) vals.push(...fm.tags);
+        else if (typeof fm.tags === 'string') vals.push(fm.tags);
+        if (Array.isArray(fm.tag)) vals.push(...fm.tag);
+        else if (typeof fm.tag === 'string') vals.push(fm.tag);
+      }
+      for (const v of vals) {
+        if (!v) continue;
+        if (typeof v === 'string') {
+          const s = v.startsWith('#') ? v.slice(1) : v;
+          if (s) found.push(s);
+        }
+      }
+    } catch {}
+    // de-duplicate
+    const uniq = Array.from(new Set(found));
+    return uniq;
+  }
+
+  for (const file of files) {
+    const cache = app.metadataCache.getFileCache(file) as CachedMetadata | null;
+    const tags = extractTags(cache);
+    if (!tags || tags.length === 0) continue;
+    const noteNode = nodeByPath.get(file.path);
+    if (!noteNode) continue;
+    for (const tagName of tags) {
+      const tagNode = ensureTagNode(tagName);
+      const key = `${noteNode.id}->${tagNode.id}`;
+      if (!edgeSet.has(key)) {
+        edges.push({ id: key, sourceId: noteNode.id, targetId: tagNode.id, linkCount: 1, hasReverse: false });
         edgeSet.add(key);
       }
     }

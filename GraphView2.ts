@@ -1,6 +1,6 @@
 import { App, ItemView, WorkspaceLeaf, Plugin, TFile, Platform } from 'obsidian';
 import { buildGraph, GraphData } from './graph/buildGraph';
-import { layoutGraph2D } from './graph/layout2d';
+import { layoutGraph2D, layoutGraph3D } from './graph/layout2d';
 import { createRenderer2D, Renderer2D } from './graph/renderer2d';
 import { createSimulation, Simulation } from './graph/simulation';
 
@@ -244,7 +244,7 @@ class Graph2DController {
     this.renderer.setGraph(this.graph);
     // Layout only nodes that don't have saved positions so user-placed nodes remain where they were.
     if (needsLayout.length > 0) {
-      layoutGraph2D(this.graph, {
+      layoutGraph3D(this.graph, {
         width: rect.width || 300,
         height: rect.height || 200,
         margin: 32,
@@ -394,13 +394,21 @@ class Graph2DController {
       this.lastWorldY = world.y;
       this.lastDragTime = performance.now();
 
-      // Hit-test in world coords to see if a node was clicked
-      const hit = this.hitTestNode(world.x, world.y);
+      // Hit-test in screen coords to see if a node was clicked
+      const hit = this.hitTestNodeScreen(screenX, screenY);
       if (hit) {
-        this.draggingNode = hit;
-        // pin this node in the simulation so physics won't move it while dragging
-        try { if (this.simulation && (this.simulation as any).setPinnedNodes) (this.simulation as any).setPinnedNodes(new Set([hit.id])); } catch (e) {}
-        this.canvas.style.cursor = 'grabbing';
+        // prevent dragging tag nodes for now (projected plane)
+        if ((hit as any).type === 'tag') {
+          this.isPanning = true;
+          this.lastPanX = screenX;
+          this.lastPanY = screenY;
+          this.canvas.style.cursor = 'grab';
+        } else {
+          this.draggingNode = hit;
+          // pin this node in the simulation so physics won't move it while dragging
+          try { if (this.simulation && (this.simulation as any).setPinnedNodes) (this.simulation as any).setPinnedNodes(new Set([hit.id])); } catch (e) {}
+          this.canvas.style.cursor = 'grabbing';
+        }
       } else {
         // start panning
         this.isPanning = true;
@@ -891,7 +899,7 @@ class Graph2DController {
       if (this.renderer && this.graph) {
         this.renderer.setGraph(this.graph);
         if (needsLayout.length > 0) {
-          layoutGraph2D(this.graph, {
+          layoutGraph3D(this.graph, {
             width,
             height,
             margin: 32,
@@ -947,15 +955,18 @@ class Graph2DController {
 
   setNodeClickHandler(handler: ((node: any) => void) | null) { this.onNodeClick = handler; }
 
-  private hitTestNode(x: number, y: number) {
+  private hitTestNodeScreen(screenX: number, screenY: number) {
     if (!this.graph || !this.renderer) return null;
     let closest: any = null;
     let closestDist = Infinity;
     const hitPadding = 6;
+    const scale = (this.renderer as any).getScale ? (this.renderer as any).getScale() : 1;
     for (const node of this.graph.nodes) {
-      const dx = x - node.x; const dy = y - node.y; const distSq = dx*dx + dy*dy;
+      const sp = (this.renderer as any).getNodeScreenPosition ? (this.renderer as any).getNodeScreenPosition(node) : null;
+      if (!sp) continue;
       const nodeRadius = this.renderer.getNodeRadiusForHit ? this.renderer.getNodeRadiusForHit(node) : 8;
-      const hitR = nodeRadius + hitPadding;
+      const hitR = nodeRadius * Math.max(0.0001, scale) + hitPadding;
+      const dx = screenX - sp.x; const dy = screenY - sp.y; const distSq = dx*dx + dy*dy;
       if (distSq <= hitR*hitR && distSq < closestDist) { closestDist = distSq; closest = node; }
     }
     return closest;
@@ -1003,8 +1014,7 @@ class Graph2DController {
 
   handleClick(screenX: number, screenY: number): void {
     if (!this.graph || !this.onNodeClick || !this.renderer) return;
-    const world = (this.renderer as any).screenToWorld(screenX, screenY);
-    const node = this.hitTestNode(world.x, world.y);
+    const node = this.hitTestNodeScreen(screenX, screenY);
     if (!node) return;
     try { this.onNodeClick(node); } catch (e) { console.error('Graph2DController.onNodeClick handler error', e); }
   }
@@ -1027,10 +1037,14 @@ class Graph2DController {
     } else {
       let closestDist = Infinity; const hitPadding = 6;
       for (const node of this.graph.nodes) {
-        const r = (this.renderer as any).getNodeRadiusForHit(node) + hitPadding;
-        const dx = node.x - world.x;
-        const dy = node.y - world.y;
-        const d = Math.sqrt(dx * dx + dy * dy);
+        const screenPos = (this.renderer as any).getNodeScreenPosition ? (this.renderer as any).getNodeScreenPosition(node) : null;
+        if (!screenPos) continue;
+        const radiusWorld = (this.renderer as any).getNodeRadiusForHit ? (this.renderer as any).getNodeRadiusForHit(node) : 8;
+        const scale = (this.renderer as any).getScale ? (this.renderer as any).getScale() : 1;
+        const r = radiusWorld * Math.max(0.0001, scale) + hitPadding;
+        const dxs = (screenPos.x) - screenX;
+        const dys = (screenPos.y) - screenY;
+        const d = Math.sqrt(dxs * dxs + dys * dys);
         if (d < r && d < closestDist) {
           closest = node;
           closestDist = d;

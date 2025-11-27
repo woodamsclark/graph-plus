@@ -235,6 +235,16 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
     const scale = dt * 60;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
+      // clamp planes: keep notes on z=0, tags on x=0
+      if ((n as any).type === 'tag') {
+        // do not allow x motion
+        n.vx = 0;
+        n.x = 0;
+      } else {
+        // note (default)
+        n.z = 0;
+        n.vz = 0;
+      }
       n.x += (n.vx || 0) * scale;
       n.y += (n.vy || 0) * scale;
       // keep z static during Step 1 (no change in visuals):

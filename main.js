@@ -68,6 +68,92 @@ async function buildGraph(app, options) {
       }
     }
   }
+  const tagNodeByName = /* @__PURE__ */ new Map();
+  function ensureTagNode(tagName) {
+    let n = tagNodeByName.get(tagName);
+    if (n)
+      return n;
+    n = {
+      id: `tag:${tagName}`,
+      label: `#${tagName}`,
+      x: 0,
+      y: 0,
+      z: 0,
+      filePath: "",
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      type: "tag",
+      inDegree: 0,
+      outDegree: 0,
+      totalDegree: 0
+    };
+    nodes.push(n);
+    tagNodeByName.set(tagName, n);
+    nodeByPath.set(n.id, n);
+    return n;
+  }
+  function extractTags(cache) {
+    if (!cache)
+      return [];
+    const found = [];
+    try {
+      const inline = cache.tags;
+      if (Array.isArray(inline)) {
+        for (const t of inline) {
+          if (!t || !t.tag)
+            continue;
+          const raw = t.tag.startsWith("#") ? t.tag.slice(1) : t.tag;
+          if (raw)
+            found.push(raw);
+        }
+      }
+    } catch {
+    }
+    try {
+      const fm = cache.frontmatter || {};
+      const vals = [];
+      if (fm) {
+        if (Array.isArray(fm.tags))
+          vals.push(...fm.tags);
+        else if (typeof fm.tags === "string")
+          vals.push(fm.tags);
+        if (Array.isArray(fm.tag))
+          vals.push(...fm.tag);
+        else if (typeof fm.tag === "string")
+          vals.push(fm.tag);
+      }
+      for (const v of vals) {
+        if (!v)
+          continue;
+        if (typeof v === "string") {
+          const s = v.startsWith("#") ? v.slice(1) : v;
+          if (s)
+            found.push(s);
+        }
+      }
+    } catch {
+    }
+    const uniq = Array.from(new Set(found));
+    return uniq;
+  }
+  for (const file of files) {
+    const cache = app.metadataCache.getFileCache(file);
+    const tags = extractTags(cache);
+    if (!tags || tags.length === 0)
+      continue;
+    const noteNode = nodeByPath.get(file.path);
+    if (!noteNode)
+      continue;
+    for (const tagName of tags) {
+      const tagNode = ensureTagNode(tagName);
+      const key = `${noteNode.id}->${tagNode.id}`;
+      if (!edgeSet.has(key)) {
+        edges.push({ id: key, sourceId: noteNode.id, targetId: tagNode.id, linkCount: 1, hasReverse: false });
+        edgeSet.add(key);
+      }
+    }
+  }
   for (const e of edges) {
     const src = nodeByPath.get(e.sourceId);
     const tgt = nodeByPath.get(e.targetId);
@@ -96,14 +182,15 @@ async function buildGraph(app, options) {
 }
 
 // graph/layout2d.ts
-function layoutGraph2D(graph, options) {
-  const { width, height, margin = 32 } = options;
+function layoutGraph3D(graph, options) {
+  const { width, height } = options;
   const allNodes = graph.nodes;
   if (!allNodes || allNodes.length === 0)
     return;
   const centerX = options.centerX ?? width / 2;
   const centerY = options.centerY ?? height / 2;
   const jitter = typeof options.jitter === "number" ? options.jitter : 8;
+  const tagZSpread = typeof options.tagZSpread === "number" ? options.tagZSpread : 400;
   const nodes = options.onlyNodes ?? allNodes;
   if (!nodes || nodes.length === 0)
     return;
@@ -111,9 +198,15 @@ function layoutGraph2D(graph, options) {
     const node = nodes[i];
     const rx = (Math.random() * 2 - 1) * jitter;
     const ry = (Math.random() * 2 - 1) * jitter;
-    node.x = centerX + rx;
-    node.y = centerY + ry;
-    node.z = 0;
+    if (node.type === "tag") {
+      node.x = 0;
+      node.y = centerY + ry;
+      node.z = (Math.random() - 0.5) * tagZSpread;
+    } else {
+      node.x = centerX + rx;
+      node.y = centerY + ry;
+      node.z = 0;
+    }
   }
   if (options.centerOnLargestNode && !options.onlyNodes) {
     let centerNode = null;
@@ -126,8 +219,15 @@ function layoutGraph2D(graph, options) {
       }
     }
     if (centerNode) {
-      centerNode.x = centerX;
-      centerNode.y = centerY;
+      if (centerNode.type === "tag") {
+        centerNode.x = 0;
+        centerNode.y = centerY;
+        centerNode.z = 0;
+      } else {
+        centerNode.x = centerX;
+        centerNode.y = centerY;
+        centerNode.z = 0;
+      }
     }
   }
 }
@@ -220,6 +320,13 @@ function createRenderer2D(options) {
   let offsetY = 0;
   const minScale = 0.25;
   const maxScale = 4;
+  const TAG_Z_PROJ = 0.6;
+  function getDrawPosition(node) {
+    if (node && node.type === "tag") {
+      return { x: (node.x || 0) + (node.z || 0) * TAG_Z_PROJ, y: node.y || 0 };
+    }
+    return { x: node.x || 0, y: node.y || 0 };
+  }
   function setGraph(g) {
     graph = g;
     nodeById = /* @__PURE__ */ new Map();
@@ -335,8 +442,9 @@ function createRenderer2D(options) {
     const outerR = radius * distanceOuterMultiplier;
     if (outerR <= innerR || outerR <= 0)
       return 0;
-    const dx = mouseX - node.x;
-    const dy = mouseY - node.y;
+    const p = getDrawPosition(node);
+    const dx = mouseX - p.x;
+    const dy = mouseY - p.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist <= innerR)
       return 1;
@@ -478,6 +586,8 @@ function createRenderer2D(options) {
         const tgt = nodeById.get(edge.targetId);
         if (!src || !tgt)
           continue;
+        const srcP = getDrawPosition(src);
+        const tgtP = getDrawPosition(tgt);
         const srcF = nodeFocusMap.get(edge.sourceId) ?? 1;
         const tgtF = nodeFocusMap.get(edge.targetId) ?? 1;
         const edgeFocus = (srcF + tgtF) * 0.5;
@@ -498,8 +608,8 @@ function createRenderer2D(options) {
         ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${alpha})`;
         const isMutual = !!edge.hasReverse && drawMutualDoubleLines;
         if (isMutual) {
-          const dx = tgt.x - src.x;
-          const dy = tgt.y - src.y;
+          const dx = tgtP.x - srcP.x;
+          const dy = tgtP.y - srcP.y;
           const len = Math.sqrt(dx * dx + dy * dy) || 1;
           const ux = dx / len;
           const uy = dy / len;
@@ -508,19 +618,19 @@ function createRenderer2D(options) {
           const offsetPx = Math.max(2, screenW * 0.6);
           const offsetWorld = offsetPx / Math.max(1e-4, scale);
           ctx.beginPath();
-          ctx.moveTo(src.x + perpX * offsetWorld, src.y + perpY * offsetWorld);
-          ctx.lineTo(tgt.x + perpX * offsetWorld, tgt.y + perpY * offsetWorld);
+          ctx.moveTo(srcP.x + perpX * offsetWorld, srcP.y + perpY * offsetWorld);
+          ctx.lineTo(tgtP.x + perpX * offsetWorld, tgtP.y + perpY * offsetWorld);
           ctx.lineWidth = worldLineWidth;
           ctx.stroke();
           ctx.beginPath();
-          ctx.moveTo(src.x - perpX * offsetWorld, src.y - perpY * offsetWorld);
-          ctx.lineTo(tgt.x - perpX * offsetWorld, tgt.y - perpY * offsetWorld);
+          ctx.moveTo(srcP.x - perpX * offsetWorld, srcP.y - perpY * offsetWorld);
+          ctx.lineTo(tgtP.x - perpX * offsetWorld, tgtP.y - perpY * offsetWorld);
           ctx.lineWidth = worldLineWidth;
           ctx.stroke();
         } else {
           ctx.beginPath();
-          ctx.moveTo(src.x, src.y);
-          ctx.lineTo(tgt.x, tgt.y);
+          ctx.moveTo(srcP.x, srcP.y);
+          ctx.lineTo(tgtP.x, tgtP.y);
           ctx.lineWidth = worldLineWidth;
           ctx.stroke();
         }
@@ -542,6 +652,7 @@ function createRenderer2D(options) {
     } catch (e) {
     }
     for (const node of graph.nodes) {
+      const p = getDrawPosition(node);
       const baseRadius = getBaseNodeRadius(node);
       const radius = getNodeRadius(node);
       const centerAlpha = getCenterAlpha(node);
@@ -553,21 +664,21 @@ function createRenderer2D(options) {
         const dimCenter = clamp01(getBaseCenterAlpha(node) * dimFactor);
         const fullCenter = centerAlpha;
         const blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
-        const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
+        const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
         gradient.addColorStop(0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter})`);
         gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.5})`);
         gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.15})`);
         gradient.addColorStop(1, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0)`);
         ctx.save();
         ctx.beginPath();
-        ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, glowRadius, 0, Math.PI * 2);
         ctx.fillStyle = gradient;
         ctx.fill();
         ctx.restore();
         const bodyAlpha = nodeMinBodyAlpha + (1 - nodeMinBodyAlpha) * focus;
         ctx.save();
         ctx.beginPath();
-        ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
         const accent = colorToRgb(themeNodeColor);
         ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${bodyAlpha})`;
         ctx.fill();
@@ -583,7 +694,7 @@ function createRenderer2D(options) {
           ctx.globalAlpha = focus;
           ctx.fillStyle = labelCss || "#ffffff";
           const verticalPadding = 4;
-          ctx.fillText(node.label, node.x, node.y + radius + verticalPadding);
+          ctx.fillText(node.label, p.x, p.y + radius + verticalPadding);
           ctx.restore();
         }
       } else {
@@ -591,7 +702,7 @@ function createRenderer2D(options) {
         const faintAlpha = 0.15 * (1 - focus) + 0.1 * focus;
         ctx.save();
         ctx.beginPath();
-        ctx.arc(node.x, node.y, radius * 0.9, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, radius * 0.9, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${faintAlpha})`;
         ctx.fill();
         ctx.restore();
@@ -643,6 +754,13 @@ function createRenderer2D(options) {
   function screenToWorld(screenX, screenY) {
     return { x: (screenX - offsetX) / scale, y: (screenY - offsetY) / scale };
   }
+  function getNodeScreenPosition(node) {
+    const p = getDrawPosition(node);
+    return { x: p.x * scale + offsetX, y: p.y * scale + offsetY };
+  }
+  function getScale() {
+    return scale;
+  }
   function zoomAt(screenX, screenY, factor) {
     if (factor <= 0)
       return;
@@ -674,7 +792,9 @@ function createRenderer2D(options) {
     setRenderOptions,
     zoomAt,
     panBy,
-    screenToWorld
+    screenToWorld,
+    getNodeScreenPosition,
+    getScale
   };
 }
 
@@ -863,6 +983,13 @@ function createSimulation(nodes, edges, options) {
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
+      if (n.type === "tag") {
+        n.vx = 0;
+        n.x = 0;
+      } else {
+        n.z = 0;
+        n.vz = 0;
+      }
       n.x += (n.vx || 0) * scale;
       n.y += (n.vy || 0) * scale;
     }
@@ -1147,7 +1274,7 @@ var Graph2DController = class {
     const centerY = (rect.height || 200) / 2;
     this.renderer.setGraph(this.graph);
     if (needsLayout.length > 0) {
-      layoutGraph2D(this.graph, {
+      layoutGraph3D(this.graph, {
         width: rect.width || 300,
         height: rect.height || 200,
         margin: 32,
@@ -1275,15 +1402,22 @@ var Graph2DController = class {
       this.lastWorldX = world.x;
       this.lastWorldY = world.y;
       this.lastDragTime = performance.now();
-      const hit = this.hitTestNode(world.x, world.y);
+      const hit = this.hitTestNodeScreen(screenX, screenY);
       if (hit) {
-        this.draggingNode = hit;
-        try {
-          if (this.simulation && this.simulation.setPinnedNodes)
-            this.simulation.setPinnedNodes(/* @__PURE__ */ new Set([hit.id]));
-        } catch (e) {
+        if (hit.type === "tag") {
+          this.isPanning = true;
+          this.lastPanX = screenX;
+          this.lastPanY = screenY;
+          this.canvas.style.cursor = "grab";
+        } else {
+          this.draggingNode = hit;
+          try {
+            if (this.simulation && this.simulation.setPinnedNodes)
+              this.simulation.setPinnedNodes(/* @__PURE__ */ new Set([hit.id]));
+          } catch (e) {
+          }
+          this.canvas.style.cursor = "grabbing";
         }
-        this.canvas.style.cursor = "grabbing";
       } else {
         this.isPanning = true;
         this.lastPanX = screenX;
@@ -1930,7 +2064,7 @@ var Graph2DController = class {
       if (this.renderer && this.graph) {
         this.renderer.setGraph(this.graph);
         if (needsLayout.length > 0) {
-          layoutGraph2D(this.graph, {
+          layoutGraph3D(this.graph, {
             width,
             height,
             margin: 32,
@@ -2008,18 +2142,22 @@ var Graph2DController = class {
   setNodeClickHandler(handler) {
     this.onNodeClick = handler;
   }
-  hitTestNode(x, y) {
+  hitTestNodeScreen(screenX, screenY) {
     if (!this.graph || !this.renderer)
       return null;
     let closest = null;
     let closestDist = Infinity;
     const hitPadding = 6;
+    const scale = this.renderer.getScale ? this.renderer.getScale() : 1;
     for (const node of this.graph.nodes) {
-      const dx = x - node.x;
-      const dy = y - node.y;
-      const distSq = dx * dx + dy * dy;
+      const sp = this.renderer.getNodeScreenPosition ? this.renderer.getNodeScreenPosition(node) : null;
+      if (!sp)
+        continue;
       const nodeRadius = this.renderer.getNodeRadiusForHit ? this.renderer.getNodeRadiusForHit(node) : 8;
-      const hitR = nodeRadius + hitPadding;
+      const hitR = nodeRadius * Math.max(1e-4, scale) + hitPadding;
+      const dx = screenX - sp.x;
+      const dy = screenY - sp.y;
+      const distSq = dx * dx + dy * dy;
       if (distSq <= hitR * hitR && distSq < closestDist) {
         closestDist = distSq;
         closest = node;
@@ -2076,8 +2214,7 @@ var Graph2DController = class {
   handleClick(screenX, screenY) {
     if (!this.graph || !this.onNodeClick || !this.renderer)
       return;
-    const world = this.renderer.screenToWorld(screenX, screenY);
-    const node = this.hitTestNode(world.x, world.y);
+    const node = this.hitTestNodeScreen(screenX, screenY);
     if (!node)
       return;
     try {
@@ -2100,10 +2237,15 @@ var Graph2DController = class {
       let closestDist = Infinity;
       const hitPadding = 6;
       for (const node of this.graph.nodes) {
-        const r = this.renderer.getNodeRadiusForHit(node) + hitPadding;
-        const dx = node.x - world.x;
-        const dy = node.y - world.y;
-        const d = Math.sqrt(dx * dx + dy * dy);
+        const screenPos = this.renderer.getNodeScreenPosition ? this.renderer.getNodeScreenPosition(node) : null;
+        if (!screenPos)
+          continue;
+        const radiusWorld = this.renderer.getNodeRadiusForHit ? this.renderer.getNodeRadiusForHit(node) : 8;
+        const scale = this.renderer.getScale ? this.renderer.getScale() : 1;
+        const r = radiusWorld * Math.max(1e-4, scale) + hitPadding;
+        const dxs = screenPos.x - screenX;
+        const dys = screenPos.y - screenY;
+        const d = Math.sqrt(dxs * dxs + dys * dys);
         if (d < r && d < closestDist) {
           closest = node;
           closestDist = d;

@@ -44,6 +44,9 @@ export interface Renderer2D {
   panBy(screenDx: number, screenDy: number): void;
   screenToWorld(screenX: number, screenY: number): { x: number; y: number };
   setRenderOptions?(opts: { mutualDoubleLines?: boolean }): void;
+  // projection helpers for hit-testing
+  getNodeScreenPosition?(node: any): { x: number; y: number };
+  getScale?(): number;
 }
 
 export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
@@ -143,6 +146,17 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let offsetY = 0;
   const minScale = 0.25;
   const maxScale = 4;
+
+  // simple projection for tag nodes to appear on a secondary plane
+  // We keep notes as-is; tags get an X offset proportional to their Z
+  const TAG_Z_PROJ = 0.6; // how much z shifts x visually for tag nodes
+
+  function getDrawPosition(node: any): { x: number; y: number } {
+    if (node && node.type === 'tag') {
+      return { x: (node.x || 0) + (node.z || 0) * TAG_Z_PROJ, y: node.y || 0 };
+    }
+    return { x: node.x || 0, y: node.y || 0 };
+  }
 
   function setGraph(g: GraphData) {
     graph = g;
@@ -274,9 +288,9 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     const innerR = radius * distanceInnerMultiplier;
     const outerR = radius * distanceOuterMultiplier;
     if (outerR <= innerR || outerR <= 0) return 0;
-
-    const dx = mouseX - node.x;
-    const dy = mouseY - node.y;
+    const p = getDrawPosition(node);
+    const dx = mouseX - p.x;
+    const dy = mouseY - p.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist <= innerR) return 1;
     if (dist >= outerR) return 0;
@@ -413,6 +427,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         const src = nodeById.get(edge.sourceId);
         const tgt = nodeById.get(edge.targetId);
         if (!src || !tgt) continue;
+        const srcP = getDrawPosition(src);
+        const tgtP = getDrawPosition(tgt);
 
         const srcF = nodeFocusMap.get(edge.sourceId) ?? 1;
         const tgtF = nodeFocusMap.get(edge.targetId) ?? 1;
@@ -438,8 +454,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         // mutual edges: draw two parallel lines offset perpendicular to the edge when enabled
         const isMutual = !!edge.hasReverse && drawMutualDoubleLines;
         if (isMutual) {
-          const dx = tgt.x - src.x;
-          const dy = tgt.y - src.y;
+          const dx = tgtP.x - srcP.x;
+          const dy = tgtP.y - srcP.y;
           const len = Math.sqrt(dx * dx + dy * dy) || 1;
           const ux = dx / len;
           const uy = dy / len;
@@ -451,21 +467,21 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
           // first line (offset +)
           ctx.beginPath();
-          ctx.moveTo(src.x + perpX * offsetWorld, src.y + perpY * offsetWorld);
-          ctx.lineTo(tgt.x + perpX * offsetWorld, tgt.y + perpY * offsetWorld);
+          ctx.moveTo(srcP.x + perpX * offsetWorld, srcP.y + perpY * offsetWorld);
+          ctx.lineTo(tgtP.x + perpX * offsetWorld, tgtP.y + perpY * offsetWorld);
           ctx.lineWidth = worldLineWidth;
           ctx.stroke();
 
           // second line (offset -)
           ctx.beginPath();
-          ctx.moveTo(src.x - perpX * offsetWorld, src.y - perpY * offsetWorld);
-          ctx.lineTo(tgt.x - perpX * offsetWorld, tgt.y - perpY * offsetWorld);
+          ctx.moveTo(srcP.x - perpX * offsetWorld, srcP.y - perpY * offsetWorld);
+          ctx.lineTo(tgtP.x - perpX * offsetWorld, tgtP.y - perpY * offsetWorld);
           ctx.lineWidth = worldLineWidth;
           ctx.stroke();
         } else {
           ctx.beginPath();
-          ctx.moveTo(src.x, src.y);
-          ctx.lineTo(tgt.x, tgt.y);
+          ctx.moveTo(srcP.x, srcP.y);
+          ctx.lineTo(tgtP.x, tgtP.y);
           ctx.lineWidth = worldLineWidth;
           ctx.stroke();
         }
@@ -494,6 +510,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     }
 
     for (const node of graph.nodes) {
+      const p = getDrawPosition(node);
       const baseRadius = getBaseNodeRadius(node);
       const radius = getNodeRadius(node);
       const centerAlpha = getCenterAlpha(node);
@@ -509,7 +526,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         const dimCenter = clamp01(getBaseCenterAlpha(node) * dimFactor);
         const fullCenter = centerAlpha;
         const blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
-        const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
+        const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
         gradient.addColorStop(0.0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter})`);
         gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.5})`);
         gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.15})`);
@@ -517,7 +534,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
         ctx.save();
         ctx.beginPath();
-        ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, glowRadius, 0, Math.PI * 2);
         ctx.fillStyle = gradient;
         ctx.fill();
         ctx.restore();
@@ -526,7 +543,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         const bodyAlpha = nodeMinBodyAlpha + (1 - nodeMinBodyAlpha) * focus;
         ctx.save();
         ctx.beginPath();
-        ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
         const accent = colorToRgb(themeNodeColor);
         ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${bodyAlpha})`;
         ctx.fill();
@@ -545,7 +562,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
           ctx.globalAlpha = focus; // fade label in/out
           ctx.fillStyle = labelCss || '#ffffff';
           const verticalPadding = 4; // world units; will be scaled by transform
-          ctx.fillText(node.label, node.x, node.y + radius + verticalPadding);
+          ctx.fillText(node.label, p.x, p.y + radius + verticalPadding);
           ctx.restore();
         }
       } else {
@@ -554,7 +571,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         const faintAlpha = 0.15 * (1 - focus) + 0.1 * focus; // slightly adjust
         ctx.save();
         ctx.beginPath();
-        ctx.arc(node.x, node.y, radius * 0.9, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, radius * 0.9, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${faintAlpha})`;
         ctx.fill();
         ctx.restore();
@@ -612,6 +629,13 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     return { x: (screenX - offsetX) / scale, y: (screenY - offsetY) / scale };
   }
 
+  function getNodeScreenPosition(node: any): { x: number; y: number } {
+    const p = getDrawPosition(node);
+    return { x: p.x * scale + offsetX, y: p.y * scale + offsetY };
+  }
+
+  function getScale() { return scale; }
+
   function zoomAt(screenX: number, screenY: number, factor: number) {
     if (factor <= 0) return;
     const worldBefore = screenToWorld(screenX, screenY);
@@ -643,6 +667,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     zoomAt,
     panBy,
     screenToWorld,
+    getNodeScreenPosition,
+    getScale,
   };
 }
 
