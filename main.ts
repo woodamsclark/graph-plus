@@ -33,6 +33,8 @@ export interface GreaterGraphSettings {
     momentumScale?: number;
     dragThreshold?: number; // in screen pixels
   };
+  // persistent node positions keyed by file path
+  nodePositions?: Record<string, { x: number; y: number }>;
 }
 
 export const DEFAULT_SETTINGS: GreaterGraphSettings = {
@@ -66,6 +68,7 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     momentumScale: 0.12,
     dragThreshold: 4,
   },
+  nodePositions: {},
 };
 
 export default class GreaterGraphPlugin extends Plugin {

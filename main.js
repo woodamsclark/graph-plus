@@ -80,12 +80,15 @@ async function buildGraph(app) {
 // graph/layout2d.ts
 function layoutGraph2D(graph, options) {
   const { width, height, margin = 32 } = options;
-  const nodes = graph.nodes;
-  if (!nodes || nodes.length === 0)
+  const allNodes = graph.nodes;
+  if (!allNodes || allNodes.length === 0)
     return;
   const centerX = options.centerX ?? width / 2;
   const centerY = options.centerY ?? height / 2;
   const jitter = typeof options.jitter === "number" ? options.jitter : 8;
+  const nodes = options.onlyNodes ?? allNodes;
+  if (!nodes || nodes.length === 0)
+    return;
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
     const rx = (Math.random() * 2 - 1) * jitter;
@@ -94,12 +97,10 @@ function layoutGraph2D(graph, options) {
     node.y = centerY + ry;
     node.z = 0;
   }
-  if (options.centerOnLargestNode) {
-    const centerX2 = options.centerX ?? width / 2;
-    const centerY2 = options.centerY ?? height / 2;
+  if (options.centerOnLargestNode && !options.onlyNodes) {
     let centerNode = null;
     let maxDeg = -Infinity;
-    for (const n of nodes) {
+    for (const n of allNodes) {
       const d = n.totalDegree || 0;
       if (d > maxDeg) {
         maxDeg = d;
@@ -107,8 +108,8 @@ function layoutGraph2D(graph, options) {
       }
     }
     if (centerNode) {
-      centerNode.x = centerX2;
-      centerNode.y = centerY2;
+      centerNode.x = centerX;
+      centerNode.y = centerY;
     }
   }
 }
@@ -786,6 +787,29 @@ var Graph2DController = class {
   dragVy = 0;
   momentumScale = 0.12;
   dragThreshold = 4;
+  // persistence
+  saveNodePositionsDebounced = null;
+  saveNodePositions() {
+    if (!this.graph)
+      return;
+    try {
+      const map = this.plugin.settings.nodePositions || {};
+      for (const node of this.graph.nodes) {
+        if (!Number.isFinite(node.x) || !Number.isFinite(node.y))
+          continue;
+        if (node.filePath)
+          map[node.filePath] = { x: node.x, y: node.y };
+      }
+      this.plugin.settings.nodePositions = map;
+      try {
+        this.plugin.saveSettings && this.plugin.saveSettings();
+      } catch (e) {
+        console.error("Failed to save node positions", e);
+      }
+    } catch (e) {
+      console.error("Greater Graph: saveNodePositions error", e);
+    }
+  }
   constructor(app, containerEl, plugin) {
     this.app = app;
     this.containerEl = containerEl;
@@ -800,6 +824,19 @@ var Graph2DController = class {
     this.canvas = canvas;
     this.renderer = createRenderer2D({ canvas, glow: this.plugin.settings?.glow });
     this.graph = await buildGraph(this.app);
+    const savedPositions = this.plugin.settings?.nodePositions || {};
+    const needsLayout = [];
+    if (this.graph && this.graph.nodes) {
+      for (const node of this.graph.nodes) {
+        const s = savedPositions[node.filePath];
+        if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) {
+          node.x = s.x;
+          node.y = s.y;
+        } else {
+          needsLayout.push(node);
+        }
+      }
+    }
     this.adjacency = /* @__PURE__ */ new Map();
     if (this.graph && this.graph.edges) {
       for (const e of this.graph.edges) {
@@ -815,14 +852,18 @@ var Graph2DController = class {
     const centerX = (rect.width || 300) / 2;
     const centerY = (rect.height || 200) / 2;
     this.renderer.setGraph(this.graph);
-    layoutGraph2D(this.graph, {
-      width: rect.width || 300,
-      height: rect.height || 200,
-      margin: 32,
-      centerX,
-      centerY,
-      centerOnLargestNode: true
-    });
+    if (needsLayout.length > 0) {
+      layoutGraph2D(this.graph, {
+        width: rect.width || 300,
+        height: rect.height || 200,
+        margin: 32,
+        centerX,
+        centerY,
+        centerOnLargestNode: true,
+        onlyNodes: needsLayout
+      });
+    } else {
+    }
     this.renderer.resize(rect.width || 300, rect.height || 200);
     let centerNodeId = void 0;
     if (this.graph && this.graph.nodes && this.graph.nodes.length > 0) {
@@ -849,6 +890,9 @@ var Graph2DController = class {
     this.running = true;
     this.lastTime = null;
     this.animationFrame = requestAnimationFrame(this.animationLoop);
+    if (!this.saveNodePositionsDebounced) {
+      this.saveNodePositionsDebounced = debounce(() => this.saveNodePositions(), 2e3, true);
+    }
     this.mouseMoveHandler = (ev) => {
       if (!this.canvas || !this.renderer)
         return;
@@ -967,6 +1011,11 @@ var Graph2DController = class {
       this.isPanning = false;
       this.draggingNode = null;
       this.canvas.style.cursor = "default";
+      try {
+        if (this.saveNodePositionsDebounced)
+          this.saveNodePositionsDebounced();
+      } catch (e) {
+      }
     };
     this.canvas.addEventListener("mousemove", this.mouseMoveHandler);
     this.canvas.addEventListener("mouseleave", this.mouseLeaveHandler);
@@ -1012,6 +1061,11 @@ var Graph2DController = class {
       this.simulation.tick(dt);
     if (this.renderer)
       this.renderer.render();
+    try {
+      if (this.saveNodePositionsDebounced)
+        this.saveNodePositionsDebounced();
+    } catch (e) {
+    }
     this.animationFrame = requestAnimationFrame(this.animationLoop);
   };
   resize(width, height) {
@@ -1031,6 +1085,19 @@ var Graph2DController = class {
     try {
       const newGraph = await buildGraph(this.app);
       this.graph = newGraph;
+      const savedPositions = this.plugin.settings?.nodePositions || {};
+      const needsLayout = [];
+      if (this.graph && this.graph.nodes) {
+        for (const node of this.graph.nodes) {
+          const s = savedPositions[node.filePath];
+          if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) {
+            node.x = s.x;
+            node.y = s.y;
+          } else {
+            needsLayout.push(node);
+          }
+        }
+      }
       this.adjacency = /* @__PURE__ */ new Map();
       if (this.graph && this.graph.edges) {
         for (const e of this.graph.edges) {
@@ -1049,14 +1116,17 @@ var Graph2DController = class {
       const centerY = height / 2;
       if (this.renderer && this.graph) {
         this.renderer.setGraph(this.graph);
-        layoutGraph2D(this.graph, {
-          width,
-          height,
-          margin: 32,
-          centerX,
-          centerY,
-          centerOnLargestNode: true
-        });
+        if (needsLayout.length > 0) {
+          layoutGraph2D(this.graph, {
+            width,
+            height,
+            margin: 32,
+            centerX,
+            centerY,
+            centerOnLargestNode: true,
+            onlyNodes: needsLayout
+          });
+        }
         this.renderer.resize(width, height);
       }
       if (this.simulation) {
@@ -1079,6 +1149,10 @@ var Graph2DController = class {
     }
   }
   destroy() {
+    try {
+      this.saveNodePositions();
+    } catch (e) {
+    }
     this.renderer?.destroy();
     if (this.canvas && this.canvas.parentElement)
       this.canvas.parentElement.removeChild(this.canvas);
@@ -1236,7 +1310,8 @@ var DEFAULT_SETTINGS = {
   interaction: {
     momentumScale: 0.12,
     dragThreshold: 4
-  }
+  },
+  nodePositions: {}
 };
 var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
   settings = DEFAULT_SETTINGS;

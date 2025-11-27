@@ -147,6 +147,25 @@ class Graph2DController {
   private dragVy: number = 0;
   private momentumScale: number = 0.12;
   private dragThreshold: number = 4;
+  // persistence
+  private saveNodePositionsDebounced: (() => void) | null = null;
+
+  private saveNodePositions(): void {
+    if (!this.graph) return;
+    try {
+      const map: Record<string, { x: number; y: number }> = (this.plugin as any).settings.nodePositions || {};
+      for (const node of this.graph.nodes) {
+        if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) continue;
+        if (node.filePath) map[node.filePath] = { x: node.x, y: node.y };
+      }
+      (this.plugin as any).settings.nodePositions = map;
+      // fire-and-forget save
+      try { (this.plugin as any).saveSettings && (this.plugin as any).saveSettings(); } catch (e) { console.error('Failed to save node positions', e); }
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('Greater Graph: saveNodePositions error', e);
+    }
+  }
 
   constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
     this.app = app;
@@ -166,6 +185,21 @@ class Graph2DController {
 
     this.graph = await buildGraph(this.app);
 
+    // Restore saved positions from plugin settings (do not override saved positions)
+    const savedPositions: Record<string, { x: number; y: number }> = (this.plugin as any).settings?.nodePositions || {};
+    const needsLayout: any[] = [];
+    if (this.graph && this.graph.nodes) {
+      for (const node of this.graph.nodes) {
+        const s = savedPositions[node.filePath];
+        if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) {
+          node.x = s.x;
+          node.y = s.y;
+        } else {
+          needsLayout.push(node);
+        }
+      }
+    }
+
     this.adjacency = new Map();
     if (this.graph && this.graph.edges) {
       for (const e of this.graph.edges) {
@@ -181,14 +215,20 @@ class Graph2DController {
     const centerY = (rect.height || 200) / 2;
 
     this.renderer.setGraph(this.graph);
-    layoutGraph2D(this.graph, {
-      width: rect.width || 300,
-      height: rect.height || 200,
-      margin: 32,
-      centerX,
-      centerY,
-      centerOnLargestNode: true,
-    });
+    // Layout only nodes that don't have saved positions so user-placed nodes remain where they were.
+    if (needsLayout.length > 0) {
+      layoutGraph2D(this.graph, {
+        width: rect.width || 300,
+        height: rect.height || 200,
+        margin: 32,
+        centerX,
+        centerY,
+        centerOnLargestNode: true,
+        onlyNodes: needsLayout,
+      });
+    } else {
+      // nothing to layout; ensure renderer has size
+    }
     this.renderer.resize(rect.width || 300, rect.height || 200);
 
     let centerNodeId: string | undefined = undefined;
@@ -219,6 +259,11 @@ class Graph2DController {
     this.running = true;
     this.lastTime = null;
     this.animationFrame = requestAnimationFrame(this.animationLoop);
+
+    // setup debounced saver for node positions
+    if (!this.saveNodePositionsDebounced) {
+      this.saveNodePositionsDebounced = debounce(() => this.saveNodePositions(), 2000, true);
+    }
 
     this.mouseMoveHandler = (ev: MouseEvent) => {
       if (!this.canvas || !this.renderer) return;
@@ -354,6 +399,8 @@ class Graph2DController {
       this.draggingNode = null;
       // preventClick remains true if a drag occurred; click handler will clear it
       this.canvas.style.cursor = 'default';
+      // save positions after a drag ends (debounced)
+      try { if (this.saveNodePositionsDebounced) this.saveNodePositionsDebounced(); } catch (e) {}
     };
 
     this.canvas.addEventListener('mousemove', this.mouseMoveHandler);
@@ -398,6 +445,8 @@ class Graph2DController {
     this.lastTime = timestamp;
     if (this.simulation) this.simulation.tick(dt);
     if (this.renderer) this.renderer.render();
+    // periodically persist node positions (debounced)
+    try { if (this.saveNodePositionsDebounced) this.saveNodePositionsDebounced(); } catch (e) {}
     this.animationFrame = requestAnimationFrame(this.animationLoop);
   };
 
@@ -419,6 +468,21 @@ class Graph2DController {
       const newGraph = await buildGraph(this.app);
       this.graph = newGraph;
 
+      // Restore saved positions for the new graph as with init
+      const savedPositions: Record<string, { x: number; y: number }> = (this.plugin as any).settings?.nodePositions || {};
+      const needsLayout: any[] = [];
+      if (this.graph && this.graph.nodes) {
+        for (const node of this.graph.nodes) {
+          const s = savedPositions[node.filePath];
+          if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) {
+            node.x = s.x;
+            node.y = s.y;
+          } else {
+            needsLayout.push(node);
+          }
+        }
+      }
+
       // rebuild adjacency
       this.adjacency = new Map<string, string[]>();
       if (this.graph && this.graph.edges) {
@@ -439,14 +503,17 @@ class Graph2DController {
 
       if (this.renderer && this.graph) {
         this.renderer.setGraph(this.graph);
-        layoutGraph2D(this.graph, {
-          width,
-          height,
-          margin: 32,
-          centerX,
-          centerY,
-          centerOnLargestNode: true,
-        });
+        if (needsLayout.length > 0) {
+          layoutGraph2D(this.graph, {
+            width,
+            height,
+            margin: 32,
+            centerX,
+            centerY,
+            centerOnLargestNode: true,
+            onlyNodes: needsLayout,
+          });
+        }
         this.renderer.resize(width, height);
       }
 
@@ -473,6 +540,8 @@ class Graph2DController {
   }
 
   destroy(): void {
+    // persist positions immediately when view is closed
+    try { this.saveNodePositions(); } catch (e) {}
     this.renderer?.destroy();
     if (this.canvas && this.canvas.parentElement) this.canvas.parentElement.removeChild(this.canvas);
     this.canvas = null;
