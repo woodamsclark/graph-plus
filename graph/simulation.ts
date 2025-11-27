@@ -24,10 +24,14 @@ export interface SimulationOptions {
   springLength: number;
   centerPull: number;
   damping: number;
-  // new optional fields
+  // 3D center point
   centerX?: number;
   centerY?: number;
+  centerZ?: number;
   centerNodeId?: string;
+  // plane constraint stiffness (soft springs to planes)
+  notePlaneStiffness?: number; // pull notes toward z = 0
+  tagPlaneStiffness?: number;  // pull tags toward x = 0
   // mouse attraction tuning
   mouseAttractionRadius?: number;
   mouseAttractionStrength?: number;
@@ -41,6 +45,8 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
   let springLength = options?.springLength ?? 100;
   let centerPull = options?.centerPull ?? 0.00;
   let damping = options?.damping ?? 0.9;
+  let notePlaneStiffness = options?.notePlaneStiffness ?? 0.02;
+  let tagPlaneStiffness = options?.tagPlaneStiffness ?? 0.02;
 
   // mouse attractor defaults
   let mouseAttractionRadius = options?.mouseAttractionRadius ?? 80;
@@ -51,6 +57,7 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
   // a reasonable default (bounding-box center of current node positions)
   let centerX: number | undefined = typeof options?.centerX === 'number' ? options!.centerX : undefined;
   let centerY: number | undefined = typeof options?.centerY === 'number' ? options!.centerY : undefined;
+  let centerZ: number | undefined = typeof options?.centerZ === 'number' ? options!.centerZ : 0;
   let centerNodeId = options?.centerNodeId ?? null;
   // If center not provided, compute bounding-box center from node positions
   if (typeof centerX !== 'number' || typeof centerY !== 'number') {
@@ -105,36 +112,26 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
         const b = nodes[j];
         let dx = a.x - b.x;
         let dy = a.y - b.y;
-        let distSq = dx * dx + dy * dy + 0.01;
-        // introduce a minimum separation distance to avoid huge forces
+        let dz = (a.z || 0) - (b.z || 0);
+        let distSq = dx * dx + dy * dy + dz * dz;
+        if (distSq === 0) distSq = 0.0001;
+        const dist = Math.sqrt(distSq);
+        // minimum separation to avoid extreme forces
         const minDist = 40;
-        let dist = Math.sqrt(distSq);
-        if (dist < 0.01) dist = 0.01;
-        const clamped = Math.max(dist, minDist);
-        const force = repulsionStrength / (clamped * clamped);
-        if (dist > 0) {
-          const fx = (dx / dist) * force;
-          const fy = (dy / dist) * force;
-          // apply to non-pinned nodes only
-          if (!pinnedNodes.has(a.id)) {
-            a.vx = (a.vx || 0) + fx;
-            a.vy = (a.vy || 0) + fy;
-          }
-          if (!pinnedNodes.has(b.id)) {
-            b.vx = (b.vx || 0) - fx;
-            b.vy = (b.vy || 0) - fy;
-          }
-        } else {
-          const fx = (Math.random() - 0.5) * 0.1;
-          const fy = (Math.random() - 0.5) * 0.1;
-          if (!pinnedNodes.has(a.id)) {
-            a.vx = (a.vx || 0) + fx;
-            a.vy = (a.vy || 0) + fy;
-          }
-          if (!pinnedNodes.has(b.id)) {
-            b.vx = (b.vx || 0) - fx;
-            b.vy = (b.vy || 0) - fy;
-          }
+        const effectiveDist = Math.max(dist, minDist);
+        const force = repulsionStrength / (effectiveDist * effectiveDist);
+        const fx = (dx / dist) * force;
+        const fy = (dy / dist) * force;
+        const fz = (dz / dist) * force;
+        if (!pinnedNodes.has(a.id)) {
+          a.vx = (a.vx || 0) + fx;
+          a.vy = (a.vy || 0) + fy;
+          a.vz = (a.vz || 0) + fz;
+        }
+        if (!pinnedNodes.has(b.id)) {
+          b.vx = (b.vx || 0) - fx;
+          b.vy = (b.vy || 0) - fy;
+          b.vz = (b.vz || 0) - fz;
         }
       }
     }
@@ -146,48 +143,49 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
       const a = nodeById.get(e.sourceId);
       const b = nodeById.get(e.targetId);
       if (!a || !b) continue;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
-      const diff = dist - springLength;
-      // use a tamed/non-linear spring to avoid explosive forces
-      const f = springStrength * Math.tanh(diff / 50);
+      const dx = (b.x - a.x);
+      const dy = (b.y - a.y);
+      const dz = ((b.z || 0) - (a.z || 0));
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.0001;
+      const displacement = dist - springLength;
+      const f = springStrength * Math.tanh(displacement / 50);
       const fx = (dx / dist) * f;
       const fy = (dy / dist) * f;
+      const fz = (dz / dist) * f;
       if (!pinnedNodes.has(a.id)) {
         a.vx = (a.vx || 0) + fx;
         a.vy = (a.vy || 0) + fy;
+        a.vz = (a.vz || 0) + fz;
       }
       if (!pinnedNodes.has(b.id)) {
         b.vx = (b.vx || 0) - fx;
         b.vy = (b.vy || 0) - fy;
+        b.vz = (b.vz || 0) - fz;
       }
     }
   }
 
   function applyCentering() {
     if (centerPull <= 0) return;
-    // use local numeric center variables to avoid undefined checks
     const cx = centerX ?? 0;
     const cy = centerY ?? 0;
-
-    // 1) Pull every node gently toward the screen center
+    const cz = centerZ ?? 0;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
-      const x = (n.x || 0) - cx;
-      const y = (n.y || 0) - cy;
-      const r = Math.sqrt(x * x + y * y) + 0.001;
-      const pull = centerPull * (r / 200);
-      n.vx = (n.vx || 0) + -(x / r) * pull;
-      n.vy = (n.vy || 0) + -(y / r) * pull;
+      const dx = (cx - (n.x || 0));
+      const dy = (cy - (n.y || 0));
+      const dz = (cz - (n.z || 0));
+      n.vx = (n.vx || 0) + dx * centerPull;
+      n.vy = (n.vy || 0) + dy * centerPull;
+      n.vz = (n.vz || 0) + dz * centerPull;
     }
-
-    // 2) Extra gentle correction to keep center node near screen center
     if (centerNode) {
-      const dx = (centerNode.x || 0) - cx;
-      const dy = (centerNode.y || 0) - cy;
-      centerNode.vx = (centerNode.vx || 0) - dx * centerPull * 0.5;
-      centerNode.vy = (centerNode.vy || 0) - dy * centerPull * 0.5;
+      const dx = (centerX ?? 0) - (centerNode.x || 0);
+      const dy = (centerY ?? 0) - (centerNode.y || 0);
+      const dz = (centerZ ?? 0) - (centerNode.z || 0);
+      centerNode.vx = (centerNode.vx || 0) + dx * centerPull * 0.5;
+      centerNode.vy = (centerNode.vy || 0) + dy * centerPull * 0.5;
+      centerNode.vz = (centerNode.vz || 0) + dz * centerPull * 0.5;
     }
   }
 
@@ -196,10 +194,10 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
       if (pinnedNodes.has(n.id)) continue;
       n.vx = (n.vx || 0) * damping;
       n.vy = (n.vy || 0) * damping;
-      // future: n.vz = (n.vz || 0) * damping; // keep z dynamics disabled for now
-
+      n.vz = (n.vz || 0) * damping;
       if (Math.abs(n.vx) < 0.001) n.vx = 0;
       if (Math.abs(n.vy) < 0.001) n.vy = 0;
+      if (Math.abs(n.vz) < 0.001) n.vz = 0;
     }
   }
 
@@ -230,34 +228,42 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
     node.vy = (node.vy || 0) + fy;
   }
 
+  function applyPlaneConstraints() {
+    const noteK = notePlaneStiffness ?? 0;
+    const tagK = tagPlaneStiffness ?? 0;
+    if (noteK === 0 && tagK === 0) return;
+    for (const n of nodes) {
+      if (pinnedNodes.has(n.id)) continue;
+      if ((n as any).type === 'note' && noteK > 0) {
+        const dz = 0 - (n.z || 0);
+        n.vz = (n.vz || 0) + dz * noteK;
+      } else if ((n as any).type === 'tag' && tagK > 0) {
+        const dx = 0 - (n.x || 0);
+        n.vx = (n.vx || 0) + dx * tagK;
+      }
+    }
+  }
+
   function integrate(dt: number) {
-    // scale by 60 so dt around 1/60 gives reasonable movement
     const scale = dt * 60;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
-      // clamp planes: keep notes on z=0, tags on x=0
-      if ((n as any).type === 'tag') {
-        // do not allow x motion
-        n.vx = 0;
-        n.x = 0;
-      } else {
-        // note (default)
-        n.z = 0;
-        n.vz = 0;
-      }
       n.x += (n.vx || 0) * scale;
       n.y += (n.vy || 0) * scale;
-      // keep z static during Step 1 (no change in visuals):
-      // n.z += (n.vz || 0) * scale;
+      n.z = (n.z || 0) + (n.vz || 0) * scale;
+      // optional gentle hard clamp epsilon
+      if ((n as any).type === 'note' && Math.abs(n.z) < 0.0001) n.z = 0;
+      if ((n as any).type === 'tag' && Math.abs(n.x) < 0.0001) n.x = 0;
     }
   }
 
   function tick(dt: number) {
     if (!running) return;
+    if (!nodes.length) return;
     applyRepulsion();
     applySprings();
     applyCentering();
-    // local mouse attraction to hovered node
+    applyPlaneConstraints();
     applyMouseAttraction();
     applyDamping();
     integrate(dt);
@@ -288,10 +294,14 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
 
     if (typeof opts.centerX === 'number') centerX = opts.centerX;
     if (typeof opts.centerY === 'number') centerY = opts.centerY;
+    if (typeof opts.centerZ === 'number') centerZ = opts.centerZ;
     if (typeof opts.centerNodeId === 'string') {
       centerNodeId = opts.centerNodeId;
       centerNode = nodes.find((n) => n.id === centerNodeId) || null;
     }
+
+    if (typeof opts.notePlaneStiffness === 'number') notePlaneStiffness = opts.notePlaneStiffness;
+    if (typeof opts.tagPlaneStiffness === 'number') tagPlaneStiffness = opts.tagPlaneStiffness;
 
     if (typeof opts.mouseAttractionRadius === 'number') mouseAttractionRadius = opts.mouseAttractionRadius;
     if (typeof opts.mouseAttractionStrength === 'number') mouseAttractionStrength = opts.mouseAttractionStrength;

@@ -34,6 +34,12 @@ export interface GreaterGraphSettings {
     springLength?: number;
     centerPull?: number;
     damping?: number;
+    // plane constraints & 3D center
+    notePlaneStiffness?: number;
+    tagPlaneStiffness?: number;
+    centerX?: number;
+    centerY?: number;
+    centerZ?: number;
     // mouse attraction tuning
     mouseAttractionRadius?: number;
     mouseAttractionStrength?: number;
@@ -83,6 +89,11 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     springLength: 130,
     centerPull: 0.0004,
     damping: 0.92,
+    notePlaneStiffness: 0.02,
+    tagPlaneStiffness: 0.02,
+    centerX: 0,
+    centerY: 0,
+    centerZ: 0,
     mouseAttractionRadius: 80,
     mouseAttractionStrength: 0.15,
     mouseAttractionExponent: 3.5,
@@ -788,6 +799,48 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         } else if (Number.isNaN(v)) {
           this.plugin.settings.interaction = this.plugin.settings.interaction || {};
           this.plugin.settings.interaction.dragThreshold = DEFAULT_SETTINGS.interaction!.dragThreshold;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
+    // Plane constraint stiffness sliders
+    addSliderSetting(containerEl, {
+      name: 'Note plane stiffness (z)',
+      desc: 'Pull strength keeping notes near z = 0 (soft constraint).',
+      value: phys.notePlaneStiffness ?? DEFAULT_SETTINGS.physics!.notePlaneStiffness!,
+      min: 0,
+      max: 0.2,
+      step: 0.001,
+      resetValue: DEFAULT_SETTINGS.physics!.notePlaneStiffness,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.notePlaneStiffness = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.notePlaneStiffness = DEFAULT_SETTINGS.physics!.notePlaneStiffness;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
+
+    addSliderSetting(containerEl, {
+      name: 'Tag plane stiffness (x)',
+      desc: 'Pull strength keeping tags near x = 0 (soft constraint).',
+      value: phys.tagPlaneStiffness ?? DEFAULT_SETTINGS.physics!.tagPlaneStiffness!,
+      min: 0,
+      max: 0.2,
+      step: 0.001,
+      resetValue: DEFAULT_SETTINGS.physics!.tagPlaneStiffness,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.tagPlaneStiffness = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.tagPlaneStiffness = DEFAULT_SETTINGS.physics!.tagPlaneStiffness;
           await this.plugin.saveSettings();
         }
       },
