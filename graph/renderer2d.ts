@@ -22,6 +22,8 @@ export interface GlowSettings {
   edgeColor?: string;
   // optional explicit glow radius in world/pixel units. If provided, overrides multiplier-based radius.
   glowRadiusPx?: number;
+  // whether to use Obsidian interface font for labels
+  useInterfaceFont?: boolean;
 }
 
 export interface Renderer2DOptions {
@@ -95,8 +97,9 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let themeNodeColor = '#66ccff';
   let themeLabelColor = '#222';
   let themeEdgeColor = '#888888';
-  // resolved interface font family defined by Obsidian/theme for labels
+  // resolved interface or monospace font families defined by theme
   let resolvedInterfaceFontFamily: string | null = null;
+  let resolvedMonoFontFamily: string | null = null;
 
   function parseHexColor(hex: string) {
     if (!hex) return null;
@@ -314,35 +317,61 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         // ignore (e.g., server-side build environment)
       }
 
-      // resolve interface font family once per render (use Obsidian/theme CSS vars or fallback to computed body font)
-      if (!resolvedInterfaceFontFamily) {
-        try {
-          const cs = window.getComputedStyle(canvas);
-          const candidates = ['--font-family-interface', '--font-family', '--font-main', '--font-primary', '--font-family-sans', '--text-font'];
-          let fam: string | null = null;
-          for (const v of candidates) {
-            const val = cs.getPropertyValue(v);
-            if (val && val.trim()) { fam = val.trim(); break; }
-          }
-          if (!fam) {
-            // fallback: create a temporary div and read its computed font-family (interface font)
-            const el = document.createElement('div');
-            el.style.position = 'absolute';
-            el.style.left = '-9999px';
-            el.style.top = '-9999px';
-            el.textContent = 'x';
-            document.body.appendChild(el);
-            try {
-              const cs2 = window.getComputedStyle(el);
-              fam = cs2.fontFamily || null;
-            } finally {
-              if (el.parentElement) el.parentElement.removeChild(el);
+      // choose which font family to resolve based on setting: interface font or monospace
+      try {
+        const cs = window.getComputedStyle(canvas);
+        if (glowOptions?.useInterfaceFont) {
+          if (!resolvedInterfaceFontFamily) {
+            const candidates = ['--font-family-interface', '--font-family', '--font-main', '--font-primary', '--font-family-sans', '--text-font'];
+            let fam: string | null = null;
+            for (const v of candidates) {
+              const val = cs.getPropertyValue(v);
+              if (val && val.trim()) { fam = val.trim(); break; }
             }
+            if (!fam) {
+              const el = document.createElement('div');
+              el.style.position = 'absolute';
+              el.style.left = '-9999px';
+              el.style.top = '-9999px';
+              el.textContent = 'x';
+              document.body.appendChild(el);
+              try {
+                const cs2 = window.getComputedStyle(el);
+                fam = cs2.fontFamily || null;
+              } finally {
+                if (el.parentElement) el.parentElement.removeChild(el);
+              }
+            }
+            resolvedInterfaceFontFamily = fam && fam.trim() ? fam.trim() : 'sans-serif';
           }
-          resolvedInterfaceFontFamily = fam && fam.trim() ? fam.trim() : 'sans-serif';
-        } catch (e) {
-          resolvedInterfaceFontFamily = 'sans-serif';
+        } else {
+          if (!resolvedMonoFontFamily) {
+            const candidates = ['--font-family-monospace', '--font-family-code', '--mono-font', '--code-font', '--font-mono', '--font-family-mono'];
+            let fam: string | null = null;
+            for (const v of candidates) {
+              const val = cs.getPropertyValue(v);
+              if (val && val.trim()) { fam = val.trim(); break; }
+            }
+            if (!fam) {
+              const codeEl = document.createElement('code');
+              codeEl.style.position = 'absolute';
+              codeEl.style.left = '-9999px';
+              codeEl.style.top = '-9999px';
+              codeEl.textContent = 'x';
+              document.body.appendChild(codeEl);
+              try {
+                const cs2 = window.getComputedStyle(codeEl);
+                fam = cs2.fontFamily || null;
+              } finally {
+                if (codeEl.parentElement) codeEl.parentElement.removeChild(codeEl);
+              }
+            }
+            resolvedMonoFontFamily = fam && fam.trim() ? fam.trim() : 'monospace';
+          }
         }
+      } catch (e) {
+        if (glowOptions?.useInterfaceFont) resolvedInterfaceFontFamily = resolvedInterfaceFontFamily || 'sans-serif';
+        else resolvedMonoFontFamily = resolvedMonoFontFamily || 'monospace';
       }
 
       ctx.save();

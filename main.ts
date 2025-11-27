@@ -22,6 +22,8 @@ export interface GlowSettings {
   nodeColor?: string;
   labelColor?: string;
   edgeColor?: string;
+  // whether to use Obsidian's interface font for labels (true) or a monospace/code font (false)
+  useInterfaceFont?: boolean;
 }
 
 export interface GreaterGraphSettings {
@@ -71,6 +73,7 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
         // color overrides left undefined by default to follow theme
         nodeColor: undefined,
         labelColor: undefined,
+          useInterfaceFont: true,
         edgeColor: undefined,
   },
   physics: {
@@ -414,6 +417,14 @@ class GreaterGraphSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         })
       );
+
+    new Setting(containerEl)
+      .setName('Use interface font for labels')
+      .setDesc('When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.')
+      .addToggle((t) => t.setValue(Boolean(glow.useInterfaceFont)).onChange(async (v) => {
+        glow.useInterfaceFont = Boolean(v);
+        await this.plugin.saveSettings();
+      }));
 
     // Physics settings
     const phys = this.plugin.settings.physics || {};
