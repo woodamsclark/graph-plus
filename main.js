@@ -1559,6 +1559,10 @@ var Graph2DController = class {
               this.isCameraFollowing = false;
               this.cameraFollowNode = null;
             }
+            try {
+              this.clearPreviewLock();
+            } catch (e) {
+            }
           }
         }
       } catch (e) {
@@ -1567,6 +1571,10 @@ var Graph2DController = class {
         if (this.isCameraFollowing) {
           this.isCameraFollowing = false;
           this.cameraFollowNode = null;
+        }
+        try {
+          this.clearPreviewLock();
+        } catch (e) {
         }
         const dx = screenX - this.lastOrbitX;
         const dy = screenY - this.lastOrbitY;
@@ -1592,6 +1600,10 @@ var Graph2DController = class {
           this.isCameraFollowing = false;
           this.cameraFollowNode = null;
         }
+        try {
+          this.clearPreviewLock();
+        } catch (e) {
+        }
         const dx = screenX - this.panStartX;
         const dy = screenY - this.panStartY;
         try {
@@ -1609,6 +1621,10 @@ var Graph2DController = class {
         if (this.isCameraFollowing) {
           this.isCameraFollowing = false;
           this.cameraFollowNode = null;
+        }
+        try {
+          this.clearPreviewLock();
+        } catch (e) {
         }
         const dx = screenX - this.lastPanX;
         const dy = screenY - this.lastPanY;
@@ -1646,6 +1662,10 @@ var Graph2DController = class {
       try {
         this.isCameraFollowing = false;
         this.cameraFollowNode = null;
+        try {
+          this.clearPreviewLock();
+        } catch (e) {
+        }
         const cam = this.renderer.getCamera();
         const zoomSpeed = 15e-4;
         const factor = Math.exp(ev.deltaY * zoomSpeed);
@@ -1754,11 +1774,54 @@ var Graph2DController = class {
           if (dist <= clickThreshold) {
             try {
               if (this.pendingFocusNode === "__origin__") {
-                this.focusCameraOnNode({ x: 0, y: 0, z: 0 });
-                this.isCameraFollowing = false;
-                this.cameraFollowNode = null;
+                this.centerCameraOnNode({ x: 0, y: 0, z: 0 });
+                try {
+                  this.clearPreviewLock();
+                } catch (e) {
+                }
               } else {
-                this.focusCameraOnNode(this.pendingFocusNode);
+                const node = this.pendingFocusNode;
+                this.centerCameraOnNode(node);
+                try {
+                  if (this.previewLockNodeId === node.id) {
+                    this.clearPreviewLock();
+                  } else {
+                    const depth = this.plugin.settings?.glow?.hoverHighlightDepth ?? 1;
+                    const highlightSet = /* @__PURE__ */ new Set();
+                    highlightSet.add(node.id);
+                    if (depth > 0 && this.adjacency) {
+                      const q = [node.id];
+                      const seen = /* @__PURE__ */ new Set([node.id]);
+                      let curDepth = 0;
+                      while (q.length > 0 && curDepth < depth) {
+                        const levelSize = q.length;
+                        for (let i = 0; i < levelSize; i++) {
+                          const nid = q.shift();
+                          const neigh = this.adjacency?.get(nid) || [];
+                          for (const nb of neigh) {
+                            if (!seen.has(nb)) {
+                              seen.add(nb);
+                              highlightSet.add(nb);
+                              q.push(nb);
+                            }
+                          }
+                        }
+                        curDepth++;
+                      }
+                    }
+                    this.previewLockNodeId = node.id;
+                    const hoverWorldX = node.x ?? 0;
+                    const hoverWorldY = node.y ?? 0;
+                    if (this.renderer.setHoverState)
+                      this.renderer.setHoverState(node.id, highlightSet, hoverWorldX, hoverWorldY);
+                    if (this.renderer && this.renderer.setHoveredNode)
+                      this.renderer.setHoveredNode(node.id);
+                    if (this.renderer && this.renderer.render)
+                      this.renderer.render();
+                    this.startPreviewLockMonitor();
+                  }
+                } catch (e) {
+                }
               }
             } catch (e) {
             }
@@ -2495,6 +2558,37 @@ var Graph2DController = class {
       this.cameraAnimTo = to;
       this.isCameraFollowing = true;
       this.cameraFollowNode = node;
+    } catch (e) {
+    }
+  }
+  // Center camera target on a node (animated) but do NOT enable follow or change distance.
+  centerCameraOnNode(node) {
+    if (!this.renderer || !node)
+      return;
+    try {
+      const cam = this.renderer.getCamera();
+      const from = {
+        targetX: cam.targetX ?? 0,
+        targetY: cam.targetY ?? 0,
+        targetZ: cam.targetZ ?? 0,
+        distance: cam.distance ?? 1e3,
+        yaw: cam.yaw ?? 0,
+        pitch: cam.pitch ?? 0
+      };
+      const to = {
+        targetX: node.x ?? 0,
+        targetY: node.y ?? 0,
+        targetZ: node.z ?? 0,
+        distance: from.distance,
+        yaw: from.yaw,
+        pitch: from.pitch
+      };
+      this.cameraAnimStart = performance.now();
+      this.cameraAnimDuration = 300;
+      this.cameraAnimFrom = from;
+      this.cameraAnimTo = to;
+      this.isCameraFollowing = false;
+      this.cameraFollowNode = null;
     } catch (e) {
     }
   }
