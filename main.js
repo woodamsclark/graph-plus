@@ -1062,6 +1062,8 @@ var Graph2DController = class {
   // to that node (and neighbors) until the popover disappears.
   previewLockNodeId = null;
   previewPollTimer = null;
+  controlsEl = null;
+  controlsVisible = true;
   saveNodePositions() {
     if (!this.graph)
       return;
@@ -1099,6 +1101,7 @@ var Graph2DController = class {
     canvas.tabIndex = 0;
     this.containerEl.appendChild(canvas);
     this.canvas = canvas;
+    this.createControlsPanel();
     const initialGlow = Object.assign({}, this.plugin.settings?.glow || {});
     const initialPhys = this.plugin.settings?.physics || {};
     if (typeof initialPhys.mouseAttractionRadius === "number")
@@ -1350,6 +1353,212 @@ var Graph2DController = class {
           }
         }
       });
+    }
+  }
+  // Create floating controls panel in top-right and a gear toggle in the view
+  createControlsPanel() {
+    try {
+      const panel = document.createElement("div");
+      panel.style.position = "absolute";
+      panel.style.top = "8px";
+      panel.style.right = "8px";
+      panel.style.zIndex = "10";
+      panel.style.background = "var(--background-secondary)";
+      panel.style.color = "var(--text-normal)";
+      panel.style.border = "1px solid var(--interactive-border)";
+      panel.style.padding = "8px";
+      panel.style.borderRadius = "6px";
+      panel.style.minWidth = "220px";
+      panel.style.fontSize = "12px";
+      panel.style.boxShadow = "var(--translucent-shadow)";
+      const title = document.createElement("div");
+      title.style.display = "flex";
+      title.style.justifyContent = "space-between";
+      title.style.alignItems = "center";
+      title.style.marginBottom = "6px";
+      const titleText = document.createElement("div");
+      titleText.textContent = "Graph Controls";
+      titleText.style.fontWeight = "600";
+      titleText.style.fontSize = "12px";
+      title.appendChild(titleText);
+      const closeBtn = document.createElement("button");
+      closeBtn.setAttribute("aria-label", "Toggle graph controls");
+      closeBtn.style.background = "transparent";
+      closeBtn.style.border = "none";
+      closeBtn.style.color = "var(--text-normal)";
+      closeBtn.style.cursor = "pointer";
+      closeBtn.textContent = "\u2699";
+      closeBtn.addEventListener("click", () => this.toggleControlsVisibility());
+      title.appendChild(closeBtn);
+      panel.appendChild(title);
+      const makeRow = (labelText, inputEl) => {
+        const row = document.createElement("div");
+        row.style.display = "flex";
+        row.style.alignItems = "center";
+        row.style.justifyContent = "space-between";
+        row.style.marginBottom = "6px";
+        const label = document.createElement("label");
+        label.textContent = labelText;
+        label.style.marginRight = "8px";
+        label.style.flex = "1";
+        inputEl.style.flex = "0 0 auto";
+        row.appendChild(label);
+        row.appendChild(inputEl);
+        return row;
+      };
+      const nodeColor = document.createElement("input");
+      nodeColor.type = "color";
+      nodeColor.value = this.plugin.settings?.glow?.nodeColor || "#66ccff";
+      nodeColor.addEventListener("input", async (e) => {
+        try {
+          this.plugin.settings.glow = this.plugin.settings.glow || {};
+          this.plugin.settings.glow.nodeColor = e.target.value;
+          await this.plugin.saveSettings();
+          try {
+            if (this.renderer && this.renderer.setGlowSettings)
+              this.renderer.setGlowSettings(this.plugin.settings.glow);
+          } catch (e2) {
+          }
+          try {
+            if (this.renderer && this.renderer.render)
+              this.renderer.render();
+          } catch (e2) {
+          }
+        } catch (e2) {
+        }
+      });
+      panel.appendChild(makeRow("Node color", nodeColor));
+      const edgeColor = document.createElement("input");
+      edgeColor.type = "color";
+      edgeColor.value = this.plugin.settings?.glow?.edgeColor || "#888888";
+      edgeColor.addEventListener("input", async (e) => {
+        try {
+          this.plugin.settings.glow = this.plugin.settings.glow || {};
+          this.plugin.settings.glow.edgeColor = e.target.value;
+          await this.plugin.saveSettings();
+          try {
+            if (this.renderer && this.renderer.setGlowSettings)
+              this.renderer.setGlowSettings(this.plugin.settings.glow);
+          } catch (e2) {
+          }
+          try {
+            if (this.renderer && this.renderer.render)
+              this.renderer.render();
+          } catch (e2) {
+          }
+        } catch (e2) {
+        }
+      });
+      panel.appendChild(makeRow("Edge color", edgeColor));
+      const countDup = document.createElement("input");
+      countDup.type = "checkbox";
+      countDup.checked = Boolean(this.plugin.settings?.countDuplicateLinks);
+      countDup.addEventListener("change", async (e) => {
+        try {
+          this.plugin.settings.countDuplicateLinks = e.target.checked;
+          await this.plugin.saveSettings();
+          try {
+            this.graph = await buildGraph(this.app, { countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks) });
+            if (this.renderer)
+              this.renderer.setGraph(this.graph);
+          } catch (e2) {
+          }
+          try {
+            if (this.renderer && this.renderer.render)
+              this.renderer.render();
+          } catch (e2) {
+          }
+        } catch (e2) {
+        }
+      });
+      panel.appendChild(makeRow("Count duplicate links", countDup));
+      const phys = this.plugin.settings?.physics || {};
+      const physFields = [
+        { key: "repulsionStrength", label: "Repulsion", step: "1" },
+        { key: "springStrength", label: "Spring", step: "0.01" },
+        { key: "springLength", label: "Spring len", step: "1" },
+        { key: "centerPull", label: "Center pull", step: "0.0001" },
+        { key: "damping", label: "Damping", step: "0.01" },
+        { key: "mouseAttractionRadius", label: "Attract radius", step: "1" },
+        { key: "mouseAttractionStrength", label: "Attract strength", step: "0.01" },
+        { key: "mouseAttractionExponent", label: "Attract exponent", step: "0.1" }
+      ];
+      for (const f of physFields) {
+        const input = document.createElement("input");
+        input.type = "number";
+        input.step = f.step || "1";
+        input.value = String(phys[f.key] ?? "");
+        input.style.width = "80px";
+        input.addEventListener("change", async (e) => {
+          try {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            const val = Number(e.target.value);
+            this.plugin.settings.physics[f.key] = Number.isFinite(val) ? val : this.plugin.settings.physics[f.key];
+            await this.plugin.saveSettings();
+            try {
+              if (this.simulation && this.simulation.setOptions)
+                this.simulation.setOptions(this.plugin.settings.physics);
+            } catch (e2) {
+            }
+            try {
+              if (this.renderer && this.renderer.setGlowSettings)
+                this.renderer.setGlowSettings(this.plugin.settings.glow);
+            } catch (e2) {
+            }
+            try {
+              if (this.renderer && this.renderer.render)
+                this.renderer.render();
+            } catch (e2) {
+            }
+          } catch (e2) {
+          }
+        });
+        panel.appendChild(makeRow(f.label, input));
+      }
+      this.containerEl.style.position = "relative";
+      this.containerEl.appendChild(panel);
+      this.controlsEl = panel;
+      try {
+        const headerActions = this.containerEl.closest(".workspace-leaf")?.querySelector(".view-header .view-actions");
+        if (headerActions) {
+          const hbtn = document.createElement("button");
+          hbtn.className = "mod-quiet";
+          hbtn.style.marginLeft = "6px";
+          hbtn.textContent = "\u2699";
+          hbtn.setAttribute("aria-label", "Toggle graph controls");
+          hbtn.addEventListener("click", () => this.toggleControlsVisibility());
+          headerActions.appendChild(hbtn);
+        }
+      } catch (e) {
+      }
+    } catch (e) {
+    }
+  }
+  toggleControlsVisibility() {
+    try {
+      this.controlsVisible = !this.controlsVisible;
+      if (!this.controlsEl)
+        return;
+      const panel = this.controlsEl;
+      if (!this.controlsVisible) {
+        for (let i = 1; i < panel.children.length; i++) {
+          const ch = panel.children[i];
+          ch.dataset["__savedDisplay"] = ch.style.display || "";
+          ch.style.display = "none";
+        }
+        panel.style.overflow = "hidden";
+        panel.style.maxHeight = "36px";
+      } else {
+        for (let i = 1; i < panel.children.length; i++) {
+          const ch = panel.children[i];
+          const prev = ch.dataset["__savedDisplay"] || "";
+          ch.style.display = prev || "";
+          delete ch.dataset["__savedDisplay"];
+        }
+        panel.style.overflow = "";
+        panel.style.maxHeight = "";
+      }
+    } catch (e) {
     }
   }
   animationLoop = (timestamp) => {
