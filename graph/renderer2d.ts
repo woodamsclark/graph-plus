@@ -21,6 +21,11 @@ export interface GlowSettings {
   tagColor?: string;
   labelColor?: string;
   edgeColor?: string;
+  // per-color alpha (0..1). If unset, treated as 1.0
+  nodeColorAlpha?: number;
+  tagColorAlpha?: number;
+  labelColorAlpha?: number;
+  edgeColorAlpha?: number;
   // optional explicit glow radius in world/pixel units. If provided, overrides multiplier-based radius.
   glowRadiusPx?: number;
   // whether to use Obsidian interface font for labels
@@ -90,6 +95,11 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let glowRadiusPx: number | null = glowOptions?.glowRadiusPx ?? null;
   let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.05;
   let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.35;
+  // per-color alpha multipliers (0..1)
+  let nodeColorAlpha = glowOptions?.nodeColorAlpha ?? 1.0;
+  let tagColorAlpha = glowOptions?.tagColorAlpha ?? 1.0;
+  let labelColorAlpha = glowOptions?.labelColorAlpha ?? 1.0;
+  let edgeColorAlpha = glowOptions?.edgeColorAlpha ?? 1.0;
   let hoverBoost = glowOptions?.hoverBoostFactor ?? 1.5;
   let neighborBoost = glowOptions?.neighborBoostFactor ?? 1.0;
   let dimFactor = glowOptions?.dimFactor ?? 0.25;
@@ -499,9 +509,23 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         let alpha = 0.65;
         if (!hoveredNodeId) alpha = 0.65;
         else alpha = 0.08 + (0.9 - 0.08) * edgeFocus; // interpolate
+        // When edge is connected to hovered/highlighted nodes, force alpha to 1
+        if (hoveredNodeId) {
+          const srcInFocus = hoverHighlightSet.has(edge.sourceId) || edge.sourceId === hoveredNodeId;
+          const tgtInFocus = hoverHighlightSet.has(edge.targetId) || edge.targetId === hoveredNodeId;
+          if (srcInFocus || tgtInFocus) alpha = 1;
+        }
 
         ctx.save();
-        ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${alpha})`;
+        const useEdgeAlpha = glowOptions?.edgeColorAlpha ?? edgeColorAlpha;
+        // compute final edge alpha and bypass user edge alpha when hovered/highlighted
+        let finalEdgeAlpha = alpha * useEdgeAlpha;
+        if (hoveredNodeId) {
+          const srcInFocus = hoverHighlightSet.has(edge.sourceId) || edge.sourceId === hoveredNodeId;
+          const tgtInFocus = hoverHighlightSet.has(edge.targetId) || edge.targetId === hoveredNodeId;
+          if (srcInFocus || tgtInFocus) finalEdgeAlpha = 1;
+        }
+        ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${finalEdgeAlpha})`;
         // mutual edges: draw two parallel lines offset perpendicular to the edge when enabled
         const isMutual = !!edge.hasReverse && drawMutualDoubleLines;
         if (isMutual) {
@@ -576,13 +600,24 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         // radial gradient glow: interpolate alpha between dim and centerAlpha
         const nodeColorOverride = (node && node.type === 'tag') ? (glowOptions?.tagColor ?? themeTagColor) : themeNodeColor; // tag color
         const accentRgb = colorToRgb(nodeColorOverride);
+        const useNodeAlpha = (node && node.type === 'tag') ? (glowOptions?.tagColorAlpha ?? tagColorAlpha) : (glowOptions?.nodeColorAlpha ?? nodeColorAlpha);
         const dimCenter = clamp01(getBaseCenterAlpha(node) * dimFactor);
         const fullCenter = centerAlpha;
-        const blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
+        let blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
+        // When hovered/highlighted, force alpha to 1 for node/tag colors
+        let effectiveUseNodeAlpha = useNodeAlpha;
+        if (hoveredNodeId) {
+          const inDepth = hoverHighlightSet.has(node.id);
+          const isHovered = node.id === hoveredNodeId;
+          if (isHovered || inDepth) {
+            blendedCenter = 1;
+            effectiveUseNodeAlpha = 1;
+          }
+        }
         const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
-        gradient.addColorStop(0.0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter})`);
-        gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.5})`);
-        gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.15})`);
+        gradient.addColorStop(0.0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * effectiveUseNodeAlpha})`);
+        gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.5 * effectiveUseNodeAlpha})`);
+        gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.15 * effectiveUseNodeAlpha})`);
         gradient.addColorStop(1.0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0)`);
 
         ctx.save();
@@ -599,7 +634,19 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
         const bodyColorOverride = (node && node.type === 'tag') ? (glowOptions?.tagColor ?? themeTagColor) : themeNodeColor;
         const accent = colorToRgb(bodyColorOverride);
-        ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${bodyAlpha})`;
+        const useBodyAlpha = (node && node.type === 'tag') ? (glowOptions?.tagColorAlpha ?? tagColorAlpha) : (glowOptions?.nodeColorAlpha ?? nodeColorAlpha);
+        // When hovered/highlighted, force body alpha to 1 for node/tag colors
+        let effectiveUseBodyAlpha = useBodyAlpha;
+        let finalBodyAlpha = bodyAlpha;
+        if (hoveredNodeId) {
+          const inDepthBody = hoverHighlightSet.has(node.id);
+          const isHoveredBody = node.id === hoveredNodeId;
+          if (isHoveredBody || inDepthBody) {
+            finalBodyAlpha = 1;
+            effectiveUseBodyAlpha = 1;
+          }
+        }
+        ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${finalBodyAlpha * effectiveUseBodyAlpha})`;
         ctx.fill();
         ctx.restore();
 
@@ -614,7 +661,10 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
           ctx.save();
           ctx.font = `${fontToSet}px ${resolvedInterfaceFontFamily || 'sans-serif'}`;
           ctx.globalAlpha = focus; // fade label in/out
-          ctx.fillStyle = labelCss || '#ffffff';
+          // apply label alpha override if present
+          const labelRgb = colorToRgb((glowOptions?.labelColor ?? labelCss) || '#ffffff');
+          const useLabelAlpha = glowOptions?.labelColorAlpha ?? labelColorAlpha;
+          ctx.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},${useLabelAlpha})`;
           const verticalPadding = 4; // world units; will be scaled by transform
           ctx.fillText(node.label, p.x, p.y + radius + verticalPadding);
           ctx.restore();
@@ -626,7 +676,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         ctx.save();
         ctx.beginPath();
         ctx.arc(p.x, p.y, radius * 0.9, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${faintAlpha})`;
+        ctx.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${faintAlpha * (glowOptions?.nodeColorAlpha ?? nodeColorAlpha)})`;
         ctx.fill();
         ctx.restore();
       }
@@ -673,6 +723,10 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     edgeDimMin = glow.edgeDimMin ?? edgeDimMin;
     edgeDimMax = glow.edgeDimMax ?? edgeDimMax;
     nodeMinBodyAlpha = glow.nodeMinBodyAlpha ?? nodeMinBodyAlpha;
+    nodeColorAlpha = (typeof glow.nodeColorAlpha === 'number') ? glow.nodeColorAlpha : nodeColorAlpha;
+    tagColorAlpha = (typeof glow.tagColorAlpha === 'number') ? glow.tagColorAlpha : tagColorAlpha;
+    labelColorAlpha = (typeof glow.labelColorAlpha === 'number') ? glow.labelColorAlpha : labelColorAlpha;
+    edgeColorAlpha = (typeof glow.edgeColorAlpha === 'number') ? glow.edgeColorAlpha : edgeColorAlpha;
   }
 
   function setHoverState(hoveredId: string | null, highlightedIds: Set<string>, mx: number, my: number) {

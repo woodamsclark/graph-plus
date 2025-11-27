@@ -251,6 +251,10 @@ function createRenderer2D(options) {
   let glowRadiusPx = glowOptions?.glowRadiusPx ?? null;
   let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.05;
   let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.35;
+  let nodeColorAlpha = glowOptions?.nodeColorAlpha ?? 1;
+  let tagColorAlpha = glowOptions?.tagColorAlpha ?? 1;
+  let labelColorAlpha = glowOptions?.labelColorAlpha ?? 1;
+  let edgeColorAlpha = glowOptions?.edgeColorAlpha ?? 1;
   let hoverBoost = glowOptions?.hoverBoostFactor ?? 1.5;
   let neighborBoost = glowOptions?.neighborBoostFactor ?? 1;
   let dimFactor = glowOptions?.dimFactor ?? 0.25;
@@ -640,8 +644,22 @@ function createRenderer2D(options) {
           alpha = 0.65;
         else
           alpha = 0.08 + (0.9 - 0.08) * edgeFocus;
+        if (hoveredNodeId) {
+          const srcInFocus = hoverHighlightSet.has(edge.sourceId) || edge.sourceId === hoveredNodeId;
+          const tgtInFocus = hoverHighlightSet.has(edge.targetId) || edge.targetId === hoveredNodeId;
+          if (srcInFocus || tgtInFocus)
+            alpha = 1;
+        }
         ctx.save();
-        ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${alpha})`;
+        const useEdgeAlpha = glowOptions?.edgeColorAlpha ?? edgeColorAlpha;
+        let finalEdgeAlpha = alpha * useEdgeAlpha;
+        if (hoveredNodeId) {
+          const srcInFocus = hoverHighlightSet.has(edge.sourceId) || edge.sourceId === hoveredNodeId;
+          const tgtInFocus = hoverHighlightSet.has(edge.targetId) || edge.targetId === hoveredNodeId;
+          if (srcInFocus || tgtInFocus)
+            finalEdgeAlpha = 1;
+        }
+        ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${finalEdgeAlpha})`;
         const isMutual = !!edge.hasReverse && drawMutualDoubleLines;
         if (isMutual) {
           const dx = tgtP.x - srcP.x;
@@ -700,13 +718,23 @@ function createRenderer2D(options) {
       if (focused) {
         const nodeColorOverride = node && node.type === "tag" ? glowOptions?.tagColor ?? themeTagColor : themeNodeColor;
         const accentRgb = colorToRgb(nodeColorOverride);
+        const useNodeAlpha = node && node.type === "tag" ? glowOptions?.tagColorAlpha ?? tagColorAlpha : glowOptions?.nodeColorAlpha ?? nodeColorAlpha;
         const dimCenter = clamp01(getBaseCenterAlpha(node) * dimFactor);
         const fullCenter = centerAlpha;
-        const blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
+        let blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
+        let effectiveUseNodeAlpha = useNodeAlpha;
+        if (hoveredNodeId) {
+          const inDepth = hoverHighlightSet.has(node.id);
+          const isHovered = node.id === hoveredNodeId;
+          if (isHovered || inDepth) {
+            blendedCenter = 1;
+            effectiveUseNodeAlpha = 1;
+          }
+        }
         const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
-        gradient.addColorStop(0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter})`);
-        gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.5})`);
-        gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.15})`);
+        gradient.addColorStop(0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * effectiveUseNodeAlpha})`);
+        gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.5 * effectiveUseNodeAlpha})`);
+        gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.15 * effectiveUseNodeAlpha})`);
         gradient.addColorStop(1, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0)`);
         ctx.save();
         ctx.beginPath();
@@ -720,7 +748,18 @@ function createRenderer2D(options) {
         ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
         const bodyColorOverride = node && node.type === "tag" ? glowOptions?.tagColor ?? themeTagColor : themeNodeColor;
         const accent = colorToRgb(bodyColorOverride);
-        ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${bodyAlpha})`;
+        const useBodyAlpha = node && node.type === "tag" ? glowOptions?.tagColorAlpha ?? tagColorAlpha : glowOptions?.nodeColorAlpha ?? nodeColorAlpha;
+        let effectiveUseBodyAlpha = useBodyAlpha;
+        let finalBodyAlpha = bodyAlpha;
+        if (hoveredNodeId) {
+          const inDepthBody = hoverHighlightSet.has(node.id);
+          const isHoveredBody = node.id === hoveredNodeId;
+          if (isHoveredBody || inDepthBody) {
+            finalBodyAlpha = 1;
+            effectiveUseBodyAlpha = 1;
+          }
+        }
+        ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${finalBodyAlpha * effectiveUseBodyAlpha})`;
         ctx.fill();
         ctx.restore();
         const displayedFontBase = baseFontSize * scale;
@@ -732,7 +771,9 @@ function createRenderer2D(options) {
           ctx.save();
           ctx.font = `${fontToSet}px ${resolvedInterfaceFontFamily || "sans-serif"}`;
           ctx.globalAlpha = focus;
-          ctx.fillStyle = labelCss || "#ffffff";
+          const labelRgb = colorToRgb((glowOptions?.labelColor ?? labelCss) || "#ffffff");
+          const useLabelAlpha = glowOptions?.labelColorAlpha ?? labelColorAlpha;
+          ctx.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},${useLabelAlpha})`;
           const verticalPadding = 4;
           ctx.fillText(node.label, p.x, p.y + radius + verticalPadding);
           ctx.restore();
@@ -743,7 +784,7 @@ function createRenderer2D(options) {
         ctx.save();
         ctx.beginPath();
         ctx.arc(p.x, p.y, radius * 0.9, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${faintAlpha})`;
+        ctx.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${faintAlpha * (glowOptions?.nodeColorAlpha ?? nodeColorAlpha)})`;
         ctx.fill();
         ctx.restore();
       }
@@ -787,6 +828,10 @@ function createRenderer2D(options) {
     edgeDimMin = glow.edgeDimMin ?? edgeDimMin;
     edgeDimMax = glow.edgeDimMax ?? edgeDimMax;
     nodeMinBodyAlpha = glow.nodeMinBodyAlpha ?? nodeMinBodyAlpha;
+    nodeColorAlpha = typeof glow.nodeColorAlpha === "number" ? glow.nodeColorAlpha : nodeColorAlpha;
+    tagColorAlpha = typeof glow.tagColorAlpha === "number" ? glow.tagColorAlpha : tagColorAlpha;
+    labelColorAlpha = typeof glow.labelColorAlpha === "number" ? glow.labelColorAlpha : labelColorAlpha;
+    edgeColorAlpha = typeof glow.edgeColorAlpha === "number" ? glow.edgeColorAlpha : edgeColorAlpha;
   }
   function setHoverState(hoveredId, highlightedIds, mx, my) {
     hoveredNodeId = hoveredId;
@@ -1932,6 +1977,17 @@ var Graph2DController = class {
       } catch (e) {
       }
       nodeColor.value = this.plugin.settings?.glow?.nodeColor || themeNodeColor;
+      const nodeColorWrap = document.createElement("div");
+      nodeColorWrap.style.display = "flex";
+      nodeColorWrap.style.alignItems = "center";
+      nodeColorWrap.style.gap = "6px";
+      const nodeAlpha = document.createElement("input");
+      nodeAlpha.type = "number";
+      nodeAlpha.min = "0";
+      nodeAlpha.max = "1";
+      nodeAlpha.step = "0.01";
+      nodeAlpha.value = String(this.plugin.settings?.glow?.nodeColorAlpha ?? 1);
+      nodeAlpha.style.width = "64px";
       nodeColor.addEventListener("input", async (e) => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
@@ -1950,15 +2006,38 @@ var Graph2DController = class {
         } catch (e2) {
         }
       });
-      panel.appendChild(makeRow("Node color", nodeColor, async () => {
+      nodeAlpha.addEventListener("input", async (e) => {
+        try {
+          this.plugin.settings.glow = this.plugin.settings.glow || {};
+          const v = Number(e.target.value);
+          this.plugin.settings.glow.nodeColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1;
+          await this.plugin.saveSettings();
+          try {
+            if (this.renderer && this.renderer.setGlowSettings)
+              this.renderer.setGlowSettings(this.plugin.settings.glow);
+          } catch (e2) {
+          }
+          try {
+            if (this.renderer && this.renderer.render)
+              this.renderer.render();
+          } catch (e2) {
+          }
+        } catch (e2) {
+        }
+      });
+      nodeColorWrap.appendChild(nodeColor);
+      nodeColorWrap.appendChild(nodeAlpha);
+      panel.appendChild(makeRow("Node color", nodeColorWrap, async () => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
           delete this.plugin.settings.glow.nodeColor;
+          delete this.plugin.settings.glow.nodeColorAlpha;
           await this.plugin.saveSettings();
           try {
             const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
             const nodeVar = cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
             nodeColor.value = nodeVar && nodeVar.trim() ? nodeVar.trim() : "#66ccff";
+            nodeAlpha.value = String(1);
           } catch (e) {
             nodeColor.value = "#66ccff";
           }
@@ -1986,6 +2065,17 @@ var Graph2DController = class {
       } catch (e) {
       }
       edgeColor.value = this.plugin.settings?.glow?.edgeColor || themeEdgeColor;
+      const edgeColorWrap = document.createElement("div");
+      edgeColorWrap.style.display = "flex";
+      edgeColorWrap.style.alignItems = "center";
+      edgeColorWrap.style.gap = "6px";
+      const edgeAlpha = document.createElement("input");
+      edgeAlpha.type = "number";
+      edgeAlpha.min = "0";
+      edgeAlpha.max = "1";
+      edgeAlpha.step = "0.01";
+      edgeAlpha.value = String(this.plugin.settings?.glow?.edgeColorAlpha ?? 1);
+      edgeAlpha.style.width = "64px";
       edgeColor.addEventListener("input", async (e) => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
@@ -2004,15 +2094,38 @@ var Graph2DController = class {
         } catch (e2) {
         }
       });
-      panel.appendChild(makeRow("Edge color", edgeColor, async () => {
+      edgeAlpha.addEventListener("input", async (e) => {
+        try {
+          this.plugin.settings.glow = this.plugin.settings.glow || {};
+          const v = Number(e.target.value);
+          this.plugin.settings.glow.edgeColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1;
+          await this.plugin.saveSettings();
+          try {
+            if (this.renderer && this.renderer.setGlowSettings)
+              this.renderer.setGlowSettings(this.plugin.settings.glow);
+          } catch (e2) {
+          }
+          try {
+            if (this.renderer && this.renderer.render)
+              this.renderer.render();
+          } catch (e2) {
+          }
+        } catch (e2) {
+        }
+      });
+      edgeColorWrap.appendChild(edgeColor);
+      edgeColorWrap.appendChild(edgeAlpha);
+      panel.appendChild(makeRow("Edge color", edgeColorWrap, async () => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
           delete this.plugin.settings.glow.edgeColor;
+          delete this.plugin.settings.glow.edgeColorAlpha;
           await this.plugin.saveSettings();
           try {
             const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
             const edgeVar = cs.getPropertyValue("--text-muted") || cs.getPropertyValue("--text-faint") || cs.getPropertyValue("--text-normal");
             edgeColor.value = edgeVar && edgeVar.trim() ? edgeVar.trim() : "#888888";
+            edgeAlpha.value = String(1);
           } catch (e) {
             edgeColor.value = "#888888";
           }
@@ -2040,6 +2153,17 @@ var Graph2DController = class {
       } catch (e) {
       }
       tagColor.value = this.plugin.settings?.glow?.tagColor || themeTagColor;
+      const tagWrap = document.createElement("div");
+      tagWrap.style.display = "flex";
+      tagWrap.style.alignItems = "center";
+      tagWrap.style.gap = "6px";
+      const tagAlpha = document.createElement("input");
+      tagAlpha.type = "number";
+      tagAlpha.min = "0";
+      tagAlpha.max = "1";
+      tagAlpha.step = "0.01";
+      tagAlpha.value = String(this.plugin.settings?.glow?.tagColorAlpha ?? 1);
+      tagAlpha.style.width = "64px";
       tagColor.addEventListener("input", async (e) => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
@@ -2058,15 +2182,38 @@ var Graph2DController = class {
         } catch (e2) {
         }
       });
-      panel.appendChild(makeRow("Tag color", tagColor, async () => {
+      tagAlpha.addEventListener("input", async (e) => {
+        try {
+          this.plugin.settings.glow = this.plugin.settings.glow || {};
+          const v = Number(e.target.value);
+          this.plugin.settings.glow.tagColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1;
+          await this.plugin.saveSettings();
+          try {
+            if (this.renderer && this.renderer.setGlowSettings)
+              this.renderer.setGlowSettings(this.plugin.settings.glow);
+          } catch (e2) {
+          }
+          try {
+            if (this.renderer && this.renderer.render)
+              this.renderer.render();
+          } catch (e2) {
+          }
+        } catch (e2) {
+        }
+      });
+      tagWrap.appendChild(tagColor);
+      tagWrap.appendChild(tagAlpha);
+      panel.appendChild(makeRow("Tag color", tagWrap, async () => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
           delete this.plugin.settings.glow.tagColor;
+          delete this.plugin.settings.glow.tagColorAlpha;
           await this.plugin.saveSettings();
           try {
             const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
             const nodeVar = cs.getPropertyValue("--accent-2") || cs.getPropertyValue("--accent-secondary") || cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
             tagColor.value = nodeVar && nodeVar.trim() ? nodeVar.trim() : "#8000ff";
+            tagAlpha.value = String(1);
           } catch (e) {
             tagColor.value = "#8000ff";
           }
@@ -2094,12 +2241,16 @@ var Graph2DController = class {
       minRange.step = "1";
       const curMin = this.plugin.settings?.glow?.minNodeRadius ?? 4;
       minRange.value = String(curMin);
-      const minLabel = document.createElement("div");
-      minLabel.textContent = String(minRange.value);
-      minLabel.style.minWidth = "36px";
-      minLabel.style.textAlign = "right";
+      const minInput = document.createElement("input");
+      minInput.type = "number";
+      minInput.min = minRange.min;
+      minInput.max = minRange.max;
+      minInput.step = minRange.step;
+      minInput.value = String(minRange.value);
+      minInput.style.width = "56px";
+      minInput.style.textAlign = "right";
       minRange.addEventListener("input", (e) => {
-        minLabel.textContent = e.target.value;
+        minInput.value = e.target.value;
       });
       minRange.addEventListener("change", async (e) => {
         try {
@@ -2120,8 +2271,14 @@ var Graph2DController = class {
         } catch (e2) {
         }
       });
+      minInput.addEventListener("input", (e) => {
+        minRange.value = e.target.value;
+      });
+      minInput.addEventListener("change", (e) => {
+        minRange.dispatchEvent(new Event("change"));
+      });
       minSizeWrap.appendChild(minRange);
-      minSizeWrap.appendChild(minLabel);
+      minSizeWrap.appendChild(minInput);
       const maxSizeWrap = document.createElement("div");
       maxSizeWrap.style.display = "flex";
       maxSizeWrap.style.alignItems = "center";
@@ -2133,12 +2290,16 @@ var Graph2DController = class {
       maxRange.step = "1";
       const curMax = this.plugin.settings?.glow?.maxNodeRadius ?? 14;
       maxRange.value = String(curMax);
-      const maxLabel = document.createElement("div");
-      maxLabel.textContent = String(maxRange.value);
-      maxLabel.style.minWidth = "36px";
-      maxLabel.style.textAlign = "right";
+      const maxInput = document.createElement("input");
+      maxInput.type = "number";
+      maxInput.min = maxRange.min;
+      maxInput.max = maxRange.max;
+      maxInput.step = maxRange.step;
+      maxInput.value = String(maxRange.value);
+      maxInput.style.width = "56px";
+      maxInput.style.textAlign = "right";
       maxRange.addEventListener("input", (e) => {
-        maxLabel.textContent = e.target.value;
+        maxInput.value = e.target.value;
       });
       maxRange.addEventListener("change", async (e) => {
         try {
@@ -2159,8 +2320,14 @@ var Graph2DController = class {
         } catch (e2) {
         }
       });
+      maxInput.addEventListener("input", (e) => {
+        maxRange.value = e.target.value;
+      });
+      maxInput.addEventListener("change", (e) => {
+        maxRange.dispatchEvent(new Event("change"));
+      });
       maxSizeWrap.appendChild(maxRange);
-      maxSizeWrap.appendChild(maxLabel);
+      maxSizeWrap.appendChild(maxInput);
       panel.appendChild(makeRow("Node min radius", minSizeWrap, async () => {
         try {
           delete this.plugin.settings.glow.minNodeRadius;
@@ -2289,7 +2456,7 @@ var Graph2DController = class {
             break;
           case "springStrength":
             range.min = "0";
-            range.max = "0.2";
+            range.max = "1.0";
             range.step = "0.001";
             break;
           case "springLength":
@@ -2328,20 +2495,33 @@ var Graph2DController = class {
             range.step = "1";
         }
         const current = phys[f.key];
-        range.value = String(Number.isFinite(current) ? current : Number(range.min));
+        if (f.key === "springStrength") {
+          const ui = Number.isFinite(current) ? Math.min(1, Math.max(0, Number(current) / 0.5)) : Number(range.min);
+          range.value = String(ui);
+        } else {
+          range.value = String(Number.isFinite(current) ? current : Number(range.min));
+        }
         range.style.width = "120px";
-        const valueLabel = document.createElement("div");
-        valueLabel.textContent = String(range.value);
-        valueLabel.style.minWidth = "48px";
-        valueLabel.style.textAlign = "right";
+        const valueInput = document.createElement("input");
+        valueInput.type = "number";
+        valueInput.min = range.min;
+        valueInput.max = range.max;
+        valueInput.step = range.step;
+        valueInput.value = String(range.value);
+        valueInput.style.width = "64px";
+        valueInput.style.textAlign = "right";
         range.addEventListener("input", (e) => {
-          valueLabel.textContent = e.target.value;
+          valueInput.value = e.target.value;
         });
         range.addEventListener("change", async (e) => {
           try {
             this.plugin.settings.physics = this.plugin.settings.physics || {};
             const val = Number(e.target.value);
-            this.plugin.settings.physics[f.key] = Number.isFinite(val) ? val : this.plugin.settings.physics[f.key];
+            if (f.key === "springStrength") {
+              this.plugin.settings.physics[f.key] = Number.isFinite(val) ? val * 0.5 : this.plugin.settings.physics[f.key];
+            } else {
+              this.plugin.settings.physics[f.key] = Number.isFinite(val) ? val : this.plugin.settings.physics[f.key];
+            }
             await this.plugin.saveSettings();
             try {
               if (this.simulation && this.simulation.setOptions)
@@ -2361,16 +2541,27 @@ var Graph2DController = class {
           } catch (e2) {
           }
         });
+        valueInput.addEventListener("input", (e) => {
+          range.value = e.target.value;
+        });
+        valueInput.addEventListener("change", (e) => {
+          range.dispatchEvent(new Event("change"));
+        });
         wrap.appendChild(range);
-        wrap.appendChild(valueLabel);
+        wrap.appendChild(valueInput);
         panel.appendChild(makeRow(f.label, wrap, async () => {
           try {
             this.plugin.settings.physics = this.plugin.settings.physics || {};
             delete this.plugin.settings.physics[f.key];
             await this.plugin.saveSettings();
             const def = this.plugin.settings.physics[f.key];
-            range.value = def !== void 0 ? String(def) : String(range.min);
-            valueLabel.textContent = range.value;
+            if (f.key === "springStrength") {
+              const ui = def !== void 0 ? String(Math.min(1, Math.max(0, Number(def) / 0.5))) : String(range.min);
+              range.value = ui;
+            } else {
+              range.value = def !== void 0 ? String(def) : String(range.min);
+            }
+            valueInput.value = range.value;
             try {
               if (this.simulation && this.simulation.setOptions)
                 this.simulation.setOptions(this.plugin.settings.physics);
@@ -2950,43 +3141,51 @@ var Graph2DController = class {
 // main.ts
 var DEFAULT_SETTINGS = {
   glow: {
-    minNodeRadius: 4,
-    maxNodeRadius: 14,
-    minCenterAlpha: 0.1,
-    maxCenterAlpha: 0.4,
-    hoverBoostFactor: 1.6,
-    neighborBoostFactor: 1.2,
-    dimFactor: 0.3,
-    hoverHighlightDepth: 1,
-    distanceInnerRadiusMultiplier: 1,
-    distanceOuterRadiusMultiplier: 2.5,
+    minNodeRadius: 6,
+    maxNodeRadius: 24,
+    minCenterAlpha: 0.15,
+    maxCenterAlpha: 0.6,
+    hoverBoostFactor: 2,
+    neighborBoostFactor: 1.5,
+    dimFactor: 0.2,
+    hoverHighlightDepth: 2,
+    distanceInnerRadiusMultiplier: 1.5,
+    distanceOuterRadiusMultiplier: 4,
     distanceCurveSteepness: 2,
     // focus/dimming defaults
-    focusSmoothingRate: 8,
-    edgeDimMin: 0.08,
-    edgeDimMax: 0.9,
+    focusSmoothingRate: 0.15,
+    edgeDimMin: 0.1,
+    edgeDimMax: 0.7,
     nodeMinBodyAlpha: 0.3,
     // color overrides left undefined by default to follow theme
     nodeColor: void 0,
+    nodeColorAlpha: 1,
     labelColor: void 0,
+    labelColorAlpha: 1,
     useInterfaceFont: true,
-    edgeColor: void 0
+    edgeColor: void 0,
+    edgeColorAlpha: 1
   },
   physics: {
-    // calmer, Obsidian-like defaults
-    repulsionStrength: 10,
-    springStrength: 0.04,
-    springLength: 130,
-    centerPull: 4e-4,
-    damping: 0.92,
-    notePlaneStiffness: 0,
-    tagPlaneStiffness: 0,
+    // INTERNAL defaults (mapped from UI defaults)
+    // Repulsion mapping: internal = ui^2 * 2000 (UI default 0.2 -> 80)
+    repulsionStrength: 80,
+    // Spring strength: internal = ui * 0.5 (UI default 0.4 -> 0.2)
+    springStrength: 0.2,
+    springLength: 100,
+    // Center pull: internal = ui * 0.01 (UI default 0.1 -> 0.001)
+    centerPull: 1e-3,
+    // Damping internal (0..1)
+    damping: 0.9,
+    notePlaneStiffness: 4e-3,
+    tagPlaneStiffness: 8e-3,
     centerX: 0,
     centerY: 0,
     centerZ: 0,
-    mouseAttractionRadius: 80,
-    mouseAttractionStrength: 0.15,
-    mouseAttractionExponent: 3.5
+    mouseAttractionRadius: 160,
+    // mouse attraction strength: internal = ui * 0.1 (UI default 0.2 -> 0.02)
+    mouseAttractionStrength: 0.02,
+    mouseAttractionExponent: 3
   },
   interaction: {
     momentumScale: 0.12,
@@ -3029,6 +3228,14 @@ var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data || {});
     if (!this.settings.glow)
       this.settings.glow = DEFAULT_SETTINGS.glow;
+    try {
+      const g = this.settings.glow;
+      if (typeof g.maxNodeRadius === "number" && typeof g.minNodeRadius === "number") {
+        if (g.maxNodeRadius < g.minNodeRadius + 2)
+          g.maxNodeRadius = g.minNodeRadius + 2;
+      }
+    } catch (e) {
+    }
   }
   async saveSettings() {
     await this.saveData(this.settings);
@@ -3076,14 +3283,26 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       range.step = String(opts.step ?? (opts.step === 0 ? 0 : opts.step || 1));
       range.value = String(opts.value);
       range.style.flex = "1";
-      const label = document.createElement("div");
-      label.textContent = String(opts.value);
-      label.style.minWidth = "56px";
-      label.style.textAlign = "right";
+      const num = document.createElement("input");
+      num.type = "number";
+      num.min = String(opts.min);
+      num.max = String(opts.max);
+      num.step = String(opts.step ?? (opts.step === 0 ? 0 : opts.step || 1));
+      num.value = String(opts.value);
+      num.style.minWidth = "56px";
+      num.style.textAlign = "right";
+      num.style.width = "80px";
       range.addEventListener("input", (e) => {
-        label.textContent = e.target.value;
+        num.value = e.target.value;
       });
       range.addEventListener("change", async (e) => {
+        const v = Number(e.target.value);
+        await opts.onChange(v);
+      });
+      num.addEventListener("input", (e) => {
+        range.value = e.target.value;
+      });
+      num.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
         await opts.onChange(v);
       });
@@ -3098,7 +3317,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         try {
           if (typeof opts.resetValue === "number") {
             range.value = String(opts.resetValue);
-            label.textContent = range.value;
+            num.value = range.value;
             await opts.onChange(Number(range.value));
           } else {
             await opts.onChange(NaN);
@@ -3107,22 +3326,25 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       });
       wrap.appendChild(range);
-      wrap.appendChild(label);
+      wrap.appendChild(num);
       wrap.appendChild(rbtn);
       s.controlEl.appendChild(wrap);
-      return { range, label, reset: rbtn };
+      return { range, num, reset: rbtn };
     };
     addSliderSetting(containerEl, {
       name: "Minimum node radius",
       desc: "Minimum radius for the smallest node (in pixels).",
-      value: glow.minNodeRadius,
-      min: 1,
-      max: 40,
+      value: glow.minNodeRadius ?? DEFAULT_SETTINGS.glow.minNodeRadius,
+      min: 2,
+      max: 20,
       step: 1,
       resetValue: DEFAULT_SETTINGS.glow.minNodeRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          glow.minNodeRadius = v;
+          glow.minNodeRadius = Math.round(v);
+          if (typeof glow.maxNodeRadius === "number" && glow.maxNodeRadius < glow.minNodeRadius + 2) {
+            glow.maxNodeRadius = glow.minNodeRadius + 2;
+          }
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           glow.minNodeRadius = DEFAULT_SETTINGS.glow.minNodeRadius;
@@ -3133,14 +3355,16 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Maximum node radius",
       desc: "Maximum radius for the most connected node (in pixels).",
-      value: glow.maxNodeRadius,
-      min: 4,
-      max: 120,
+      value: glow.maxNodeRadius ?? DEFAULT_SETTINGS.glow.maxNodeRadius,
+      min: 8,
+      max: 80,
       step: 1,
       resetValue: DEFAULT_SETTINGS.glow.maxNodeRadius,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= glow.minNodeRadius) {
-          glow.maxNodeRadius = v;
+        if (!Number.isNaN(v)) {
+          glow.maxNodeRadius = Math.round(v);
+          if (typeof glow.minNodeRadius === "number" && glow.maxNodeRadius < glow.minNodeRadius + 2)
+            glow.maxNodeRadius = glow.minNodeRadius + 2;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           glow.maxNodeRadius = DEFAULT_SETTINGS.glow.maxNodeRadius;
@@ -3151,14 +3375,14 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     new import_obsidian2.Setting(containerEl).setName("");
     addSliderSetting(containerEl, {
       name: "Minimum center glow opacity",
-      desc: "Opacity (0\u20131) at the glow center for the least connected node.",
-      value: glow.minCenterAlpha,
+      desc: "Opacity (0\u20130.8) at the glow center for the least connected node.",
+      value: glow.minCenterAlpha ?? DEFAULT_SETTINGS.glow.minCenterAlpha,
       min: 0,
-      max: 1,
+      max: 0.8,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.glow.minCenterAlpha,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+        if (!Number.isNaN(v) && v >= 0 && v <= 0.8) {
           glow.minCenterAlpha = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
@@ -3170,7 +3394,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Maximum center glow opacity",
       desc: "Opacity (0\u20131) at the glow center for the most connected node.",
-      value: glow.maxCenterAlpha,
+      value: glow.maxCenterAlpha ?? DEFAULT_SETTINGS.glow.maxCenterAlpha,
       min: 0,
       max: 1,
       step: 0.01,
@@ -3188,13 +3412,13 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Hover glow boost",
       desc: "Multiplier applied to the center glow when a node is hovered.",
-      value: glow.hoverBoostFactor,
+      value: glow.hoverBoostFactor ?? DEFAULT_SETTINGS.glow.hoverBoostFactor,
       min: 1,
-      max: 5,
+      max: 4,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.glow.hoverBoostFactor,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 1) {
+        if (!Number.isNaN(v) && v >= 1 && v <= 4) {
           glow.hoverBoostFactor = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
@@ -3206,13 +3430,13 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Neighbor glow boost",
       desc: "Multiplier applied to nodes within the highlight depth (excluding hovered node).",
-      value: glow.neighborBoostFactor ?? 1.2,
+      value: glow.neighborBoostFactor ?? DEFAULT_SETTINGS.glow.neighborBoostFactor,
       min: 1,
-      max: 5,
+      max: 3,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.glow.neighborBoostFactor,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 1) {
+        if (!Number.isNaN(v) && v >= 1 && v <= 3) {
           glow.neighborBoostFactor = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
@@ -3224,7 +3448,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Dim factor for distant nodes",
       desc: "Multiplier (0\u20131) applied to nodes outside the highlight depth.",
-      value: glow.dimFactor ?? 0.3,
+      value: glow.dimFactor ?? DEFAULT_SETTINGS.glow.dimFactor,
       min: 0,
       max: 1,
       step: 0.01,
@@ -3244,7 +3468,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       desc: "Graph distance (in hops) from the hovered node that will be highlighted.",
       value: glow.hoverHighlightDepth ?? 1,
       min: 0,
-      max: 6,
+      max: 5,
       step: 1,
       resetValue: DEFAULT_SETTINGS.glow.hoverHighlightDepth,
       onChange: async (v) => {
@@ -3261,8 +3485,8 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       name: "Inner distance multiplier",
       desc: "Distance (in node radii) where distance-based glow is fully active.",
       value: glow.distanceInnerRadiusMultiplier ?? 1,
-      min: 0.1,
-      max: 3,
+      min: 0.5,
+      max: 4,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.glow.distanceInnerRadiusMultiplier,
       onChange: async (v) => {
@@ -3279,8 +3503,8 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       name: "Outer distance multiplier",
       desc: "Distance (in node radii) beyond which the mouse has no effect on glow.",
       value: glow.distanceOuterRadiusMultiplier ?? 2.5,
-      min: 0.5,
-      max: 6,
+      min: 1,
+      max: 8,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.glow.distanceOuterRadiusMultiplier,
       onChange: async (v) => {
@@ -3297,8 +3521,8 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       name: "Distance curve steepness",
       desc: "Controls how quickly glow ramps up as the cursor approaches a node. Higher values = steeper S-curve.",
       value: glow.distanceCurveSteepness ?? 2,
-      min: 0.1,
-      max: 8,
+      min: 0.5,
+      max: 5,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.glow.distanceCurveSteepness,
       onChange: async (v) => {
@@ -3311,42 +3535,78 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       }
     });
-    new import_obsidian2.Setting(containerEl).setName("Focus smoothing rate").setDesc("How quickly nodes fade in/out when hover focus changes (higher = faster, per second).").addText(
-      (text) => text.setValue(String(glow.focusSmoothingRate ?? 8)).onChange(async (value) => {
-        const num = Number(value);
-        if (!isNaN(num) && num > 0) {
-          glow.focusSmoothingRate = num;
+    addSliderSetting(containerEl, {
+      name: "Focus smoothing rate",
+      desc: "Smoothness of focus transitions (0 = very slow, 1 = fast). Internally used as a lerp factor.",
+      value: glow.focusSmoothingRate ?? DEFAULT_SETTINGS.glow.focusSmoothingRate,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.glow.focusSmoothingRate,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+          glow.focusSmoothingRate = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.focusSmoothingRate = DEFAULT_SETTINGS.glow.focusSmoothingRate;
           await this.plugin.saveSettings();
         }
-      })
-    );
-    new import_obsidian2.Setting(containerEl).setName("Edge dim minimum alpha").setDesc("Minimum alpha used for dimmed edges (0-1).").addText(
-      (text) => text.setValue(String(glow.edgeDimMin ?? 0.08)).onChange(async (value) => {
-        const num = Number(value);
-        if (!isNaN(num) && num >= 0 && num <= 1) {
-          glow.edgeDimMin = num;
+      }
+    });
+    addSliderSetting(containerEl, {
+      name: "Edge dim minimum alpha",
+      desc: "Minimum alpha used for dimmed edges (0-0.8).",
+      value: glow.edgeDimMin ?? DEFAULT_SETTINGS.glow.edgeDimMin,
+      min: 0,
+      max: 0.8,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.glow.edgeDimMin,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0 && v <= 0.8) {
+          glow.edgeDimMin = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.edgeDimMin = DEFAULT_SETTINGS.glow.edgeDimMin;
           await this.plugin.saveSettings();
         }
-      })
-    );
-    new import_obsidian2.Setting(containerEl).setName("Edge dim maximum alpha").setDesc("Maximum alpha used for focused edges (0-1).").addText(
-      (text) => text.setValue(String(glow.edgeDimMax ?? 0.9)).onChange(async (value) => {
-        const num = Number(value);
-        if (!isNaN(num) && num >= 0 && num <= 1) {
-          glow.edgeDimMax = num;
+      }
+    });
+    addSliderSetting(containerEl, {
+      name: "Edge dim maximum alpha",
+      desc: "Maximum alpha used for focused edges (0-1).",
+      value: glow.edgeDimMax ?? DEFAULT_SETTINGS.glow.edgeDimMax,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.glow.edgeDimMax,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+          glow.edgeDimMax = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.edgeDimMax = DEFAULT_SETTINGS.glow.edgeDimMax;
           await this.plugin.saveSettings();
         }
-      })
-    );
-    new import_obsidian2.Setting(containerEl).setName("Node minimum body alpha").setDesc("Minimum fill alpha for dimmed nodes (0-1).").addText(
-      (text) => text.setValue(String(glow.nodeMinBodyAlpha ?? 0.3)).onChange(async (value) => {
-        const num = Number(value);
-        if (!isNaN(num) && num >= 0 && num <= 1) {
-          glow.nodeMinBodyAlpha = num;
+      }
+    });
+    addSliderSetting(containerEl, {
+      name: "Node minimum body alpha",
+      desc: "Minimum fill alpha for dimmed nodes (0-1).",
+      value: glow.nodeMinBodyAlpha ?? DEFAULT_SETTINGS.glow.nodeMinBodyAlpha,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.glow.nodeMinBodyAlpha,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+          glow.nodeMinBodyAlpha = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.nodeMinBodyAlpha = DEFAULT_SETTINGS.glow.nodeMinBodyAlpha;
           await this.plugin.saveSettings();
         }
-      })
-    );
+      }
+    });
     containerEl.createEl("h2", { text: "Colors" });
     {
       const s = new import_obsidian2.Setting(containerEl).setName("Node color (override)").setDesc("Optional CSS color string to override the theme accent for node fill. Leave empty to use the active theme.");
@@ -3369,11 +3629,27 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       rb.style.cursor = "pointer";
       rb.addEventListener("click", async () => {
         glow.nodeColor = void 0;
+        glow.nodeColorAlpha = void 0;
         await this.plugin.saveSettings();
         if (txt)
           txt.setValue("");
+        alphaInput.value = String(DEFAULT_SETTINGS.glow.nodeColorAlpha);
       });
       s.controlEl.appendChild(rb);
+      const alphaInput = document.createElement("input");
+      alphaInput.type = "number";
+      alphaInput.min = "0";
+      alphaInput.max = "1";
+      alphaInput.step = "0.01";
+      alphaInput.value = String(glow.nodeColorAlpha ?? DEFAULT_SETTINGS.glow.nodeColorAlpha);
+      alphaInput.style.width = "68px";
+      alphaInput.style.marginLeft = "8px";
+      alphaInput.addEventListener("change", async (e) => {
+        const v = Number(e.target.value);
+        glow.nodeColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.nodeColorAlpha;
+        await this.plugin.saveSettings();
+      });
+      s.controlEl.appendChild(alphaInput);
     }
     {
       const s = new import_obsidian2.Setting(containerEl).setName("Edge color (override)").setDesc("Optional CSS color string to override edge stroke color. Leave empty to use a theme-appropriate color.");
@@ -3396,11 +3672,27 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       rb.style.cursor = "pointer";
       rb.addEventListener("click", async () => {
         glow.edgeColor = void 0;
+        glow.edgeColorAlpha = void 0;
         await this.plugin.saveSettings();
         if (txt)
           txt.setValue("");
+        edgeAlpha.value = String(DEFAULT_SETTINGS.glow.edgeColorAlpha);
       });
       s.controlEl.appendChild(rb);
+      const edgeAlpha = document.createElement("input");
+      edgeAlpha.type = "number";
+      edgeAlpha.min = "0";
+      edgeAlpha.max = "1";
+      edgeAlpha.step = "0.01";
+      edgeAlpha.value = String(glow.edgeColorAlpha ?? DEFAULT_SETTINGS.glow.edgeColorAlpha);
+      edgeAlpha.style.width = "68px";
+      edgeAlpha.style.marginLeft = "8px";
+      edgeAlpha.addEventListener("change", async (e) => {
+        const v = Number(e.target.value);
+        glow.edgeColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.edgeColorAlpha;
+        await this.plugin.saveSettings();
+      });
+      s.controlEl.appendChild(edgeAlpha);
     }
     {
       const s = new import_obsidian2.Setting(containerEl).setName("Label color (override)").setDesc("Optional CSS color string to override label text color. Leave empty to use the active theme text color.");
@@ -3423,11 +3715,27 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       rb.style.cursor = "pointer";
       rb.addEventListener("click", async () => {
         glow.labelColor = void 0;
+        glow.labelColorAlpha = void 0;
         await this.plugin.saveSettings();
         if (txt)
           txt.setValue("");
+        labelAlpha.value = String(DEFAULT_SETTINGS.glow.labelColorAlpha);
       });
       s.controlEl.appendChild(rb);
+      const labelAlpha = document.createElement("input");
+      labelAlpha.type = "number";
+      labelAlpha.min = "0";
+      labelAlpha.max = "1";
+      labelAlpha.step = "0.01";
+      labelAlpha.value = String(glow.labelColorAlpha ?? DEFAULT_SETTINGS.glow.labelColorAlpha);
+      labelAlpha.style.width = "68px";
+      labelAlpha.style.marginLeft = "8px";
+      labelAlpha.addEventListener("change", async (e) => {
+        const v = Number(e.target.value);
+        glow.labelColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.labelColorAlpha;
+        await this.plugin.saveSettings();
+      });
+      s.controlEl.appendChild(labelAlpha);
     }
     new import_obsidian2.Setting(containerEl).setName("Use interface font for labels").setDesc("When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.").addToggle((t) => t.setValue(Boolean(glow.useInterfaceFont)).onChange(async (v) => {
       glow.useInterfaceFont = Boolean(v);
@@ -3435,18 +3743,23 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     }));
     const phys = this.plugin.settings.physics || {};
     containerEl.createEl("h2", { text: "Greater Graph \u2013 Physics" });
+    const repulsionUi = (() => {
+      const internal = phys.repulsionStrength ?? DEFAULT_SETTINGS.physics.repulsionStrength;
+      const ui = Math.sqrt(Math.max(0, internal / 2e3));
+      return Math.min(1, Math.max(0, ui));
+    })();
     addSliderSetting(containerEl, {
       name: "Repulsion strength",
-      desc: "Controls node-node repulsion strength (higher = more separation).",
-      value: phys.repulsionStrength ?? 4e3,
+      desc: "UI 0\u20131 (mapped internally). Higher = more node separation.",
+      value: repulsionUi,
       min: 0,
-      max: 1e4,
-      step: 1,
-      resetValue: DEFAULT_SETTINGS.physics.repulsionStrength,
+      max: 1,
+      step: 0.01,
+      resetValue: 0.2,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.repulsionStrength = v;
+          this.plugin.settings.physics.repulsionStrength = v * v * 2e3;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
@@ -3455,18 +3768,19 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       }
     });
+    const springUi = Math.min(1, Math.max(0, (phys.springStrength ?? DEFAULT_SETTINGS.physics.springStrength) / 0.5));
     addSliderSetting(containerEl, {
       name: "Spring strength",
-      desc: "Spring force constant for edges (higher = stiffer).",
-      value: phys.springStrength ?? 0.08,
+      desc: "UI 0\u20131 mapped to internal spring constant (higher = stiffer).",
+      value: springUi,
       min: 0,
-      max: 0.2,
-      step: 1e-3,
-      resetValue: DEFAULT_SETTINGS.physics.springStrength,
+      max: 1,
+      step: 0.01,
+      resetValue: 0.4,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.springStrength = v;
+          this.plugin.settings.physics.springStrength = v * 0.5;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
@@ -3478,9 +3792,9 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Spring length",
       desc: "Preferred length (px) for edge springs.",
-      value: phys.springLength ?? 80,
-      min: 10,
-      max: 500,
+      value: phys.springLength ?? DEFAULT_SETTINGS.physics.springLength,
+      min: 20,
+      max: 400,
       step: 1,
       resetValue: DEFAULT_SETTINGS.physics.springLength,
       onChange: async (v) => {
@@ -3495,18 +3809,19 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       }
     });
+    const centerUi = Math.min(1, Math.max(0, (phys.centerPull ?? DEFAULT_SETTINGS.physics.centerPull) / 0.01));
     addSliderSetting(containerEl, {
       name: "Center pull",
-      desc: "Force pulling nodes toward center (small value).",
-      value: phys.centerPull ?? 0.02,
+      desc: "UI 0\u20131 mapped to a small centering force (internal scale).",
+      value: centerUi,
       min: 0,
-      max: 0.01,
-      step: 1e-4,
-      resetValue: DEFAULT_SETTINGS.physics.centerPull,
+      max: 1,
+      step: 1e-3,
+      resetValue: 0.1,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.centerPull = v;
+          this.plugin.settings.physics.centerPull = v * 0.01;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
@@ -3517,14 +3832,14 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     });
     addSliderSetting(containerEl, {
       name: "Damping",
-      desc: "Velocity damping (0-1). Higher values reduce motion faster.",
-      value: phys.damping ?? 0.85,
-      min: 0,
+      desc: "Velocity damping (0.7\u20131.0). Higher values reduce motion faster.",
+      value: phys.damping ?? DEFAULT_SETTINGS.physics.damping,
+      min: 0.7,
       max: 1,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.physics.damping,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+        if (!Number.isNaN(v) && v >= 0.7 && v <= 1) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
           this.plugin.settings.physics.damping = v;
           await this.plugin.saveSettings();
@@ -3587,80 +3902,19 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       }
     });
+    const notePlaneUi = Math.min(1, Math.max(0, (phys.notePlaneStiffness ?? DEFAULT_SETTINGS.physics.notePlaneStiffness) / 0.02));
     addSliderSetting(containerEl, {
-      name: "Mouse attraction exponent",
-      desc: "How sharply attraction ramps as the cursor approaches (typical values: 3\u20134).",
-      value: phys.mouseAttractionExponent ?? 3.5,
-      min: 0.1,
-      max: 10,
-      step: 0.1,
-      resetValue: DEFAULT_SETTINGS.physics.mouseAttractionExponent,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v > 0) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionExponent = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionExponent = DEFAULT_SETTINGS.physics.mouseAttractionExponent;
-          await this.plugin.saveSettings();
-        }
-      }
-    });
-    containerEl.createEl("h2", { text: "Interaction" });
-    const interaction = this.plugin.settings.interaction || {};
-    addSliderSetting(containerEl, {
-      name: "Drag momentum scale",
-      desc: "Multiplier applied to the sampled drag velocity when releasing a dragged node.",
-      value: interaction.momentumScale ?? 0.12,
+      name: "Note plane stiffness (z)",
+      desc: "How strongly notes are pulled toward the z=0 plane (UI 0\u20131).",
+      value: notePlaneUi,
       min: 0,
       max: 1,
       step: 0.01,
-      resetValue: DEFAULT_SETTINGS.interaction.momentumScale,
+      resetValue: 0.2,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
-          this.plugin.settings.interaction = this.plugin.settings.interaction || {};
-          this.plugin.settings.interaction.momentumScale = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          this.plugin.settings.interaction = this.plugin.settings.interaction || {};
-          this.plugin.settings.interaction.momentumScale = DEFAULT_SETTINGS.interaction.momentumScale;
-          await this.plugin.saveSettings();
-        }
-      }
-    });
-    addSliderSetting(containerEl, {
-      name: "Drag threshold (px)",
-      desc: "Screen-space movement (pixels) required to count as a drag rather than a click.",
-      value: interaction.dragThreshold ?? 4,
-      min: 0,
-      max: 40,
-      step: 1,
-      resetValue: DEFAULT_SETTINGS.interaction.dragThreshold,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
-          this.plugin.settings.interaction = this.plugin.settings.interaction || {};
-          this.plugin.settings.interaction.dragThreshold = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          this.plugin.settings.interaction = this.plugin.settings.interaction || {};
-          this.plugin.settings.interaction.dragThreshold = DEFAULT_SETTINGS.interaction.dragThreshold;
-          await this.plugin.saveSettings();
-        }
-      }
-    });
-    addSliderSetting(containerEl, {
-      name: "Note plane stiffness (z)",
-      desc: "Pull strength keeping notes near z = 0 (soft constraint).",
-      value: phys.notePlaneStiffness ?? DEFAULT_SETTINGS.physics.notePlaneStiffness,
-      min: 0,
-      max: 0.2,
-      step: 1e-3,
-      resetValue: DEFAULT_SETTINGS.physics.notePlaneStiffness,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.notePlaneStiffness = v;
+          this.plugin.settings.physics.notePlaneStiffness = v * 0.02;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
@@ -3669,22 +3923,84 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       }
     });
+    const tagPlaneUi = Math.min(1, Math.max(0, (phys.tagPlaneStiffness ?? DEFAULT_SETTINGS.physics.tagPlaneStiffness) / 0.02));
     addSliderSetting(containerEl, {
       name: "Tag plane stiffness (x)",
-      desc: "Pull strength keeping tags near x = 0 (soft constraint).",
-      value: phys.tagPlaneStiffness ?? DEFAULT_SETTINGS.physics.tagPlaneStiffness,
+      desc: "How strongly tag nodes are pulled toward the x=0 plane (UI 0\u20131).",
+      value: tagPlaneUi,
       min: 0,
-      max: 0.2,
-      step: 1e-3,
-      resetValue: DEFAULT_SETTINGS.physics.tagPlaneStiffness,
+      max: 1,
+      step: 0.01,
+      resetValue: 0.4,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.tagPlaneStiffness = v;
+          this.plugin.settings.physics.tagPlaneStiffness = v * 0.02;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
           this.plugin.settings.physics.tagPlaneStiffness = DEFAULT_SETTINGS.physics.tagPlaneStiffness;
+          await this.plugin.saveSettings();
+        }
+      }
+    });
+    addSliderSetting(containerEl, {
+      name: "Mouse attraction radius (px)",
+      desc: "Maximum distance (in pixels) from cursor where the attraction applies.",
+      value: phys.mouseAttractionRadius ?? DEFAULT_SETTINGS.physics.mouseAttractionRadius,
+      min: 40,
+      max: 400,
+      step: 1,
+      resetValue: DEFAULT_SETTINGS.physics.mouseAttractionRadius,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionRadius = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionRadius = DEFAULT_SETTINGS.physics.mouseAttractionRadius;
+          await this.plugin.saveSettings();
+        }
+      }
+    });
+    const mouseStrengthUi = Math.min(1, Math.max(0, (phys.mouseAttractionStrength ?? DEFAULT_SETTINGS.physics.mouseAttractionStrength) / 0.1));
+    addSliderSetting(containerEl, {
+      name: "Mouse attraction strength",
+      desc: "UI 0\u20131 mapped to internal small force scale (higher = stronger pull).",
+      value: mouseStrengthUi,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      resetValue: 0.2,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionStrength = v * 0.1;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionStrength = DEFAULT_SETTINGS.physics.mouseAttractionStrength;
+          await this.plugin.saveSettings();
+        }
+      }
+    });
+    addSliderSetting(containerEl, {
+      name: "Mouse attraction exponent",
+      desc: "How sharply attraction ramps as the cursor approaches (1 = linear; higher = snappier near cursor).",
+      value: phys.mouseAttractionExponent ?? DEFAULT_SETTINGS.physics.mouseAttractionExponent,
+      min: 1,
+      max: 6,
+      step: 0.1,
+      resetValue: DEFAULT_SETTINGS.physics.mouseAttractionExponent,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 1 && v <= 6) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionExponent = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionExponent = DEFAULT_SETTINGS.physics.mouseAttractionExponent;
           await this.plugin.saveSettings();
         }
       }

@@ -797,6 +797,12 @@ class Graph2DController {
         if (nodeVar && nodeVar.trim()) themeNodeColor = nodeVar.trim();
       } catch (e) {}
       nodeColor.value = (this.plugin as any).settings?.glow?.nodeColor || themeNodeColor;
+      const nodeColorWrap = document.createElement('div');
+      nodeColorWrap.style.display = 'flex'; nodeColorWrap.style.alignItems = 'center'; nodeColorWrap.style.gap = '6px';
+      const nodeAlpha = document.createElement('input');
+      nodeAlpha.type = 'number'; nodeAlpha.min = '0'; nodeAlpha.max = '1'; nodeAlpha.step = '0.01';
+      nodeAlpha.value = String((this.plugin as any).settings?.glow?.nodeColorAlpha ?? 1.0);
+      nodeAlpha.style.width = '64px';
       nodeColor.addEventListener('input', async (e) => {
         try {
           (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
@@ -806,16 +812,29 @@ class Graph2DController {
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
         } catch (e) {}
       });
-      panel.appendChild(makeRow('Node color', nodeColor, async () => {
+      nodeAlpha.addEventListener('input', async (e) => {
+        try {
+          (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+          const v = Number((e.target as HTMLInputElement).value);
+          (this.plugin as any).settings.glow.nodeColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1.0;
+          await (this.plugin as any).saveSettings();
+          try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
+          try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+        } catch (e) {}
+      });
+      nodeColorWrap.appendChild(nodeColor); nodeColorWrap.appendChild(nodeAlpha);
+      panel.appendChild(makeRow('Node color', nodeColorWrap, async () => {
         try {
           (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
           delete (this.plugin as any).settings.glow.nodeColor;
+          delete (this.plugin as any).settings.glow.nodeColorAlpha;
           await (this.plugin as any).saveSettings();
           // reset input display to theme color
           try {
             const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
             const nodeVar = cs.getPropertyValue('--interactive-accent') || cs.getPropertyValue('--accent-1') || cs.getPropertyValue('--accent');
             nodeColor.value = (nodeVar && nodeVar.trim()) ? nodeVar.trim() : '#66ccff';
+            nodeAlpha.value = String(1.0);
           } catch (e) { nodeColor.value = '#66ccff'; }
           try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
@@ -833,6 +852,10 @@ class Graph2DController {
         if (edgeVar && edgeVar.trim()) themeEdgeColor = edgeVar.trim();
       } catch (e) {}
       edgeColor.value = (this.plugin as any).settings?.glow?.edgeColor || themeEdgeColor;
+      const edgeColorWrap = document.createElement('div');
+      edgeColorWrap.style.display = 'flex'; edgeColorWrap.style.alignItems = 'center'; edgeColorWrap.style.gap = '6px';
+      const edgeAlpha = document.createElement('input'); edgeAlpha.type = 'number'; edgeAlpha.min = '0'; edgeAlpha.max = '1'; edgeAlpha.step = '0.01';
+      edgeAlpha.value = String((this.plugin as any).settings?.glow?.edgeColorAlpha ?? 1.0); edgeAlpha.style.width = '64px';
       edgeColor.addEventListener('input', async (e) => {
         try {
           (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
@@ -842,16 +865,29 @@ class Graph2DController {
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
         } catch (e) {}
       });
-      panel.appendChild(makeRow('Edge color', edgeColor, async () => {
+      edgeAlpha.addEventListener('input', async (e) => {
+        try {
+          (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+          const v = Number((e.target as HTMLInputElement).value);
+          (this.plugin as any).settings.glow.edgeColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1.0;
+          await (this.plugin as any).saveSettings();
+          try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
+          try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+        } catch (e) {}
+      });
+      edgeColorWrap.appendChild(edgeColor); edgeColorWrap.appendChild(edgeAlpha);
+      panel.appendChild(makeRow('Edge color', edgeColorWrap, async () => {
         try {
           (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
           delete (this.plugin as any).settings.glow.edgeColor;
+          delete (this.plugin as any).settings.glow.edgeColorAlpha;
           await (this.plugin as any).saveSettings();
           // reset input display to theme color
           try {
             const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
             const edgeVar = cs.getPropertyValue('--text-muted') || cs.getPropertyValue('--text-faint') || cs.getPropertyValue('--text-normal');
             edgeColor.value = (edgeVar && edgeVar.trim()) ? edgeVar.trim() : '#888888';
+            edgeAlpha.value = String(1.0);
           } catch (e) { edgeColor.value = '#888888'; }
           try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
@@ -869,6 +905,8 @@ class Graph2DController {
           if (nodeVar && nodeVar.trim()) themeTagColor = nodeVar.trim();
         } catch (e) {}
         tagColor.value = (this.plugin as any).settings?.glow?.tagColor || themeTagColor;
+        const tagWrap = document.createElement('div'); tagWrap.style.display='flex'; tagWrap.style.alignItems='center'; tagWrap.style.gap='6px';
+        const tagAlpha = document.createElement('input'); tagAlpha.type='number'; tagAlpha.min='0'; tagAlpha.max='1'; tagAlpha.step='0.01'; tagAlpha.value = String((this.plugin as any).settings?.glow?.tagColorAlpha ?? 1.0); tagAlpha.style.width='64px';
         tagColor.addEventListener('input', async (e) => {
           try {
             (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
@@ -878,16 +916,20 @@ class Graph2DController {
             try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
           } catch (e) {}
         });
-        panel.appendChild(makeRow('Tag color', tagColor, async () => {
+        tagAlpha.addEventListener('input', async (e) => { try { (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {}; const v = Number((e.target as HTMLInputElement).value); (this.plugin as any).settings.glow.tagColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1.0; await (this.plugin as any).saveSettings(); try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {} try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {} } catch (e) {} });
+        tagWrap.appendChild(tagColor); tagWrap.appendChild(tagAlpha);
+        panel.appendChild(makeRow('Tag color', tagWrap, async () => {
           try {
             (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
             delete (this.plugin as any).settings.glow.tagColor;
+            delete (this.plugin as any).settings.glow.tagColorAlpha;
             await (this.plugin as any).saveSettings();
             // reset input display to theme tag color
             try {
               const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
               const nodeVar = cs.getPropertyValue('--accent-2') || cs.getPropertyValue('--accent-secondary') || cs.getPropertyValue('--interactive-accent') || cs.getPropertyValue('--accent-1') || cs.getPropertyValue('--accent');
               tagColor.value = (nodeVar && nodeVar.trim()) ? nodeVar.trim() : '#8000ff';
+              tagAlpha.value = String(1.0);
             } catch (e) { tagColor.value = '#8000ff'; }
             try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
             try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
@@ -903,8 +945,12 @@ class Graph2DController {
       minRange.type = 'range'; minRange.min = '1'; minRange.max = '60'; minRange.step = '1';
       const curMin = (this.plugin as any).settings?.glow?.minNodeRadius ?? 4;
       minRange.value = String(curMin);
-      const minLabel = document.createElement('div'); minLabel.textContent = String(minRange.value); minLabel.style.minWidth = '36px'; minLabel.style.textAlign='right';
-      minRange.addEventListener('input', (e) => { minLabel.textContent = (e.target as HTMLInputElement).value; });
+      const minInput = document.createElement('input');
+      minInput.type = 'number';
+      minInput.min = minRange.min; minInput.max = minRange.max; minInput.step = minRange.step;
+      minInput.value = String(minRange.value);
+      minInput.style.width = '56px'; minInput.style.textAlign = 'right';
+      minRange.addEventListener('input', (e) => { minInput.value = (e.target as HTMLInputElement).value; });
       minRange.addEventListener('change', async (e) => {
         try {
           (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
@@ -915,7 +961,9 @@ class Graph2DController {
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
         } catch (e) {}
       });
-      minSizeWrap.appendChild(minRange); minSizeWrap.appendChild(minLabel);
+      minInput.addEventListener('input', (e) => { minRange.value = (e.target as HTMLInputElement).value; });
+      minInput.addEventListener('change', (e) => { minRange.dispatchEvent(new Event('change')); });
+      minSizeWrap.appendChild(minRange); minSizeWrap.appendChild(minInput);
 
       const maxSizeWrap = document.createElement('div');
       maxSizeWrap.style.display = 'flex'; maxSizeWrap.style.alignItems = 'center'; maxSizeWrap.style.gap = '6px';
@@ -923,8 +971,12 @@ class Graph2DController {
       maxRange.type = 'range'; maxRange.min = '4'; maxRange.max = '120'; maxRange.step = '1';
       const curMax = (this.plugin as any).settings?.glow?.maxNodeRadius ?? 14;
       maxRange.value = String(curMax);
-      const maxLabel = document.createElement('div'); maxLabel.textContent = String(maxRange.value); maxLabel.style.minWidth = '36px'; maxLabel.style.textAlign='right';
-      maxRange.addEventListener('input', (e) => { maxLabel.textContent = (e.target as HTMLInputElement).value; });
+      const maxInput = document.createElement('input');
+      maxInput.type = 'number';
+      maxInput.min = maxRange.min; maxInput.max = maxRange.max; maxInput.step = maxRange.step;
+      maxInput.value = String(maxRange.value);
+      maxInput.style.width = '56px'; maxInput.style.textAlign = 'right';
+      maxRange.addEventListener('input', (e) => { maxInput.value = (e.target as HTMLInputElement).value; });
       maxRange.addEventListener('change', async (e) => {
         try {
           (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
@@ -935,7 +987,9 @@ class Graph2DController {
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
         } catch (e) {}
       });
-      maxSizeWrap.appendChild(maxRange); maxSizeWrap.appendChild(maxLabel);
+      maxInput.addEventListener('input', (e) => { maxRange.value = (e.target as HTMLInputElement).value; });
+      maxInput.addEventListener('change', (e) => { maxRange.dispatchEvent(new Event('change')); });
+      maxSizeWrap.appendChild(maxRange); maxSizeWrap.appendChild(maxInput);
 
       // row for node size min
       panel.appendChild(makeRow('Node min radius', minSizeWrap, async () => {
@@ -1020,7 +1074,7 @@ class Graph2DController {
         // sensible defaults per-key
         switch (f.key) {
           case 'repulsionStrength': range.min = '0'; range.max = '10000'; range.step = '1'; break;
-          case 'springStrength': range.min = '0'; range.max = '0.2'; range.step = '0.001'; break;
+          case 'springStrength': range.min = '0'; range.max = '1.0'; range.step = '0.001'; break;
           case 'springLength': range.min = '10'; range.max = '500'; range.step = '1'; break;
           case 'centerPull': range.min = '0'; range.max = '0.01'; range.step = '0.0001'; break;
           case 'damping': range.min = '0'; range.max = '1'; range.step = '0.01'; break;
@@ -1030,32 +1084,47 @@ class Graph2DController {
           default: range.min = '0'; range.max = '100'; range.step = '1';
         }
         const current = (phys as any)[f.key];
-        range.value = String(Number.isFinite(current) ? current : Number(range.min));
+        // For springStrength, settings store the internal value; convert to UI 0..1
+        if (f.key === 'springStrength') {
+          const ui = Number.isFinite(current) ? Math.min(1, Math.max(0, Number(current) / 0.5)) : Number(range.min);
+          range.value = String(ui);
+        } else {
+          range.value = String(Number.isFinite(current) ? current : Number(range.min));
+        }
         range.style.width = '120px';
 
-        const valueLabel = document.createElement('div');
-        valueLabel.textContent = String(range.value);
-        valueLabel.style.minWidth = '48px';
-        valueLabel.style.textAlign = 'right';
+        const valueInput = document.createElement('input');
+        valueInput.type = 'number';
+        valueInput.min = range.min; valueInput.max = range.max; valueInput.step = range.step;
+        valueInput.value = String(range.value);
+        valueInput.style.width = '64px';
+        valueInput.style.textAlign = 'right';
 
         range.addEventListener('input', (e) => {
-          valueLabel.textContent = (e.target as HTMLInputElement).value;
+          valueInput.value = (e.target as HTMLInputElement).value;
         });
 
         range.addEventListener('change', async (e) => {
           try {
             (this.plugin as any).settings.physics = (this.plugin as any).settings.physics || {};
             const val = Number((e.target as HTMLInputElement).value);
-            (this.plugin as any).settings.physics[f.key] = Number.isFinite(val) ? val : (this.plugin as any).settings.physics[f.key];
+            // map UI -> internal for specific keys
+            if (f.key === 'springStrength') {
+              // UI 0..1 -> internal = ui * 0.5
+              (this.plugin as any).settings.physics[f.key] = Number.isFinite(val) ? (val * 0.5) : (this.plugin as any).settings.physics[f.key];
+            } else {
+              (this.plugin as any).settings.physics[f.key] = Number.isFinite(val) ? val : (this.plugin as any).settings.physics[f.key];
+            }
             await (this.plugin as any).saveSettings();
             try { if (this.simulation && (this.simulation as any).setOptions) (this.simulation as any).setOptions((this.plugin as any).settings.physics); } catch (e) {}
             try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
             try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
           } catch (e) {}
         });
-
+        valueInput.addEventListener('input', (e) => { range.value = (e.target as HTMLInputElement).value; });
+        valueInput.addEventListener('change', (e) => { range.dispatchEvent(new Event('change')); });
         wrap.appendChild(range);
-        wrap.appendChild(valueLabel);
+        wrap.appendChild(valueInput);
         panel.appendChild(makeRow(f.label, wrap, async () => {
           try {
             (this.plugin as any).settings.physics = (this.plugin as any).settings.physics || {};
@@ -1063,8 +1132,13 @@ class Graph2DController {
             await (this.plugin as any).saveSettings();
             // restore UI to default from settings object if available
             const def = (this.plugin as any).settings.physics[f.key];
-            range.value = def !== undefined ? String(def) : String(range.min);
-            valueLabel.textContent = range.value;
+            if (f.key === 'springStrength') {
+              const ui = def !== undefined ? String(Math.min(1, Math.max(0, Number(def) / 0.5))) : String(range.min);
+              range.value = ui;
+            } else {
+              range.value = def !== undefined ? String(def) : String(range.min);
+            }
+            valueInput.value = range.value;
             try { if (this.simulation && (this.simulation as any).setOptions) (this.simulation as any).setOptions((this.plugin as any).settings.physics); } catch (e) {}
             try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
           } catch (e) {}

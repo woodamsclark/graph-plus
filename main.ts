@@ -22,6 +22,10 @@ export interface GlowSettings {
   nodeColor?: string;
   labelColor?: string;
   edgeColor?: string;
+  // per-color alpha multipliers (0..1)
+  nodeColorAlpha?: number;
+  labelColorAlpha?: number;
+  edgeColorAlpha?: number;
   // whether to use Obsidian's interface font for labels (true) or a monospace/code font (false)
   useInterfaceFont?: boolean;
 }
@@ -62,43 +66,51 @@ export interface GreaterGraphSettings {
 
 export const DEFAULT_SETTINGS: GreaterGraphSettings = {
   glow: {
-    minNodeRadius: 4,
-    maxNodeRadius: 14,
-    minCenterAlpha: 0.10,
-    maxCenterAlpha: 0.40,
-    hoverBoostFactor: 1.6,
-    neighborBoostFactor: 1.2,
-    dimFactor: 0.3,
-    hoverHighlightDepth: 1,
-        distanceInnerRadiusMultiplier: 1.0,
-        distanceOuterRadiusMultiplier: 2.5,
-        distanceCurveSteepness: 2.0,
-        // focus/dimming defaults
-        focusSmoothingRate: 8,
-        edgeDimMin: 0.08,
-        edgeDimMax: 0.9,
-        nodeMinBodyAlpha: 0.3,
+    minNodeRadius: 6,
+    maxNodeRadius: 24,
+    minCenterAlpha: 0.15,
+    maxCenterAlpha: 0.6,
+    hoverBoostFactor: 2,
+    neighborBoostFactor: 1.5,
+    dimFactor: 0.2,
+    hoverHighlightDepth: 2,
+    distanceInnerRadiusMultiplier: 1.5,
+    distanceOuterRadiusMultiplier: 4,
+    distanceCurveSteepness: 2.0,
+    // focus/dimming defaults
+    focusSmoothingRate: 0.15,
+    edgeDimMin: 0.1,
+    edgeDimMax: 0.7,
+    nodeMinBodyAlpha: 0.3,
         // color overrides left undefined by default to follow theme
         nodeColor: undefined,
+        nodeColorAlpha: 1.0,
         labelColor: undefined,
+        labelColorAlpha: 1.0,
           useInterfaceFont: true,
         edgeColor: undefined,
+        edgeColorAlpha: 1.0,
   },
   physics: {
-    // calmer, Obsidian-like defaults
-    repulsionStrength: 10,
-    springStrength: 0.04,
-    springLength: 130,
-    centerPull: 0.0004,
-    damping: 0.92,
-    notePlaneStiffness: 0,
-    tagPlaneStiffness: 0,
+    // INTERNAL defaults (mapped from UI defaults)
+    // Repulsion mapping: internal = ui^2 * 2000 (UI default 0.2 -> 80)
+    repulsionStrength: 80,
+    // Spring strength: internal = ui * 0.5 (UI default 0.4 -> 0.2)
+    springStrength: 0.2,
+    springLength: 100,
+    // Center pull: internal = ui * 0.01 (UI default 0.1 -> 0.001)
+    centerPull: 0.001,
+    // Damping internal (0..1)
+    damping: 0.9,
+    notePlaneStiffness: 0.004,
+    tagPlaneStiffness: 0.008,
     centerX: 0,
     centerY: 0,
     centerZ: 0,
-    mouseAttractionRadius: 80,
-    mouseAttractionStrength: 0.15,
-    mouseAttractionExponent: 3.5,
+    mouseAttractionRadius: 160,
+    // mouse attraction strength: internal = ui * 0.1 (UI default 0.2 -> 0.02)
+    mouseAttractionStrength: 0.02,
+    mouseAttractionExponent: 3,
   },
   interaction: {
     momentumScale: 0.12,
@@ -151,6 +163,13 @@ export default class GreaterGraphPlugin extends Plugin {
     const data = await this.loadData();
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data || {});
     if (!this.settings.glow) this.settings.glow = DEFAULT_SETTINGS.glow;
+    // enforce min/max radius invariant
+    try {
+      const g = this.settings.glow;
+      if (typeof g.maxNodeRadius === 'number' && typeof g.minNodeRadius === 'number') {
+        if (g.maxNodeRadius < g.minNodeRadius + 2) g.maxNodeRadius = g.minNodeRadius + 2;
+      }
+    } catch (e) {}
   }
 
   async saveSettings() {
@@ -213,13 +232,18 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       range.value = String(opts.value);
       range.style.flex = '1';
 
-      const label = document.createElement('div');
-      label.textContent = String(opts.value);
-      label.style.minWidth = '56px';
-      label.style.textAlign = 'right';
+      const num = document.createElement('input');
+      num.type = 'number';
+      num.min = String(opts.min); num.max = String(opts.max); num.step = String(opts.step ?? (opts.step === 0 ? 0 : (opts.step || 1)));
+      num.value = String(opts.value);
+      num.style.minWidth = '56px';
+      num.style.textAlign = 'right';
+      num.style.width = '80px';
 
-      range.addEventListener('input', (e) => { label.textContent = (e.target as HTMLInputElement).value; });
+      range.addEventListener('input', (e) => { num.value = (e.target as HTMLInputElement).value; });
       range.addEventListener('change', async (e) => { const v = Number((e.target as HTMLInputElement).value); await opts.onChange(v); });
+      num.addEventListener('input', (e) => { range.value = (e.target as HTMLInputElement).value; });
+      num.addEventListener('change', async (e) => { const v = Number((e.target as HTMLInputElement).value); await opts.onChange(v); });
 
       const rbtn = document.createElement('button');
       rbtn.type = 'button';
@@ -232,7 +256,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         try {
           if (typeof opts.resetValue === 'number') {
             range.value = String(opts.resetValue);
-            label.textContent = range.value;
+            num.value = range.value;
             await opts.onChange(Number(range.value));
           } else {
             // if resetValue undefined -> delete stored setting by calling onChange with NaN
@@ -242,24 +266,28 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       });
 
       wrap.appendChild(range);
-      wrap.appendChild(label);
+      wrap.appendChild(num);
       wrap.appendChild(rbtn);
       (s as any).controlEl.appendChild(wrap);
-      return { range, label, reset: rbtn };
+      return { range, num, reset: rbtn };
     };
 
-    // Minimum node radius
+    // Minimum node radius (UI in pixels)
     addSliderSetting(containerEl, {
       name: 'Minimum node radius',
       desc: 'Minimum radius for the smallest node (in pixels).',
-      value: glow.minNodeRadius,
-      min: 1,
-      max: 40,
+      value: glow.minNodeRadius ?? DEFAULT_SETTINGS.glow.minNodeRadius,
+      min: 2,
+      max: 20,
       step: 1,
       resetValue: DEFAULT_SETTINGS.glow.minNodeRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          glow.minNodeRadius = v;
+          glow.minNodeRadius = Math.round(v);
+          // ensure max >= min + 2
+          if (typeof glow.maxNodeRadius === 'number' && glow.maxNodeRadius < glow.minNodeRadius + 2) {
+            glow.maxNodeRadius = glow.minNodeRadius + 2;
+          }
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           glow.minNodeRadius = DEFAULT_SETTINGS.glow.minNodeRadius;
@@ -271,14 +299,15 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Maximum node radius',
       desc: 'Maximum radius for the most connected node (in pixels).',
-      value: glow.maxNodeRadius,
-      min: 4,
-      max: 120,
+      value: glow.maxNodeRadius ?? DEFAULT_SETTINGS.glow.maxNodeRadius,
+      min: 8,
+      max: 80,
       step: 1,
       resetValue: DEFAULT_SETTINGS.glow.maxNodeRadius,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= glow.minNodeRadius) {
-          glow.maxNodeRadius = v;
+        if (!Number.isNaN(v)) {
+          glow.maxNodeRadius = Math.round(v);
+          if (typeof glow.minNodeRadius === 'number' && glow.maxNodeRadius < glow.minNodeRadius + 2) glow.maxNodeRadius = glow.minNodeRadius + 2;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           glow.maxNodeRadius = DEFAULT_SETTINGS.glow.maxNodeRadius;
@@ -292,14 +321,14 @@ class GreaterGraphSettingTab extends PluginSettingTab {
 
     addSliderSetting(containerEl, {
       name: 'Minimum center glow opacity',
-      desc: 'Opacity (0–1) at the glow center for the least connected node.',
-      value: glow.minCenterAlpha,
+      desc: 'Opacity (0–0.8) at the glow center for the least connected node.',
+      value: glow.minCenterAlpha ?? DEFAULT_SETTINGS.glow.minCenterAlpha,
       min: 0,
-      max: 1,
+      max: 0.8,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.glow.minCenterAlpha,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+        if (!Number.isNaN(v) && v >= 0 && v <= 0.8) {
           glow.minCenterAlpha = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
@@ -312,7 +341,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Maximum center glow opacity',
       desc: 'Opacity (0–1) at the glow center for the most connected node.',
-      value: glow.maxCenterAlpha,
+      value: glow.maxCenterAlpha ?? DEFAULT_SETTINGS.glow.maxCenterAlpha,
       min: 0,
       max: 1,
       step: 0.01,
@@ -331,13 +360,13 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Hover glow boost',
       desc: 'Multiplier applied to the center glow when a node is hovered.',
-      value: glow.hoverBoostFactor,
+      value: glow.hoverBoostFactor ?? DEFAULT_SETTINGS.glow.hoverBoostFactor,
       min: 1,
-      max: 5,
+      max: 4,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.glow.hoverBoostFactor,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 1.0) {
+        if (!Number.isNaN(v) && v >= 1.0 && v <= 4) {
           glow.hoverBoostFactor = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
@@ -350,13 +379,13 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Neighbor glow boost',
       desc: 'Multiplier applied to nodes within the highlight depth (excluding hovered node).',
-      value: glow.neighborBoostFactor ?? 1.2,
+      value: glow.neighborBoostFactor ?? DEFAULT_SETTINGS.glow.neighborBoostFactor,
       min: 1,
-      max: 5,
+      max: 3,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.glow.neighborBoostFactor,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 1.0) {
+        if (!Number.isNaN(v) && v >= 1.0 && v <= 3) {
           glow.neighborBoostFactor = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
@@ -369,7 +398,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Dim factor for distant nodes',
       desc: 'Multiplier (0–1) applied to nodes outside the highlight depth.',
-      value: glow.dimFactor ?? 0.3,
+      value: glow.dimFactor ?? DEFAULT_SETTINGS.glow.dimFactor,
       min: 0,
       max: 1,
       step: 0.01,
@@ -390,7 +419,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       desc: 'Graph distance (in hops) from the hovered node that will be highlighted.',
       value: glow.hoverHighlightDepth ?? 1,
       min: 0,
-      max: 6,
+      max: 5,
       step: 1,
       resetValue: DEFAULT_SETTINGS.glow.hoverHighlightDepth,
       onChange: async (v) => {
@@ -408,8 +437,8 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       name: 'Inner distance multiplier',
       desc: 'Distance (in node radii) where distance-based glow is fully active.',
       value: glow.distanceInnerRadiusMultiplier ?? 1.0,
-      min: 0.1,
-      max: 3,
+      min: 0.5,
+      max: 4,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.glow.distanceInnerRadiusMultiplier,
       onChange: async (v) => {
@@ -427,8 +456,8 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       name: 'Outer distance multiplier',
       desc: 'Distance (in node radii) beyond which the mouse has no effect on glow.',
       value: glow.distanceOuterRadiusMultiplier ?? 2.5,
-      min: 0.5,
-      max: 6,
+      min: 1,
+      max: 8,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.glow.distanceOuterRadiusMultiplier,
       onChange: async (v) => {
@@ -446,8 +475,8 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       name: 'Distance curve steepness',
       desc: 'Controls how quickly glow ramps up as the cursor approaches a node. Higher values = steeper S-curve.',
       value: glow.distanceCurveSteepness ?? 2.0,
-      min: 0.1,
-      max: 8,
+      min: 0.5,
+      max: 5,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.glow.distanceCurveSteepness,
       onChange: async (v) => {
@@ -462,57 +491,81 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     });
 
     // Focus / dimming controls
-    new Setting(containerEl)
-      .setName('Focus smoothing rate')
-      .setDesc('How quickly nodes fade in/out when hover focus changes (higher = faster, per second).')
-      .addText((text) =>
-        text.setValue(String(glow.focusSmoothingRate ?? 8)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num > 0) {
-            glow.focusSmoothingRate = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Focus smoothing rate',
+      desc: 'Smoothness of focus transitions (0 = very slow, 1 = fast). Internally used as a lerp factor.',
+      value: glow.focusSmoothingRate ?? DEFAULT_SETTINGS.glow.focusSmoothingRate,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.glow.focusSmoothingRate,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+          glow.focusSmoothingRate = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.focusSmoothingRate = DEFAULT_SETTINGS.glow.focusSmoothingRate;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Edge dim minimum alpha')
-      .setDesc('Minimum alpha used for dimmed edges (0-1).')
-      .addText((text) =>
-        text.setValue(String(glow.edgeDimMin ?? 0.08)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 0 && num <= 1) {
-            glow.edgeDimMin = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Edge dim minimum alpha',
+      desc: 'Minimum alpha used for dimmed edges (0-0.8).',
+      value: glow.edgeDimMin ?? DEFAULT_SETTINGS.glow.edgeDimMin,
+      min: 0,
+      max: 0.8,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.glow.edgeDimMin,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0 && v <= 0.8) {
+          glow.edgeDimMin = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.edgeDimMin = DEFAULT_SETTINGS.glow.edgeDimMin;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Edge dim maximum alpha')
-      .setDesc('Maximum alpha used for focused edges (0-1).')
-      .addText((text) =>
-        text.setValue(String(glow.edgeDimMax ?? 0.9)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 0 && num <= 1) {
-            glow.edgeDimMax = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Edge dim maximum alpha',
+      desc: 'Maximum alpha used for focused edges (0-1).',
+      value: glow.edgeDimMax ?? DEFAULT_SETTINGS.glow.edgeDimMax,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.glow.edgeDimMax,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+          glow.edgeDimMax = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.edgeDimMax = DEFAULT_SETTINGS.glow.edgeDimMax;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
-    new Setting(containerEl)
-      .setName('Node minimum body alpha')
-      .setDesc('Minimum fill alpha for dimmed nodes (0-1).')
-      .addText((text) =>
-        text.setValue(String(glow.nodeMinBodyAlpha ?? 0.3)).onChange(async (value) => {
-          const num = Number(value);
-          if (!isNaN(num) && num >= 0 && num <= 1) {
-            glow.nodeMinBodyAlpha = num;
-            await this.plugin.saveSettings();
-          }
-        })
-      );
+    addSliderSetting(containerEl, {
+      name: 'Node minimum body alpha',
+      desc: 'Minimum fill alpha for dimmed nodes (0-1).',
+      value: glow.nodeMinBodyAlpha ?? DEFAULT_SETTINGS.glow.nodeMinBodyAlpha,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.glow.nodeMinBodyAlpha,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+          glow.nodeMinBodyAlpha = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.nodeMinBodyAlpha = DEFAULT_SETTINGS.glow.nodeMinBodyAlpha;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
     // Color overrides (optional)
     containerEl.createEl('h2', { text: 'Colors' });
@@ -528,8 +581,18 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       }); });
       const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
-      rb.addEventListener('click', async () => { glow.nodeColor = undefined; await this.plugin.saveSettings(); if (txt) (txt as any).setValue(''); });
+      rb.addEventListener('click', async () => { glow.nodeColor = undefined; glow.nodeColorAlpha = undefined; await this.plugin.saveSettings(); if (txt) (txt as any).setValue(''); alphaInput.value = String(DEFAULT_SETTINGS.glow.nodeColorAlpha); });
       (s as any).controlEl.appendChild(rb);
+      const alphaInput = document.createElement('input');
+      alphaInput.type = 'number'; alphaInput.min = '0'; alphaInput.max = '1'; alphaInput.step = '0.01';
+      alphaInput.value = String(glow.nodeColorAlpha ?? DEFAULT_SETTINGS.glow.nodeColorAlpha);
+      alphaInput.style.width = '68px'; alphaInput.style.marginLeft = '8px';
+      alphaInput.addEventListener('change', async (e) => {
+        const v = Number((e.target as HTMLInputElement).value);
+        glow.nodeColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.nodeColorAlpha;
+        await this.plugin.saveSettings();
+      });
+      (s as any).controlEl.appendChild(alphaInput);
     }
 
     {
@@ -543,8 +606,18 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       }); });
       const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
-      rb.addEventListener('click', async () => { glow.edgeColor = undefined; await this.plugin.saveSettings(); if (txt) (txt as any).setValue(''); });
+      rb.addEventListener('click', async () => { glow.edgeColor = undefined; glow.edgeColorAlpha = undefined; await this.plugin.saveSettings(); if (txt) (txt as any).setValue(''); edgeAlpha.value = String(DEFAULT_SETTINGS.glow.edgeColorAlpha); });
       (s as any).controlEl.appendChild(rb);
+      const edgeAlpha = document.createElement('input');
+      edgeAlpha.type = 'number'; edgeAlpha.min = '0'; edgeAlpha.max = '1'; edgeAlpha.step = '0.01';
+      edgeAlpha.value = String(glow.edgeColorAlpha ?? DEFAULT_SETTINGS.glow.edgeColorAlpha);
+      edgeAlpha.style.width = '68px'; edgeAlpha.style.marginLeft = '8px';
+      edgeAlpha.addEventListener('change', async (e) => {
+        const v = Number((e.target as HTMLInputElement).value);
+        glow.edgeColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.edgeColorAlpha;
+        await this.plugin.saveSettings();
+      });
+      (s as any).controlEl.appendChild(edgeAlpha);
     }
 
     {
@@ -558,8 +631,18 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       }); });
       const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
-      rb.addEventListener('click', async () => { glow.labelColor = undefined; await this.plugin.saveSettings(); if (txt) (txt as any).setValue(''); });
+      rb.addEventListener('click', async () => { glow.labelColor = undefined; glow.labelColorAlpha = undefined; await this.plugin.saveSettings(); if (txt) (txt as any).setValue(''); labelAlpha.value = String(DEFAULT_SETTINGS.glow.labelColorAlpha); });
       (s as any).controlEl.appendChild(rb);
+      const labelAlpha = document.createElement('input');
+      labelAlpha.type = 'number'; labelAlpha.min = '0'; labelAlpha.max = '1'; labelAlpha.step = '0.01';
+      labelAlpha.value = String(glow.labelColorAlpha ?? DEFAULT_SETTINGS.glow.labelColorAlpha);
+      labelAlpha.style.width = '68px'; labelAlpha.style.marginLeft = '8px';
+      labelAlpha.addEventListener('change', async (e) => {
+        const v = Number((e.target as HTMLInputElement).value);
+        glow.labelColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.labelColorAlpha;
+        await this.plugin.saveSettings();
+      });
+      (s as any).controlEl.appendChild(labelAlpha);
     }
 
     new Setting(containerEl)
@@ -575,18 +658,24 @@ class GreaterGraphSettingTab extends PluginSettingTab {
 
     containerEl.createEl('h2', { text: 'Greater Graph – Physics' });
 
+    // Repulsion: UI 0..1 maps to internal repulsion = ui^2 * 2000
+    const repulsionUi = (() => {
+      const internal = (phys.repulsionStrength ?? DEFAULT_SETTINGS.physics!.repulsionStrength);
+      const ui = Math.sqrt(Math.max(0, internal / 2000));
+      return Math.min(1, Math.max(0, ui));
+    })();
     addSliderSetting(containerEl, {
       name: 'Repulsion strength',
-      desc: 'Controls node-node repulsion strength (higher = more separation).',
-      value: phys.repulsionStrength ?? 4000,
+      desc: 'UI 0–1 (mapped internally). Higher = more node separation.',
+      value: repulsionUi,
       min: 0,
-      max: 10000,
-      step: 1,
-      resetValue: DEFAULT_SETTINGS.physics!.repulsionStrength,
+      max: 1,
+      step: 0.01,
+      resetValue: 0.2,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.repulsionStrength = v;
+          this.plugin.settings.physics.repulsionStrength = (v * v) * 2000;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
@@ -596,18 +685,20 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       },
     });
 
+    // Spring strength: UI 0..1 -> internal = ui * 0.5
+    const springUi = Math.min(1, Math.max(0, (phys.springStrength ?? DEFAULT_SETTINGS.physics!.springStrength) / 0.5));
     addSliderSetting(containerEl, {
       name: 'Spring strength',
-      desc: 'Spring force constant for edges (higher = stiffer).',
-      value: phys.springStrength ?? 0.08,
+      desc: 'UI 0–1 mapped to internal spring constant (higher = stiffer).',
+      value: springUi,
       min: 0,
-      max: 0.2,
-      step: 0.001,
-      resetValue: DEFAULT_SETTINGS.physics!.springStrength,
+      max: 1,
+      step: 0.01,
+      resetValue: 0.4,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.springStrength = v;
+          this.plugin.settings.physics.springStrength = v * 0.5;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
@@ -620,9 +711,9 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Spring length',
       desc: 'Preferred length (px) for edge springs.',
-      value: phys.springLength ?? 80,
-      min: 10,
-      max: 500,
+      value: phys.springLength ?? DEFAULT_SETTINGS.physics!.springLength,
+      min: 20,
+      max: 400,
       step: 1,
       resetValue: DEFAULT_SETTINGS.physics!.springLength,
       onChange: async (v) => {
@@ -638,18 +729,20 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       },
     });
 
+    // Center pull UI 0..1 -> internal = ui * 0.01
+    const centerUi = Math.min(1, Math.max(0, (phys.centerPull ?? DEFAULT_SETTINGS.physics!.centerPull) / 0.01));
     addSliderSetting(containerEl, {
       name: 'Center pull',
-      desc: 'Force pulling nodes toward center (small value).',
-      value: phys.centerPull ?? 0.02,
+      desc: 'UI 0–1 mapped to a small centering force (internal scale).',
+      value: centerUi,
       min: 0,
-      max: 0.01,
-      step: 0.0001,
-      resetValue: DEFAULT_SETTINGS.physics!.centerPull,
+      max: 1,
+      step: 0.001,
+      resetValue: 0.1,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.centerPull = v;
+          this.plugin.settings.physics.centerPull = v * 0.01;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
@@ -659,16 +752,17 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       },
     });
 
+    // Damping: use UI 0.7–1.0 (use directly as internal damping)
     addSliderSetting(containerEl, {
       name: 'Damping',
-      desc: 'Velocity damping (0-1). Higher values reduce motion faster.',
-      value: phys.damping ?? 0.85,
-      min: 0,
+      desc: 'Velocity damping (0.7–1.0). Higher values reduce motion faster.',
+      value: phys.damping ?? DEFAULT_SETTINGS.physics!.damping,
+      min: 0.7,
       max: 1,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.physics!.damping,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+        if (!Number.isNaN(v) && v >= 0.7 && v <= 1) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
           this.plugin.settings.physics.damping = v;
           await this.plugin.saveSettings();
@@ -749,113 +843,115 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       },
     });
 
-    addSliderSetting(containerEl, {
-      name: 'Mouse attraction exponent',
-      desc: 'How sharply attraction ramps as the cursor approaches (typical values: 3–4).',
-      value: phys.mouseAttractionExponent ?? 3.5,
-      min: 0.1,
-      max: 10,
-      step: 0.1,
-      resetValue: DEFAULT_SETTINGS.physics!.mouseAttractionExponent,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v > 0) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionExponent = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionExponent = DEFAULT_SETTINGS.physics!.mouseAttractionExponent;
-          await this.plugin.saveSettings();
-        }
-      },
-    });
-    // Interaction settings (drag momentum / thresholds)
-    containerEl.createEl('h2', { text: 'Interaction' });
+    // Plane stiffness controls (UI 0..1 -> internal = ui * 0.02)
+      const notePlaneUi = Math.min(1, Math.max(0, (phys.notePlaneStiffness ?? DEFAULT_SETTINGS.physics!.notePlaneStiffness) / 0.02));
+      addSliderSetting(containerEl, {
+        name: 'Note plane stiffness (z)',
+        desc: 'How strongly notes are pulled toward the z=0 plane (UI 0–1).',
+        value: notePlaneUi,
+        min: 0,
+        max: 1,
+        step: 0.01,
+        resetValue: 0.2,
+        onChange: async (v) => {
+          if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.notePlaneStiffness = v * 0.02;
+            await this.plugin.saveSettings();
+          } else if (Number.isNaN(v)) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.notePlaneStiffness = DEFAULT_SETTINGS.physics!.notePlaneStiffness;
+            await this.plugin.saveSettings();
+          }
+        },
+      });
 
-    const interaction = this.plugin.settings.interaction || {};
+      const tagPlaneUi = Math.min(1, Math.max(0, (phys.tagPlaneStiffness ?? DEFAULT_SETTINGS.physics!.tagPlaneStiffness) / 0.02));
+      addSliderSetting(containerEl, {
+        name: 'Tag plane stiffness (x)',
+        desc: 'How strongly tag nodes are pulled toward the x=0 plane (UI 0–1).',
+        value: tagPlaneUi,
+        min: 0,
+        max: 1,
+        step: 0.01,
+        resetValue: 0.4,
+        onChange: async (v) => {
+          if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.tagPlaneStiffness = v * 0.02;
+            await this.plugin.saveSettings();
+          } else if (Number.isNaN(v)) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.tagPlaneStiffness = DEFAULT_SETTINGS.physics!.tagPlaneStiffness;
+            await this.plugin.saveSettings();
+          }
+        },
+      });
 
-    addSliderSetting(containerEl, {
-      name: 'Drag momentum scale',
-      desc: 'Multiplier applied to the sampled drag velocity when releasing a dragged node.',
-      value: interaction.momentumScale ?? 0.12,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.interaction!.momentumScale,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
-          this.plugin.settings.interaction = this.plugin.settings.interaction || {};
-          this.plugin.settings.interaction.momentumScale = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          this.plugin.settings.interaction = this.plugin.settings.interaction || {};
-          this.plugin.settings.interaction.momentumScale = DEFAULT_SETTINGS.interaction!.momentumScale;
-          await this.plugin.saveSettings();
-        }
-      },
-    });
+      // Mouse attractor settings
+      addSliderSetting(containerEl, {
+        name: 'Mouse attraction radius (px)',
+        desc: 'Maximum distance (in pixels) from cursor where the attraction applies.',
+        value: phys.mouseAttractionRadius ?? DEFAULT_SETTINGS.physics!.mouseAttractionRadius,
+        min: 40,
+        max: 400,
+        step: 1,
+        resetValue: DEFAULT_SETTINGS.physics!.mouseAttractionRadius,
+        onChange: async (v) => {
+          if (!Number.isNaN(v) && v >= 0) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.mouseAttractionRadius = v;
+            await this.plugin.saveSettings();
+          } else if (Number.isNaN(v)) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.mouseAttractionRadius = DEFAULT_SETTINGS.physics!.mouseAttractionRadius;
+            await this.plugin.saveSettings();
+          }
+        },
+      });
 
-    addSliderSetting(containerEl, {
-      name: 'Drag threshold (px)',
-      desc: 'Screen-space movement (pixels) required to count as a drag rather than a click.',
-      value: interaction.dragThreshold ?? 4,
-      min: 0,
-      max: 40,
-      step: 1,
-      resetValue: DEFAULT_SETTINGS.interaction!.dragThreshold,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
-          this.plugin.settings.interaction = this.plugin.settings.interaction || {};
-          this.plugin.settings.interaction.dragThreshold = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          this.plugin.settings.interaction = this.plugin.settings.interaction || {};
-          this.plugin.settings.interaction.dragThreshold = DEFAULT_SETTINGS.interaction!.dragThreshold;
-          await this.plugin.saveSettings();
-        }
-      },
-    });
-    // Plane constraint stiffness sliders
-    addSliderSetting(containerEl, {
-      name: 'Note plane stiffness (z)',
-      desc: 'Pull strength keeping notes near z = 0 (soft constraint).',
-      value: phys.notePlaneStiffness ?? DEFAULT_SETTINGS.physics!.notePlaneStiffness!,
-      min: 0,
-      max: 0.2,
-      step: 0.001,
-      resetValue: DEFAULT_SETTINGS.physics!.notePlaneStiffness,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.notePlaneStiffness = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.notePlaneStiffness = DEFAULT_SETTINGS.physics!.notePlaneStiffness;
-          await this.plugin.saveSettings();
-        }
-      },
-    });
+      // mouse attraction strength: UI 0..1 -> internal = ui * 0.1
+      const mouseStrengthUi = Math.min(1, Math.max(0, (phys.mouseAttractionStrength ?? DEFAULT_SETTINGS.physics!.mouseAttractionStrength) / 0.1));
+      addSliderSetting(containerEl, {
+        name: 'Mouse attraction strength',
+        desc: 'UI 0–1 mapped to internal small force scale (higher = stronger pull).',
+        value: mouseStrengthUi,
+        min: 0,
+        max: 1,
+        step: 0.01,
+        resetValue: 0.2,
+        onChange: async (v) => {
+          if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.mouseAttractionStrength = v * 0.1;
+            await this.plugin.saveSettings();
+          } else if (Number.isNaN(v)) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.mouseAttractionStrength = DEFAULT_SETTINGS.physics!.mouseAttractionStrength;
+            await this.plugin.saveSettings();
+          }
+        },
+      });
 
-    addSliderSetting(containerEl, {
-      name: 'Tag plane stiffness (x)',
-      desc: 'Pull strength keeping tags near x = 0 (soft constraint).',
-      value: phys.tagPlaneStiffness ?? DEFAULT_SETTINGS.physics!.tagPlaneStiffness!,
-      min: 0,
-      max: 0.2,
-      step: 0.001,
-      resetValue: DEFAULT_SETTINGS.physics!.tagPlaneStiffness,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.tagPlaneStiffness = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.tagPlaneStiffness = DEFAULT_SETTINGS.physics!.tagPlaneStiffness;
-          await this.plugin.saveSettings();
-        }
-      },
-    });
+      addSliderSetting(containerEl, {
+        name: 'Mouse attraction exponent',
+        desc: 'How sharply attraction ramps as the cursor approaches (1 = linear; higher = snappier near cursor).',
+        value: phys.mouseAttractionExponent ?? DEFAULT_SETTINGS.physics!.mouseAttractionExponent,
+        min: 1,
+        max: 6,
+        step: 0.1,
+        resetValue: DEFAULT_SETTINGS.physics!.mouseAttractionExponent,
+        onChange: async (v) => {
+          if (!Number.isNaN(v) && v >= 1 && v <= 6) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.mouseAttractionExponent = v;
+            await this.plugin.saveSettings();
+          } else if (Number.isNaN(v)) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.mouseAttractionExponent = DEFAULT_SETTINGS.physics!.mouseAttractionExponent;
+            await this.plugin.saveSettings();
+          }
+        },
+      });
   }
 }
