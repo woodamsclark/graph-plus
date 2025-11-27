@@ -33,8 +33,9 @@ export interface GreaterGraphSettings {
     momentumScale?: number;
     dragThreshold?: number; // in screen pixels
   };
-  // persistent node positions keyed by file path
-  nodePositions?: Record<string, { x: number; y: number }>;
+  // persistent node positions keyed by vault name, then by file path
+  // settings.nodePositions[vaultId][filePath] = { x, y }
+  nodePositions?: Record<string, Record<string, { x: number; y: number }>>;
 }
 
 export const DEFAULT_SETTINGS: GreaterGraphSettings = {

@@ -153,12 +153,16 @@ class Graph2DController {
   private saveNodePositions(): void {
     if (!this.graph) return;
     try {
-      const map: Record<string, { x: number; y: number }> = (this.plugin as any).settings.nodePositions || {};
+      // top-level map keyed by vault name
+      const allSaved: Record<string, Record<string, { x: number; y: number }>> = (this.plugin as any).settings.nodePositions || {};
+      const vaultId = this.app.vault.getName();
+      if (!allSaved[vaultId]) allSaved[vaultId] = {};
+      const map = allSaved[vaultId];
       for (const node of this.graph.nodes) {
         if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) continue;
         if (node.filePath) map[node.filePath] = { x: node.x, y: node.y };
       }
-      (this.plugin as any).settings.nodePositions = map;
+      (this.plugin as any).settings.nodePositions = allSaved;
       // fire-and-forget save
       try { (this.plugin as any).saveSettings && (this.plugin as any).saveSettings(); } catch (e) { console.error('Failed to save node positions', e); }
     } catch (e) {
@@ -186,7 +190,9 @@ class Graph2DController {
     this.graph = await buildGraph(this.app);
 
     // Restore saved positions from plugin settings (do not override saved positions)
-    const savedPositions: Record<string, { x: number; y: number }> = (this.plugin as any).settings?.nodePositions || {};
+    const vaultId = this.app.vault.getName();
+    const allSaved: Record<string, Record<string, { x: number; y: number }>> = (this.plugin as any).settings?.nodePositions || {};
+    const savedPositions: Record<string, { x: number; y: number }> = allSaved[vaultId] || {};
     const needsLayout: any[] = [];
     if (this.graph && this.graph.nodes) {
       for (const node of this.graph.nodes) {
@@ -469,7 +475,9 @@ class Graph2DController {
       this.graph = newGraph;
 
       // Restore saved positions for the new graph as with init
-      const savedPositions: Record<string, { x: number; y: number }> = (this.plugin as any).settings?.nodePositions || {};
+      const vaultId = this.app.vault.getName();
+      const allSaved: Record<string, Record<string, { x: number; y: number }>> = (this.plugin as any).settings?.nodePositions || {};
+      const savedPositions: Record<string, { x: number; y: number }> = allSaved[vaultId] || {};
       const needsLayout: any[] = [];
       if (this.graph && this.graph.nodes) {
         for (const node of this.graph.nodes) {

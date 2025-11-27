@@ -793,14 +793,18 @@ var Graph2DController = class {
     if (!this.graph)
       return;
     try {
-      const map = this.plugin.settings.nodePositions || {};
+      const allSaved = this.plugin.settings.nodePositions || {};
+      const vaultId = this.app.vault.getName();
+      if (!allSaved[vaultId])
+        allSaved[vaultId] = {};
+      const map = allSaved[vaultId];
       for (const node of this.graph.nodes) {
         if (!Number.isFinite(node.x) || !Number.isFinite(node.y))
           continue;
         if (node.filePath)
           map[node.filePath] = { x: node.x, y: node.y };
       }
-      this.plugin.settings.nodePositions = map;
+      this.plugin.settings.nodePositions = allSaved;
       try {
         this.plugin.saveSettings && this.plugin.saveSettings();
       } catch (e) {
@@ -824,7 +828,9 @@ var Graph2DController = class {
     this.canvas = canvas;
     this.renderer = createRenderer2D({ canvas, glow: this.plugin.settings?.glow });
     this.graph = await buildGraph(this.app);
-    const savedPositions = this.plugin.settings?.nodePositions || {};
+    const vaultId = this.app.vault.getName();
+    const allSaved = this.plugin.settings?.nodePositions || {};
+    const savedPositions = allSaved[vaultId] || {};
     const needsLayout = [];
     if (this.graph && this.graph.nodes) {
       for (const node of this.graph.nodes) {
@@ -1085,7 +1091,9 @@ var Graph2DController = class {
     try {
       const newGraph = await buildGraph(this.app);
       this.graph = newGraph;
-      const savedPositions = this.plugin.settings?.nodePositions || {};
+      const vaultId = this.app.vault.getName();
+      const allSaved = this.plugin.settings?.nodePositions || {};
+      const savedPositions = allSaved[vaultId] || {};
       const needsLayout = [];
       if (this.graph && this.graph.nodes) {
         for (const node of this.graph.nodes) {
