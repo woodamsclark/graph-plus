@@ -6,9 +6,26 @@ import { createSimulation, Simulation } from './graph/simulation';
 
 export const GREATER_GRAPH_VIEW_TYPE = 'greater-graph-view';
 
+// Small debounce helper used for coalescing vault/metadata events
+function debounce<T extends (...args: any[]) => void>(fn: T, wait = 300, immediate = false): T {
+  let timeout: number | null = null;
+  // eslint-disable-next-line @typescript-eslint/ban-types
+  return ((...args: any[]) => {
+    const later = () => {
+      timeout = null;
+      if (!immediate) fn(...args);
+    };
+    const callNow = immediate && timeout === null;
+    if (timeout) window.clearTimeout(timeout);
+    timeout = window.setTimeout(later, wait) as unknown as number;
+    if (callNow) fn(...args);
+  }) as unknown as T;
+}
+
 export class GraphView extends ItemView {
   private controller: Graph2DController | null = null;
   private plugin: Plugin;
+  private scheduleGraphRefresh: (() => void) | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: Plugin) {
     super(leaf);
@@ -35,6 +52,26 @@ export class GraphView extends ItemView {
     if (this.controller) {
       this.controller.setNodeClickHandler((node: any) => void this.openNodeFile(node));
     }
+    // Debounced refresh to avoid thrashing on many vault events
+    if (!this.scheduleGraphRefresh) {
+      this.scheduleGraphRefresh = debounce(() => {
+        try {
+          this.controller?.refreshGraph();
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.error('Greater Graph: refreshGraph error', e);
+        }
+      }, 500, true);
+    }
+
+    // Register vault + metadata listeners so the view updates live
+    // Use this.registerEvent so Obsidian will unregister them when the view closes
+    this.registerEvent(this.app.vault.on('create', () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
+    this.registerEvent(this.app.vault.on('delete', () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
+    this.registerEvent(this.app.vault.on('rename', () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
+    // metadataCache 'changed' fires on link/content changes
+    // @ts-ignore - metadataCache typing can differ across Obsidian versions
+    this.registerEvent(this.app.metadataCache.on('changed', () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
   }
 
   onResize() {
@@ -253,6 +290,67 @@ class Graph2DController {
     const centerY = height / 2;
     if (this.simulation && (this.simulation as any).setOptions) {
       (this.simulation as any).setOptions({ centerX, centerY });
+    }
+  }
+
+  // Rebuilds the graph and restarts the simulation. Safe to call repeatedly.
+  async refreshGraph(): Promise<void> {
+    // If the controller has been destroyed or no canvas, abort
+    if (!this.canvas) return;
+    try {
+      const newGraph = await buildGraph(this.app);
+      this.graph = newGraph;
+
+      // rebuild adjacency
+      this.adjacency = new Map<string, string[]>();
+      if (this.graph && this.graph.edges) {
+        for (const e of this.graph.edges) {
+          if (!this.adjacency.has(e.sourceId)) this.adjacency.set(e.sourceId, []);
+          if (!this.adjacency.has(e.targetId)) this.adjacency.set(e.targetId, []);
+          this.adjacency.get(e.sourceId)!.push(e.targetId);
+          this.adjacency.get(e.targetId)!.push(e.sourceId);
+        }
+      }
+
+      // layout using current size and center
+      const rect = this.containerEl.getBoundingClientRect();
+      const width = rect.width || 300;
+      const height = rect.height || 200;
+      const centerX = width / 2;
+      const centerY = height / 2;
+
+      if (this.renderer && this.graph) {
+        this.renderer.setGraph(this.graph);
+        layoutGraph2D(this.graph, {
+          width,
+          height,
+          margin: 32,
+          centerX,
+          centerY,
+          centerOnLargestNode: true,
+        });
+        this.renderer.resize(width, height);
+      }
+
+      // recreate simulation using new nodes/edges
+      if (this.simulation) {
+        try { this.simulation.stop(); } catch (e) {}
+        this.simulation = null;
+      }
+
+      this.simulation = createSimulation(
+        (this.graph && this.graph.nodes) || [],
+        (this.graph && this.graph.edges) || [],
+        Object.assign({}, (this.plugin as any).settings?.physics || {}, { centerX, centerY })
+      );
+
+      this.simulation.start();
+
+      // force a render
+      if (this.renderer) this.renderer.render();
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('Greater Graph: failed to refresh graph', e);
     }
   }
 
