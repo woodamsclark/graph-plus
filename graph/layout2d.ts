@@ -26,13 +26,20 @@ export function layoutGraph2D(graph: GraphData, options: Layout2DOptions): void 
   const nodes = options.onlyNodes ?? allNodes;
   if (!nodes || nodes.length === 0) return;
 
-  // Place selected nodes initially very near the center with a small random
-  // jitter so the physics simulation can separate them without being
-  // perfectly overlapped. The jitter is intentionally small (default 8px).
+  // Place selected nodes in a randomized radial spread around the center so
+  // nodes initially load around the central node rather than stacked.
+  const minRadius = Math.max(32, jitter * 4);
+  const maxRadius = Math.max(minRadius + 40, Math.min(Math.max(width, height) / 2 - (options.margin || 32), 800));
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
-    const rx = (Math.random() * 2 - 1) * jitter; // -jitter..jitter
-    const ry = (Math.random() * 2 - 1) * jitter;
+    if ((node as any).isCenterNode) {
+      node.x = centerX; node.y = centerY; node.z = 0;
+      continue;
+    }
+    const angle = Math.random() * Math.PI * 2;
+    const r = minRadius + Math.random() * (maxRadius - minRadius);
+    const rx = Math.cos(angle) * r;
+    const ry = Math.sin(angle) * r;
     node.x = centerX + rx;
     node.y = centerY + ry;
     node.z = 0;
@@ -75,10 +82,26 @@ export function layoutGraph3D(graph: GraphData, options: Layout3DOptions): void 
   const nodes = options.onlyNodes ?? allNodes;
   if (!nodes || nodes.length === 0) return;
 
+  const minRadius3D = Math.max(32, jitter * 4);
+  const maxRadius3D = Math.max(minRadius3D + 40, Math.min(Math.max(width, height) / 2 - (options.margin || 32), 800));
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
-    const rx = (Math.random() * 2 - 1) * jitter;
-    const ry = (Math.random() * 2 - 1) * jitter;
+    if ((node as any).isCenterNode) {
+      if ((node as any).type === 'tag') {
+        node.x = 0;
+        node.y = centerY;
+        node.z = 0;
+      } else {
+        node.x = centerX;
+        node.y = centerY;
+        node.z = 0;
+      }
+      continue;
+    }
+    const angle = Math.random() * Math.PI * 2;
+    const r = minRadius3D + Math.random() * (maxRadius3D - minRadius3D);
+    const rx = Math.cos(angle) * r;
+    const ry = Math.sin(angle) * r;
     if ((node as any).type === 'tag') {
       node.x = 0; // clamp to ZY plane
       node.y = centerY + ry;

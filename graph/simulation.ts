@@ -244,6 +244,18 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
     }
   }
 
+  function applyCenterNodeLock() {
+    const cx = centerX ?? 0;
+    const cy = centerY ?? 0;
+    const cz = centerZ ?? 0;
+    for (const n of nodes) {
+      if ((n as any).isCenterNode) {
+        n.x = cx; n.y = cy; n.z = cz;
+        n.vx = 0; n.vy = 0; n.vz = 0;
+      }
+    }
+  }
+
   function integrate(dt: number) {
     const scale = dt * 60;
     for (const n of nodes) {
@@ -265,6 +277,7 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
     applyCentering();
     applyPlaneConstraints();
     applyMouseAttraction();
+    applyCenterNodeLock();
     applyDamping();
     integrate(dt);
   }

@@ -52,7 +52,7 @@ export class GraphView extends ItemView {
     if (this.controller) {
       this.controller.setNodeClickHandler((node: any) => void this.openNodeFile(node));
     }
-    // Debounced refresh to avoid thrashing on many vault events
+    // Debounced refresh to avoid thrashing on vault events
     if (!this.scheduleGraphRefresh) {
       this.scheduleGraphRefresh = debounce(() => {
         try {
@@ -61,17 +61,17 @@ export class GraphView extends ItemView {
           // eslint-disable-next-line no-console
           console.error('Greater Graph: refreshGraph error', e);
         }
-      }, 500, true);
+      }, 200, true);
     }
 
-    // Register vault + metadata listeners so the view updates live
+    // Register only structural vault listeners so the view updates on file changes,
+    // not on every keystroke/content metadata parse.
     // Use this.registerEvent so Obsidian will unregister them when the view closes
     this.registerEvent(this.app.vault.on('create', () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
     this.registerEvent(this.app.vault.on('delete', () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
     this.registerEvent(this.app.vault.on('rename', () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
-    // metadataCache 'changed' fires on link/content changes
-    // @ts-ignore - metadataCache typing can differ across Obsidian versions
-    this.registerEvent(this.app.metadataCache.on('changed', () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
+    // Note: We intentionally do NOT rebuild on metadataCache 'changed' to avoid refreshes
+    // while typing. Optional incremental updates can hook into metadata changes separately.
   }
 
   onResize() {
@@ -186,6 +186,13 @@ class Graph2DController {
   private suppressAttractorUntilMouseMove: boolean = false;
   // Simple camera follow flag
   private followLockedNodeId: string | null = null;
+  // Center node and camera defaults
+  private centerNode: any | null = null;
+  private defaultCameraDistance: number = 1200;
+  private lastUsePinnedCenterNote: boolean = false;
+  private lastPinnedCenterNotePath: string = '';
+  private viewCenterX: number = 0;
+  private viewCenterY: number = 0;
 
   private saveNodePositions(): void {
     if (!this.graph) return;
@@ -265,6 +272,10 @@ class Graph2DController {
     const initialPhys = (this.plugin as any).settings?.physics || {};
     if (typeof initialPhys.mouseAttractionRadius === 'number') initialGlow.glowRadiusPx = initialPhys.mouseAttractionRadius;
     this.renderer = createRenderer2D({ canvas, glow: initialGlow });
+    try {
+      const cam0 = (this.renderer as any).getCamera?.();
+      if (cam0 && typeof cam0.distance === 'number') this.defaultCameraDistance = cam0.distance;
+    } catch (e) {}
     // Apply initial render options (whether to draw mutual links as double lines)
     try {
       const drawDouble = Boolean((this.plugin as any).settings?.mutualLinkDoubleLine);
@@ -272,7 +283,16 @@ class Graph2DController {
       if (this.renderer && (this.renderer as any).setRenderOptions) (this.renderer as any).setRenderOptions({ mutualDoubleLines: drawDouble, showTags });
     } catch (e) {}
 
-    this.graph = await buildGraph(this.app, { countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks) });
+    // track center selection settings for change detection
+    this.lastUsePinnedCenterNote = Boolean((this.plugin as any).settings?.usePinnedCenterNote);
+    this.lastPinnedCenterNotePath = String((this.plugin as any).settings?.pinnedCenterNotePath || '');
+
+    this.graph = await buildGraph(this.app, {
+      countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks),
+      usePinnedCenterNote: Boolean((this.plugin as any).settings?.usePinnedCenterNote),
+      pinnedCenterNotePath: String((this.plugin as any).settings?.pinnedCenterNotePath || ''),
+      useOutlinkFallback: Boolean((this.plugin as any).settings?.useOutlinkFallback),
+    } as any);
 
     // Restore saved positions from plugin settings (do not override saved positions)
     const vaultId = this.app.vault.getName();
@@ -289,6 +309,8 @@ class Graph2DController {
           needsLayout.push(node);
         }
       }
+      // centerNode will be positioned after we compute the view center (below)
+      this.centerNode = this.graph.nodes.find((n: any) => (n as any).isCenterNode) || null;
     }
 
     this.adjacency = new Map();
@@ -304,6 +326,9 @@ class Graph2DController {
     const rect = this.containerEl.getBoundingClientRect();
     const centerX = (rect.width || 300) / 2;
     const centerY = (rect.height || 200) / 2;
+    // record view center for consistent camera resets and locking
+    this.viewCenterX = centerX;
+    this.viewCenterY = centerY;
 
     this.renderer.setGraph(this.graph);
     // Layout only nodes that don't have saved positions so user-placed nodes remain where they were.
@@ -314,24 +339,19 @@ class Graph2DController {
         margin: 32,
         centerX,
         centerY,
-        centerOnLargestNode: true,
+        centerOnLargestNode: Boolean((this.plugin as any).settings?.usePinnedCenterNote),
         onlyNodes: needsLayout,
       });
     } else {
       // nothing to layout; ensure renderer has size
     }
+    // Ensure the center node (if any) is placed at the view center
+    if (this.centerNode) { this.centerNode.x = centerX; this.centerNode.y = centerY; this.centerNode.z = 0; }
     this.renderer.resize(rect.width || 300, rect.height || 200);
 
-    let centerNodeId: string | undefined = undefined;
-    if (this.graph && this.graph.nodes && this.graph.nodes.length > 0) {
-      let maxDeg = -Infinity;
-      for (const n of this.graph.nodes) {
-        if ((n.totalDegree || 0) > maxDeg) {
-          maxDeg = n.totalDegree || 0;
-          centerNodeId = n.id;
-        }
-      }
-    }
+    // Use the explicitly chosen center node (when pinned mode is enabled) as
+    // the simulation's centerNodeId. If none was chosen, don't pin a center node.
+    const centerNodeId = this.centerNode ? this.centerNode.id : undefined;
 
     // create physics simulation (respecting showTags setting)
     const showTagsInitial = (this.plugin as any).settings?.showTags !== false;
@@ -633,10 +653,15 @@ class Graph2DController {
           if (dist <= clickThreshold) {
             try {
               if (this.pendingFocusNode === '__origin__') {
-                // focus origin but do not enable follow
-                try { (this.renderer as any).setCamera({ targetX: 0, targetY: 0, targetZ: 0 }); } catch (e) {}
+                // focus origin; clear follow/highlight; keep a sane default distance
+                try { (this.renderer as any).setCamera({ targetX: this.viewCenterX ?? 0, targetY: this.viewCenterY ?? 0, targetZ: 0, distance: this.defaultCameraDistance }); } catch (e) {}
                 try { if ((this.renderer as any).resetPanToCenter) (this.renderer as any).resetPanToCenter(); } catch (e) {}
                 this.followLockedNodeId = null; this.previewLockNodeId = null;
+                try {
+                  if ((this.renderer as any).setHoverState) (this.renderer as any).setHoverState(null, new Set(), 0, 0);
+                  if ((this.renderer as any).setHoveredNode) (this.renderer as any).setHoveredNode(null);
+                  (this.renderer as any).render?.();
+                } catch (e) {}
                 // suppress the cursor attractor until user next moves the mouse
                 this.suppressAttractorUntilMouseMove = true;
               } else {
@@ -714,6 +739,18 @@ class Graph2DController {
             const interaction = (this.plugin as any).settings?.interaction || {};
             this.momentumScale = interaction.momentumScale ?? this.momentumScale;
             this.dragThreshold = interaction.dragThreshold ?? this.dragThreshold;
+          } catch (e) {}
+
+          // If center selection settings changed, rebuild graph
+          try {
+            const usePinned = Boolean((this.plugin as any).settings?.usePinnedCenterNote);
+            const pinnedPath = String((this.plugin as any).settings?.pinnedCenterNotePath || '');
+            if (usePinned !== this.lastUsePinnedCenterNote || pinnedPath !== this.lastPinnedCenterNotePath) {
+              this.lastUsePinnedCenterNote = usePinned;
+              this.lastPinnedCenterNotePath = pinnedPath;
+              // schedule a graph refresh
+              this.refreshGraph();
+            }
           } catch (e) {}
         }
       });
@@ -1015,11 +1052,26 @@ class Graph2DController {
 
       // row for node size min
       panel.appendChild(makeRow('Node min radius', minSizeWrap, async () => {
-        try { delete (this.plugin as any).settings.glow.minNodeRadius; await (this.plugin as any).saveSettings(); minRange.value = String(4); minLabel.textContent = minRange.value; if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+        try {
+          delete (this.plugin as any).settings.glow.minNodeRadius;
+          await (this.plugin as any).saveSettings();
+          minRange.value = String(4);
+          // update displayed numeric input
+          try { if (minSizeWrap && minSizeWrap.querySelector('input[type=number]')) { (minSizeWrap.querySelector('input[type=number]') as HTMLInputElement).value = String(4); } } catch (e) {}
+          if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow);
+          if (this.renderer && (this.renderer as any).render) (this.renderer as any).render();
+        } catch (e) {}
       }));
       // row for node size max
       panel.appendChild(makeRow('Node max radius', maxSizeWrap, async () => {
-        try { delete (this.plugin as any).settings.glow.maxNodeRadius; await (this.plugin as any).saveSettings(); maxRange.value = String(14); maxLabel.textContent = maxRange.value; if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+        try {
+          delete (this.plugin as any).settings.glow.maxNodeRadius;
+          await (this.plugin as any).saveSettings();
+          maxRange.value = String(14);
+          try { if (maxSizeWrap && maxSizeWrap.querySelector('input[type=number]')) { (maxSizeWrap.querySelector('input[type=number]') as HTMLInputElement).value = String(14); } } catch (e) {}
+          if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow);
+          if (this.renderer && (this.renderer as any).render) (this.renderer as any).render();
+        } catch (e) {}
       }));
 
       // Count duplicate links toggle
@@ -1031,7 +1083,7 @@ class Graph2DController {
           (this.plugin as any).settings.countDuplicateLinks = (e.target as HTMLInputElement).checked;
           await (this.plugin as any).saveSettings();
           // rebuild graph and renderer sizing if necessary
-          try { this.graph = await buildGraph(this.app, { countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks) }); if (this.renderer) (this.renderer as any).setGraph(this.graph); } catch (e) {}
+          try { this.graph = await buildGraph(this.app, { countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks), usePinnedCenterNote: Boolean((this.plugin as any).settings?.usePinnedCenterNote), pinnedCenterNotePath: String((this.plugin as any).settings?.pinnedCenterNotePath || ''), useOutlinkFallback: Boolean((this.plugin as any).settings?.useOutlinkFallback) } as any); if (this.renderer) (this.renderer as any).setGraph(this.graph); } catch (e) {}
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
         } catch (e) {}
       });
@@ -1039,7 +1091,7 @@ class Graph2DController {
         try {
           (this.plugin as any).settings.countDuplicateLinks = undefined as any;
           await (this.plugin as any).saveSettings();
-          try { this.graph = await buildGraph(this.app, { countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks) }); if (this.renderer) (this.renderer as any).setGraph(this.graph); } catch (e) {}
+          try { this.graph = await buildGraph(this.app, { countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks), usePinnedCenterNote: Boolean((this.plugin as any).settings?.usePinnedCenterNote), pinnedCenterNotePath: String((this.plugin as any).settings?.pinnedCenterNotePath || ''), useOutlinkFallback: Boolean((this.plugin as any).settings?.useOutlinkFallback) } as any); if (this.renderer) (this.renderer as any).setGraph(this.graph); } catch (e) {}
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
         } catch (e) {}
       }));
@@ -1414,7 +1466,12 @@ class Graph2DController {
     // If the controller has been destroyed or no canvas, abort
     if (!this.canvas) return;
     try {
-      const newGraph = await buildGraph(this.app, { countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks) });
+      const newGraph = await buildGraph(this.app, {
+        countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks),
+        usePinnedCenterNote: Boolean((this.plugin as any).settings?.usePinnedCenterNote),
+        pinnedCenterNotePath: String((this.plugin as any).settings?.pinnedCenterNotePath || ''),
+        useOutlinkFallback: Boolean((this.plugin as any).settings?.useOutlinkFallback),
+      } as any);
       this.graph = newGraph;
 
       // Restore saved positions for the new graph as with init
@@ -1432,6 +1489,7 @@ class Graph2DController {
             needsLayout.push(node);
           }
         }
+        this.centerNode = this.graph.nodes.find((n: any) => (n as any).isCenterNode) || null;
       }
 
       // rebuild adjacency
@@ -1451,6 +1509,8 @@ class Graph2DController {
       const height = rect.height || 200;
       const centerX = width / 2;
       const centerY = height / 2;
+      this.viewCenterX = centerX;
+      this.viewCenterY = centerY;
 
       if (this.renderer && this.graph) {
         this.renderer.setGraph(this.graph);
@@ -1466,6 +1526,8 @@ class Graph2DController {
           });
         }
         this.renderer.resize(width, height);
+        // ensure center node aligned with view center
+        if (this.centerNode) { this.centerNode.x = centerX; this.centerNode.y = centerY; this.centerNode.z = 0; }
       }
 
       // recreate simulation using new nodes/edges

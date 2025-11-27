@@ -68,6 +68,11 @@ export interface GreaterGraphSettings {
   nodePositions?: Record<string, Record<string, { x: number; y: number }>>;
   // visibility toggles
   showTags?: boolean;
+  // Center node selection
+  usePinnedCenterNote?: boolean;
+  pinnedCenterNotePath?: string;
+  // When choosing a center by degree, prefer out-degree (out-links) instead of in-degree
+  useOutlinkFallback?: boolean;
 }
 
 export const DEFAULT_SETTINGS: GreaterGraphSettings = {
@@ -130,6 +135,9 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
   nodePositions: {},
   mutualLinkDoubleLine: true,
   showTags: true,
+  usePinnedCenterNote: false,
+  pinnedCenterNotePath: '',
+  useOutlinkFallback: false,
 };
 
 export default class GreaterGraphPlugin extends Plugin {
@@ -1033,5 +1041,38 @@ class GreaterGraphSettingTab extends PluginSettingTab {
           }
         },
       });
+
+    // Center Node settings
+    containerEl.createEl('h2', { text: 'Center Node' });
+    new Setting(containerEl)
+      .setName('Use pinned center note')
+      .setDesc('Prefer a specific note path as the graph center. Falls back to max in-links if not found.')
+      .addToggle((t) => t
+        .setValue(Boolean(this.plugin.settings.usePinnedCenterNote))
+        .onChange(async (v: boolean) => {
+          this.plugin.settings.usePinnedCenterNote = Boolean(v);
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Pinned center note path')
+      .setDesc('e.g., "Home.md" or "Notes/Home" (vault-relative).')
+      .addText((txt) => txt
+        .setPlaceholder('path/to/note')
+        .setValue(this.plugin.settings.pinnedCenterNotePath || '')
+        .onChange(async (v: string) => {
+          this.plugin.settings.pinnedCenterNotePath = (v || '').trim();
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Fallback: prefer out-links')
+      .setDesc('When picking a center by link count, prefer out-links (out-degree) instead of in-links (in-degree)')
+      .addToggle((t) => t
+        .setValue(Boolean(this.plugin.settings.useOutlinkFallback))
+        .onChange(async (v: boolean) => {
+          this.plugin.settings.useOutlinkFallback = Boolean(v);
+          await this.plugin.saveSettings();
+        }));
   }
 }

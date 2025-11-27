@@ -178,6 +178,77 @@ async function buildGraph(app, options) {
       other.hasReverse = true;
     }
   }
+  function chooseCenterNode(nodesArr, opts) {
+    if (!opts?.usePinnedCenterNote)
+      return null;
+    const onlyNotes = nodesArr.filter((n) => n.type !== "tag");
+    let chosen = null;
+    const preferOut = Boolean(opts?.useOutlinkFallback);
+    const metric = (n) => preferOut ? n.outDegree || 0 : n.inDegree || 0;
+    const chooseBy = (predicate) => {
+      let best = null;
+      for (const n of onlyNotes) {
+        if (!predicate(n))
+          continue;
+        if (!best) {
+          best = n;
+          continue;
+        }
+        if (metric(n) > metric(best))
+          best = n;
+      }
+      return best;
+    };
+    if (opts.usePinnedCenterNote && opts.pinnedCenterNotePath) {
+      const raw = String(opts.pinnedCenterNotePath).trim();
+      if (raw) {
+        const mc = app.metadataCache;
+        let resolved2 = null;
+        try {
+          resolved2 = mc?.getFirstLinkpathDest?.(raw, "");
+        } catch {
+        }
+        if (!resolved2 && !raw.endsWith(".md")) {
+          try {
+            resolved2 = mc?.getFirstLinkpathDest?.(raw + ".md", "");
+          } catch {
+          }
+        }
+        if (resolved2 && resolved2.path) {
+          chosen = chooseBy((n) => n.filePath === resolved2.path);
+        }
+        if (!chosen) {
+          const normA = raw;
+          const normB = raw.endsWith(".md") ? raw : raw + ".md";
+          chosen = chooseBy((n) => n.filePath === normA || n.filePath === normB);
+        }
+        if (!chosen) {
+          const base = raw.endsWith(".md") ? raw.slice(0, -3) : raw;
+          chosen = chooseBy((n) => {
+            const f = n.file;
+            const bn = f?.basename || n.label;
+            return String(bn) === base;
+          });
+        }
+      }
+    }
+    if (!chosen) {
+      for (const n of onlyNotes) {
+        if (!chosen) {
+          chosen = n;
+          continue;
+        }
+        if (metric(n) > metric(chosen))
+          chosen = n;
+      }
+    }
+    return chosen;
+  }
+  for (const n of nodes)
+    n.isCenterNode = false;
+  const centerNode = chooseCenterNode(nodes, { usePinnedCenterNote: Boolean(options?.usePinnedCenterNote), pinnedCenterNotePath: options?.pinnedCenterNotePath || "" });
+  if (centerNode)
+    centerNode.isCenterNode = true;
   return { nodes, edges };
 }
 
@@ -194,10 +265,26 @@ function layoutGraph3D(graph, options) {
   const nodes = options.onlyNodes ?? allNodes;
   if (!nodes || nodes.length === 0)
     return;
+  const minRadius3D = Math.max(32, jitter * 4);
+  const maxRadius3D = Math.max(minRadius3D + 40, Math.min(Math.max(width, height) / 2 - (options.margin || 32), 800));
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
-    const rx = (Math.random() * 2 - 1) * jitter;
-    const ry = (Math.random() * 2 - 1) * jitter;
+    if (node.isCenterNode) {
+      if (node.type === "tag") {
+        node.x = 0;
+        node.y = centerY;
+        node.z = 0;
+      } else {
+        node.x = centerX;
+        node.y = centerY;
+        node.z = 0;
+      }
+      continue;
+    }
+    const angle = Math.random() * Math.PI * 2;
+    const r = minRadius3D + Math.random() * (maxRadius3D - minRadius3D);
+    const rx = Math.cos(angle) * r;
+    const ry = Math.sin(angle) * r;
     if (node.type === "tag") {
       node.x = 0;
       node.y = centerY + ry;
@@ -1151,6 +1238,21 @@ function createSimulation(nodes, edges, options) {
       }
     }
   }
+  function applyCenterNodeLock() {
+    const cx = centerX ?? 0;
+    const cy = centerY ?? 0;
+    const cz = centerZ ?? 0;
+    for (const n of nodes) {
+      if (n.isCenterNode) {
+        n.x = cx;
+        n.y = cy;
+        n.z = cz;
+        n.vx = 0;
+        n.vy = 0;
+        n.vz = 0;
+      }
+    }
+  }
   function integrate(dt) {
     const scale = dt * 60;
     for (const n of nodes) {
@@ -1175,6 +1277,7 @@ function createSimulation(nodes, edges, options) {
     applyCentering();
     applyPlaneConstraints();
     applyMouseAttraction();
+    applyCenterNodeLock();
     applyDamping();
     integrate(dt);
   }
@@ -1285,12 +1388,11 @@ var GraphView = class extends import_obsidian.ItemView {
         } catch (e) {
           console.error("Greater Graph: refreshGraph error", e);
         }
-      }, 500, true);
+      }, 200, true);
     }
     this.registerEvent(this.app.vault.on("create", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
     this.registerEvent(this.app.vault.on("delete", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
     this.registerEvent(this.app.vault.on("rename", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
-    this.registerEvent(this.app.metadataCache.on("changed", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
   }
   onResize() {
     const rect = this.containerEl.getBoundingClientRect();
@@ -1404,6 +1506,13 @@ var Graph2DController = class {
   suppressAttractorUntilMouseMove = false;
   // Simple camera follow flag
   followLockedNodeId = null;
+  // Center node and camera defaults
+  centerNode = null;
+  defaultCameraDistance = 1200;
+  lastUsePinnedCenterNote = false;
+  lastPinnedCenterNotePath = "";
+  viewCenterX = 0;
+  viewCenterY = 0;
   saveNodePositions() {
     if (!this.graph)
       return;
@@ -1486,13 +1595,26 @@ var Graph2DController = class {
       initialGlow.glowRadiusPx = initialPhys.mouseAttractionRadius;
     this.renderer = createRenderer2D({ canvas, glow: initialGlow });
     try {
+      const cam0 = this.renderer.getCamera?.();
+      if (cam0 && typeof cam0.distance === "number")
+        this.defaultCameraDistance = cam0.distance;
+    } catch (e) {
+    }
+    try {
       const drawDouble = Boolean(this.plugin.settings?.mutualLinkDoubleLine);
       const showTags = this.plugin.settings?.showTags !== false;
       if (this.renderer && this.renderer.setRenderOptions)
         this.renderer.setRenderOptions({ mutualDoubleLines: drawDouble, showTags });
     } catch (e) {
     }
-    this.graph = await buildGraph(this.app, { countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks) });
+    this.lastUsePinnedCenterNote = Boolean(this.plugin.settings?.usePinnedCenterNote);
+    this.lastPinnedCenterNotePath = String(this.plugin.settings?.pinnedCenterNotePath || "");
+    this.graph = await buildGraph(this.app, {
+      countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks),
+      usePinnedCenterNote: Boolean(this.plugin.settings?.usePinnedCenterNote),
+      pinnedCenterNotePath: String(this.plugin.settings?.pinnedCenterNotePath || ""),
+      useOutlinkFallback: Boolean(this.plugin.settings?.useOutlinkFallback)
+    });
     const vaultId = this.app.vault.getName();
     const allSaved = this.plugin.settings?.nodePositions || {};
     const savedPositions = allSaved[vaultId] || {};
@@ -1507,6 +1629,7 @@ var Graph2DController = class {
           needsLayout.push(node);
         }
       }
+      this.centerNode = this.graph.nodes.find((n) => n.isCenterNode) || null;
     }
     this.adjacency = /* @__PURE__ */ new Map();
     if (this.graph && this.graph.edges) {
@@ -1522,6 +1645,8 @@ var Graph2DController = class {
     const rect = this.containerEl.getBoundingClientRect();
     const centerX = (rect.width || 300) / 2;
     const centerY = (rect.height || 200) / 2;
+    this.viewCenterX = centerX;
+    this.viewCenterY = centerY;
     this.renderer.setGraph(this.graph);
     if (needsLayout.length > 0) {
       layoutGraph3D(this.graph, {
@@ -1530,22 +1655,18 @@ var Graph2DController = class {
         margin: 32,
         centerX,
         centerY,
-        centerOnLargestNode: true,
+        centerOnLargestNode: Boolean(this.plugin.settings?.usePinnedCenterNote),
         onlyNodes: needsLayout
       });
     } else {
     }
-    this.renderer.resize(rect.width || 300, rect.height || 200);
-    let centerNodeId = void 0;
-    if (this.graph && this.graph.nodes && this.graph.nodes.length > 0) {
-      let maxDeg = -Infinity;
-      for (const n of this.graph.nodes) {
-        if ((n.totalDegree || 0) > maxDeg) {
-          maxDeg = n.totalDegree || 0;
-          centerNodeId = n.id;
-        }
-      }
+    if (this.centerNode) {
+      this.centerNode.x = centerX;
+      this.centerNode.y = centerY;
+      this.centerNode.z = 0;
     }
+    this.renderer.resize(rect.width || 300, rect.height || 200);
+    const centerNodeId = this.centerNode ? this.centerNode.id : void 0;
     const showTagsInitial = this.plugin.settings?.showTags !== false;
     this.recreateSimulation(showTagsInitial, { centerX, centerY, centerNodeId });
     try {
@@ -1817,7 +1938,7 @@ var Graph2DController = class {
             try {
               if (this.pendingFocusNode === "__origin__") {
                 try {
-                  this.renderer.setCamera({ targetX: 0, targetY: 0, targetZ: 0 });
+                  this.renderer.setCamera({ targetX: this.viewCenterX ?? 0, targetY: this.viewCenterY ?? 0, targetZ: 0, distance: this.defaultCameraDistance });
                 } catch (e) {
                 }
                 try {
@@ -1827,6 +1948,14 @@ var Graph2DController = class {
                 }
                 this.followLockedNodeId = null;
                 this.previewLockNodeId = null;
+                try {
+                  if (this.renderer.setHoverState)
+                    this.renderer.setHoverState(null, /* @__PURE__ */ new Set(), 0, 0);
+                  if (this.renderer.setHoveredNode)
+                    this.renderer.setHoveredNode(null);
+                  this.renderer.render?.();
+                } catch (e) {
+                }
                 this.suppressAttractorUntilMouseMove = true;
               } else {
                 const n = this.pendingFocusNode;
@@ -1914,6 +2043,16 @@ var Graph2DController = class {
             const interaction = this.plugin.settings?.interaction || {};
             this.momentumScale = interaction.momentumScale ?? this.momentumScale;
             this.dragThreshold = interaction.dragThreshold ?? this.dragThreshold;
+          } catch (e) {
+          }
+          try {
+            const usePinned = Boolean(this.plugin.settings?.usePinnedCenterNote);
+            const pinnedPath = String(this.plugin.settings?.pinnedCenterNotePath || "");
+            if (usePinned !== this.lastUsePinnedCenterNote || pinnedPath !== this.lastPinnedCenterNotePath) {
+              this.lastUsePinnedCenterNote = usePinned;
+              this.lastPinnedCenterNotePath = pinnedPath;
+              this.refreshGraph();
+            }
           } catch (e) {
           }
         }
@@ -2448,7 +2587,12 @@ var Graph2DController = class {
           delete this.plugin.settings.glow.minNodeRadius;
           await this.plugin.saveSettings();
           minRange.value = String(4);
-          minLabel.textContent = minRange.value;
+          try {
+            if (minSizeWrap && minSizeWrap.querySelector("input[type=number]")) {
+              minSizeWrap.querySelector("input[type=number]").value = String(4);
+            }
+          } catch (e) {
+          }
           if (this.renderer && this.renderer.setGlowSettings)
             this.renderer.setGlowSettings(this.plugin.settings.glow);
           if (this.renderer && this.renderer.render)
@@ -2461,7 +2605,12 @@ var Graph2DController = class {
           delete this.plugin.settings.glow.maxNodeRadius;
           await this.plugin.saveSettings();
           maxRange.value = String(14);
-          maxLabel.textContent = maxRange.value;
+          try {
+            if (maxSizeWrap && maxSizeWrap.querySelector("input[type=number]")) {
+              maxSizeWrap.querySelector("input[type=number]").value = String(14);
+            }
+          } catch (e) {
+          }
           if (this.renderer && this.renderer.setGlowSettings)
             this.renderer.setGlowSettings(this.plugin.settings.glow);
           if (this.renderer && this.renderer.render)
@@ -2477,7 +2626,7 @@ var Graph2DController = class {
           this.plugin.settings.countDuplicateLinks = e.target.checked;
           await this.plugin.saveSettings();
           try {
-            this.graph = await buildGraph(this.app, { countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks) });
+            this.graph = await buildGraph(this.app, { countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks), usePinnedCenterNote: Boolean(this.plugin.settings?.usePinnedCenterNote), pinnedCenterNotePath: String(this.plugin.settings?.pinnedCenterNotePath || ""), useOutlinkFallback: Boolean(this.plugin.settings?.useOutlinkFallback) });
             if (this.renderer)
               this.renderer.setGraph(this.graph);
           } catch (e2) {
@@ -2495,7 +2644,7 @@ var Graph2DController = class {
           this.plugin.settings.countDuplicateLinks = void 0;
           await this.plugin.saveSettings();
           try {
-            this.graph = await buildGraph(this.app, { countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks) });
+            this.graph = await buildGraph(this.app, { countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks), usePinnedCenterNote: Boolean(this.plugin.settings?.usePinnedCenterNote), pinnedCenterNotePath: String(this.plugin.settings?.pinnedCenterNotePath || ""), useOutlinkFallback: Boolean(this.plugin.settings?.useOutlinkFallback) });
             if (this.renderer)
               this.renderer.setGraph(this.graph);
           } catch (e) {
@@ -2941,7 +3090,12 @@ var Graph2DController = class {
     if (!this.canvas)
       return;
     try {
-      const newGraph = await buildGraph(this.app, { countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks) });
+      const newGraph = await buildGraph(this.app, {
+        countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks),
+        usePinnedCenterNote: Boolean(this.plugin.settings?.usePinnedCenterNote),
+        pinnedCenterNotePath: String(this.plugin.settings?.pinnedCenterNotePath || ""),
+        useOutlinkFallback: Boolean(this.plugin.settings?.useOutlinkFallback)
+      });
       this.graph = newGraph;
       const vaultId = this.app.vault.getName();
       const allSaved = this.plugin.settings?.nodePositions || {};
@@ -2957,6 +3111,7 @@ var Graph2DController = class {
             needsLayout.push(node);
           }
         }
+        this.centerNode = this.graph.nodes.find((n) => n.isCenterNode) || null;
       }
       this.adjacency = /* @__PURE__ */ new Map();
       if (this.graph && this.graph.edges) {
@@ -2974,6 +3129,8 @@ var Graph2DController = class {
       const height = rect.height || 200;
       const centerX = width / 2;
       const centerY = height / 2;
+      this.viewCenterX = centerX;
+      this.viewCenterY = centerY;
       if (this.renderer && this.graph) {
         this.renderer.setGraph(this.graph);
         if (needsLayout.length > 0) {
@@ -2988,6 +3145,11 @@ var Graph2DController = class {
           });
         }
         this.renderer.resize(width, height);
+        if (this.centerNode) {
+          this.centerNode.x = centerX;
+          this.centerNode.y = centerY;
+          this.centerNode.z = 0;
+        }
       }
       if (this.simulation) {
         try {
@@ -3315,7 +3477,10 @@ var DEFAULT_SETTINGS = {
   },
   nodePositions: {},
   mutualLinkDoubleLine: true,
-  showTags: true
+  showTags: true,
+  usePinnedCenterNote: false,
+  pinnedCenterNotePath: "",
+  useOutlinkFallback: false
 };
 var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
   settings = DEFAULT_SETTINGS;
@@ -4233,6 +4398,19 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       }
     });
+    containerEl.createEl("h2", { text: "Center Node" });
+    new import_obsidian2.Setting(containerEl).setName("Use pinned center note").setDesc("Prefer a specific note path as the graph center. Falls back to max in-links if not found.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.usePinnedCenterNote)).onChange(async (v) => {
+      this.plugin.settings.usePinnedCenterNote = Boolean(v);
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian2.Setting(containerEl).setName("Pinned center note path").setDesc('e.g., "Home.md" or "Notes/Home" (vault-relative).').addText((txt) => txt.setPlaceholder("path/to/note").setValue(this.plugin.settings.pinnedCenterNotePath || "").onChange(async (v) => {
+      this.plugin.settings.pinnedCenterNotePath = (v || "").trim();
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian2.Setting(containerEl).setName("Fallback: prefer out-links").setDesc("When picking a center by link count, prefer out-links (out-degree) instead of in-links (in-degree)").addToggle((t) => t.setValue(Boolean(this.plugin.settings.useOutlinkFallback)).onChange(async (v) => {
+      this.plugin.settings.useOutlinkFallback = Boolean(v);
+      await this.plugin.saveSettings();
+    }));
   }
 };
 // Annotate the CommonJS export names for ESM import in node:

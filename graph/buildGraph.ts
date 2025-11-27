@@ -17,6 +17,7 @@ export interface GraphNode {
   inDegree: number;
   outDegree: number;
   totalDegree: number;
+  isCenterNode?: boolean;
 }
 
 export interface GraphEdge {
@@ -34,7 +35,7 @@ export interface GraphData {
   edges: GraphEdge[];
 }
 
-export async function buildGraph(app: App, options?: { countDuplicates?: boolean }): Promise<GraphData> {
+export async function buildGraph(app: App, options?: { countDuplicates?: boolean; usePinnedCenterNote?: boolean; pinnedCenterNotePath?: string; }): Promise<GraphData> {
   const files: TFile[] = app.vault.getMarkdownFiles();
 
   const nodes: GraphNode[] = files.map((file) => ({
@@ -189,6 +190,67 @@ export async function buildGraph(app: App, options?: { countDuplicates?: boolean
       other.hasReverse = true;
     }
   }
+
+  // Choose and mark center node
+  function chooseCenterNode(nodesArr: GraphNode[], opts: { usePinnedCenterNote?: boolean; pinnedCenterNotePath?: string; useOutlinkFallback?: boolean; }): GraphNode | null {
+    // Only select a center node when the pinned-center feature is enabled.
+    if (!opts?.usePinnedCenterNote) return null;
+    const onlyNotes = nodesArr.filter((n) => (n as any).type !== 'tag');
+    let chosen: GraphNode | null = null;
+    const preferOut = Boolean(opts?.useOutlinkFallback);
+    const metric = (n: GraphNode) => preferOut ? (n.outDegree || 0) : (n.inDegree || 0);
+    // Helper to select by predicate but prefer highest inDegree if multiple
+    const chooseBy = (predicate: (n: GraphNode) => boolean): GraphNode | null => {
+      let best: GraphNode | null = null;
+      for (const n of onlyNotes) {
+        if (!predicate(n)) continue;
+        if (!best) { best = n; continue; }
+        if (metric(n) > metric(best)) best = n;
+      }
+      return best;
+    };
+    if (opts.usePinnedCenterNote && opts.pinnedCenterNotePath) {
+      const raw = String(opts.pinnedCenterNotePath).trim();
+      if (raw) {
+        const mc: any = (app as any).metadataCache;
+        // Try Obsidian linkpath resolution first
+        let resolved: any = null;
+        try { resolved = mc?.getFirstLinkpathDest?.(raw, ''); } catch {}
+        if (!resolved && !raw.endsWith('.md')) {
+          try { resolved = mc?.getFirstLinkpathDest?.(raw + '.md', ''); } catch {}
+        }
+        if (resolved && resolved.path) {
+          chosen = chooseBy((n) => n.filePath === resolved.path);
+        }
+        if (!chosen) {
+          // Fallbacks: exact path (with or without .md)
+          const normA = raw;
+          const normB = raw.endsWith('.md') ? raw : raw + '.md';
+          chosen = chooseBy((n) => n.filePath === normA || n.filePath === normB);
+        }
+        if (!chosen) {
+          // Basename match
+          const base = raw.endsWith('.md') ? raw.slice(0, -3) : raw;
+          chosen = chooseBy((n) => {
+            const f = (n as any).file; const bn = f?.basename || n.label;
+            return String(bn) === base;
+          });
+        }
+      }
+    }
+    if (!chosen) {
+      // Fallback to the highest-degree note (in- or out-degree based on opts)
+      for (const n of onlyNotes) {
+        if (!chosen) { chosen = n; continue; }
+        if (metric(n) > metric(chosen)) chosen = n;
+      }
+    }
+    return chosen;
+  }
+
+  for (const n of nodes) (n as any).isCenterNode = false;
+  const centerNode = chooseCenterNode(nodes, { usePinnedCenterNote: Boolean(options?.usePinnedCenterNote), pinnedCenterNotePath: options?.pinnedCenterNotePath || '' });
+  if (centerNode) (centerNode as any).isCenterNode = true;
 
   return { nodes, edges };
 }
