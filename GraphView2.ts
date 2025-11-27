@@ -129,9 +129,12 @@ class Graph2DController {
   private wheelHandler: ((e: WheelEvent) => void) | null = null;
   private mouseDownHandler: ((e: MouseEvent) => void) | null = null;
   private mouseUpHandler: ((e: MouseEvent) => void) | null = null;
-  private isDragging: boolean = false;
   private lastDragX: number = 0;
   private lastDragY: number = 0;
+  private draggingNode: any | null = null;
+  private isPanning: boolean = false;
+  private lastPanX: number = 0;
+  private lastPanY: number = 0;
 
   constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
     this.app = app;
@@ -199,11 +202,34 @@ class Graph2DController {
     this.animationFrame = requestAnimationFrame(this.animationLoop);
 
     this.mouseMoveHandler = (ev: MouseEvent) => {
-      if (!this.canvas) return;
+      if (!this.canvas || !this.renderer) return;
       const r = this.canvas.getBoundingClientRect();
-      const x = ev.clientX - r.left;
-      const y = ev.clientY - r.top;
-      this.handleHover(x, y);
+      const screenX = ev.clientX - r.left;
+      const screenY = ev.clientY - r.top;
+
+      // If currently dragging a node, move it to the world coords under the cursor
+      if (this.draggingNode) {
+        const world = (this.renderer as any).screenToWorld(screenX, screenY);
+        this.draggingNode.x = world.x;
+        this.draggingNode.y = world.y;
+        this.draggingNode.vx = 0;
+        this.draggingNode.vy = 0;
+        this.renderer.render();
+        return;
+      }
+
+      // If panning, translate the camera
+      if (this.isPanning) {
+        const dx = screenX - this.lastPanX;
+        const dy = screenY - this.lastPanY;
+        (this.renderer as any).panBy(dx, dy);
+        this.lastPanX = screenX;
+        this.lastPanY = screenY;
+        return;
+      }
+
+      // Default: treat as hover
+      this.handleHover(screenX, screenY);
     };
 
     this.mouseLeaveHandler = () => this.clearHover();
@@ -229,18 +255,31 @@ class Graph2DController {
     };
 
     this.mouseDownHandler = (ev: MouseEvent) => {
-      if (!this.canvas || ev.button !== 0) return;
-      this.isDragging = true;
+      if (!this.canvas || ev.button !== 0 || !this.renderer) return;
       const r = this.canvas.getBoundingClientRect();
-      this.lastDragX = ev.clientX - r.left;
-      this.lastDragY = ev.clientY - r.top;
-      this.canvas.style.cursor = 'grabbing';
+      const screenX = ev.clientX - r.left;
+      const screenY = ev.clientY - r.top;
+      const world = (this.renderer as any).screenToWorld(screenX, screenY);
+
+      // Hit-test in world coords to see if a node was clicked
+      const hit = this.hitTestNode(world.x, world.y);
+      if (hit) {
+        this.draggingNode = hit;
+        this.canvas.style.cursor = 'grabbing';
+      } else {
+        // start panning
+        this.isPanning = true;
+        this.lastPanX = screenX;
+        this.lastPanY = screenY;
+        this.canvas.style.cursor = 'grab';
+      }
     };
 
     this.mouseUpHandler = (ev: MouseEvent) => {
       if (!this.canvas) return;
       if (ev.button !== 0) return;
-      this.isDragging = false;
+      this.isPanning = false;
+      this.draggingNode = null;
       this.canvas.style.cursor = 'default';
     };
 
@@ -392,19 +431,6 @@ class Graph2DController {
 
   handleHover(screenX: number, screenY: number): void {
     if (!this.graph || !this.renderer) return;
-    if (this.isDragging) {
-      // treat as panning movement
-      const worldPrev = (this.renderer as any).screenToWorld(this.lastDragX, this.lastDragY);
-      const r = this.canvas!.getBoundingClientRect();
-      const curX = screenX;
-      const curY = screenY;
-      const dx = curX - this.lastDragX;
-      const dy = curY - this.lastDragY;
-      (this.renderer as any).panBy(dx, dy);
-      this.lastDragX = curX;
-      this.lastDragY = curY;
-      return; // no hover while dragging
-    }
     const world = (this.renderer as any).screenToWorld(screenX, screenY);
     let closest: any = null; let closestDist = Infinity; const hitPadding = 6;
     for (const node of this.graph.nodes) {
