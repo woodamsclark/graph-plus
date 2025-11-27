@@ -172,6 +172,7 @@ function createRenderer2D(options) {
   let themeLabelColor = "#222";
   let themeEdgeColor = "#888888";
   let resolvedInterfaceFontFamily = null;
+  let resolvedMonoFontFamily = null;
   function parseHexColor(hex) {
     if (!hex)
       return null;
@@ -376,37 +377,70 @@ function createRenderer2D(options) {
         themeEdgeColor = edgeVar.trim();
     } catch (e) {
     }
-    if (!resolvedInterfaceFontFamily) {
-      try {
-        const cs = window.getComputedStyle(canvas);
-        const candidates = ["--font-family-interface", "--font-family", "--font-main", "--font-primary", "--font-family-sans", "--text-font"];
-        let fam = null;
-        for (const v of candidates) {
-          const val = cs.getPropertyValue(v);
-          if (val && val.trim()) {
-            fam = val.trim();
-            break;
+    try {
+      const cs = window.getComputedStyle(canvas);
+      if (glowOptions?.useInterfaceFont) {
+        if (!resolvedInterfaceFontFamily) {
+          const candidates = ["--font-family-interface", "--font-family", "--font-main", "--font-primary", "--font-family-sans", "--text-font"];
+          let fam = null;
+          for (const v of candidates) {
+            const val = cs.getPropertyValue(v);
+            if (val && val.trim()) {
+              fam = val.trim();
+              break;
+            }
           }
-        }
-        if (!fam) {
-          const el = document.createElement("div");
-          el.style.position = "absolute";
-          el.style.left = "-9999px";
-          el.style.top = "-9999px";
-          el.textContent = "x";
-          document.body.appendChild(el);
-          try {
-            const cs2 = window.getComputedStyle(el);
-            fam = cs2.fontFamily || null;
-          } finally {
-            if (el.parentElement)
-              el.parentElement.removeChild(el);
+          if (!fam) {
+            const el = document.createElement("div");
+            el.style.position = "absolute";
+            el.style.left = "-9999px";
+            el.style.top = "-9999px";
+            el.textContent = "x";
+            document.body.appendChild(el);
+            try {
+              const cs2 = window.getComputedStyle(el);
+              fam = cs2.fontFamily || null;
+            } finally {
+              if (el.parentElement)
+                el.parentElement.removeChild(el);
+            }
           }
+          resolvedInterfaceFontFamily = fam && fam.trim() ? fam.trim() : "sans-serif";
         }
-        resolvedInterfaceFontFamily = fam && fam.trim() ? fam.trim() : "sans-serif";
-      } catch (e) {
-        resolvedInterfaceFontFamily = "sans-serif";
+      } else {
+        if (!resolvedMonoFontFamily) {
+          const candidates = ["--font-family-monospace", "--font-family-code", "--mono-font", "--code-font", "--font-mono", "--font-family-mono"];
+          let fam = null;
+          for (const v of candidates) {
+            const val = cs.getPropertyValue(v);
+            if (val && val.trim()) {
+              fam = val.trim();
+              break;
+            }
+          }
+          if (!fam) {
+            const codeEl = document.createElement("code");
+            codeEl.style.position = "absolute";
+            codeEl.style.left = "-9999px";
+            codeEl.style.top = "-9999px";
+            codeEl.textContent = "x";
+            document.body.appendChild(codeEl);
+            try {
+              const cs2 = window.getComputedStyle(codeEl);
+              fam = cs2.fontFamily || null;
+            } finally {
+              if (codeEl.parentElement)
+                codeEl.parentElement.removeChild(codeEl);
+            }
+          }
+          resolvedMonoFontFamily = fam && fam.trim() ? fam.trim() : "monospace";
+        }
       }
+    } catch (e) {
+      if (glowOptions?.useInterfaceFont)
+        resolvedInterfaceFontFamily = resolvedInterfaceFontFamily || "sans-serif";
+      else
+        resolvedMonoFontFamily = resolvedMonoFontFamily || "monospace";
     }
     ctx.save();
     ctx.translate(offsetX, offsetY);
@@ -1022,6 +1056,8 @@ var Graph2DController = class {
   dragThreshold = 4;
   // persistence
   saveNodePositionsDebounced = null;
+  // last node id that we triggered a hover preview for (to avoid retriggering)
+  lastPreviewedNodeId = null;
   saveNodePositions() {
     if (!this.graph)
       return;
@@ -1045,6 +1081,23 @@ var Graph2DController = class {
       }
     } catch (e) {
       console.error("Greater Graph: saveNodePositions error", e);
+    }
+  }
+  // Remove any lingering Obsidian hover popovers we created
+  closePreview() {
+    try {
+      const selectors = [".markdown-hover", ".hover-popover", ".hover-preview", ".markdown-hover-popover"];
+      for (const s of selectors) {
+        const els = document.querySelectorAll(s);
+        els.forEach((el) => {
+          try {
+            if (el.parentElement)
+              el.parentElement.removeChild(el);
+          } catch (e) {
+          }
+        });
+      }
+    } catch (e) {
     }
   }
   constructor(app, containerEl, plugin) {
@@ -1185,9 +1238,13 @@ var Graph2DController = class {
         this.lastPanY = screenY;
         return;
       }
-      this.handleHover(screenX, screenY);
+      this.handleHover(screenX, screenY, ev);
     };
-    this.mouseLeaveHandler = () => this.clearHover();
+    this.mouseLeaveHandler = () => {
+      this.clearHover();
+      this.lastPreviewedNodeId = null;
+      this.closePreview();
+    };
     this.mouseClickHandler = (ev) => {
       if (!this.canvas)
         return;
@@ -1472,6 +1529,14 @@ var Graph2DController = class {
     }
     return closest;
   }
+  isPreviewModifier(event) {
+    try {
+      if (import_obsidian.Platform && import_obsidian.Platform.isMacOS)
+        return Boolean(event.metaKey);
+    } catch (e) {
+    }
+    return Boolean(event.ctrlKey);
+  }
   handleClick(screenX, screenY) {
     if (!this.graph || !this.onNodeClick || !this.renderer)
       return;
@@ -1485,9 +1550,14 @@ var Graph2DController = class {
       console.error("Graph2DController.onNodeClick handler error", e);
     }
   }
-  handleHover(screenX, screenY) {
+  handleHover(screenX, screenY, ev) {
     if (!this.graph || !this.renderer)
       return;
+    if (this.draggingNode || this.isPanning) {
+      this.lastPreviewedNodeId = null;
+      this.closePreview();
+      return;
+    }
     const world = this.renderer.screenToWorld(screenX, screenY);
     let closest = null;
     let closestDist = Infinity;
@@ -1538,6 +1608,31 @@ var Graph2DController = class {
         this.simulation.setMouseAttractor(world.x, world.y, newId);
     } catch (e) {
     }
+    try {
+      if (ev) {
+        const previewModifier = this.isPreviewModifier(ev);
+        const currentId = closest ? closest.id : null;
+        if (previewModifier && closest && currentId !== this.lastPreviewedNodeId) {
+          this.lastPreviewedNodeId = currentId;
+          try {
+            this.app.workspace.trigger("hover-link", {
+              event: ev,
+              source: "greater-graph",
+              hoverParent: this.containerEl,
+              targetEl: this.canvas,
+              linktext: closest.filePath || closest.label,
+              sourcePath: closest.filePath
+            });
+          } catch (e) {
+          }
+        }
+        if (!previewModifier || !closest) {
+          this.lastPreviewedNodeId = null;
+          this.closePreview();
+        }
+      }
+    } catch (e) {
+    }
   }
   clearHover() {
     if (!this.renderer)
@@ -1577,6 +1672,7 @@ var DEFAULT_SETTINGS = {
     // color overrides left undefined by default to follow theme
     nodeColor: void 0,
     labelColor: void 0,
+    useInterfaceFont: true,
     edgeColor: void 0
   },
   physics: {
@@ -1822,6 +1918,10 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+    new import_obsidian2.Setting(containerEl).setName("Use interface font for labels").setDesc("When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.").addToggle((t) => t.setValue(Boolean(glow.useInterfaceFont)).onChange(async (v) => {
+      glow.useInterfaceFont = Boolean(v);
+      await this.plugin.saveSettings();
+    }));
     const phys = this.plugin.settings.physics || {};
     containerEl.createEl("h2", { text: "Greater Graph \u2013 Physics" });
     new import_obsidian2.Setting(containerEl).setName("Repulsion strength").setDesc("Controls node-node repulsion strength (higher = more separation).").addText(

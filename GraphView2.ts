@@ -1,4 +1,4 @@
-import { App, ItemView, WorkspaceLeaf, Plugin, TFile } from 'obsidian';
+import { App, ItemView, WorkspaceLeaf, Plugin, TFile, Platform } from 'obsidian';
 import { buildGraph, GraphData } from './graph/buildGraph';
 import { layoutGraph2D } from './graph/layout2d';
 import { createRenderer2D, Renderer2D } from './graph/renderer2d';
@@ -149,6 +149,8 @@ class Graph2DController {
   private dragThreshold: number = 4;
   // persistence
   private saveNodePositionsDebounced: (() => void) | null = null;
+  // last node id that we triggered a hover preview for (to avoid retriggering)
+  private lastPreviewedNodeId: string | null = null;
 
   private saveNodePositions(): void {
     if (!this.graph) return;
@@ -169,6 +171,20 @@ class Graph2DController {
       // eslint-disable-next-line no-console
       console.error('Greater Graph: saveNodePositions error', e);
     }
+  }
+
+  // Remove any lingering Obsidian hover popovers we created
+  private closePreview(): void {
+    try {
+      // common hover/popover class names used by Obsidian's hover UI
+      const selectors = ['.markdown-hover', '.hover-popover', '.hover-preview', '.markdown-hover-popover'];
+      for (const s of selectors) {
+        const els = document.querySelectorAll(s);
+        els.forEach((el) => {
+          try { if (el.parentElement) el.parentElement.removeChild(el); } catch (e) {}
+        });
+      }
+    } catch (e) {}
   }
 
   constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
@@ -333,11 +349,11 @@ class Graph2DController {
         return;
       }
 
-      // Default: treat as hover
-      this.handleHover(screenX, screenY);
+      // Default: treat as hover; pass the original event for preview modifier detection
+      this.handleHover(screenX, screenY, ev);
     };
 
-    this.mouseLeaveHandler = () => this.clearHover();
+    this.mouseLeaveHandler = () => { this.clearHover(); this.lastPreviewedNodeId = null; this.closePreview(); };
 
     this.mouseClickHandler = (ev: MouseEvent) => {
       if (!this.canvas) return;
@@ -598,6 +614,13 @@ class Graph2DController {
     return closest;
   }
 
+  private isPreviewModifier(event: MouseEvent): boolean {
+    try {
+      if (Platform && (Platform as any).isMacOS) return Boolean(event.metaKey);
+    } catch (e) {}
+    return Boolean(event.ctrlKey);
+  }
+
   handleClick(screenX: number, screenY: number): void {
     if (!this.graph || !this.onNodeClick || !this.renderer) return;
     const world = (this.renderer as any).screenToWorld(screenX, screenY);
@@ -606,8 +629,14 @@ class Graph2DController {
     try { this.onNodeClick(node); } catch (e) { console.error('Graph2DController.onNodeClick handler error', e); }
   }
 
-  handleHover(screenX: number, screenY: number): void {
+  handleHover(screenX: number, screenY: number, ev?: MouseEvent): void {
     if (!this.graph || !this.renderer) return;
+    // don't show previews while dragging or panning
+    if (this.draggingNode || this.isPanning) {
+      this.lastPreviewedNodeId = null;
+      this.closePreview();
+      return;
+    }
     const world = (this.renderer as any).screenToWorld(screenX, screenY);
     let closest: any = null; let closestDist = Infinity; const hitPadding = 6;
     for (const node of this.graph.nodes) {
@@ -634,6 +663,31 @@ class Graph2DController {
     this.renderer.render();
     // inform simulation of mouse world coords and hovered node so it can apply local attraction
     try { if (this.simulation && (this.simulation as any).setMouseAttractor) (this.simulation as any).setMouseAttractor(world.x, world.y, newId); } catch (e) {}
+
+    // Handle preview modifier: trigger Obsidian's hover-link once per node when modifier held
+    try {
+      if (ev) {
+        const previewModifier = this.isPreviewModifier(ev);
+        const currentId = closest ? closest.id : null;
+        if (previewModifier && closest && currentId !== this.lastPreviewedNodeId) {
+          this.lastPreviewedNodeId = currentId;
+          try {
+            this.app.workspace.trigger('hover-link', {
+              event: ev,
+              source: 'greater-graph',
+              hoverParent: this.containerEl,
+              targetEl: this.canvas,
+              linktext: closest.filePath || closest.label,
+              sourcePath: closest.filePath,
+            } as any);
+          } catch (e) {}
+        }
+        if (!previewModifier || !closest) {
+          this.lastPreviewedNodeId = null;
+          this.closePreview();
+        }
+      }
+    } catch (e) {}
   }
 
   clearHover(): void {
