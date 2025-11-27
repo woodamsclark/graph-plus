@@ -276,9 +276,23 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     }
 
     // Draw node glows (radial gradient), node bodies, and labels
-    ctx.font = '10px sans-serif';
+    // Compute zoom-aware font sizing. Font size displayed on screen = baseFontSize * scale
+    const baseFontSize = 10; // world-space base font size
+    const minFontSize = 6; // px (screen)
+    const maxFontSize = 18; // px (screen)
+    const hideBelow = 7; // hide labels when displayed size < this (px)
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
+
+    // Determine label color: prefer explicit override, otherwise read --text-normal
+    let labelCss = themeLabelColor;
+    try {
+      const cs = window.getComputedStyle(canvas);
+      const v = cs.getPropertyValue('--text-normal');
+      if (v && v.trim()) labelCss = v.trim();
+    } catch (e) {
+      // ignore
+    }
 
     for (const node of graph.nodes) {
       const radius = getNodeRadius(node);
@@ -308,11 +322,18 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
       ctx.fill();
       ctx.restore();
 
-      // label below node
-      ctx.save();
-      ctx.fillStyle = themeLabelColor;
-      ctx.fillText(node.label, node.x, node.y + radius + 4);
-      ctx.restore();
+      // label below node (zoom-aware)
+      const displayedFont = baseFontSize * scale; // px on screen
+      if (displayedFont >= hideBelow) {
+        const clampedDisplayed = Math.max(minFontSize, Math.min(maxFontSize, displayedFont));
+        const fontToSet = Math.max(1, clampedDisplayed / Math.max(0.0001, scale));
+        ctx.save();
+        ctx.font = `${fontToSet}px sans-serif`;
+        ctx.fillStyle = labelCss || '#ffffff';
+        const verticalPadding = 4; // world units; will be scaled by transform
+        ctx.fillText(node.label, node.x, node.y + radius + verticalPadding);
+        ctx.restore();
+      }
     }
 
     ctx.restore();

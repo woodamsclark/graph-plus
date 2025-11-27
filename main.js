@@ -348,9 +348,20 @@ function createRenderer2D(options) {
       ctx.stroke();
       ctx.restore();
     }
-    ctx.font = "10px sans-serif";
+    const baseFontSize = 10;
+    const minFontSize = 6;
+    const maxFontSize = 18;
+    const hideBelow = 7;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
+    let labelCss = themeLabelColor;
+    try {
+      const cs = window.getComputedStyle(canvas);
+      const v = cs.getPropertyValue("--text-normal");
+      if (v && v.trim())
+        labelCss = v.trim();
+    } catch (e) {
+    }
     for (const node of graph.nodes) {
       const radius = getNodeRadius(node);
       const centerAlpha = getCenterAlpha(node);
@@ -373,10 +384,17 @@ function createRenderer2D(options) {
       ctx.fillStyle = themeNodeColor;
       ctx.fill();
       ctx.restore();
-      ctx.save();
-      ctx.fillStyle = themeLabelColor;
-      ctx.fillText(node.label, node.x, node.y + radius + 4);
-      ctx.restore();
+      const displayedFont = baseFontSize * scale;
+      if (displayedFont >= hideBelow) {
+        const clampedDisplayed = Math.max(minFontSize, Math.min(maxFontSize, displayedFont));
+        const fontToSet = Math.max(1, clampedDisplayed / Math.max(1e-4, scale));
+        ctx.save();
+        ctx.font = `${fontToSet}px sans-serif`;
+        ctx.fillStyle = labelCss || "#ffffff";
+        const verticalPadding = 4;
+        ctx.fillText(node.label, node.x, node.y + radius + verticalPadding);
+        ctx.restore();
+      }
     }
     ctx.restore();
   }
