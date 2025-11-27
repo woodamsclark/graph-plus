@@ -155,6 +155,8 @@ class Graph2DController {
   // to that node (and neighbors) until the popover disappears.
   private previewLockNodeId: string | null = null;
   private previewPollTimer: number | null = null;
+  private controlsEl: HTMLElement | null = null;
+  private controlsVisible: boolean = true;
 
   private saveNodePositions(): void {
     if (!this.graph) return;
@@ -190,6 +192,9 @@ class Graph2DController {
     canvas.tabIndex = 0;
     this.containerEl.appendChild(canvas);
     this.canvas = canvas;
+
+    // create in-view controls panel
+    this.createControlsPanel();
 
     // When creating renderer, pass glow settings and prefer explicit glowRadiusPx derived
     // from physics.mouseAttractionRadius so glow matches mouse attraction radius.
@@ -467,6 +472,191 @@ class Graph2DController {
         }
       });
     }
+  }
+
+  // Create floating controls panel in top-right and a gear toggle in the view
+  private createControlsPanel(): void {
+    try {
+      // Panel container
+      const panel = document.createElement('div');
+      panel.style.position = 'absolute';
+      panel.style.top = '8px';
+      panel.style.right = '8px';
+      panel.style.zIndex = '10';
+      panel.style.background = 'var(--background-secondary)';
+      panel.style.color = 'var(--text-normal)';
+      panel.style.border = '1px solid var(--interactive-border)';
+      panel.style.padding = '8px';
+      panel.style.borderRadius = '6px';
+      panel.style.minWidth = '220px';
+      panel.style.fontSize = '12px';
+      panel.style.boxShadow = 'var(--translucent-shadow)';
+
+      // Title row with close/gear
+      const title = document.createElement('div');
+      title.style.display = 'flex';
+      title.style.justifyContent = 'space-between';
+      title.style.alignItems = 'center';
+      title.style.marginBottom = '6px';
+      const titleText = document.createElement('div');
+      titleText.textContent = 'Graph Controls';
+      titleText.style.fontWeight = '600';
+      titleText.style.fontSize = '12px';
+      title.appendChild(titleText);
+
+      const closeBtn = document.createElement('button');
+      closeBtn.setAttribute('aria-label', 'Toggle graph controls');
+      closeBtn.style.background = 'transparent';
+      closeBtn.style.border = 'none';
+      closeBtn.style.color = 'var(--text-normal)';
+      closeBtn.style.cursor = 'pointer';
+      closeBtn.textContent = '⚙';
+      closeBtn.addEventListener('click', () => this.toggleControlsVisibility());
+      title.appendChild(closeBtn);
+      panel.appendChild(title);
+
+      const makeRow = (labelText: string, inputEl: HTMLElement) => {
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.justifyContent = 'space-between';
+        row.style.marginBottom = '6px';
+        const label = document.createElement('label');
+        label.textContent = labelText;
+        label.style.marginRight = '8px';
+        label.style.flex = '1';
+        inputEl.style.flex = '0 0 auto';
+        row.appendChild(label);
+        row.appendChild(inputEl);
+        return row;
+      };
+
+      // Node color
+      const nodeColor = document.createElement('input');
+      nodeColor.type = 'color';
+      nodeColor.value = (this.plugin as any).settings?.glow?.nodeColor || '#66ccff';
+      nodeColor.addEventListener('input', async (e) => {
+        try {
+          (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+          (this.plugin as any).settings.glow.nodeColor = (e.target as HTMLInputElement).value;
+          await (this.plugin as any).saveSettings();
+          try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
+          try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+        } catch (e) {}
+      });
+      panel.appendChild(makeRow('Node color', nodeColor));
+
+      // Edge color
+      const edgeColor = document.createElement('input');
+      edgeColor.type = 'color';
+      edgeColor.value = (this.plugin as any).settings?.glow?.edgeColor || '#888888';
+      edgeColor.addEventListener('input', async (e) => {
+        try {
+          (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+          (this.plugin as any).settings.glow.edgeColor = (e.target as HTMLInputElement).value;
+          await (this.plugin as any).saveSettings();
+          try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
+          try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+        } catch (e) {}
+      });
+      panel.appendChild(makeRow('Edge color', edgeColor));
+
+      // Count duplicate links toggle
+      const countDup = document.createElement('input');
+      countDup.type = 'checkbox';
+      countDup.checked = Boolean((this.plugin as any).settings?.countDuplicateLinks);
+      countDup.addEventListener('change', async (e) => {
+        try {
+          (this.plugin as any).settings.countDuplicateLinks = (e.target as HTMLInputElement).checked;
+          await (this.plugin as any).saveSettings();
+          // rebuild graph and renderer sizing if necessary
+          try { this.graph = await buildGraph(this.app, { countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks) }); if (this.renderer) (this.renderer as any).setGraph(this.graph); } catch (e) {}
+          try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+        } catch (e) {}
+      });
+      panel.appendChild(makeRow('Count duplicate links', countDup));
+
+      // Physics settings group
+      const phys = (this.plugin as any).settings?.physics || {};
+      const physFields: { key: string; label: string; step?: string }[] = [
+        { key: 'repulsionStrength', label: 'Repulsion', step: '1' },
+        { key: 'springStrength', label: 'Spring', step: '0.01' },
+        { key: 'springLength', label: 'Spring len', step: '1' },
+        { key: 'centerPull', label: 'Center pull', step: '0.0001' },
+        { key: 'damping', label: 'Damping', step: '0.01' },
+        { key: 'mouseAttractionRadius', label: 'Attract radius', step: '1' },
+        { key: 'mouseAttractionStrength', label: 'Attract strength', step: '0.01' },
+        { key: 'mouseAttractionExponent', label: 'Attract exponent', step: '0.1' },
+      ];
+      for (const f of physFields) {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = f.step || '1';
+        input.value = String((phys as any)[f.key] ?? '');
+        input.style.width = '80px';
+        input.addEventListener('change', async (e) => {
+          try {
+            (this.plugin as any).settings.physics = (this.plugin as any).settings.physics || {};
+            const val = Number((e.target as HTMLInputElement).value);
+            (this.plugin as any).settings.physics[f.key] = Number.isFinite(val) ? val : (this.plugin as any).settings.physics[f.key];
+            await (this.plugin as any).saveSettings();
+            try { if (this.simulation && (this.simulation as any).setOptions) (this.simulation as any).setOptions((this.plugin as any).settings.physics); } catch (e) {}
+            try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
+            try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+          } catch (e) {}
+        });
+        panel.appendChild(makeRow(f.label, input));
+      }
+
+      // append to container
+      this.containerEl.style.position = 'relative';
+      this.containerEl.appendChild(panel);
+      this.controlsEl = panel;
+
+      // also try to add a gear to the view header area if available
+      try {
+        const headerActions = this.containerEl.closest('.workspace-leaf')?.querySelector('.view-header .view-actions');
+        if (headerActions) {
+          const hbtn = document.createElement('button');
+          hbtn.className = 'mod-quiet';
+          hbtn.style.marginLeft = '6px';
+          hbtn.textContent = '⚙';
+          hbtn.setAttribute('aria-label', 'Toggle graph controls');
+          hbtn.addEventListener('click', () => this.toggleControlsVisibility());
+          headerActions.appendChild(hbtn);
+        }
+      } catch (e) {}
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  private toggleControlsVisibility(): void {
+    try {
+      this.controlsVisible = !this.controlsVisible;
+      if (!this.controlsEl) return;
+      const panel = this.controlsEl;
+      // When collapsed, keep the title row visible and hide the rest (collapse upward).
+      if (!this.controlsVisible) {
+        for (let i = 1; i < panel.children.length; i++) {
+          const ch = panel.children[i] as HTMLElement;
+          ch.dataset['__savedDisplay'] = ch.style.display || '';
+          ch.style.display = 'none';
+        }
+        panel.style.overflow = 'hidden';
+        // keep a small header height so it looks collapsed
+        panel.style.maxHeight = '36px';
+      } else {
+        for (let i = 1; i < panel.children.length; i++) {
+          const ch = panel.children[i] as HTMLElement;
+          const prev = ch.dataset['__savedDisplay'] || '';
+          ch.style.display = prev || '';
+          delete ch.dataset['__savedDisplay'];
+        }
+        panel.style.overflow = '';
+        panel.style.maxHeight = '';
+      }
+    } catch (e) {}
   }
 
   private animationLoop = (timestamp: number) => {
