@@ -357,6 +357,21 @@ class Graph2DController {
     const showTagsInitial = (this.plugin as any).settings?.showTags !== false;
     this.recreateSimulation(showTagsInitial, { centerX, centerY, centerNodeId });
 
+    // Center camera on initial load same as a right-click origin focus would do.
+    try {
+      if ((this.renderer as any).setCamera) (this.renderer as any).setCamera({ targetX: this.viewCenterX ?? 0, targetY: this.viewCenterY ?? 0, targetZ: 0, distance: this.defaultCameraDistance });
+    } catch (e) {}
+    try { if ((this.renderer as any).resetPanToCenter) (this.renderer as any).resetPanToCenter(); } catch (e) {}
+    // Clear any follow/preview locks and reset hover state so initial view is clean
+    this.followLockedNodeId = null; this.previewLockNodeId = null;
+    try {
+      if ((this.renderer as any).setHoverState) (this.renderer as any).setHoverState(null, new Set(), 0, 0);
+      if ((this.renderer as any).setHoveredNode) (this.renderer as any).setHoveredNode(null);
+      (this.renderer as any).render?.();
+    } catch (e) {}
+    // Suppress the cursor attractor until the user moves the mouse (matches right-click behavior)
+    this.suppressAttractorUntilMouseMove = true;
+
     // read interaction settings (drag momentum / threshold)
     try {
       const interaction = (this.plugin as any).settings?.interaction || {};
@@ -1089,82 +1104,7 @@ class Graph2DController {
 
       // (Background color control removed)
 
-      // Node size range controls (min/max radius)
-      const minSizeWrap = document.createElement('div');
-      minSizeWrap.style.display = 'flex'; minSizeWrap.style.alignItems = 'center'; minSizeWrap.style.gap = '6px';
-      const minRange = document.createElement('input');
-      minRange.type = 'range'; minRange.min = '1'; minRange.max = '60'; minRange.step = '1';
-      const curMin = (this.plugin as any).settings?.glow?.minNodeRadius ?? 4;
-      minRange.value = String(curMin);
-      const minInput = document.createElement('input');
-      minInput.type = 'number';
-      minInput.min = minRange.min; minInput.max = minRange.max; minInput.step = minRange.step;
-      minInput.value = String(minRange.value);
-      minInput.style.width = '56px'; minInput.style.textAlign = 'right';
-      minRange.addEventListener('input', (e) => { minInput.value = (e.target as HTMLInputElement).value; });
-      minRange.addEventListener('change', async (e) => {
-        try {
-          (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
-          const v = Number((e.target as HTMLInputElement).value);
-          (this.plugin as any).settings.glow.minNodeRadius = v;
-          await (this.plugin as any).saveSettings();
-          try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
-          try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
-        } catch (e) {}
-      });
-      minInput.addEventListener('input', (e) => { minRange.value = (e.target as HTMLInputElement).value; });
-      minInput.addEventListener('change', (e) => { minRange.dispatchEvent(new Event('change')); });
-      minSizeWrap.appendChild(minRange); minSizeWrap.appendChild(minInput);
-
-      const maxSizeWrap = document.createElement('div');
-      maxSizeWrap.style.display = 'flex'; maxSizeWrap.style.alignItems = 'center'; maxSizeWrap.style.gap = '6px';
-      const maxRange = document.createElement('input');
-      maxRange.type = 'range'; maxRange.min = '4'; maxRange.max = '120'; maxRange.step = '1';
-      const curMax = (this.plugin as any).settings?.glow?.maxNodeRadius ?? 14;
-      maxRange.value = String(curMax);
-      const maxInput = document.createElement('input');
-      maxInput.type = 'number';
-      maxInput.min = maxRange.min; maxInput.max = maxRange.max; maxInput.step = maxRange.step;
-      maxInput.value = String(maxRange.value);
-      maxInput.style.width = '56px'; maxInput.style.textAlign = 'right';
-      maxRange.addEventListener('input', (e) => { maxInput.value = (e.target as HTMLInputElement).value; });
-      maxRange.addEventListener('change', async (e) => {
-        try {
-          (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
-          const v = Number((e.target as HTMLInputElement).value);
-          (this.plugin as any).settings.glow.maxNodeRadius = v;
-          await (this.plugin as any).saveSettings();
-          try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
-          try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
-        } catch (e) {}
-      });
-      maxInput.addEventListener('input', (e) => { maxRange.value = (e.target as HTMLInputElement).value; });
-      maxInput.addEventListener('change', (e) => { maxRange.dispatchEvent(new Event('change')); });
-      maxSizeWrap.appendChild(maxRange); maxSizeWrap.appendChild(maxInput);
-
-      // row for node size min
-      panel.appendChild(makeRow('Node min radius', minSizeWrap, async () => {
-        try {
-          delete (this.plugin as any).settings.glow.minNodeRadius;
-          await (this.plugin as any).saveSettings();
-          minRange.value = String(4);
-          // update displayed numeric input
-          try { if (minSizeWrap && minSizeWrap.querySelector('input[type=number]')) { (minSizeWrap.querySelector('input[type=number]') as HTMLInputElement).value = String(4); } } catch (e) {}
-          if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow);
-          if (this.renderer && (this.renderer as any).render) (this.renderer as any).render();
-        } catch (e) {}
-      }));
-      // row for node size max
-      panel.appendChild(makeRow('Node max radius', maxSizeWrap, async () => {
-        try {
-          delete (this.plugin as any).settings.glow.maxNodeRadius;
-          await (this.plugin as any).saveSettings();
-          maxRange.value = String(14);
-          try { if (maxSizeWrap && maxSizeWrap.querySelector('input[type=number]')) { (maxSizeWrap.querySelector('input[type=number]') as HTMLInputElement).value = String(14); } } catch (e) {}
-          if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow);
-          if (this.renderer && (this.renderer as any).render) (this.renderer as any).render();
-        } catch (e) {}
-      }));
+      
 
       // Count duplicate links toggle
       const countDup = document.createElement('input');
