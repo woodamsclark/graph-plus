@@ -13,6 +13,10 @@ export interface GlowSettings {
   distanceInnerRadiusMultiplier?: number;
   distanceOuterRadiusMultiplier?: number;
   distanceCurveSteepness?: number;
+  focusSmoothingRate?: number;
+  edgeDimMin?: number;
+  edgeDimMax?: number;
+  nodeMinBodyAlpha?: number;
   nodeColor?: string;
   labelColor?: string;
   edgeColor?: string;
@@ -63,6 +67,15 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let hoverHighlightSet: Set<string> = new Set();
   let mouseX = 0;
   let mouseY = 0;
+  // per-node smooth focus factor (0 = dimmed, 1 = focused)
+  const nodeFocusMap: Map<string, number> = new Map();
+  let lastRenderTime = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+  // Focus/dimming controls (configurable via glow settings)
+  let focusSmoothingRate = glowOptions?.focusSmoothingRate ?? 8;
+  let edgeDimMin = glowOptions?.edgeDimMin ?? 0.08;
+  let edgeDimMax = glowOptions?.edgeDimMax ?? 0.9;
+  let nodeMinBodyAlpha = glowOptions?.nodeMinBodyAlpha ?? 0.3;
+  
 
   // theme-derived colors (updated each render)
   let themeNodeColor = '#66ccff';
@@ -118,6 +131,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     if (graph && graph.nodes) {
       for (const n of graph.nodes) {
         nodeById.set(n.id, n);
+        // initialize focus map to fully focused by default
+        if (!nodeFocusMap.has(n.id)) nodeFocusMap.set(n.id, 1);
       }
     }
     // compute min/max totalDegree for normalization
@@ -231,6 +246,13 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
   function render() {
     if (!ctx) return;
+    // compute time delta for smooth transitions
+    const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+    let dt = (now - lastRenderTime) / 1000;
+    if (!isFinite(dt) || dt <= 0) dt = 0.016;
+    if (dt > 0.1) dt = 0.1;
+    lastRenderTime = now;
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (!graph) return;
@@ -256,23 +278,55 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     ctx.translate(offsetX, offsetY);
     ctx.scale(scale, scale);
 
-    // Draw edges first so nodes appear on top
+    // Helper: determine whether a node is within the focused set (instant target)
+    function isNodeTargetFocused(nodeId: string) {
+      if (!hoveredNodeId) return true; // no hover -> everything focused
+      if (nodeId === hoveredNodeId) return true;
+      if (hoverHighlightSet && hoverHighlightSet.has(nodeId)) return true;
+      return false;
+    }
+
+    // Smoothly update per-node focus factor towards target (exponential smoothing)
+    function updateFocusFactors() {
+      if (!graph || !graph.nodes) return;
+      for (const n of graph.nodes) {
+        const id = n.id;
+        const target = isNodeTargetFocused(id) ? 1 : 0;
+        const cur = nodeFocusMap.get(id) ?? target;
+        // exponential smoothing: alpha = 1 - exp(-rate * dt)
+        const alpha = 1 - Math.exp(-focusSmoothingRate * dt);
+        const next = cur + (target - cur) * alpha;
+        nodeFocusMap.set(id, next);
+      }
+    }
+    updateFocusFactors();
+
+    // Draw edges first so nodes appear on top. Draw per-edge so we can dim edges
+    // that are outside the focus region (at least one endpoint not focused).
     if ((graph as any).edges && (graph as any).edges.length > 0) {
-      ctx.save();
-      ctx.beginPath();
+      const edgeRgb = colorToRgb(themeEdgeColor);
       for (const edge of (graph as any).edges) {
         const src = nodeById.get(edge.sourceId);
         const tgt = nodeById.get(edge.targetId);
         if (!src || !tgt) continue;
+
+        const srcF = nodeFocusMap.get(edge.sourceId) ?? 1;
+        const tgtF = nodeFocusMap.get(edge.targetId) ?? 1;
+        const edgeFocus = (srcF + tgtF) * 0.5;
+
+        ctx.save();
+        ctx.beginPath();
         ctx.moveTo(src.x, src.y);
         ctx.lineTo(tgt.x, tgt.y);
+        // compute alpha: when no hover, use default; otherwise interpolate between dim and strong
+        let alpha = 0.65;
+        if (!hoveredNodeId) alpha = 0.65;
+        else alpha = 0.08 + (0.9 - 0.08) * edgeFocus; // interpolate
+        ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${alpha})`;
+        ctx.lineWidth = Math.max(0.6, (edgeFocus > 0.5 ? 1 : 0.8) / Math.max(0.0001, scale));
+        ctx.stroke();
+        ctx.restore();
       }
-      const edgeRgb = colorToRgb(themeEdgeColor);
-      ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},0.65)`;
-      // keep stroke visually ~1px regardless of zoom
-      ctx.lineWidth = Math.max(1, 1 / Math.max(0.0001, scale));
-      ctx.stroke();
-      ctx.restore();
     }
 
     // Draw node glows (radial gradient), node bodies, and labels
@@ -299,39 +353,60 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
       const centerAlpha = getCenterAlpha(node);
       const glowRadius = radius * glowMultiplier;
 
-      // radial gradient glow
-      const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
-      const accentRgb = colorToRgb(themeNodeColor);
-      gradient.addColorStop(0.0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${centerAlpha})`);
-      gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${centerAlpha * 0.5})`);
-      gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${centerAlpha * 0.15})`);
-      gradient.addColorStop(1.0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0)`);
+      const focus = nodeFocusMap.get(node.id) ?? 1;
+      const focused = focus > 0.01;
 
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
-      ctx.fillStyle = gradient;
-      ctx.fill();
-      ctx.restore();
+      if (focused) {
+        // radial gradient glow: interpolate alpha between dim and centerAlpha
+        const accentRgb = colorToRgb(themeNodeColor);
+        const dimCenter = clamp01(getBaseCenterAlpha(node) * dimFactor);
+        const fullCenter = centerAlpha;
+        const blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
+        const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
+        gradient.addColorStop(0.0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter})`);
+        gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.5})`);
+        gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.15})`);
+        gradient.addColorStop(1.0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0)`);
 
-      // node body
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-      ctx.fillStyle = themeNodeColor;
-      ctx.fill();
-      ctx.restore();
-
-      // label below node (zoom-aware)
-      const displayedFont = baseFontSize * scale; // px on screen
-      if (displayedFont >= hideBelow) {
-        const clampedDisplayed = Math.max(minFontSize, Math.min(maxFontSize, displayedFont));
-        const fontToSet = Math.max(1, clampedDisplayed / Math.max(0.0001, scale));
         ctx.save();
-        ctx.font = `${fontToSet}px sans-serif`;
-        ctx.fillStyle = labelCss || '#ffffff';
-        const verticalPadding = 4; // world units; will be scaled by transform
-        ctx.fillText(node.label, node.x, node.y + radius + verticalPadding);
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
+        ctx.fillStyle = gradient;
+        ctx.fill();
+        ctx.restore();
+
+        // node body (focused -> blend alpha)
+        const bodyAlpha = nodeMinBodyAlpha + (1 - nodeMinBodyAlpha) * focus;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+        const accent = colorToRgb(themeNodeColor);
+        ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${bodyAlpha})`;
+        ctx.fill();
+        ctx.restore();
+
+        // label below node (zoom-aware) - fade label with focus
+        const displayedFont = baseFontSize * scale; // px on screen
+        if (displayedFont >= hideBelow) {
+          const clampedDisplayed = Math.max(minFontSize, Math.min(maxFontSize, displayedFont));
+          const fontToSet = Math.max(1, clampedDisplayed / Math.max(0.0001, scale));
+          ctx.save();
+          ctx.font = `${fontToSet}px sans-serif`;
+          ctx.globalAlpha = focus; // fade label in/out
+          ctx.fillStyle = labelCss || '#ffffff';
+          const verticalPadding = 4; // world units; will be scaled by transform
+          ctx.fillText(node.label, node.x, node.y + radius + verticalPadding);
+          ctx.restore();
+        }
+      } else {
+        // dimmed node: draw a faint fill but allow smooth focus factor (should be near 0)
+        const faintRgb = colorToRgb(themeLabelColor || '#999');
+        const faintAlpha = 0.15 * (1 - focus) + 0.1 * focus; // slightly adjust
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, radius * 0.9, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${faintAlpha})`;
+        ctx.fill();
         ctx.restore();
       }
     }
@@ -365,6 +440,10 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     distanceInnerMultiplier = glow.distanceInnerRadiusMultiplier ?? distanceInnerMultiplier;
     distanceOuterMultiplier = glow.distanceOuterRadiusMultiplier ?? distanceOuterMultiplier;
     distanceCurveSteepness = glow.distanceCurveSteepness ?? distanceCurveSteepness;
+    focusSmoothingRate = glow.focusSmoothingRate ?? focusSmoothingRate;
+    edgeDimMin = glow.edgeDimMin ?? edgeDimMin;
+    edgeDimMax = glow.edgeDimMax ?? edgeDimMax;
+    nodeMinBodyAlpha = glow.nodeMinBodyAlpha ?? nodeMinBodyAlpha;
   }
 
   function setHoverState(hoveredId: string | null, highlightedIds: Set<string>, mx: number, my: number) {

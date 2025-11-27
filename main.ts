@@ -14,6 +14,11 @@ export interface GlowSettings {
   distanceInnerRadiusMultiplier?: number;
   distanceOuterRadiusMultiplier?: number;
   distanceCurveSteepness?: number;
+  // focus/dimming controls
+  focusSmoothingRate?: number;
+  edgeDimMin?: number;
+  edgeDimMax?: number;
+  nodeMinBodyAlpha?: number;
   // optional color overrides (CSS color strings). If unset, theme vars are used.
   nodeColor?: string;
   labelColor?: string;
@@ -49,13 +54,18 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     neighborBoostFactor: 1.2,
     dimFactor: 0.3,
     hoverHighlightDepth: 1,
-      distanceInnerRadiusMultiplier: 1.0,
-      distanceOuterRadiusMultiplier: 2.5,
-      distanceCurveSteepness: 2.0,
-      // color overrides left undefined by default to follow theme
-      nodeColor: undefined,
-      labelColor: undefined,
-      edgeColor: undefined,
+        distanceInnerRadiusMultiplier: 1.0,
+        distanceOuterRadiusMultiplier: 2.5,
+        distanceCurveSteepness: 2.0,
+        // focus/dimming defaults
+        focusSmoothingRate: 8,
+        edgeDimMin: 0.08,
+        edgeDimMax: 0.9,
+        nodeMinBodyAlpha: 0.3,
+        // color overrides left undefined by default to follow theme
+        nodeColor: undefined,
+        labelColor: undefined,
+        edgeColor: undefined,
   },
   physics: {
     // calmer, Obsidian-like defaults
@@ -311,6 +321,59 @@ class GreaterGraphSettingTab extends PluginSettingTab {
           const num = Number(value);
           if (!isNaN(num) && num > 0) {
             glow.distanceCurveSteepness = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    // Focus / dimming controls
+    new Setting(containerEl)
+      .setName('Focus smoothing rate')
+      .setDesc('How quickly nodes fade in/out when hover focus changes (higher = faster, per second).')
+      .addText((text) =>
+        text.setValue(String(glow.focusSmoothingRate ?? 8)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && num > 0) {
+            glow.focusSmoothingRate = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Edge dim minimum alpha')
+      .setDesc('Minimum alpha used for dimmed edges (0-1).')
+      .addText((text) =>
+        text.setValue(String(glow.edgeDimMin ?? 0.08)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && num >= 0 && num <= 1) {
+            glow.edgeDimMin = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Edge dim maximum alpha')
+      .setDesc('Maximum alpha used for focused edges (0-1).')
+      .addText((text) =>
+        text.setValue(String(glow.edgeDimMax ?? 0.9)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && num >= 0 && num <= 1) {
+            glow.edgeDimMax = num;
+            await this.plugin.saveSettings();
+          }
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Node minimum body alpha')
+      .setDesc('Minimum fill alpha for dimmed nodes (0-1).')
+      .addText((text) =>
+        text.setValue(String(glow.nodeMinBodyAlpha ?? 0.3)).onChange(async (value) => {
+          const num = Number(value);
+          if (!isNaN(num) && num >= 0 && num <= 1) {
+            glow.nodeMinBodyAlpha = num;
             await this.plugin.saveSettings();
           }
         })

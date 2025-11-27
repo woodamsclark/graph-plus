@@ -139,6 +139,12 @@ function createRenderer2D(options) {
   let hoverHighlightSet = /* @__PURE__ */ new Set();
   let mouseX = 0;
   let mouseY = 0;
+  const nodeFocusMap = /* @__PURE__ */ new Map();
+  let lastRenderTime = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+  let focusSmoothingRate = glowOptions?.focusSmoothingRate ?? 8;
+  let edgeDimMin = glowOptions?.edgeDimMin ?? 0.08;
+  let edgeDimMax = glowOptions?.edgeDimMax ?? 0.9;
+  let nodeMinBodyAlpha = glowOptions?.nodeMinBodyAlpha ?? 0.3;
   let themeNodeColor = "#66ccff";
   let themeLabelColor = "#222";
   let themeEdgeColor = "#888888";
@@ -193,6 +199,8 @@ function createRenderer2D(options) {
     if (graph && graph.nodes) {
       for (const n of graph.nodes) {
         nodeById.set(n.id, n);
+        if (!nodeFocusMap.has(n.id))
+          nodeFocusMap.set(n.id, 1);
       }
     }
     minDegree = Infinity;
@@ -291,6 +299,13 @@ function createRenderer2D(options) {
   function render() {
     if (!ctx)
       return;
+    const now = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+    let dt = (now - lastRenderTime) / 1e3;
+    if (!isFinite(dt) || dt <= 0)
+      dt = 0.016;
+    if (dt > 0.1)
+      dt = 0.1;
+    lastRenderTime = now;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!graph)
       return;
@@ -317,22 +332,52 @@ function createRenderer2D(options) {
     ctx.save();
     ctx.translate(offsetX, offsetY);
     ctx.scale(scale, scale);
+    function isNodeTargetFocused(nodeId) {
+      if (!hoveredNodeId)
+        return true;
+      if (nodeId === hoveredNodeId)
+        return true;
+      if (hoverHighlightSet && hoverHighlightSet.has(nodeId))
+        return true;
+      return false;
+    }
+    function updateFocusFactors() {
+      if (!graph || !graph.nodes)
+        return;
+      for (const n of graph.nodes) {
+        const id = n.id;
+        const target = isNodeTargetFocused(id) ? 1 : 0;
+        const cur = nodeFocusMap.get(id) ?? target;
+        const alpha = 1 - Math.exp(-focusSmoothingRate * dt);
+        const next = cur + (target - cur) * alpha;
+        nodeFocusMap.set(id, next);
+      }
+    }
+    updateFocusFactors();
     if (graph.edges && graph.edges.length > 0) {
-      ctx.save();
-      ctx.beginPath();
+      const edgeRgb = colorToRgb(themeEdgeColor);
       for (const edge of graph.edges) {
         const src = nodeById.get(edge.sourceId);
         const tgt = nodeById.get(edge.targetId);
         if (!src || !tgt)
           continue;
+        const srcF = nodeFocusMap.get(edge.sourceId) ?? 1;
+        const tgtF = nodeFocusMap.get(edge.targetId) ?? 1;
+        const edgeFocus = (srcF + tgtF) * 0.5;
+        ctx.save();
+        ctx.beginPath();
         ctx.moveTo(src.x, src.y);
         ctx.lineTo(tgt.x, tgt.y);
+        let alpha = 0.65;
+        if (!hoveredNodeId)
+          alpha = 0.65;
+        else
+          alpha = 0.08 + (0.9 - 0.08) * edgeFocus;
+        ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${alpha})`;
+        ctx.lineWidth = Math.max(0.6, (edgeFocus > 0.5 ? 1 : 0.8) / Math.max(1e-4, scale));
+        ctx.stroke();
+        ctx.restore();
       }
-      const edgeRgb = colorToRgb(themeEdgeColor);
-      ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},0.65)`;
-      ctx.lineWidth = Math.max(1, 1 / Math.max(1e-4, scale));
-      ctx.stroke();
-      ctx.restore();
     }
     const baseFontSize = 10;
     const minFontSize = 6;
@@ -352,33 +397,52 @@ function createRenderer2D(options) {
       const radius = getNodeRadius(node);
       const centerAlpha = getCenterAlpha(node);
       const glowRadius = radius * glowMultiplier;
-      const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
-      const accentRgb = colorToRgb(themeNodeColor);
-      gradient.addColorStop(0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${centerAlpha})`);
-      gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${centerAlpha * 0.5})`);
-      gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${centerAlpha * 0.15})`);
-      gradient.addColorStop(1, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0)`);
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
-      ctx.fillStyle = gradient;
-      ctx.fill();
-      ctx.restore();
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-      ctx.fillStyle = themeNodeColor;
-      ctx.fill();
-      ctx.restore();
-      const displayedFont = baseFontSize * scale;
-      if (displayedFont >= hideBelow) {
-        const clampedDisplayed = Math.max(minFontSize, Math.min(maxFontSize, displayedFont));
-        const fontToSet = Math.max(1, clampedDisplayed / Math.max(1e-4, scale));
+      const focus = nodeFocusMap.get(node.id) ?? 1;
+      const focused = focus > 0.01;
+      if (focused) {
+        const accentRgb = colorToRgb(themeNodeColor);
+        const dimCenter = clamp01(getBaseCenterAlpha(node) * dimFactor);
+        const fullCenter = centerAlpha;
+        const blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
+        const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
+        gradient.addColorStop(0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter})`);
+        gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.5})`);
+        gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.15})`);
+        gradient.addColorStop(1, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0)`);
         ctx.save();
-        ctx.font = `${fontToSet}px sans-serif`;
-        ctx.fillStyle = labelCss || "#ffffff";
-        const verticalPadding = 4;
-        ctx.fillText(node.label, node.x, node.y + radius + verticalPadding);
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
+        ctx.fillStyle = gradient;
+        ctx.fill();
+        ctx.restore();
+        const bodyAlpha = nodeMinBodyAlpha + (1 - nodeMinBodyAlpha) * focus;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+        const accent = colorToRgb(themeNodeColor);
+        ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${bodyAlpha})`;
+        ctx.fill();
+        ctx.restore();
+        const displayedFont = baseFontSize * scale;
+        if (displayedFont >= hideBelow) {
+          const clampedDisplayed = Math.max(minFontSize, Math.min(maxFontSize, displayedFont));
+          const fontToSet = Math.max(1, clampedDisplayed / Math.max(1e-4, scale));
+          ctx.save();
+          ctx.font = `${fontToSet}px sans-serif`;
+          ctx.globalAlpha = focus;
+          ctx.fillStyle = labelCss || "#ffffff";
+          const verticalPadding = 4;
+          ctx.fillText(node.label, node.x, node.y + radius + verticalPadding);
+          ctx.restore();
+        }
+      } else {
+        const faintRgb = colorToRgb(themeLabelColor || "#999");
+        const faintAlpha = 0.15 * (1 - focus) + 0.1 * focus;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, radius * 0.9, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${faintAlpha})`;
+        ctx.fill();
         ctx.restore();
       }
     }
@@ -408,6 +472,10 @@ function createRenderer2D(options) {
     distanceInnerMultiplier = glow.distanceInnerRadiusMultiplier ?? distanceInnerMultiplier;
     distanceOuterMultiplier = glow.distanceOuterRadiusMultiplier ?? distanceOuterMultiplier;
     distanceCurveSteepness = glow.distanceCurveSteepness ?? distanceCurveSteepness;
+    focusSmoothingRate = glow.focusSmoothingRate ?? focusSmoothingRate;
+    edgeDimMin = glow.edgeDimMin ?? edgeDimMin;
+    edgeDimMax = glow.edgeDimMax ?? edgeDimMax;
+    nodeMinBodyAlpha = glow.nodeMinBodyAlpha ?? nodeMinBodyAlpha;
   }
   function setHoverState(hoveredId, highlightedIds, mx, my) {
     hoveredNodeId = hoveredId;
@@ -1302,6 +1370,11 @@ var DEFAULT_SETTINGS = {
     distanceInnerRadiusMultiplier: 1,
     distanceOuterRadiusMultiplier: 2.5,
     distanceCurveSteepness: 2,
+    // focus/dimming defaults
+    focusSmoothingRate: 8,
+    edgeDimMin: 0.08,
+    edgeDimMax: 0.9,
+    nodeMinBodyAlpha: 0.3,
     // color overrides left undefined by default to follow theme
     nodeColor: void 0,
     labelColor: void 0,
@@ -1492,6 +1565,42 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         const num = Number(value);
         if (!isNaN(num) && num > 0) {
           glow.distanceCurveSteepness = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Focus smoothing rate").setDesc("How quickly nodes fade in/out when hover focus changes (higher = faster, per second).").addText(
+      (text) => text.setValue(String(glow.focusSmoothingRate ?? 8)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num > 0) {
+          glow.focusSmoothingRate = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Edge dim minimum alpha").setDesc("Minimum alpha used for dimmed edges (0-1).").addText(
+      (text) => text.setValue(String(glow.edgeDimMin ?? 0.08)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 0 && num <= 1) {
+          glow.edgeDimMin = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Edge dim maximum alpha").setDesc("Maximum alpha used for focused edges (0-1).").addText(
+      (text) => text.setValue(String(glow.edgeDimMax ?? 0.9)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 0 && num <= 1) {
+          glow.edgeDimMax = num;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("Node minimum body alpha").setDesc("Minimum fill alpha for dimmed nodes (0-1).").addText(
+      (text) => text.setValue(String(glow.nodeMinBodyAlpha ?? 0.3)).onChange(async (value) => {
+        const num = Number(value);
+        if (!isNaN(num) && num >= 0 && num <= 1) {
+          glow.nodeMinBodyAlpha = num;
           await this.plugin.saveSettings();
         }
       })
