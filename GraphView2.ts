@@ -536,8 +536,9 @@ class Graph2DController {
       if (!this.canvas || !this.renderer) return;
       ev.preventDefault();
       try {
-        // any user wheel action cancels camera following
-        this.followLockedNodeId = null; this.previewLockNodeId = null;
+        // any user wheel action cancels camera following but should NOT cancel
+        // the preview hover lock so highlighting remains while zooming.
+        this.followLockedNodeId = null;
         const cam = (this.renderer as any).getCamera();
         const zoomSpeed = 0.0015;
         const factor = Math.exp(ev.deltaY * zoomSpeed);

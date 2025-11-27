@@ -1828,7 +1828,6 @@ var Graph2DController = class {
       ev.preventDefault();
       try {
         this.followLockedNodeId = null;
-        this.previewLockNodeId = null;
         const cam = this.renderer.getCamera();
         const zoomSpeed = 15e-4;
         const factor = Math.exp(ev.deltaY * zoomSpeed);
