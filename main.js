@@ -48,9 +48,10 @@ async function buildGraph(app, options) {
   const nodeByPath = /* @__PURE__ */ new Map();
   for (const n of nodes)
     nodeByPath.set(n.id, n);
+  const resolved = app.metadataCache.resolvedLinks || {};
   const edges = [];
   const edgeSet = /* @__PURE__ */ new Set();
-  const resolved = app.metadataCache.resolvedLinks || {};
+  const countDuplicates = Boolean(options?.countDuplicates);
   for (const sourcePath of Object.keys(resolved)) {
     const targets = resolved[sourcePath] || {};
     for (const targetPath of Object.keys(targets)) {
@@ -58,29 +59,36 @@ async function buildGraph(app, options) {
         continue;
       const key = `${sourcePath}->${targetPath}`;
       if (!edgeSet.has(key)) {
-        edges.push({ sourceId: sourcePath, targetId: targetPath });
+        const rawCount = Number(targets[targetPath] || 1) || 1;
+        const linkCount = countDuplicates ? rawCount : 1;
+        edges.push({ id: key, sourceId: sourcePath, targetId: targetPath, linkCount, hasReverse: false });
         edgeSet.add(key);
       }
     }
   }
-  const countDuplicates = Boolean(options?.countDuplicates);
   for (const e of edges) {
     const src = nodeByPath.get(e.sourceId);
     const tgt = nodeByPath.get(e.targetId);
     if (!src || !tgt)
       continue;
-    if (countDuplicates) {
-      const resolved2 = app.metadataCache.resolvedLinks || {};
-      const c = resolved2[e.sourceId] && resolved2[e.sourceId][e.targetId] || 1;
-      src.outDegree = (src.outDegree || 0) + c;
-      tgt.inDegree = (tgt.inDegree || 0) + c;
-    } else {
-      src.outDegree = (src.outDegree || 0) + 1;
-      tgt.inDegree = (tgt.inDegree || 0) + 1;
-    }
+    const c = Number(e.linkCount || 1) || 1;
+    src.outDegree = (src.outDegree || 0) + c;
+    tgt.inDegree = (tgt.inDegree || 0) + c;
   }
   for (const n of nodes) {
     n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
+  }
+  const edgeMap = /* @__PURE__ */ new Map();
+  for (const e of edges) {
+    edgeMap.set(`${e.sourceId}->${e.targetId}`, e);
+  }
+  for (const e of edges) {
+    const reverseKey = `${e.targetId}->${e.sourceId}`;
+    if (edgeMap.has(reverseKey)) {
+      e.hasReverse = true;
+      const other = edgeMap.get(reverseKey);
+      other.hasReverse = true;
+    }
   }
   return { nodes, edges };
 }
@@ -131,6 +139,8 @@ function createRenderer2D(options) {
   let nodeById = /* @__PURE__ */ new Map();
   let minDegree = 0;
   let maxDegree = 0;
+  let minEdgeCount = 1;
+  let maxEdgeCount = 1;
   let minRadius = glowOptions?.minNodeRadius ?? 4;
   let maxRadius = glowOptions?.maxNodeRadius ?? 14;
   const DEFAULT_GLOW_MULTIPLIER = 2;
@@ -219,11 +229,22 @@ function createRenderer2D(options) {
     maxDegree = -Infinity;
     if (graph && graph.nodes) {
       for (const n of graph.nodes) {
-        const d = n.totalDegree || 0;
+        const d = n.inDegree || 0;
         if (d < minDegree)
           minDegree = d;
         if (d > maxDegree)
           maxDegree = d;
+      }
+    }
+    minEdgeCount = Infinity;
+    maxEdgeCount = -Infinity;
+    if (graph && graph.edges) {
+      for (const e of graph.edges) {
+        const c = Number(e.linkCount || 1) || 1;
+        if (c < minEdgeCount)
+          minEdgeCount = c;
+        if (c > maxEdgeCount)
+          maxEdgeCount = c;
       }
     }
     if (!isFinite(minDegree))
@@ -239,7 +260,7 @@ function createRenderer2D(options) {
     render();
   }
   function getDegreeNormalized(node) {
-    const d = node.totalDegree || 0;
+    const d = node.inDegree || 0;
     if (maxDegree <= minDegree)
       return 0.5;
     return (d - minDegree) / (maxDegree - minDegree);
@@ -390,18 +411,49 @@ function createRenderer2D(options) {
         const srcF = nodeFocusMap.get(edge.sourceId) ?? 1;
         const tgtF = nodeFocusMap.get(edge.targetId) ?? 1;
         const edgeFocus = (srcF + tgtF) * 0.5;
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(src.x, src.y);
-        ctx.lineTo(tgt.x, tgt.y);
+        const c = Number(edge.linkCount || 1) || 1;
+        let t = 0.5;
+        if (maxEdgeCount > minEdgeCount)
+          t = (c - minEdgeCount) / (maxEdgeCount - minEdgeCount);
+        const minScreenW = 0.8;
+        const maxScreenW = 6;
+        const screenW = minScreenW + t * (maxScreenW - minScreenW);
+        const worldLineWidth = Math.max(0.4, screenW / Math.max(1e-4, scale));
         let alpha = 0.65;
         if (!hoveredNodeId)
           alpha = 0.65;
         else
           alpha = 0.08 + (0.9 - 0.08) * edgeFocus;
+        ctx.save();
         ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${alpha})`;
-        ctx.lineWidth = Math.max(0.6, (edgeFocus > 0.5 ? 1 : 0.8) / Math.max(1e-4, scale));
-        ctx.stroke();
+        const isMutual = !!edge.hasReverse;
+        if (isMutual) {
+          const dx = tgt.x - src.x;
+          const dy = tgt.y - src.y;
+          const len = Math.sqrt(dx * dx + dy * dy) || 1;
+          const ux = dx / len;
+          const uy = dy / len;
+          const perpX = -uy;
+          const perpY = ux;
+          const offsetPx = Math.max(2, screenW * 0.6);
+          const offsetWorld = offsetPx / Math.max(1e-4, scale);
+          ctx.beginPath();
+          ctx.moveTo(src.x + perpX * offsetWorld, src.y + perpY * offsetWorld);
+          ctx.lineTo(tgt.x + perpX * offsetWorld, tgt.y + perpY * offsetWorld);
+          ctx.lineWidth = worldLineWidth;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(src.x - perpX * offsetWorld, src.y - perpY * offsetWorld);
+          ctx.lineTo(tgt.x - perpX * offsetWorld, tgt.y - perpY * offsetWorld);
+          ctx.lineWidth = worldLineWidth;
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(src.x, src.y);
+          ctx.lineTo(tgt.x, tgt.y);
+          ctx.lineWidth = worldLineWidth;
+          ctx.stroke();
+        }
         ctx.restore();
       }
     }

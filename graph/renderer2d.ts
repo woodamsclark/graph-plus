@@ -52,6 +52,9 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   // degree-based styling params
   let minDegree = 0;
   let maxDegree = 0;
+  // edge count stats
+  let minEdgeCount = 1;
+  let maxEdgeCount = 1;
 
   let minRadius = glowOptions?.minNodeRadius ?? 4;
   let maxRadius = glowOptions?.maxNodeRadius ?? 14;
@@ -143,14 +146,24 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         if (!nodeFocusMap.has(n.id)) nodeFocusMap.set(n.id, 1);
       }
     }
-    // compute min/max totalDegree for normalization
+    // compute min/max inDegree for normalization (node radius driven by in-degree)
     minDegree = Infinity;
     maxDegree = -Infinity;
     if (graph && graph.nodes) {
       for (const n of graph.nodes) {
-        const d = (n as any).totalDegree || 0;
+        const d = (n as any).inDegree || 0;
         if (d < minDegree) minDegree = d;
         if (d > maxDegree) maxDegree = d;
+      }
+    }
+    // compute edge count stats for thickness mapping
+    minEdgeCount = Infinity;
+    maxEdgeCount = -Infinity;
+    if (graph && (graph as any).edges) {
+      for (const e of (graph as any).edges) {
+        const c = Number(e.linkCount || 1) || 1;
+        if (c < minEdgeCount) minEdgeCount = c;
+        if (c > maxEdgeCount) maxEdgeCount = c;
       }
     }
     if (!isFinite(minDegree)) minDegree = 0;
@@ -171,7 +184,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   }
 
   function getDegreeNormalized(node: any) {
-    const d = (node.totalDegree || 0);
+    const d = (node.inDegree || 0);
     if (maxDegree <= minDegree) return 0.5;
     return (d - minDegree) / (maxDegree - minDegree);
   }
@@ -340,17 +353,58 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         const tgtF = nodeFocusMap.get(edge.targetId) ?? 1;
         const edgeFocus = (srcF + tgtF) * 0.5;
 
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(src.x, src.y);
-        ctx.lineTo(tgt.x, tgt.y);
+        // determine thickness based on linkCount (map to screen pixels, then scale to world units)
+        const c = Number(edge.linkCount || 1) || 1;
+        let t = 0.5;
+        if (maxEdgeCount > minEdgeCount) t = (c - minEdgeCount) / (maxEdgeCount - minEdgeCount);
+        // map t to desired screen px width
+        const minScreenW = 0.8;
+        const maxScreenW = 6.0;
+        const screenW = minScreenW + t * (maxScreenW - minScreenW);
+        const worldLineWidth = Math.max(0.4, screenW / Math.max(0.0001, scale));
+
         // compute alpha: when no hover, use default; otherwise interpolate between dim and strong
         let alpha = 0.65;
         if (!hoveredNodeId) alpha = 0.65;
         else alpha = 0.08 + (0.9 - 0.08) * edgeFocus; // interpolate
+
+        ctx.save();
         ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${alpha})`;
-        ctx.lineWidth = Math.max(0.6, (edgeFocus > 0.5 ? 1 : 0.8) / Math.max(0.0001, scale));
-        ctx.stroke();
+        // mutual edges: draw two parallel lines offset perpendicular to the edge
+        const isMutual = !!edge.hasReverse;
+        if (isMutual) {
+          const dx = tgt.x - src.x;
+          const dy = tgt.y - src.y;
+          const len = Math.sqrt(dx * dx + dy * dy) || 1;
+          const ux = dx / len;
+          const uy = dy / len;
+          const perpX = -uy;
+          const perpY = ux;
+          // offset in world units (aim for ~screenW/2 offset)
+          const offsetPx = Math.max(2, screenW * 0.6);
+          const offsetWorld = offsetPx / Math.max(0.0001, scale);
+
+          // first line (offset +)
+          ctx.beginPath();
+          ctx.moveTo(src.x + perpX * offsetWorld, src.y + perpY * offsetWorld);
+          ctx.lineTo(tgt.x + perpX * offsetWorld, tgt.y + perpY * offsetWorld);
+          ctx.lineWidth = worldLineWidth;
+          ctx.stroke();
+
+          // second line (offset -)
+          ctx.beginPath();
+          ctx.moveTo(src.x - perpX * offsetWorld, src.y - perpY * offsetWorld);
+          ctx.lineTo(tgt.x - perpX * offsetWorld, tgt.y - perpY * offsetWorld);
+          ctx.lineWidth = worldLineWidth;
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(src.x, src.y);
+          ctx.lineTo(tgt.x, tgt.y);
+          ctx.lineWidth = worldLineWidth;
+          ctx.stroke();
+        }
+
         ctx.restore();
       }
     }

@@ -16,8 +16,13 @@ export interface GraphNode {
 }
 
 export interface GraphEdge {
+  id?: string;
   sourceId: string;
   targetId: string;
+  // number of links from source -> target (resolvedLinks count)
+  linkCount?: number;
+  // whether the reverse edge (target->source) exists
+  hasReverse?: boolean;
 }
 
 export interface GraphData {
@@ -47,12 +52,15 @@ export async function buildGraph(app: App, options?: { countDuplicates?: boolean
   const nodeByPath = new Map<string, GraphNode>();
   for (const n of nodes) nodeByPath.set(n.id, n);
 
-  const edges: GraphEdge[] = [];
-  const edgeSet = new Set<string>();
   // Prefer using Obsidian's resolvedLinks map so our edges match the
   // core graph connections exactly. `resolvedLinks` maps sourcePath -> { destPath: count }
   // and already resolves linkpaths; iterate that structure instead of walking per-file caches.
   const resolved: any = (app.metadataCache as any).resolvedLinks || {};
+
+  const edges: GraphEdge[] = [];
+  const edgeSet = new Set<string>();
+  const countDuplicates = Boolean(options?.countDuplicates);
+
   for (const sourcePath of Object.keys(resolved)) {
     const targets = resolved[sourcePath] || {};
     for (const targetPath of Object.keys(targets)) {
@@ -60,31 +68,40 @@ export async function buildGraph(app: App, options?: { countDuplicates?: boolean
       if (!nodeByPath.has(sourcePath) || !nodeByPath.has(targetPath)) continue;
       const key = `${sourcePath}->${targetPath}`;
       if (!edgeSet.has(key)) {
-        edges.push({ sourceId: sourcePath, targetId: targetPath });
+        const rawCount = Number(targets[targetPath] || 1) || 1;
+        const linkCount = countDuplicates ? rawCount : 1;
+        edges.push({ id: key, sourceId: sourcePath, targetId: targetPath, linkCount, hasReverse: false });
         edgeSet.add(key);
       }
     }
   }
-  // compute in/out/total degrees directly from edges
-  const countDuplicates = Boolean(options?.countDuplicates);
+
+  // compute in/out/total degrees directly from edges using linkCount
   for (const e of edges) {
     const src = nodeByPath.get(e.sourceId);
     const tgt = nodeByPath.get(e.targetId);
     if (!src || !tgt) continue;
-    if (countDuplicates) {
-      // Use resolvedLinks counts where available to weight degrees
-      const resolved: any = (app.metadataCache as any).resolvedLinks || {};
-      const c = (resolved[e.sourceId] && resolved[e.sourceId][e.targetId]) || 1;
-      src.outDegree = (src.outDegree || 0) + c;
-      tgt.inDegree = (tgt.inDegree || 0) + c;
-    } else {
-      src.outDegree = (src.outDegree || 0) + 1;
-      tgt.inDegree = (tgt.inDegree || 0) + 1;
-    }
+    const c = Number(e.linkCount || 1) || 1;
+    src.outDegree = (src.outDegree || 0) + c;
+    tgt.inDegree = (tgt.inDegree || 0) + c;
   }
 
   for (const n of nodes) {
     n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
+  }
+
+  // detect mutual edges (reverse links) and mark hasReverse on both
+  const edgeMap = new Map<string, GraphEdge>();
+  for (const e of edges) {
+    edgeMap.set(`${e.sourceId}->${e.targetId}`, e);
+  }
+  for (const e of edges) {
+    const reverseKey = `${e.targetId}->${e.sourceId}`;
+    if (edgeMap.has(reverseKey)) {
+      e.hasReverse = true;
+      const other = edgeMap.get(reverseKey)!;
+      other.hasReverse = true;
+    }
   }
 
   return { nodes, edges };
