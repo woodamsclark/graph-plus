@@ -803,6 +803,8 @@ class Graph2DController {
       nodeAlpha.type = 'number'; nodeAlpha.min = '0'; nodeAlpha.max = '1'; nodeAlpha.step = '0.01';
       nodeAlpha.value = String((this.plugin as any).settings?.glow?.nodeColorAlpha ?? 1.0);
       nodeAlpha.style.width = '64px';
+      const nodeMaxAlpha = document.createElement('input'); nodeMaxAlpha.type = 'number'; nodeMaxAlpha.min = '0'; nodeMaxAlpha.max = '1'; nodeMaxAlpha.step = '0.01';
+      nodeMaxAlpha.value = String((this.plugin as any).settings?.glow?.nodeColorMaxAlpha ?? 1.0); nodeMaxAlpha.style.width = '64px'; nodeMaxAlpha.style.marginLeft = '6px';
       nodeColor.addEventListener('input', async (e) => {
         try {
           (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
@@ -822,12 +824,14 @@ class Graph2DController {
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
         } catch (e) {}
       });
-      nodeColorWrap.appendChild(nodeColor); nodeColorWrap.appendChild(nodeAlpha);
+      nodeMaxAlpha.addEventListener('input', async (e) => { try { (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {}; const v = Number((e.target as HTMLInputElement).value); (this.plugin as any).settings.glow.nodeColorMaxAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1.0; await (this.plugin as any).saveSettings(); try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {} try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {} } catch (e) {} });
+      nodeColorWrap.appendChild(nodeColor); nodeColorWrap.appendChild(nodeAlpha); nodeColorWrap.appendChild(nodeMaxAlpha);
       panel.appendChild(makeRow('Node color', nodeColorWrap, async () => {
         try {
           (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
-          delete (this.plugin as any).settings.glow.nodeColor;
+            delete (this.plugin as any).settings.glow.nodeColor;
           delete (this.plugin as any).settings.glow.nodeColorAlpha;
+          delete (this.plugin as any).settings.glow.nodeColorMaxAlpha;
           await (this.plugin as any).saveSettings();
           // reset input display to theme color
           try {
@@ -835,6 +839,7 @@ class Graph2DController {
             const nodeVar = cs.getPropertyValue('--interactive-accent') || cs.getPropertyValue('--accent-1') || cs.getPropertyValue('--accent');
             nodeColor.value = (nodeVar && nodeVar.trim()) ? nodeVar.trim() : '#66ccff';
             nodeAlpha.value = String(1.0);
+            nodeMaxAlpha.value = String(1.0);
           } catch (e) { nodeColor.value = '#66ccff'; }
           try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
@@ -856,6 +861,8 @@ class Graph2DController {
       edgeColorWrap.style.display = 'flex'; edgeColorWrap.style.alignItems = 'center'; edgeColorWrap.style.gap = '6px';
       const edgeAlpha = document.createElement('input'); edgeAlpha.type = 'number'; edgeAlpha.min = '0'; edgeAlpha.max = '1'; edgeAlpha.step = '0.01';
       edgeAlpha.value = String((this.plugin as any).settings?.glow?.edgeColorAlpha ?? 1.0); edgeAlpha.style.width = '64px';
+      const edgeMaxAlpha = document.createElement('input'); edgeMaxAlpha.type = 'number'; edgeMaxAlpha.min = '0'; edgeMaxAlpha.max = '1'; edgeMaxAlpha.step = '0.01';
+      edgeMaxAlpha.value = String((this.plugin as any).settings?.glow?.edgeColorMaxAlpha ?? 1.0); edgeMaxAlpha.style.width = '64px'; edgeMaxAlpha.style.marginLeft = '6px';
       edgeColor.addEventListener('input', async (e) => {
         try {
           (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
@@ -875,12 +882,14 @@ class Graph2DController {
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
         } catch (e) {}
       });
-      edgeColorWrap.appendChild(edgeColor); edgeColorWrap.appendChild(edgeAlpha);
+      edgeMaxAlpha.addEventListener('input', async (e) => { try { (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {}; const v = Number((e.target as HTMLInputElement).value); (this.plugin as any).settings.glow.edgeColorMaxAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1.0; await (this.plugin as any).saveSettings(); try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {} try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {} } catch (e) {} });
+      edgeColorWrap.appendChild(edgeColor); edgeColorWrap.appendChild(edgeAlpha); edgeColorWrap.appendChild(edgeMaxAlpha);
       panel.appendChild(makeRow('Edge color', edgeColorWrap, async () => {
         try {
           (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
           delete (this.plugin as any).settings.glow.edgeColor;
           delete (this.plugin as any).settings.glow.edgeColorAlpha;
+          delete (this.plugin as any).settings.glow.edgeColorMaxAlpha;
           await (this.plugin as any).saveSettings();
           // reset input display to theme color
           try {
@@ -888,6 +897,7 @@ class Graph2DController {
             const edgeVar = cs.getPropertyValue('--text-muted') || cs.getPropertyValue('--text-faint') || cs.getPropertyValue('--text-normal');
             edgeColor.value = (edgeVar && edgeVar.trim()) ? edgeVar.trim() : '#888888';
             edgeAlpha.value = String(1.0);
+            edgeMaxAlpha.value = String(1.0);
           } catch (e) { edgeColor.value = '#888888'; }
           try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
@@ -907,6 +917,7 @@ class Graph2DController {
         tagColor.value = (this.plugin as any).settings?.glow?.tagColor || themeTagColor;
         const tagWrap = document.createElement('div'); tagWrap.style.display='flex'; tagWrap.style.alignItems='center'; tagWrap.style.gap='6px';
         const tagAlpha = document.createElement('input'); tagAlpha.type='number'; tagAlpha.min='0'; tagAlpha.max='1'; tagAlpha.step='0.01'; tagAlpha.value = String((this.plugin as any).settings?.glow?.tagColorAlpha ?? 1.0); tagAlpha.style.width='64px';
+        const tagMaxAlpha = document.createElement('input'); tagMaxAlpha.type='number'; tagMaxAlpha.min='0'; tagMaxAlpha.max='1'; tagMaxAlpha.step='0.01'; tagMaxAlpha.value = String((this.plugin as any).settings?.glow?.tagColorMaxAlpha ?? 1.0); tagMaxAlpha.style.width='64px'; tagMaxAlpha.style.marginLeft='6px';
         tagColor.addEventListener('input', async (e) => {
           try {
             (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
@@ -917,7 +928,8 @@ class Graph2DController {
           } catch (e) {}
         });
         tagAlpha.addEventListener('input', async (e) => { try { (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {}; const v = Number((e.target as HTMLInputElement).value); (this.plugin as any).settings.glow.tagColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1.0; await (this.plugin as any).saveSettings(); try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {} try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {} } catch (e) {} });
-        tagWrap.appendChild(tagColor); tagWrap.appendChild(tagAlpha);
+        tagMaxAlpha.addEventListener('input', async (e) => { try { (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {}; const v = Number((e.target as HTMLInputElement).value); (this.plugin as any).settings.glow.tagColorMaxAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1.0; await (this.plugin as any).saveSettings(); try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {} try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {} } catch (e) {} });
+        tagWrap.appendChild(tagColor); tagWrap.appendChild(tagAlpha); tagWrap.appendChild(tagMaxAlpha);
         panel.appendChild(makeRow('Tag color', tagWrap, async () => {
           try {
             (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};

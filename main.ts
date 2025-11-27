@@ -20,12 +20,18 @@ export interface GlowSettings {
   nodeMinBodyAlpha?: number;
   // optional color overrides (CSS color strings). If unset, theme vars are used.
   nodeColor?: string;
+  tagColor?: string;
   labelColor?: string;
   edgeColor?: string;
   // per-color alpha multipliers (0..1)
   nodeColorAlpha?: number;
+  // maximum alpha to use when the node/tag/edge is hovered (0..1)
+  nodeColorMaxAlpha?: number;
+  tagColorAlpha?: number;
+  tagColorMaxAlpha?: number;
   labelColorAlpha?: number;
   edgeColorAlpha?: number;
+  edgeColorMaxAlpha?: number;
   // whether to use Obsidian's interface font for labels (true) or a monospace/code font (false)
   useInterfaceFont?: boolean;
 }
@@ -85,11 +91,16 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
         // color overrides left undefined by default to follow theme
         nodeColor: undefined,
         nodeColorAlpha: 1.0,
+        nodeColorMaxAlpha: 1.0,
+        tagColor: undefined,
+        tagColorAlpha: 1.0,
+        tagColorMaxAlpha: 1.0,
         labelColor: undefined,
         labelColorAlpha: 1.0,
-          useInterfaceFont: true,
+        useInterfaceFont: true,
         edgeColor: undefined,
         edgeColorAlpha: 1.0,
+        edgeColorMaxAlpha: 0.5,
   },
   physics: {
     // INTERNAL defaults (mapped from UI defaults)
@@ -581,8 +592,6 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       }); });
       const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
-      rb.addEventListener('click', async () => { glow.nodeColor = undefined; glow.nodeColorAlpha = undefined; await this.plugin.saveSettings(); if (txt) (txt as any).setValue(''); alphaInput.value = String(DEFAULT_SETTINGS.glow.nodeColorAlpha); });
-      (s as any).controlEl.appendChild(rb);
       const alphaInput = document.createElement('input');
       alphaInput.type = 'number'; alphaInput.min = '0'; alphaInput.max = '1'; alphaInput.step = '0.01';
       alphaInput.value = String(glow.nodeColorAlpha ?? DEFAULT_SETTINGS.glow.nodeColorAlpha);
@@ -592,7 +601,25 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         glow.nodeColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.nodeColorAlpha;
         await this.plugin.saveSettings();
       });
+
+      const maxAlphaInput = document.createElement('input');
+      maxAlphaInput.type = 'number'; maxAlphaInput.min = '0'; maxAlphaInput.max = '1'; maxAlphaInput.step = '0.01';
+      maxAlphaInput.value = String((glow.nodeColorMaxAlpha ?? DEFAULT_SETTINGS.glow.nodeColorMaxAlpha));
+      maxAlphaInput.style.width = '68px'; maxAlphaInput.style.marginLeft = '6px';
+      maxAlphaInput.addEventListener('change', async (e) => {
+        const v = Number((e.target as HTMLInputElement).value);
+        glow.nodeColorMaxAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.nodeColorMaxAlpha;
+        await this.plugin.saveSettings();
+      });
+
+      rb.addEventListener('click', async () => { glow.nodeColor = undefined; glow.nodeColorAlpha = undefined; glow.nodeColorMaxAlpha = undefined; await this.plugin.saveSettings(); if (txt) (txt as any).setValue(''); alphaInput.value = String(DEFAULT_SETTINGS.glow.nodeColorAlpha); maxAlphaInput.value = String(DEFAULT_SETTINGS.glow.nodeColorMaxAlpha); });
+      (s as any).controlEl.appendChild(rb);
+
+      const hint = document.createElement('span'); hint.textContent = '(alpha: min|max)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
+      (s as any).controlEl.appendChild(hint);
+
       (s as any).controlEl.appendChild(alphaInput);
+      (s as any).controlEl.appendChild(maxAlphaInput);
     }
 
     {
@@ -606,8 +633,6 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       }); });
       const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
-      rb.addEventListener('click', async () => { glow.edgeColor = undefined; glow.edgeColorAlpha = undefined; await this.plugin.saveSettings(); if (txt) (txt as any).setValue(''); edgeAlpha.value = String(DEFAULT_SETTINGS.glow.edgeColorAlpha); });
-      (s as any).controlEl.appendChild(rb);
       const edgeAlpha = document.createElement('input');
       edgeAlpha.type = 'number'; edgeAlpha.min = '0'; edgeAlpha.max = '1'; edgeAlpha.step = '0.01';
       edgeAlpha.value = String(glow.edgeColorAlpha ?? DEFAULT_SETTINGS.glow.edgeColorAlpha);
@@ -617,7 +642,62 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         glow.edgeColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.edgeColorAlpha;
         await this.plugin.saveSettings();
       });
+
+      const edgeMaxAlpha = document.createElement('input');
+      edgeMaxAlpha.type = 'number'; edgeMaxAlpha.min = '0'; edgeMaxAlpha.max = '1'; edgeMaxAlpha.step = '0.01';
+      edgeMaxAlpha.value = String(glow.edgeColorMaxAlpha ?? DEFAULT_SETTINGS.glow.edgeColorMaxAlpha);
+      edgeMaxAlpha.style.width = '68px'; edgeMaxAlpha.style.marginLeft = '6px';
+      edgeMaxAlpha.addEventListener('change', async (e) => {
+        const v = Number((e.target as HTMLInputElement).value);
+        glow.edgeColorMaxAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.edgeColorMaxAlpha;
+        await this.plugin.saveSettings();
+      });
+
+      rb.addEventListener('click', async () => { glow.edgeColor = undefined; glow.edgeColorAlpha = undefined; glow.edgeColorMaxAlpha = undefined; await this.plugin.saveSettings(); if (txt) (txt as any).setValue(''); edgeAlpha.value = String(DEFAULT_SETTINGS.glow.edgeColorAlpha); edgeMaxAlpha.value = String(DEFAULT_SETTINGS.glow.edgeColorMaxAlpha); });
+      (s as any).controlEl.appendChild(rb);
+
+      const hint = document.createElement('span'); hint.textContent = '(alpha: min|max)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
+      (s as any).controlEl.appendChild(hint);
       (s as any).controlEl.appendChild(edgeAlpha);
+      (s as any).controlEl.appendChild(edgeMaxAlpha);
+    }
+
+    // Tag color (override)
+    {
+      const s = new Setting(containerEl)
+        .setName('Tag color (override)')
+        .setDesc('Optional CSS color string to override tag node color. Leave empty to use a theme-appropriate color.');
+      let txt: any = null;
+      s.addText((t) => { txt = t; return t.setValue(String(glow.tagColor ?? '')).onChange(async (value) => {
+        const v = value.trim();
+        glow.tagColor = v === '' ? undefined : v;
+        await this.plugin.saveSettings();
+      }); });
+      const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
+      const tagAlpha = document.createElement('input'); tagAlpha.type = 'number'; tagAlpha.min = '0'; tagAlpha.max = '1'; tagAlpha.step = '0.01';
+      tagAlpha.value = String(glow.tagColorAlpha ?? DEFAULT_SETTINGS.glow.tagColorAlpha);
+      tagAlpha.style.width = '68px'; tagAlpha.style.marginLeft = '8px';
+      tagAlpha.addEventListener('change', async (e) => {
+        const v = Number((e.target as HTMLInputElement).value);
+        glow.tagColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.tagColorAlpha;
+        await this.plugin.saveSettings();
+      });
+
+      const tagMaxAlpha = document.createElement('input'); tagMaxAlpha.type = 'number'; tagMaxAlpha.min = '0'; tagMaxAlpha.max = '1'; tagMaxAlpha.step = '0.01';
+      tagMaxAlpha.value = String(glow.tagColorMaxAlpha ?? DEFAULT_SETTINGS.glow.tagColorMaxAlpha);
+      tagMaxAlpha.style.width = '68px'; tagMaxAlpha.style.marginLeft = '6px';
+      tagMaxAlpha.addEventListener('change', async (e) => {
+        const v = Number((e.target as HTMLInputElement).value);
+        glow.tagColorMaxAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.tagColorMaxAlpha;
+        await this.plugin.saveSettings();
+      });
+
+      rb.addEventListener('click', async () => { glow.tagColor = undefined; glow.tagColorAlpha = undefined; glow.tagColorMaxAlpha = undefined; await this.plugin.saveSettings(); if (txt) (txt as any).setValue(''); tagAlpha.value = String(DEFAULT_SETTINGS.glow.tagColorAlpha); tagMaxAlpha.value = String(DEFAULT_SETTINGS.glow.tagColorMaxAlpha); });
+      (s as any).controlEl.appendChild(rb);
+      const hint = document.createElement('span'); hint.textContent = '(alpha: min|max)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
+      (s as any).controlEl.appendChild(hint);
+      (s as any).controlEl.appendChild(tagAlpha);
+      (s as any).controlEl.appendChild(tagMaxAlpha);
     }
 
     {

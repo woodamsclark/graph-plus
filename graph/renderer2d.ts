@@ -26,6 +26,10 @@ export interface GlowSettings {
   tagColorAlpha?: number;
   labelColorAlpha?: number;
   edgeColorAlpha?: number;
+  // maximum alpha to use for each color when hovered/highlighted
+  nodeColorMaxAlpha?: number;
+  tagColorMaxAlpha?: number;
+  edgeColorMaxAlpha?: number;
   // optional explicit glow radius in world/pixel units. If provided, overrides multiplier-based radius.
   glowRadiusPx?: number;
   // whether to use Obsidian interface font for labels
@@ -100,6 +104,9 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let tagColorAlpha = glowOptions?.tagColorAlpha ?? 1.0;
   let labelColorAlpha = glowOptions?.labelColorAlpha ?? 1.0;
   let edgeColorAlpha = glowOptions?.edgeColorAlpha ?? 1.0;
+  let nodeColorMaxAlpha = glowOptions?.nodeColorMaxAlpha ?? nodeColorAlpha;
+  let tagColorMaxAlpha = glowOptions?.tagColorMaxAlpha ?? tagColorAlpha;
+  let edgeColorMaxAlpha = glowOptions?.edgeColorMaxAlpha ?? edgeColorAlpha;
   let hoverBoost = glowOptions?.hoverBoostFactor ?? 1.5;
   let neighborBoost = glowOptions?.neighborBoostFactor ?? 1.0;
   let dimFactor = glowOptions?.dimFactor ?? 0.25;
@@ -509,21 +516,21 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         let alpha = 0.65;
         if (!hoveredNodeId) alpha = 0.65;
         else alpha = 0.08 + (0.9 - 0.08) * edgeFocus; // interpolate
-        // When edge is connected to hovered/highlighted nodes, force alpha to 1
-        if (hoveredNodeId) {
-          const srcInFocus = hoverHighlightSet.has(edge.sourceId) || edge.sourceId === hoveredNodeId;
-          const tgtInFocus = hoverHighlightSet.has(edge.targetId) || edge.targetId === hoveredNodeId;
-          if (srcInFocus || tgtInFocus) alpha = 1;
-        }
+        // Do not force alpha here; we'll decide final alpha below using configured
+        // per-color min/max alpha values so hover max can be customized.
 
         ctx.save();
         const useEdgeAlpha = glowOptions?.edgeColorAlpha ?? edgeColorAlpha;
-        // compute final edge alpha and bypass user edge alpha when hovered/highlighted
+        const useEdgeMax = glowOptions?.edgeColorMaxAlpha ?? glowOptions?.edgeColorAlpha ?? edgeColorMaxAlpha;
+        // compute final edge alpha and bypass user edge alpha when hovered/highlighted.
+        // Use the same reduced-propagation rule as above: require both endpoints
+        // in the highlight set, except allow direct-hover incidence.
         let finalEdgeAlpha = alpha * useEdgeAlpha;
         if (hoveredNodeId) {
-          const srcInFocus = hoverHighlightSet.has(edge.sourceId) || edge.sourceId === hoveredNodeId;
-          const tgtInFocus = hoverHighlightSet.has(edge.targetId) || edge.targetId === hoveredNodeId;
-          if (srcInFocus || tgtInFocus) finalEdgeAlpha = 1;
+          const srcInDepth = hoverHighlightSet.has(edge.sourceId);
+          const tgtInDepth = hoverHighlightSet.has(edge.targetId);
+          const directlyIncident = edge.sourceId === hoveredNodeId || edge.targetId === hoveredNodeId;
+          if ((srcInDepth && tgtInDepth) || directlyIncident) finalEdgeAlpha = useEdgeMax;
         }
         ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${finalEdgeAlpha})`;
         // mutual edges: draw two parallel lines offset perpendicular to the edge when enabled
@@ -601,6 +608,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         const nodeColorOverride = (node && node.type === 'tag') ? (glowOptions?.tagColor ?? themeTagColor) : themeNodeColor; // tag color
         const accentRgb = colorToRgb(nodeColorOverride);
         const useNodeAlpha = (node && node.type === 'tag') ? (glowOptions?.tagColorAlpha ?? tagColorAlpha) : (glowOptions?.nodeColorAlpha ?? nodeColorAlpha);
+        const useNodeMax = (node && node.type === 'tag') ? (glowOptions?.tagColorMaxAlpha ?? glowOptions?.tagColorAlpha ?? tagColorAlpha) : (glowOptions?.nodeColorMaxAlpha ?? glowOptions?.nodeColorAlpha ?? nodeColorAlpha);
         const dimCenter = clamp01(getBaseCenterAlpha(node) * dimFactor);
         const fullCenter = centerAlpha;
         let blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
@@ -611,7 +619,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
           const isHovered = node.id === hoveredNodeId;
           if (isHovered || inDepth) {
             blendedCenter = 1;
-            effectiveUseNodeAlpha = 1;
+            effectiveUseNodeAlpha = useNodeMax;
           }
         }
         const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
@@ -635,6 +643,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         const bodyColorOverride = (node && node.type === 'tag') ? (glowOptions?.tagColor ?? themeTagColor) : themeNodeColor;
         const accent = colorToRgb(bodyColorOverride);
         const useBodyAlpha = (node && node.type === 'tag') ? (glowOptions?.tagColorAlpha ?? tagColorAlpha) : (glowOptions?.nodeColorAlpha ?? nodeColorAlpha);
+        const useBodyMax = (node && node.type === 'tag') ? (glowOptions?.tagColorMaxAlpha ?? glowOptions?.tagColorAlpha ?? tagColorAlpha) : (glowOptions?.nodeColorMaxAlpha ?? glowOptions?.nodeColorAlpha ?? nodeColorAlpha);
         // When hovered/highlighted, force body alpha to 1 for node/tag colors
         let effectiveUseBodyAlpha = useBodyAlpha;
         let finalBodyAlpha = bodyAlpha;
@@ -643,7 +652,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
           const isHoveredBody = node.id === hoveredNodeId;
           if (isHoveredBody || inDepthBody) {
             finalBodyAlpha = 1;
-            effectiveUseBodyAlpha = 1;
+            effectiveUseBodyAlpha = useBodyMax;
           }
         }
         ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${finalBodyAlpha * effectiveUseBodyAlpha})`;
@@ -727,6 +736,9 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     tagColorAlpha = (typeof glow.tagColorAlpha === 'number') ? glow.tagColorAlpha : tagColorAlpha;
     labelColorAlpha = (typeof glow.labelColorAlpha === 'number') ? glow.labelColorAlpha : labelColorAlpha;
     edgeColorAlpha = (typeof glow.edgeColorAlpha === 'number') ? glow.edgeColorAlpha : edgeColorAlpha;
+    nodeColorMaxAlpha = (typeof glow.nodeColorMaxAlpha === 'number') ? glow.nodeColorMaxAlpha : nodeColorMaxAlpha;
+    tagColorMaxAlpha = (typeof glow.tagColorMaxAlpha === 'number') ? glow.tagColorMaxAlpha : tagColorMaxAlpha;
+    edgeColorMaxAlpha = (typeof glow.edgeColorMaxAlpha === 'number') ? glow.edgeColorMaxAlpha : edgeColorMaxAlpha;
   }
 
   function setHoverState(hoveredId: string | null, highlightedIds: Set<string>, mx: number, my: number) {
