@@ -41,6 +41,7 @@ export interface Renderer2D {
   zoomAt(screenX: number, screenY: number, factor: number): void;
   panBy(screenDx: number, screenDy: number): void;
   screenToWorld(screenX: number, screenY: number): { x: number; y: number };
+  setRenderOptions?(opts: { mutualDoubleLines?: boolean }): void;
 }
 
 export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
@@ -55,6 +56,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   // edge count stats
   let minEdgeCount = 1;
   let maxEdgeCount = 1;
+  // whether to draw mutual edges as double parallel lines
+  let drawMutualDoubleLines = true;
 
   let minRadius = glowOptions?.minNodeRadius ?? 4;
   let maxRadius = glowOptions?.maxNodeRadius ?? 14;
@@ -370,8 +373,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
         ctx.save();
         ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${alpha})`;
-        // mutual edges: draw two parallel lines offset perpendicular to the edge
-        const isMutual = !!edge.hasReverse;
+        // mutual edges: draw two parallel lines offset perpendicular to the edge when enabled
+        const isMutual = !!edge.hasReverse && drawMutualDoubleLines;
         if (isMutual) {
           const dx = tgt.x - src.x;
           const dy = tgt.y - src.y;
@@ -511,6 +514,11 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     return getNodeRadius(node);
   }
 
+  function setRenderOptions(opts: { mutualDoubleLines?: boolean }) {
+    if (!opts) return;
+    if (typeof opts.mutualDoubleLines === 'boolean') drawMutualDoubleLines = opts.mutualDoubleLines;
+  }
+
   function setGlowSettings(glow: GlowSettings) {
     if (!glow) return;
     minRadius = glow.minNodeRadius;
@@ -569,6 +577,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     getNodeRadiusForHit,
     setGlowSettings,
     setHoverState,
+    setRenderOptions,
     zoomAt,
     panBy,
     screenToWorld,

@@ -191,6 +191,11 @@ class Graph2DController {
     const initialPhys = (this.plugin as any).settings?.physics || {};
     if (typeof initialPhys.mouseAttractionRadius === 'number') initialGlow.glowRadiusPx = initialPhys.mouseAttractionRadius;
     this.renderer = createRenderer2D({ canvas, glow: initialGlow });
+    // Apply initial render options (whether to draw mutual links as double lines)
+    try {
+      const drawDouble = Boolean((this.plugin as any).settings?.mutualLinkDoubleLine);
+      if (this.renderer && (this.renderer as any).setRenderOptions) (this.renderer as any).setRenderOptions({ mutualDoubleLines: drawDouble });
+    } catch (e) {}
 
     this.graph = await buildGraph(this.app, { countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks) });
 
@@ -433,6 +438,11 @@ class Graph2DController {
             const glowWithRadius = Object.assign({}, glow || {});
             if (typeof phys.mouseAttractionRadius === 'number') glowWithRadius.glowRadiusPx = phys.mouseAttractionRadius;
             (this.renderer as any).setGlowSettings(glowWithRadius);
+            // update mutual-line rendering option too
+            try {
+              const drawDouble = Boolean((this.plugin as any).settings?.mutualLinkDoubleLine);
+              if (this.renderer && (this.renderer as any).setRenderOptions) (this.renderer as any).setRenderOptions({ mutualDoubleLines: drawDouble });
+            } catch (e) {}
             this.renderer.render();
           }
           const phys = (this.plugin as any).settings.physics;

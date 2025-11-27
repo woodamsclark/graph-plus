@@ -39,6 +39,8 @@ export interface GreaterGraphSettings {
   };
   // whether to count duplicate links (multiple links between same files) when computing in/out degrees
   countDuplicateLinks?: boolean;
+  // render mutual links as two parallel lines when enabled
+  mutualLinkDoubleLine?: boolean;
   interaction?: {
     momentumScale?: number;
     dragThreshold?: number; // in screen pixels
@@ -87,6 +89,7 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     dragThreshold: 4,
   },
   nodePositions: {},
+  mutualLinkDoubleLine: true,
 };
 
 export default class GreaterGraphPlugin extends Plugin {
@@ -493,6 +496,14 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       .setDesc('If enabled, multiple links between the same two files will be counted when computing in/out degrees.')
       .addToggle((t) => t.setValue(Boolean(this.plugin.settings.countDuplicateLinks)).onChange(async (v) => {
         this.plugin.settings.countDuplicateLinks = Boolean(v);
+        await this.plugin.saveSettings();
+      }));
+
+    new Setting(containerEl)
+      .setName('Double-line mutual links')
+      .setDesc('When enabled, mutual links (A ↔ B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.')
+      .addToggle((t) => t.setValue(Boolean(this.plugin.settings.mutualLinkDoubleLine)).onChange(async (v) => {
+        this.plugin.settings.mutualLinkDoubleLine = Boolean(v);
         await this.plugin.saveSettings();
       }));
     
