@@ -151,6 +151,10 @@ class Graph2DController {
   private saveNodePositionsDebounced: (() => void) | null = null;
   // last node id that we triggered a hover preview for (to avoid retriggering)
   private lastPreviewedNodeId: string | null = null;
+  // When a hover preview has been triggered and is visible, lock highlighting
+  // to that node (and neighbors) until the popover disappears.
+  private previewLockNodeId: string | null = null;
+  private previewPollTimer: number | null = null;
 
   private saveNodePositions(): void {
     if (!this.graph) return;
@@ -171,20 +175,6 @@ class Graph2DController {
       // eslint-disable-next-line no-console
       console.error('Greater Graph: saveNodePositions error', e);
     }
-  }
-
-  // Remove any lingering Obsidian hover popovers we created
-  private closePreview(): void {
-    try {
-      // common hover/popover class names used by Obsidian's hover UI
-      const selectors = ['.markdown-hover', '.hover-popover', '.hover-preview', '.markdown-hover-popover'];
-      for (const s of selectors) {
-        const els = document.querySelectorAll(s);
-        els.forEach((el) => {
-          try { if (el.parentElement) el.parentElement.removeChild(el); } catch (e) {}
-        });
-      }
-    } catch (e) {}
   }
 
   constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
@@ -353,7 +343,10 @@ class Graph2DController {
       this.handleHover(screenX, screenY, ev);
     };
 
-    this.mouseLeaveHandler = () => { this.clearHover(); this.lastPreviewedNodeId = null; this.closePreview(); };
+    this.mouseLeaveHandler = () => { this.clearHover(); this.lastPreviewedNodeId = null; };
+
+    // ensure any preview poll timer is cleared when leaving the view area
+    // (we intentionally don't release previewLockNodeId here; poll determines actual popover state)
 
     this.mouseClickHandler = (ev: MouseEvent) => {
       if (!this.canvas) return;
@@ -587,6 +580,11 @@ class Graph2DController {
   destroy(): void {
     // persist positions immediately when view is closed
     try { this.saveNodePositions(); } catch (e) {}
+    // clear any preview poll timer and lock
+    try { if (this.previewPollTimer) window.clearInterval(this.previewPollTimer as number); } catch (e) {}
+    this.previewPollTimer = null;
+    this.previewLockNodeId = null;
+    this.lastPreviewedNodeId = null;
     this.renderer?.destroy();
     if (this.canvas && this.canvas.parentElement) this.canvas.parentElement.removeChild(this.canvas);
     this.canvas = null;
@@ -621,6 +619,39 @@ class Graph2DController {
     return Boolean(event.ctrlKey);
   }
 
+    // Start a small poll to detect when Obsidian's hover popover is removed from DOM.
+    // While the popover exists we keep the preview lock active; when it's gone we clear it.
+    private startPreviewLockMonitor(): void {
+      try {
+        if (this.previewPollTimer) window.clearInterval(this.previewPollTimer as number);
+      } catch (e) {}
+      this.previewPollTimer = window.setInterval(() => {
+        try {
+          const sel = '.popover.hover-popover, .hover-popover, .internal-link-popover, .internal-link-hover';
+          const found = document.querySelector(sel);
+          if (!found) {
+            this.clearPreviewLock();
+          }
+        } catch (e) {
+          // ignore
+        }
+      }, 250) as unknown as number;
+    }
+
+    private clearPreviewLock(): void {
+      try {
+        if (this.previewPollTimer) window.clearInterval(this.previewPollTimer as number);
+      } catch (e) {}
+      this.previewPollTimer = null;
+      this.previewLockNodeId = null;
+      this.lastPreviewedNodeId = null;
+      try {
+        if (this.renderer && (this.renderer as any).setHoverState) (this.renderer as any).setHoverState(null, new Set(), 0, 0);
+        if (this.renderer && (this.renderer as any).setHoveredNode) (this.renderer as any).setHoveredNode(null);
+        if (this.renderer && (this.renderer as any).render) (this.renderer as any).render();
+      } catch (e) {}
+    }
+
   handleClick(screenX: number, screenY: number): void {
     if (!this.graph || !this.onNodeClick || !this.renderer) return;
     const world = (this.renderer as any).screenToWorld(screenX, screenY);
@@ -633,44 +664,82 @@ class Graph2DController {
     if (!this.graph || !this.renderer) return;
     // don't show previews while dragging or panning
     if (this.draggingNode || this.isPanning) {
-      this.lastPreviewedNodeId = null;
-      this.closePreview();
+      // if user is panning/dragging, we don't want preview lock to change here
       return;
     }
+
     const world = (this.renderer as any).screenToWorld(screenX, screenY);
-    let closest: any = null; let closestDist = Infinity; const hitPadding = 6;
-    for (const node of this.graph.nodes) {
-      const dx = world.x - node.x; const dy = world.y - node.y; const distSq = dx*dx + dy*dy;
-      const nodeRadius = this.renderer.getNodeRadiusForHit ? this.renderer.getNodeRadiusForHit(node) : 8;
-      const hitR = nodeRadius + hitPadding;
-      if (distSq <= hitR*hitR && distSq < closestDist) { closestDist = distSq; closest = node; }
+
+    // If a preview is locked, keep that node (and its neighbors) highlighted
+    // and ignore other nodes until the preview is gone.
+    let closest: any = null;
+    if (this.previewLockNodeId && this.graph && this.graph.nodes) {
+      closest = this.graph.nodes.find((n: any) => n.id === this.previewLockNodeId) || null;
+    } else {
+      let closestDist = Infinity; const hitPadding = 6;
+      for (const node of this.graph.nodes) {
+        const r = (this.renderer as any).getNodeRadiusForHit(node) + hitPadding;
+        const dx = node.x - world.x;
+        const dy = node.y - world.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < r && d < closestDist) {
+          closest = node;
+          closestDist = d;
+        }
+      }
     }
+
     const newId = closest ? closest.id : null;
     const depth = (this.plugin as any).settings?.glow?.hoverHighlightDepth ?? 1;
     const highlightSet = new Set<string>(); if (newId) highlightSet.add(newId);
     if (newId && this.adjacency && depth > 0) {
-      const q: Array<{ id: string; d: number }> = [{ id: newId, d: 0 }];
+      const q: string[] = [newId];
       const seen = new Set<string>([newId]);
-      while (q.length > 0) {
-        const cur = q.shift()!; if (cur.d > 0) highlightSet.add(cur.id);
-        if (cur.d >= depth) continue; const neighbors = this.adjacency.get(cur.id) || [];
-        for (const nb of neighbors) { if (!seen.has(nb)) { seen.add(nb); q.push({ id: nb, d: cur.d + 1 }); } }
+      let curDepth = 0;
+      while (q.length > 0 && curDepth < depth) {
+        const levelSize = q.length;
+        for (let i = 0; i < levelSize; i++) {
+          const nid = q.shift() as string;
+          const neigh = this.adjacency?.get(nid) || [];
+          for (const nb of neigh) {
+            if (!seen.has(nb)) {
+              seen.add(nb);
+              highlightSet.add(nb);
+              q.push(nb);
+            }
+          }
+        }
+        curDepth++;
       }
     }
+
+    // If preview is locked, use the locked node's actual world coords for attraction/hover center
+    let hoverWorldX = world.x;
+    let hoverWorldY = world.y;
+    if (this.previewLockNodeId) {
+      const lockedNode = this.graph.nodes.find((n: any) => n.id === this.previewLockNodeId);
+      if (lockedNode) {
+        hoverWorldX = lockedNode.x;
+        hoverWorldY = lockedNode.y;
+      }
+    }
+
     if (this.canvas) this.canvas.style.cursor = newId ? 'pointer' : 'default';
-    if ((this.renderer as any).setHoverState) (this.renderer as any).setHoverState(newId, highlightSet, world.x, world.y);
+    if ((this.renderer as any).setHoverState) (this.renderer as any).setHoverState(newId, highlightSet, hoverWorldX, hoverWorldY);
     if (this.renderer.setHoveredNode) this.renderer.setHoveredNode(newId);
     this.renderer.render();
+
     // inform simulation of mouse world coords and hovered node so it can apply local attraction
-    try { if (this.simulation && (this.simulation as any).setMouseAttractor) (this.simulation as any).setMouseAttractor(world.x, world.y, newId); } catch (e) {}
+    try { if (this.simulation && (this.simulation as any).setMouseAttractor) (this.simulation as any).setMouseAttractor(hoverWorldX, hoverWorldY, newId); } catch (e) {}
 
     // Handle preview modifier: trigger Obsidian's hover-link once per node when modifier held
     try {
       if (ev) {
         const previewModifier = this.isPreviewModifier(ev);
         const currentId = closest ? closest.id : null;
-        if (previewModifier && closest && currentId !== this.lastPreviewedNodeId) {
+        if (previewModifier && closest && currentId !== this.lastPreviewedNodeId && !this.previewLockNodeId) {
           this.lastPreviewedNodeId = currentId;
+          // trigger native hover preview
           try {
             this.app.workspace.trigger('hover-link', {
               event: ev,
@@ -681,10 +750,13 @@ class Graph2DController {
               sourcePath: closest.filePath,
             } as any);
           } catch (e) {}
+          // lock highlighting to this node until popover disappears
+          this.previewLockNodeId = currentId;
+          this.startPreviewLockMonitor();
         }
         if (!previewModifier || !closest) {
-          this.lastPreviewedNodeId = null;
-          this.closePreview();
+          // only clear lastPreviewedNodeId when there's no active preview lock
+          if (!this.previewLockNodeId) this.lastPreviewedNodeId = null;
         }
       }
     } catch (e) {}
