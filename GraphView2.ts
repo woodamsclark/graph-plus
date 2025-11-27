@@ -308,6 +308,8 @@ class Graph2DController {
         this.lastDragTime = now;
 
         this.renderer.render();
+        // while dragging, disable the mouse attractor so physics doesn't fight the drag
+        try { if (this.simulation && (this.simulation as any).setMouseAttractor) (this.simulation as any).setMouseAttractor(null, null, null); } catch (e) {}
         return;
       }
 
@@ -611,7 +613,15 @@ class Graph2DController {
     if ((this.renderer as any).setHoverState) (this.renderer as any).setHoverState(newId, highlightSet, world.x, world.y);
     if (this.renderer.setHoveredNode) this.renderer.setHoveredNode(newId);
     this.renderer.render();
+    // inform simulation of mouse world coords and hovered node so it can apply local attraction
+    try { if (this.simulation && (this.simulation as any).setMouseAttractor) (this.simulation as any).setMouseAttractor(world.x, world.y, newId); } catch (e) {}
   }
 
-  clearHover(): void { if (!this.renderer) return; if ((this.renderer as any).setHoverState) (this.renderer as any).setHoverState(null, new Set(), 0, 0); if (this.renderer.setHoveredNode) this.renderer.setHoveredNode(null); this.renderer.render(); }
+  clearHover(): void {
+    if (!this.renderer) return;
+    if ((this.renderer as any).setHoverState) (this.renderer as any).setHoverState(null, new Set(), 0, 0);
+    if (this.renderer.setHoveredNode) this.renderer.setHoveredNode(null);
+    this.renderer.render();
+    try { if (this.simulation && (this.simulation as any).setMouseAttractor) (this.simulation as any).setMouseAttractor(null, null, null); } catch (e) {}
+  }
 }

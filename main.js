@@ -527,6 +527,9 @@ function createSimulation(nodes, edges, options) {
   let springLength = options?.springLength ?? 100;
   let centerPull = options?.centerPull ?? 0;
   let damping = options?.damping ?? 0.9;
+  let mouseAttractionRadius = options?.mouseAttractionRadius ?? 80;
+  let mouseAttractionStrength = options?.mouseAttractionStrength ?? 0.15;
+  let mouseAttractionExponent = options?.mouseAttractionExponent ?? 3.5;
   let centerX = typeof options?.centerX === "number" ? options.centerX : void 0;
   let centerY = typeof options?.centerY === "number" ? options.centerY : void 0;
   let centerNodeId = options?.centerNodeId ?? null;
@@ -569,6 +572,9 @@ function createSimulation(nodes, edges, options) {
   for (const n of nodes)
     nodeById.set(n.id, n);
   let pinnedNodes = /* @__PURE__ */ new Set();
+  let mouseX = null;
+  let mouseY = null;
+  let mouseHoveredNodeId = null;
   function applyRepulsion() {
     const N = nodes.length;
     for (let i = 0; i < N; i++) {
@@ -669,6 +675,31 @@ function createSimulation(nodes, edges, options) {
         n.vy = 0;
     }
   }
+  function applyMouseAttraction() {
+    if (mouseX == null || mouseY == null)
+      return;
+    if (!mouseHoveredNodeId)
+      return;
+    const node = nodeById.get(mouseHoveredNodeId);
+    if (!node)
+      return;
+    if (pinnedNodes.has(node.id))
+      return;
+    const radius = mouseAttractionRadius ?? 80;
+    const strength = mouseAttractionStrength ?? 0.15;
+    const exponent = mouseAttractionExponent ?? 3.5;
+    const dx = mouseX - node.x;
+    const dy = mouseY - node.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (!dist || dist > radius)
+      return;
+    const t = 1 - dist / radius;
+    const forceMag = strength * Math.pow(Math.max(0, t), exponent);
+    const fx = dx / (dist || 1) * forceMag;
+    const fy = dy / (dist || 1) * forceMag;
+    node.vx = (node.vx || 0) + fx;
+    node.vy = (node.vy || 0) + fy;
+  }
   function integrate(dt) {
     const scale = dt * 60;
     for (const n of nodes) {
@@ -684,6 +715,7 @@ function createSimulation(nodes, edges, options) {
     applyRepulsion();
     applySprings();
     applyCentering();
+    applyMouseAttraction();
     applyDamping();
     integrate(dt);
   }
@@ -720,11 +752,22 @@ function createSimulation(nodes, edges, options) {
       centerNodeId = opts.centerNodeId;
       centerNode = nodes.find((n) => n.id === centerNodeId) || null;
     }
+    if (typeof opts.mouseAttractionRadius === "number")
+      mouseAttractionRadius = opts.mouseAttractionRadius;
+    if (typeof opts.mouseAttractionStrength === "number")
+      mouseAttractionStrength = opts.mouseAttractionStrength;
+    if (typeof opts.mouseAttractionExponent === "number")
+      mouseAttractionExponent = opts.mouseAttractionExponent;
   }
   function setPinnedNodes(ids) {
     pinnedNodes = new Set(ids || []);
   }
-  return { start, stop, tick, reset, setOptions, setPinnedNodes };
+  function setMouseAttractor(x, y, nodeId) {
+    mouseX = x;
+    mouseY = y;
+    mouseHoveredNodeId = nodeId;
+  }
+  return { start, stop, tick, reset, setOptions, setPinnedNodes, setMouseAttractor };
 }
 
 // GraphView2.ts
@@ -995,6 +1038,11 @@ var Graph2DController = class {
         this.lastWorldY = world.y;
         this.lastDragTime = now;
         this.renderer.render();
+        try {
+          if (this.simulation && this.simulation.setMouseAttractor)
+            this.simulation.setMouseAttractor(null, null, null);
+        } catch (e) {
+        }
         return;
       }
       if (this.isPanning) {
@@ -1343,6 +1391,11 @@ var Graph2DController = class {
     if (this.renderer.setHoveredNode)
       this.renderer.setHoveredNode(newId);
     this.renderer.render();
+    try {
+      if (this.simulation && this.simulation.setMouseAttractor)
+        this.simulation.setMouseAttractor(world.x, world.y, newId);
+    } catch (e) {
+    }
   }
   clearHover() {
     if (!this.renderer)
@@ -1352,6 +1405,11 @@ var Graph2DController = class {
     if (this.renderer.setHoveredNode)
       this.renderer.setHoveredNode(null);
     this.renderer.render();
+    try {
+      if (this.simulation && this.simulation.setMouseAttractor)
+        this.simulation.setMouseAttractor(null, null, null);
+    } catch (e) {
+    }
   }
 };
 
@@ -1386,7 +1444,10 @@ var DEFAULT_SETTINGS = {
     springStrength: 0.04,
     springLength: 130,
     centerPull: 4e-4,
-    damping: 0.92
+    damping: 0.92,
+    mouseAttractionRadius: 80,
+    mouseAttractionStrength: 0.15,
+    mouseAttractionExponent: 3.5
   },
   interaction: {
     momentumScale: 0.12,

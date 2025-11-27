@@ -33,6 +33,10 @@ export interface GreaterGraphSettings {
     springLength?: number;
     centerPull?: number;
     damping?: number;
+    // mouse attraction tuning
+    mouseAttractionRadius?: number;
+    mouseAttractionStrength?: number;
+    mouseAttractionExponent?: number;
   };
   interaction?: {
     momentumScale?: number;
@@ -74,6 +78,9 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     springLength: 130,
     centerPull: 0.0004,
     damping: 0.92,
+    mouseAttractionRadius: 80,
+    mouseAttractionStrength: 0.15,
+    mouseAttractionExponent: 3.5,
   },
   interaction: {
     momentumScale: 0.12,

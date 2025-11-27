@@ -14,6 +14,8 @@ export interface Simulation {
   }>): void;
   // pinned node control: prevent physics from moving these nodes
   setPinnedNodes?(ids: Set<string>): void;
+  // allow the controller to provide mouse world coords and hovered node id
+  setMouseAttractor?(x: number | null, y: number | null, nodeId: string | null): void;
 }
 
 export interface SimulationOptions {
@@ -26,6 +28,10 @@ export interface SimulationOptions {
   centerX?: number;
   centerY?: number;
   centerNodeId?: string;
+  // mouse attraction tuning
+  mouseAttractionRadius?: number;
+  mouseAttractionStrength?: number;
+  mouseAttractionExponent?: number;
 }
 
 export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options?: Partial<SimulationOptions>): Simulation {
@@ -35,6 +41,11 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
   let springLength = options?.springLength ?? 100;
   let centerPull = options?.centerPull ?? 0.00;
   let damping = options?.damping ?? 0.9;
+
+  // mouse attractor defaults
+  let mouseAttractionRadius = options?.mouseAttractionRadius ?? 80;
+  let mouseAttractionStrength = options?.mouseAttractionStrength ?? 0.15;
+  let mouseAttractionExponent = options?.mouseAttractionExponent ?? 3.5;
 
   // center options: prefer explicitly provided values; otherwise compute
   // a reasonable default (bounding-box center of current node positions)
@@ -80,6 +91,11 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
   for (const n of nodes) nodeById.set(n.id, n);
   // set of node ids that should be pinned (physics skip)
   let pinnedNodes = new Set<string>();
+
+  // mouse attractor runtime state (world coords)
+  let mouseX: number | null = null;
+  let mouseY: number | null = null;
+  let mouseHoveredNodeId: string | null = null;
 
   function applyRepulsion() {
     const N = nodes.length;
@@ -186,6 +202,33 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
     }
   }
 
+  function applyMouseAttraction() {
+    if (mouseX == null || mouseY == null) return;
+    if (!mouseHoveredNodeId) return;
+    const node = nodeById.get(mouseHoveredNodeId);
+    if (!node) return;
+    // don't tug on pinned nodes (e.g. while dragging)
+    if (pinnedNodes.has(node.id)) return;
+
+    const radius = mouseAttractionRadius ?? 80;
+    const strength = mouseAttractionStrength ?? 0.15;
+    const exponent = mouseAttractionExponent ?? 3.5;
+
+    const dx = mouseX - node.x;
+    const dy = mouseY - node.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (!dist || dist > radius) return;
+
+    const t = 1 - dist / radius;
+    const forceMag = strength * Math.pow(Math.max(0, t), exponent);
+
+    const fx = (dx / (dist || 1)) * forceMag;
+    const fy = (dy / (dist || 1)) * forceMag;
+
+    node.vx = (node.vx || 0) + fx;
+    node.vy = (node.vy || 0) + fy;
+  }
+
   function integrate(dt: number) {
     // scale by 60 so dt around 1/60 gives reasonable movement
     const scale = dt * 60;
@@ -201,6 +244,8 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
     applyRepulsion();
     applySprings();
     applyCentering();
+    // local mouse attraction to hovered node
+    applyMouseAttraction();
     applyDamping();
     integrate(dt);
   }
@@ -234,11 +279,21 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
       centerNodeId = opts.centerNodeId;
       centerNode = nodes.find((n) => n.id === centerNodeId) || null;
     }
+
+    if (typeof opts.mouseAttractionRadius === 'number') mouseAttractionRadius = opts.mouseAttractionRadius;
+    if (typeof opts.mouseAttractionStrength === 'number') mouseAttractionStrength = opts.mouseAttractionStrength;
+    if (typeof opts.mouseAttractionExponent === 'number') mouseAttractionExponent = opts.mouseAttractionExponent;
   }
 
   function setPinnedNodes(ids: Set<string>) {
     pinnedNodes = new Set(ids || []);
   }
 
-  return { start, stop, tick, reset, setOptions, setPinnedNodes };
+  function setMouseAttractor(x: number | null, y: number | null, nodeId: string | null) {
+    mouseX = x;
+    mouseY = y;
+    mouseHoveredNodeId = nodeId;
+  }
+
+  return { start, stop, tick, reset, setOptions, setPinnedNodes, setMouseAttractor };
 }
