@@ -1033,6 +1033,60 @@ class Graph2DController {
             } catch (e) {}
           }));
 
+        // Label visibility controls (min radius + fade range)
+        const labelVisWrap = document.createElement('div');
+        labelVisWrap.style.display = 'flex'; labelVisWrap.style.alignItems = 'center'; labelVisWrap.style.gap = '6px';
+        const labelMinRange = document.createElement('input');
+        labelMinRange.type = 'range'; labelMinRange.min = '0'; labelMinRange.max = '20'; labelMinRange.step = '1';
+        const curLabelMin = (this.plugin as any).settings?.glow?.labelMinVisibleRadiusPx ?? 6;
+        labelMinRange.value = String(curLabelMin);
+        const labelMinInput = document.createElement('input'); labelMinInput.type = 'number'; labelMinInput.min = labelMinRange.min; labelMinInput.max = labelMinRange.max; labelMinInput.step = labelMinRange.step; labelMinInput.value = String(labelMinRange.value); labelMinInput.style.width = '56px'; labelMinInput.style.textAlign = 'right';
+        labelMinRange.addEventListener('input', (e) => { labelMinInput.value = (e.target as HTMLInputElement).value; });
+        labelMinRange.addEventListener('change', async (e) => {
+          try {
+            (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+            const v = Number((e.target as HTMLInputElement).value);
+            (this.plugin as any).settings.glow.labelMinVisibleRadiusPx = Number.isFinite(v) ? Math.max(0, Math.round(v)) : 6;
+            await (this.plugin as any).saveSettings();
+            try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
+            try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+          } catch (e) {}
+        });
+
+        const labelFadeRange = document.createElement('input');
+        labelFadeRange.type = 'range'; labelFadeRange.min = '0'; labelFadeRange.max = '40'; labelFadeRange.step = '1';
+        const curFade = (this.plugin as any).settings?.glow?.labelFadeRangePx ?? 8;
+        labelFadeRange.value = String(curFade);
+        const labelFadeInput = document.createElement('input'); labelFadeInput.type = 'number'; labelFadeInput.min = labelFadeRange.min; labelFadeInput.max = labelFadeRange.max; labelFadeInput.step = labelFadeRange.step; labelFadeInput.value = String(labelFadeRange.value); labelFadeInput.style.width = '56px'; labelFadeInput.style.textAlign = 'right';
+        labelFadeRange.addEventListener('input', (e) => { labelFadeInput.value = (e.target as HTMLInputElement).value; });
+        labelFadeRange.addEventListener('change', async (e) => {
+          try {
+            (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+            const v = Number((e.target as HTMLInputElement).value);
+            (this.plugin as any).settings.glow.labelFadeRangePx = Number.isFinite(v) ? Math.max(0, Math.round(v)) : 8;
+            await (this.plugin as any).saveSettings();
+            try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
+            try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+          } catch (e) {}
+        });
+
+        const leftWrap = document.createElement('div'); leftWrap.style.display = 'flex'; leftWrap.style.flexDirection = 'column'; leftWrap.style.gap = '6px';
+        const minWrap = document.createElement('div'); minWrap.style.display = 'flex'; minWrap.style.alignItems = 'center'; minWrap.style.gap = '6px'; minWrap.appendChild(labelMinRange); minWrap.appendChild(labelMinInput);
+        const fadeWrap = document.createElement('div'); fadeWrap.style.display = 'flex'; fadeWrap.style.alignItems = 'center'; fadeWrap.style.gap = '6px'; fadeWrap.appendChild(labelFadeRange); fadeWrap.appendChild(labelFadeInput);
+        leftWrap.appendChild(minWrap); leftWrap.appendChild(fadeWrap);
+        panel.appendChild(makeRow('Label visibility (min + fade)', leftWrap, async () => {
+          try {
+            (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+            delete (this.plugin as any).settings.glow.labelMinVisibleRadiusPx;
+            delete (this.plugin as any).settings.glow.labelFadeRangePx;
+            await (this.plugin as any).saveSettings();
+            labelMinRange.value = String(6); labelMinInput.value = String(6);
+            labelFadeRange.value = String(8); labelFadeInput.value = String(8);
+            try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
+            try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+          } catch (e) {}
+        }));
+
       // (Background color control removed)
 
       // Node size range controls (min/max radius)
