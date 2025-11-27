@@ -18,6 +18,7 @@ export interface GlowSettings {
   edgeDimMax?: number;
   nodeMinBodyAlpha?: number;
   nodeColor?: string;
+  tagColor?: string;
   labelColor?: string;
   edgeColor?: string;
   // optional explicit glow radius in world/pixel units. If provided, overrides multiplier-based radius.
@@ -67,7 +68,7 @@ export interface Camera {
 
 export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   const canvas = options.canvas;
-  const glowOptions = options.glow;
+  let glowOptions = options.glow;
   const ctx = canvas.getContext('2d');
   let graph: GraphData | null = null;
   let nodeById: Map<string, any> = new Map();
@@ -118,6 +119,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let themeNodeColor = '#66ccff';
   let themeLabelColor = '#222';
   let themeEdgeColor = '#888888';
+  let themeTagColor = '#8000ff';
   // resolved interface or monospace font families defined by theme
   let resolvedInterfaceFontFamily: string | null = null;
   let resolvedMonoFontFamily: string | null = null;
@@ -372,6 +374,9 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         if (!glowOptions?.nodeColor && nodeVar && nodeVar.trim()) themeNodeColor = nodeVar.trim();
         if (!glowOptions?.labelColor && labelVar && labelVar.trim()) themeLabelColor = labelVar.trim();
         if (!glowOptions?.edgeColor && edgeVar && edgeVar.trim()) themeEdgeColor = edgeVar.trim();
+        // derive a theme tag color from secondary/accent vars (prefer explicit secondary accent if available)
+        const tagVar = cs.getPropertyValue('--accent-2') || cs.getPropertyValue('--accent-secondary') || cs.getPropertyValue('--interactive-accent') || cs.getPropertyValue('--accent-1') || cs.getPropertyValue('--accent');
+        if (!glowOptions?.tagColor && tagVar && tagVar.trim()) themeTagColor = tagVar.trim();
       } catch (e) {
         // ignore (e.g., server-side build environment)
       }
@@ -569,7 +574,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
       if (focused) {
         // radial gradient glow: interpolate alpha between dim and centerAlpha
-        const nodeColorOverride = (node && node.type === 'tag') ? '#8000ff' : themeNodeColor; // purple for tags
+        const nodeColorOverride = (node && node.type === 'tag') ? (glowOptions?.tagColor ?? themeTagColor) : themeNodeColor; // tag color
         const accentRgb = colorToRgb(nodeColorOverride);
         const dimCenter = clamp01(getBaseCenterAlpha(node) * dimFactor);
         const fullCenter = centerAlpha;
@@ -592,7 +597,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         ctx.save();
         ctx.beginPath();
         ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-        const bodyColorOverride = (node && node.type === 'tag') ? '#8000ff' : themeNodeColor;
+        const bodyColorOverride = (node && node.type === 'tag') ? (glowOptions?.tagColor ?? themeTagColor) : themeNodeColor;
         const accent = colorToRgb(bodyColorOverride);
         ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${bodyAlpha})`;
         ctx.fill();
@@ -650,6 +655,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
   function setGlowSettings(glow: GlowSettings) {
     if (!glow) return;
+    // keep reference so render() reads up-to-date overrides (nodeColor/edgeColor/labelColor)
+    glowOptions = glow;
     minRadius = glow.minNodeRadius;
     maxRadius = glow.maxNodeRadius;
     glowRadiusPx = (typeof glow.glowRadiusPx === 'number') ? glow.glowRadiusPx : glowRadiusPx;

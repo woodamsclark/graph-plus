@@ -789,7 +789,14 @@ class Graph2DController {
       // Node color
       const nodeColor = document.createElement('input');
       nodeColor.type = 'color';
-      nodeColor.value = (this.plugin as any).settings?.glow?.nodeColor || '#66ccff';
+      // Resolve theme-derived node color (prefer canvas vars if available)
+      let themeNodeColor = '#66ccff';
+      try {
+        const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
+        const nodeVar = cs.getPropertyValue('--interactive-accent') || cs.getPropertyValue('--accent-1') || cs.getPropertyValue('--accent');
+        if (nodeVar && nodeVar.trim()) themeNodeColor = nodeVar.trim();
+      } catch (e) {}
+      nodeColor.value = (this.plugin as any).settings?.glow?.nodeColor || themeNodeColor;
       nodeColor.addEventListener('input', async (e) => {
         try {
           (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
@@ -802,9 +809,14 @@ class Graph2DController {
       panel.appendChild(makeRow('Node color', nodeColor, async () => {
         try {
           (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
-          (this.plugin as any).settings.glow.nodeColor = undefined;
+          delete (this.plugin as any).settings.glow.nodeColor;
           await (this.plugin as any).saveSettings();
-          // update UI: if possible clear color input to theme-derived value
+          // reset input display to theme color
+          try {
+            const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
+            const nodeVar = cs.getPropertyValue('--interactive-accent') || cs.getPropertyValue('--accent-1') || cs.getPropertyValue('--accent');
+            nodeColor.value = (nodeVar && nodeVar.trim()) ? nodeVar.trim() : '#66ccff';
+          } catch (e) { nodeColor.value = '#66ccff'; }
           try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
         } catch (e) {}
@@ -813,7 +825,14 @@ class Graph2DController {
       // Edge color
       const edgeColor = document.createElement('input');
       edgeColor.type = 'color';
-      edgeColor.value = (this.plugin as any).settings?.glow?.edgeColor || '#888888';
+      // Resolve theme-derived edge color
+      let themeEdgeColor = '#888888';
+      try {
+        const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
+        const edgeVar = cs.getPropertyValue('--text-muted') || cs.getPropertyValue('--text-faint') || cs.getPropertyValue('--text-normal');
+        if (edgeVar && edgeVar.trim()) themeEdgeColor = edgeVar.trim();
+      } catch (e) {}
+      edgeColor.value = (this.plugin as any).settings?.glow?.edgeColor || themeEdgeColor;
       edgeColor.addEventListener('input', async (e) => {
         try {
           (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
@@ -826,36 +845,56 @@ class Graph2DController {
       panel.appendChild(makeRow('Edge color', edgeColor, async () => {
         try {
           (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
-          (this.plugin as any).settings.glow.edgeColor = undefined;
+          delete (this.plugin as any).settings.glow.edgeColor;
           await (this.plugin as any).saveSettings();
+          // reset input display to theme color
+          try {
+            const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
+            const edgeVar = cs.getPropertyValue('--text-muted') || cs.getPropertyValue('--text-faint') || cs.getPropertyValue('--text-normal');
+            edgeColor.value = (edgeVar && edgeVar.trim()) ? edgeVar.trim() : '#888888';
+          } catch (e) { edgeColor.value = '#888888'; }
           try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
         } catch (e) {}
       }));
 
-      // Background color (in-view)
-      const bgColor = document.createElement('input');
-      bgColor.type = 'color';
-      // allow background color to be stored at plugin.settings.glow.backgroundColor
-      bgColor.value = (this.plugin as any).settings?.glow?.backgroundColor || (getComputedStyle(this.containerEl).getPropertyValue('--background-primary') || '#ffffff').trim();
-      bgColor.addEventListener('input', async (e) => {
+        // Tag color
+        const tagColor = document.createElement('input');
+        tagColor.type = 'color';
+        // Resolve theme-derived tag color from secondary/accent vars (fallback to purple)
+        let themeTagColor = '#8000ff';
         try {
-          (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
-          (this.plugin as any).settings.glow.backgroundColor = (e.target as HTMLInputElement).value;
-          await (this.plugin as any).saveSettings();
-          try { this.containerEl.style.background = (this.plugin as any).settings.glow.backgroundColor || ''; } catch (e) {}
-          try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+          const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
+          const nodeVar = cs.getPropertyValue('--accent-2') || cs.getPropertyValue('--accent-secondary') || cs.getPropertyValue('--interactive-accent') || cs.getPropertyValue('--accent-1') || cs.getPropertyValue('--accent');
+          if (nodeVar && nodeVar.trim()) themeTagColor = nodeVar.trim();
         } catch (e) {}
-      });
-      panel.appendChild(makeRow('Background color', bgColor, async () => {
-        try {
-          (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
-          delete (this.plugin as any).settings.glow.backgroundColor;
-          await (this.plugin as any).saveSettings();
-          try { this.containerEl.style.background = ''; } catch (e) {}
-          try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
-        } catch (e) {}
-      }));
+        tagColor.value = (this.plugin as any).settings?.glow?.tagColor || themeTagColor;
+        tagColor.addEventListener('input', async (e) => {
+          try {
+            (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+            (this.plugin as any).settings.glow.tagColor = (e.target as HTMLInputElement).value;
+            await (this.plugin as any).saveSettings();
+            try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
+            try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+          } catch (e) {}
+        });
+        panel.appendChild(makeRow('Tag color', tagColor, async () => {
+          try {
+            (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+            delete (this.plugin as any).settings.glow.tagColor;
+            await (this.plugin as any).saveSettings();
+            // reset input display to theme tag color
+            try {
+              const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
+              const nodeVar = cs.getPropertyValue('--accent-2') || cs.getPropertyValue('--accent-secondary') || cs.getPropertyValue('--interactive-accent') || cs.getPropertyValue('--accent-1') || cs.getPropertyValue('--accent');
+              tagColor.value = (nodeVar && nodeVar.trim()) ? nodeVar.trim() : '#8000ff';
+            } catch (e) { tagColor.value = '#8000ff'; }
+            try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
+            try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+          } catch (e) {}
+        }));
+
+      // (Background color control removed)
 
       // Node size range controls (min/max radius)
       const minSizeWrap = document.createElement('div');

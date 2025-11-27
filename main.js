@@ -235,7 +235,7 @@ function layoutGraph3D(graph, options) {
 // graph/renderer2d.ts
 function createRenderer2D(options) {
   const canvas = options.canvas;
-  const glowOptions = options.glow;
+  let glowOptions = options.glow;
   const ctx = canvas.getContext("2d");
   let graph = null;
   let nodeById = /* @__PURE__ */ new Map();
@@ -274,6 +274,7 @@ function createRenderer2D(options) {
   let themeNodeColor = "#66ccff";
   let themeLabelColor = "#222";
   let themeEdgeColor = "#888888";
+  let themeTagColor = "#8000ff";
   let resolvedInterfaceFontFamily = null;
   let resolvedMonoFontFamily = null;
   function parseHexColor(hex) {
@@ -515,6 +516,9 @@ function createRenderer2D(options) {
         themeLabelColor = labelVar.trim();
       if (!glowOptions?.edgeColor && edgeVar && edgeVar.trim())
         themeEdgeColor = edgeVar.trim();
+      const tagVar = cs.getPropertyValue("--accent-2") || cs.getPropertyValue("--accent-secondary") || cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
+      if (!glowOptions?.tagColor && tagVar && tagVar.trim())
+        themeTagColor = tagVar.trim();
     } catch (e) {
     }
     try {
@@ -694,7 +698,7 @@ function createRenderer2D(options) {
       const focus = nodeFocusMap.get(node.id) ?? 1;
       const focused = focus > 0.01;
       if (focused) {
-        const nodeColorOverride = node && node.type === "tag" ? "#8000ff" : themeNodeColor;
+        const nodeColorOverride = node && node.type === "tag" ? glowOptions?.tagColor ?? themeTagColor : themeNodeColor;
         const accentRgb = colorToRgb(nodeColorOverride);
         const dimCenter = clamp01(getBaseCenterAlpha(node) * dimFactor);
         const fullCenter = centerAlpha;
@@ -714,7 +718,7 @@ function createRenderer2D(options) {
         ctx.save();
         ctx.beginPath();
         ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-        const bodyColorOverride = node && node.type === "tag" ? "#8000ff" : themeNodeColor;
+        const bodyColorOverride = node && node.type === "tag" ? glowOptions?.tagColor ?? themeTagColor : themeNodeColor;
         const accent = colorToRgb(bodyColorOverride);
         ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${bodyAlpha})`;
         ctx.fill();
@@ -766,6 +770,7 @@ function createRenderer2D(options) {
   function setGlowSettings(glow) {
     if (!glow)
       return;
+    glowOptions = glow;
     minRadius = glow.minNodeRadius;
     maxRadius = glow.maxNodeRadius;
     glowRadiusPx = typeof glow.glowRadiusPx === "number" ? glow.glowRadiusPx : glowRadiusPx;
@@ -1918,7 +1923,15 @@ var Graph2DController = class {
       };
       const nodeColor = document.createElement("input");
       nodeColor.type = "color";
-      nodeColor.value = this.plugin.settings?.glow?.nodeColor || "#66ccff";
+      let themeNodeColor = "#66ccff";
+      try {
+        const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
+        const nodeVar = cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
+        if (nodeVar && nodeVar.trim())
+          themeNodeColor = nodeVar.trim();
+      } catch (e) {
+      }
+      nodeColor.value = this.plugin.settings?.glow?.nodeColor || themeNodeColor;
       nodeColor.addEventListener("input", async (e) => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
@@ -1940,8 +1953,15 @@ var Graph2DController = class {
       panel.appendChild(makeRow("Node color", nodeColor, async () => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
-          this.plugin.settings.glow.nodeColor = void 0;
+          delete this.plugin.settings.glow.nodeColor;
           await this.plugin.saveSettings();
+          try {
+            const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
+            const nodeVar = cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
+            nodeColor.value = nodeVar && nodeVar.trim() ? nodeVar.trim() : "#66ccff";
+          } catch (e) {
+            nodeColor.value = "#66ccff";
+          }
           try {
             if (this.renderer && this.renderer.setGlowSettings)
               this.renderer.setGlowSettings(this.plugin.settings.glow);
@@ -1957,7 +1977,15 @@ var Graph2DController = class {
       }));
       const edgeColor = document.createElement("input");
       edgeColor.type = "color";
-      edgeColor.value = this.plugin.settings?.glow?.edgeColor || "#888888";
+      let themeEdgeColor = "#888888";
+      try {
+        const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
+        const edgeVar = cs.getPropertyValue("--text-muted") || cs.getPropertyValue("--text-faint") || cs.getPropertyValue("--text-normal");
+        if (edgeVar && edgeVar.trim())
+          themeEdgeColor = edgeVar.trim();
+      } catch (e) {
+      }
+      edgeColor.value = this.plugin.settings?.glow?.edgeColor || themeEdgeColor;
       edgeColor.addEventListener("input", async (e) => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
@@ -1979,8 +2007,15 @@ var Graph2DController = class {
       panel.appendChild(makeRow("Edge color", edgeColor, async () => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
-          this.plugin.settings.glow.edgeColor = void 0;
+          delete this.plugin.settings.glow.edgeColor;
           await this.plugin.saveSettings();
+          try {
+            const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
+            const edgeVar = cs.getPropertyValue("--text-muted") || cs.getPropertyValue("--text-faint") || cs.getPropertyValue("--text-normal");
+            edgeColor.value = edgeVar && edgeVar.trim() ? edgeVar.trim() : "#888888";
+          } catch (e) {
+            edgeColor.value = "#888888";
+          }
           try {
             if (this.renderer && this.renderer.setGlowSettings)
               this.renderer.setGlowSettings(this.plugin.settings.glow);
@@ -1994,16 +2029,25 @@ var Graph2DController = class {
         } catch (e) {
         }
       }));
-      const bgColor = document.createElement("input");
-      bgColor.type = "color";
-      bgColor.value = this.plugin.settings?.glow?.backgroundColor || (getComputedStyle(this.containerEl).getPropertyValue("--background-primary") || "#ffffff").trim();
-      bgColor.addEventListener("input", async (e) => {
+      const tagColor = document.createElement("input");
+      tagColor.type = "color";
+      let themeTagColor = "#8000ff";
+      try {
+        const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
+        const nodeVar = cs.getPropertyValue("--accent-2") || cs.getPropertyValue("--accent-secondary") || cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
+        if (nodeVar && nodeVar.trim())
+          themeTagColor = nodeVar.trim();
+      } catch (e) {
+      }
+      tagColor.value = this.plugin.settings?.glow?.tagColor || themeTagColor;
+      tagColor.addEventListener("input", async (e) => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
-          this.plugin.settings.glow.backgroundColor = e.target.value;
+          this.plugin.settings.glow.tagColor = e.target.value;
           await this.plugin.saveSettings();
           try {
-            this.containerEl.style.background = this.plugin.settings.glow.backgroundColor || "";
+            if (this.renderer && this.renderer.setGlowSettings)
+              this.renderer.setGlowSettings(this.plugin.settings.glow);
           } catch (e2) {
           }
           try {
@@ -2014,13 +2058,21 @@ var Graph2DController = class {
         } catch (e2) {
         }
       });
-      panel.appendChild(makeRow("Background color", bgColor, async () => {
+      panel.appendChild(makeRow("Tag color", tagColor, async () => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
-          delete this.plugin.settings.glow.backgroundColor;
+          delete this.plugin.settings.glow.tagColor;
           await this.plugin.saveSettings();
           try {
-            this.containerEl.style.background = "";
+            const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
+            const nodeVar = cs.getPropertyValue("--accent-2") || cs.getPropertyValue("--accent-secondary") || cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
+            tagColor.value = nodeVar && nodeVar.trim() ? nodeVar.trim() : "#8000ff";
+          } catch (e) {
+            tagColor.value = "#8000ff";
+          }
+          try {
+            if (this.renderer && this.renderer.setGlowSettings)
+              this.renderer.setGlowSettings(this.plugin.settings.glow);
           } catch (e) {
           }
           try {
