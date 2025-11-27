@@ -2484,6 +2484,75 @@ var Graph2DController = class {
         } catch (e) {
         }
       }));
+      const hoverDepthWrap = document.createElement("div");
+      hoverDepthWrap.style.display = "flex";
+      hoverDepthWrap.style.alignItems = "center";
+      hoverDepthWrap.style.gap = "6px";
+      const hoverDepthRange = document.createElement("input");
+      hoverDepthRange.type = "range";
+      hoverDepthRange.min = "0";
+      hoverDepthRange.max = "4";
+      hoverDepthRange.step = "1";
+      const curHoverDepth = this.plugin.settings?.glow?.hoverHighlightDepth ?? 1;
+      hoverDepthRange.value = String(curHoverDepth);
+      const hoverDepthInput = document.createElement("input");
+      hoverDepthInput.type = "number";
+      hoverDepthInput.min = hoverDepthRange.min;
+      hoverDepthInput.max = hoverDepthRange.max;
+      hoverDepthInput.step = hoverDepthRange.step;
+      hoverDepthInput.value = String(hoverDepthRange.value);
+      hoverDepthInput.style.width = "56px";
+      hoverDepthInput.style.textAlign = "right";
+      hoverDepthRange.addEventListener("input", (e) => {
+        hoverDepthInput.value = e.target.value;
+      });
+      hoverDepthRange.addEventListener("change", async (e) => {
+        try {
+          this.plugin.settings.glow = this.plugin.settings.glow || {};
+          const v = Number(e.target.value);
+          this.plugin.settings.glow.hoverHighlightDepth = Number.isFinite(v) ? Math.max(0, Math.min(4, Math.floor(v))) : 1;
+          await this.plugin.saveSettings();
+          try {
+            if (this.renderer && this.renderer.setGlowSettings)
+              this.renderer.setGlowSettings(this.plugin.settings.glow);
+          } catch (e2) {
+          }
+          try {
+            if (this.renderer && this.renderer.render)
+              this.renderer.render();
+          } catch (e2) {
+          }
+        } catch (e2) {
+        }
+      });
+      hoverDepthInput.addEventListener("input", (e) => {
+        hoverDepthRange.value = e.target.value;
+      });
+      hoverDepthInput.addEventListener("change", (e) => {
+        hoverDepthRange.dispatchEvent(new Event("change"));
+      });
+      hoverDepthWrap.appendChild(hoverDepthRange);
+      hoverDepthWrap.appendChild(hoverDepthInput);
+      panel.appendChild(makeRow("Hover highlight depth", hoverDepthWrap, async () => {
+        try {
+          this.plugin.settings.glow = this.plugin.settings.glow || {};
+          delete this.plugin.settings.glow.hoverHighlightDepth;
+          await this.plugin.saveSettings();
+          hoverDepthRange.value = String(1);
+          hoverDepthInput.value = String(1);
+          try {
+            if (this.renderer && this.renderer.setGlowSettings)
+              this.renderer.setGlowSettings(this.plugin.settings.glow);
+          } catch (e) {
+          }
+          try {
+            if (this.renderer && this.renderer.render)
+              this.renderer.render();
+          } catch (e) {
+          }
+        } catch (e) {
+        }
+      }));
       const minSizeWrap = document.createElement("div");
       minSizeWrap.style.display = "flex";
       minSizeWrap.style.alignItems = "center";

@@ -995,6 +995,43 @@ class Graph2DController {
           } catch (e) {}
         }));
 
+          // Hover highlight depth control (expose in toolbox)
+          const hoverDepthWrap = document.createElement('div');
+          hoverDepthWrap.style.display = 'flex'; hoverDepthWrap.style.alignItems = 'center'; hoverDepthWrap.style.gap = '6px';
+          const hoverDepthRange = document.createElement('input');
+          hoverDepthRange.type = 'range'; hoverDepthRange.min = '0'; hoverDepthRange.max = '4'; hoverDepthRange.step = '1';
+          const curHoverDepth = (this.plugin as any).settings?.glow?.hoverHighlightDepth ?? 1;
+          hoverDepthRange.value = String(curHoverDepth);
+          const hoverDepthInput = document.createElement('input');
+          hoverDepthInput.type = 'number'; hoverDepthInput.min = hoverDepthRange.min; hoverDepthInput.max = hoverDepthRange.max; hoverDepthInput.step = hoverDepthRange.step;
+          hoverDepthInput.value = String(hoverDepthRange.value);
+          hoverDepthInput.style.width = '56px'; hoverDepthInput.style.textAlign = 'right';
+          hoverDepthRange.addEventListener('input', (e) => { hoverDepthInput.value = (e.target as HTMLInputElement).value; });
+          hoverDepthRange.addEventListener('change', async (e) => {
+            try {
+              (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+              const v = Number((e.target as HTMLInputElement).value);
+              (this.plugin as any).settings.glow.hoverHighlightDepth = Number.isFinite(v) ? Math.max(0, Math.min(4, Math.floor(v))) : 1;
+              await (this.plugin as any).saveSettings();
+              try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
+              try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+            } catch (e) {}
+          });
+          hoverDepthInput.addEventListener('input', (e) => { hoverDepthRange.value = (e.target as HTMLInputElement).value; });
+          hoverDepthInput.addEventListener('change', (e) => { hoverDepthRange.dispatchEvent(new Event('change')); });
+          hoverDepthWrap.appendChild(hoverDepthRange); hoverDepthWrap.appendChild(hoverDepthInput);
+          panel.appendChild(makeRow('Hover highlight depth', hoverDepthWrap, async () => {
+            try {
+              (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
+              delete (this.plugin as any).settings.glow.hoverHighlightDepth;
+              await (this.plugin as any).saveSettings();
+              hoverDepthRange.value = String(1);
+              hoverDepthInput.value = String(1);
+              try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
+              try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+            } catch (e) {}
+          }));
+
       // (Background color control removed)
 
       // Node size range controls (min/max radius)
