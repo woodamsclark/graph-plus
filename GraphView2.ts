@@ -214,7 +214,8 @@ class Graph2DController {
     // Apply initial render options (whether to draw mutual links as double lines)
     try {
       const drawDouble = Boolean((this.plugin as any).settings?.mutualLinkDoubleLine);
-      if (this.renderer && (this.renderer as any).setRenderOptions) (this.renderer as any).setRenderOptions({ mutualDoubleLines: drawDouble });
+      const showTags = (this.plugin as any).settings?.showTags !== false;
+      if (this.renderer && (this.renderer as any).setRenderOptions) (this.renderer as any).setRenderOptions({ mutualDoubleLines: drawDouble, showTags });
     } catch (e) {}
 
     this.graph = await buildGraph(this.app, { countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks) });
@@ -533,7 +534,8 @@ class Graph2DController {
             // update mutual-line rendering option too
             try {
               const drawDouble = Boolean((this.plugin as any).settings?.mutualLinkDoubleLine);
-              if (this.renderer && (this.renderer as any).setRenderOptions) (this.renderer as any).setRenderOptions({ mutualDoubleLines: drawDouble });
+              const showTags = (this.plugin as any).settings?.showTags !== false;
+              if (this.renderer && (this.renderer as any).setRenderOptions) (this.renderer as any).setRenderOptions({ mutualDoubleLines: drawDouble, showTags });
             } catch (e) {}
             this.renderer.render();
           }
@@ -768,6 +770,32 @@ class Graph2DController {
           await (this.plugin as any).saveSettings();
           try { this.graph = await buildGraph(this.app, { countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks) }); if (this.renderer) (this.renderer as any).setGraph(this.graph); } catch (e) {}
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
+        } catch (e) {}
+      }));
+
+      // Show tag nodes toggle
+      const showTagsChk = document.createElement('input');
+      showTagsChk.type = 'checkbox';
+      showTagsChk.checked = (this.plugin as any).settings?.showTags !== false;
+      showTagsChk.addEventListener('change', async (e) => {
+        try {
+          (this.plugin as any).settings.showTags = (e.target as HTMLInputElement).checked;
+          await (this.plugin as any).saveSettings();
+          // update renderer visibility
+          const drawDouble = Boolean((this.plugin as any).settings?.mutualLinkDoubleLine);
+          const showTags = (this.plugin as any).settings?.showTags !== false;
+          if (this.renderer && (this.renderer as any).setRenderOptions) (this.renderer as any).setRenderOptions({ mutualDoubleLines: drawDouble, showTags });
+          if (this.renderer && (this.renderer as any).render) (this.renderer as any).render();
+        } catch (e) {}
+      });
+      panel.appendChild(makeRow('Show tag nodes', showTagsChk, async () => {
+        try {
+          (this.plugin as any).settings.showTags = true;
+          await (this.plugin as any).saveSettings();
+          const drawDouble = Boolean((this.plugin as any).settings?.mutualLinkDoubleLine);
+          const showTags = (this.plugin as any).settings?.showTags !== false;
+          if (this.renderer && (this.renderer as any).setRenderOptions) (this.renderer as any).setRenderOptions({ mutualDoubleLines: drawDouble, showTags });
+          if (this.renderer && (this.renderer as any).render) (this.renderer as any).render();
         } catch (e) {}
       }));
 

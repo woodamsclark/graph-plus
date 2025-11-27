@@ -56,6 +56,8 @@ export interface GreaterGraphSettings {
   // persistent node positions keyed by vault name, then by file path
   // settings.nodePositions[vaultId][filePath] = { x, y }
   nodePositions?: Record<string, Record<string, { x: number; y: number }>>;
+  // visibility toggles
+  showTags?: boolean;
 }
 
 export const DEFAULT_SETTINGS: GreaterGraphSettings = {
@@ -104,6 +106,7 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
   },
   nodePositions: {},
   mutualLinkDoubleLine: true,
+  showTags: true,
 };
 
 export default class GreaterGraphPlugin extends Plugin {
@@ -691,6 +694,15 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       .setDesc('When enabled, mutual links (A ↔ B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.')
       .addToggle((t) => t.setValue(Boolean(this.plugin.settings.mutualLinkDoubleLine)).onChange(async (v) => {
         this.plugin.settings.mutualLinkDoubleLine = Boolean(v);
+        await this.plugin.saveSettings();
+      }));
+
+    // Tag visibility toggle
+    new Setting(containerEl)
+      .setName('Show tag nodes')
+      .setDesc('Toggle visibility of tag nodes and their edges in the graph.')
+      .addToggle((t) => t.setValue(this.plugin.settings.showTags !== false).onChange(async (v) => {
+        this.plugin.settings.showTags = Boolean(v);
         await this.plugin.saveSettings();
       }));
     

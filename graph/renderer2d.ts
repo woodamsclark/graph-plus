@@ -43,7 +43,7 @@ export interface Renderer2D {
   zoomAt(screenX: number, screenY: number, factor: number): void;
   panBy(screenDx: number, screenDy: number): void;
   screenToWorld(screenX: number, screenY: number): { x: number; y: number };
-  setRenderOptions?(opts: { mutualDoubleLines?: boolean }): void;
+  setRenderOptions?(opts: { mutualDoubleLines?: boolean; showTags?: boolean }): void;
   // projection helpers for hit-testing
   getNodeScreenPosition?(node: any): { x: number; y: number };
   getScale?(): number;
@@ -76,6 +76,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let maxEdgeCount = 1;
   // whether to draw mutual edges as double parallel lines
   let drawMutualDoubleLines = true;
+  // whether to show tag nodes & tag-connected edges
+  let showTags = true;
 
   let minRadius = glowOptions?.minNodeRadius ?? 4;
   let maxRadius = glowOptions?.maxNodeRadius ?? 14;
@@ -467,6 +469,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         const src = nodeById.get(edge.sourceId);
         const tgt = nodeById.get(edge.targetId);
         if (!src || !tgt) continue;
+        if (!showTags && (src.type === 'tag' || tgt.type === 'tag')) continue;
         const srcP = projectWorld(src);
         const tgtP = projectWorld(tgt);
 
@@ -550,6 +553,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     }
 
     for (const node of graph.nodes) {
+      if (!showTags && node.type === 'tag') continue;
       const p = projectWorld(node);
       const baseRadius = getBaseNodeRadius(node);
       const radius = getNodeRadius(node);
@@ -635,9 +639,10 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     return getNodeRadius(node);
   }
 
-  function setRenderOptions(opts: { mutualDoubleLines?: boolean }) {
+  function setRenderOptions(opts: { mutualDoubleLines?: boolean; showTags?: boolean }) {
     if (!opts) return;
     if (typeof opts.mutualDoubleLines === 'boolean') drawMutualDoubleLines = opts.mutualDoubleLines;
+    if (typeof opts.showTags === 'boolean') showTags = opts.showTags;
   }
 
   function setGlowSettings(glow: GlowSettings) {
