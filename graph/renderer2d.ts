@@ -47,6 +47,19 @@ export interface Renderer2D {
   // projection helpers for hit-testing
   getNodeScreenPosition?(node: any): { x: number; y: number };
   getScale?(): number;
+  // camera controls
+  setCamera?(cam: Partial<Camera>): void;
+  getCamera?(): Camera;
+}
+
+export interface Camera {
+  yaw: number;      // rotation around Y axis
+  pitch: number;    // rotation around X axis
+  distance: number; // camera distance from target
+  targetX: number;
+  targetY: number;
+  targetZ: number;
+  zoom: number;     // additional zoom scalar
 }
 
 export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
@@ -141,21 +154,48 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     return { r: 102, g: 204, b: 255 };
   }
   // camera state
-  let scale = 1;
+  let scale = 1; // retained for 2D UI zoom/pan compositing
   let offsetX = 0;
   let offsetY = 0;
   const minScale = 0.25;
   const maxScale = 4;
 
-  // simple projection for tag nodes to appear on a secondary plane
-  // We keep notes as-is; tags get an X offset proportional to their Z
-  const TAG_Z_PROJ = 0.6; // how much z shifts x visually for tag nodes
+  let camera: Camera = {
+    yaw: Math.PI / 6,
+    pitch: Math.PI / 8,
+    distance: 1200,
+    targetX: 0,
+    targetY: 0,
+    targetZ: 0,
+    zoom: 1.0,
+  };
 
-  function getDrawPosition(node: any): { x: number; y: number } {
-    if (node && node.type === 'tag') {
-      return { x: (node.x || 0) + (node.z || 0) * TAG_Z_PROJ, y: node.y || 0 };
-    }
-    return { x: node.x || 0, y: node.y || 0 };
+  function setCamera(newCamera: Partial<Camera>) {
+    camera = { ...camera, ...newCamera } as Camera;
+  }
+  function getCamera(): Camera { return camera; }
+
+  // Camera-based projection: returns projected world-plane coordinates
+  function projectWorld(node: any): { x: number; y: number; depth: number } {
+    const { yaw, pitch, distance, targetX, targetY, targetZ, zoom } = camera;
+    const wx = (node.x || 0) - targetX;
+    const wy = (node.y || 0) - targetY;
+    const wz = (node.z || 0) - targetZ;
+    const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
+    const xz = wx * cosYaw - wz * sinYaw;
+    const zz = wx * sinYaw + wz * cosYaw;
+    const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+    const yz = wy * cosP - zz * sinP;
+    const zz2 = wy * sinP + zz * cosP;
+    const camZ = distance;
+    const dz = camZ - zz2;
+    const eps = 0.0001;
+    const safeDz = dz < eps ? eps : dz;
+    const focal = 800; // tune focal length
+    const perspective = (zoom * focal) / safeDz;
+    const px = xz * perspective;
+    const py = yz * perspective;
+    return { x: px, y: py, depth: dz };
   }
 
   function setGraph(g: GraphData) {
@@ -288,7 +328,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     const innerR = radius * distanceInnerMultiplier;
     const outerR = radius * distanceOuterMultiplier;
     if (outerR <= innerR || outerR <= 0) return 0;
-    const p = getDrawPosition(node);
+    const p = projectWorld(node);
     const dx = mouseX - p.x;
     const dy = mouseY - p.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -427,8 +467,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         const src = nodeById.get(edge.sourceId);
         const tgt = nodeById.get(edge.targetId);
         if (!src || !tgt) continue;
-        const srcP = getDrawPosition(src);
-        const tgtP = getDrawPosition(tgt);
+        const srcP = projectWorld(src);
+        const tgtP = projectWorld(tgt);
 
         const srcF = nodeFocusMap.get(edge.sourceId) ?? 1;
         const tgtF = nodeFocusMap.get(edge.targetId) ?? 1;
@@ -510,7 +550,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     }
 
     for (const node of graph.nodes) {
-      const p = getDrawPosition(node);
+      const p = projectWorld(node);
       const baseRadius = getBaseNodeRadius(node);
       const radius = getNodeRadius(node);
       const centerAlpha = getCenterAlpha(node);
@@ -522,7 +562,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
       if (focused) {
         // radial gradient glow: interpolate alpha between dim and centerAlpha
-        const accentRgb = colorToRgb(themeNodeColor);
+        const nodeColorOverride = (node && node.type === 'tag') ? '#8000ff' : themeNodeColor; // purple for tags
+        const accentRgb = colorToRgb(nodeColorOverride);
         const dimCenter = clamp01(getBaseCenterAlpha(node) * dimFactor);
         const fullCenter = centerAlpha;
         const blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
@@ -544,7 +585,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         ctx.save();
         ctx.beginPath();
         ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-        const accent = colorToRgb(themeNodeColor);
+        const bodyColorOverride = (node && node.type === 'tag') ? '#8000ff' : themeNodeColor;
+        const accent = colorToRgb(bodyColorOverride);
         ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${bodyAlpha})`;
         ctx.fill();
         ctx.restore();
@@ -630,7 +672,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   }
 
   function getNodeScreenPosition(node: any): { x: number; y: number } {
-    const p = getDrawPosition(node);
+    const p = projectWorld(node);
     return { x: p.x * scale + offsetX, y: p.y * scale + offsetY };
   }
 
@@ -638,13 +680,11 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
   function zoomAt(screenX: number, screenY: number, factor: number) {
     if (factor <= 0) return;
-    const worldBefore = screenToWorld(screenX, screenY);
-    scale *= factor;
-    if (scale < minScale) scale = minScale;
-    if (scale > maxScale) scale = maxScale;
-    const worldAfter = worldBefore; // keep same world point under cursor
-    offsetX = screenX - worldAfter.x * scale;
-    offsetY = screenY - worldAfter.y * scale;
+    // prefer camera-based zoom by adjusting distance
+    const cam = getCamera();
+    let newDistance = cam.distance / factor;
+    newDistance = Math.max(200, Math.min(5000, newDistance));
+    setCamera({ distance: newDistance });
     render();
   }
 
@@ -669,6 +709,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     screenToWorld,
     getNodeScreenPosition,
     getScale,
+    setCamera,
+    getCamera,
   };
 }
 

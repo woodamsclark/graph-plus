@@ -135,6 +135,15 @@ class Graph2DController {
   private isPanning: boolean = false;
   private lastPanX: number = 0;
   private lastPanY: number = 0;
+  // Camera interaction (Phase 4)
+  private isOrbiting: boolean = false;
+  private lastOrbitX: number = 0;
+  private lastOrbitY: number = 0;
+  private isMiddlePanning: boolean = false;
+  private panStartX: number = 0;
+  private panStartY: number = 0;
+  private panStartTargetX: number = 0;
+  private panStartTargetY: number = 0;
   // drag tracking for momentum and click suppression
   private hasDragged: boolean = false;
   private preventClick: boolean = false;
@@ -334,7 +343,43 @@ class Graph2DController {
         return;
       }
 
-      // If panning, translate the camera
+      // Orbit (right mouse button drag)
+      if (this.isOrbiting) {
+        const dx = screenX - this.lastOrbitX;
+        const dy = screenY - this.lastOrbitY;
+        this.lastOrbitX = screenX;
+        this.lastOrbitY = screenY;
+        try {
+          const cam = (this.renderer as any).getCamera();
+          const yawSpeed = 0.005;
+          const pitchSpeed = 0.005;
+          let newYaw = cam.yaw - dx * yawSpeed;
+          let newPitch = cam.pitch - dy * pitchSpeed;
+          const maxPitch = Math.PI / 2 - 0.1;
+          const minPitch = -maxPitch;
+          newPitch = Math.max(minPitch, Math.min(maxPitch, newPitch));
+          (this.renderer as any).setCamera({ yaw: newYaw, pitch: newPitch });
+          (this.renderer as any).render();
+        } catch (e) {}
+        return;
+      }
+
+      // Middle-button pan: move camera target
+      if (this.isMiddlePanning) {
+        const dx = screenX - this.panStartX;
+        const dy = screenY - this.panStartY;
+        try {
+          const cam = (this.renderer as any).getCamera();
+          const panSpeed = cam.distance * 0.001 / Math.max(0.0001, cam.zoom);
+          const newTargetX = this.panStartTargetX - dx * panSpeed;
+          const newTargetY = this.panStartTargetY + dy * panSpeed;
+          (this.renderer as any).setCamera({ targetX: newTargetX, targetY: newTargetY });
+          (this.renderer as any).render();
+        } catch (e) {}
+        return;
+      }
+
+      // Legacy 2D panning (left drag on empty) remains
       if (this.isPanning) {
         const dx = screenX - this.lastPanX;
         const dy = screenY - this.lastPanY;
@@ -370,19 +415,41 @@ class Graph2DController {
     this.wheelHandler = (ev: WheelEvent) => {
       if (!this.canvas || !this.renderer) return;
       ev.preventDefault();
-      const r = this.canvas.getBoundingClientRect();
-      const x = ev.clientX - r.left;
-      const y = ev.clientY - r.top;
       const factor = ev.deltaY < 0 ? 1.1 : 0.9;
-      (this.renderer as any).zoomAt(x, y, factor);
+      (this.renderer as any).zoomAt(ev.clientX, ev.clientY, factor);
       (this.renderer as any).render();
     };
 
     this.mouseDownHandler = (ev: MouseEvent) => {
-      if (!this.canvas || ev.button !== 0 || !this.renderer) return;
+      if (!this.canvas || !this.renderer) return;
       const r = this.canvas.getBoundingClientRect();
       const screenX = ev.clientX - r.left;
       const screenY = ev.clientY - r.top;
+      // Right button -> start orbit if on empty space
+      if (ev.button === 2) {
+        const hitNode = this.hitTestNodeScreen(screenX, screenY);
+        if (!hitNode) {
+          this.isOrbiting = true;
+          this.lastOrbitX = screenX;
+          this.lastOrbitY = screenY;
+          ev.preventDefault();
+          return;
+        }
+      }
+      // Middle button -> start camera target pan
+      if (ev.button === 1) {
+        try {
+          const cam = (this.renderer as any).getCamera();
+          this.isMiddlePanning = true;
+          this.panStartX = screenX;
+          this.panStartY = screenY;
+          this.panStartTargetX = cam.targetX;
+          this.panStartTargetY = cam.targetY;
+          ev.preventDefault();
+          return;
+        } catch (e) {}
+      }
+      if (ev.button !== 0) return;
       const world = (this.renderer as any).screenToWorld(screenX, screenY);
 
       // initialize drag tracking
@@ -420,6 +487,8 @@ class Graph2DController {
 
     this.mouseUpHandler = (ev: MouseEvent) => {
       if (!this.canvas) return;
+      if (ev.button === 2) this.isOrbiting = false;
+      if (ev.button === 1) this.isMiddlePanning = false;
       if (ev.button !== 0) return;
 
       // If we were dragging a node, apply momentum if it was dragged
@@ -449,6 +518,7 @@ class Graph2DController {
     this.canvas.addEventListener('wheel', this.wheelHandler, { passive: false });
     this.canvas.addEventListener('mousedown', this.mouseDownHandler);
     window.addEventListener('mouseup', this.mouseUpHandler);
+    this.canvas.addEventListener('contextmenu', (e) => { if (this.isOrbiting) e.preventDefault(); });
 
     if ((this.plugin as any).registerSettingsListener) {
       this.settingsUnregister = (this.plugin as any).registerSettingsListener(() => {
