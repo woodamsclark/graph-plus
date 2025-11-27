@@ -52,6 +52,7 @@ export interface Renderer2D {
   // camera controls
   setCamera?(cam: Partial<Camera>): void;
   getCamera?(): Camera;
+  getCameraBasis?(cam: Camera): { right: { x: number; y: number; z: number }; up: { x: number; y: number; z: number }; forward: { x: number; y: number; z: number } };
 }
 
 export interface Camera {
@@ -731,6 +732,39 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
   function getScale() { return scale; }
 
+  // Camera basis helper: returns right, up, forward unit vectors in world space
+  function getCameraBasis(cam: Camera) {
+    const { yaw, pitch } = cam;
+
+    const cosPitch = Math.cos(pitch);
+    const sinPitch = Math.sin(pitch);
+    const cosYaw = Math.cos(yaw);
+    const sinYaw = Math.sin(yaw);
+
+    const forward = {
+      x: Math.sin(yaw) * cosPitch,
+      y: sinPitch,
+      z: Math.cos(yaw) * cosPitch,
+    };
+
+    const right = {
+      x: cosYaw,
+      y: 0,
+      z: -sinYaw,
+    };
+
+    const up = {
+      x: forward.y * right.z - forward.z * right.y,
+      y: forward.z * right.x - forward.x * right.z,
+      z: forward.x * right.y - forward.y * right.x,
+    };
+
+    const len = Math.sqrt(up.x * up.x + up.y * up.y + up.z * up.z) || 1;
+    up.x /= len; up.y /= len; up.z /= len;
+
+    return { right, up, forward };
+  }
+
   function zoomAt(screenX: number, screenY: number, factor: number) {
     if (factor <= 0) return;
     // prefer camera-based zoom by adjusting distance
@@ -766,6 +800,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     getScale,
     setCamera,
     getCamera,
+    getCameraBasis,
   };
 }
 

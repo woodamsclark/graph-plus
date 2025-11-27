@@ -824,6 +824,33 @@ function createRenderer2D(options) {
   function getScale() {
     return scale;
   }
+  function getCameraBasis(cam) {
+    const { yaw, pitch } = cam;
+    const cosPitch = Math.cos(pitch);
+    const sinPitch = Math.sin(pitch);
+    const cosYaw = Math.cos(yaw);
+    const sinYaw = Math.sin(yaw);
+    const forward = {
+      x: Math.sin(yaw) * cosPitch,
+      y: sinPitch,
+      z: Math.cos(yaw) * cosPitch
+    };
+    const right = {
+      x: cosYaw,
+      y: 0,
+      z: -sinYaw
+    };
+    const up = {
+      x: forward.y * right.z - forward.z * right.y,
+      y: forward.z * right.x - forward.x * right.z,
+      z: forward.x * right.y - forward.y * right.x
+    };
+    const len = Math.sqrt(up.x * up.x + up.y * up.y + up.z * up.z) || 1;
+    up.x /= len;
+    up.y /= len;
+    up.z /= len;
+    return { right, up, forward };
+  }
   function zoomAt(screenX, screenY, factor) {
     if (factor <= 0)
       return;
@@ -856,7 +883,8 @@ function createRenderer2D(options) {
     getProjectedNode,
     getScale,
     setCamera,
-    getCamera
+    getCamera,
+    getCameraBasis
   };
 }
 
@@ -1306,6 +1334,9 @@ var Graph2DController = class {
   previewPollTimer = null;
   controlsEl = null;
   controlsVisible = true;
+  // Screen-space tracking for cursor attractor
+  lastMouseX = null;
+  lastMouseY = null;
   saveNodePositions() {
     if (!this.graph)
       return;
@@ -1468,6 +1499,8 @@ var Graph2DController = class {
       const r = this.canvas.getBoundingClientRect();
       const screenX = ev.clientX - r.left;
       const screenY = ev.clientY - r.top;
+      this.lastMouseX = screenX;
+      this.lastMouseY = screenY;
       if (this.draggingNode) {
         const now = performance.now();
         let world = null;
@@ -1590,6 +1623,8 @@ var Graph2DController = class {
       this.clearHover();
       this.lastPreviewedNodeId = null;
     };
+    this.lastMouseX = null;
+    this.lastMouseY = null;
     this.mouseClickHandler = (ev) => {
       if (!this.canvas)
         return;
@@ -2350,6 +2385,10 @@ var Graph2DController = class {
     if (dt > 0.05)
       dt = 0.05;
     this.lastTime = timestamp;
+    try {
+      this.applyCursorAttractor();
+    } catch (e) {
+    }
     if (this.simulation)
       this.simulation.tick(dt);
     try {
@@ -2365,6 +2404,59 @@ var Graph2DController = class {
     }
     this.animationFrame = requestAnimationFrame(this.animationLoop);
   };
+  // Camera-plane cursor attractor: screen-aligned, O(N) per-frame
+  applyCursorAttractor() {
+    const physics = this.plugin.settings?.physics || {};
+    if (physics.mouseAttractionEnabled === false)
+      return;
+    if (this.lastMouseX == null || this.lastMouseY == null)
+      return;
+    if (!this.renderer || !this.graph)
+      return;
+    const radius = physics.mouseAttractionRadius;
+    const baseStrength = physics.mouseAttractionStrength;
+    const exponent = physics.mouseAttractionExponent ?? 3;
+    if (!Number.isFinite(radius) || radius <= 0 || !Number.isFinite(baseStrength) || baseStrength === 0)
+      return;
+    const cam = this.renderer.getCamera();
+    const basis = this.renderer.getCameraBasis ? this.renderer.getCameraBasis(cam) : null;
+    if (!basis)
+      return;
+    const { right, up } = basis;
+    const width = (this.canvas ? this.canvas.width : this.containerEl.getBoundingClientRect().width) || 1;
+    const height = (this.canvas ? this.canvas.height : this.containerEl.getBoundingClientRect().height) || 1;
+    for (const node of this.graph.nodes) {
+      const proj = this.renderer.getProjectedNode ? this.renderer.getProjectedNode(node) : null;
+      if (!proj)
+        continue;
+      const dxScreen = this.lastMouseX - proj.x;
+      const dyScreen = this.lastMouseY - proj.y;
+      const distScreen = Math.sqrt(dxScreen * dxScreen + dyScreen * dyScreen);
+      if (distScreen > radius || distScreen === 0)
+        continue;
+      const deadzone = Math.max(1, radius * 0.06);
+      if (distScreen < deadzone) {
+        node.vx = (node.vx || 0) * 0.6;
+        node.vy = (node.vy || 0) * 0.6;
+        node.vz = (node.vz || 0) * 0.6;
+        continue;
+      }
+      const nx = dxScreen / distScreen;
+      const ny = dyScreen / distScreen;
+      let wx = right.x * nx + up.x * ny;
+      let wy = right.y * nx + up.y * ny;
+      let wz = right.z * nx + up.z * ny;
+      const len = Math.sqrt(wx * wx + wy * wy + wz * wz) || 1;
+      wx /= len;
+      wy /= len;
+      wz /= len;
+      const t = 1 - distScreen / radius;
+      const strength = baseStrength * Math.pow(t, exponent);
+      node.vx = (node.vx || 0) + wx * strength;
+      node.vy = (node.vy || 0) + wy * strength;
+      node.vz = (node.vz || 0) + wz * strength;
+    }
+  }
   resize(width, height) {
     if (!this.renderer)
       return;
