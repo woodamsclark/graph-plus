@@ -188,6 +188,40 @@ class Graph2DController {
     }
   }
 
+  // Recreate the physics simulation, optionally excluding tag nodes.
+  private recreateSimulation(showTags: boolean, extraOpts?: { centerX?: number; centerY?: number; centerNodeId?: string }) {
+    try {
+      if (this.simulation) {
+        try { this.simulation.stop(); } catch (e) {}
+      }
+      if (!this.graph) return;
+      const physOpts = Object.assign({}, (this.plugin as any).settings?.physics || {});
+      const rect = this.containerEl.getBoundingClientRect();
+      const centerX = (extraOpts && typeof extraOpts.centerX === 'number') ? extraOpts.centerX : rect.width / 2;
+      const centerY = (extraOpts && typeof extraOpts.centerY === 'number') ? extraOpts.centerY : rect.height / 2;
+      const centerNodeId = extraOpts?.centerNodeId;
+
+      // Filter nodes/edges when tags are hidden
+      let simNodes = this.graph.nodes;
+      let simEdges = this.graph.edges || [];
+      if (!showTags) {
+        const tagSet = new Set<string>();
+        simNodes = this.graph.nodes.filter((n: any) => {
+          if ((n as any).type === 'tag') { tagSet.add(n.id); return false; }
+          return true;
+        });
+        simEdges = (this.graph.edges || []).filter((e: any) => !tagSet.has(e.sourceId) && !tagSet.has(e.targetId));
+      }
+
+      this.simulation = createSimulation(simNodes, simEdges, Object.assign({}, physOpts, { centerX, centerY, centerNodeId }));
+      // start simulation
+      try { this.simulation.start(); } catch (e) {}
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to recreate simulation', e);
+    }
+  }
+
   constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
     this.app = app;
     this.containerEl = containerEl;
@@ -279,11 +313,9 @@ class Graph2DController {
       }
     }
 
-    this.simulation = createSimulation(
-      this.graph.nodes,
-      this.graph.edges,
-      Object.assign({}, (this.plugin as any).settings?.physics || {}, { centerX, centerY, centerNodeId })
-    );
+    // create physics simulation (respecting showTags setting)
+    const showTagsInitial = (this.plugin as any).settings?.showTags !== false;
+    this.recreateSimulation(showTagsInitial, { centerX, centerY, centerNodeId });
 
     // read interaction settings (drag momentum / threshold)
     try {
@@ -292,7 +324,6 @@ class Graph2DController {
       this.dragThreshold = interaction.dragThreshold ?? this.dragThreshold;
     } catch (e) {}
 
-    this.simulation.start();
     this.running = true;
     this.lastTime = null;
     this.animationFrame = requestAnimationFrame(this.animationLoop);
@@ -786,6 +817,8 @@ class Graph2DController {
           const showTags = (this.plugin as any).settings?.showTags !== false;
           if (this.renderer && (this.renderer as any).setRenderOptions) (this.renderer as any).setRenderOptions({ mutualDoubleLines: drawDouble, showTags });
           if (this.renderer && (this.renderer as any).render) (this.renderer as any).render();
+          // recreate physics to remove/add tag nodes
+          try { this.recreateSimulation(showTags); } catch (e) {}
         } catch (e) {}
       });
       panel.appendChild(makeRow('Show tag nodes', showTagsChk, async () => {
@@ -796,6 +829,7 @@ class Graph2DController {
           const showTags = (this.plugin as any).settings?.showTags !== false;
           if (this.renderer && (this.renderer as any).setRenderOptions) (this.renderer as any).setRenderOptions({ mutualDoubleLines: drawDouble, showTags });
           if (this.renderer && (this.renderer as any).render) (this.renderer as any).render();
+          try { this.recreateSimulation(showTags); } catch (e) {}
         } catch (e) {}
       }));
 
