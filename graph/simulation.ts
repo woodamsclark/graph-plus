@@ -232,13 +232,16 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
     const noteK = notePlaneStiffness ?? 0;
     const tagK = tagPlaneStiffness ?? 0;
     if (noteK === 0 && tagK === 0) return;
+    // Pull notes/tags toward the simulation center (not always world origin)
+    const targetZ = centerZ ?? 0;
+    const targetX = centerX ?? 0;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
       if ((n as any).type === 'note' && noteK > 0) {
-        const dz = 0 - (n.z || 0);
+        const dz = (targetZ) - (n.z || 0);
         n.vz = (n.vz || 0) + dz * noteK;
       } else if ((n as any).type === 'tag' && tagK > 0) {
-        const dx = 0 - (n.x || 0);
+        const dx = (targetX) - (n.x || 0);
         n.vx = (n.vx || 0) + dx * tagK;
       }
     }
