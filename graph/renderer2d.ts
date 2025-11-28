@@ -551,7 +551,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
           const srcInDepth = hoverHighlightSet.has(edge.sourceId);
           const tgtInDepth = hoverHighlightSet.has(edge.targetId);
           const directlyIncident = edge.sourceId === hoveredNodeId || edge.targetId === hoveredNodeId;
-          if ((srcInDepth && tgtInDepth) || directlyIncident) finalEdgeAlpha = useEdgeMax;
+          if ((srcInDepth && tgtInDepth) || directlyIncident) finalEdgeAlpha = 1.0;
         }
         ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${finalEdgeAlpha})`;
         // mutual edges: draw two parallel lines offset perpendicular to the edge when enabled
@@ -640,7 +640,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
           const isHovered = node.id === hoveredNodeId;
           if (isHovered || inDepth) {
             blendedCenter = 1;
-            effectiveUseNodeAlpha = useNodeMax;
+            // Force full alpha for hovered/highlighted node glows
+            effectiveUseNodeAlpha = 1.0;
           }
         }
         const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
@@ -673,7 +674,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
           const isHoveredBody = node.id === hoveredNodeId;
           if (isHoveredBody || inDepthBody) {
             finalBodyAlpha = 1;
-            effectiveUseBodyAlpha = useBodyMax;
+            // Force full alpha for hovered/highlighted node bodies
+            effectiveUseBodyAlpha = 1.0;
           }
         }
         ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${finalBodyAlpha * effectiveUseBodyAlpha})`;
@@ -714,14 +716,16 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
           const fontToSet = Math.max(1, (clampedDisplayed) / Math.max(0.0001, scale));
           ctx.save();
           ctx.font = `${fontToSet}px ${resolvedInterfaceFontFamily || 'sans-serif'}`;
-          // Compute final alpha from label visibility and the node's center alpha
-          // so that proximity/hover glow also affects label appearance.
-          const centerA = clamp01(getCenterAlpha(node));
-          ctx.globalAlpha = labelAlphaVis * centerA;
-          // apply label alpha override if present
-          const labelRgb = colorToRgb((glowOptions?.labelColor ?? labelCss) || '#ffffff');
-          const useLabelAlpha = glowOptions?.labelColorAlpha ?? labelColorAlpha;
-          ctx.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},${useLabelAlpha})`;
+            // Compute final alpha from label visibility. For hovered/highlighted
+            // nodes we force full alpha (1.0) so labels are never partially transparent.
+            const isHoverOrHighlight = hoveredNodeId === node.id || (hoverHighlightSet && hoverHighlightSet.has(node.id));
+            const centerA = isHoverOrHighlight ? 1.0 : clamp01(getCenterAlpha(node));
+            ctx.globalAlpha = labelAlphaVis * centerA;
+            // apply label alpha override if present, but force to 1.0 for hovered/highlighted
+            const labelRgb = colorToRgb((glowOptions?.labelColor ?? labelCss) || '#ffffff');
+            const useLabelAlpha = glowOptions?.labelColorAlpha ?? labelColorAlpha;
+            const effectiveUseLabelAlpha = isHoverOrHighlight ? 1.0 : useLabelAlpha;
+            ctx.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},${effectiveUseLabelAlpha})`;
           const verticalPadding = 4; // world units; will be scaled by transform
           ctx.fillText(node.label, p.x, p.y + radius + verticalPadding);
           ctx.restore();
