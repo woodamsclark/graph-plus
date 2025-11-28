@@ -266,12 +266,19 @@ class Graph2DController {
     // create in-view controls panel
     this.createControlsPanel();
 
-    // When creating renderer, pass glow settings and prefer explicit glowRadiusPx derived
-    // from physics.mouseAttractionRadius so glow matches mouse attraction radius.
+    // When creating renderer, pass glow settings only; old mouse-attraction radius is deprecated.
     const initialGlow = Object.assign({}, (this.plugin as any).settings?.glow || {});
-    const initialPhys = (this.plugin as any).settings?.physics || {};
-    if (typeof initialPhys.mouseAttractionRadius === 'number') initialGlow.glowRadiusPx = initialPhys.mouseAttractionRadius;
     this.renderer = createRenderer2D({ canvas, glow: initialGlow });
+    // Ensure sane fallback alphas so nodes are visible even if settings are unset
+    try {
+      const defaults = {
+        nodeColorAlpha: 1.0,
+        edgeColorAlpha: 0.6,
+        tagColorAlpha: 1.0,
+      } as any;
+      const merged = Object.assign({}, defaults, (this.plugin as any).settings?.glow || {});
+      if ((this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings(merged);
+    } catch (e) {}
     try {
       const cam0 = (this.renderer as any).getCamera?.();
       if (cam0 && typeof cam0.distance === 'number') this.defaultCameraDistance = cam0.distance;
@@ -1182,10 +1189,32 @@ class Graph2DController {
         { key: 'springLength', label: 'Spring len', step: '1' },
         { key: 'centerPull', label: 'Center pull', step: '0.0001' },
         { key: 'damping', label: 'Damping', step: '0.01' },
-        // mouseAttractionRadius and mouseAttractionStrength are managed
-        // in the global Settings panel (main.ts) to avoid duplicate controls.
+        // Mouse gravity uses unified glow/gravity settings; old radius control is deprecated.
         { key: 'mouseAttractionExponent', label: 'Mouse attraction exponent', step: '0.1' },
       ];
+      // Mouse gravity enable toggle
+      const mouseGravChk = document.createElement('input');
+      mouseGravChk.type = 'checkbox';
+      mouseGravChk.checked = (phys.mouseGravityEnabled !== false) && (phys.mouseAttractionEnabled !== false);
+      mouseGravChk.addEventListener('change', async (e) => {
+        try {
+          (this.plugin as any).settings.physics = (this.plugin as any).settings.physics || {};
+          (this.plugin as any).settings.physics.mouseGravityEnabled = (e.target as HTMLInputElement).checked;
+          delete (this.plugin as any).settings.physics.mouseAttractionEnabled;
+          await (this.plugin as any).saveSettings();
+          try { if (this.simulation && (this.simulation as any).setOptions) (this.simulation as any).setOptions((this.plugin as any).settings.physics); } catch (e) {}
+        } catch (e) {}
+      });
+      panel.appendChild(makeRow('Mouse gravity', mouseGravChk, async () => {
+        try {
+          (this.plugin as any).settings.physics = (this.plugin as any).settings.physics || {};
+          delete (this.plugin as any).settings.physics.mouseGravityEnabled;
+          delete (this.plugin as any).settings.physics.mouseAttractionEnabled;
+          await (this.plugin as any).saveSettings();
+          mouseGravChk.checked = true;
+          try { if (this.simulation && (this.simulation as any).setOptions) (this.simulation as any).setOptions((this.plugin as any).settings.physics); } catch (e) {}
+        } catch (e) {}
+      }));
       for (const f of physFields) {
         const wrap = document.createElement('div');
         wrap.style.display = 'flex';
@@ -1201,7 +1230,6 @@ class Graph2DController {
           case 'springLength': range.min = '10'; range.max = '500'; range.step = '1'; break;
           case 'centerPull': range.min = '0'; range.max = '0.01'; range.step = '0.0001'; break;
           case 'damping': range.min = '0'; range.max = '1'; range.step = '0.01'; break;
-          case 'mouseAttractionRadius': range.min = '0'; range.max = '400'; range.step = '1'; break;
           case 'mouseAttractionStrength': range.min = '0'; range.max = '1'; range.step = '0.01'; break;
           case 'mouseAttractionExponent': range.min = '0.1'; range.max = '10'; range.step = '0.1'; break;
           default: range.min = '0'; range.max = '100'; range.step = '1';
@@ -1375,24 +1403,25 @@ class Graph2DController {
   // Camera-plane cursor attractor: screen-aligned, O(N) per-frame
   private applyCursorAttractor() {
     const physics = (this.plugin as any).settings?.physics || {};
+    const glow = (this.plugin as any).settings?.glow || {};
     // default to enabled when unset
-    if (physics.mouseAttractionEnabled === false) return;
+    const gravityEnabled = (physics.mouseGravityEnabled !== false) && (physics.mouseAttractionEnabled !== false);
+    if (!gravityEnabled) return;
     if (this.suppressAttractorUntilMouseMove) return;
     if (this.lastMouseX == null || this.lastMouseY == null) return;
     if (!this.renderer || !this.graph) return;
 
-    const radius = physics.mouseAttractionRadius; // use existing setting
-    const baseStrength = physics.mouseAttractionStrength;
-    const exponent = physics.mouseAttractionExponent ?? 3;
-    if (!Number.isFinite(radius) || radius <= 0 || !Number.isFinite(baseStrength) || baseStrength === 0) return;
+    // Use unified glow/gravity model: per-node radius scaled by gravityRadiusMultiplier,
+    // with curve steepness controlling falloff. Base strength is a constant (configurable).
+    const multiplier = Number.isFinite(glow.gravityRadiusMultiplier) ? Number(glow.gravityRadiusMultiplier) : 6;
+    const steepness = Number.isFinite(glow.gravityCurveSteepness) ? Number(glow.gravityCurveSteepness) : (physics.mouseAttractionExponent ?? 3);
+    const baseStrength = Number.isFinite(physics.mouseAttractionStrength) ? Number(physics.mouseAttractionStrength) : 0.6;
+    if (baseStrength === 0) return;
 
     const cam = (this.renderer as any).getCamera();
     const basis = (this.renderer as any).getCameraBasis ? (this.renderer as any).getCameraBasis(cam) : null;
     if (!basis) return;
     const { right, up } = basis;
-
-    const width = (this.canvas ? this.canvas.width : this.containerEl.getBoundingClientRect().width) || 1;
-    const height = (this.canvas ? this.canvas.height : this.containerEl.getBoundingClientRect().height) || 1;
 
     for (const node of this.graph.nodes) {
       const proj = (this.renderer as any).getProjectedNode ? (this.renderer as any).getProjectedNode(node) : null;
@@ -1400,8 +1429,11 @@ class Graph2DController {
 
       const dxScreen = (this.lastMouseX as number) - proj.x;
       const dyScreen = (this.lastMouseY as number) - proj.y;
-
       const distScreen = Math.sqrt(dxScreen * dxScreen + dyScreen * dyScreen);
+
+      // Determine per-node attraction radius in screen space
+      const nodeScreenR = Number.isFinite(proj.r) ? Math.max(4, Number(proj.r)) : 8;
+      const radius = Math.max(8, nodeScreenR * multiplier);
       if (distScreen > radius || distScreen === 0) continue;
 
       // Jitter suppression: deadzone near cursor
@@ -1426,7 +1458,7 @@ class Graph2DController {
       wx /= len; wy /= len; wz /= len;
 
       const t = 1 - distScreen / radius;
-      const strength = baseStrength * Math.pow(t, exponent);
+      const strength = baseStrength * Math.pow(t, steepness);
 
       node.vx = (node.vx || 0) + wx * strength;
       node.vy = (node.vy || 0) + wy * strength;
