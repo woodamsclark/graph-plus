@@ -44,7 +44,7 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
   let springStrength = options?.springStrength ?? 0.04;
   let springLength = options?.springLength ?? 100;
   let centerPull = options?.centerPull ?? 0.00;
-  let damping = options?.damping ?? 0.9;
+    let damping = options?.damping ?? 0.7; // normalized 0..1
   let notePlaneStiffness = options?.notePlaneStiffness ?? 0;
   let tagPlaneStiffness = options?.tagPlaneStiffness ?? 0;
 
@@ -192,9 +192,10 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
   function applyDamping() {
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
-      n.vx = (n.vx || 0) * damping;
-      n.vy = (n.vy || 0) * damping;
-      n.vz = (n.vz || 0) * damping;
+        const d = Math.max(0, Math.min(1, damping));
+        n.vx *= (1 - d);
+        n.vy *= (1 - d);
+        n.vz *= (1 - d);
       if (Math.abs(n.vx) < 0.001) n.vx = 0;
       if (Math.abs(n.vy) < 0.001) n.vy = 0;
       if (Math.abs(n.vz) < 0.001) n.vz = 0;

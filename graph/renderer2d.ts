@@ -6,13 +6,10 @@ export interface GlowSettings {
   // removed: glowRadiusMultiplier (now driven by mouse attraction radius)
   minCenterAlpha: number;
   maxCenterAlpha: number;
-  hoverBoostFactor: number;
-  neighborBoostFactor?: number;
-  dimFactor?: number;
-  hoverHighlightDepth?: number;
-  distanceInnerRadiusMultiplier?: number;
-  distanceOuterRadiusMultiplier?: number;
-  distanceCurveSteepness?: number;
+  // renamed + simplified distance model
+  highlightDepth?: number;
+  gravityRadiusMultiplier?: number;
+  gravityCurveSteepness?: number;
   focusSmoothingRate?: number;
   edgeDimMin?: number;
   edgeDimMax?: number;
@@ -31,10 +28,19 @@ export interface GlowSettings {
   labelFadeRangePx?: number;
   // base font size for labels (in world-space units before camera zoom scaling)
   labelBaseFontSize?: number;
-  // maximum alpha to use for each color when hovered/highlighted
-  nodeColorMaxAlpha?: number;
-  tagColorMaxAlpha?: number;
-  edgeColorMaxAlpha?: number;
+  // per-type min/normal/max alpha
+  nodeMinAlpha?: number;
+  nodeAlpha?: number;
+  nodeMaxAlpha?: number;
+  tagMinAlpha?: number;
+  tagAlpha?: number;
+  tagMaxAlpha?: number;
+  edgeMinAlpha?: number;
+  edgeAlpha?: number;
+  edgeMaxAlpha?: number;
+  labelMinAlpha?: number;
+  labelAlpha?: number;
+  labelMaxAlpha?: number;
   // optional explicit glow radius in world/pixel units. If provided, overrides multiplier-based radius.
   glowRadiusPx?: number;
   // whether to use Obsidian interface font for labels
@@ -111,16 +117,21 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let tagColorAlpha = glowOptions?.tagColorAlpha ?? 1.0;
   let labelColorAlpha = glowOptions?.labelColorAlpha ?? 1.0;
   let edgeColorAlpha = glowOptions?.edgeColorAlpha ?? 1.0;
-  let nodeColorMaxAlpha = glowOptions?.nodeColorMaxAlpha ?? nodeColorAlpha;
-  let tagColorMaxAlpha = glowOptions?.tagColorMaxAlpha ?? tagColorAlpha;
-  let edgeColorMaxAlpha = glowOptions?.edgeColorMaxAlpha ?? edgeColorAlpha;
-  let hoverBoost = glowOptions?.hoverBoostFactor ?? 2;
-  let neighborBoost = glowOptions?.neighborBoostFactor ?? 1.5;
-  let dimFactor = glowOptions?.dimFactor ?? 0.2;
-  let hoverHighlightDepth = glowOptions?.hoverHighlightDepth ?? 2;
-  let distanceInnerMultiplier = glowOptions?.distanceInnerRadiusMultiplier ?? 1.5;
-  let distanceOuterMultiplier = glowOptions?.distanceOuterRadiusMultiplier ?? 4;
-  let distanceCurveSteepness = glowOptions?.distanceCurveSteepness ?? 2.0;
+  // new per-type alpha controls
+  let nodeMinAlpha = glowOptions?.nodeMinAlpha ?? 0.1;
+  let nodeMaxAlpha = glowOptions?.nodeMaxAlpha ?? 1.0;
+  let tagMinAlpha = glowOptions?.tagMinAlpha ?? 0.1;
+  let tagMaxAlpha = glowOptions?.tagMaxAlpha ?? 1.0;
+  let edgeMinAlpha = glowOptions?.edgeMinAlpha ?? 0.1;
+  let edgeMaxAlpha = glowOptions?.edgeMaxAlpha ?? 0.6;
+  let labelMinAlpha = glowOptions?.labelMinAlpha ?? 0.0;
+  let labelMaxAlpha = glowOptions?.labelMaxAlpha ?? 1.0;
+  // focus + gravity
+  let hoverHighlightDepth = glowOptions?.highlightDepth ?? 1;
+  let gravityRadiusMultiplier = glowOptions?.gravityRadiusMultiplier ?? 15;
+  let gravityCurveSteepness = glowOptions?.gravityCurveSteepness ?? 1.0;
+  let distanceInnerMultiplier = 1.0; // fixed inner = 1×radius
+  let focusSmoothingRate = glowOptions?.focusSmoothingRate ?? 0.8;
   let hoveredNodeId: string | null = null;
   let hoverHighlightSet: Set<string> = new Set();
   let mouseX = 0;
@@ -133,7 +144,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   const nodeFocusMap: Map<string, number> = new Map();
   let lastRenderTime = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
   // Focus/dimming controls (configurable via glow settings)
-  let focusSmoothingRate = glowOptions?.focusSmoothingRate ?? 0.15;
+  // focusSmoothingRate defined above per spec
   let edgeDimMin = glowOptions?.edgeDimMin ?? 0.1;
   let edgeDimMax = glowOptions?.edgeDimMax ?? 0.7;
   let nodeMinBodyAlpha = glowOptions?.nodeMinBodyAlpha ?? 0.3;
@@ -370,8 +381,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
   function getMouseDistanceFactor(node: any) {
     const radius = getNodeRadius(node);
-    const innerR = radius * distanceInnerMultiplier;
-    const outerR = radius * distanceOuterMultiplier;
+    const innerR = radius * distanceInnerMultiplier; // fixed 1×
+    const outerR = radius * gravityRadiusMultiplier;
     if (outerR <= innerR || outerR <= 0) return 0;
     const p = projectWorld(node);
     const dx = mouseX - p.x;
@@ -383,7 +394,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     // normalize so 0 = outerR, 1 = innerR
     const t = (dist - innerR) / (outerR - innerR); // 0..1 where 0=inner,1=outer
     const proximity = 1 - t; // 1 near inner, 0 near outer
-    return applySCurve(proximity, distanceCurveSteepness);
+    return applySCurve(proximity, gravityCurveSteepness);
   }
 
   function render() {
@@ -542,16 +553,15 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
         ctx.save();
         const useEdgeAlpha = glowOptions?.edgeColorAlpha ?? edgeColorAlpha;
-        const useEdgeMax = glowOptions?.edgeColorMaxAlpha ?? glowOptions?.edgeColorAlpha ?? edgeColorMaxAlpha;
         // compute final edge alpha and bypass user edge alpha when hovered/highlighted.
         // Use the same reduced-propagation rule as above: require both endpoints
         // in the highlight set, except allow direct-hover incidence.
-        let finalEdgeAlpha = alpha * useEdgeAlpha;
+        let finalEdgeAlpha = Math.max(edgeMinAlpha, alpha * useEdgeAlpha);
         if (hoveredNodeId) {
           const srcInDepth = hoverHighlightSet.has(edge.sourceId);
           const tgtInDepth = hoverHighlightSet.has(edge.targetId);
           const directlyIncident = edge.sourceId === hoveredNodeId || edge.targetId === hoveredNodeId;
-          if ((srcInDepth && tgtInDepth) || directlyIncident) finalEdgeAlpha = 1.0;
+          if ((srcInDepth && tgtInDepth) || directlyIncident) finalEdgeAlpha = edgeMaxAlpha;
         }
         ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${finalEdgeAlpha})`;
         // mutual edges: draw two parallel lines offset perpendicular to the edge when enabled
@@ -629,19 +639,18 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         const nodeColorOverride = (node && node.type === 'tag') ? (glowOptions?.tagColor ?? themeTagColor) : themeNodeColor; // tag color
         const accentRgb = colorToRgb(nodeColorOverride);
         const useNodeAlpha = (node && node.type === 'tag') ? (glowOptions?.tagColorAlpha ?? tagColorAlpha) : (glowOptions?.nodeColorAlpha ?? nodeColorAlpha);
-        const useNodeMax = (node && node.type === 'tag') ? (glowOptions?.tagColorMaxAlpha ?? glowOptions?.tagColorAlpha ?? tagColorAlpha) : (glowOptions?.nodeColorMaxAlpha ?? glowOptions?.nodeColorAlpha ?? nodeColorAlpha);
         const dimCenter = clamp01(getBaseCenterAlpha(node) * dimFactor);
         const fullCenter = centerAlpha;
         let blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
         // When hovered/highlighted, force alpha to 1 for node/tag colors
-        let effectiveUseNodeAlpha = useNodeAlpha;
+        let effectiveUseNodeAlpha = Math.max((node && node.type==='tag')?tagMinAlpha:nodeMinAlpha, useNodeAlpha);
         if (hoveredNodeId) {
           const inDepth = hoverHighlightSet.has(node.id);
           const isHovered = node.id === hoveredNodeId;
           if (isHovered || inDepth) {
             blendedCenter = 1;
-            // Force full alpha for hovered/highlighted node glows
-            effectiveUseNodeAlpha = 1.0;
+            // Use max alpha for hovered/highlighted node glows
+            effectiveUseNodeAlpha = (node && node.type==='tag') ? tagMaxAlpha : nodeMaxAlpha;
           }
         }
         const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
@@ -665,17 +674,16 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         const bodyColorOverride = (node && node.type === 'tag') ? (glowOptions?.tagColor ?? themeTagColor) : themeNodeColor;
         const accent = colorToRgb(bodyColorOverride);
         const useBodyAlpha = (node && node.type === 'tag') ? (glowOptions?.tagColorAlpha ?? tagColorAlpha) : (glowOptions?.nodeColorAlpha ?? nodeColorAlpha);
-        const useBodyMax = (node && node.type === 'tag') ? (glowOptions?.tagColorMaxAlpha ?? glowOptions?.tagColorAlpha ?? tagColorAlpha) : (glowOptions?.nodeColorMaxAlpha ?? glowOptions?.nodeColorAlpha ?? nodeColorAlpha);
         // When hovered/highlighted, force body alpha to 1 for node/tag colors
-        let effectiveUseBodyAlpha = useBodyAlpha;
+        let effectiveUseBodyAlpha = Math.max((node && node.type==='tag')?tagMinAlpha:nodeMinAlpha, useBodyAlpha);
         let finalBodyAlpha = bodyAlpha;
         if (hoveredNodeId) {
           const inDepthBody = hoverHighlightSet.has(node.id);
           const isHoveredBody = node.id === hoveredNodeId;
           if (isHoveredBody || inDepthBody) {
             finalBodyAlpha = 1;
-            // Force full alpha for hovered/highlighted node bodies
-            effectiveUseBodyAlpha = 1.0;
+            // Use max alpha for hovered/highlighted node bodies
+            effectiveUseBodyAlpha = (node && node.type==='tag') ? tagMaxAlpha : nodeMaxAlpha;
           }
         }
         ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${finalBodyAlpha * effectiveUseBodyAlpha})`;
@@ -684,10 +692,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
         // label below node (zoom-aware) - grow with hover and fade with focus
         // incorporate camera zoom scale so labels scale with camera distance
-        const displayedFontBase = baseFontSize * getZoomScale(); // px on screen base before hover/scale
-        // compute scaleFactor from radius/baseRadius to match node growth
-        const scaleFactor = baseRadius > 0 ? radius / baseRadius : 1;
-        const displayedFont = displayedFontBase * scaleFactor;
+        // Font size invariant to zoom
+        const displayedFont = labelBaseFontSize;
         // Compute label alpha based on node screen-space radius
         const radiusScreenPx = radius * Math.max(0.0001, scale);
         let labelAlphaVis = 1;
@@ -720,12 +726,14 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
             // nodes we force full alpha (1.0) so labels are never partially transparent.
             const isHoverOrHighlight = hoveredNodeId === node.id || (hoverHighlightSet && hoverHighlightSet.has(node.id));
             const centerA = isHoverOrHighlight ? 1.0 : clamp01(getCenterAlpha(node));
-            ctx.globalAlpha = labelAlphaVis * centerA;
+            // derive label alpha by focus state
+            let labelA = Math.max(labelMinAlpha, labelAlphaVis * (glowOptions?.labelColorAlpha ?? labelColorAlpha));
+            if (isHoverOrHighlight) labelA = labelMaxAlpha;
+            else if (hoveredNodeId && hoverHighlightSet.has(node.id)) labelA = Math.max(labelA, (glowOptions?.labelColorAlpha ?? labelColorAlpha));
+            ctx.globalAlpha = Math.max(0, Math.min(1, labelA * centerA));
             // apply label alpha override if present, but force to 1.0 for hovered/highlighted
             const labelRgb = colorToRgb((glowOptions?.labelColor ?? labelCss) || '#ffffff');
-            const useLabelAlpha = glowOptions?.labelColorAlpha ?? labelColorAlpha;
-            const effectiveUseLabelAlpha = isHoverOrHighlight ? 1.0 : useLabelAlpha;
-            ctx.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},${effectiveUseLabelAlpha})`;
+            ctx.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},1.0)`;
           const verticalPadding = 4; // world units; will be scaled by transform
           ctx.fillText(node.label, p.x, p.y + radius + verticalPadding);
           ctx.restore();

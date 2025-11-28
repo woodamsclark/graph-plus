@@ -1033,7 +1033,7 @@ class Graph2DController {
           hoverDepthWrap.style.display = 'flex'; hoverDepthWrap.style.alignItems = 'center'; hoverDepthWrap.style.gap = '6px';
           const hoverDepthRange = document.createElement('input');
           hoverDepthRange.type = 'range'; hoverDepthRange.min = '0'; hoverDepthRange.max = '4'; hoverDepthRange.step = '1';
-          const curHoverDepth = (this.plugin as any).settings?.glow?.hoverHighlightDepth ?? 1;
+          const curHoverDepth = (this.plugin as any).settings?.glow?.highlightDepth ?? 1;
           hoverDepthRange.value = String(curHoverDepth);
           const hoverDepthInput = document.createElement('input');
           hoverDepthInput.type = 'number'; hoverDepthInput.min = hoverDepthRange.min; hoverDepthInput.max = hoverDepthRange.max; hoverDepthInput.step = hoverDepthRange.step;
@@ -1044,7 +1044,7 @@ class Graph2DController {
             try {
               (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
               const v = Number((e.target as HTMLInputElement).value);
-              (this.plugin as any).settings.glow.hoverHighlightDepth = Number.isFinite(v) ? Math.max(0, Math.min(4, Math.floor(v))) : 1;
+              (this.plugin as any).settings.glow.highlightDepth = Number.isFinite(v) ? Math.max(0, Math.min(3, Math.floor(v))) : 1;
               await (this.plugin as any).saveSettings();
               try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
               try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
@@ -1053,10 +1053,10 @@ class Graph2DController {
           hoverDepthInput.addEventListener('input', (e) => { hoverDepthRange.value = (e.target as HTMLInputElement).value; });
           hoverDepthInput.addEventListener('change', (e) => { hoverDepthRange.dispatchEvent(new Event('change')); });
           hoverDepthWrap.appendChild(hoverDepthRange); hoverDepthWrap.appendChild(hoverDepthInput);
-          panel.appendChild(makeRow('Hover highlight depth', hoverDepthWrap, async () => {
+          panel.appendChild(makeRow('Highlight depth', hoverDepthWrap, async () => {
             try {
               (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
-              delete (this.plugin as any).settings.glow.hoverHighlightDepth;
+              delete (this.plugin as any).settings.glow.highlightDepth;
               await (this.plugin as any).saveSettings();
               hoverDepthRange.value = String(1);
               hoverDepthInput.value = String(1);
