@@ -29,6 +29,8 @@ export interface GlowSettings {
   // Label visibility controls
   labelMinVisibleRadiusPx?: number;
   labelFadeRangePx?: number;
+  // base font size for labels (in world-space units before camera zoom scaling)
+  labelBaseFontSize?: number;
   // maximum alpha to use for each color when hovered/highlighted
   nodeColorMaxAlpha?: number;
   tagColorMaxAlpha?: number;
@@ -96,13 +98,14 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   // whether to show tag nodes & tag-connected edges
   let showTags = true;
 
-  let minRadius = glowOptions?.minNodeRadius ?? 4;
-  let maxRadius = glowOptions?.maxNodeRadius ?? 14;
+  let minRadius = glowOptions?.minNodeRadius ?? 6;
+  let maxRadius = glowOptions?.maxNodeRadius ?? 24;
   const DEFAULT_GLOW_MULTIPLIER = 2.0;
   // explicit glow radius in world units (pixels). If set, this value is used instead of radius*DEFAULT_GLOW_MULTIPLIER
   let glowRadiusPx: number | null = glowOptions?.glowRadiusPx ?? null;
-  let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.05;
-  let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.35;
+  // Defaults should match the plugin's DEFAULT_SETTINGS.glow where possible
+  let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.15;
+  let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.6;
   // per-color alpha multipliers (0..1)
   let nodeColorAlpha = glowOptions?.nodeColorAlpha ?? 1.0;
   let tagColorAlpha = glowOptions?.tagColorAlpha ?? 1.0;
@@ -111,12 +114,12 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let nodeColorMaxAlpha = glowOptions?.nodeColorMaxAlpha ?? nodeColorAlpha;
   let tagColorMaxAlpha = glowOptions?.tagColorMaxAlpha ?? tagColorAlpha;
   let edgeColorMaxAlpha = glowOptions?.edgeColorMaxAlpha ?? edgeColorAlpha;
-  let hoverBoost = glowOptions?.hoverBoostFactor ?? 1.5;
-  let neighborBoost = glowOptions?.neighborBoostFactor ?? 1.0;
-  let dimFactor = glowOptions?.dimFactor ?? 0.25;
-  let hoverHighlightDepth = glowOptions?.hoverHighlightDepth ?? 1;
-  let distanceInnerMultiplier = glowOptions?.distanceInnerRadiusMultiplier ?? 1.0;
-  let distanceOuterMultiplier = glowOptions?.distanceOuterRadiusMultiplier ?? 2.5;
+  let hoverBoost = glowOptions?.hoverBoostFactor ?? 2;
+  let neighborBoost = glowOptions?.neighborBoostFactor ?? 1.5;
+  let dimFactor = glowOptions?.dimFactor ?? 0.2;
+  let hoverHighlightDepth = glowOptions?.hoverHighlightDepth ?? 2;
+  let distanceInnerMultiplier = glowOptions?.distanceInnerRadiusMultiplier ?? 1.5;
+  let distanceOuterMultiplier = glowOptions?.distanceOuterRadiusMultiplier ?? 4;
   let distanceCurveSteepness = glowOptions?.distanceCurveSteepness ?? 2.0;
   let hoveredNodeId: string | null = null;
   let hoverHighlightSet: Set<string> = new Set();
@@ -130,13 +133,14 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   const nodeFocusMap: Map<string, number> = new Map();
   let lastRenderTime = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
   // Focus/dimming controls (configurable via glow settings)
-  let focusSmoothingRate = glowOptions?.focusSmoothingRate ?? 8;
-  let edgeDimMin = glowOptions?.edgeDimMin ?? 0.08;
-  let edgeDimMax = glowOptions?.edgeDimMax ?? 0.9;
+  let focusSmoothingRate = glowOptions?.focusSmoothingRate ?? 0.15;
+  let edgeDimMin = glowOptions?.edgeDimMin ?? 0.1;
+  let edgeDimMax = glowOptions?.edgeDimMax ?? 0.7;
   let nodeMinBodyAlpha = glowOptions?.nodeMinBodyAlpha ?? 0.3;
   // label visibility controls
   let labelMinVisibleRadiusPx = glowOptions?.labelMinVisibleRadiusPx ?? 6;
   let labelFadeRangePx = glowOptions?.labelFadeRangePx ?? 8;
+  let labelBaseFontSize = glowOptions?.labelBaseFontSize ?? 10;
   
 
   // theme-derived colors (updated each render)
@@ -591,7 +595,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
     // Draw node glows (radial gradient), node bodies, and labels
     // Compute zoom-aware font sizing. Font size displayed on screen = baseFontSize * scale
-    const baseFontSize = 10; // world-space base font size
+    const baseFontSize = labelBaseFontSize; // world-space base font size (configurable)
     const minFontSize = 6; // px (screen)
     const maxFontSize = 18; // px (screen)
     // label visibility threshold now driven by node screen-space radius
@@ -695,16 +699,25 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         } else {
           labelAlphaVis = 1;
         }
-        // Always show label if hovered or in highlight set
+        // Also allow mouse proximity to reveal labels: compute proximity (0..1)
+        // and blend it with the radius-based visibility so labels start to appear
+        // as the mouse approaches small nodes.
+        const proximityFactor = getMouseDistanceFactor(node); // 0..1
+        // blend: if either screen-size or proximity suggests visibility, allow it
+        labelAlphaVis = Math.max(labelAlphaVis, labelAlphaVis + proximityFactor * (1 - labelAlphaVis));
+        // Always show label at full visibility if hovered or in highlight set
         const isHoverOrHighlight = hoveredNodeId === node.id || (hoverHighlightSet && hoverHighlightSet.has(node.id));
-        if (isHoverOrHighlight) labelAlphaVis = Math.max(labelAlphaVis, 1);
+        if (isHoverOrHighlight) labelAlphaVis = 1;
 
         if (labelAlphaVis > 0) {
           const clampedDisplayed = Math.max(minFontSize, Math.min(maxFontSize, displayedFont));
           const fontToSet = Math.max(1, (clampedDisplayed) / Math.max(0.0001, scale));
           ctx.save();
           ctx.font = `${fontToSet}px ${resolvedInterfaceFontFamily || 'sans-serif'}`;
-          ctx.globalAlpha = (focus) * labelAlphaVis; // fade label with focus and visibility
+          // Compute final alpha from label visibility and the node's center alpha
+          // so that proximity/hover glow also affects label appearance.
+          const centerA = clamp01(getCenterAlpha(node));
+          ctx.globalAlpha = labelAlphaVis * centerA;
           // apply label alpha override if present
           const labelRgb = colorToRgb((glowOptions?.labelColor ?? labelCss) || '#ffffff');
           const useLabelAlpha = glowOptions?.labelColorAlpha ?? labelColorAlpha;
@@ -717,10 +730,13 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         // dimmed node: draw a faint fill but allow smooth focus factor (should be near 0)
         const faintRgb = colorToRgb(themeLabelColor || '#999');
         const faintAlpha = 0.15 * (1 - focus) + 0.1 * focus; // slightly adjust
+        // Modulate the faint fill by centerAlpha so dimFactor affects distant nodes
+        const effectiveCenterAlpha = clamp01(getCenterAlpha(node));
+        const finalAlpha = faintAlpha * effectiveCenterAlpha * (glowOptions?.nodeColorAlpha ?? nodeColorAlpha);
         ctx.save();
         ctx.beginPath();
         ctx.arc(p.x, p.y, radius * 0.9, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${faintAlpha * (glowOptions?.nodeColorAlpha ?? nodeColorAlpha)})`;
+        ctx.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${finalAlpha})`;
         ctx.fill();
         ctx.restore();
       }
@@ -769,6 +785,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     nodeMinBodyAlpha = glow.nodeMinBodyAlpha ?? nodeMinBodyAlpha;
     labelMinVisibleRadiusPx = (typeof glow.labelMinVisibleRadiusPx === 'number') ? glow.labelMinVisibleRadiusPx : labelMinVisibleRadiusPx;
     labelFadeRangePx = (typeof glow.labelFadeRangePx === 'number') ? glow.labelFadeRangePx : labelFadeRangePx;
+    labelBaseFontSize = (typeof glow.labelBaseFontSize === 'number') ? glow.labelBaseFontSize : labelBaseFontSize;
     nodeColorAlpha = (typeof glow.nodeColorAlpha === 'number') ? glow.nodeColorAlpha : nodeColorAlpha;
     tagColorAlpha = (typeof glow.tagColorAlpha === 'number') ? glow.tagColorAlpha : tagColorAlpha;
     labelColorAlpha = (typeof glow.labelColorAlpha === 'number') ? glow.labelColorAlpha : labelColorAlpha;
@@ -776,6 +793,15 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     nodeColorMaxAlpha = (typeof glow.nodeColorMaxAlpha === 'number') ? glow.nodeColorMaxAlpha : nodeColorMaxAlpha;
     tagColorMaxAlpha = (typeof glow.tagColorMaxAlpha === 'number') ? glow.tagColorMaxAlpha : tagColorMaxAlpha;
     edgeColorMaxAlpha = (typeof glow.edgeColorMaxAlpha === 'number') ? glow.edgeColorMaxAlpha : edgeColorMaxAlpha;
+
+    // Enforce sensible invariants: ensure *_MaxAlpha is never less than base *_Alpha.
+    // This prevents surprising visuals where a "hover max" would be more transparent
+    // than the normal/base color alpha.
+    try {
+      nodeColorMaxAlpha = Math.max(nodeColorMaxAlpha, nodeColorAlpha);
+      tagColorMaxAlpha = Math.max(tagColorMaxAlpha, tagColorAlpha);
+      edgeColorMaxAlpha = Math.max(edgeColorMaxAlpha, edgeColorAlpha);
+    } catch (e) {}
   }
 
   function setHoverState(hoveredId: string | null, highlightedIds: Set<string>, mx: number, my: number) {

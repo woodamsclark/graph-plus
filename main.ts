@@ -23,6 +23,13 @@ export interface GlowSettings {
   tagColor?: string;
   labelColor?: string;
   edgeColor?: string;
+  // base font size for labels (world-space units mapped to screen px via camera zoom)
+  labelBaseFontSize?: number;
+  // label visibility/fade (screen-space px)
+  labelMinVisibleRadiusPx?: number;
+  labelFadeRangePx?: number;
+  // explicit glow radius in pixels (null/undefined to use multiplier-based glow)
+  glowRadiusPx?: number | null;
   // per-color alpha multipliers (0..1)
   nodeColorAlpha?: number;
   // maximum alpha to use when the node/tag/edge is hovered (0..1)
@@ -101,6 +108,10 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
         tagColorAlpha: 1.0,
         tagColorMaxAlpha: 1.0,
         labelColor: undefined,
+        labelBaseFontSize: 10,
+        labelMinVisibleRadiusPx: 6,
+        labelFadeRangePx: 8,
+        glowRadiusPx: null,
         labelColorAlpha: 1.0,
         useInterfaceFont: true,
         edgeColor: undefined,
@@ -457,7 +468,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       desc: 'Distance (in node radii) where distance-based glow is fully active.',
       value: glow.distanceInnerRadiusMultiplier ?? 1.0,
       min: 0.5,
-      max: 4,
+      max: 100,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.glow.distanceInnerRadiusMultiplier,
       onChange: async (v) => {
@@ -476,7 +487,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       desc: 'Distance (in node radii) beyond which the mouse has no effect on glow.',
       value: glow.distanceOuterRadiusMultiplier ?? 2.5,
       min: 1,
-      max: 8,
+      max: 100,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.glow.distanceOuterRadiusMultiplier,
       onChange: async (v) => {
@@ -740,6 +751,25 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         glow.useInterfaceFont = Boolean(v);
         await this.plugin.saveSettings();
       }));
+
+    addSliderSetting(containerEl, {
+      name: 'Base label font size',
+      desc: 'Base font size for labels in pixels (before camera zoom scaling).',
+      value: glow.labelBaseFontSize ?? DEFAULT_SETTINGS.glow.labelBaseFontSize,
+      min: 6,
+      max: 24,
+      step: 1,
+      resetValue: DEFAULT_SETTINGS.glow.labelBaseFontSize,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 1 && v <= 72) {
+          glow.labelBaseFontSize = Math.round(v);
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.labelBaseFontSize = DEFAULT_SETTINGS.glow.labelBaseFontSize;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
 
     // Physics settings
     const phys = this.plugin.settings.physics || {};

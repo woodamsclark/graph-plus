@@ -332,12 +332,12 @@ function createRenderer2D(options) {
   let maxEdgeCount = 1;
   let drawMutualDoubleLines = true;
   let showTags = true;
-  let minRadius = glowOptions?.minNodeRadius ?? 4;
-  let maxRadius = glowOptions?.maxNodeRadius ?? 14;
+  let minRadius = glowOptions?.minNodeRadius ?? 6;
+  let maxRadius = glowOptions?.maxNodeRadius ?? 24;
   const DEFAULT_GLOW_MULTIPLIER = 2;
   let glowRadiusPx = glowOptions?.glowRadiusPx ?? null;
-  let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.05;
-  let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.35;
+  let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.15;
+  let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.6;
   let nodeColorAlpha = glowOptions?.nodeColorAlpha ?? 1;
   let tagColorAlpha = glowOptions?.tagColorAlpha ?? 1;
   let labelColorAlpha = glowOptions?.labelColorAlpha ?? 1;
@@ -345,12 +345,12 @@ function createRenderer2D(options) {
   let nodeColorMaxAlpha = glowOptions?.nodeColorMaxAlpha ?? nodeColorAlpha;
   let tagColorMaxAlpha = glowOptions?.tagColorMaxAlpha ?? tagColorAlpha;
   let edgeColorMaxAlpha = glowOptions?.edgeColorMaxAlpha ?? edgeColorAlpha;
-  let hoverBoost = glowOptions?.hoverBoostFactor ?? 1.5;
-  let neighborBoost = glowOptions?.neighborBoostFactor ?? 1;
-  let dimFactor = glowOptions?.dimFactor ?? 0.25;
-  let hoverHighlightDepth = glowOptions?.hoverHighlightDepth ?? 1;
-  let distanceInnerMultiplier = glowOptions?.distanceInnerRadiusMultiplier ?? 1;
-  let distanceOuterMultiplier = glowOptions?.distanceOuterRadiusMultiplier ?? 2.5;
+  let hoverBoost = glowOptions?.hoverBoostFactor ?? 2;
+  let neighborBoost = glowOptions?.neighborBoostFactor ?? 1.5;
+  let dimFactor = glowOptions?.dimFactor ?? 0.2;
+  let hoverHighlightDepth = glowOptions?.hoverHighlightDepth ?? 2;
+  let distanceInnerMultiplier = glowOptions?.distanceInnerRadiusMultiplier ?? 1.5;
+  let distanceOuterMultiplier = glowOptions?.distanceOuterRadiusMultiplier ?? 4;
   let distanceCurveSteepness = glowOptions?.distanceCurveSteepness ?? 2;
   let hoveredNodeId = null;
   let hoverHighlightSet = /* @__PURE__ */ new Set();
@@ -361,12 +361,13 @@ function createRenderer2D(options) {
   const hoverLerpSpeed = 0.2;
   const nodeFocusMap = /* @__PURE__ */ new Map();
   let lastRenderTime = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
-  let focusSmoothingRate = glowOptions?.focusSmoothingRate ?? 8;
-  let edgeDimMin = glowOptions?.edgeDimMin ?? 0.08;
-  let edgeDimMax = glowOptions?.edgeDimMax ?? 0.9;
+  let focusSmoothingRate = glowOptions?.focusSmoothingRate ?? 0.15;
+  let edgeDimMin = glowOptions?.edgeDimMin ?? 0.1;
+  let edgeDimMax = glowOptions?.edgeDimMax ?? 0.7;
   let nodeMinBodyAlpha = glowOptions?.nodeMinBodyAlpha ?? 0.3;
   let labelMinVisibleRadiusPx = glowOptions?.labelMinVisibleRadiusPx ?? 6;
   let labelFadeRangePx = glowOptions?.labelFadeRangePx ?? 8;
+  let labelBaseFontSize = glowOptions?.labelBaseFontSize ?? 10;
   let themeNodeColor = "#66ccff";
   let themeLabelColor = "#222";
   let themeEdgeColor = "#888888";
@@ -785,7 +786,7 @@ function createRenderer2D(options) {
         ctx.restore();
       }
     }
-    const baseFontSize = 10;
+    const baseFontSize = labelBaseFontSize;
     const minFontSize = 6;
     const maxFontSize = 18;
     ctx.textAlign = "center";
@@ -872,15 +873,18 @@ function createRenderer2D(options) {
         } else {
           labelAlphaVis = 1;
         }
+        const proximityFactor = getMouseDistanceFactor(node);
+        labelAlphaVis = Math.max(labelAlphaVis, labelAlphaVis + proximityFactor * (1 - labelAlphaVis));
         const isHoverOrHighlight = hoveredNodeId === node.id || hoverHighlightSet && hoverHighlightSet.has(node.id);
         if (isHoverOrHighlight)
-          labelAlphaVis = Math.max(labelAlphaVis, 1);
+          labelAlphaVis = 1;
         if (labelAlphaVis > 0) {
           const clampedDisplayed = Math.max(minFontSize, Math.min(maxFontSize, displayedFont));
           const fontToSet = Math.max(1, clampedDisplayed / Math.max(1e-4, scale));
           ctx.save();
           ctx.font = `${fontToSet}px ${resolvedInterfaceFontFamily || "sans-serif"}`;
-          ctx.globalAlpha = focus * labelAlphaVis;
+          const centerA = clamp01(getCenterAlpha(node));
+          ctx.globalAlpha = labelAlphaVis * centerA;
           const labelRgb = colorToRgb((glowOptions?.labelColor ?? labelCss) || "#ffffff");
           const useLabelAlpha = glowOptions?.labelColorAlpha ?? labelColorAlpha;
           ctx.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},${useLabelAlpha})`;
@@ -891,10 +895,12 @@ function createRenderer2D(options) {
       } else {
         const faintRgb = colorToRgb(themeLabelColor || "#999");
         const faintAlpha = 0.15 * (1 - focus) + 0.1 * focus;
+        const effectiveCenterAlpha = clamp01(getCenterAlpha(node));
+        const finalAlpha = faintAlpha * effectiveCenterAlpha * (glowOptions?.nodeColorAlpha ?? nodeColorAlpha);
         ctx.save();
         ctx.beginPath();
         ctx.arc(p.x, p.y, radius * 0.9, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${faintAlpha * (glowOptions?.nodeColorAlpha ?? nodeColorAlpha)})`;
+        ctx.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${finalAlpha})`;
         ctx.fill();
         ctx.restore();
       }
@@ -940,6 +946,7 @@ function createRenderer2D(options) {
     nodeMinBodyAlpha = glow.nodeMinBodyAlpha ?? nodeMinBodyAlpha;
     labelMinVisibleRadiusPx = typeof glow.labelMinVisibleRadiusPx === "number" ? glow.labelMinVisibleRadiusPx : labelMinVisibleRadiusPx;
     labelFadeRangePx = typeof glow.labelFadeRangePx === "number" ? glow.labelFadeRangePx : labelFadeRangePx;
+    labelBaseFontSize = typeof glow.labelBaseFontSize === "number" ? glow.labelBaseFontSize : labelBaseFontSize;
     nodeColorAlpha = typeof glow.nodeColorAlpha === "number" ? glow.nodeColorAlpha : nodeColorAlpha;
     tagColorAlpha = typeof glow.tagColorAlpha === "number" ? glow.tagColorAlpha : tagColorAlpha;
     labelColorAlpha = typeof glow.labelColorAlpha === "number" ? glow.labelColorAlpha : labelColorAlpha;
@@ -947,6 +954,12 @@ function createRenderer2D(options) {
     nodeColorMaxAlpha = typeof glow.nodeColorMaxAlpha === "number" ? glow.nodeColorMaxAlpha : nodeColorMaxAlpha;
     tagColorMaxAlpha = typeof glow.tagColorMaxAlpha === "number" ? glow.tagColorMaxAlpha : tagColorMaxAlpha;
     edgeColorMaxAlpha = typeof glow.edgeColorMaxAlpha === "number" ? glow.edgeColorMaxAlpha : edgeColorMaxAlpha;
+    try {
+      nodeColorMaxAlpha = Math.max(nodeColorMaxAlpha, nodeColorAlpha);
+      tagColorMaxAlpha = Math.max(tagColorMaxAlpha, tagColorAlpha);
+      edgeColorMaxAlpha = Math.max(edgeColorMaxAlpha, edgeColorAlpha);
+    } catch (e) {
+    }
   }
   function setHoverState(hoveredId, highlightedIds, mx, my) {
     hoveredNodeId = hoveredId;
@@ -1693,6 +1706,27 @@ var Graph2DController = class {
     const centerNodeId = this.centerNode ? this.centerNode.id : void 0;
     const showTagsInitial = this.plugin.settings?.showTags !== false;
     this.recreateSimulation(showTagsInitial, { centerX, centerY, centerNodeId });
+    try {
+      if (this.renderer.setCamera)
+        this.renderer.setCamera({ targetX: this.viewCenterX ?? 0, targetY: this.viewCenterY ?? 0, targetZ: 0, distance: this.defaultCameraDistance });
+    } catch (e) {
+    }
+    try {
+      if (this.renderer.resetPanToCenter)
+        this.renderer.resetPanToCenter();
+    } catch (e) {
+    }
+    this.followLockedNodeId = null;
+    this.previewLockNodeId = null;
+    try {
+      if (this.renderer.setHoverState)
+        this.renderer.setHoverState(null, /* @__PURE__ */ new Set(), 0, 0);
+      if (this.renderer.setHoveredNode)
+        this.renderer.setHoveredNode(null);
+      this.renderer.render?.();
+    } catch (e) {
+    }
+    this.suppressAttractorUntilMouseMove = true;
     try {
       const interaction = this.plugin.settings?.interaction || {};
       this.momentumScale = interaction.momentumScale ?? this.momentumScale;
@@ -2695,140 +2729,6 @@ var Graph2DController = class {
         } catch (e) {
         }
       }));
-      const minSizeWrap = document.createElement("div");
-      minSizeWrap.style.display = "flex";
-      minSizeWrap.style.alignItems = "center";
-      minSizeWrap.style.gap = "6px";
-      const minRange = document.createElement("input");
-      minRange.type = "range";
-      minRange.min = "1";
-      minRange.max = "60";
-      minRange.step = "1";
-      const curMin = this.plugin.settings?.glow?.minNodeRadius ?? 4;
-      minRange.value = String(curMin);
-      const minInput = document.createElement("input");
-      minInput.type = "number";
-      minInput.min = minRange.min;
-      minInput.max = minRange.max;
-      minInput.step = minRange.step;
-      minInput.value = String(minRange.value);
-      minInput.style.width = "56px";
-      minInput.style.textAlign = "right";
-      minRange.addEventListener("input", (e) => {
-        minInput.value = e.target.value;
-      });
-      minRange.addEventListener("change", async (e) => {
-        try {
-          this.plugin.settings.glow = this.plugin.settings.glow || {};
-          const v = Number(e.target.value);
-          this.plugin.settings.glow.minNodeRadius = v;
-          await this.plugin.saveSettings();
-          try {
-            if (this.renderer && this.renderer.setGlowSettings)
-              this.renderer.setGlowSettings(this.plugin.settings.glow);
-          } catch (e2) {
-          }
-          try {
-            if (this.renderer && this.renderer.render)
-              this.renderer.render();
-          } catch (e2) {
-          }
-        } catch (e2) {
-        }
-      });
-      minInput.addEventListener("input", (e) => {
-        minRange.value = e.target.value;
-      });
-      minInput.addEventListener("change", (e) => {
-        minRange.dispatchEvent(new Event("change"));
-      });
-      minSizeWrap.appendChild(minRange);
-      minSizeWrap.appendChild(minInput);
-      const maxSizeWrap = document.createElement("div");
-      maxSizeWrap.style.display = "flex";
-      maxSizeWrap.style.alignItems = "center";
-      maxSizeWrap.style.gap = "6px";
-      const maxRange = document.createElement("input");
-      maxRange.type = "range";
-      maxRange.min = "4";
-      maxRange.max = "120";
-      maxRange.step = "1";
-      const curMax = this.plugin.settings?.glow?.maxNodeRadius ?? 14;
-      maxRange.value = String(curMax);
-      const maxInput = document.createElement("input");
-      maxInput.type = "number";
-      maxInput.min = maxRange.min;
-      maxInput.max = maxRange.max;
-      maxInput.step = maxRange.step;
-      maxInput.value = String(maxRange.value);
-      maxInput.style.width = "56px";
-      maxInput.style.textAlign = "right";
-      maxRange.addEventListener("input", (e) => {
-        maxInput.value = e.target.value;
-      });
-      maxRange.addEventListener("change", async (e) => {
-        try {
-          this.plugin.settings.glow = this.plugin.settings.glow || {};
-          const v = Number(e.target.value);
-          this.plugin.settings.glow.maxNodeRadius = v;
-          await this.plugin.saveSettings();
-          try {
-            if (this.renderer && this.renderer.setGlowSettings)
-              this.renderer.setGlowSettings(this.plugin.settings.glow);
-          } catch (e2) {
-          }
-          try {
-            if (this.renderer && this.renderer.render)
-              this.renderer.render();
-          } catch (e2) {
-          }
-        } catch (e2) {
-        }
-      });
-      maxInput.addEventListener("input", (e) => {
-        maxRange.value = e.target.value;
-      });
-      maxInput.addEventListener("change", (e) => {
-        maxRange.dispatchEvent(new Event("change"));
-      });
-      maxSizeWrap.appendChild(maxRange);
-      maxSizeWrap.appendChild(maxInput);
-      panel.appendChild(makeRow("Node min radius", minSizeWrap, async () => {
-        try {
-          delete this.plugin.settings.glow.minNodeRadius;
-          await this.plugin.saveSettings();
-          minRange.value = String(4);
-          try {
-            if (minSizeWrap && minSizeWrap.querySelector("input[type=number]")) {
-              minSizeWrap.querySelector("input[type=number]").value = String(4);
-            }
-          } catch (e) {
-          }
-          if (this.renderer && this.renderer.setGlowSettings)
-            this.renderer.setGlowSettings(this.plugin.settings.glow);
-          if (this.renderer && this.renderer.render)
-            this.renderer.render();
-        } catch (e) {
-        }
-      }));
-      panel.appendChild(makeRow("Node max radius", maxSizeWrap, async () => {
-        try {
-          delete this.plugin.settings.glow.maxNodeRadius;
-          await this.plugin.saveSettings();
-          maxRange.value = String(14);
-          try {
-            if (maxSizeWrap && maxSizeWrap.querySelector("input[type=number]")) {
-              maxSizeWrap.querySelector("input[type=number]").value = String(14);
-            }
-          } catch (e) {
-          }
-          if (this.renderer && this.renderer.setGlowSettings)
-            this.renderer.setGlowSettings(this.plugin.settings.glow);
-          if (this.renderer && this.renderer.render)
-            this.renderer.render();
-        } catch (e) {
-        }
-      }));
       const countDup = document.createElement("input");
       countDup.type = "checkbox";
       countDup.checked = Boolean(this.plugin.settings?.countDuplicateLinks);
@@ -3676,6 +3576,10 @@ var DEFAULT_SETTINGS = {
     tagColorAlpha: 1,
     tagColorMaxAlpha: 1,
     labelColor: void 0,
+    labelBaseFontSize: 10,
+    labelMinVisibleRadiusPx: 6,
+    labelFadeRangePx: 8,
+    glowRadiusPx: null,
     labelColorAlpha: 1,
     useInterfaceFont: true,
     edgeColor: void 0,
@@ -4005,7 +3909,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       desc: "Distance (in node radii) where distance-based glow is fully active.",
       value: glow.distanceInnerRadiusMultiplier ?? 1,
       min: 0.5,
-      max: 4,
+      max: 100,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.glow.distanceInnerRadiusMultiplier,
       onChange: async (v) => {
@@ -4023,7 +3927,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       desc: "Distance (in node radii) beyond which the mouse has no effect on glow.",
       value: glow.distanceOuterRadiusMultiplier ?? 2.5,
       min: 1,
-      max: 8,
+      max: 100,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.glow.distanceOuterRadiusMultiplier,
       onChange: async (v) => {
@@ -4366,6 +4270,24 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       glow.useInterfaceFont = Boolean(v);
       await this.plugin.saveSettings();
     }));
+    addSliderSetting(containerEl, {
+      name: "Base label font size",
+      desc: "Base font size for labels in pixels (before camera zoom scaling).",
+      value: glow.labelBaseFontSize ?? DEFAULT_SETTINGS.glow.labelBaseFontSize,
+      min: 6,
+      max: 24,
+      step: 1,
+      resetValue: DEFAULT_SETTINGS.glow.labelBaseFontSize,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 1 && v <= 72) {
+          glow.labelBaseFontSize = Math.round(v);
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.labelBaseFontSize = DEFAULT_SETTINGS.glow.labelBaseFontSize;
+          await this.plugin.saveSettings();
+        }
+      }
+    });
     const phys = this.plugin.settings.physics || {};
     containerEl.createEl("h2", { text: "Greater Graph \u2013 Physics" });
     const repulsionUi = (() => {
