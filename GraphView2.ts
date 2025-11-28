@@ -893,7 +893,7 @@ class Graph2DController {
       nodeColorWrap.style.display = 'flex'; nodeColorWrap.style.alignItems = 'center'; nodeColorWrap.style.gap = '6px';
       const nodeAlpha = document.createElement('input');
       nodeAlpha.type = 'number'; nodeAlpha.min = '0'; nodeAlpha.max = '1'; nodeAlpha.step = '0.01';
-      nodeAlpha.value = String((this.plugin as any).settings?.glow?.nodeColorAlpha ?? 1.0);
+      nodeAlpha.value = String((this.plugin as any).settings?.glow?.nodeColorAlpha ?? 0.1);
       nodeAlpha.style.width = '64px';
       const nodeMaxAlpha = document.createElement('input'); nodeMaxAlpha.type = 'number'; nodeMaxAlpha.min = '0'; nodeMaxAlpha.max = '1'; nodeMaxAlpha.step = '0.01';
       nodeMaxAlpha.value = String((this.plugin as any).settings?.glow?.nodeColorMaxAlpha ?? 1.0); nodeMaxAlpha.style.width = '64px'; nodeMaxAlpha.style.marginLeft = '6px';
@@ -952,9 +952,9 @@ class Graph2DController {
       const edgeColorWrap = document.createElement('div');
       edgeColorWrap.style.display = 'flex'; edgeColorWrap.style.alignItems = 'center'; edgeColorWrap.style.gap = '6px';
       const edgeAlpha = document.createElement('input'); edgeAlpha.type = 'number'; edgeAlpha.min = '0'; edgeAlpha.max = '1'; edgeAlpha.step = '0.01';
-      edgeAlpha.value = String((this.plugin as any).settings?.glow?.edgeColorAlpha ?? 1.0); edgeAlpha.style.width = '64px';
+      edgeAlpha.value = String((this.plugin as any).settings?.glow?.edgeColorAlpha ?? 0.1); edgeAlpha.style.width = '64px';
       const edgeMaxAlpha = document.createElement('input'); edgeMaxAlpha.type = 'number'; edgeMaxAlpha.min = '0'; edgeMaxAlpha.max = '1'; edgeMaxAlpha.step = '0.01';
-      edgeMaxAlpha.value = String((this.plugin as any).settings?.glow?.edgeColorMaxAlpha ?? 1.0); edgeMaxAlpha.style.width = '64px'; edgeMaxAlpha.style.marginLeft = '6px';
+      edgeMaxAlpha.value = String((this.plugin as any).settings?.glow?.edgeColorMaxAlpha ?? 0.6); edgeMaxAlpha.style.width = '64px'; edgeMaxAlpha.style.marginLeft = '6px';
       edgeColor.addEventListener('input', async (e) => {
         try {
           (this.plugin as any).settings.glow = (this.plugin as any).settings.glow || {};
@@ -1008,7 +1008,7 @@ class Graph2DController {
         } catch (e) {}
         tagColor.value = (this.plugin as any).settings?.glow?.tagColor || themeTagColor;
         const tagWrap = document.createElement('div'); tagWrap.style.display='flex'; tagWrap.style.alignItems='center'; tagWrap.style.gap='6px';
-        const tagAlpha = document.createElement('input'); tagAlpha.type='number'; tagAlpha.min='0'; tagAlpha.max='1'; tagAlpha.step='0.01'; tagAlpha.value = String((this.plugin as any).settings?.glow?.tagColorAlpha ?? 1.0); tagAlpha.style.width='64px';
+        const tagAlpha = document.createElement('input'); tagAlpha.type='number'; tagAlpha.min='0'; tagAlpha.max='1'; tagAlpha.step='0.01'; tagAlpha.value = String((this.plugin as any).settings?.glow?.tagColorAlpha ?? 0.1); tagAlpha.style.width='64px';
         const tagMaxAlpha = document.createElement('input'); tagMaxAlpha.type='number'; tagMaxAlpha.min='0'; tagMaxAlpha.max='1'; tagMaxAlpha.step='0.01'; tagMaxAlpha.value = String((this.plugin as any).settings?.glow?.tagColorMaxAlpha ?? 1.0); tagMaxAlpha.style.width='64px'; tagMaxAlpha.style.marginLeft='6px';
         tagColor.addEventListener('input', async (e) => {
           try {
@@ -1196,7 +1196,7 @@ class Graph2DController {
         { key: 'damping', label: 'Damping', step: '0.01' },
         // mouseAttractionRadius and mouseAttractionStrength are managed
         // in the global Settings panel (main.ts) to avoid duplicate controls.
-        { key: 'mouseAttractionExponent', label: 'Attract exponent', step: '0.1' },
+        { key: 'mouseAttractionExponent', label: 'Mouse attraction exponent', step: '0.1' },
       ];
       for (const f of physFields) {
         const wrap = document.createElement('div');
