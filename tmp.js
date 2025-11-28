@@ -276,7 +276,7 @@ function createRenderer2D(options) {
       gradient.addColorStop(0, `rgba(102,204,255,${centerAlpha})`);
       gradient.addColorStop(0.4, `rgba(102,204,255,${centerAlpha * 0.5})`);
       gradient.addColorStop(0.8, `rgba(102,204,255,${centerAlpha * 0.15})`);
-      gradient.addColorStop(1, `rgba(102,204,255,0)`);
+      gradient.addColorStop(1, `rgba(255, 43, 43, 0)`);
       ctx.save();
       ctx.beginPath();
       ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
@@ -286,11 +286,11 @@ function createRenderer2D(options) {
       ctx.save();
       ctx.beginPath();
       ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-      ctx.fillStyle = "#66ccff";
+      ctx.fillStyle = "#ffffffff";
       ctx.fill();
       ctx.restore();
       ctx.save();
-      ctx.fillStyle = "#222";
+      ctx.fillStyle = "#ffffffff";
       ctx.fillText(node.label, node.x, node.y + radius + 4);
       ctx.restore();
     }

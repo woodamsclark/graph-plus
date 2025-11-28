@@ -804,6 +804,8 @@ class Graph2DController {
               this.refreshGraph();
             }
           } catch (e) {}
+          // Refresh toolbox UI to match latest settings
+          try { this.refreshControlsFromSettings(); } catch (e) {}
         }
       });
     }
@@ -1184,7 +1186,7 @@ class Graph2DController {
       // Physics settings group
       const phys = (this.plugin as any).settings?.physics || {};
       const physFields: { key: string; label: string; step?: string }[] = [
-        { key: 'repulsionStrength', label: 'Repulsion', step: '1' },
+        { key: 'repulsionStrength', label: 'Repulsion', step: '0.01' },
         { key: 'springStrength', label: 'Spring', step: '0.01' },
         { key: 'springLength', label: 'Spring len', step: '1' },
         { key: 'centerPull', label: 'Center pull', step: '0.0001' },
@@ -1225,7 +1227,7 @@ class Graph2DController {
         range.type = 'range';
         // sensible defaults per-key
         switch (f.key) {
-          case 'repulsionStrength': range.min = '0'; range.max = '10000'; range.step = '1'; break;
+          case 'repulsionStrength': range.min = '0'; range.max = '1'; range.step = f.step || '0.01'; break;
           case 'springStrength': range.min = '0'; range.max = '1.0'; range.step = '0.001'; break;
           case 'springLength': range.min = '10'; range.max = '500'; range.step = '1'; break;
           case 'centerPull': range.min = '0'; range.max = '0.01'; range.step = '0.0001'; break;
@@ -1235,8 +1237,13 @@ class Graph2DController {
           default: range.min = '0'; range.max = '100'; range.step = '1';
         }
         const current = (phys as any)[f.key];
-        // For springStrength, settings store the internal value; convert to UI 0..1
-        if (f.key === 'springStrength') {
+        // For specific keys, convert internal -> UI
+        if (f.key === 'repulsionStrength') {
+          const internal = Number.isFinite(current) ? Number(current) : Number(range.min);
+          // UI 0..1 where internal = ui^2 * 2000
+          const ui = Math.min(1, Math.max(0, Math.sqrt(Math.max(0, internal / 2000))));
+          range.value = String(ui);
+        } else if (f.key === 'springStrength') {
           const ui = Number.isFinite(current) ? Math.min(1, Math.max(0, Number(current) / 0.5)) : Number(range.min);
           range.value = String(ui);
         } else {
@@ -1260,7 +1267,10 @@ class Graph2DController {
             (this.plugin as any).settings.physics = (this.plugin as any).settings.physics || {};
             const val = Number((e.target as HTMLInputElement).value);
             // map UI -> internal for specific keys
-            if (f.key === 'springStrength') {
+            if (f.key === 'repulsionStrength') {
+              // internal = ui^2 * 2000
+              (this.plugin as any).settings.physics[f.key] = Number.isFinite(val) ? ((val * val) * 2000) : (this.plugin as any).settings.physics[f.key];
+            } else if (f.key === 'springStrength') {
               // UI 0..1 -> internal = ui * 0.5
               (this.plugin as any).settings.physics[f.key] = Number.isFinite(val) ? (val * 0.5) : (this.plugin as any).settings.physics[f.key];
             } else {
@@ -1283,7 +1293,10 @@ class Graph2DController {
             await (this.plugin as any).saveSettings();
             // restore UI to default from settings object if available
             const def = (this.plugin as any).settings.physics[f.key];
-            if (f.key === 'springStrength') {
+            if (f.key === 'repulsionStrength') {
+              const ui = def !== undefined ? String(Math.min(1, Math.max(0, Math.sqrt(Math.max(0, Number(def) / 2000))))) : String(range.min);
+              range.value = ui;
+            } else if (f.key === 'springStrength') {
               const ui = def !== undefined ? String(Math.min(1, Math.max(0, Number(def) / 0.5))) : String(range.min);
               range.value = ui;
             } else {
@@ -1324,6 +1337,8 @@ class Graph2DController {
           headerActions.appendChild(hbtn);
         }
       } catch (e) {}
+      // Initialize toolbox UI from settings values at creation
+      try { this.refreshControlsFromSettings(); } catch (e) {}
     } catch (e) {
       // ignore
     }
@@ -1353,6 +1368,122 @@ class Graph2DController {
         }
         panel.style.overflow = '';
         panel.style.maxHeight = '';
+      }
+    } catch (e) {}
+  }
+
+  // Synchronize the toolbox UI controls from current plugin settings
+  private refreshControlsFromSettings(): void {
+    try {
+      if (!this.controlsEl) return;
+      const settings = (this.plugin as any).settings || {};
+      const glow = settings.glow || {};
+      const phys = settings.physics || {};
+      // Iterate rows and update known inputs by label text
+      const panel = this.controlsEl;
+      for (let i = 0; i < panel.children.length; i++) {
+        const row = panel.children[i] as HTMLElement;
+        const labelEl = row.querySelector('label');
+        const right = row.querySelector('div:last-child');
+        if (!labelEl || !right) continue;
+        const name = (labelEl.textContent || '').toLowerCase();
+        const inputs = Array.from(right.querySelectorAll('input')) as HTMLInputElement[];
+        // Node color row
+        if (name.includes('node color')) {
+          const color = inputs.find((x) => x.type === 'color');
+          const alpha = inputs.find((x) => x.type === 'number');
+          if (color) color.value = String(glow.nodeColor || (color.value || '#66ccff'));
+          if (alpha) alpha.value = String(glow.nodeColorAlpha ?? 1.0);
+        }
+        // Edge color row
+        else if (name.includes('edge color')) {
+          const color = inputs.find((x) => x.type === 'color');
+          const alpha = inputs.find((x) => x.type === 'number');
+          if (color) color.value = String(glow.edgeColor || (color.value || '#888888'));
+          if (alpha) alpha.value = String(glow.edgeColorAlpha ?? 0.6);
+        }
+        // Tag color row
+        else if (name.includes('tag color')) {
+          const color = inputs.find((x) => x.type === 'color');
+          const alpha = inputs.find((x) => x.type === 'number');
+          if (color) color.value = String(glow.tagColor || (color.value || '#8000ff'));
+          if (alpha) alpha.value = String(glow.tagColorAlpha ?? 1.0);
+        }
+        // Highlight depth
+        else if (name.includes('highlight depth')) {
+          const range = inputs.find((x) => x.type === 'range');
+          const num = inputs.find((x) => x.type === 'number');
+          const v = String(glow.highlightDepth ?? 1);
+          if (range) range.value = v;
+          if (num) num.value = v;
+        }
+        // Label visibility (min + fade)
+        else if (name.includes('label visibility')) {
+          const ranges = inputs.filter((x) => x.type === 'range');
+          const nums = inputs.filter((x) => x.type === 'number');
+          const minV = String(glow.labelMinVisibleRadiusPx ?? 6);
+          const fadeV = String(glow.labelFadeRangePx ?? 8);
+          if (ranges[0]) ranges[0].value = minV;
+          if (nums[0]) nums[0].value = minV;
+          if (ranges[1]) ranges[1].value = fadeV;
+          if (nums[1]) nums[1].value = fadeV;
+        }
+        // Count duplicate links
+        else if (name.includes('count duplicate links')) {
+          const chk = inputs.find((x) => x.type === 'checkbox');
+          if (chk) chk.checked = Boolean(settings.countDuplicateLinks);
+        }
+        // Show tag nodes
+        else if (name.includes('show tag nodes')) {
+          const chk = inputs.find((x) => x.type === 'checkbox');
+          if (chk) chk.checked = (settings.showTags !== false);
+        }
+        // Mouse gravity toggle
+        else if (name.includes('mouse gravity')) {
+          const chk = inputs.find((x) => x.type === 'checkbox');
+          if (chk) chk.checked = (phys.mouseGravityEnabled !== false) && (phys.mouseAttractionEnabled !== false);
+        }
+        // Physics numeric ranges
+        else if (name.includes('repulsion')) {
+          const range = inputs.find((x) => x.type === 'range');
+          const num = inputs.find((x) => x.type === 'number');
+          const internal = Number(phys.repulsionStrength ?? 0);
+          const ui = Math.min(1, Math.max(0, Math.sqrt(Math.max(0, internal / 2000))));
+          const v = String(ui);
+          if (range) range.value = v;
+          if (num) num.value = v;
+        } else if (name.includes('spring len')) {
+          const range = inputs.find((x) => x.type === 'range');
+          const num = inputs.find((x) => x.type === 'number');
+          const val = String(phys.springLength ?? 100);
+          if (range) range.value = val;
+          if (num) num.value = val;
+        } else if (name.includes('spring')) {
+          const range = inputs.find((x) => x.type === 'range');
+          const num = inputs.find((x) => x.type === 'number');
+          // UI is 0..1 for spring strength in toolbox; we keep value as-is
+          const ui = phys.springStrength != null ? String(Math.min(1, Math.max(0, Number(phys.springStrength) / 0.5))) : '0';
+          if (range) range.value = ui;
+          if (num) num.value = ui;
+        } else if (name.includes('center pull')) {
+          const range = inputs.find((x) => x.type === 'range');
+          const num = inputs.find((x) => x.type === 'number');
+          const ui = phys.centerPull != null ? String(Math.min(1, Math.max(0, Number(phys.centerPull) / 0.01))) : '0';
+          if (range) range.value = ui;
+          if (num) num.value = ui;
+        } else if (name.includes('damping')) {
+          const range = inputs.find((x) => x.type === 'range');
+          const num = inputs.find((x) => x.type === 'number');
+          const val = String(phys.damping ?? 0.7);
+          if (range) range.value = val;
+          if (num) num.value = val;
+        } else if (name.includes('mouse attraction exponent')) {
+          const range = inputs.find((x) => x.type === 'range');
+          const num = inputs.find((x) => x.type === 'number');
+          const val = String(phys.mouseAttractionExponent ?? 3);
+          if (range) range.value = val;
+          if (num) num.value = val;
+        }
       }
     } catch (e) {}
   }

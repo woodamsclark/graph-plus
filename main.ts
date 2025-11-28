@@ -9,10 +9,11 @@ export interface GlowSettings {
   hoverBoostFactor: number;
   neighborBoostFactor?: number;
   dimFactor?: number;
-  hoverHighlightDepth?: number;
-  distanceInnerRadiusMultiplier?: number;
-  distanceOuterRadiusMultiplier?: number;
-  distanceCurveSteepness?: number;
+  // renamed: hoverHighlightDepth -> highlightDepth
+  highlightDepth?: number;
+  // unified gravity/glow distance model
+  gravityRadiusMultiplier?: number; // scales per-node screen radius
+  gravityCurveSteepness?: number;   // falloff steepness
   // focus/dimming controls
   focusSmoothingRate?: number;
   edgeDimMin?: number;
@@ -57,8 +58,8 @@ export interface GreaterGraphSettings {
     centerX?: number;
     centerY?: number;
     centerZ?: number;
-    // mouse attraction tuning
-    mouseAttractionRadius?: number;
+    // mouse gravity well
+    mouseGravityEnabled?: boolean;
     mouseAttractionStrength?: number;
     mouseAttractionExponent?: number;
   };
@@ -93,10 +94,11 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     neighborBoostFactor: undefined,
     // dimFactor removed from UI but kept available for fallback
     dimFactor: undefined,
-    hoverHighlightDepth: 1,
-    distanceInnerRadiusMultiplier: 1,
-    distanceOuterRadiusMultiplier: 30,
-    distanceCurveSteepness: 1.0,
+    // renamed highlight depth
+    highlightDepth: 1,
+    // unified gravity/glow params
+    gravityRadiusMultiplier: 6,
+    gravityCurveSteepness: 3,
     // focus/dimming defaults
     focusSmoothingRate: 0.8,
     edgeDimMin: undefined,
@@ -135,8 +137,8 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     centerX: 0,
     centerY: 0,
     centerZ: 0,
-    // mouse attractor (renamed in UI to 'mouse gravity well')
-    mouseAttractionRadius: 30,
+    // mouse gravity toggle + strength/exponent
+    mouseGravityEnabled: true,
     mouseAttractionStrength: 1,
     mouseAttractionExponent: 1,
   },
@@ -411,74 +413,55 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Highlight depth',
       desc: 'Graph distance (in hops) from the hovered node that will be highlighted.',
-      value: glow.hoverHighlightDepth ?? 1,
+      value: glow.highlightDepth ?? DEFAULT_SETTINGS.glow.highlightDepth!,
       min: 0,
       max: 5,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.glow.hoverHighlightDepth,
+      resetValue: DEFAULT_SETTINGS.glow.highlightDepth,
       onChange: async (v) => {
         if (!Number.isNaN(v) && Number.isInteger(v) && v >= 0) {
-          glow.hoverHighlightDepth = Math.max(0, Math.floor(v));
+          glow.highlightDepth = Math.max(0, Math.floor(v));
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.hoverHighlightDepth = DEFAULT_SETTINGS.glow.hoverHighlightDepth;
+          glow.highlightDepth = DEFAULT_SETTINGS.glow.highlightDepth;
           await this.plugin.saveSettings();
         }
       },
     });
 
     addSliderSetting(containerEl, {
-      name: 'Inner distance multiplier',
-      desc: 'Distance (in node radii) where distance-based glow is fully active.',
-      value: glow.distanceInnerRadiusMultiplier ?? 1.0,
-      min: 0.5,
-      max: 100,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.distanceInnerRadiusMultiplier,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v > 0) {
-          glow.distanceInnerRadiusMultiplier = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          glow.distanceInnerRadiusMultiplier = DEFAULT_SETTINGS.glow.distanceInnerRadiusMultiplier;
-          await this.plugin.saveSettings();
-        }
-      },
-    });
-
-    addSliderSetting(containerEl, {
-      name: 'Outer distance multiplier',
-      desc: 'Distance (in node radii) beyond which the mouse has no effect on glow.',
-      value: glow.distanceOuterRadiusMultiplier ?? DEFAULT_SETTINGS.glow.distanceOuterRadiusMultiplier,
+      name: 'Gravity radius multiplier',
+      desc: 'Scales each node\'s screen-space radius for glow/mouse gravity.',
+      value: glow.gravityRadiusMultiplier ?? DEFAULT_SETTINGS.glow.gravityRadiusMultiplier!,
       min: 1,
-      max: 100,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.distanceOuterRadiusMultiplier,
+      max: 20,
+      step: 0.1,
+      resetValue: DEFAULT_SETTINGS.glow.gravityRadiusMultiplier,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v > (glow.distanceInnerRadiusMultiplier ?? 0)) {
-          glow.distanceOuterRadiusMultiplier = v;
+        if (!Number.isNaN(v) && v > 0) {
+          glow.gravityRadiusMultiplier = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.distanceOuterRadiusMultiplier = DEFAULT_SETTINGS.glow.distanceOuterRadiusMultiplier;
+          glow.gravityRadiusMultiplier = DEFAULT_SETTINGS.glow.gravityRadiusMultiplier;
           await this.plugin.saveSettings();
         }
       },
     });
 
     addSliderSetting(containerEl, {
-      name: 'Distance curve steepness',
-      desc: 'Controls how quickly glow ramps up as the cursor approaches a node. Higher values = steeper S-curve.',
-      value: glow.distanceCurveSteepness ?? 2.0,
+      name: 'Gravity curve steepness',
+      desc: 'Controls falloff steepness; higher = stronger near cursor.',
+      value: glow.gravityCurveSteepness ?? DEFAULT_SETTINGS.glow.gravityCurveSteepness!,
       min: 0.5,
-      max: 5,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.distanceCurveSteepness,
+      max: 10,
+      step: 0.1,
+      resetValue: DEFAULT_SETTINGS.glow.gravityCurveSteepness,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          glow.distanceCurveSteepness = v;
+          glow.gravityCurveSteepness = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.distanceCurveSteepness = DEFAULT_SETTINGS.glow.distanceCurveSteepness;
+          glow.gravityCurveSteepness = DEFAULT_SETTINGS.glow.gravityCurveSteepness;
           await this.plugin.saveSettings();
         }
       },
@@ -887,30 +870,21 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         },
       });
 
-      // Mouse attractor settings
-      addSliderSetting(containerEl, {
-        name: 'Mouse gravity well (radius px)',
-        desc: 'Maximum distance (in pixels) from cursor where the gravity well attracts nodes.',
-        value: phys.mouseAttractionRadius ?? DEFAULT_SETTINGS.physics!.mouseAttractionRadius,
-        min: 10,
-        max: 400,
-        step: 1,
-        resetValue: DEFAULT_SETTINGS.physics!.mouseAttractionRadius,
-        onChange: async (v) => {
-          if (!Number.isNaN(v) && v >= 0) {
+      // Mouse gravity toggle (replaces old radius control)
+      new Setting(containerEl)
+        .setName('Mouse gravity')
+        .setDesc('Enable the mouse gravity well that attracts nearby nodes.')
+        .addToggle((t: any) => t
+          .setValue(Boolean((phys as any).mouseGravityEnabled !== false))
+          .onChange(async (v: any) => {
             this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.mouseAttractionRadius = v;
+            this.plugin.settings.physics.mouseGravityEnabled = Boolean(v);
             await this.plugin.saveSettings();
-          } else if (Number.isNaN(v)) {
-            this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.mouseAttractionRadius = DEFAULT_SETTINGS.physics!.mouseAttractionRadius;
-            await this.plugin.saveSettings();
-          }
-        },
-      });
+          }));
 
       // mouse attraction strength: UI 0..1 -> internal = ui * 0.1
-      const mouseStrengthUi = Math.min(1, Math.max(0, (phys.mouseAttractionStrength ?? DEFAULT_SETTINGS.physics!.mouseAttractionStrength) / 0.1));
+      const mouseStrengthInternal = (this.plugin.settings.physics?.mouseAttractionStrength ?? DEFAULT_SETTINGS.physics!.mouseAttractionStrength);
+      const mouseStrengthUi = Math.min(1, Math.max(0, (mouseStrengthInternal || 0) / 0.1));
       addSliderSetting(containerEl, {
         name: 'Mouse attraction strength',
         desc: 'UI 0–1 mapped to internal small force scale (higher = stronger pull).',
@@ -935,7 +909,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       addSliderSetting(containerEl, {
         name: 'Mouse attraction exponent',
         desc: 'How sharply attraction ramps as the cursor approaches (1 = linear; higher = snappier near cursor).',
-        value: phys.mouseAttractionExponent ?? DEFAULT_SETTINGS.physics!.mouseAttractionExponent,
+        value: (this.plugin.settings.physics?.mouseAttractionExponent ?? DEFAULT_SETTINGS.physics!.mouseAttractionExponent) as number,
         min: 1,
         max: 6,
         step: 0.1,

@@ -342,16 +342,19 @@ function createRenderer2D(options) {
   let tagColorAlpha = glowOptions?.tagColorAlpha ?? 1;
   let labelColorAlpha = glowOptions?.labelColorAlpha ?? 1;
   let edgeColorAlpha = glowOptions?.edgeColorAlpha ?? 1;
-  let nodeColorMaxAlpha = glowOptions?.nodeColorMaxAlpha ?? nodeColorAlpha;
-  let tagColorMaxAlpha = glowOptions?.tagColorMaxAlpha ?? tagColorAlpha;
-  let edgeColorMaxAlpha = glowOptions?.edgeColorMaxAlpha ?? edgeColorAlpha;
-  let hoverBoost = glowOptions?.hoverBoostFactor ?? 2;
-  let neighborBoost = glowOptions?.neighborBoostFactor ?? 1.5;
-  let dimFactor = glowOptions?.dimFactor ?? 0.2;
-  let hoverHighlightDepth = glowOptions?.hoverHighlightDepth ?? 2;
-  let distanceInnerMultiplier = glowOptions?.distanceInnerRadiusMultiplier ?? 1.5;
-  let distanceOuterMultiplier = glowOptions?.distanceOuterRadiusMultiplier ?? 4;
-  let distanceCurveSteepness = glowOptions?.distanceCurveSteepness ?? 2;
+  let nodeMinAlpha = glowOptions?.nodeMinAlpha ?? 0.1;
+  let nodeMaxAlpha = glowOptions?.nodeMaxAlpha ?? 1;
+  let tagMinAlpha = glowOptions?.tagMinAlpha ?? 0.1;
+  let tagMaxAlpha = glowOptions?.tagMaxAlpha ?? 1;
+  let edgeMinAlpha = glowOptions?.edgeMinAlpha ?? 0.1;
+  let edgeMaxAlpha = glowOptions?.edgeMaxAlpha ?? 0.6;
+  let labelMinAlpha = glowOptions?.labelMinAlpha ?? 0;
+  let labelMaxAlpha = glowOptions?.labelMaxAlpha ?? 1;
+  let hoverHighlightDepth = glowOptions?.highlightDepth ?? 1;
+  let gravityRadiusMultiplier = glowOptions?.gravityRadiusMultiplier ?? 15;
+  let gravityCurveSteepness = glowOptions?.gravityCurveSteepness ?? 1;
+  let distanceInnerMultiplier = 1;
+  let focusSmoothingRate = glowOptions?.focusSmoothingRate ?? 0.8;
   let hoveredNodeId = null;
   let hoverHighlightSet = /* @__PURE__ */ new Set();
   let mouseX = 0;
@@ -361,7 +364,6 @@ function createRenderer2D(options) {
   const hoverLerpSpeed = 0.2;
   const nodeFocusMap = /* @__PURE__ */ new Map();
   let lastRenderTime = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
-  let focusSmoothingRate = glowOptions?.focusSmoothingRate ?? 0.15;
   let edgeDimMin = glowOptions?.edgeDimMin ?? 0.1;
   let edgeDimMax = glowOptions?.edgeDimMax ?? 0.7;
   let nodeMinBodyAlpha = glowOptions?.nodeMinBodyAlpha ?? 0.3;
@@ -573,7 +575,7 @@ function createRenderer2D(options) {
   function getMouseDistanceFactor(node) {
     const radius = getNodeRadius(node);
     const innerR = radius * distanceInnerMultiplier;
-    const outerR = radius * distanceOuterMultiplier;
+    const outerR = radius * gravityRadiusMultiplier;
     if (outerR <= innerR || outerR <= 0)
       return 0;
     const p = projectWorld(node);
@@ -586,7 +588,7 @@ function createRenderer2D(options) {
       return 0;
     const t = (dist - innerR) / (outerR - innerR);
     const proximity = 1 - t;
-    return applySCurve(proximity, distanceCurveSteepness);
+    return applySCurve(proximity, gravityCurveSteepness);
   }
   function render() {
     if (!ctx)
@@ -745,14 +747,13 @@ function createRenderer2D(options) {
           alpha = 0.08 + (0.9 - 0.08) * edgeFocus;
         ctx.save();
         const useEdgeAlpha = glowOptions?.edgeColorAlpha ?? edgeColorAlpha;
-        const useEdgeMax = glowOptions?.edgeColorMaxAlpha ?? glowOptions?.edgeColorAlpha ?? edgeColorMaxAlpha;
-        let finalEdgeAlpha = alpha * useEdgeAlpha;
+        let finalEdgeAlpha = Math.max(edgeMinAlpha, alpha * useEdgeAlpha);
         if (hoveredNodeId) {
           const srcInDepth = hoverHighlightSet.has(edge.sourceId);
           const tgtInDepth = hoverHighlightSet.has(edge.targetId);
           const directlyIncident = edge.sourceId === hoveredNodeId || edge.targetId === hoveredNodeId;
           if (srcInDepth && tgtInDepth || directlyIncident)
-            finalEdgeAlpha = useEdgeMax;
+            finalEdgeAlpha = edgeMaxAlpha;
         }
         ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${finalEdgeAlpha})`;
         const isMutual = !!edge.hasReverse && drawMutualDoubleLines;
@@ -813,17 +814,16 @@ function createRenderer2D(options) {
         const nodeColorOverride = node && node.type === "tag" ? glowOptions?.tagColor ?? themeTagColor : themeNodeColor;
         const accentRgb = colorToRgb(nodeColorOverride);
         const useNodeAlpha = node && node.type === "tag" ? glowOptions?.tagColorAlpha ?? tagColorAlpha : glowOptions?.nodeColorAlpha ?? nodeColorAlpha;
-        const useNodeMax = node && node.type === "tag" ? glowOptions?.tagColorMaxAlpha ?? glowOptions?.tagColorAlpha ?? tagColorAlpha : glowOptions?.nodeColorMaxAlpha ?? glowOptions?.nodeColorAlpha ?? nodeColorAlpha;
         const dimCenter = clamp01(getBaseCenterAlpha(node) * dimFactor);
         const fullCenter = centerAlpha;
         let blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
-        let effectiveUseNodeAlpha = useNodeAlpha;
+        let effectiveUseNodeAlpha = Math.max(node && node.type === "tag" ? tagMinAlpha : nodeMinAlpha, useNodeAlpha);
         if (hoveredNodeId) {
           const inDepth = hoverHighlightSet.has(node.id);
           const isHovered = node.id === hoveredNodeId;
           if (isHovered || inDepth) {
             blendedCenter = 1;
-            effectiveUseNodeAlpha = useNodeMax;
+            effectiveUseNodeAlpha = node && node.type === "tag" ? tagMaxAlpha : nodeMaxAlpha;
           }
         }
         const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
@@ -844,23 +844,20 @@ function createRenderer2D(options) {
         const bodyColorOverride = node && node.type === "tag" ? glowOptions?.tagColor ?? themeTagColor : themeNodeColor;
         const accent = colorToRgb(bodyColorOverride);
         const useBodyAlpha = node && node.type === "tag" ? glowOptions?.tagColorAlpha ?? tagColorAlpha : glowOptions?.nodeColorAlpha ?? nodeColorAlpha;
-        const useBodyMax = node && node.type === "tag" ? glowOptions?.tagColorMaxAlpha ?? glowOptions?.tagColorAlpha ?? tagColorAlpha : glowOptions?.nodeColorMaxAlpha ?? glowOptions?.nodeColorAlpha ?? nodeColorAlpha;
-        let effectiveUseBodyAlpha = useBodyAlpha;
+        let effectiveUseBodyAlpha = Math.max(node && node.type === "tag" ? tagMinAlpha : nodeMinAlpha, useBodyAlpha);
         let finalBodyAlpha = bodyAlpha;
         if (hoveredNodeId) {
           const inDepthBody = hoverHighlightSet.has(node.id);
           const isHoveredBody = node.id === hoveredNodeId;
           if (isHoveredBody || inDepthBody) {
             finalBodyAlpha = 1;
-            effectiveUseBodyAlpha = useBodyMax;
+            effectiveUseBodyAlpha = node && node.type === "tag" ? tagMaxAlpha : nodeMaxAlpha;
           }
         }
         ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${finalBodyAlpha * effectiveUseBodyAlpha})`;
         ctx.fill();
         ctx.restore();
-        const displayedFontBase = baseFontSize * getZoomScale();
-        const scaleFactor = baseRadius > 0 ? radius / baseRadius : 1;
-        const displayedFont = displayedFontBase * scaleFactor;
+        const displayedFont = labelBaseFontSize;
         const radiusScreenPx = radius * Math.max(1e-4, scale);
         let labelAlphaVis = 1;
         const minR = Math.max(0, labelMinVisibleRadiusPx);
@@ -883,11 +880,16 @@ function createRenderer2D(options) {
           const fontToSet = Math.max(1, clampedDisplayed / Math.max(1e-4, scale));
           ctx.save();
           ctx.font = `${fontToSet}px ${resolvedInterfaceFontFamily || "sans-serif"}`;
-          const centerA = clamp01(getCenterAlpha(node));
-          ctx.globalAlpha = labelAlphaVis * centerA;
+          const isHoverOrHighlight2 = hoveredNodeId === node.id || hoverHighlightSet && hoverHighlightSet.has(node.id);
+          const centerA = isHoverOrHighlight2 ? 1 : clamp01(getCenterAlpha(node));
+          let labelA = Math.max(labelMinAlpha, labelAlphaVis * (glowOptions?.labelColorAlpha ?? labelColorAlpha));
+          if (isHoverOrHighlight2)
+            labelA = labelMaxAlpha;
+          else if (hoveredNodeId && hoverHighlightSet.has(node.id))
+            labelA = Math.max(labelA, glowOptions?.labelColorAlpha ?? labelColorAlpha);
+          ctx.globalAlpha = Math.max(0, Math.min(1, labelA * centerA));
           const labelRgb = colorToRgb((glowOptions?.labelColor ?? labelCss) || "#ffffff");
-          const useLabelAlpha = glowOptions?.labelColorAlpha ?? labelColorAlpha;
-          ctx.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},${useLabelAlpha})`;
+          ctx.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},1.0)`;
           const verticalPadding = 4;
           ctx.fillText(node.label, p.x, p.y + radius + verticalPadding);
           ctx.restore();
@@ -1080,7 +1082,7 @@ function createSimulation(nodes, edges, options) {
   let springStrength = options?.springStrength ?? 0.04;
   let springLength = options?.springLength ?? 100;
   let centerPull = options?.centerPull ?? 0;
-  let damping = options?.damping ?? 0.9;
+  let damping = options?.damping ?? 0.7;
   let notePlaneStiffness = options?.notePlaneStiffness ?? 0;
   let tagPlaneStiffness = options?.tagPlaneStiffness ?? 0;
   let mouseAttractionRadius = options?.mouseAttractionRadius ?? 80;
@@ -1222,9 +1224,10 @@ function createSimulation(nodes, edges, options) {
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
-      n.vx = (n.vx || 0) * damping;
-      n.vy = (n.vy || 0) * damping;
-      n.vz = (n.vz || 0) * damping;
+      const d = Math.max(0, Math.min(1, damping));
+      n.vx *= 1 - d;
+      n.vy *= 1 - d;
+      n.vz *= 1 - d;
       if (Math.abs(n.vx) < 1e-3)
         n.vx = 0;
       if (Math.abs(n.vy) < 1e-3)
@@ -1263,14 +1266,16 @@ function createSimulation(nodes, edges, options) {
     const tagK = tagPlaneStiffness ?? 0;
     if (noteK === 0 && tagK === 0)
       return;
+    const targetZ = centerZ ?? 0;
+    const targetX = centerX ?? 0;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
       if (n.type === "note" && noteK > 0) {
-        const dz = 0 - (n.z || 0);
+        const dz = targetZ - (n.z || 0);
         n.vz = (n.vz || 0) + dz * noteK;
       } else if (n.type === "tag" && tagK > 0) {
-        const dx = 0 - (n.x || 0);
+        const dx = targetX - (n.x || 0);
         n.vx = (n.vx || 0) + dx * tagK;
       }
     }
@@ -1627,10 +1632,18 @@ var Graph2DController = class {
     this.canvas = canvas;
     this.createControlsPanel();
     const initialGlow = Object.assign({}, this.plugin.settings?.glow || {});
-    const initialPhys = this.plugin.settings?.physics || {};
-    if (typeof initialPhys.mouseAttractionRadius === "number")
-      initialGlow.glowRadiusPx = initialPhys.mouseAttractionRadius;
     this.renderer = createRenderer2D({ canvas, glow: initialGlow });
+    try {
+      const defaults = {
+        nodeColorAlpha: 1,
+        edgeColorAlpha: 0.6,
+        tagColorAlpha: 1
+      };
+      const merged = Object.assign({}, defaults, this.plugin.settings?.glow || {});
+      if (this.renderer.setGlowSettings)
+        this.renderer.setGlowSettings(merged);
+    } catch (e) {
+    }
     try {
       const cam0 = this.renderer.getCamera?.();
       if (cam0 && typeof cam0.distance === "number")
@@ -1995,7 +2008,31 @@ var Graph2DController = class {
             try {
               if (this.pendingFocusNode === "__origin__") {
                 try {
-                  this.renderer.setCamera({ targetX: this.viewCenterX ?? 0, targetY: this.viewCenterY ?? 0, targetZ: 0, distance: this.defaultCameraDistance });
+                  if (this.renderer) {
+                    const cam = this.renderer.getCamera();
+                    const from = {
+                      targetX: cam.targetX ?? 0,
+                      targetY: cam.targetY ?? 0,
+                      targetZ: cam.targetZ ?? 0,
+                      distance: cam.distance ?? 1e3,
+                      yaw: cam.yaw ?? 0,
+                      pitch: cam.pitch ?? 0
+                    };
+                    const to = {
+                      targetX: this.viewCenterX ?? 0,
+                      targetY: this.viewCenterY ?? 0,
+                      targetZ: 0,
+                      distance: this.defaultCameraDistance,
+                      yaw: from.yaw,
+                      pitch: from.pitch
+                    };
+                    this.cameraAnimStart = performance.now();
+                    this.cameraAnimDuration = 300;
+                    this.cameraAnimFrom = from;
+                    this.cameraAnimTo = to;
+                    this.isCameraFollowing = false;
+                    this.cameraFollowNode = null;
+                  }
                 } catch (e) {
                 }
                 try {
@@ -2017,7 +2054,7 @@ var Graph2DController = class {
               } else {
                 const n = this.pendingFocusNode;
                 try {
-                  this.renderer.setCamera({ targetX: n.x ?? 0, targetY: n.y ?? 0, targetZ: n.z ?? 0 });
+                  this.focusCameraOnNode(n);
                 } catch (e) {
                 }
                 try {
@@ -2110,6 +2147,10 @@ var Graph2DController = class {
               this.lastPinnedCenterNotePath = pinnedPath;
               this.refreshGraph();
             }
+          } catch (e) {
+          }
+          try {
+            this.refreshControlsFromSettings();
           } catch (e) {
           }
         }
@@ -2209,16 +2250,8 @@ var Graph2DController = class {
       nodeAlpha.min = "0";
       nodeAlpha.max = "1";
       nodeAlpha.step = "0.01";
-      nodeAlpha.value = String(this.plugin.settings?.glow?.nodeColorAlpha ?? 1);
+      nodeAlpha.value = String(this.plugin.settings?.glow?.nodeColorAlpha ?? 0.1);
       nodeAlpha.style.width = "64px";
-      const nodeMaxAlpha = document.createElement("input");
-      nodeMaxAlpha.type = "number";
-      nodeMaxAlpha.min = "0";
-      nodeMaxAlpha.max = "1";
-      nodeMaxAlpha.step = "0.01";
-      nodeMaxAlpha.value = String(this.plugin.settings?.glow?.nodeColorMaxAlpha ?? 1);
-      nodeMaxAlpha.style.width = "64px";
-      nodeMaxAlpha.style.marginLeft = "6px";
       nodeColor.addEventListener("input", async (e) => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
@@ -2256,41 +2289,19 @@ var Graph2DController = class {
         } catch (e2) {
         }
       });
-      nodeMaxAlpha.addEventListener("input", async (e) => {
-        try {
-          this.plugin.settings.glow = this.plugin.settings.glow || {};
-          const v = Number(e.target.value);
-          this.plugin.settings.glow.nodeColorMaxAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1;
-          await this.plugin.saveSettings();
-          try {
-            if (this.renderer && this.renderer.setGlowSettings)
-              this.renderer.setGlowSettings(this.plugin.settings.glow);
-          } catch (e2) {
-          }
-          try {
-            if (this.renderer && this.renderer.render)
-              this.renderer.render();
-          } catch (e2) {
-          }
-        } catch (e2) {
-        }
-      });
       nodeColorWrap.appendChild(nodeColor);
       nodeColorWrap.appendChild(nodeAlpha);
-      nodeColorWrap.appendChild(nodeMaxAlpha);
       panel.appendChild(makeRow("Node color", nodeColorWrap, async () => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
           delete this.plugin.settings.glow.nodeColor;
           delete this.plugin.settings.glow.nodeColorAlpha;
-          delete this.plugin.settings.glow.nodeColorMaxAlpha;
           await this.plugin.saveSettings();
           try {
             const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
             const nodeVar = cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
             nodeColor.value = nodeVar && nodeVar.trim() ? nodeVar.trim() : "#66ccff";
             nodeAlpha.value = String(1);
-            nodeMaxAlpha.value = String(1);
           } catch (e) {
             nodeColor.value = "#66ccff";
           }
@@ -2327,16 +2338,8 @@ var Graph2DController = class {
       edgeAlpha.min = "0";
       edgeAlpha.max = "1";
       edgeAlpha.step = "0.01";
-      edgeAlpha.value = String(this.plugin.settings?.glow?.edgeColorAlpha ?? 1);
+      edgeAlpha.value = String(this.plugin.settings?.glow?.edgeColorAlpha ?? 0.1);
       edgeAlpha.style.width = "64px";
-      const edgeMaxAlpha = document.createElement("input");
-      edgeMaxAlpha.type = "number";
-      edgeMaxAlpha.min = "0";
-      edgeMaxAlpha.max = "1";
-      edgeMaxAlpha.step = "0.01";
-      edgeMaxAlpha.value = String(this.plugin.settings?.glow?.edgeColorMaxAlpha ?? 1);
-      edgeMaxAlpha.style.width = "64px";
-      edgeMaxAlpha.style.marginLeft = "6px";
       edgeColor.addEventListener("input", async (e) => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
@@ -2374,41 +2377,19 @@ var Graph2DController = class {
         } catch (e2) {
         }
       });
-      edgeMaxAlpha.addEventListener("input", async (e) => {
-        try {
-          this.plugin.settings.glow = this.plugin.settings.glow || {};
-          const v = Number(e.target.value);
-          this.plugin.settings.glow.edgeColorMaxAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1;
-          await this.plugin.saveSettings();
-          try {
-            if (this.renderer && this.renderer.setGlowSettings)
-              this.renderer.setGlowSettings(this.plugin.settings.glow);
-          } catch (e2) {
-          }
-          try {
-            if (this.renderer && this.renderer.render)
-              this.renderer.render();
-          } catch (e2) {
-          }
-        } catch (e2) {
-        }
-      });
       edgeColorWrap.appendChild(edgeColor);
       edgeColorWrap.appendChild(edgeAlpha);
-      edgeColorWrap.appendChild(edgeMaxAlpha);
       panel.appendChild(makeRow("Edge color", edgeColorWrap, async () => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
           delete this.plugin.settings.glow.edgeColor;
           delete this.plugin.settings.glow.edgeColorAlpha;
-          delete this.plugin.settings.glow.edgeColorMaxAlpha;
           await this.plugin.saveSettings();
           try {
             const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
             const edgeVar = cs.getPropertyValue("--text-muted") || cs.getPropertyValue("--text-faint") || cs.getPropertyValue("--text-normal");
             edgeColor.value = edgeVar && edgeVar.trim() ? edgeVar.trim() : "#888888";
             edgeAlpha.value = String(1);
-            edgeMaxAlpha.value = String(1);
           } catch (e) {
             edgeColor.value = "#888888";
           }
@@ -2445,16 +2426,8 @@ var Graph2DController = class {
       tagAlpha.min = "0";
       tagAlpha.max = "1";
       tagAlpha.step = "0.01";
-      tagAlpha.value = String(this.plugin.settings?.glow?.tagColorAlpha ?? 1);
+      tagAlpha.value = String(this.plugin.settings?.glow?.tagColorAlpha ?? 0.1);
       tagAlpha.style.width = "64px";
-      const tagMaxAlpha = document.createElement("input");
-      tagMaxAlpha.type = "number";
-      tagMaxAlpha.min = "0";
-      tagMaxAlpha.max = "1";
-      tagMaxAlpha.step = "0.01";
-      tagMaxAlpha.value = String(this.plugin.settings?.glow?.tagColorMaxAlpha ?? 1);
-      tagMaxAlpha.style.width = "64px";
-      tagMaxAlpha.style.marginLeft = "6px";
       tagColor.addEventListener("input", async (e) => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
@@ -2492,28 +2465,8 @@ var Graph2DController = class {
         } catch (e2) {
         }
       });
-      tagMaxAlpha.addEventListener("input", async (e) => {
-        try {
-          this.plugin.settings.glow = this.plugin.settings.glow || {};
-          const v = Number(e.target.value);
-          this.plugin.settings.glow.tagColorMaxAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1;
-          await this.plugin.saveSettings();
-          try {
-            if (this.renderer && this.renderer.setGlowSettings)
-              this.renderer.setGlowSettings(this.plugin.settings.glow);
-          } catch (e2) {
-          }
-          try {
-            if (this.renderer && this.renderer.render)
-              this.renderer.render();
-          } catch (e2) {
-          }
-        } catch (e2) {
-        }
-      });
       tagWrap.appendChild(tagColor);
       tagWrap.appendChild(tagAlpha);
-      tagWrap.appendChild(tagMaxAlpha);
       panel.appendChild(makeRow("Tag color", tagWrap, async () => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
@@ -2550,7 +2503,7 @@ var Graph2DController = class {
       hoverDepthRange.min = "0";
       hoverDepthRange.max = "4";
       hoverDepthRange.step = "1";
-      const curHoverDepth = this.plugin.settings?.glow?.hoverHighlightDepth ?? 1;
+      const curHoverDepth = this.plugin.settings?.glow?.highlightDepth ?? 1;
       hoverDepthRange.value = String(curHoverDepth);
       const hoverDepthInput = document.createElement("input");
       hoverDepthInput.type = "number";
@@ -2567,7 +2520,7 @@ var Graph2DController = class {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
           const v = Number(e.target.value);
-          this.plugin.settings.glow.hoverHighlightDepth = Number.isFinite(v) ? Math.max(0, Math.min(4, Math.floor(v))) : 1;
+          this.plugin.settings.glow.highlightDepth = Number.isFinite(v) ? Math.max(0, Math.min(3, Math.floor(v))) : 1;
           await this.plugin.saveSettings();
           try {
             if (this.renderer && this.renderer.setGlowSettings)
@@ -2590,10 +2543,10 @@ var Graph2DController = class {
       });
       hoverDepthWrap.appendChild(hoverDepthRange);
       hoverDepthWrap.appendChild(hoverDepthInput);
-      panel.appendChild(makeRow("Hover highlight depth", hoverDepthWrap, async () => {
+      panel.appendChild(makeRow("Highlight depth", hoverDepthWrap, async () => {
         try {
           this.plugin.settings.glow = this.plugin.settings.glow || {};
-          delete this.plugin.settings.glow.hoverHighlightDepth;
+          delete this.plugin.settings.glow.highlightDepth;
           await this.plugin.saveSettings();
           hoverDepthRange.value = String(1);
           hoverDepthInput.value = String(1);
@@ -2807,15 +2760,46 @@ var Graph2DController = class {
       }));
       const phys = this.plugin.settings?.physics || {};
       const physFields = [
-        { key: "repulsionStrength", label: "Repulsion", step: "1" },
+        { key: "repulsionStrength", label: "Repulsion", step: "0.01" },
         { key: "springStrength", label: "Spring", step: "0.01" },
         { key: "springLength", label: "Spring len", step: "1" },
         { key: "centerPull", label: "Center pull", step: "0.0001" },
         { key: "damping", label: "Damping", step: "0.01" },
-        // mouseAttractionRadius and mouseAttractionStrength are managed
-        // in the global Settings panel (main.ts) to avoid duplicate controls.
-        { key: "mouseAttractionExponent", label: "Attract exponent", step: "0.1" }
+        // Mouse gravity uses unified glow/gravity settings; old radius control is deprecated.
+        { key: "mouseAttractionExponent", label: "Mouse attraction exponent", step: "0.1" }
       ];
+      const mouseGravChk = document.createElement("input");
+      mouseGravChk.type = "checkbox";
+      mouseGravChk.checked = phys.mouseGravityEnabled !== false && phys.mouseAttractionEnabled !== false;
+      mouseGravChk.addEventListener("change", async (e) => {
+        try {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseGravityEnabled = e.target.checked;
+          delete this.plugin.settings.physics.mouseAttractionEnabled;
+          await this.plugin.saveSettings();
+          try {
+            if (this.simulation && this.simulation.setOptions)
+              this.simulation.setOptions(this.plugin.settings.physics);
+          } catch (e2) {
+          }
+        } catch (e2) {
+        }
+      });
+      panel.appendChild(makeRow("Mouse gravity", mouseGravChk, async () => {
+        try {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          delete this.plugin.settings.physics.mouseGravityEnabled;
+          delete this.plugin.settings.physics.mouseAttractionEnabled;
+          await this.plugin.saveSettings();
+          mouseGravChk.checked = true;
+          try {
+            if (this.simulation && this.simulation.setOptions)
+              this.simulation.setOptions(this.plugin.settings.physics);
+          } catch (e) {
+          }
+        } catch (e) {
+        }
+      }));
       for (const f of physFields) {
         const wrap = document.createElement("div");
         wrap.style.display = "flex";
@@ -2826,8 +2810,8 @@ var Graph2DController = class {
         switch (f.key) {
           case "repulsionStrength":
             range.min = "0";
-            range.max = "10000";
-            range.step = "1";
+            range.max = "1";
+            range.step = f.step || "0.01";
             break;
           case "springStrength":
             range.min = "0";
@@ -2849,11 +2833,6 @@ var Graph2DController = class {
             range.max = "1";
             range.step = "0.01";
             break;
-          case "mouseAttractionRadius":
-            range.min = "0";
-            range.max = "400";
-            range.step = "1";
-            break;
           case "mouseAttractionStrength":
             range.min = "0";
             range.max = "1";
@@ -2870,7 +2849,11 @@ var Graph2DController = class {
             range.step = "1";
         }
         const current = phys[f.key];
-        if (f.key === "springStrength") {
+        if (f.key === "repulsionStrength") {
+          const internal = Number.isFinite(current) ? Number(current) : Number(range.min);
+          const ui = Math.min(1, Math.max(0, Math.sqrt(Math.max(0, internal / 2e3))));
+          range.value = String(ui);
+        } else if (f.key === "springStrength") {
           const ui = Number.isFinite(current) ? Math.min(1, Math.max(0, Number(current) / 0.5)) : Number(range.min);
           range.value = String(ui);
         } else {
@@ -2892,7 +2875,9 @@ var Graph2DController = class {
           try {
             this.plugin.settings.physics = this.plugin.settings.physics || {};
             const val = Number(e.target.value);
-            if (f.key === "springStrength") {
+            if (f.key === "repulsionStrength") {
+              this.plugin.settings.physics[f.key] = Number.isFinite(val) ? val * val * 2e3 : this.plugin.settings.physics[f.key];
+            } else if (f.key === "springStrength") {
               this.plugin.settings.physics[f.key] = Number.isFinite(val) ? val * 0.5 : this.plugin.settings.physics[f.key];
             } else {
               this.plugin.settings.physics[f.key] = Number.isFinite(val) ? val : this.plugin.settings.physics[f.key];
@@ -2930,7 +2915,10 @@ var Graph2DController = class {
             delete this.plugin.settings.physics[f.key];
             await this.plugin.saveSettings();
             const def = this.plugin.settings.physics[f.key];
-            if (f.key === "springStrength") {
+            if (f.key === "repulsionStrength") {
+              const ui = def !== void 0 ? String(Math.min(1, Math.max(0, Math.sqrt(Math.max(0, Number(def) / 2e3))))) : String(range.min);
+              range.value = ui;
+            } else if (f.key === "springStrength") {
               const ui = def !== void 0 ? String(Math.min(1, Math.max(0, Number(def) / 0.5))) : String(range.min);
               range.value = ui;
             } else {
@@ -2976,6 +2964,10 @@ var Graph2DController = class {
         }
       } catch (e) {
       }
+      try {
+        this.refreshControlsFromSettings();
+      } catch (e) {
+      }
     } catch (e) {
     }
   }
@@ -3002,6 +2994,132 @@ var Graph2DController = class {
         }
         panel.style.overflow = "";
         panel.style.maxHeight = "";
+      }
+    } catch (e) {
+    }
+  }
+  // Synchronize the toolbox UI controls from current plugin settings
+  refreshControlsFromSettings() {
+    try {
+      if (!this.controlsEl)
+        return;
+      const settings = this.plugin.settings || {};
+      const glow = settings.glow || {};
+      const phys = settings.physics || {};
+      const panel = this.controlsEl;
+      for (let i = 0; i < panel.children.length; i++) {
+        const row = panel.children[i];
+        const labelEl = row.querySelector("label");
+        const right = row.querySelector("div:last-child");
+        if (!labelEl || !right)
+          continue;
+        const name = (labelEl.textContent || "").toLowerCase();
+        const inputs = Array.from(right.querySelectorAll("input"));
+        if (name.includes("node color")) {
+          const color = inputs.find((x) => x.type === "color");
+          const alpha = inputs.find((x) => x.type === "number");
+          if (color)
+            color.value = String(glow.nodeColor || (color.value || "#66ccff"));
+          if (alpha)
+            alpha.value = String(glow.nodeColorAlpha ?? 1);
+        } else if (name.includes("edge color")) {
+          const color = inputs.find((x) => x.type === "color");
+          const alpha = inputs.find((x) => x.type === "number");
+          if (color)
+            color.value = String(glow.edgeColor || (color.value || "#888888"));
+          if (alpha)
+            alpha.value = String(glow.edgeColorAlpha ?? 0.6);
+        } else if (name.includes("tag color")) {
+          const color = inputs.find((x) => x.type === "color");
+          const alpha = inputs.find((x) => x.type === "number");
+          if (color)
+            color.value = String(glow.tagColor || (color.value || "#8000ff"));
+          if (alpha)
+            alpha.value = String(glow.tagColorAlpha ?? 1);
+        } else if (name.includes("highlight depth")) {
+          const range = inputs.find((x) => x.type === "range");
+          const num = inputs.find((x) => x.type === "number");
+          const v = String(glow.highlightDepth ?? 1);
+          if (range)
+            range.value = v;
+          if (num)
+            num.value = v;
+        } else if (name.includes("label visibility")) {
+          const ranges = inputs.filter((x) => x.type === "range");
+          const nums = inputs.filter((x) => x.type === "number");
+          const minV = String(glow.labelMinVisibleRadiusPx ?? 6);
+          const fadeV = String(glow.labelFadeRangePx ?? 8);
+          if (ranges[0])
+            ranges[0].value = minV;
+          if (nums[0])
+            nums[0].value = minV;
+          if (ranges[1])
+            ranges[1].value = fadeV;
+          if (nums[1])
+            nums[1].value = fadeV;
+        } else if (name.includes("count duplicate links")) {
+          const chk = inputs.find((x) => x.type === "checkbox");
+          if (chk)
+            chk.checked = Boolean(settings.countDuplicateLinks);
+        } else if (name.includes("show tag nodes")) {
+          const chk = inputs.find((x) => x.type === "checkbox");
+          if (chk)
+            chk.checked = settings.showTags !== false;
+        } else if (name.includes("mouse gravity")) {
+          const chk = inputs.find((x) => x.type === "checkbox");
+          if (chk)
+            chk.checked = phys.mouseGravityEnabled !== false && phys.mouseAttractionEnabled !== false;
+        } else if (name.includes("repulsion")) {
+          const range = inputs.find((x) => x.type === "range");
+          const num = inputs.find((x) => x.type === "number");
+          const internal = Number(phys.repulsionStrength ?? 0);
+          const ui = Math.min(1, Math.max(0, Math.sqrt(Math.max(0, internal / 2e3))));
+          const v = String(ui);
+          if (range)
+            range.value = v;
+          if (num)
+            num.value = v;
+        } else if (name.includes("spring len")) {
+          const range = inputs.find((x) => x.type === "range");
+          const num = inputs.find((x) => x.type === "number");
+          const val = String(phys.springLength ?? 100);
+          if (range)
+            range.value = val;
+          if (num)
+            num.value = val;
+        } else if (name.includes("spring")) {
+          const range = inputs.find((x) => x.type === "range");
+          const num = inputs.find((x) => x.type === "number");
+          const ui = phys.springStrength != null ? String(Math.min(1, Math.max(0, Number(phys.springStrength) / 0.5))) : "0";
+          if (range)
+            range.value = ui;
+          if (num)
+            num.value = ui;
+        } else if (name.includes("center pull")) {
+          const range = inputs.find((x) => x.type === "range");
+          const num = inputs.find((x) => x.type === "number");
+          const ui = phys.centerPull != null ? String(Math.min(1, Math.max(0, Number(phys.centerPull) / 0.01))) : "0";
+          if (range)
+            range.value = ui;
+          if (num)
+            num.value = ui;
+        } else if (name.includes("damping")) {
+          const range = inputs.find((x) => x.type === "range");
+          const num = inputs.find((x) => x.type === "number");
+          const val = String(phys.damping ?? 0.7);
+          if (range)
+            range.value = val;
+          if (num)
+            num.value = val;
+        } else if (name.includes("mouse attraction exponent")) {
+          const range = inputs.find((x) => x.type === "range");
+          const num = inputs.find((x) => x.type === "number");
+          const val = String(phys.mouseAttractionExponent ?? 3);
+          if (range)
+            range.value = val;
+          if (num)
+            num.value = val;
+        }
       }
     } catch (e) {
     }
@@ -3060,7 +3178,9 @@ var Graph2DController = class {
   // Camera-plane cursor attractor: screen-aligned, O(N) per-frame
   applyCursorAttractor() {
     const physics = this.plugin.settings?.physics || {};
-    if (physics.mouseAttractionEnabled === false)
+    const glow = this.plugin.settings?.glow || {};
+    const gravityEnabled = physics.mouseGravityEnabled !== false && physics.mouseAttractionEnabled !== false;
+    if (!gravityEnabled)
       return;
     if (this.suppressAttractorUntilMouseMove)
       return;
@@ -3068,18 +3188,16 @@ var Graph2DController = class {
       return;
     if (!this.renderer || !this.graph)
       return;
-    const radius = physics.mouseAttractionRadius;
-    const baseStrength = physics.mouseAttractionStrength;
-    const exponent = physics.mouseAttractionExponent ?? 3;
-    if (!Number.isFinite(radius) || radius <= 0 || !Number.isFinite(baseStrength) || baseStrength === 0)
+    const multiplier = Number.isFinite(glow.gravityRadiusMultiplier) ? Number(glow.gravityRadiusMultiplier) : 6;
+    const steepness = Number.isFinite(glow.gravityCurveSteepness) ? Number(glow.gravityCurveSteepness) : physics.mouseAttractionExponent ?? 3;
+    const baseStrength = Number.isFinite(physics.mouseAttractionStrength) ? Number(physics.mouseAttractionStrength) : 0.6;
+    if (baseStrength === 0)
       return;
     const cam = this.renderer.getCamera();
     const basis = this.renderer.getCameraBasis ? this.renderer.getCameraBasis(cam) : null;
     if (!basis)
       return;
     const { right, up } = basis;
-    const width = (this.canvas ? this.canvas.width : this.containerEl.getBoundingClientRect().width) || 1;
-    const height = (this.canvas ? this.canvas.height : this.containerEl.getBoundingClientRect().height) || 1;
     for (const node of this.graph.nodes) {
       const proj = this.renderer.getProjectedNode ? this.renderer.getProjectedNode(node) : null;
       if (!proj)
@@ -3087,6 +3205,8 @@ var Graph2DController = class {
       const dxScreen = this.lastMouseX - proj.x;
       const dyScreen = this.lastMouseY - proj.y;
       const distScreen = Math.sqrt(dxScreen * dxScreen + dyScreen * dyScreen);
+      const nodeScreenR = Number.isFinite(proj.r) ? Math.max(4, Number(proj.r)) : 8;
+      const radius = Math.max(8, nodeScreenR * multiplier);
       if (distScreen > radius || distScreen === 0)
         continue;
       const deadzone = Math.max(1, radius * 0.06);
@@ -3106,7 +3226,7 @@ var Graph2DController = class {
       wy /= len;
       wz /= len;
       const t = 1 - distScreen / radius;
-      const strength = baseStrength * Math.pow(t, exponent);
+      const strength = baseStrength * Math.pow(t, steepness);
       node.vx = (node.vx || 0) + wx * strength;
       node.vy = (node.vy || 0) + wy * strength;
       node.vz = (node.vz || 0) + wz * strength;
@@ -3552,61 +3672,64 @@ var Graph2DController = class {
 // main.ts
 var DEFAULT_SETTINGS = {
   glow: {
-    minNodeRadius: 6,
-    maxNodeRadius: 24,
-    minCenterAlpha: 0.15,
+    minNodeRadius: 3,
+    maxNodeRadius: 20,
+    minCenterAlpha: 0.1,
     maxCenterAlpha: 0.6,
-    hoverBoostFactor: 2,
-    neighborBoostFactor: 1.5,
-    dimFactor: 0.2,
-    hoverHighlightDepth: 2,
-    distanceInnerRadiusMultiplier: 1.5,
-    distanceOuterRadiusMultiplier: 4,
-    distanceCurveSteepness: 2,
+    hoverBoostFactor: 10,
+    // neighborBoostFactor is intentionally left undefined; renderer should link it to hoverBoostFactor
+    neighborBoostFactor: void 0,
+    // dimFactor removed from UI but kept available for fallback
+    dimFactor: void 0,
+    // renamed highlight depth
+    highlightDepth: 1,
+    // unified gravity/glow params
+    gravityRadiusMultiplier: 6,
+    gravityCurveSteepness: 3,
     // focus/dimming defaults
-    focusSmoothingRate: 0.15,
-    edgeDimMin: 0.1,
-    edgeDimMax: 0.7,
-    nodeMinBodyAlpha: 0.3,
+    focusSmoothingRate: 0.8,
+    edgeDimMin: void 0,
+    edgeDimMax: void 0,
+    nodeMinBodyAlpha: void 0,
     // color overrides left undefined by default to follow theme
     nodeColor: void 0,
-    nodeColorAlpha: 1,
+    nodeColorAlpha: 0.1,
     nodeColorMaxAlpha: 1,
     tagColor: void 0,
-    tagColorAlpha: 1,
+    tagColorAlpha: 0.1,
     tagColorMaxAlpha: 1,
     labelColor: void 0,
-    labelBaseFontSize: 10,
+    labelBaseFontSize: 24,
     labelMinVisibleRadiusPx: 6,
     labelFadeRangePx: 8,
     glowRadiusPx: null,
     labelColorAlpha: 1,
     useInterfaceFont: true,
     edgeColor: void 0,
-    edgeColorAlpha: 1,
-    edgeColorMaxAlpha: 0.5
+    edgeColorAlpha: 0.1,
+    edgeColorMaxAlpha: 0.6
   },
   physics: {
-    // INTERNAL defaults (mapped from UI defaults)
-    // Repulsion mapping: internal = ui^2 * 2000 (UI default 0.2 -> 80)
-    repulsionStrength: 80,
-    // Spring strength: internal = ui * 0.5 (UI default 0.4 -> 0.2)
-    springStrength: 0.2,
+    // Physics defaults (use direct/internal scale values)
+    repulsionStrength: 5e3,
+    springStrength: 1,
     springLength: 100,
-    // Center pull: internal = ui * 0.01 (UI default 0.1 -> 0.001)
+    // Center pull internal
     centerPull: 1e-3,
     // Damping internal (0..1)
-    damping: 0.9,
-    notePlaneStiffness: 4e-3,
-    tagPlaneStiffness: 8e-3,
+    damping: 0.7,
+    // plane stiffness defaults
+    notePlaneStiffness: 0,
+    tagPlaneStiffness: 0,
     centerX: 0,
     centerY: 0,
     centerZ: 0,
-    mouseAttractionRadius: 160,
-    // mouse attraction strength: internal = ui * 0.1 (UI default 0.2 -> 0.02)
-    mouseAttractionStrength: 0.02,
-    mouseAttractionExponent: 3
+    // mouse gravity toggle + strength/exponent
+    mouseGravityEnabled: true,
+    mouseAttractionStrength: 1,
+    mouseAttractionExponent: 1
   },
+  countDuplicateLinks: true,
   interaction: {
     momentumScale: 0.12,
     dragThreshold: 4
@@ -3758,7 +3881,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       name: "Minimum node radius",
       desc: "Minimum radius for the smallest node (in pixels).",
       value: glow.minNodeRadius ?? DEFAULT_SETTINGS.glow.minNodeRadius,
-      min: 2,
+      min: 1,
       max: 20,
       step: 1,
       resetValue: DEFAULT_SETTINGS.glow.minNodeRadius,
@@ -3837,11 +3960,11 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       desc: "Multiplier applied to the center glow when a node is hovered.",
       value: glow.hoverBoostFactor ?? DEFAULT_SETTINGS.glow.hoverBoostFactor,
       min: 1,
-      max: 4,
-      step: 0.01,
+      max: 100,
+      step: 0.1,
       resetValue: DEFAULT_SETTINGS.glow.hoverBoostFactor,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 1 && v <= 4) {
+        if (!Number.isNaN(v) && v >= 1 && v <= 100) {
           glow.hoverBoostFactor = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
@@ -3851,109 +3974,55 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       }
     });
     addSliderSetting(containerEl, {
-      name: "Neighbor glow boost",
-      desc: "Multiplier applied to nodes within the highlight depth (excluding hovered node).",
-      value: glow.neighborBoostFactor ?? DEFAULT_SETTINGS.glow.neighborBoostFactor,
-      min: 1,
-      max: 3,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.neighborBoostFactor,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 1 && v <= 3) {
-          glow.neighborBoostFactor = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          glow.neighborBoostFactor = DEFAULT_SETTINGS.glow.neighborBoostFactor;
-          await this.plugin.saveSettings();
-        }
-      }
-    });
-    addSliderSetting(containerEl, {
-      name: "Dim factor for distant nodes",
-      desc: "Multiplier (0\u20131) applied to nodes outside the highlight depth.",
-      value: glow.dimFactor ?? DEFAULT_SETTINGS.glow.dimFactor,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.dimFactor,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          glow.dimFactor = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          glow.dimFactor = DEFAULT_SETTINGS.glow.dimFactor;
-          await this.plugin.saveSettings();
-        }
-      }
-    });
-    addSliderSetting(containerEl, {
       name: "Highlight depth",
       desc: "Graph distance (in hops) from the hovered node that will be highlighted.",
-      value: glow.hoverHighlightDepth ?? 1,
+      value: glow.highlightDepth ?? DEFAULT_SETTINGS.glow.highlightDepth,
       min: 0,
       max: 5,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.glow.hoverHighlightDepth,
+      resetValue: DEFAULT_SETTINGS.glow.highlightDepth,
       onChange: async (v) => {
         if (!Number.isNaN(v) && Number.isInteger(v) && v >= 0) {
-          glow.hoverHighlightDepth = Math.max(0, Math.floor(v));
+          glow.highlightDepth = Math.max(0, Math.floor(v));
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.hoverHighlightDepth = DEFAULT_SETTINGS.glow.hoverHighlightDepth;
+          glow.highlightDepth = DEFAULT_SETTINGS.glow.highlightDepth;
           await this.plugin.saveSettings();
         }
       }
     });
     addSliderSetting(containerEl, {
-      name: "Inner distance multiplier",
-      desc: "Distance (in node radii) where distance-based glow is fully active.",
-      value: glow.distanceInnerRadiusMultiplier ?? 1,
-      min: 0.5,
-      max: 100,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.distanceInnerRadiusMultiplier,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v > 0) {
-          glow.distanceInnerRadiusMultiplier = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          glow.distanceInnerRadiusMultiplier = DEFAULT_SETTINGS.glow.distanceInnerRadiusMultiplier;
-          await this.plugin.saveSettings();
-        }
-      }
-    });
-    addSliderSetting(containerEl, {
-      name: "Outer distance multiplier",
-      desc: "Distance (in node radii) beyond which the mouse has no effect on glow.",
-      value: glow.distanceOuterRadiusMultiplier ?? 2.5,
+      name: "Gravity radius multiplier",
+      desc: "Scales each node's screen-space radius for glow/mouse gravity.",
+      value: glow.gravityRadiusMultiplier ?? DEFAULT_SETTINGS.glow.gravityRadiusMultiplier,
       min: 1,
-      max: 100,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.distanceOuterRadiusMultiplier,
+      max: 20,
+      step: 0.1,
+      resetValue: DEFAULT_SETTINGS.glow.gravityRadiusMultiplier,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v > (glow.distanceInnerRadiusMultiplier ?? 0)) {
-          glow.distanceOuterRadiusMultiplier = v;
+        if (!Number.isNaN(v) && v > 0) {
+          glow.gravityRadiusMultiplier = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.distanceOuterRadiusMultiplier = DEFAULT_SETTINGS.glow.distanceOuterRadiusMultiplier;
+          glow.gravityRadiusMultiplier = DEFAULT_SETTINGS.glow.gravityRadiusMultiplier;
           await this.plugin.saveSettings();
         }
       }
     });
     addSliderSetting(containerEl, {
-      name: "Distance curve steepness",
-      desc: "Controls how quickly glow ramps up as the cursor approaches a node. Higher values = steeper S-curve.",
-      value: glow.distanceCurveSteepness ?? 2,
+      name: "Gravity curve steepness",
+      desc: "Controls falloff steepness; higher = stronger near cursor.",
+      value: glow.gravityCurveSteepness ?? DEFAULT_SETTINGS.glow.gravityCurveSteepness,
       min: 0.5,
-      max: 5,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.distanceCurveSteepness,
+      max: 10,
+      step: 0.1,
+      resetValue: DEFAULT_SETTINGS.glow.gravityCurveSteepness,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          glow.distanceCurveSteepness = v;
+          glow.gravityCurveSteepness = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.distanceCurveSteepness = DEFAULT_SETTINGS.glow.distanceCurveSteepness;
+          glow.gravityCurveSteepness = DEFAULT_SETTINGS.glow.gravityCurveSteepness;
           await this.plugin.saveSettings();
         }
       }
@@ -3976,71 +4045,21 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       }
     });
-    addSliderSetting(containerEl, {
-      name: "Edge dim minimum alpha",
-      desc: "Minimum alpha used for dimmed edges (0-0.8).",
-      value: glow.edgeDimMin ?? DEFAULT_SETTINGS.glow.edgeDimMin,
-      min: 0,
-      max: 0.8,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.edgeDimMin,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 0.8) {
-          glow.edgeDimMin = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          glow.edgeDimMin = DEFAULT_SETTINGS.glow.edgeDimMin;
-          await this.plugin.saveSettings();
-        }
-      }
-    });
-    addSliderSetting(containerEl, {
-      name: "Edge dim maximum alpha",
-      desc: "Maximum alpha used for focused edges (0-1).",
-      value: glow.edgeDimMax ?? DEFAULT_SETTINGS.glow.edgeDimMax,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.edgeDimMax,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          glow.edgeDimMax = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          glow.edgeDimMax = DEFAULT_SETTINGS.glow.edgeDimMax;
-          await this.plugin.saveSettings();
-        }
-      }
-    });
-    addSliderSetting(containerEl, {
-      name: "Node minimum body alpha",
-      desc: "Minimum fill alpha for dimmed nodes (0-1).",
-      value: glow.nodeMinBodyAlpha ?? DEFAULT_SETTINGS.glow.nodeMinBodyAlpha,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.nodeMinBodyAlpha,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          glow.nodeMinBodyAlpha = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          glow.nodeMinBodyAlpha = DEFAULT_SETTINGS.glow.nodeMinBodyAlpha;
-          await this.plugin.saveSettings();
-        }
-      }
-    });
     containerEl.createEl("h2", { text: "Colors" });
     {
-      const s = new import_obsidian2.Setting(containerEl).setName("Node color (override)").setDesc("Optional CSS color string to override the theme accent for node fill. Leave empty to use the active theme.");
-      let txt = null;
-      s.addText((t) => {
-        txt = t;
-        return t.setValue(String(glow.nodeColor ?? "")).onChange(async (value) => {
-          const v = value.trim();
-          glow.nodeColor = v === "" ? void 0 : v;
-          await this.plugin.saveSettings();
-        });
+      const s = new import_obsidian2.Setting(containerEl).setName("Node color (override)").setDesc("Optional color to override the theme accent for node fill. Leave unset to use the active theme.");
+      const colorInput = document.createElement("input");
+      colorInput.type = "color";
+      try {
+        colorInput.value = glow.nodeColor ? String(glow.nodeColor) : "#000000";
+      } catch (e) {
+        colorInput.value = "#000000";
+      }
+      colorInput.style.marginLeft = "8px";
+      colorInput.addEventListener("change", async (e) => {
+        const v = e.target.value.trim();
+        glow.nodeColor = v === "" ? void 0 : v;
+        await this.plugin.saveSettings();
       });
       const rb = document.createElement("button");
       rb.type = "button";
@@ -4052,7 +4071,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       rb.style.cursor = "pointer";
       const alphaInput = document.createElement("input");
       alphaInput.type = "number";
-      alphaInput.min = "0";
+      alphaInput.min = "0.1";
       alphaInput.max = "1";
       alphaInput.step = "0.01";
       alphaInput.value = String(glow.nodeColorAlpha ?? DEFAULT_SETTINGS.glow.nodeColorAlpha);
@@ -4060,12 +4079,12 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       alphaInput.style.marginLeft = "8px";
       alphaInput.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
-        glow.nodeColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.nodeColorAlpha;
+        glow.nodeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.nodeColorAlpha;
         await this.plugin.saveSettings();
       });
       const maxAlphaInput = document.createElement("input");
       maxAlphaInput.type = "number";
-      maxAlphaInput.min = "0";
+      maxAlphaInput.min = "0.1";
       maxAlphaInput.max = "1";
       maxAlphaInput.step = "0.01";
       maxAlphaInput.value = String(glow.nodeColorMaxAlpha ?? DEFAULT_SETTINGS.glow.nodeColorMaxAlpha);
@@ -4073,7 +4092,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       maxAlphaInput.style.marginLeft = "6px";
       maxAlphaInput.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
-        glow.nodeColorMaxAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.nodeColorMaxAlpha;
+        glow.nodeColorMaxAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.nodeColorMaxAlpha;
         await this.plugin.saveSettings();
       });
       rb.addEventListener("click", async () => {
@@ -4081,8 +4100,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         glow.nodeColorAlpha = void 0;
         glow.nodeColorMaxAlpha = void 0;
         await this.plugin.saveSettings();
-        if (txt)
-          txt.setValue("");
+        colorInput.value = "#000000";
         alphaInput.value = String(DEFAULT_SETTINGS.glow.nodeColorAlpha);
         maxAlphaInput.value = String(DEFAULT_SETTINGS.glow.nodeColorMaxAlpha);
       });
@@ -4092,19 +4110,24 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       hint.style.marginLeft = "8px";
       hint.style.marginRight = "6px";
       s.controlEl.appendChild(hint);
+      s.controlEl.appendChild(colorInput);
       s.controlEl.appendChild(alphaInput);
       s.controlEl.appendChild(maxAlphaInput);
     }
     {
-      const s = new import_obsidian2.Setting(containerEl).setName("Edge color (override)").setDesc("Optional CSS color string to override edge stroke color. Leave empty to use a theme-appropriate color.");
-      let txt = null;
-      s.addText((t) => {
-        txt = t;
-        return t.setValue(String(glow.edgeColor ?? "")).onChange(async (value) => {
-          const v = value.trim();
-          glow.edgeColor = v === "" ? void 0 : v;
-          await this.plugin.saveSettings();
-        });
+      const s = new import_obsidian2.Setting(containerEl).setName("Edge color (override)").setDesc("Optional color to override edge stroke color. Leave unset to use a theme-appropriate color.");
+      const colorInput = document.createElement("input");
+      colorInput.type = "color";
+      try {
+        colorInput.value = glow.edgeColor ? String(glow.edgeColor) : "#000000";
+      } catch (e) {
+        colorInput.value = "#000000";
+      }
+      colorInput.style.marginLeft = "8px";
+      colorInput.addEventListener("change", async (e) => {
+        const v = e.target.value.trim();
+        glow.edgeColor = v === "" ? void 0 : v;
+        await this.plugin.saveSettings();
       });
       const rb = document.createElement("button");
       rb.type = "button";
@@ -4116,7 +4139,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       rb.style.cursor = "pointer";
       const edgeAlpha = document.createElement("input");
       edgeAlpha.type = "number";
-      edgeAlpha.min = "0";
+      edgeAlpha.min = "0.1";
       edgeAlpha.max = "1";
       edgeAlpha.step = "0.01";
       edgeAlpha.value = String(glow.edgeColorAlpha ?? DEFAULT_SETTINGS.glow.edgeColorAlpha);
@@ -4124,12 +4147,12 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       edgeAlpha.style.marginLeft = "8px";
       edgeAlpha.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
-        glow.edgeColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.edgeColorAlpha;
+        glow.edgeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.edgeColorAlpha;
         await this.plugin.saveSettings();
       });
       const edgeMaxAlpha = document.createElement("input");
       edgeMaxAlpha.type = "number";
-      edgeMaxAlpha.min = "0";
+      edgeMaxAlpha.min = "0.1";
       edgeMaxAlpha.max = "1";
       edgeMaxAlpha.step = "0.01";
       edgeMaxAlpha.value = String(glow.edgeColorMaxAlpha ?? DEFAULT_SETTINGS.glow.edgeColorMaxAlpha);
@@ -4137,7 +4160,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       edgeMaxAlpha.style.marginLeft = "6px";
       edgeMaxAlpha.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
-        glow.edgeColorMaxAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.edgeColorMaxAlpha;
+        glow.edgeColorMaxAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.edgeColorMaxAlpha;
         await this.plugin.saveSettings();
       });
       rb.addEventListener("click", async () => {
@@ -4145,12 +4168,12 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         glow.edgeColorAlpha = void 0;
         glow.edgeColorMaxAlpha = void 0;
         await this.plugin.saveSettings();
-        if (txt)
-          txt.setValue("");
+        colorInput.value = "#000000";
         edgeAlpha.value = String(DEFAULT_SETTINGS.glow.edgeColorAlpha);
         edgeMaxAlpha.value = String(DEFAULT_SETTINGS.glow.edgeColorMaxAlpha);
       });
       s.controlEl.appendChild(rb);
+      s.controlEl.appendChild(colorInput);
       const hint = document.createElement("span");
       hint.textContent = "(alpha: min|max)";
       hint.style.marginLeft = "8px";
@@ -4160,15 +4183,19 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       s.controlEl.appendChild(edgeMaxAlpha);
     }
     {
-      const s = new import_obsidian2.Setting(containerEl).setName("Tag color (override)").setDesc("Optional CSS color string to override tag node color. Leave empty to use a theme-appropriate color.");
-      let txt = null;
-      s.addText((t) => {
-        txt = t;
-        return t.setValue(String(glow.tagColor ?? "")).onChange(async (value) => {
-          const v = value.trim();
-          glow.tagColor = v === "" ? void 0 : v;
-          await this.plugin.saveSettings();
-        });
+      const s = new import_obsidian2.Setting(containerEl).setName("Tag color (override)").setDesc("Optional color to override tag node color. Leave unset to use the active theme.");
+      const colorInput = document.createElement("input");
+      colorInput.type = "color";
+      try {
+        colorInput.value = glow.tagColor ? String(glow.tagColor) : "#000000";
+      } catch (e) {
+        colorInput.value = "#000000";
+      }
+      colorInput.style.marginLeft = "8px";
+      colorInput.addEventListener("change", async (e) => {
+        const v = e.target.value.trim();
+        glow.tagColor = v === "" ? void 0 : v;
+        await this.plugin.saveSettings();
       });
       const rb = document.createElement("button");
       rb.type = "button";
@@ -4180,7 +4207,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       rb.style.cursor = "pointer";
       const tagAlpha = document.createElement("input");
       tagAlpha.type = "number";
-      tagAlpha.min = "0";
+      tagAlpha.min = "0.1";
       tagAlpha.max = "1";
       tagAlpha.step = "0.01";
       tagAlpha.value = String(glow.tagColorAlpha ?? DEFAULT_SETTINGS.glow.tagColorAlpha);
@@ -4188,12 +4215,12 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       tagAlpha.style.marginLeft = "8px";
       tagAlpha.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
-        glow.tagColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.tagColorAlpha;
+        glow.tagColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.tagColorAlpha;
         await this.plugin.saveSettings();
       });
       const tagMaxAlpha = document.createElement("input");
       tagMaxAlpha.type = "number";
-      tagMaxAlpha.min = "0";
+      tagMaxAlpha.min = "0.1";
       tagMaxAlpha.max = "1";
       tagMaxAlpha.step = "0.01";
       tagMaxAlpha.value = String(glow.tagColorMaxAlpha ?? DEFAULT_SETTINGS.glow.tagColorMaxAlpha);
@@ -4201,7 +4228,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       tagMaxAlpha.style.marginLeft = "6px";
       tagMaxAlpha.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
-        glow.tagColorMaxAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.tagColorMaxAlpha;
+        glow.tagColorMaxAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.tagColorMaxAlpha;
         await this.plugin.saveSettings();
       });
       rb.addEventListener("click", async () => {
@@ -4209,12 +4236,12 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         glow.tagColorAlpha = void 0;
         glow.tagColorMaxAlpha = void 0;
         await this.plugin.saveSettings();
-        if (txt)
-          txt.setValue("");
+        colorInput.value = "#000000";
         tagAlpha.value = String(DEFAULT_SETTINGS.glow.tagColorAlpha);
         tagMaxAlpha.value = String(DEFAULT_SETTINGS.glow.tagColorMaxAlpha);
       });
       s.controlEl.appendChild(rb);
+      s.controlEl.appendChild(colorInput);
       const hint = document.createElement("span");
       hint.textContent = "(alpha: min|max)";
       hint.style.marginLeft = "8px";
@@ -4224,15 +4251,19 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       s.controlEl.appendChild(tagMaxAlpha);
     }
     {
-      const s = new import_obsidian2.Setting(containerEl).setName("Label color (override)").setDesc("Optional CSS color string to override label text color. Leave empty to use the active theme text color.");
-      let txt = null;
-      s.addText((t) => {
-        txt = t;
-        return t.setValue(String(glow.labelColor ?? "")).onChange(async (value) => {
-          const v = value.trim();
-          glow.labelColor = v === "" ? void 0 : v;
-          await this.plugin.saveSettings();
-        });
+      const s = new import_obsidian2.Setting(containerEl).setName("Label color (override)").setDesc("Optional color to override the label text color. Leave unset to use the active theme.");
+      const colorInput = document.createElement("input");
+      colorInput.type = "color";
+      try {
+        colorInput.value = glow.labelColor ? String(glow.labelColor) : "#000000";
+      } catch (e) {
+        colorInput.value = "#000000";
+      }
+      colorInput.style.marginLeft = "8px";
+      colorInput.addEventListener("change", async (e) => {
+        const v = e.target.value.trim();
+        glow.labelColor = v === "" ? void 0 : v;
+        await this.plugin.saveSettings();
       });
       const rb = document.createElement("button");
       rb.type = "button";
@@ -4242,15 +4273,6 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       rb.style.border = "none";
       rb.style.background = "transparent";
       rb.style.cursor = "pointer";
-      rb.addEventListener("click", async () => {
-        glow.labelColor = void 0;
-        glow.labelColorAlpha = void 0;
-        await this.plugin.saveSettings();
-        if (txt)
-          txt.setValue("");
-        labelAlpha.value = String(DEFAULT_SETTINGS.glow.labelColorAlpha);
-      });
-      s.controlEl.appendChild(rb);
       const labelAlpha = document.createElement("input");
       labelAlpha.type = "number";
       labelAlpha.min = "0";
@@ -4264,6 +4286,20 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         glow.labelColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.labelColorAlpha;
         await this.plugin.saveSettings();
       });
+      rb.addEventListener("click", async () => {
+        glow.labelColor = void 0;
+        glow.labelColorAlpha = void 0;
+        await this.plugin.saveSettings();
+        colorInput.value = "#000000";
+        labelAlpha.value = String(DEFAULT_SETTINGS.glow.labelColorAlpha);
+      });
+      s.controlEl.appendChild(rb);
+      s.controlEl.appendChild(colorInput);
+      const hint = document.createElement("span");
+      hint.textContent = "(alpha)";
+      hint.style.marginLeft = "8px";
+      hint.style.marginRight = "6px";
+      s.controlEl.appendChild(hint);
       s.controlEl.appendChild(labelAlpha);
     }
     new import_obsidian2.Setting(containerEl).setName("Use interface font for labels").setDesc("When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.").addToggle((t) => t.setValue(Boolean(glow.useInterfaceFont)).onChange(async (v) => {
@@ -4302,7 +4338,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       min: 0,
       max: 1,
       step: 0.01,
-      resetValue: 0.2,
+      resetValue: repulsionUi,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
@@ -4323,7 +4359,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       min: 0,
       max: 1,
       step: 0.01,
-      resetValue: 0.4,
+      resetValue: springUi,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
@@ -4451,27 +4487,13 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       }
     });
-    addSliderSetting(containerEl, {
-      name: "Mouse attraction radius (px)",
-      desc: "Maximum distance (in pixels) from cursor where the attraction applies.",
-      value: phys.mouseAttractionRadius ?? DEFAULT_SETTINGS.physics.mouseAttractionRadius,
-      min: 40,
-      max: 400,
-      step: 1,
-      resetValue: DEFAULT_SETTINGS.physics.mouseAttractionRadius,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionRadius = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionRadius = DEFAULT_SETTINGS.physics.mouseAttractionRadius;
-          await this.plugin.saveSettings();
-        }
-      }
-    });
-    const mouseStrengthUi = Math.min(1, Math.max(0, (phys.mouseAttractionStrength ?? DEFAULT_SETTINGS.physics.mouseAttractionStrength) / 0.1));
+    new import_obsidian2.Setting(containerEl).setName("Mouse gravity").setDesc("Enable the mouse gravity well that attracts nearby nodes.").addToggle((t) => t.setValue(Boolean(phys.mouseGravityEnabled !== false)).onChange(async (v) => {
+      this.plugin.settings.physics = this.plugin.settings.physics || {};
+      this.plugin.settings.physics.mouseGravityEnabled = Boolean(v);
+      await this.plugin.saveSettings();
+    }));
+    const mouseStrengthInternal = this.plugin.settings.physics?.mouseAttractionStrength ?? DEFAULT_SETTINGS.physics.mouseAttractionStrength;
+    const mouseStrengthUi = Math.min(1, Math.max(0, (mouseStrengthInternal || 0) / 0.1));
     addSliderSetting(containerEl, {
       name: "Mouse attraction strength",
       desc: "UI 0\u20131 mapped to internal small force scale (higher = stronger pull).",
@@ -4495,7 +4517,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Mouse attraction exponent",
       desc: "How sharply attraction ramps as the cursor approaches (1 = linear; higher = snappier near cursor).",
-      value: phys.mouseAttractionExponent ?? DEFAULT_SETTINGS.physics.mouseAttractionExponent,
+      value: this.plugin.settings.physics?.mouseAttractionExponent ?? DEFAULT_SETTINGS.physics.mouseAttractionExponent,
       min: 1,
       max: 6,
       step: 0.1,
