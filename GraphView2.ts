@@ -669,8 +669,35 @@ class Graph2DController {
           if (dist <= clickThreshold) {
             try {
               if (this.pendingFocusNode === '__origin__') {
-                // focus origin; clear follow/highlight; keep a sane default distance
-                try { (this.renderer as any).setCamera({ targetX: this.viewCenterX ?? 0, targetY: this.viewCenterY ?? 0, targetZ: 0, distance: this.defaultCameraDistance }); } catch (e) {}
+                // Animate focus to origin; clear follow/highlight; keep a sane default distance
+                try {
+                  if (this.renderer) {
+                    const cam = (this.renderer as any).getCamera();
+                    const from = {
+                      targetX: cam.targetX ?? 0,
+                      targetY: cam.targetY ?? 0,
+                      targetZ: cam.targetZ ?? 0,
+                      distance: cam.distance ?? 1000,
+                      yaw: cam.yaw ?? 0,
+                      pitch: cam.pitch ?? 0,
+                    };
+                    const to = {
+                      targetX: this.viewCenterX ?? 0,
+                      targetY: this.viewCenterY ?? 0,
+                      targetZ: 0,
+                      distance: this.defaultCameraDistance,
+                      yaw: from.yaw,
+                      pitch: from.pitch,
+                    };
+                    this.cameraAnimStart = performance.now();
+                    this.cameraAnimDuration = 300;
+                    this.cameraAnimFrom = from;
+                    this.cameraAnimTo = to;
+                    // clear any follow locks
+                    this.isCameraFollowing = false;
+                    this.cameraFollowNode = null;
+                  }
+                } catch (e) {}
                 try { if ((this.renderer as any).resetPanToCenter) (this.renderer as any).resetPanToCenter(); } catch (e) {}
                 this.followLockedNodeId = null; this.previewLockNodeId = null;
                 try {
@@ -681,9 +708,11 @@ class Graph2DController {
                 // suppress the cursor attractor until user next moves the mouse
                 this.suppressAttractorUntilMouseMove = true;
               } else {
-                // Center camera onto node without changing distance; lock hover + follow until user drags/another right-click
+                // Center camera onto node using animated focus helper; lock hover + follow until user drags/another right-click
                 const n = this.pendingFocusNode;
-                try { (this.renderer as any).setCamera({ targetX: n.x ?? 0, targetY: n.y ?? 0, targetZ: n.z ?? 0 }); } catch (e) {}
+                try {
+                  this.focusCameraOnNode(n);
+                } catch (e) {}
                 try { if ((this.renderer as any).resetPanToCenter) (this.renderer as any).resetPanToCenter(); } catch (e) {}
                 this.followLockedNodeId = n.id;
                 this.previewLockNodeId = n.id;
