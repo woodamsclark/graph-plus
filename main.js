@@ -2301,7 +2301,7 @@ var Graph2DController = class {
             const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
             const nodeVar = cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
             nodeColor.value = nodeVar && nodeVar.trim() ? nodeVar.trim() : "#66ccff";
-            nodeAlpha.value = String(1);
+            nodeAlpha.value = String(this.plugin.settings?.glow?.nodeColorAlpha ?? DEFAULT_SETTINGS.glow.nodeColorAlpha ?? 0.1);
           } catch (e) {
             nodeColor.value = "#66ccff";
           }
@@ -2389,7 +2389,7 @@ var Graph2DController = class {
             const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
             const edgeVar = cs.getPropertyValue("--text-muted") || cs.getPropertyValue("--text-faint") || cs.getPropertyValue("--text-normal");
             edgeColor.value = edgeVar && edgeVar.trim() ? edgeVar.trim() : "#888888";
-            edgeAlpha.value = String(1);
+            edgeAlpha.value = String(this.plugin.settings?.glow?.edgeColorAlpha ?? DEFAULT_SETTINGS.glow.edgeColorAlpha ?? 0.1);
           } catch (e) {
             edgeColor.value = "#888888";
           }
@@ -2477,7 +2477,7 @@ var Graph2DController = class {
             const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
             const nodeVar = cs.getPropertyValue("--accent-2") || cs.getPropertyValue("--accent-secondary") || cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
             tagColor.value = nodeVar && nodeVar.trim() ? nodeVar.trim() : "#8000ff";
-            tagAlpha.value = String(1);
+            tagAlpha.value = String(this.plugin.settings?.glow?.tagColorAlpha ?? DEFAULT_SETTINGS.glow.tagColorAlpha ?? 0.1);
           } catch (e) {
             tagColor.value = "#8000ff";
           }
@@ -2759,6 +2759,15 @@ var Graph2DController = class {
         }
       }));
       const phys = this.plugin.settings?.physics || {};
+      const physDefaults = {
+        repulsionStrength: 5e3,
+        springStrength: 1,
+        springLength: 100,
+        centerPull: 1e-3,
+        damping: 0.7,
+        mouseAttractionStrength: 1,
+        mouseAttractionExponent: 1
+      };
       const physFields = [
         { key: "repulsionStrength", label: "Repulsion", step: "0.01" },
         { key: "springStrength", label: "Spring", step: "0.01" },
@@ -2849,15 +2858,18 @@ var Graph2DController = class {
             range.step = "1";
         }
         const current = phys[f.key];
+        const defaultInternal = physDefaults[f.key];
         if (f.key === "repulsionStrength") {
-          const internal = Number.isFinite(current) ? Number(current) : Number(range.min);
+          const internal = Number.isFinite(current) ? Number(current) : Number.isFinite(defaultInternal) ? Number(defaultInternal) : Number(range.min);
           const ui = Math.min(1, Math.max(0, Math.sqrt(Math.max(0, internal / 2e3))));
           range.value = String(ui);
         } else if (f.key === "springStrength") {
-          const ui = Number.isFinite(current) ? Math.min(1, Math.max(0, Number(current) / 0.5)) : Number(range.min);
+          const internal = Number.isFinite(current) ? Number(current) : Number.isFinite(defaultInternal) ? Number(defaultInternal) : Number(range.min);
+          const ui = Math.min(1, Math.max(0, Number(internal) / 0.5));
           range.value = String(ui);
         } else {
-          range.value = String(Number.isFinite(current) ? current : Number(range.min));
+          const internal = Number.isFinite(current) ? Number(current) : Number.isFinite(defaultInternal) ? Number(defaultInternal) : Number(range.min);
+          range.value = String(internal);
         }
         range.style.width = "120px";
         const valueInput = document.createElement("input");
@@ -2915,14 +2927,18 @@ var Graph2DController = class {
             delete this.plugin.settings.physics[f.key];
             await this.plugin.saveSettings();
             const def = this.plugin.settings.physics[f.key];
+            const defaultInternal2 = physDefaults[f.key];
             if (f.key === "repulsionStrength") {
-              const ui = def !== void 0 ? String(Math.min(1, Math.max(0, Math.sqrt(Math.max(0, Number(def) / 2e3))))) : String(range.min);
+              const internal = def !== void 0 ? Number(def) : Number.isFinite(defaultInternal2) ? defaultInternal2 : Number(range.min);
+              const ui = String(Math.min(1, Math.max(0, Math.sqrt(Math.max(0, Number(internal) / 2e3)))));
               range.value = ui;
             } else if (f.key === "springStrength") {
-              const ui = def !== void 0 ? String(Math.min(1, Math.max(0, Number(def) / 0.5))) : String(range.min);
+              const internal = def !== void 0 ? Number(def) : Number.isFinite(defaultInternal2) ? defaultInternal2 : Number(range.min);
+              const ui = String(Math.min(1, Math.max(0, Number(internal) / 0.5)));
               range.value = ui;
             } else {
-              range.value = def !== void 0 ? String(def) : String(range.min);
+              const internal = def !== void 0 ? String(def) : String(Number.isFinite(defaultInternal2) ? defaultInternal2 : Number(range.min));
+              range.value = internal;
             }
             valueInput.value = range.value;
             try {
@@ -3676,11 +3692,7 @@ var DEFAULT_SETTINGS = {
     maxNodeRadius: 20,
     minCenterAlpha: 0.1,
     maxCenterAlpha: 0.6,
-    hoverBoostFactor: 10,
-    // neighborBoostFactor is intentionally left undefined; renderer should link it to hoverBoostFactor
-    neighborBoostFactor: void 0,
-    // dimFactor removed from UI but kept available for fallback
-    dimFactor: void 0,
+    // (legacy hover/neighbor/dim factors removed; use gravity curve settings)
     // renamed highlight depth
     highlightDepth: 1,
     // unified gravity/glow params
@@ -3688,9 +3700,6 @@ var DEFAULT_SETTINGS = {
     gravityCurveSteepness: 3,
     // focus/dimming defaults
     focusSmoothingRate: 0.8,
-    edgeDimMin: void 0,
-    edgeDimMax: void 0,
-    nodeMinBodyAlpha: void 0,
     // color overrides left undefined by default to follow theme
     nodeColor: void 0,
     nodeColorAlpha: 0.1,
@@ -3724,10 +3733,8 @@ var DEFAULT_SETTINGS = {
     centerX: 0,
     centerY: 0,
     centerZ: 0,
-    // mouse gravity toggle + strength/exponent
-    mouseGravityEnabled: true,
-    mouseAttractionStrength: 1,
-    mouseAttractionExponent: 1
+    // mouse gravity toggle
+    mouseGravityEnabled: true
   },
   countDuplicateLinks: true,
   interaction: {
@@ -3918,7 +3925,6 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       }
     });
-    new import_obsidian2.Setting(containerEl).setName("");
     addSliderSetting(containerEl, {
       name: "Minimum center glow opacity",
       desc: "Opacity (0\u20130.8) at the glow center for the least connected node.",
@@ -3956,27 +3962,9 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       }
     });
     addSliderSetting(containerEl, {
-      name: "Hover glow boost",
-      desc: "Multiplier applied to the center glow when a node is hovered.",
-      value: glow.hoverBoostFactor ?? DEFAULT_SETTINGS.glow.hoverBoostFactor,
-      min: 1,
-      max: 100,
-      step: 0.1,
-      resetValue: DEFAULT_SETTINGS.glow.hoverBoostFactor,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 1 && v <= 100) {
-          glow.hoverBoostFactor = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          glow.hoverBoostFactor = DEFAULT_SETTINGS.glow.hoverBoostFactor;
-          await this.plugin.saveSettings();
-        }
-      }
-    });
-    addSliderSetting(containerEl, {
       name: "Highlight depth",
       desc: "Graph distance (in hops) from the hovered node that will be highlighted.",
-      value: glow.highlightDepth ?? DEFAULT_SETTINGS.glow.highlightDepth,
+      value: glow.highlightDepth,
       min: 0,
       max: 5,
       step: 1,
@@ -4492,48 +4480,6 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       this.plugin.settings.physics.mouseGravityEnabled = Boolean(v);
       await this.plugin.saveSettings();
     }));
-    const mouseStrengthInternal = this.plugin.settings.physics?.mouseAttractionStrength ?? DEFAULT_SETTINGS.physics.mouseAttractionStrength;
-    const mouseStrengthUi = Math.min(1, Math.max(0, (mouseStrengthInternal || 0) / 0.1));
-    addSliderSetting(containerEl, {
-      name: "Mouse attraction strength",
-      desc: "UI 0\u20131 mapped to internal small force scale (higher = stronger pull).",
-      value: mouseStrengthUi,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      resetValue: 0.2,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionStrength = v * 0.1;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionStrength = DEFAULT_SETTINGS.physics.mouseAttractionStrength;
-          await this.plugin.saveSettings();
-        }
-      }
-    });
-    addSliderSetting(containerEl, {
-      name: "Mouse attraction exponent",
-      desc: "How sharply attraction ramps as the cursor approaches (1 = linear; higher = snappier near cursor).",
-      value: this.plugin.settings.physics?.mouseAttractionExponent ?? DEFAULT_SETTINGS.physics.mouseAttractionExponent,
-      min: 1,
-      max: 6,
-      step: 0.1,
-      resetValue: DEFAULT_SETTINGS.physics.mouseAttractionExponent,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 1 && v <= 6) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionExponent = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionExponent = DEFAULT_SETTINGS.physics.mouseAttractionExponent;
-          await this.plugin.saveSettings();
-        }
-      }
-    });
     containerEl.createEl("h2", { text: "Center Node" });
     new import_obsidian2.Setting(containerEl).setName("Use pinned center note").setDesc("Prefer a specific note path as the graph center. Falls back to max in-links if not found.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.usePinnedCenterNote)).onChange(async (v) => {
       this.plugin.settings.usePinnedCenterNote = Boolean(v);

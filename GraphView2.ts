@@ -3,6 +3,7 @@ import { buildGraph, GraphData } from './graph/buildGraph';
 import { layoutGraph2D, layoutGraph3D } from './graph/layout2d';
 import { createRenderer2D, Renderer2D } from './graph/renderer2d';
 import { createSimulation, Simulation } from './graph/simulation';
+import { DEFAULT_SETTINGS } from './main';
 
 export const GREATER_GRAPH_VIEW_TYPE = 'greater-graph-view';
 
@@ -935,7 +936,7 @@ class Graph2DController {
             const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
             const nodeVar = cs.getPropertyValue('--interactive-accent') || cs.getPropertyValue('--accent-1') || cs.getPropertyValue('--accent');
             nodeColor.value = (nodeVar && nodeVar.trim()) ? nodeVar.trim() : '#66ccff';
-            nodeAlpha.value = String(1.0);
+            nodeAlpha.value = String((this.plugin as any).settings?.glow?.nodeColorAlpha ?? DEFAULT_SETTINGS.glow.nodeColorAlpha ?? 0.1);
           } catch (e) { nodeColor.value = '#66ccff'; }
           try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
@@ -988,7 +989,7 @@ class Graph2DController {
             const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
             const edgeVar = cs.getPropertyValue('--text-muted') || cs.getPropertyValue('--text-faint') || cs.getPropertyValue('--text-normal');
             edgeColor.value = (edgeVar && edgeVar.trim()) ? edgeVar.trim() : '#888888';
-            edgeAlpha.value = String(1.0);
+            edgeAlpha.value = String((this.plugin as any).settings?.glow?.edgeColorAlpha ?? DEFAULT_SETTINGS.glow.edgeColorAlpha ?? 0.1);
           } catch (e) { edgeColor.value = '#888888'; }
           try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
           try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
@@ -1030,7 +1031,7 @@ class Graph2DController {
               const cs = this.canvas ? window.getComputedStyle(this.canvas) : window.getComputedStyle(this.containerEl);
               const nodeVar = cs.getPropertyValue('--accent-2') || cs.getPropertyValue('--accent-secondary') || cs.getPropertyValue('--interactive-accent') || cs.getPropertyValue('--accent-1') || cs.getPropertyValue('--accent');
               tagColor.value = (nodeVar && nodeVar.trim()) ? nodeVar.trim() : '#8000ff';
-              tagAlpha.value = String(1.0);
+              tagAlpha.value = String((this.plugin as any).settings?.glow?.tagColorAlpha ?? DEFAULT_SETTINGS.glow.tagColorAlpha ?? 0.1);
             } catch (e) { tagColor.value = '#8000ff'; }
             try { if (this.renderer && (this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings((this.plugin as any).settings.glow); } catch (e) {}
             try { if (this.renderer && (this.renderer as any).render) (this.renderer as any).render(); } catch (e) {}
@@ -1185,6 +1186,16 @@ class Graph2DController {
 
       // Physics settings group
       const phys = (this.plugin as any).settings?.physics || {};
+      // Known defaults mirror DEFAULT_SETTINGS.physics from main.ts
+      const physDefaults: Record<string, number> = {
+        repulsionStrength: 5000,
+        springStrength: 1,
+        springLength: 100,
+        centerPull: 0.001,
+        damping: 0.7,
+        mouseAttractionStrength: 1,
+        mouseAttractionExponent: 1,
+      };
       const physFields: { key: string; label: string; step?: string }[] = [
         { key: 'repulsionStrength', label: 'Repulsion', step: '0.01' },
         { key: 'springStrength', label: 'Spring', step: '0.01' },
@@ -1237,17 +1248,21 @@ class Graph2DController {
           default: range.min = '0'; range.max = '100'; range.step = '1';
         }
         const current = (phys as any)[f.key];
+        // fallback to hardcoded defaults if setting missing
+        const defaultInternal = physDefaults[f.key];
         // For specific keys, convert internal -> UI
         if (f.key === 'repulsionStrength') {
-          const internal = Number.isFinite(current) ? Number(current) : Number(range.min);
+          const internal = Number.isFinite(current) ? Number(current) : (Number.isFinite(defaultInternal) ? Number(defaultInternal) : Number(range.min));
           // UI 0..1 where internal = ui^2 * 2000
           const ui = Math.min(1, Math.max(0, Math.sqrt(Math.max(0, internal / 2000))));
           range.value = String(ui);
         } else if (f.key === 'springStrength') {
-          const ui = Number.isFinite(current) ? Math.min(1, Math.max(0, Number(current) / 0.5)) : Number(range.min);
+          const internal = Number.isFinite(current) ? Number(current) : (Number.isFinite(defaultInternal) ? Number(defaultInternal) : Number(range.min));
+          const ui = Math.min(1, Math.max(0, Number(internal) / 0.5));
           range.value = String(ui);
         } else {
-          range.value = String(Number.isFinite(current) ? current : Number(range.min));
+          const internal = Number.isFinite(current) ? Number(current) : (Number.isFinite(defaultInternal) ? Number(defaultInternal) : Number(range.min));
+          range.value = String(internal);
         }
         range.style.width = '120px';
 
@@ -1293,14 +1308,18 @@ class Graph2DController {
             await (this.plugin as any).saveSettings();
             // restore UI to default from settings object if available
             const def = (this.plugin as any).settings.physics[f.key];
+            const defaultInternal = physDefaults[f.key];
             if (f.key === 'repulsionStrength') {
-              const ui = def !== undefined ? String(Math.min(1, Math.max(0, Math.sqrt(Math.max(0, Number(def) / 2000))))) : String(range.min);
+              const internal = def !== undefined ? Number(def) : (Number.isFinite(defaultInternal) ? defaultInternal : Number(range.min));
+              const ui = String(Math.min(1, Math.max(0, Math.sqrt(Math.max(0, Number(internal) / 2000)))));
               range.value = ui;
             } else if (f.key === 'springStrength') {
-              const ui = def !== undefined ? String(Math.min(1, Math.max(0, Number(def) / 0.5))) : String(range.min);
+              const internal = def !== undefined ? Number(def) : (Number.isFinite(defaultInternal) ? defaultInternal : Number(range.min));
+              const ui = String(Math.min(1, Math.max(0, Number(internal) / 0.5)));
               range.value = ui;
             } else {
-              range.value = def !== undefined ? String(def) : String(range.min);
+              const internal = def !== undefined ? String(def) : String(Number.isFinite(defaultInternal) ? defaultInternal : Number(range.min));
+              range.value = internal;
             }
             valueInput.value = range.value;
             try { if (this.simulation && (this.simulation as any).setOptions) (this.simulation as any).setOptions((this.plugin as any).settings.physics); } catch (e) {}

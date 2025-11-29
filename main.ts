@@ -6,11 +6,9 @@ export interface GlowSettings {
   maxNodeRadius: number;
   minCenterAlpha: number;
   maxCenterAlpha: number;
-  hoverBoostFactor: number;
-  neighborBoostFactor?: number;
-  dimFactor?: number;
+  
   // renamed: hoverHighlightDepth -> highlightDepth
-  highlightDepth?: number;
+  highlightDepth: number;
   // unified gravity/glow distance model
   gravityRadiusMultiplier?: number; // scales per-node screen radius
   gravityCurveSteepness?: number;   // falloff steepness
@@ -60,8 +58,6 @@ export interface GreaterGraphSettings {
     centerZ?: number;
     // mouse gravity well
     mouseGravityEnabled?: boolean;
-    mouseAttractionStrength?: number;
-    mouseAttractionExponent?: number;
   };
   // whether to count duplicate links (multiple links between same files) when computing in/out degrees
   countDuplicateLinks?: boolean;
@@ -73,7 +69,7 @@ export interface GreaterGraphSettings {
   };
   // persistent node positions keyed by vault name, then by file path
   // settings.nodePositions[vaultId][filePath] = { x, y }
-  nodePositions?: Record<string, Record<string, { x: number; y: number }>>;
+  nodePositions?: Record<string, Record<string, { x: number; y: number; z?: number }>>;
   // visibility toggles
   showTags?: boolean;
   // Center node selection
@@ -89,11 +85,7 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     maxNodeRadius: 20,
     minCenterAlpha: 0.1,
     maxCenterAlpha: 0.6,
-    hoverBoostFactor: 10,
-    // neighborBoostFactor is intentionally left undefined; renderer should link it to hoverBoostFactor
-    neighborBoostFactor: undefined,
-    // dimFactor removed from UI but kept available for fallback
-    dimFactor: undefined,
+    // (legacy hover/neighbor/dim factors removed; use gravity curve settings)
     // renamed highlight depth
     highlightDepth: 1,
     // unified gravity/glow params
@@ -101,9 +93,7 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     gravityCurveSteepness: 3,
     // focus/dimming defaults
     focusSmoothingRate: 0.8,
-    edgeDimMin: undefined,
-    edgeDimMax: undefined,
-    nodeMinBodyAlpha: undefined,
+    
         // color overrides left undefined by default to follow theme
         nodeColor: undefined,
         nodeColorAlpha: 0.1,
@@ -137,10 +127,8 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     centerX: 0,
     centerY: 0,
     centerZ: 0,
-    // mouse gravity toggle + strength/exponent
+    // mouse gravity toggle
     mouseGravityEnabled: true,
-    mouseAttractionStrength: 1,
-    mouseAttractionExponent: 1,
   },
   countDuplicateLinks: true,
   interaction: {
@@ -350,9 +338,6 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       },
     });
 
-    new Setting(containerEl)
-      .setName('')
-
     addSliderSetting(containerEl, {
       name: 'Minimum center glow opacity',
       desc: 'Opacity (0–0.8) at the glow center for the least connected node.',
@@ -391,29 +376,12 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       },
     });
 
-    addSliderSetting(containerEl, {
-      name: 'Hover glow boost',
-      desc: 'Multiplier applied to the center glow when a node is hovered.',
-      value: glow.hoverBoostFactor ?? DEFAULT_SETTINGS.glow.hoverBoostFactor,
-      min: 1,
-      max: 100,
-      step: 0.1,
-      resetValue: DEFAULT_SETTINGS.glow.hoverBoostFactor,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 1.0 && v <= 100) {
-          glow.hoverBoostFactor = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          glow.hoverBoostFactor = DEFAULT_SETTINGS.glow.hoverBoostFactor;
-          await this.plugin.saveSettings();
-        }
-      },
-    });
+    
 
     addSliderSetting(containerEl, {
       name: 'Highlight depth',
       desc: 'Graph distance (in hops) from the hovered node that will be highlighted.',
-      value: glow.highlightDepth ?? DEFAULT_SETTINGS.glow.highlightDepth!,
+      value: glow.highlightDepth,
       min: 0,
       max: 5,
       step: 1,
@@ -882,50 +850,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }));
 
-      // mouse attraction strength: UI 0..1 -> internal = ui * 0.1
-      const mouseStrengthInternal = (this.plugin.settings.physics?.mouseAttractionStrength ?? DEFAULT_SETTINGS.physics!.mouseAttractionStrength);
-      const mouseStrengthUi = Math.min(1, Math.max(0, (mouseStrengthInternal || 0) / 0.1));
-      addSliderSetting(containerEl, {
-        name: 'Mouse attraction strength',
-        desc: 'UI 0–1 mapped to internal small force scale (higher = stronger pull).',
-        value: mouseStrengthUi,
-        min: 0,
-        max: 1,
-        step: 0.01,
-        resetValue: 0.2,
-        onChange: async (v) => {
-          if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-            this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.mouseAttractionStrength = v * 0.1;
-            await this.plugin.saveSettings();
-          } else if (Number.isNaN(v)) {
-            this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.mouseAttractionStrength = DEFAULT_SETTINGS.physics!.mouseAttractionStrength;
-            await this.plugin.saveSettings();
-          }
-        },
-      });
-
-      addSliderSetting(containerEl, {
-        name: 'Mouse attraction exponent',
-        desc: 'How sharply attraction ramps as the cursor approaches (1 = linear; higher = snappier near cursor).',
-        value: (this.plugin.settings.physics?.mouseAttractionExponent ?? DEFAULT_SETTINGS.physics!.mouseAttractionExponent) as number,
-        min: 1,
-        max: 6,
-        step: 0.1,
-        resetValue: DEFAULT_SETTINGS.physics!.mouseAttractionExponent,
-        onChange: async (v) => {
-          if (!Number.isNaN(v) && v >= 1 && v <= 6) {
-            this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.mouseAttractionExponent = v;
-            await this.plugin.saveSettings();
-          } else if (Number.isNaN(v)) {
-            this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.mouseAttractionExponent = DEFAULT_SETTINGS.physics!.mouseAttractionExponent;
-            await this.plugin.saveSettings();
-          }
-        },
-      });
+      
 
     // Center Node settings
     containerEl.createEl('h2', { text: 'Center Node' });
