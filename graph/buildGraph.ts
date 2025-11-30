@@ -95,7 +95,9 @@ export async function buildGraph(app: App, options?: { countDuplicates?: boolean
       x: 0,
       y: 0,
       z: 0,
-      filePath: '',
+      // Use the tag id as the persisted key so tag node positions can be
+      // saved/restored in the same `nodePositions` map as notes.
+      filePath: `tag:${tagName}`,
       vx: 0,
       vy: 0,
       vz: 0,

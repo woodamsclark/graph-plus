@@ -87,6 +87,9 @@ export function layoutGraph3D(graph: GraphData, options: Layout3DOptions): void 
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
     if ((node as any).isCenterNode) {
+      // Keep the explicit center node at the requested center. For tag
+      // center nodes we preserve the tag-plane convention (x=0) so they sit
+      // on the ZY plane; for note center nodes place at XY center.
       if ((node as any).type === 'tag') {
         node.x = 0;
         node.y = centerY;
@@ -103,7 +106,12 @@ export function layoutGraph3D(graph: GraphData, options: Layout3DOptions): void 
     const rx = Math.cos(angle) * r;
     const ry = Math.sin(angle) * r;
     if ((node as any).type === 'tag') {
-      node.x = 0; // clamp to ZY plane
+      // Place tag nodes in a ring around the view center (same center as
+      // notes) so new tags visually appear around the center node rather
+      // than off to the left. We still give tags Z spread so they occupy
+      // the tag plane visually, but their X coordinate is centered on the
+      // view center plus radial offset for a consistent initial distribution.
+      node.x = centerX + rx;
       node.y = centerY + ry;
       node.z = (Math.random() - 0.5) * tagZSpread;
     } else {

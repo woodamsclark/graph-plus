@@ -303,9 +303,47 @@ class Graph2DController {
     } as any);
 
     // Restore saved positions from plugin settings (do not override saved positions)
+    // NOTE: We intentionally differentiate between nodes that have persisted
+    // positions and nodes that don't. Nodes with a saved position are placed
+    // exactly at their saved world coordinates and are NOT included in the
+    // subsequent layout pass. Nodes without saved positions are collected
+    // into `needsLayout` and will be laid out around the current view center
+    // (centerX/centerY) so newly-created notes/tags appear around the visible
+    // center node rather than at the absolute origin (0,0,0).
     const vaultId = this.app.vault.getName();
-    const allSaved: Record<string, Record<string, { x: number; y: number }>> = (this.plugin as any).settings?.nodePositions || {};
-    const savedPositions: Record<string, { x: number; y: number }> = allSaved[vaultId] || {};
+    // `nodePositions` historically was stored as a flat map of path->pos.
+    // Newer versions store a per-vault map: { [vaultId]: { path: pos } }.
+    // Support both formats: prefer per-vault, fall back to flat, and migrate
+    // legacy flat maps into the per-vault shape for future saves.
+    const rawSaved: any = (this.plugin as any).settings?.nodePositions || {};
+    let allSaved: Record<string, Record<string, { x: number; y: number }>> = {};
+    let savedPositions: Record<string, { x: number; y: number }> = {};
+    if (rawSaved && typeof rawSaved === 'object') {
+      if (rawSaved[vaultId] && typeof rawSaved[vaultId] === 'object') {
+        // already per-vault
+        allSaved = rawSaved as any;
+        savedPositions = allSaved[vaultId] || {};
+      } else {
+        // legacy flat map: treat rawSaved as the vault map and migrate
+        const hasPathLikeKeys = Object.keys(rawSaved).some((k) => typeof k === 'string' && (k.includes('/') || k.startsWith('tag:') || k.endsWith('.md')));
+        if (hasPathLikeKeys) {
+          // use flat map as savedPositions for this session
+          savedPositions = rawSaved as Record<string, { x: number; y: number }>;
+          // also migrate into per-vault shape so future saves are consistent
+          allSaved = {} as any;
+          allSaved[vaultId] = Object.assign({}, rawSaved);
+          try {
+            (this.plugin as any).settings.nodePositions = allSaved;
+            // persist migrated shape (best-effort)
+            try { (this.plugin as any).saveSettings && (this.plugin as any).saveSettings(); } catch (e) {}
+          } catch (e) {}
+        } else {
+          // empty or unexpected shape: treat as empty
+          allSaved = {} as any;
+          savedPositions = {};
+        }
+      }
+    }
     const needsLayout: any[] = [];
     if (this.graph && this.graph.nodes) {
       for (const node of this.graph.nodes) {

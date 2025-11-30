@@ -79,7 +79,9 @@ async function buildGraph(app, options) {
       x: 0,
       y: 0,
       z: 0,
-      filePath: "",
+      // Use the tag id as the persisted key so tag node positions can be
+      // saved/restored in the same `nodePositions` map as notes.
+      filePath: `tag:${tagName}`,
       vx: 0,
       vy: 0,
       vz: 0,
@@ -286,7 +288,7 @@ function layoutGraph3D(graph, options) {
     const rx = Math.cos(angle) * r;
     const ry = Math.sin(angle) * r;
     if (node.type === "tag") {
-      node.x = 0;
+      node.x = centerX + rx;
       node.y = centerY + ry;
       node.z = (Math.random() - 0.5) * tagZSpread;
     } else {
@@ -1666,8 +1668,33 @@ var Graph2DController = class {
       useOutlinkFallback: Boolean(this.plugin.settings?.useOutlinkFallback)
     });
     const vaultId = this.app.vault.getName();
-    const allSaved = this.plugin.settings?.nodePositions || {};
-    const savedPositions = allSaved[vaultId] || {};
+    const rawSaved = this.plugin.settings?.nodePositions || {};
+    let allSaved = {};
+    let savedPositions = {};
+    if (rawSaved && typeof rawSaved === "object") {
+      if (rawSaved[vaultId] && typeof rawSaved[vaultId] === "object") {
+        allSaved = rawSaved;
+        savedPositions = allSaved[vaultId] || {};
+      } else {
+        const hasPathLikeKeys = Object.keys(rawSaved).some((k) => typeof k === "string" && (k.includes("/") || k.startsWith("tag:") || k.endsWith(".md")));
+        if (hasPathLikeKeys) {
+          savedPositions = rawSaved;
+          allSaved = {};
+          allSaved[vaultId] = Object.assign({}, rawSaved);
+          try {
+            this.plugin.settings.nodePositions = allSaved;
+            try {
+              this.plugin.saveSettings && this.plugin.saveSettings();
+            } catch (e) {
+            }
+          } catch (e) {
+          }
+        } else {
+          allSaved = {};
+          savedPositions = {};
+        }
+      }
+    }
     const needsLayout = [];
     if (this.graph && this.graph.nodes) {
       for (const node of this.graph.nodes) {
