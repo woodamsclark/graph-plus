@@ -379,22 +379,36 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     return a / (a + b);
   }
 
-  function getMouseDistanceFactor(node: any) {
+  // Unified glow/gravity radius helper: returns explicit glowRadiusPx when set,
+  // otherwise uses node body radius * gravityRadiusMultiplier (or DEFAULT_GLOW_MULTIPLIER).
+  function getUnifiedGlowRadius(node: any) {
     const radius = getNodeRadius(node);
-    const innerR = radius * distanceInnerMultiplier; // fixed 1×
-    const outerR = radius * gravityRadiusMultiplier;
+    if (glowRadiusPx != null && isFinite(glowRadiusPx) && glowRadiusPx > 0) {
+      return glowRadiusPx;
+    }
+    const mult = (typeof gravityRadiusMultiplier === 'number' && isFinite(gravityRadiusMultiplier)) ? gravityRadiusMultiplier : DEFAULT_GLOW_MULTIPLIER;
+    return radius * mult;
+  }
+
+  function evalGravityFalloff(dist: number, innerR: number, outerR: number, exponent: number) {
+    if (dist <= innerR) return 1;
+    if (dist >= outerR) return 0;
+    const t = (dist - innerR) / (outerR - innerR);
+    const base = 1 - t;
+    const k = exponent > 0 ? exponent : 1;
+    return Math.pow(base, k);
+  }
+
+  function getMouseDistanceFactor(node: any) {
+    const innerR = getNodeRadius(node); // full effect inside node body
+    const outerR = getUnifiedGlowRadius(node);
     if (outerR <= innerR || outerR <= 0) return 0;
     const p = projectWorld(node);
     const dx = mouseX - p.x;
     const dy = mouseY - p.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist <= innerR) return 1;
-    if (dist >= outerR) return 0;
-
-    // normalize so 0 = outerR, 1 = innerR
-    const t = (dist - innerR) / (outerR - innerR); // 0..1 where 0=inner,1=outer
-    const proximity = 1 - t; // 1 near inner, 0 near outer
-    return applySCurve(proximity, gravityCurveSteepness);
+    // Use the new falloff evaluator which behaves intuitively with exponent
+    return evalGravityFalloff(dist, innerR, outerR, gravityCurveSteepness);
   }
 
   function render() {

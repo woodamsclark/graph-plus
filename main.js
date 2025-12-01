@@ -574,23 +574,34 @@ function createRenderer2D(options) {
       return 0.5;
     return a / (a + b);
   }
-  function getMouseDistanceFactor(node) {
+  function getUnifiedGlowRadius(node) {
     const radius = getNodeRadius(node);
-    const innerR = radius * distanceInnerMultiplier;
-    const outerR = radius * gravityRadiusMultiplier;
+    if (glowRadiusPx != null && isFinite(glowRadiusPx) && glowRadiusPx > 0) {
+      return glowRadiusPx;
+    }
+    const mult = typeof gravityRadiusMultiplier === "number" && isFinite(gravityRadiusMultiplier) ? gravityRadiusMultiplier : DEFAULT_GLOW_MULTIPLIER;
+    return radius * mult;
+  }
+  function evalGravityFalloff(dist, innerR, outerR, exponent) {
+    if (dist <= innerR)
+      return 1;
+    if (dist >= outerR)
+      return 0;
+    const t = (dist - innerR) / (outerR - innerR);
+    const base = 1 - t;
+    const k = exponent > 0 ? exponent : 1;
+    return Math.pow(base, k);
+  }
+  function getMouseDistanceFactor(node) {
+    const innerR = getNodeRadius(node);
+    const outerR = getUnifiedGlowRadius(node);
     if (outerR <= innerR || outerR <= 0)
       return 0;
     const p = projectWorld(node);
     const dx = mouseX - p.x;
     const dy = mouseY - p.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist <= innerR)
-      return 1;
-    if (dist >= outerR)
-      return 0;
-    const t = (dist - innerR) / (outerR - innerR);
-    const proximity = 1 - t;
-    return applySCurve(proximity, gravityCurveSteepness);
+    return evalGravityFalloff(dist, innerR, outerR, gravityCurveSteepness);
   }
   function render() {
     if (!ctx)
@@ -2801,7 +2812,8 @@ var Graph2DController = class {
         { key: "springLength", label: "Spring len", step: "1" },
         { key: "centerPull", label: "Center pull", step: "0.0001" },
         { key: "damping", label: "Damping", step: "0.01" },
-        // Mouse gravity uses unified glow/gravity settings; old radius control is deprecated.
+        // Mouse gravity uses unified glow/gravity settings; expose strength + exponent.
+        { key: "mouseAttractionStrength", label: "Mouse gravity strength", step: "0.01" },
         { key: "mouseAttractionExponent", label: "Mouse attraction exponent", step: "0.1" }
       ];
       const mouseGravChk = document.createElement("input");
@@ -2918,6 +2930,13 @@ var Graph2DController = class {
               this.plugin.settings.physics[f.key] = Number.isFinite(val) ? val * val * 2e3 : this.plugin.settings.physics[f.key];
             } else if (f.key === "springStrength") {
               this.plugin.settings.physics[f.key] = Number.isFinite(val) ? val * 0.5 : this.plugin.settings.physics[f.key];
+            } else if (f.key === "mouseAttractionStrength") {
+              this.plugin.settings.physics[f.key] = Number.isFinite(val) ? val : this.plugin.settings.physics[f.key];
+              try {
+                if (this.simulation && this.simulation.setOptions)
+                  this.simulation.setOptions({ mouseAttractionStrength: Number(val) });
+              } catch (e2) {
+              }
             } else {
               this.plugin.settings.physics[f.key] = Number.isFinite(val) ? val : this.plugin.settings.physics[f.key];
             }
@@ -3242,6 +3261,16 @@ var Graph2DController = class {
       return;
     const { right, up } = basis;
     for (const node of this.graph.nodes) {
+      let evalGravityFalloff = function(dist, innerR2, outerR2, exponent) {
+        if (dist <= innerR2)
+          return 1;
+        if (dist >= outerR2)
+          return 0;
+        const t = (dist - innerR2) / (outerR2 - innerR2);
+        const base = 1 - t;
+        const k = exponent > 0 ? exponent : 1;
+        return Math.pow(base, k);
+      };
       const proj = this.renderer.getProjectedNode ? this.renderer.getProjectedNode(node) : null;
       if (!proj)
         continue;
@@ -3268,8 +3297,10 @@ var Graph2DController = class {
       wx /= len;
       wy /= len;
       wz /= len;
-      const t = 1 - distScreen / radius;
-      const strength = baseStrength * Math.pow(t, steepness);
+      const innerR = nodeScreenR;
+      const outerR = radius;
+      const falloff = evalGravityFalloff(distScreen, innerR, outerR, steepness);
+      const strength = baseStrength * falloff;
       node.vx = (node.vx || 0) + wx * strength;
       node.vy = (node.vy || 0) + wy * strength;
       node.vz = (node.vz || 0) + wz * strength;
@@ -3761,7 +3792,8 @@ var DEFAULT_SETTINGS = {
     centerY: 0,
     centerZ: 0,
     // mouse gravity toggle
-    mouseGravityEnabled: true
+    mouseGravityEnabled: true,
+    mouseAttractionStrength: 1
   },
   countDuplicateLinks: true,
   interaction: {
@@ -4507,6 +4539,26 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       this.plugin.settings.physics.mouseGravityEnabled = Boolean(v);
       await this.plugin.saveSettings();
     }));
+    addSliderSetting(containerEl, {
+      name: "Mouse gravity strength",
+      desc: "Strength of the mouse gravity well (0 = off, 1 = strong).",
+      value: phys.mouseAttractionStrength ?? DEFAULT_SETTINGS.physics.mouseAttractionStrength,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      resetValue: DEFAULT_SETTINGS.physics.mouseAttractionStrength,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionStrength = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          this.plugin.settings.physics = this.plugin.settings.physics || {};
+          this.plugin.settings.physics.mouseAttractionStrength = DEFAULT_SETTINGS.physics.mouseAttractionStrength;
+          await this.plugin.saveSettings();
+        }
+      }
+    });
     containerEl.createEl("h2", { text: "Center Node" });
     new import_obsidian2.Setting(containerEl).setName("Use pinned center note").setDesc("Prefer a specific note path as the graph center. Falls back to max in-links if not found.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.usePinnedCenterNote)).onChange(async (v) => {
       this.plugin.settings.usePinnedCenterNote = Boolean(v);

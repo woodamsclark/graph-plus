@@ -58,6 +58,8 @@ export interface GreaterGraphSettings {
     centerZ?: number;
     // mouse gravity well
     mouseGravityEnabled?: boolean;
+    mouseAttractionStrength?: number;
+    mouseAttractionExponent?: number;
   };
   // whether to count duplicate links (multiple links between same files) when computing in/out degrees
   countDuplicateLinks?: boolean;
@@ -129,6 +131,7 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     centerZ: 0,
     // mouse gravity toggle
     mouseGravityEnabled: true,
+    mouseAttractionStrength: 1,
   },
   countDuplicateLinks: true,
   interaction: {
@@ -849,6 +852,28 @@ class GreaterGraphSettingTab extends PluginSettingTab {
             this.plugin.settings.physics.mouseGravityEnabled = Boolean(v);
             await this.plugin.saveSettings();
           }));
+
+      // Mouse gravity strength (0..1)
+      addSliderSetting(containerEl, {
+        name: 'Mouse gravity strength',
+        desc: 'Strength of the mouse gravity well (0 = off, 1 = strong).',
+        value: (phys.mouseAttractionStrength ?? DEFAULT_SETTINGS.physics!.mouseAttractionStrength) as number,
+        min: 0,
+        max: 1,
+        step: 0.01,
+        resetValue: DEFAULT_SETTINGS.physics!.mouseAttractionStrength,
+        onChange: async (v) => {
+          if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.mouseAttractionStrength = v;
+            await this.plugin.saveSettings();
+          } else if (Number.isNaN(v)) {
+            this.plugin.settings.physics = this.plugin.settings.physics || {};
+            this.plugin.settings.physics.mouseAttractionStrength = DEFAULT_SETTINGS.physics!.mouseAttractionStrength;
+            await this.plugin.saveSettings();
+          }
+        },
+      });
 
       
 

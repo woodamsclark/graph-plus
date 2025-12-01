@@ -1240,7 +1240,8 @@ class Graph2DController {
         { key: 'springLength', label: 'Spring len', step: '1' },
         { key: 'centerPull', label: 'Center pull', step: '0.0001' },
         { key: 'damping', label: 'Damping', step: '0.01' },
-        // Mouse gravity uses unified glow/gravity settings; old radius control is deprecated.
+        // Mouse gravity uses unified glow/gravity settings; expose strength + exponent.
+        { key: 'mouseAttractionStrength', label: 'Mouse gravity strength', step: '0.01' },
         { key: 'mouseAttractionExponent', label: 'Mouse attraction exponent', step: '0.1' },
       ];
       // Mouse gravity enable toggle
@@ -1326,6 +1327,10 @@ class Graph2DController {
             } else if (f.key === 'springStrength') {
               // UI 0..1 -> internal = ui * 0.5
               (this.plugin as any).settings.physics[f.key] = Number.isFinite(val) ? (val * 0.5) : (this.plugin as any).settings.physics[f.key];
+            } else if (f.key === 'mouseAttractionStrength') {
+              (this.plugin as any).settings.physics[f.key] = Number.isFinite(val) ? val : (this.plugin as any).settings.physics[f.key];
+              // propagate immediately to simulation as a single-option update
+              try { if (this.simulation && (this.simulation as any).setOptions) (this.simulation as any).setOptions({ mouseAttractionStrength: Number(val) }); } catch (e) {}
             } else {
               (this.plugin as any).settings.physics[f.key] = Number.isFinite(val) ? val : (this.plugin as any).settings.physics[f.key];
             }
@@ -1645,8 +1650,19 @@ class Graph2DController {
       const len = Math.sqrt(wx * wx + wy * wy + wz * wz) || 1;
       wx /= len; wy /= len; wz /= len;
 
-      const t = 1 - distScreen / radius;
-      const strength = baseStrength * Math.pow(t, steepness);
+      // Evaluate falloff using stable exponent curve: full inside nodeScreenR, zero at radius
+      const innerR = nodeScreenR;
+      const outerR = radius;
+      function evalGravityFalloff(dist: number, innerR: number, outerR: number, exponent: number) {
+        if (dist <= innerR) return 1;
+        if (dist >= outerR) return 0;
+        const t = (dist - innerR) / (outerR - innerR);
+        const base = 1 - t;
+        const k = exponent > 0 ? exponent : 1;
+        return Math.pow(base, k);
+      }
+      const falloff = evalGravityFalloff(distScreen, innerR, outerR, steepness);
+      const strength = baseStrength * falloff;
 
       node.vx = (node.vx || 0) + wx * strength;
       node.vy = (node.vy || 0) + wy * strength;
