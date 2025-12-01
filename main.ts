@@ -10,14 +10,12 @@ export interface GlowSettings {
   // renamed: hoverHighlightDepth -> highlightDepth
   highlightDepth: number;
   // unified gravity/glow distance model
-  gravityRadiusMultiplier?: number; // scales per-node screen radius
+  gravityRadius?: number; // scales per-node screen radius
+  labelRadius?: number;   // screen-space label reveal radius (× size)
+  highlightRadius?: number; // highlight falloff outer radius (× size)
   gravityCurveSteepness?: number;   // falloff steepness
-  // multiplier (× node radius) used to reveal labels near the cursor
-  labelProximityRadiusMultiplier?: number;
   // focus/dimming controls
   focusSmoothingRate?: number;
-  edgeDimMin?: number;
-  edgeDimMax?: number;
   nodeMinBodyAlpha?: number;
   // optional color overrides (CSS color strings). If unset, theme vars are used.
   nodeColor?: string;
@@ -27,19 +25,15 @@ export interface GlowSettings {
   // base font size for labels (world-space units mapped to screen px via camera zoom)
   labelBaseFontSize?: number;
   // label visibility/fade (screen-space px)
-  labelMinVisibleRadiusPx?: number;
+
   labelFadeRangePx?: number;
   // explicit glow radius in pixels (null/undefined to use multiplier-based glow)
-  glowRadiusPx?: number | null;
+  //glowRadiusPx?: number | null;
   // per-color alpha multipliers (0..1)
   nodeColorAlpha?: number;
-  // maximum alpha to use when the node/tag/edge is hovered (0..1)
-  nodeColorMaxAlpha?: number;
   tagColorAlpha?: number;
-  tagColorMaxAlpha?: number;
   labelColorAlpha?: number;
   edgeColorAlpha?: number;
-  edgeColorMaxAlpha?: number;
   // whether to use Obsidian's interface font for labels (true) or a monospace/code font (false)
   useInterfaceFont?: boolean;
 }
@@ -60,7 +54,6 @@ export interface GreaterGraphSettings {
     centerZ?: number;
     // mouse gravity well
     mouseGravityEnabled?: boolean;
-    mouseAttractionStrength?: number;
   };
   // whether to count duplicate links (multiple links between same files) when computing in/out degrees
   countDuplicateLinks?: boolean;
@@ -92,30 +85,25 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     // renamed highlight depth
     highlightDepth: 1,
     // unified gravity/glow params
-    gravityRadiusMultiplier: 6,
+    gravityRadius: 6,
     gravityCurveSteepness: 3,
-    // label reveal multiplier (× node radius)
-    labelProximityRadiusMultiplier: 10,
     // focus/dimming defaults
     focusSmoothingRate: 0.8,
     
         // color overrides left undefined by default to follow theme
         nodeColor: undefined,
         nodeColorAlpha: 0.1,
-        nodeColorMaxAlpha: 1.0,
         tagColor: undefined,
         tagColorAlpha: 0.1,
-        tagColorMaxAlpha: 1.0,
         labelColor: undefined,
         labelBaseFontSize: 24,
-        labelMinVisibleRadiusPx: 6,
         labelFadeRangePx: 8,
-        glowRadiusPx: null,
+        //glowRadiusPx: null,
         labelColorAlpha: 1.0,
         useInterfaceFont: true,
         edgeColor: undefined,
         edgeColorAlpha: 0.1,
-        edgeColorMaxAlpha: 0.6,
+        
   },
   physics: {
     // Physics defaults (use direct/internal scale values)
@@ -134,8 +122,6 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     centerZ: 0,
     // mouse gravity toggle
     mouseGravityEnabled: true,
-    // how strongly the mouse gravity well pulls (multiplier applied in simulation)
-    mouseAttractionStrength: 1.0,
   },
   countDuplicateLinks: true,
   interaction: {
@@ -405,19 +391,19 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     });
 
     addSliderSetting(containerEl, {
-      name: 'Gravity radius multiplier',
+      name: 'Gravity Radius',
       desc: 'Scales each node\'s screen-space radius for glow/mouse gravity.',
-      value: glow.gravityRadiusMultiplier ?? DEFAULT_SETTINGS.glow.gravityRadiusMultiplier!,
+      value: glow.gravityRadius ?? DEFAULT_SETTINGS.glow.gravityRadius!,
       min: 1,
-      max: 50,
+      max: 20,
       step: 0.1,
-      resetValue: DEFAULT_SETTINGS.glow.gravityRadiusMultiplier,
+      resetValue: DEFAULT_SETTINGS.glow.gravityRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          glow.gravityRadiusMultiplier = v;
+          glow.gravityRadius = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.gravityRadiusMultiplier = DEFAULT_SETTINGS.glow.gravityRadiusMultiplier;
+          glow.gravityRadius = DEFAULT_SETTINGS.glow.gravityRadius;
           await this.plugin.saveSettings();
         }
       },
@@ -442,20 +428,20 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       },
     });
 
-    addSliderSetting(containerEl, {
-      name: 'Label proximity multiplier',
-      desc: 'Multiplier (× node radius) used to reveal labels near the cursor. Independent from gravity radius.',
-      value: glow.labelProximityRadiusMultiplier ?? DEFAULT_SETTINGS.glow.labelProximityRadiusMultiplier!,
-      min: 1,
-      max: 50,
-      step: 0.5,
-      resetValue: DEFAULT_SETTINGS.glow.labelProximityRadiusMultiplier,
+        addSliderSetting(containerEl, {
+      name: 'Label Radius',
+      desc: 'Screen-space label reveal radius (× node size).',
+      value: glow.labelRadius ?? DEFAULT_SETTINGS.glow.labelRadius!,
+      min: 0.5,
+      max: 10,
+      step: 0.1,
+      resetValue: DEFAULT_SETTINGS.glow.labelRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          glow.labelProximityRadiusMultiplier = v;
+          glow.labelRadius = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.labelProximityRadiusMultiplier = DEFAULT_SETTINGS.glow.labelProximityRadiusMultiplier;
+          glow.labelRadius = DEFAULT_SETTINGS.glow.labelRadius;
           await this.plugin.saveSettings();
         }
       },
@@ -509,22 +495,12 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         glow.nodeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.nodeColorAlpha;
         await this.plugin.saveSettings();
       });
-      const maxAlphaInput = document.createElement('input');
-      maxAlphaInput.type = 'number'; maxAlphaInput.min = '0.1'; maxAlphaInput.max = '1'; maxAlphaInput.step = '0.01';
-      maxAlphaInput.value = String((glow.nodeColorMaxAlpha ?? DEFAULT_SETTINGS.glow.nodeColorMaxAlpha));
-      maxAlphaInput.style.width = '68px'; maxAlphaInput.style.marginLeft = '6px';
-      maxAlphaInput.addEventListener('change', async (e) => {
-        const v = Number((e.target as HTMLInputElement).value);
-        glow.nodeColorMaxAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.nodeColorMaxAlpha;
-        await this.plugin.saveSettings();
-      });
-      rb.addEventListener('click', async () => { glow.nodeColor = undefined; glow.nodeColorAlpha = undefined; glow.nodeColorMaxAlpha = undefined; await this.plugin.saveSettings(); colorInput.value = '#000000'; alphaInput.value = String(DEFAULT_SETTINGS.glow.nodeColorAlpha); maxAlphaInput.value = String(DEFAULT_SETTINGS.glow.nodeColorMaxAlpha); });
+      rb.addEventListener('click', async () => { glow.nodeColor = undefined; glow.nodeColorAlpha = undefined; await this.plugin.saveSettings(); colorInput.value = '#000000'; alphaInput.value = String(DEFAULT_SETTINGS.glow.nodeColorAlpha); });
       (s as any).controlEl.appendChild(rb);
-      const hint = document.createElement('span'); hint.textContent = '(alpha: min|max)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
+      const hint = document.createElement('span'); hint.textContent = '(alpha)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
       (s as any).controlEl.appendChild(hint);
       (s as any).controlEl.appendChild(colorInput);
       (s as any).controlEl.appendChild(alphaInput);
-      (s as any).controlEl.appendChild(maxAlphaInput);
     }
 
     {
@@ -551,23 +527,12 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       });
 
-      const edgeMaxAlpha = document.createElement('input');
-      edgeMaxAlpha.type = 'number'; edgeMaxAlpha.min = '0.1'; edgeMaxAlpha.max = '1'; edgeMaxAlpha.step = '0.01';
-      edgeMaxAlpha.value = String(glow.edgeColorMaxAlpha ?? DEFAULT_SETTINGS.glow.edgeColorMaxAlpha);
-      edgeMaxAlpha.style.width = '68px'; edgeMaxAlpha.style.marginLeft = '6px';
-      edgeMaxAlpha.addEventListener('change', async (e) => {
-        const v = Number((e.target as HTMLInputElement).value);
-        glow.edgeColorMaxAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.edgeColorMaxAlpha;
-        await this.plugin.saveSettings();
-      });
-
-      rb.addEventListener('click', async () => { glow.edgeColor = undefined; glow.edgeColorAlpha = undefined; glow.edgeColorMaxAlpha = undefined; await this.plugin.saveSettings(); colorInput.value = '#000000'; edgeAlpha.value = String(DEFAULT_SETTINGS.glow.edgeColorAlpha); edgeMaxAlpha.value = String(DEFAULT_SETTINGS.glow.edgeColorMaxAlpha); });
+      rb.addEventListener('click', async () => { glow.edgeColor = undefined; glow.edgeColorAlpha = undefined; await this.plugin.saveSettings(); colorInput.value = '#000000'; edgeAlpha.value = String(DEFAULT_SETTINGS.glow.edgeColorAlpha); });
       (s as any).controlEl.appendChild(rb);
       (s as any).controlEl.appendChild(colorInput);
-      const hint = document.createElement('span'); hint.textContent = '(alpha: min|max)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
+      const hint = document.createElement('span'); hint.textContent = '(alpha)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
       (s as any).controlEl.appendChild(hint);
       (s as any).controlEl.appendChild(edgeAlpha);
-      (s as any).controlEl.appendChild(edgeMaxAlpha);
     }
 
     // Tag color (override)
@@ -594,22 +559,12 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       });
 
-      const tagMaxAlpha = document.createElement('input'); tagMaxAlpha.type = 'number'; tagMaxAlpha.min = '0.1'; tagMaxAlpha.max = '1'; tagMaxAlpha.step = '0.01';
-      tagMaxAlpha.value = String(glow.tagColorMaxAlpha ?? DEFAULT_SETTINGS.glow.tagColorMaxAlpha);
-      tagMaxAlpha.style.width = '68px'; tagMaxAlpha.style.marginLeft = '6px';
-      tagMaxAlpha.addEventListener('change', async (e) => {
-        const v = Number((e.target as HTMLInputElement).value);
-        glow.tagColorMaxAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.tagColorMaxAlpha;
-        await this.plugin.saveSettings();
-      });
-
-      rb.addEventListener('click', async () => { glow.tagColor = undefined; glow.tagColorAlpha = undefined; glow.tagColorMaxAlpha = undefined; await this.plugin.saveSettings(); colorInput.value = '#000000'; tagAlpha.value = String(DEFAULT_SETTINGS.glow.tagColorAlpha); tagMaxAlpha.value = String(DEFAULT_SETTINGS.glow.tagColorMaxAlpha); });
+      rb.addEventListener('click', async () => { glow.tagColor = undefined; glow.tagColorAlpha = undefined; await this.plugin.saveSettings(); colorInput.value = '#000000'; tagAlpha.value = String(DEFAULT_SETTINGS.glow.tagColorAlpha); });
       (s as any).controlEl.appendChild(rb);
       (s as any).controlEl.appendChild(colorInput);
-      const hint = document.createElement('span'); hint.textContent = '(alpha: min|max)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
+      const hint = document.createElement('span'); hint.textContent = '(alpha)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
       (s as any).controlEl.appendChild(hint);
       (s as any).controlEl.appendChild(tagAlpha);
-      (s as any).controlEl.appendChild(tagMaxAlpha);
     }
 
     {
@@ -875,28 +830,6 @@ class GreaterGraphSettingTab extends PluginSettingTab {
             this.plugin.settings.physics.mouseGravityEnabled = Boolean(v);
             await this.plugin.saveSettings();
           }));
-
-      // Mouse attraction strength (when mouse gravity is enabled)
-      addSliderSetting(containerEl, {
-        name: 'Mouse attraction strength',
-        desc: 'How strongly the mouse gravity well pulls nearby nodes (multiplier).',
-        value: phys.mouseAttractionStrength ?? DEFAULT_SETTINGS.physics!.mouseAttractionStrength!,
-        min: 0,
-        max: 5,
-        step: 0.1,
-        resetValue: DEFAULT_SETTINGS.physics!.mouseAttractionStrength,
-        onChange: async (v) => {
-          if (!Number.isNaN(v) && v >= 0) {
-            this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.mouseAttractionStrength = v;
-            await this.plugin.saveSettings();
-          } else if (Number.isNaN(v)) {
-            this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.mouseAttractionStrength = DEFAULT_SETTINGS.physics!.mouseAttractionStrength;
-            await this.plugin.saveSettings();
-          }
-        },
-      });
 
       
 

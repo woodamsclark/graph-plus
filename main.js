@@ -336,8 +336,6 @@ function createRenderer2D(options) {
   let showTags = true;
   let minRadius = glowOptions?.minNodeRadius ?? 6;
   let maxRadius = glowOptions?.maxNodeRadius ?? 24;
-  const DEFAULT_GLOW_MULTIPLIER = 2;
-  let glowRadiusPx = glowOptions?.glowRadiusPx ?? null;
   let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.15;
   let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.6;
   let nodeColorAlpha = glowOptions?.nodeColorAlpha ?? 1;
@@ -352,21 +350,11 @@ function createRenderer2D(options) {
   let edgeMaxAlpha = glowOptions?.edgeMaxAlpha ?? 0.6;
   let labelMinAlpha = glowOptions?.labelMinAlpha ?? 0;
   let labelMaxAlpha = glowOptions?.labelMaxAlpha ?? 1;
-  let hoverHighlightDepth = glowOptions?.highlightDepth ?? 1;
-  let gravityRadiusMultiplier = glowOptions?.gravityRadiusMultiplier ?? 15;
+  let gravityRadius = glowOptions?.gravityRadius ?? 15;
   let gravityCurveSteepness = glowOptions?.gravityCurveSteepness ?? 1;
-  let labelProximityRadiusMultiplier = glowOptions?.labelProximityRadiusMultiplier ?? 10;
-  let highlightRadiusMultiplier = glowOptions?.highlightRadiusMultiplier ?? gravityRadiusMultiplier;
-  let highlightCurveSteepness = glowOptions?.highlightCurveSteepness ?? gravityCurveSteepness;
-  let distanceInnerMultiplier = 1;
-  let hoverBoost = 1.4;
-  let neighborBoost = 1.15;
-  let dimFactor = 0.35;
-  let distanceOuterMultiplier = gravityRadiusMultiplier;
-  let distanceCurveSteepness = gravityCurveSteepness;
-  let nodeColorMaxAlpha = nodeMaxAlpha;
-  let tagColorMaxAlpha = tagMaxAlpha;
-  let edgeColorMaxAlpha = edgeMaxAlpha;
+  let labelRadius = glowOptions?.labelRadius ?? 10;
+  let highlightRadius = glowOptions?.highlightRadius ?? 10;
+  let innerRadius = 1;
   let focusSmoothingRate = glowOptions?.focusSmoothingRate ?? 0.8;
   let hoveredNodeId = null;
   let hoverHighlightSet = /* @__PURE__ */ new Set();
@@ -377,10 +365,7 @@ function createRenderer2D(options) {
   const hoverLerpSpeed = 0.2;
   const nodeFocusMap = /* @__PURE__ */ new Map();
   let lastRenderTime = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
-  let edgeDimMin = glowOptions?.edgeDimMin ?? 0.1;
-  let edgeDimMax = glowOptions?.edgeDimMax ?? 0.7;
-  let nodeMinBodyAlpha = glowOptions?.nodeMinBodyAlpha ?? 0.3;
-  let labelMinVisibleRadiusPx = glowOptions?.labelMinVisibleRadiusPx ?? 6;
+  let labelAlphaMin = glowOptions?.nodeMinBodyAlpha ?? 0.3;
   let labelFadeRangePx = glowOptions?.labelFadeRangePx ?? 8;
   let labelBaseFontSize = glowOptions?.labelBaseFontSize ?? 10;
   let themeNodeColor = "#66ccff";
@@ -432,8 +417,6 @@ function createRenderer2D(options) {
   let scale = 1;
   let offsetX = 0;
   let offsetY = 0;
-  const minScale = 0.25;
-  const maxScale = 4;
   let camera = {
     yaw: Math.PI / 6,
     pitch: Math.PI / 8,
@@ -550,27 +533,20 @@ function createRenderer2D(options) {
     const base = getBaseCenterAlpha(node);
     if (!hoveredNodeId) {
       const hl2 = evalFalloff(node, buildHighlightProfile(node));
-      const normal = base;
-      const highlighted = base * neighborBoost;
-      const blended = normal + (highlighted - normal) * hl2;
-      return clamp01(blended);
+      const normal2 = base;
+      const highlighted2 = base;
+      const blended2 = normal2 + (highlighted2 - normal2) * hl2;
+      return clamp01(blended2);
     }
     const inDepth = hoverHighlightSet.has(node.id);
     const isHovered = node.id === hoveredNodeId;
     if (!inDepth)
-      return clamp01(base * dimFactor);
+      return clamp01(base);
     const hl = evalFalloff(node, buildHighlightProfile(node));
-    if (isHovered) {
-      const normal = base;
-      const highlighted = base * hoverBoost;
-      const blended = normal + (highlighted - normal) * hl;
-      return clamp01(blended);
-    } else {
-      const normal = base;
-      const highlighted = base * neighborBoost;
-      const blended = normal + (highlighted - normal) * hl;
-      return clamp01(blended);
-    }
+    const normal = base;
+    const highlighted = base;
+    const blended = normal + (highlighted - normal) * hl;
+    return clamp01(blended);
   }
   function clamp01(v) {
     if (v <= 0)
@@ -594,25 +570,25 @@ function createRenderer2D(options) {
   function buildGravityProfile(node) {
     const r = getNodeRadius(node);
     return {
-      inner: r * distanceInnerMultiplier,
-      outer: r * gravityRadiusMultiplier,
+      inner: r * innerRadius,
+      outer: r * gravityRadius,
       curve: gravityCurveSteepness
     };
   }
   function buildLabelProfile(node) {
     const r = getNodeRadius(node);
     return {
-      inner: r * distanceInnerMultiplier,
-      outer: r * labelProximityRadiusMultiplier,
+      inner: r * innerRadius,
+      outer: r * labelRadius,
       curve: gravityCurveSteepness
     };
   }
   function buildHighlightProfile(node) {
     const r = getNodeRadius(node);
     return {
-      inner: r * distanceInnerMultiplier,
-      outer: r * highlightRadiusMultiplier,
-      curve: highlightCurveSteepness
+      inner: r * innerRadius,
+      outer: r * highlightRadius,
+      curve: gravityCurveSteepness
     };
   }
   function evalFalloff(node, profile) {
@@ -630,17 +606,6 @@ function createRenderer2D(options) {
     const t = (dist - inner) / (outer - inner);
     const proximity = 1 - t;
     return applySCurve(proximity, curve);
-  }
-  function getProjectedRadius(node, radiusWorld) {
-    const p = projectWorld(node);
-    const p2 = projectWorld({
-      x: (node.x || 0) + radiusWorld,
-      y: node.y || 0,
-      z: node.z || 0
-    });
-    const dx = p2.x - p.x;
-    const dy = p2.y - p.y;
-    return Math.sqrt(dx * dx + dy * dy);
   }
   function render() {
     if (!ctx)
@@ -755,7 +720,7 @@ function createRenderer2D(options) {
         return true;
       return false;
     }
-    function updateFocusFactors() {
+    function updateFocusMap() {
       if (!graph || !graph.nodes)
         return;
       for (const n of graph.nodes) {
@@ -767,7 +732,7 @@ function createRenderer2D(options) {
         nodeFocusMap.set(id, next);
       }
     }
-    updateFocusFactors();
+    updateFocusMap();
     const targetHover = hoveredNodeId ? 1 : 0;
     hoverScale += (targetHover - hoverScale) * hoverLerpSpeed;
     if (graph.edges && graph.edges.length > 0) {
@@ -861,14 +826,14 @@ function createRenderer2D(options) {
       const centerAlpha = getCenterAlpha(node);
       const gravityProfile = buildGravityProfile(node);
       const gravityOuterR = gravityProfile.outer;
-      const glowRadius = glowRadiusPx != null && isFinite(glowRadiusPx) && glowRadiusPx > 0 ? glowRadiusPx : gravityOuterR;
+      const glowRadius = radius * gravityRadius;
       const focus = nodeFocusMap.get(node.id) ?? 1;
       const focused = focus > 0.01;
       if (focused) {
         const nodeColorOverride = node && node.type === "tag" ? glowOptions?.tagColor ?? themeTagColor : themeNodeColor;
         const accentRgb = colorToRgb(nodeColorOverride);
         const useNodeAlpha = node && node.type === "tag" ? glowOptions?.tagColorAlpha ?? tagColorAlpha : glowOptions?.nodeColorAlpha ?? nodeColorAlpha;
-        const dimCenter = clamp01(getBaseCenterAlpha(node) * dimFactor);
+        const dimCenter = clamp01(getBaseCenterAlpha(node));
         const fullCenter = centerAlpha;
         let blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
         let effectiveUseNodeAlpha = Math.max(node && node.type === "tag" ? tagMinAlpha : nodeMinAlpha, useNodeAlpha);
@@ -891,7 +856,7 @@ function createRenderer2D(options) {
         ctx.fillStyle = gradient;
         ctx.fill();
         ctx.restore();
-        const bodyAlpha = nodeMinBodyAlpha + (1 - nodeMinBodyAlpha) * focus;
+        const bodyAlpha = labelAlphaMin + (1 - labelAlphaMin) * focus;
         ctx.save();
         ctx.beginPath();
         ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
@@ -914,7 +879,7 @@ function createRenderer2D(options) {
         const displayedFont = labelBaseFontSize;
         const radiusScreenPx = radius * Math.max(1e-4, scale);
         let labelAlphaVis = 1;
-        const minR = Math.max(0, labelMinVisibleRadiusPx);
+        const minR = 0;
         const fadeRange = Math.max(0, labelFadeRangePx);
         if (radiusScreenPx <= minR) {
           labelAlphaVis = 0;
@@ -986,52 +951,24 @@ function createRenderer2D(options) {
     glowOptions = glow;
     minRadius = glow.minNodeRadius;
     maxRadius = glow.maxNodeRadius;
-    glowRadiusPx = typeof glow.glowRadiusPx === "number" ? glow.glowRadiusPx : glowRadiusPx;
     minCenterAlpha = glow.minCenterAlpha;
     maxCenterAlpha = glow.maxCenterAlpha;
-    if (glow.gravityRadiusMultiplier != null)
-      gravityRadiusMultiplier = glow.gravityRadiusMultiplier;
+    if (glow.gravityRadius != null)
+      gravityRadius = glow.gravityRadius;
     if (glow.gravityCurveSteepness != null)
       gravityCurveSteepness = glow.gravityCurveSteepness;
-    if (glow.labelProximityRadiusMultiplier != null)
-      labelProximityRadiusMultiplier = glow.labelProximityRadiusMultiplier;
-    if (glow.highlightRadiusMultiplier != null)
-      highlightRadiusMultiplier = glow.highlightRadiusMultiplier;
-    if (glow.highlightCurveSteepness != null)
-      highlightCurveSteepness = glow.highlightCurveSteepness;
-    if (typeof glow.hoverBoostFactor === "number")
-      hoverBoost = glow.hoverBoostFactor;
-    if (typeof glow.neighborBoostFactor === "number")
-      neighborBoost = glow.neighborBoostFactor;
-    if (typeof glow.dimFactor === "number")
-      dimFactor = glow.dimFactor;
-    hoverHighlightDepth = typeof glow.hoverHighlightDepth === "number" ? glow.hoverHighlightDepth : typeof glow.highlightDepth === "number" ? glow.highlightDepth : hoverHighlightDepth;
-    if (typeof glow.distanceInnerRadiusMultiplier === "number")
-      distanceInnerMultiplier = glow.distanceInnerRadiusMultiplier;
-    if (typeof glow.distanceOuterRadiusMultiplier === "number")
-      distanceOuterMultiplier = glow.distanceOuterRadiusMultiplier;
-    if (typeof glow.distanceCurveSteepness === "number")
-      distanceCurveSteepness = glow.distanceCurveSteepness;
+    if (glow.labelRadius != null)
+      labelRadius = glow.labelRadius;
+    if (glow.highlightRadius != null)
+      highlightRadius = glow.highlightRadius;
     focusSmoothingRate = glow.focusSmoothingRate ?? focusSmoothingRate;
-    edgeDimMin = glow.edgeDimMin ?? edgeDimMin;
-    edgeDimMax = glow.edgeDimMax ?? edgeDimMax;
-    nodeMinBodyAlpha = glow.nodeMinBodyAlpha ?? nodeMinBodyAlpha;
-    labelMinVisibleRadiusPx = typeof glow.labelMinVisibleRadiusPx === "number" ? glow.labelMinVisibleRadiusPx : labelMinVisibleRadiusPx;
+    labelAlphaMin = glow.nodeMinBodyAlpha ?? labelAlphaMin;
     labelFadeRangePx = typeof glow.labelFadeRangePx === "number" ? glow.labelFadeRangePx : labelFadeRangePx;
     labelBaseFontSize = typeof glow.labelBaseFontSize === "number" ? glow.labelBaseFontSize : labelBaseFontSize;
     nodeColorAlpha = typeof glow.nodeColorAlpha === "number" ? glow.nodeColorAlpha : nodeColorAlpha;
     tagColorAlpha = typeof glow.tagColorAlpha === "number" ? glow.tagColorAlpha : tagColorAlpha;
     labelColorAlpha = typeof glow.labelColorAlpha === "number" ? glow.labelColorAlpha : labelColorAlpha;
     edgeColorAlpha = typeof glow.edgeColorAlpha === "number" ? glow.edgeColorAlpha : edgeColorAlpha;
-    nodeColorMaxAlpha = typeof glow.nodeColorMaxAlpha === "number" ? glow.nodeColorMaxAlpha : nodeColorMaxAlpha;
-    tagColorMaxAlpha = typeof glow.tagColorMaxAlpha === "number" ? glow.tagColorMaxAlpha : tagColorMaxAlpha;
-    edgeColorMaxAlpha = typeof glow.edgeColorMaxAlpha === "number" ? glow.edgeColorMaxAlpha : edgeColorMaxAlpha;
-    try {
-      nodeColorMaxAlpha = Math.max(nodeColorMaxAlpha, nodeColorAlpha);
-      tagColorMaxAlpha = Math.max(tagColorMaxAlpha, tagColorAlpha);
-      edgeColorMaxAlpha = Math.max(edgeColorMaxAlpha, edgeColorAlpha);
-    } catch (e) {
-    }
   }
   function setHoverState(hoveredId, highlightedIds, mx, my) {
     hoveredNodeId = hoveredId;
@@ -3299,7 +3236,9 @@ var Graph2DController = class {
       return;
     if (!this.renderer || !this.graph)
       return;
-    const multiplier = Number.isFinite(glow.gravityRadiusMultiplier) ? Number(glow.gravityRadiusMultiplier) : 6;
+    const rawGravitySetting = Number.isFinite(glow.gravityRadius) ? Number(glow.gravityRadius) : NaN;
+    const gravityRadiusPx = Number.isFinite(rawGravitySetting) && rawGravitySetting > 0 ? Math.min(50, rawGravitySetting) : NaN;
+    const defaultMultiplier = 6;
     const steepness = Number.isFinite(glow.gravityCurveSteepness) ? Number(glow.gravityCurveSteepness) : physics.mouseAttractionExponent ?? 3;
     const baseStrength = Number.isFinite(physics.mouseAttractionStrength) ? Number(physics.mouseAttractionStrength) : 0.6;
     if (baseStrength === 0)
@@ -3317,7 +3256,7 @@ var Graph2DController = class {
       const dyScreen = this.lastMouseY - proj.y;
       const distScreen = Math.sqrt(dxScreen * dxScreen + dyScreen * dyScreen);
       const nodeScreenR = Number.isFinite(proj.r) ? Math.max(4, Number(proj.r)) : 8;
-      const radius = Math.max(8, nodeScreenR * multiplier);
+      const radius = Number.isFinite(gravityRadiusPx) ? Math.max(8, gravityRadiusPx) : Math.max(8, nodeScreenR * defaultMultiplier);
       if (distScreen > radius || distScreen === 0)
         continue;
       const deadzone = Math.max(1, radius * 0.06);
@@ -3691,7 +3630,7 @@ var Graph2DController = class {
       }
     }
     const newId = closest ? closest.id : null;
-    const depth = this.plugin.settings?.glow?.hoverHighlightDepth ?? 1;
+    const depth = this.plugin.settings?.glow?.highlightDepth ?? 1;
     const highlightSet = /* @__PURE__ */ new Set();
     if (newId)
       highlightSet.add(newId);
@@ -3791,29 +3730,23 @@ var DEFAULT_SETTINGS = {
     // renamed highlight depth
     highlightDepth: 1,
     // unified gravity/glow params
-    gravityRadiusMultiplier: 6,
+    gravityRadius: 6,
     gravityCurveSteepness: 3,
-    // label reveal multiplier (× node radius)
-    labelProximityRadiusMultiplier: 10,
     // focus/dimming defaults
     focusSmoothingRate: 0.8,
     // color overrides left undefined by default to follow theme
     nodeColor: void 0,
     nodeColorAlpha: 0.1,
-    nodeColorMaxAlpha: 1,
     tagColor: void 0,
     tagColorAlpha: 0.1,
-    tagColorMaxAlpha: 1,
     labelColor: void 0,
     labelBaseFontSize: 24,
-    labelMinVisibleRadiusPx: 6,
     labelFadeRangePx: 8,
-    glowRadiusPx: null,
+    //glowRadiusPx: null,
     labelColorAlpha: 1,
     useInterfaceFont: true,
     edgeColor: void 0,
-    edgeColorAlpha: 0.1,
-    edgeColorMaxAlpha: 0.6
+    edgeColorAlpha: 0.1
   },
   physics: {
     // Physics defaults (use direct/internal scale values)
@@ -3831,9 +3764,7 @@ var DEFAULT_SETTINGS = {
     centerY: 0,
     centerZ: 0,
     // mouse gravity toggle
-    mouseGravityEnabled: true,
-    // how strongly the mouse gravity well pulls (multiplier applied in simulation)
-    mouseAttractionStrength: 1
+    mouseGravityEnabled: true
   },
   countDuplicateLinks: true,
   interaction: {
@@ -4079,19 +4010,19 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       }
     });
     addSliderSetting(containerEl, {
-      name: "Gravity radius multiplier",
+      name: "Gravity Radius",
       desc: "Scales each node's screen-space radius for glow/mouse gravity.",
-      value: glow.gravityRadiusMultiplier ?? DEFAULT_SETTINGS.glow.gravityRadiusMultiplier,
+      value: glow.gravityRadius ?? DEFAULT_SETTINGS.glow.gravityRadius,
       min: 1,
-      max: 50,
+      max: 20,
       step: 0.1,
-      resetValue: DEFAULT_SETTINGS.glow.gravityRadiusMultiplier,
+      resetValue: DEFAULT_SETTINGS.glow.gravityRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          glow.gravityRadiusMultiplier = v;
+          glow.gravityRadius = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.gravityRadiusMultiplier = DEFAULT_SETTINGS.glow.gravityRadiusMultiplier;
+          glow.gravityRadius = DEFAULT_SETTINGS.glow.gravityRadius;
           await this.plugin.saveSettings();
         }
       }
@@ -4115,19 +4046,19 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       }
     });
     addSliderSetting(containerEl, {
-      name: "Label proximity multiplier",
-      desc: "Multiplier (\xD7 node radius) used to reveal labels near the cursor. Independent from gravity radius.",
-      value: glow.labelProximityRadiusMultiplier ?? DEFAULT_SETTINGS.glow.labelProximityRadiusMultiplier,
-      min: 1,
-      max: 50,
-      step: 0.5,
-      resetValue: DEFAULT_SETTINGS.glow.labelProximityRadiusMultiplier,
+      name: "Label Radius",
+      desc: "Screen-space label reveal radius (\xD7 node size).",
+      value: glow.labelRadius ?? DEFAULT_SETTINGS.glow.labelRadius,
+      min: 0.5,
+      max: 10,
+      step: 0.1,
+      resetValue: DEFAULT_SETTINGS.glow.labelRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          glow.labelProximityRadiusMultiplier = v;
+          glow.labelRadius = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.labelProximityRadiusMultiplier = DEFAULT_SETTINGS.glow.labelProximityRadiusMultiplier;
+          glow.labelRadius = DEFAULT_SETTINGS.glow.labelRadius;
           await this.plugin.saveSettings();
         }
       }
@@ -4187,37 +4118,21 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         glow.nodeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.nodeColorAlpha;
         await this.plugin.saveSettings();
       });
-      const maxAlphaInput = document.createElement("input");
-      maxAlphaInput.type = "number";
-      maxAlphaInput.min = "0.1";
-      maxAlphaInput.max = "1";
-      maxAlphaInput.step = "0.01";
-      maxAlphaInput.value = String(glow.nodeColorMaxAlpha ?? DEFAULT_SETTINGS.glow.nodeColorMaxAlpha);
-      maxAlphaInput.style.width = "68px";
-      maxAlphaInput.style.marginLeft = "6px";
-      maxAlphaInput.addEventListener("change", async (e) => {
-        const v = Number(e.target.value);
-        glow.nodeColorMaxAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.nodeColorMaxAlpha;
-        await this.plugin.saveSettings();
-      });
       rb.addEventListener("click", async () => {
         glow.nodeColor = void 0;
         glow.nodeColorAlpha = void 0;
-        glow.nodeColorMaxAlpha = void 0;
         await this.plugin.saveSettings();
         colorInput.value = "#000000";
         alphaInput.value = String(DEFAULT_SETTINGS.glow.nodeColorAlpha);
-        maxAlphaInput.value = String(DEFAULT_SETTINGS.glow.nodeColorMaxAlpha);
       });
       s.controlEl.appendChild(rb);
       const hint = document.createElement("span");
-      hint.textContent = "(alpha: min|max)";
+      hint.textContent = "(alpha)";
       hint.style.marginLeft = "8px";
       hint.style.marginRight = "6px";
       s.controlEl.appendChild(hint);
       s.controlEl.appendChild(colorInput);
       s.controlEl.appendChild(alphaInput);
-      s.controlEl.appendChild(maxAlphaInput);
     }
     {
       const s = new import_obsidian2.Setting(containerEl).setName("Edge color (override)").setDesc("Optional color to override edge stroke color. Leave unset to use a theme-appropriate color.");
@@ -4255,37 +4170,21 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         glow.edgeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.edgeColorAlpha;
         await this.plugin.saveSettings();
       });
-      const edgeMaxAlpha = document.createElement("input");
-      edgeMaxAlpha.type = "number";
-      edgeMaxAlpha.min = "0.1";
-      edgeMaxAlpha.max = "1";
-      edgeMaxAlpha.step = "0.01";
-      edgeMaxAlpha.value = String(glow.edgeColorMaxAlpha ?? DEFAULT_SETTINGS.glow.edgeColorMaxAlpha);
-      edgeMaxAlpha.style.width = "68px";
-      edgeMaxAlpha.style.marginLeft = "6px";
-      edgeMaxAlpha.addEventListener("change", async (e) => {
-        const v = Number(e.target.value);
-        glow.edgeColorMaxAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.edgeColorMaxAlpha;
-        await this.plugin.saveSettings();
-      });
       rb.addEventListener("click", async () => {
         glow.edgeColor = void 0;
         glow.edgeColorAlpha = void 0;
-        glow.edgeColorMaxAlpha = void 0;
         await this.plugin.saveSettings();
         colorInput.value = "#000000";
         edgeAlpha.value = String(DEFAULT_SETTINGS.glow.edgeColorAlpha);
-        edgeMaxAlpha.value = String(DEFAULT_SETTINGS.glow.edgeColorMaxAlpha);
       });
       s.controlEl.appendChild(rb);
       s.controlEl.appendChild(colorInput);
       const hint = document.createElement("span");
-      hint.textContent = "(alpha: min|max)";
+      hint.textContent = "(alpha)";
       hint.style.marginLeft = "8px";
       hint.style.marginRight = "6px";
       s.controlEl.appendChild(hint);
       s.controlEl.appendChild(edgeAlpha);
-      s.controlEl.appendChild(edgeMaxAlpha);
     }
     {
       const s = new import_obsidian2.Setting(containerEl).setName("Tag color (override)").setDesc("Optional color to override tag node color. Leave unset to use the active theme.");
@@ -4323,37 +4222,21 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         glow.tagColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.tagColorAlpha;
         await this.plugin.saveSettings();
       });
-      const tagMaxAlpha = document.createElement("input");
-      tagMaxAlpha.type = "number";
-      tagMaxAlpha.min = "0.1";
-      tagMaxAlpha.max = "1";
-      tagMaxAlpha.step = "0.01";
-      tagMaxAlpha.value = String(glow.tagColorMaxAlpha ?? DEFAULT_SETTINGS.glow.tagColorMaxAlpha);
-      tagMaxAlpha.style.width = "68px";
-      tagMaxAlpha.style.marginLeft = "6px";
-      tagMaxAlpha.addEventListener("change", async (e) => {
-        const v = Number(e.target.value);
-        glow.tagColorMaxAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.tagColorMaxAlpha;
-        await this.plugin.saveSettings();
-      });
       rb.addEventListener("click", async () => {
         glow.tagColor = void 0;
         glow.tagColorAlpha = void 0;
-        glow.tagColorMaxAlpha = void 0;
         await this.plugin.saveSettings();
         colorInput.value = "#000000";
         tagAlpha.value = String(DEFAULT_SETTINGS.glow.tagColorAlpha);
-        tagMaxAlpha.value = String(DEFAULT_SETTINGS.glow.tagColorMaxAlpha);
       });
       s.controlEl.appendChild(rb);
       s.controlEl.appendChild(colorInput);
       const hint = document.createElement("span");
-      hint.textContent = "(alpha: min|max)";
+      hint.textContent = "(alpha)";
       hint.style.marginLeft = "8px";
       hint.style.marginRight = "6px";
       s.controlEl.appendChild(hint);
       s.controlEl.appendChild(tagAlpha);
-      s.controlEl.appendChild(tagMaxAlpha);
     }
     {
       const s = new import_obsidian2.Setting(containerEl).setName("Label color (override)").setDesc("Optional color to override the label text color. Leave unset to use the active theme.");
@@ -4597,26 +4480,6 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       this.plugin.settings.physics.mouseGravityEnabled = Boolean(v);
       await this.plugin.saveSettings();
     }));
-    addSliderSetting(containerEl, {
-      name: "Mouse attraction strength",
-      desc: "How strongly the mouse gravity well pulls nearby nodes (multiplier).",
-      value: phys.mouseAttractionStrength ?? DEFAULT_SETTINGS.physics.mouseAttractionStrength,
-      min: 0,
-      max: 5,
-      step: 0.1,
-      resetValue: DEFAULT_SETTINGS.physics.mouseAttractionStrength,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionStrength = v;
-          await this.plugin.saveSettings();
-        } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.mouseAttractionStrength = DEFAULT_SETTINGS.physics.mouseAttractionStrength;
-          await this.plugin.saveSettings();
-        }
-      }
-    });
     containerEl.createEl("h2", { text: "Center Node" });
     new import_obsidian2.Setting(containerEl).setName("Use pinned center note").setDesc("Prefer a specific note path as the graph center. Falls back to max in-links if not found.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.usePinnedCenterNote)).onChange(async (v) => {
       this.plugin.settings.usePinnedCenterNote = Boolean(v);

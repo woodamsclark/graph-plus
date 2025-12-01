@@ -1599,9 +1599,12 @@ class Graph2DController {
     if (this.lastMouseX == null || this.lastMouseY == null) return;
     if (!this.renderer || !this.graph) return;
 
-    // Use unified glow/gravity model: per-node radius scaled by gravityRadiusMultiplier,
-    // with curve steepness controlling falloff. Base strength is a constant (configurable).
-    const multiplier = Number.isFinite(glow.gravityRadiusMultiplier) ? Number(glow.gravityRadiusMultiplier) : 6;
+    // Use unified glow/gravity model: interpret the `gravityRadiusMultiplier`
+    // setting as an absolute pixel gravity/glow radius (capped at 50). If
+    // unset, fall back to multiplier-based behavior (6× node screen radius).
+    const rawGravitySetting = Number.isFinite(glow.gravityRadius) ? Number(glow.gravityRadius) : NaN;
+    const gravityRadiusPx = (Number.isFinite(rawGravitySetting) && rawGravitySetting > 0) ? Math.min(50, rawGravitySetting) : NaN;
+    const defaultMultiplier = 6;
     const steepness = Number.isFinite(glow.gravityCurveSteepness) ? Number(glow.gravityCurveSteepness) : (physics.mouseAttractionExponent ?? 3);
     const baseStrength = Number.isFinite(physics.mouseAttractionStrength) ? Number(physics.mouseAttractionStrength) : 0.6;
     if (baseStrength === 0) return;
@@ -1621,7 +1624,7 @@ class Graph2DController {
 
       // Determine per-node attraction radius in screen space
       const nodeScreenR = Number.isFinite(proj.r) ? Math.max(4, Number(proj.r)) : 8;
-      const radius = Math.max(8, nodeScreenR * multiplier);
+      const radius = Number.isFinite(gravityRadiusPx) ? Math.max(8, gravityRadiusPx) : Math.max(8, nodeScreenR * defaultMultiplier);
       if (distScreen > radius || distScreen === 0) continue;
 
       // Jitter suppression: deadzone near cursor
@@ -1964,7 +1967,7 @@ class Graph2DController {
     }
 
     const newId = closest ? closest.id : null;
-    const depth = (this.plugin as any).settings?.glow?.hoverHighlightDepth ?? 1;
+    const depth = (this.plugin as any).settings?.glow?.highlightDepth ?? 1;
     const highlightSet = new Set<string>(); if (newId) highlightSet.add(newId);
     if (newId && this.adjacency && depth > 0) {
       const q: string[] = [newId];
