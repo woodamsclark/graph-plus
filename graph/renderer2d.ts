@@ -10,6 +10,11 @@ export interface GlowSettings {
   highlightDepth?: number;
   gravityRadiusMultiplier?: number;
   gravityCurveSteepness?: number;
+  // highlight profile (for brightness only)
+  highlightRadiusMultiplier?: number;
+  highlightCurveSteepness?: number;
+  // multiplier (×node radius) used to reveal labels near the cursor
+  labelProximityRadiusMultiplier?: number;
   focusSmoothingRate?: number;
   edgeDimMin?: number;
   edgeDimMax?: number;
@@ -45,6 +50,17 @@ export interface GlowSettings {
   glowRadiusPx?: number;
   // whether to use Obsidian interface font for labels
   useInterfaceFont?: boolean;
+  // legacy / compatibility fields (optional)
+  hoverBoostFactor?: number;
+  neighborBoostFactor?: number;
+  dimFactor?: number;
+  hoverHighlightDepth?: number;
+  distanceInnerRadiusMultiplier?: number;
+  distanceOuterRadiusMultiplier?: number;
+  distanceCurveSteepness?: number;
+  nodeColorMaxAlpha?: number;
+  tagColorMaxAlpha?: number;
+  edgeColorMaxAlpha?: number;
 }
 
 export interface Renderer2DOptions {
@@ -130,7 +146,23 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   let hoverHighlightDepth = glowOptions?.highlightDepth ?? 1;
   let gravityRadiusMultiplier = glowOptions?.gravityRadiusMultiplier ?? 15;
   let gravityCurveSteepness = glowOptions?.gravityCurveSteepness ?? 1.0;
+  let labelProximityRadiusMultiplier =
+    glowOptions?.labelProximityRadiusMultiplier ?? 10;
+  // Separate highlight profile (for brightening only)
+  let highlightRadiusMultiplier =
+    glowOptions?.highlightRadiusMultiplier ?? gravityRadiusMultiplier;
+  let highlightCurveSteepness =
+    glowOptions?.highlightCurveSteepness ?? gravityCurveSteepness;
   let distanceInnerMultiplier = 1.0; // fixed inner = 1×radius
+  // legacy/behavioral tuning params (kept as runtime vars for compatibility)
+  let hoverBoost = 1.4;
+  let neighborBoost = 1.15;
+  let dimFactor = 0.35;
+  let distanceOuterMultiplier = gravityRadiusMultiplier;
+  let distanceCurveSteepness = gravityCurveSteepness;
+  let nodeColorMaxAlpha = nodeMaxAlpha;
+  let tagColorMaxAlpha = tagMaxAlpha;
+  let edgeColorMaxAlpha = edgeMaxAlpha;
   let focusSmoothingRate = glowOptions?.focusSmoothingRate ?? 0.8;
   let hoveredNodeId: string | null = null;
   let hoverHighlightSet: Set<string> = new Set();
@@ -333,33 +365,39 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
   function getCenterAlpha(node: any) {
     const base = getBaseCenterAlpha(node);
-
- // CASE 1: No hovered node yet → only distance-based glow, no depth/dimming
+    // CASE 1: No hovered node yet → only highlight profile based brightening
     if (!hoveredNodeId) {
-        const distFactor = getMouseDistanceFactor(node); // 0 far, 1 near
-        // use neighborBoost here (or hoverBoost if you prefer stronger)
-        const boost = 1 + (neighborBoost - 1) * distFactor;
-        return clamp01(base * boost);
-  }
+      // Highlight factor based on highlight profile (0 far, 1 near)
+      const hl = evalFalloff(node, buildHighlightProfile(node));
+      // Interpolate between normal and highlighted brightness
+      const normal = base;
+      const highlighted = base * neighborBoost; // or hoverBoost if stronger desired
+      const blended = normal + (highlighted - normal) * hl;
+      return clamp01(blended);
+    }
 
-// CASE 2: There *is* a hovered node → apply depth + distance logic
+    // CASE 2: There *is* a hovered node → apply depth + highlight profile
     const inDepth = hoverHighlightSet.has(node.id);
     const isHovered = node.id === hoveredNodeId;
 
-    // outside highlight depth -> dimmed, no distance effect
+    // Outside highlight depth → dimmed, no highlight effect
     if (!inDepth) return clamp01(base * dimFactor);
 
-    // within depth -> apply distance-based factor
-    const distFactor = getMouseDistanceFactor(node); // 0..1
+    // Inside highlight depth → use highlight profile
+    const hl = evalFalloff(node, buildHighlightProfile(node)); // 0..1
 
     if (isHovered) {
-      // hovered node reaches max hover as mouse approaches
-      const boost = 1 + (hoverBoost - 1) * distFactor;
-      return clamp01(base * boost);
+      // Hovered node: interpolate between base and stronger hoverBoost
+      const normal = base;
+      const highlighted = base * hoverBoost;
+      const blended = normal + (highlighted - normal) * hl;
+      return clamp01(blended);
     } else {
-      // neighbor nodes get interpolated boost based on distance
-      const boost = 1 + (neighborBoost - 1) * distFactor;
-      return clamp01(base * boost);
+      // Neighbor nodes: interpolate between base and neighborBoost
+      const normal = base;
+      const highlighted = base * neighborBoost;
+      const blended = normal + (highlighted - normal) * hl;
+      return clamp01(blended);
     }
   }
 
@@ -379,36 +417,67 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     return a / (a + b);
   }
 
-  // Unified glow/gravity radius helper: returns explicit glowRadiusPx when set,
-  // otherwise uses node body radius * gravityRadiusMultiplier (or DEFAULT_GLOW_MULTIPLIER).
-  function getUnifiedGlowRadius(node: any) {
-    const radius = getNodeRadius(node);
-    if (glowRadiusPx != null && isFinite(glowRadiusPx) && glowRadiusPx > 0) {
-      return glowRadiusPx;
-    }
-    const mult = (typeof gravityRadiusMultiplier === 'number' && isFinite(gravityRadiusMultiplier)) ? gravityRadiusMultiplier : DEFAULT_GLOW_MULTIPLIER;
-    return radius * mult;
+  type FalloffProfile = {
+    inner: number;
+    outer: number;
+    curve: number;
+  };
+
+  function buildGravityProfile(node: any): FalloffProfile {
+    const r = getNodeRadius(node);
+    return {
+      inner: r * distanceInnerMultiplier,
+      outer: r * gravityRadiusMultiplier,
+      curve: gravityCurveSteepness,
+    };
   }
 
-  function evalGravityFalloff(dist: number, innerR: number, outerR: number, exponent: number) {
-    if (dist <= innerR) return 1;
-    if (dist >= outerR) return 0;
-    const t = (dist - innerR) / (outerR - innerR);
-    const base = 1 - t;
-    const k = exponent > 0 ? exponent : 1;
-    return Math.pow(base, k);
+  function buildLabelProfile(node: any): FalloffProfile {
+    const r = getNodeRadius(node);
+    return {
+      inner: r * distanceInnerMultiplier,
+      outer: r * labelProximityRadiusMultiplier,
+      curve: gravityCurveSteepness,
+    };
   }
 
-  function getMouseDistanceFactor(node: any) {
-    const innerR = getNodeRadius(node); // full effect inside node body
-    const outerR = getUnifiedGlowRadius(node);
-    if (outerR <= innerR || outerR <= 0) return 0;
+  function buildHighlightProfile(node: any): FalloffProfile {
+    const r = getNodeRadius(node);
+    return {
+      inner: r * distanceInnerMultiplier,
+      outer: r * highlightRadiusMultiplier,
+      curve: highlightCurveSteepness,
+    };
+  }
+
+  function evalFalloff(node: any, profile: FalloffProfile): number {
+    const { inner, outer, curve } = profile;
+
+    if (outer <= inner || outer <= 0) return 0;
+
     const p = projectWorld(node);
     const dx = mouseX - p.x;
     const dy = mouseY - p.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    // Use the new falloff evaluator which behaves intuitively with exponent
-    return evalGravityFalloff(dist, innerR, outerR, gravityCurveSteepness);
+
+    if (dist <= inner) return 1;
+    if (dist >= outer) return 0;
+
+    const t = (dist - inner) / (outer - inner);
+    const proximity = 1 - t;
+    return applySCurve(proximity, curve);
+  }
+
+  function getProjectedRadius(node: any, radiusWorld: number) {
+    const p = projectWorld(node);
+    const p2 = projectWorld({
+      x: (node.x || 0) + radiusWorld,
+      y: (node.y || 0),
+      z: (node.z || 0),
+    });
+    const dx = p2.x - p.x;
+    const dy = p2.y - p.y;
+    return Math.sqrt(dx * dx + dy * dy);
   }
 
   function render() {
@@ -642,8 +711,15 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
       const baseRadius = getBaseNodeRadius(node);
       const radius = getNodeRadius(node);
       const centerAlpha = getCenterAlpha(node);
-      // compute glow radius: explicit pixel radius wins, otherwise use multiplier * node radius
-      const glowRadius = (glowRadiusPx != null && isFinite(glowRadiusPx) && glowRadiusPx > 0) ? glowRadiusPx : radius * DEFAULT_GLOW_MULTIPLIER;
+      // Use the same outer radius as the gravity profile, so the visual glow
+      // ring matches the outer limit of mouse attraction.
+      const gravityProfile = buildGravityProfile(node);
+      const gravityOuterR = gravityProfile.outer;
+
+      const glowRadius =
+        (glowRadiusPx != null && isFinite(glowRadiusPx) && glowRadiusPx > 0)
+          ? glowRadiusPx
+          : gravityOuterR;
 
       const focus = nodeFocusMap.get(node.id) ?? 1;
       const focused = focus > 0.01;
@@ -724,7 +800,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         // Also allow mouse proximity to reveal labels: compute proximity (0..1)
         // and blend it with the radius-based visibility so labels start to appear
         // as the mouse approaches small nodes.
-        const proximityFactor = getMouseDistanceFactor(node); // 0..1
+        const proximityFactor = evalFalloff(node, buildLabelProfile(node)); // 0..1
         // blend: if either screen-size or proximity suggests visibility, allow it
         labelAlphaVis = Math.max(labelAlphaVis, labelAlphaVis + proximityFactor * (1 - labelAlphaVis));
         // Always show label at full visibility if hovered or in highlight set
@@ -798,13 +874,20 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     glowRadiusPx = (typeof glow.glowRadiusPx === 'number') ? glow.glowRadiusPx : glowRadiusPx;
     minCenterAlpha = glow.minCenterAlpha;
     maxCenterAlpha = glow.maxCenterAlpha;
-    hoverBoost = glow.hoverBoostFactor;
-    neighborBoost = glow.neighborBoostFactor ?? neighborBoost;
-    dimFactor = glow.dimFactor ?? dimFactor;
-    hoverHighlightDepth = glow.hoverHighlightDepth ?? hoverHighlightDepth;
-    distanceInnerMultiplier = glow.distanceInnerRadiusMultiplier ?? distanceInnerMultiplier;
-    distanceOuterMultiplier = glow.distanceOuterRadiusMultiplier ?? distanceOuterMultiplier;
-    distanceCurveSteepness = glow.distanceCurveSteepness ?? distanceCurveSteepness;
+    if (glow.gravityRadiusMultiplier != null) gravityRadiusMultiplier = glow.gravityRadiusMultiplier;
+    if (glow.gravityCurveSteepness != null) gravityCurveSteepness = glow.gravityCurveSteepness;
+    if (glow.labelProximityRadiusMultiplier != null) labelProximityRadiusMultiplier = glow.labelProximityRadiusMultiplier;
+    if (glow.highlightRadiusMultiplier != null)
+      highlightRadiusMultiplier = glow.highlightRadiusMultiplier;
+    if (glow.highlightCurveSteepness != null)
+      highlightCurveSteepness = glow.highlightCurveSteepness;
+    if (typeof glow.hoverBoostFactor === 'number') hoverBoost = glow.hoverBoostFactor;
+    if (typeof glow.neighborBoostFactor === 'number') neighborBoost = glow.neighborBoostFactor;
+    if (typeof glow.dimFactor === 'number') dimFactor = glow.dimFactor;
+    hoverHighlightDepth = (typeof glow.hoverHighlightDepth === 'number') ? glow.hoverHighlightDepth : (typeof glow.highlightDepth === 'number' ? glow.highlightDepth : hoverHighlightDepth);
+    if (typeof glow.distanceInnerRadiusMultiplier === 'number') distanceInnerMultiplier = glow.distanceInnerRadiusMultiplier;
+    if (typeof glow.distanceOuterRadiusMultiplier === 'number') distanceOuterMultiplier = glow.distanceOuterRadiusMultiplier;
+    if (typeof glow.distanceCurveSteepness === 'number') distanceCurveSteepness = glow.distanceCurveSteepness;
     focusSmoothingRate = glow.focusSmoothingRate ?? focusSmoothingRate;
     edgeDimMin = glow.edgeDimMin ?? edgeDimMin;
     edgeDimMax = glow.edgeDimMax ?? edgeDimMax;

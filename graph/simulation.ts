@@ -5,13 +5,7 @@ export interface Simulation {
   stop(): void;
   tick(dt: number): void;
   reset(): void;
-  setOptions(opts: Partial<{
-    repulsionStrength: number;
-    springStrength: number;
-    springLength: number;
-    centerPull: number;
-    damping: number;
-  }>): void;
+  setOptions(opts: Partial<SimulationOptions>): void;
   // pinned node control: prevent physics from moving these nodes
   setPinnedNodes?(ids: Set<string>): void;
   // allow the controller to provide mouse world coords and hovered node id

@@ -355,7 +355,18 @@ function createRenderer2D(options) {
   let hoverHighlightDepth = glowOptions?.highlightDepth ?? 1;
   let gravityRadiusMultiplier = glowOptions?.gravityRadiusMultiplier ?? 15;
   let gravityCurveSteepness = glowOptions?.gravityCurveSteepness ?? 1;
+  let labelProximityRadiusMultiplier = glowOptions?.labelProximityRadiusMultiplier ?? 10;
+  let highlightRadiusMultiplier = glowOptions?.highlightRadiusMultiplier ?? gravityRadiusMultiplier;
+  let highlightCurveSteepness = glowOptions?.highlightCurveSteepness ?? gravityCurveSteepness;
   let distanceInnerMultiplier = 1;
+  let hoverBoost = 1.4;
+  let neighborBoost = 1.15;
+  let dimFactor = 0.35;
+  let distanceOuterMultiplier = gravityRadiusMultiplier;
+  let distanceCurveSteepness = gravityCurveSteepness;
+  let nodeColorMaxAlpha = nodeMaxAlpha;
+  let tagColorMaxAlpha = tagMaxAlpha;
+  let edgeColorMaxAlpha = edgeMaxAlpha;
   let focusSmoothingRate = glowOptions?.focusSmoothingRate ?? 0.8;
   let hoveredNodeId = null;
   let hoverHighlightSet = /* @__PURE__ */ new Set();
@@ -538,21 +549,27 @@ function createRenderer2D(options) {
   function getCenterAlpha(node) {
     const base = getBaseCenterAlpha(node);
     if (!hoveredNodeId) {
-      const distFactor2 = getMouseDistanceFactor(node);
-      const boost = 1 + (neighborBoost - 1) * distFactor2;
-      return clamp01(base * boost);
+      const hl2 = evalFalloff(node, buildHighlightProfile(node));
+      const normal = base;
+      const highlighted = base * neighborBoost;
+      const blended = normal + (highlighted - normal) * hl2;
+      return clamp01(blended);
     }
     const inDepth = hoverHighlightSet.has(node.id);
     const isHovered = node.id === hoveredNodeId;
     if (!inDepth)
       return clamp01(base * dimFactor);
-    const distFactor = getMouseDistanceFactor(node);
+    const hl = evalFalloff(node, buildHighlightProfile(node));
     if (isHovered) {
-      const boost = 1 + (hoverBoost - 1) * distFactor;
-      return clamp01(base * boost);
+      const normal = base;
+      const highlighted = base * hoverBoost;
+      const blended = normal + (highlighted - normal) * hl;
+      return clamp01(blended);
     } else {
-      const boost = 1 + (neighborBoost - 1) * distFactor;
-      return clamp01(base * boost);
+      const normal = base;
+      const highlighted = base * neighborBoost;
+      const blended = normal + (highlighted - normal) * hl;
+      return clamp01(blended);
     }
   }
   function clamp01(v) {
@@ -574,34 +591,56 @@ function createRenderer2D(options) {
       return 0.5;
     return a / (a + b);
   }
-  function getUnifiedGlowRadius(node) {
-    const radius = getNodeRadius(node);
-    if (glowRadiusPx != null && isFinite(glowRadiusPx) && glowRadiusPx > 0) {
-      return glowRadiusPx;
-    }
-    const mult = typeof gravityRadiusMultiplier === "number" && isFinite(gravityRadiusMultiplier) ? gravityRadiusMultiplier : DEFAULT_GLOW_MULTIPLIER;
-    return radius * mult;
+  function buildGravityProfile(node) {
+    const r = getNodeRadius(node);
+    return {
+      inner: r * distanceInnerMultiplier,
+      outer: r * gravityRadiusMultiplier,
+      curve: gravityCurveSteepness
+    };
   }
-  function evalGravityFalloff(dist, innerR, outerR, exponent) {
-    if (dist <= innerR)
-      return 1;
-    if (dist >= outerR)
-      return 0;
-    const t = (dist - innerR) / (outerR - innerR);
-    const base = 1 - t;
-    const k = exponent > 0 ? exponent : 1;
-    return Math.pow(base, k);
+  function buildLabelProfile(node) {
+    const r = getNodeRadius(node);
+    return {
+      inner: r * distanceInnerMultiplier,
+      outer: r * labelProximityRadiusMultiplier,
+      curve: gravityCurveSteepness
+    };
   }
-  function getMouseDistanceFactor(node) {
-    const innerR = getNodeRadius(node);
-    const outerR = getUnifiedGlowRadius(node);
-    if (outerR <= innerR || outerR <= 0)
+  function buildHighlightProfile(node) {
+    const r = getNodeRadius(node);
+    return {
+      inner: r * distanceInnerMultiplier,
+      outer: r * highlightRadiusMultiplier,
+      curve: highlightCurveSteepness
+    };
+  }
+  function evalFalloff(node, profile) {
+    const { inner, outer, curve } = profile;
+    if (outer <= inner || outer <= 0)
       return 0;
     const p = projectWorld(node);
     const dx = mouseX - p.x;
     const dy = mouseY - p.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    return evalGravityFalloff(dist, innerR, outerR, gravityCurveSteepness);
+    if (dist <= inner)
+      return 1;
+    if (dist >= outer)
+      return 0;
+    const t = (dist - inner) / (outer - inner);
+    const proximity = 1 - t;
+    return applySCurve(proximity, curve);
+  }
+  function getProjectedRadius(node, radiusWorld) {
+    const p = projectWorld(node);
+    const p2 = projectWorld({
+      x: (node.x || 0) + radiusWorld,
+      y: node.y || 0,
+      z: node.z || 0
+    });
+    const dx = p2.x - p.x;
+    const dy = p2.y - p.y;
+    return Math.sqrt(dx * dx + dy * dy);
   }
   function render() {
     if (!ctx)
@@ -820,7 +859,9 @@ function createRenderer2D(options) {
       const baseRadius = getBaseNodeRadius(node);
       const radius = getNodeRadius(node);
       const centerAlpha = getCenterAlpha(node);
-      const glowRadius = glowRadiusPx != null && isFinite(glowRadiusPx) && glowRadiusPx > 0 ? glowRadiusPx : radius * DEFAULT_GLOW_MULTIPLIER;
+      const gravityProfile = buildGravityProfile(node);
+      const gravityOuterR = gravityProfile.outer;
+      const glowRadius = glowRadiusPx != null && isFinite(glowRadiusPx) && glowRadiusPx > 0 ? glowRadiusPx : gravityOuterR;
       const focus = nodeFocusMap.get(node.id) ?? 1;
       const focused = focus > 0.01;
       if (focused) {
@@ -883,7 +924,7 @@ function createRenderer2D(options) {
         } else {
           labelAlphaVis = 1;
         }
-        const proximityFactor = getMouseDistanceFactor(node);
+        const proximityFactor = evalFalloff(node, buildLabelProfile(node));
         labelAlphaVis = Math.max(labelAlphaVis, labelAlphaVis + proximityFactor * (1 - labelAlphaVis));
         const isHoverOrHighlight = hoveredNodeId === node.id || hoverHighlightSet && hoverHighlightSet.has(node.id);
         if (isHoverOrHighlight)
@@ -948,13 +989,29 @@ function createRenderer2D(options) {
     glowRadiusPx = typeof glow.glowRadiusPx === "number" ? glow.glowRadiusPx : glowRadiusPx;
     minCenterAlpha = glow.minCenterAlpha;
     maxCenterAlpha = glow.maxCenterAlpha;
-    hoverBoost = glow.hoverBoostFactor;
-    neighborBoost = glow.neighborBoostFactor ?? neighborBoost;
-    dimFactor = glow.dimFactor ?? dimFactor;
-    hoverHighlightDepth = glow.hoverHighlightDepth ?? hoverHighlightDepth;
-    distanceInnerMultiplier = glow.distanceInnerRadiusMultiplier ?? distanceInnerMultiplier;
-    distanceOuterMultiplier = glow.distanceOuterRadiusMultiplier ?? distanceOuterMultiplier;
-    distanceCurveSteepness = glow.distanceCurveSteepness ?? distanceCurveSteepness;
+    if (glow.gravityRadiusMultiplier != null)
+      gravityRadiusMultiplier = glow.gravityRadiusMultiplier;
+    if (glow.gravityCurveSteepness != null)
+      gravityCurveSteepness = glow.gravityCurveSteepness;
+    if (glow.labelProximityRadiusMultiplier != null)
+      labelProximityRadiusMultiplier = glow.labelProximityRadiusMultiplier;
+    if (glow.highlightRadiusMultiplier != null)
+      highlightRadiusMultiplier = glow.highlightRadiusMultiplier;
+    if (glow.highlightCurveSteepness != null)
+      highlightCurveSteepness = glow.highlightCurveSteepness;
+    if (typeof glow.hoverBoostFactor === "number")
+      hoverBoost = glow.hoverBoostFactor;
+    if (typeof glow.neighborBoostFactor === "number")
+      neighborBoost = glow.neighborBoostFactor;
+    if (typeof glow.dimFactor === "number")
+      dimFactor = glow.dimFactor;
+    hoverHighlightDepth = typeof glow.hoverHighlightDepth === "number" ? glow.hoverHighlightDepth : typeof glow.highlightDepth === "number" ? glow.highlightDepth : hoverHighlightDepth;
+    if (typeof glow.distanceInnerRadiusMultiplier === "number")
+      distanceInnerMultiplier = glow.distanceInnerRadiusMultiplier;
+    if (typeof glow.distanceOuterRadiusMultiplier === "number")
+      distanceOuterMultiplier = glow.distanceOuterRadiusMultiplier;
+    if (typeof glow.distanceCurveSteepness === "number")
+      distanceCurveSteepness = glow.distanceCurveSteepness;
     focusSmoothingRate = glow.focusSmoothingRate ?? focusSmoothingRate;
     edgeDimMin = glow.edgeDimMin ?? edgeDimMin;
     edgeDimMax = glow.edgeDimMax ?? edgeDimMax;
@@ -2812,8 +2869,7 @@ var Graph2DController = class {
         { key: "springLength", label: "Spring len", step: "1" },
         { key: "centerPull", label: "Center pull", step: "0.0001" },
         { key: "damping", label: "Damping", step: "0.01" },
-        // Mouse gravity uses unified glow/gravity settings; expose strength + exponent.
-        { key: "mouseAttractionStrength", label: "Mouse gravity strength", step: "0.01" },
+        // Mouse gravity uses unified glow/gravity settings; old radius control is deprecated.
         { key: "mouseAttractionExponent", label: "Mouse attraction exponent", step: "0.1" }
       ];
       const mouseGravChk = document.createElement("input");
@@ -2930,13 +2986,6 @@ var Graph2DController = class {
               this.plugin.settings.physics[f.key] = Number.isFinite(val) ? val * val * 2e3 : this.plugin.settings.physics[f.key];
             } else if (f.key === "springStrength") {
               this.plugin.settings.physics[f.key] = Number.isFinite(val) ? val * 0.5 : this.plugin.settings.physics[f.key];
-            } else if (f.key === "mouseAttractionStrength") {
-              this.plugin.settings.physics[f.key] = Number.isFinite(val) ? val : this.plugin.settings.physics[f.key];
-              try {
-                if (this.simulation && this.simulation.setOptions)
-                  this.simulation.setOptions({ mouseAttractionStrength: Number(val) });
-              } catch (e2) {
-              }
             } else {
               this.plugin.settings.physics[f.key] = Number.isFinite(val) ? val : this.plugin.settings.physics[f.key];
             }
@@ -3261,16 +3310,6 @@ var Graph2DController = class {
       return;
     const { right, up } = basis;
     for (const node of this.graph.nodes) {
-      let evalGravityFalloff = function(dist, innerR2, outerR2, exponent) {
-        if (dist <= innerR2)
-          return 1;
-        if (dist >= outerR2)
-          return 0;
-        const t = (dist - innerR2) / (outerR2 - innerR2);
-        const base = 1 - t;
-        const k = exponent > 0 ? exponent : 1;
-        return Math.pow(base, k);
-      };
       const proj = this.renderer.getProjectedNode ? this.renderer.getProjectedNode(node) : null;
       if (!proj)
         continue;
@@ -3297,10 +3336,8 @@ var Graph2DController = class {
       wx /= len;
       wy /= len;
       wz /= len;
-      const innerR = nodeScreenR;
-      const outerR = radius;
-      const falloff = evalGravityFalloff(distScreen, innerR, outerR, steepness);
-      const strength = baseStrength * falloff;
+      const t = 1 - distScreen / radius;
+      const strength = baseStrength * Math.pow(t, steepness);
       node.vx = (node.vx || 0) + wx * strength;
       node.vy = (node.vy || 0) + wy * strength;
       node.vz = (node.vz || 0) + wz * strength;
@@ -3756,6 +3793,8 @@ var DEFAULT_SETTINGS = {
     // unified gravity/glow params
     gravityRadiusMultiplier: 6,
     gravityCurveSteepness: 3,
+    // label reveal multiplier (× node radius)
+    labelProximityRadiusMultiplier: 10,
     // focus/dimming defaults
     focusSmoothingRate: 0.8,
     // color overrides left undefined by default to follow theme
@@ -3793,6 +3832,7 @@ var DEFAULT_SETTINGS = {
     centerZ: 0,
     // mouse gravity toggle
     mouseGravityEnabled: true,
+    // how strongly the mouse gravity well pulls (multiplier applied in simulation)
     mouseAttractionStrength: 1
   },
   countDuplicateLinks: true,
@@ -4043,7 +4083,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       desc: "Scales each node's screen-space radius for glow/mouse gravity.",
       value: glow.gravityRadiusMultiplier ?? DEFAULT_SETTINGS.glow.gravityRadiusMultiplier,
       min: 1,
-      max: 20,
+      max: 50,
       step: 0.1,
       resetValue: DEFAULT_SETTINGS.glow.gravityRadiusMultiplier,
       onChange: async (v) => {
@@ -4070,6 +4110,24 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           glow.gravityCurveSteepness = DEFAULT_SETTINGS.glow.gravityCurveSteepness;
+          await this.plugin.saveSettings();
+        }
+      }
+    });
+    addSliderSetting(containerEl, {
+      name: "Label proximity multiplier",
+      desc: "Multiplier (\xD7 node radius) used to reveal labels near the cursor. Independent from gravity radius.",
+      value: glow.labelProximityRadiusMultiplier ?? DEFAULT_SETTINGS.glow.labelProximityRadiusMultiplier,
+      min: 1,
+      max: 50,
+      step: 0.5,
+      resetValue: DEFAULT_SETTINGS.glow.labelProximityRadiusMultiplier,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v > 0) {
+          glow.labelProximityRadiusMultiplier = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.labelProximityRadiusMultiplier = DEFAULT_SETTINGS.glow.labelProximityRadiusMultiplier;
           await this.plugin.saveSettings();
         }
       }
@@ -4540,15 +4598,15 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       await this.plugin.saveSettings();
     }));
     addSliderSetting(containerEl, {
-      name: "Mouse gravity strength",
-      desc: "Strength of the mouse gravity well (0 = off, 1 = strong).",
+      name: "Mouse attraction strength",
+      desc: "How strongly the mouse gravity well pulls nearby nodes (multiplier).",
       value: phys.mouseAttractionStrength ?? DEFAULT_SETTINGS.physics.mouseAttractionStrength,
       min: 0,
-      max: 1,
-      step: 0.01,
+      max: 5,
+      step: 0.1,
       resetValue: DEFAULT_SETTINGS.physics.mouseAttractionStrength,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+        if (!Number.isNaN(v) && v >= 0) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
           this.plugin.settings.physics.mouseAttractionStrength = v;
           await this.plugin.saveSettings();

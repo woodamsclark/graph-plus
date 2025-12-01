@@ -12,6 +12,8 @@ export interface GlowSettings {
   // unified gravity/glow distance model
   gravityRadiusMultiplier?: number; // scales per-node screen radius
   gravityCurveSteepness?: number;   // falloff steepness
+  // multiplier (× node radius) used to reveal labels near the cursor
+  labelProximityRadiusMultiplier?: number;
   // focus/dimming controls
   focusSmoothingRate?: number;
   edgeDimMin?: number;
@@ -59,7 +61,6 @@ export interface GreaterGraphSettings {
     // mouse gravity well
     mouseGravityEnabled?: boolean;
     mouseAttractionStrength?: number;
-    mouseAttractionExponent?: number;
   };
   // whether to count duplicate links (multiple links between same files) when computing in/out degrees
   countDuplicateLinks?: boolean;
@@ -93,6 +94,8 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     // unified gravity/glow params
     gravityRadiusMultiplier: 6,
     gravityCurveSteepness: 3,
+    // label reveal multiplier (× node radius)
+    labelProximityRadiusMultiplier: 10,
     // focus/dimming defaults
     focusSmoothingRate: 0.8,
     
@@ -131,7 +134,8 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
     centerZ: 0,
     // mouse gravity toggle
     mouseGravityEnabled: true,
-    mouseAttractionStrength: 1,
+    // how strongly the mouse gravity well pulls (multiplier applied in simulation)
+    mouseAttractionStrength: 1.0,
   },
   countDuplicateLinks: true,
   interaction: {
@@ -405,7 +409,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       desc: 'Scales each node\'s screen-space radius for glow/mouse gravity.',
       value: glow.gravityRadiusMultiplier ?? DEFAULT_SETTINGS.glow.gravityRadiusMultiplier!,
       min: 1,
-      max: 20,
+      max: 50,
       step: 0.1,
       resetValue: DEFAULT_SETTINGS.glow.gravityRadiusMultiplier,
       onChange: async (v) => {
@@ -433,6 +437,25 @@ class GreaterGraphSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           glow.gravityCurveSteepness = DEFAULT_SETTINGS.glow.gravityCurveSteepness;
+          await this.plugin.saveSettings();
+        }
+      },
+    });
+
+    addSliderSetting(containerEl, {
+      name: 'Label proximity multiplier',
+      desc: 'Multiplier (× node radius) used to reveal labels near the cursor. Independent from gravity radius.',
+      value: glow.labelProximityRadiusMultiplier ?? DEFAULT_SETTINGS.glow.labelProximityRadiusMultiplier!,
+      min: 1,
+      max: 50,
+      step: 0.5,
+      resetValue: DEFAULT_SETTINGS.glow.labelProximityRadiusMultiplier,
+      onChange: async (v) => {
+        if (!Number.isNaN(v) && v > 0) {
+          glow.labelProximityRadiusMultiplier = v;
+          await this.plugin.saveSettings();
+        } else if (Number.isNaN(v)) {
+          glow.labelProximityRadiusMultiplier = DEFAULT_SETTINGS.glow.labelProximityRadiusMultiplier;
           await this.plugin.saveSettings();
         }
       },
@@ -853,17 +876,17 @@ class GreaterGraphSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }));
 
-      // Mouse gravity strength (0..1)
+      // Mouse attraction strength (when mouse gravity is enabled)
       addSliderSetting(containerEl, {
-        name: 'Mouse gravity strength',
-        desc: 'Strength of the mouse gravity well (0 = off, 1 = strong).',
-        value: (phys.mouseAttractionStrength ?? DEFAULT_SETTINGS.physics!.mouseAttractionStrength) as number,
+        name: 'Mouse attraction strength',
+        desc: 'How strongly the mouse gravity well pulls nearby nodes (multiplier).',
+        value: phys.mouseAttractionStrength ?? DEFAULT_SETTINGS.physics!.mouseAttractionStrength!,
         min: 0,
-        max: 1,
-        step: 0.01,
+        max: 5,
+        step: 0.1,
         resetValue: DEFAULT_SETTINGS.physics!.mouseAttractionStrength,
         onChange: async (v) => {
-          if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+          if (!Number.isNaN(v) && v >= 0) {
             this.plugin.settings.physics = this.plugin.settings.physics || {};
             this.plugin.settings.physics.mouseAttractionStrength = v;
             await this.plugin.saveSettings();
