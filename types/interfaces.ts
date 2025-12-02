@@ -158,3 +158,23 @@ export interface SimulationSettings {
   mouseAttractionStrength?: number;
   mouseAttractionExponent?: number;
 }
+
+export interface InputManagerCallbacks {
+    // Camera Control
+    onOrbit(dx: number, dy: number): void;
+    onPan(dx: number, dy: number): void;
+    onZoom(screenX: number, screenY: number, delta: number): void;
+
+    // Node Interaction
+    onHover(screenX: number, screenY: number): void;
+    onNodeClick(screenX: number, screenY: number): void;
+    
+    // Node Dragging (Coordinates are relative to the screen for the simulation)
+    onDragStart(nodeId: string, screenX: number, screenY: number): void;
+    onDragMove(screenX: number, screenY: number): void;
+    onDragEnd(): void;
+
+    // Utility
+    screenToWorld(screenX: number, screenY: number): { x: number, y: number, z: number } | null;
+    findNodeAtScreenPosition(screenX: number, screenY: number): { id: string, filePath?: string, label: string } | null;
+}

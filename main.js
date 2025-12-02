@@ -1388,6 +1388,94 @@ function debounce(fn, wait = 300, immediate = false) {
   };
 }
 
+// graph/InputManager.ts
+var InputManager = class {
+  canvas;
+  callbacks;
+  isOrbiting = false;
+  isDraggingNode = false;
+  draggedNodeId = null;
+  lastMouseX = 0;
+  lastMouseY = 0;
+  constructor(canvas, callbacks) {
+    this.canvas = canvas;
+    this.callbacks = callbacks;
+    this.attachListeners();
+  }
+  attachListeners() {
+    this.canvas.addEventListener("mousedown", this.onMouseDown);
+    this.canvas.addEventListener("wheel", this.onWheel);
+    this.canvas.addEventListener("mousemove", this.onMouseMove);
+    this.canvas.addEventListener("mouseleave", this.onMouseLeave);
+    document.addEventListener("mousemove", this.onGlobalMouseMove);
+    document.addEventListener("mouseup", this.onGlobalMouseUp);
+  }
+  onMouseDown = (e) => {
+    e.preventDefault();
+    this.lastMouseX = e.clientX;
+    this.lastMouseY = e.clientY;
+    const isDragModifier = e.button === 0;
+    const isOrbitModifier = e.button === 0 && e.ctrlKey;
+    const node = this.callbacks.findNodeAtScreenPosition(e.offsetX, e.offsetY);
+    if (node && isDragModifier) {
+      this.isDraggingNode = true;
+      this.draggedNodeId = node.id;
+      this.callbacks.onDragStart(node.id, e.offsetX, e.offsetY);
+    } else if (isOrbitModifier) {
+      this.isOrbiting = true;
+    } else if (e.button === 0) {
+    }
+  };
+  // Use this for calculating orbit/drag delta
+  onGlobalMouseMove = (e) => {
+    const dx = e.clientX - this.lastMouseX;
+    const dy = e.clientY - this.lastMouseY;
+    this.lastMouseX = e.clientX;
+    this.lastMouseY = e.clientY;
+    if (this.isOrbiting) {
+      this.callbacks.onOrbit(dx, dy);
+    } else if (this.isDraggingNode) {
+      const rect = this.canvas.getBoundingClientRect();
+      const screenX = e.clientX - rect.left;
+      const screenY = e.clientY - rect.top;
+      this.callbacks.onDragMove(screenX, screenY);
+    }
+  };
+  // Use this for ending orbit/drag
+  onGlobalMouseUp = (e) => {
+    if (this.isOrbiting) {
+      this.isOrbiting = false;
+    } else if (this.isDraggingNode) {
+      this.isDraggingNode = false;
+      this.draggedNodeId = null;
+      this.callbacks.onDragEnd();
+    } else {
+      this.callbacks.onNodeClick(e.offsetX, e.offsetY);
+    }
+  };
+  // Use this for continuous hover updates
+  onMouseMove = (e) => {
+    if (this.isDraggingNode || this.isOrbiting)
+      return;
+    this.callbacks.onHover(e.offsetX, e.offsetY);
+  };
+  onWheel = (e) => {
+    e.preventDefault();
+    this.callbacks.onZoom(e.offsetX, e.offsetY, Math.sign(e.deltaY));
+  };
+  onMouseLeave = () => {
+    this.callbacks.onHover(-Infinity, -Infinity);
+  };
+  destroy() {
+    this.canvas.removeEventListener("mousemove", this.onMouseMove);
+    this.canvas.removeEventListener("mousedown", this.onMouseDown);
+    this.canvas.removeEventListener("wheel", this.onWheel);
+    this.canvas.removeEventListener("mouseleave", this.onMouseLeave);
+    document.removeEventListener("mousemove", this.onGlobalMouseMove);
+    document.removeEventListener("mouseup", this.onGlobalMouseUp);
+  }
+};
+
 // graph/GraphController.ts
 var GraphController = class {
   app;
@@ -1398,34 +1486,13 @@ var GraphController = class {
   adjacency = null;
   onNodeClick = null;
   plugin;
-  mouseMoveHandler;
-  mouseClickHandler;
-  mouseLeaveHandler;
   simulation = null;
   animationFrame = null;
   lastTime = null;
   running;
   settingsUnregister = null;
-  wheelHandler;
-  mouseDownHandler;
-  mouseUpHandler;
   draggingNode;
-  dragStartDepth = 0;
-  dragOffsetWorld = { x: 0, y: 0, z: 0 };
   isPanning = false;
-  lastPanX = 0;
-  lastPanY = 0;
-  isOrbiting = false;
-  lastOrbitX = 0;
-  lastOrbitY = 0;
-  isMiddlePanning = false;
-  panStartX = 0;
-  panStartY = 0;
-  panStartTargetX = 0;
-  panStartTargetY = 0;
-  pendingFocusNode = null;
-  pendingFocusDownX = 0;
-  pendingFocusDownY = 0;
   cameraAnimStart = null;
   cameraAnimDuration = 300;
   // ms
@@ -1433,21 +1500,11 @@ var GraphController = class {
   cameraAnimTo = null;
   isCameraFollowing = false;
   cameraFollowNode = null;
-  hasDragged = false;
-  preventClick = false;
-  downScreenX = 0;
-  downScreenY = 0;
-  lastWorldX = 0;
-  lastWorldY = 0;
-  lastDragTime = 0;
-  dragVx = 0;
-  dragVy = 0;
   momentumScale = 0.12;
   dragThreshold = 4;
   lastPreviewedNodeId = null;
   previewLockNodeId = null;
   previewPollTimer = null;
-  controlsEl = null;
   lastMouseX = null;
   lastMouseY = null;
   followLockedNodeId = null;
@@ -1459,6 +1516,7 @@ var GraphController = class {
   viewCenterY = 0;
   suppressAttractorUntilMouseMove = false;
   saveNodePositionsDebounced = null;
+  inputManager = null;
   saveNodePositions() {
     if (!this.graph)
       return;
@@ -1527,7 +1585,6 @@ var GraphController = class {
     this.containerEl = containerEl;
     this.plugin = plugin;
   }
-  // INIT
   async init() {
     const canvas = document.createElement("canvas");
     canvas.style.width = "100%";
@@ -1558,6 +1615,27 @@ var GraphController = class {
       usePinnedCenterNote: Boolean(this.plugin.settings?.usePinnedCenterNote),
       pinnedCenterNotePath: String(this.plugin.settings?.pinnedCenterNotePath || ""),
       useOutlinkFallback: Boolean(this.plugin.settings?.useOutlinkFallback)
+    });
+    this.inputManager = new InputManager(this.canvas, {
+      onOrbit: (dx, dy) => {
+        this.renderer.orbitBy(dx, dy);
+        this.renderer?.render();
+      },
+      onPan: (dx, dy) => {
+        this.renderer.panBy(dx, dy);
+        this.renderer?.render();
+      },
+      onZoom: (x, y, delta) => {
+        this.renderer.zoomAt(x, y, 1 + delta * 0.1);
+      },
+      onHover: (screenX, screenY) => this.updateHoverState(screenX, screenY),
+      onDragStart: (nodeId, screenX, screenY) => this.startNodeDrag(nodeId, screenX, screenY),
+      onDragMove: (screenX, screenY) => this.dragNodeMove(screenX, screenY),
+      onDragEnd: () => this.endNodeDrag(),
+      onNodeClick: (screenX, screenY) => this.handleNodeClick(screenX, screenY),
+      // Utility methods passed to the InputManager:
+      screenToWorld: (screenX, screenY) => this.renderer.screenToWorld(screenX, screenY),
+      findNodeAtScreenPosition: (screenX, screenY) => this.findNodeAtScreenPosition(screenX, screenY)
     });
     const vaultId = this.app.vault.getName();
     const rawSaved = this.plugin.settings?.nodePositions || {};
@@ -1671,364 +1749,6 @@ var GraphController = class {
     if (!this.saveNodePositionsDebounced) {
       this.saveNodePositionsDebounced = debounce(() => this.saveNodePositions(), 2e3, true);
     }
-    this.mouseMoveHandler = (ev) => {
-      if (!this.canvas || !this.renderer)
-        return;
-      const r = this.canvas.getBoundingClientRect();
-      const screenX = ev.clientX - r.left;
-      const screenY = ev.clientY - r.top;
-      this.lastMouseX = screenX;
-      this.lastMouseY = screenY;
-      this.suppressAttractorUntilMouseMove = false;
-      if (this.draggingNode) {
-        const now = performance.now();
-        let world = null;
-        try {
-          const cam = this.renderer.getCamera();
-          const width = this.canvas ? this.canvas.width : this.containerEl.getBoundingClientRect().width || 300;
-          const height = this.canvas ? this.canvas.height : this.containerEl.getBoundingClientRect().height || 200;
-          if (this.renderer.screenToWorldAtDepth) {
-            world = this.renderer.screenToWorldAtDepth(screenX, screenY, this.dragStartDepth, width, height, cam);
-          } else {
-            world = this.renderer.screenToWorld(screenX, screenY);
-          }
-        } catch (e) {
-          world = this.renderer.screenToWorld(screenX, screenY);
-        }
-        if (!this.hasDragged) {
-          const dxs = screenX - this.downScreenX;
-          const dys = screenY - this.downScreenY;
-          if (Math.sqrt(dxs * dxs + dys * dys) > this.dragThreshold) {
-            this.hasDragged = true;
-            this.preventClick = true;
-          }
-        }
-        const dt = Math.max((now - this.lastDragTime) / 1e3, 1e-6);
-        this.dragVx = (world.x + this.dragOffsetWorld.x - this.lastWorldX) / dt;
-        this.dragVy = (world.y + this.dragOffsetWorld.y - this.lastWorldY) / dt;
-        this.draggingNode.x = world.x + this.dragOffsetWorld.x;
-        this.draggingNode.y = world.y + this.dragOffsetWorld.y;
-        this.draggingNode.z = (world.z || 0) + this.dragOffsetWorld.z;
-        this.draggingNode.vx = 0;
-        this.draggingNode.vy = 0;
-        this.draggingNode.vz = 0;
-        this.lastWorldX = this.draggingNode.x;
-        this.lastWorldY = this.draggingNode.y;
-        this.lastDragTime = now;
-        this.renderer.render();
-        try {
-          if (this.simulation && this.simulation.setMouseAttractor)
-            this.simulation.setMouseAttractor(null, null, null);
-        } catch (e) {
-        }
-        return;
-      }
-      try {
-        if ((ev.buttons & 2) === 2 && this.pendingFocusNode) {
-          const dx = screenX - this.pendingFocusDownX;
-          const dy = screenY - this.pendingFocusDownY;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const dragThreshold = 8;
-          if (dist > dragThreshold) {
-            this.isOrbiting = true;
-            this.lastOrbitX = this.pendingFocusDownX;
-            this.lastOrbitY = this.pendingFocusDownY;
-            this.pendingFocusNode = null;
-            if (this.isCameraFollowing) {
-              this.isCameraFollowing = false;
-              this.cameraFollowNode = null;
-            }
-          }
-        }
-      } catch (e) {
-      }
-      if (this.isOrbiting) {
-        const dx = screenX - this.lastOrbitX;
-        const dy = screenY - this.lastOrbitY;
-        this.lastOrbitX = screenX;
-        this.lastOrbitY = screenY;
-        try {
-          const cam = this.renderer.getCamera();
-          const yawSpeed = 5e-3;
-          const pitchSpeed = 5e-3;
-          let newYaw = cam.yaw - dx * yawSpeed;
-          let newPitch = cam.pitch - dy * pitchSpeed;
-          const maxPitch = Math.PI / 2 - 0.1;
-          const minPitch = -maxPitch;
-          newPitch = Math.max(minPitch, Math.min(maxPitch, newPitch));
-          this.renderer.setCamera({ yaw: newYaw, pitch: newPitch });
-          this.renderer.render();
-        } catch (e) {
-        }
-        return;
-      }
-      if (this.isMiddlePanning) {
-        if (this.isCameraFollowing) {
-          this.isCameraFollowing = false;
-          this.cameraFollowNode = null;
-        }
-        const dx = screenX - this.panStartX;
-        const dy = screenY - this.panStartY;
-        try {
-          const cam = this.renderer.getCamera();
-          const panSpeed = cam.distance * 1e-3 / Math.max(1e-4, cam.zoom);
-          const newTargetX = this.panStartTargetX - dx * panSpeed;
-          const newTargetY = this.panStartTargetY + dy * panSpeed;
-          this.renderer.setCamera({ targetX: newTargetX, targetY: newTargetY });
-          this.renderer.render();
-        } catch (e) {
-        }
-        return;
-      }
-      if (this.isPanning) {
-        this.followLockedNodeId = null;
-        this.previewLockNodeId = null;
-        const dx = screenX - this.lastPanX;
-        const dy = screenY - this.lastPanY;
-        this.renderer.panBy(dx, dy);
-        this.lastPanX = screenX;
-        this.lastPanY = screenY;
-        return;
-      }
-      this.updateHoverFromCoords(screenX, screenY, ev);
-    };
-    this.mouseLeaveHandler = () => {
-      this.clearHover();
-      this.lastPreviewedNodeId = null;
-    };
-    this.lastMouseX = null;
-    this.lastMouseY = null;
-    this.mouseClickHandler = (ev) => {
-      if (!this.canvas)
-        return;
-      if (ev.button !== 0)
-        return;
-      if (this.preventClick) {
-        this.preventClick = false;
-        return;
-      }
-      const r = this.canvas.getBoundingClientRect();
-      const x = ev.clientX - r.left;
-      const y = ev.clientY - r.top;
-      this.handleClick(x, y);
-    };
-    this.wheelHandler = (ev) => {
-      if (!this.canvas || !this.renderer)
-        return;
-      ev.preventDefault();
-      try {
-        this.followLockedNodeId = null;
-        const cam = this.renderer.getCamera();
-        const zoomSpeed = 15e-4;
-        const factor = Math.exp(ev.deltaY * zoomSpeed);
-        let distance = (cam.distance || 1e3) * factor;
-        distance = Math.max(200, Math.min(8e3, distance));
-        this.renderer.setCamera({ distance });
-        this.renderer.render();
-      } catch (e) {
-      }
-    };
-    this.mouseDownHandler = (ev) => {
-      if (!this.canvas || !this.renderer)
-        return;
-      const r = this.canvas.getBoundingClientRect();
-      const screenX = ev.clientX - r.left;
-      const screenY = ev.clientY - r.top;
-      if (ev.button === 2) {
-        const hitNode = this.hitTestNodeScreen(screenX, screenY);
-        if (hitNode) {
-          this.pendingFocusNode = hitNode;
-          this.pendingFocusDownX = screenX;
-          this.pendingFocusDownY = screenY;
-          ev.preventDefault();
-          return;
-        } else {
-          this.pendingFocusNode = "__origin__";
-          this.pendingFocusDownX = screenX;
-          this.pendingFocusDownY = screenY;
-          ev.preventDefault();
-          return;
-        }
-      }
-      if (ev.button === 1) {
-        try {
-          const cam = this.renderer.getCamera();
-          this.isMiddlePanning = true;
-          this.panStartX = screenX;
-          this.panStartY = screenY;
-          this.panStartTargetX = cam.targetX;
-          this.panStartTargetY = cam.targetY;
-          ev.preventDefault();
-          return;
-        } catch (e) {
-        }
-      }
-      if (ev.button !== 0)
-        return;
-      const world = this.renderer.screenToWorld(screenX, screenY);
-      this.hasDragged = false;
-      this.preventClick = false;
-      this.downScreenX = screenX;
-      this.downScreenY = screenY;
-      this.lastWorldX = world.x;
-      this.lastWorldY = world.y;
-      this.lastDragTime = performance.now();
-      const hit = this.hitTestNodeScreen(screenX, screenY);
-      if (hit) {
-        if (hit.type === "tag") {
-          this.isPanning = true;
-          this.lastPanX = screenX;
-          this.lastPanY = screenY;
-          this.canvas.style.cursor = "grab";
-        } else {
-          this.draggingNode = hit;
-          try {
-            const cam = this.renderer.getCamera();
-            const proj = this.renderer.getProjectedNode ? this.renderer.getProjectedNode(hit) : null;
-            const depth = proj ? proj.depth : 1e3;
-            this.dragStartDepth = depth;
-            const width = this.canvas ? this.canvas.width : this.containerEl.getBoundingClientRect().width || 300;
-            const height = this.canvas ? this.canvas.height : this.containerEl.getBoundingClientRect().height || 200;
-            const screenXClient = proj ? proj.x : screenX;
-            const screenYClient = proj ? proj.y : screenY;
-            const worldAtCursor = this.renderer.screenToWorldAtDepth ? this.renderer.screenToWorldAtDepth(screenXClient, screenYClient, depth, width, height, cam) : this.renderer.screenToWorld(screenXClient, screenYClient);
-            this.dragOffsetWorld = {
-              x: (hit.x || 0) - (worldAtCursor.x || 0),
-              y: (hit.y || 0) - (worldAtCursor.y || 0),
-              z: (hit.z || 0) - (worldAtCursor.z || 0)
-            };
-            try {
-              if (this.simulation && this.simulation.setPinnedNodes)
-                this.simulation.setPinnedNodes(/* @__PURE__ */ new Set([hit.id]));
-            } catch (e) {
-            }
-          } catch (e) {
-            this.dragOffsetWorld = { x: 0, y: 0, z: 0 };
-          }
-          this.canvas.style.cursor = "grabbing";
-        }
-      } else {
-        this.isPanning = true;
-        this.lastPanX = screenX;
-        this.lastPanY = screenY;
-        this.canvas.style.cursor = "grab";
-      }
-    };
-    this.mouseUpHandler = (ev) => {
-      if (!this.canvas)
-        return;
-      if (ev.button === 2) {
-        if (this.pendingFocusNode) {
-          const dx = ev.clientX - (this.canvas.getBoundingClientRect().left + this.pendingFocusDownX);
-          const dy = ev.clientY - (this.canvas.getBoundingClientRect().top + this.pendingFocusDownY);
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const clickThreshold = 8;
-          if (dist <= clickThreshold) {
-            try {
-              if (this.pendingFocusNode === "__origin__") {
-                try {
-                  if (this.renderer) {
-                    const cam = this.renderer.getCamera();
-                    const from = {
-                      targetX: cam.targetX ?? 0,
-                      targetY: cam.targetY ?? 0,
-                      targetZ: cam.targetZ ?? 0,
-                      distance: cam.distance ?? 1e3,
-                      yaw: cam.yaw ?? 0,
-                      pitch: cam.pitch ?? 0
-                    };
-                    const to = {
-                      targetX: this.viewCenterX ?? 0,
-                      targetY: this.viewCenterY ?? 0,
-                      targetZ: 0,
-                      distance: this.defaultCameraDistance,
-                      yaw: from.yaw,
-                      pitch: from.pitch
-                    };
-                    this.cameraAnimStart = performance.now();
-                    this.cameraAnimDuration = 300;
-                    this.cameraAnimFrom = from;
-                    this.cameraAnimTo = to;
-                    this.isCameraFollowing = false;
-                    this.cameraFollowNode = null;
-                  }
-                } catch (e) {
-                }
-                try {
-                  if (this.renderer.resetPanToCenter)
-                    this.renderer.resetPanToCenter();
-                } catch (e) {
-                }
-                this.followLockedNodeId = null;
-                this.previewLockNodeId = null;
-                try {
-                  if (this.renderer.setHoverState)
-                    this.renderer.setHoverState(null, /* @__PURE__ */ new Set(), 0, 0);
-                  if (this.renderer.setHoveredNode)
-                    this.renderer.setHoveredNode(null);
-                  this.renderer.render?.();
-                } catch (e) {
-                }
-                this.suppressAttractorUntilMouseMove = true;
-              } else {
-                const n = this.pendingFocusNode;
-                try {
-                  this.focusCameraOnNode(n);
-                } catch (e) {
-                }
-                try {
-                  if (this.renderer.resetPanToCenter)
-                    this.renderer.resetPanToCenter();
-                } catch (e) {
-                }
-                this.followLockedNodeId = n.id;
-                this.previewLockNodeId = n.id;
-                this.suppressAttractorUntilMouseMove = true;
-              }
-            } catch (e) {
-            }
-          }
-          this.pendingFocusNode = null;
-        }
-        this.isOrbiting = false;
-      }
-      if (ev.button === 1)
-        this.isMiddlePanning = false;
-      if (ev.button !== 0)
-        return;
-      if (this.draggingNode) {
-        if (this.hasDragged) {
-          try {
-            this.draggingNode.vx = this.dragVx * this.momentumScale;
-            this.draggingNode.vy = this.dragVy * this.momentumScale;
-          } catch (e) {
-          }
-        }
-        try {
-          if (this.simulation && this.simulation.setPinnedNodes)
-            this.simulation.setPinnedNodes(/* @__PURE__ */ new Set());
-        } catch (e) {
-        }
-      }
-      this.isPanning = false;
-      this.draggingNode = null;
-      this.canvas.style.cursor = "default";
-      try {
-        if (this.saveNodePositionsDebounced)
-          this.saveNodePositionsDebounced();
-      } catch (e) {
-      }
-    };
-    this.canvas.addEventListener("mousemove", this.mouseMoveHandler);
-    this.canvas.addEventListener("mouseleave", this.mouseLeaveHandler);
-    this.canvas.addEventListener("click", this.mouseClickHandler);
-    this.canvas.addEventListener("wheel", this.wheelHandler, { passive: false });
-    this.canvas.addEventListener("mousedown", this.mouseDownHandler);
-    window.addEventListener("mouseup", this.mouseUpHandler);
-    this.canvas.addEventListener("contextmenu", (e) => {
-      if (this.isOrbiting || this.pendingFocusNode)
-        e.preventDefault();
-    });
     if (this.plugin.registerSettingsListener) {
       this.settingsUnregister = this.plugin.registerSettingsListener(() => {
         if (this.plugin.settings) {
@@ -2069,121 +1789,30 @@ var GraphController = class {
       });
     }
   }
-  // Synchronize the toolbox UI controls from current plugin settings
-  /*private refreshControlsFromSettings(): void {
-    try {
-      if (!this.controlsEl) return;
-      const settings = (this.plugin as any).settings || {};
-      const glow = settings.glow || {};
-      const phys = settings.physics || {};
-      // Iterate rows and update known inputs by label text
-      const panel = this.controlsEl;
-      for (let i = 0; i < panel.children.length; i++) {
-        const row = panel.children[i] as HTMLElement;
-        const labelEl = row.querySelector('label');
-        const right = row.querySelector('div:last-child');
-        if (!labelEl || !right) continue;
-        const name = (labelEl.textContent || '').toLowerCase();
-        const inputs = Array.from(right.querySelectorAll('input')) as HTMLInputElement[];
-        // Node color row
-        if (name.includes('node color')) {
-          const color = inputs.find((x) => x.type === 'color');
-          const alpha = inputs.find((x) => x.type === 'number');
-          if (color) color.value = String(glow.nodeColor || (color.value || '#66ccff'));
-          if (alpha) alpha.value = String(glow.nodeColorAlpha ?? 1.0);
-        }
-        // Edge color row
-        else if (name.includes('edge color')) {
-          const color = inputs.find((x) => x.type === 'color');
-          const alpha = inputs.find((x) => x.type === 'number');
-          if (color) color.value = String(glow.edgeColor || (color.value || '#888888'));
-          if (alpha) alpha.value = String(glow.edgeColorAlpha ?? 0.6);
-        }
-        // Tag color row
-        else if (name.includes('tag color')) {
-          const color = inputs.find((x) => x.type === 'color');
-          const alpha = inputs.find((x) => x.type === 'number');
-          if (color) color.value = String(glow.tagColor || (color.value || '#8000ff'));
-          if (alpha) alpha.value = String(glow.tagColorAlpha ?? 1.0);
-        }
-        // Highlight depth
-        else if (name.includes('highlight depth')) {
-          const range = inputs.find((x) => x.type === 'range');
-          const num = inputs.find((x) => x.type === 'number');
-          const v = String(glow.highlightDepth ?? 1);
-          if (range) range.value = v;
-          if (num) num.value = v;
-        }
-        // Label visibility (min + fade)
-        else if (name.includes('label visibility')) {
-          const ranges = inputs.filter((x) => x.type === 'range');
-          const nums = inputs.filter((x) => x.type === 'number');
-          const minV = String(glow.labelMinVisibleRadiusPx ?? 6);
-          const fadeV = String(glow.labelFadeRangePx ?? 8);
-          if (ranges[0]) ranges[0].value = minV;
-          if (nums[0]) nums[0].value = minV;
-          if (ranges[1]) ranges[1].value = fadeV;
-          if (nums[1]) nums[1].value = fadeV;
-        }
-        // Count duplicate links
-        else if (name.includes('count duplicate links')) {
-          const chk = inputs.find((x) => x.type === 'checkbox');
-          if (chk) chk.checked = Boolean(settings.countDuplicateLinks);
-        }
-        // Show tag nodes
-        else if (name.includes('show tag nodes')) {
-          const chk = inputs.find((x) => x.type === 'checkbox');
-          if (chk) chk.checked = (settings.showTags !== false);
-        }
-        // Mouse gravity toggle
-        else if (name.includes('mouse gravity')) {
-          const chk = inputs.find((x) => x.type === 'checkbox');
-          if (chk) chk.checked = (phys.mouseGravityEnabled !== false) && (phys.mouseAttractionEnabled !== false);
-        }
-        // Physics numeric ranges
-        else if (name.includes('repulsion')) {
-          const range = inputs.find((x) => x.type === 'range');
-          const num = inputs.find((x) => x.type === 'number');
-          const internal = Number(phys.repulsionStrength ?? 0);
-          const ui = Math.min(1, Math.max(0, Math.sqrt(Math.max(0, internal / 2000))));
-          const v = String(ui);
-          if (range) range.value = v;
-          if (num) num.value = v;
-        } else if (name.includes('spring len')) {
-          const range = inputs.find((x) => x.type === 'range');
-          const num = inputs.find((x) => x.type === 'number');
-          const val = String(phys.springLength ?? 100);
-          if (range) range.value = val;
-          if (num) num.value = val;
-        } else if (name.includes('spring')) {
-          const range = inputs.find((x) => x.type === 'range');
-          const num = inputs.find((x) => x.type === 'number');
-          // UI is 0..1 for spring strength in toolbox; we keep value as-is
-          const ui = phys.springStrength != null ? String(Math.min(1, Math.max(0, Number(phys.springStrength) / 0.5))) : '0';
-          if (range) range.value = ui;
-          if (num) num.value = ui;
-        } else if (name.includes('center pull')) {
-          const range = inputs.find((x) => x.type === 'range');
-          const num = inputs.find((x) => x.type === 'number');
-          const ui = phys.centerPull != null ? String(Math.min(1, Math.max(0, Number(phys.centerPull) / 0.01))) : '0';
-          if (range) range.value = ui;
-          if (num) num.value = ui;
-        } else if (name.includes('damping')) {
-          const range = inputs.find((x) => x.type === 'range');
-          const num = inputs.find((x) => x.type === 'number');
-          const val = String(phys.damping ?? 0.7);
-          if (range) range.value = val;
-          if (num) num.value = val;
-        } else if (name.includes('mouse attraction exponent')) {
-          const range = inputs.find((x) => x.type === 'range');
-          const num = inputs.find((x) => x.type === 'number');
-          const val = String(phys.mouseAttractionExponent ?? 3);
-          if (range) range.value = val;
-          if (num) num.value = val;
-        }
-      }
-    } catch (e) {}
-  }*/
+  updateHoverState(screenX, screenY) {
+    return;
+  }
+  updateDragState(screenX, screenY) {
+    return;
+  }
+  startNodeDrag(nodeId, screenX, screenY) {
+    return;
+  }
+  updatePanState(screenX, screenY) {
+    return;
+  }
+  dragNodeMove(screenX, screenY) {
+    return;
+  }
+  endNodeDrag() {
+    return;
+  }
+  handleNodeClick(screenX, screenY) {
+    return;
+  }
+  findNodeAtScreenPosition(screenX, screenY) {
+    return null;
+  }
   animationLoop = (timestamp) => {
     if (!this.running)
       return;
@@ -2512,6 +2141,8 @@ var GraphController = class {
       }
       this.settingsUnregister = null;
     }
+    this.inputManager?.destroy();
+    this.inputManager = null;
   }
   setNodeClickHandler(handler) {
     this.onNodeClick = handler;
