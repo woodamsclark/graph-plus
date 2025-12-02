@@ -6,10 +6,15 @@ export class InputManager {
     private canvas           : HTMLCanvasElement;
     private callbacks        : InputManagerCallbacks;
     private isOrbiting       : boolean          = false;
+    private isPanning        : boolean          = false;
     private isDraggingNode   : boolean          = false;
     private draggedNodeId    : string | null    = null;
     private lastMouseX       : number           = 0;
     private lastMouseY       : number           = 0;
+    private downScreenX: number = 0;         // Initial screenX (canvas relative)
+    private downScreenY: number = 0;         // Initial screenY (canvas relative)
+    private isMouseClicking: boolean = false;// True if LMB is down
+    private dragThreshold: number = 5;       // Drag starts after 5 pixels of movement
 
     constructor(canvas: HTMLCanvasElement, callbacks: InputManagerCallbacks) {
         this.canvas     = canvas;
@@ -29,25 +34,26 @@ export class InputManager {
 
     private onMouseDown = (e: MouseEvent) => {
         e.preventDefault();
-        this.lastMouseX = e.clientX;
-        this.lastMouseY = e.clientY;
+        this.lastMouseX         = e.clientX;
+        this.lastMouseY         = e.clientY;
+        this.isMouseClicking    = true;
 
-        const isDragModifier    = e.button === 0; // Check for left-click (and no modifier)
+        
+        const isLeftClick       = e.button === 0;
+        const isDragModifier    = e.button === 0;              // Check for left-click (and no modifier)
         const isOrbitModifier   = e.button === 0 && e.ctrlKey; // Example: Ctrl + Left click for Orbit
+        this.downScreenX        = e.offsetX; 
+        this.downScreenY        = e.offsetY; 
+        this.isDraggingNode     = false;
+        this.isPanning          = false;
 
-        const node = this.callbacks.findNodeAtScreenPosition(e.offsetX, e.offsetY);
-
-        if (node && isDragModifier) {
-            // Found a node, start dragging
-            this.isDraggingNode = true;
-            this.draggedNodeId  = node.id;
-            this.callbacks.onDragStart(node.id, e.offsetX, e.offsetY);
-        } else if (isOrbitModifier) {
-            // Start orbiting
-            this.isOrbiting = true;
-        } else if (e.button === 0) {
-            // Pan start (or select area start)
-            // ... (Handle pan start if necessary)
+        const hitNode = this.callbacks.detectClickedNode(e.offsetX, e.offsetY);
+        if (isLeftClick) {
+            if (hitNode) {
+                this.draggedNodeId = hitNode.id; // Store ID for potential drag
+            } else {
+                this.draggedNodeId = null; // No node hit, potential pan
+            }
         }
     }
     
@@ -60,26 +66,72 @@ export class InputManager {
 
         if (this.isOrbiting) {
             this.callbacks.onOrbit(dx, dy);
-        } else if (this.isDraggingNode) {
+            return
+        }
+        if (this.isDraggingNode) {
             // Pass screen coordinates
             const rect = this.canvas.getBoundingClientRect();
             const screenX = e.clientX - rect.left;
             const screenY = e.clientY - rect.top;
             this.callbacks.onDragMove(screenX, screenY);
+        } else if (this.isPanning) {
+            this.callbacks.onPan(dx, dy);
+        }
+
+        const rect = this.canvas.getBoundingClientRect();
+        const screenX = e.clientX - rect.left;
+        const screenY = e.clientY - rect.top;
+        
+        const distSq                = (screenX - this.downScreenX) ** 2 + (screenY - this.downScreenY) ** 2;
+        const thresholdSq           = this.dragThreshold ** 2;
+        const hasExceededThreshold  = distSq > thresholdSq;
+
+        // A. Confirm Drag State (Node Hit)
+        if (this.draggedNodeId !== null && !this.isDraggingNode && hasExceededThreshold) {
+                this.isDraggingNode = true; // CONFIRM DRAG
+                this.callbacks.onDragStart(this.draggedNodeId, this.downScreenX, this.downScreenY);
+        }
+        // B. Confirm Pan State (Empty Space Hit)
+        else if (this.isMouseClicking && this.draggedNodeId === null && !this.isPanning && hasExceededThreshold) {
+            this.isPanning = true; // CONFIRM PAN
+        }
+
+        // --- EXECUTE MOVEMENT LOGIC (Only if confirmed) ---
+        
+        if (this.isDraggingNode) {
+            this.callbacks.onDragMove(screenX, screenY);
+        } 
+        else if (this.isPanning) {
+            this.callbacks.onPan(dx, dy); 
         }
     }
 
     // Use this for ending orbit/drag
     private onGlobalMouseUp = (e: MouseEvent) => {
-        if (this.isOrbiting) {
-            this.isOrbiting = false;
-        } else if (this.isDraggingNode) {
-            this.isDraggingNode = false;
-            this.draggedNodeId  = null;
-            this.callbacks.onDragEnd();
-        } else {
-            // Only fire node click if we weren't dragging/orbiting
-            this.callbacks.onNodeClick(e.offsetX, e.offsetY);
+        const isLeftClick       = e.button === 0;
+        const wasDragging       = this.isDraggingNode;
+        const wasPanning        = this.isPanning;
+        this.isPanning          = false;
+        //this.isOrbiting = false; // we don't want to leave orbit on mouseup
+        this.isDraggingNode     = false;
+        this.isMouseClicking    = false; 
+        this.draggedNodeId      = null; // Clear the potential/confirmed target
+
+        if (wasDragging) {
+            this.callbacks.onDragEnd(); 
+            return; // Suppress click
+        }
+        if (wasPanning) {
+            return; // Suppress the click that might otherwise fire
+        }  
+        // 4. Handle clean Click (if NO movement passed the threshold)
+        if (isLeftClick) {
+            const rect      = this.canvas.getBoundingClientRect();
+            const screenX   = e.clientX - rect.left;
+            const screenY   = e.clientY - rect.top;
+
+            // This is only called if it was a TIGHT, short mouse press
+            this.callbacks.onOpenNode(screenX, screenY); 
         }
     }
 
@@ -89,7 +141,7 @@ export class InputManager {
         if (this.isDraggingNode || this.isOrbiting) return;
         
         // Handle Hover and Preview logic
-        this.callbacks.onHover(e.offsetX, e.offsetY);
+        //this.callbacks.onHover(e.offsetX, e.offsetY);
     }
     
     private onWheel = (e: WheelEvent) => {

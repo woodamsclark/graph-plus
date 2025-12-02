@@ -2,15 +2,15 @@ import { App, ItemView, WorkspaceLeaf, Plugin, TFile, Platform } from 'obsidian'
 import { buildGraph } from './graph/buildGraph.ts';
 import { layoutGraph2D, layoutGraph3D } from './graph/layout2d.ts';
 import { createRenderer2D } from './graph/renderer2d.ts';
-import { createSimulation, Simulation } from './graph/simulation.ts';
-import { GraphController } from './graph/GraphController.ts';import { DEFAULT_SETTINGS } from './main';
+import { createSimulation } from './graph/simulation.ts';
+import { GraphManager } from './graph/GraphManager.ts';import { DEFAULT_SETTINGS } from './main';
 import { debounce } from './utils/debounce.ts';
 import { GraphData, Renderer2D } from './types/interfaces.ts';
 
 export const GREATER_GRAPH_VIEW_TYPE = 'greater-graph-view';
 
 export class GraphView extends ItemView {
-  private controller: GraphController | null = null;
+  private controller: GraphManager | null = null;
   private plugin: Plugin;
   private scheduleGraphRefresh: (() => void) | null = null;
 
@@ -34,10 +34,10 @@ export class GraphView extends ItemView {
   async onOpen() {
     this.containerEl.empty();
     const container = this.containerEl.createDiv({ cls: 'greater-graph-view' });
-    this.controller = new GraphController(this.app, container, this.plugin);
+    this.controller = new GraphManager(this.app, container, this.plugin);
     await this.controller.init();
     if (this.controller) {
-      this.controller.setNodeClickHandler((node: any) => void this.openNodeFile(node));
+      this.controller.setOnNodeClick((node) => this.openNodeFile(node));
     }
     // Debounced refresh to avoid thrashing on vault events
     if (!this.scheduleGraphRefresh) {
@@ -94,5 +94,7 @@ export class GraphView extends ItemView {
       // eslint-disable-next-line no-console
       console.error('Greater Graph: failed to open file', e);
     }
+    
   }
+  
 }

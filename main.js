@@ -28,7 +28,7 @@ var import_obsidian3 = require("obsidian");
 // GraphView.ts
 var import_obsidian2 = require("obsidian");
 
-// graph/GraphController.ts
+// graph/GraphManager.ts
 var import_obsidian = require("obsidian");
 
 // graph/buildGraph.ts
@@ -1031,6 +1031,11 @@ function createRenderer2D(options) {
     render();
   }
   function panBy(screenDx, screenDy) {
+    const cam = getCamera();
+    const SCALE_REFERENCE_DISTANCE = 1e3;
+    const currentScale = SCALE_REFERENCE_DISTANCE / cam.distance;
+    const worldDx = screenDx / currentScale;
+    const worldDy = screenDy / currentScale;
     offsetX += screenDx;
     offsetY += screenDy;
     render();
@@ -1393,10 +1398,19 @@ var InputManager = class {
   canvas;
   callbacks;
   isOrbiting = false;
+  isPanning = false;
   isDraggingNode = false;
   draggedNodeId = null;
   lastMouseX = 0;
   lastMouseY = 0;
+  downScreenX = 0;
+  // Initial screenX (canvas relative)
+  downScreenY = 0;
+  // Initial screenY (canvas relative)
+  isMouseClicking = false;
+  // True if LMB is down
+  dragThreshold = 5;
+  // Drag starts after 5 pixels of movement
   constructor(canvas, callbacks) {
     this.canvas = canvas;
     this.callbacks = callbacks;
@@ -1414,16 +1428,21 @@ var InputManager = class {
     e.preventDefault();
     this.lastMouseX = e.clientX;
     this.lastMouseY = e.clientY;
+    this.isMouseClicking = true;
+    const isLeftClick = e.button === 0;
     const isDragModifier = e.button === 0;
     const isOrbitModifier = e.button === 0 && e.ctrlKey;
-    const node = this.callbacks.findNodeAtScreenPosition(e.offsetX, e.offsetY);
-    if (node && isDragModifier) {
-      this.isDraggingNode = true;
-      this.draggedNodeId = node.id;
-      this.callbacks.onDragStart(node.id, e.offsetX, e.offsetY);
-    } else if (isOrbitModifier) {
-      this.isOrbiting = true;
-    } else if (e.button === 0) {
+    this.downScreenX = e.offsetX;
+    this.downScreenY = e.offsetY;
+    this.isDraggingNode = false;
+    this.isPanning = false;
+    const hitNode = this.callbacks.detectClickedNode(e.offsetX, e.offsetY);
+    if (isLeftClick) {
+      if (hitNode) {
+        this.draggedNodeId = hitNode.id;
+      } else {
+        this.draggedNodeId = null;
+      }
     }
   };
   // Use this for calculating orbit/drag delta
@@ -1434,30 +1453,61 @@ var InputManager = class {
     this.lastMouseY = e.clientY;
     if (this.isOrbiting) {
       this.callbacks.onOrbit(dx, dy);
-    } else if (this.isDraggingNode) {
-      const rect = this.canvas.getBoundingClientRect();
-      const screenX = e.clientX - rect.left;
-      const screenY = e.clientY - rect.top;
+      return;
+    }
+    if (this.isDraggingNode) {
+      const rect2 = this.canvas.getBoundingClientRect();
+      const screenX2 = e.clientX - rect2.left;
+      const screenY2 = e.clientY - rect2.top;
+      this.callbacks.onDragMove(screenX2, screenY2);
+    } else if (this.isPanning) {
+      this.callbacks.onPan(dx, dy);
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    const distSq = (screenX - this.downScreenX) ** 2 + (screenY - this.downScreenY) ** 2;
+    const thresholdSq = this.dragThreshold ** 2;
+    const hasExceededThreshold = distSq > thresholdSq;
+    if (this.draggedNodeId !== null && !this.isDraggingNode && hasExceededThreshold) {
+      this.isDraggingNode = true;
+      this.callbacks.onDragStart(this.draggedNodeId, this.downScreenX, this.downScreenY);
+    } else if (this.isMouseClicking && this.draggedNodeId === null && !this.isPanning && hasExceededThreshold) {
+      this.isPanning = true;
+    }
+    if (this.isDraggingNode) {
       this.callbacks.onDragMove(screenX, screenY);
+    } else if (this.isPanning) {
+      this.callbacks.onPan(dx, dy);
     }
   };
   // Use this for ending orbit/drag
   onGlobalMouseUp = (e) => {
-    if (this.isOrbiting) {
-      this.isOrbiting = false;
-    } else if (this.isDraggingNode) {
-      this.isDraggingNode = false;
-      this.draggedNodeId = null;
+    const isLeftClick = e.button === 0;
+    const wasDragging = this.isDraggingNode;
+    const wasPanning = this.isPanning;
+    this.isPanning = false;
+    this.isDraggingNode = false;
+    this.isMouseClicking = false;
+    this.draggedNodeId = null;
+    if (wasDragging) {
       this.callbacks.onDragEnd();
-    } else {
-      this.callbacks.onNodeClick(e.offsetX, e.offsetY);
+      return;
+    }
+    if (wasPanning) {
+      return;
+    }
+    if (isLeftClick) {
+      const rect = this.canvas.getBoundingClientRect();
+      const screenX = e.clientX - rect.left;
+      const screenY = e.clientY - rect.top;
+      this.callbacks.onOpenNode(screenX, screenY);
     }
   };
   // Use this for continuous hover updates
   onMouseMove = (e) => {
     if (this.isDraggingNode || this.isOrbiting)
       return;
-    this.callbacks.onHover(e.offsetX, e.offsetY);
   };
   onWheel = (e) => {
     e.preventDefault();
@@ -1476,21 +1526,22 @@ var InputManager = class {
   }
 };
 
-// graph/GraphController.ts
-var GraphController = class {
+// graph/GraphManager.ts
+var GraphManager = class {
   app;
   containerEl;
   canvas = null;
   renderer = null;
   graph = null;
   adjacency = null;
-  onNodeClick = null;
+  openNodeFile = null;
+  settingsUnregister = null;
+  saveNodePositionsDebounced = null;
   plugin;
   simulation = null;
   animationFrame = null;
   lastTime = null;
   running;
-  settingsUnregister = null;
   draggingNode;
   isPanning = false;
   cameraAnimStart = null;
@@ -1509,14 +1560,13 @@ var GraphController = class {
   lastMouseY = null;
   followLockedNodeId = null;
   centerNode = null;
+  inputManager = null;
   defaultCameraDistance = 1200;
   lastUsePinnedCenterNote = false;
   lastPinnedCenterNotePath = "";
   viewCenterX = 0;
   viewCenterY = 0;
   suppressAttractorUntilMouseMove = false;
-  saveNodePositionsDebounced = null;
-  inputManager = null;
   saveNodePositions() {
     if (!this.graph)
       return;
@@ -1627,15 +1677,17 @@ var GraphController = class {
       },
       onZoom: (x, y, delta) => {
         this.renderer.zoomAt(x, y, 1 + delta * 0.1);
+        this.renderer?.render();
       },
+      detectClickedNode: (screenX, screenY) => {
+        return this.nodeClicked(screenX, screenY);
+      },
+      onOpenNode: (screenX, screenY) => this.openNode(screenX, screenY),
       onHover: (screenX, screenY) => this.updateHoverState(screenX, screenY),
       onDragStart: (nodeId, screenX, screenY) => this.startNodeDrag(nodeId, screenX, screenY),
       onDragMove: (screenX, screenY) => this.dragNodeMove(screenX, screenY),
       onDragEnd: () => this.endNodeDrag(),
-      onNodeClick: (screenX, screenY) => this.handleNodeClick(screenX, screenY),
-      // Utility methods passed to the InputManager:
-      screenToWorld: (screenX, screenY) => this.renderer.screenToWorld(screenX, screenY),
-      findNodeAtScreenPosition: (screenX, screenY) => this.findNodeAtScreenPosition(screenX, screenY)
+      screenToWorld: (screenX, screenY) => this.renderer.screenToWorld(screenX, screenY)
     });
     const vaultId = this.app.vault.getName();
     const rawSaved = this.plugin.settings?.nodePositions || {};
@@ -1796,6 +1848,10 @@ var GraphController = class {
     return;
   }
   startNodeDrag(nodeId, screenX, screenY) {
+    console.log("dragging", nodeId);
+    return;
+  }
+  endNodeDrag() {
     return;
   }
   updatePanState(screenX, screenY) {
@@ -1804,14 +1860,14 @@ var GraphController = class {
   dragNodeMove(screenX, screenY) {
     return;
   }
-  endNodeDrag() {
-    return;
+  openNode(screenX, screenY) {
+    const node = this.nodeClicked(screenX, screenY);
+    if (node && this.openNodeFile) {
+      this.openNodeFile(node);
+    }
   }
-  handleNodeClick(screenX, screenY) {
-    return;
-  }
-  findNodeAtScreenPosition(screenX, screenY) {
-    return null;
+  setOnNodeClick(handler) {
+    this.openNodeFile = handler;
   }
   animationLoop = (timestamp) => {
     if (!this.running)
@@ -2133,7 +2189,7 @@ var GraphController = class {
       this.lastTime = null;
       this.running = false;
     }
-    this.onNodeClick = null;
+    this.openNodeFile = null;
     if (this.settingsUnregister) {
       try {
         this.settingsUnregister();
@@ -2145,9 +2201,9 @@ var GraphController = class {
     this.inputManager = null;
   }
   setNodeClickHandler(handler) {
-    this.onNodeClick = handler;
+    this.openNodeFile = handler;
   }
-  hitTestNodeScreen(screenX, screenY) {
+  nodeClicked(screenX, screenY) {
     if (!this.graph || !this.renderer)
       return null;
     let closest = null;
@@ -2217,13 +2273,13 @@ var GraphController = class {
     }
   }
   handleClick(screenX, screenY) {
-    if (!this.graph || !this.onNodeClick || !this.renderer)
+    if (!this.graph || !this.openNodeFile || !this.renderer)
       return;
-    const node = this.hitTestNodeScreen(screenX, screenY);
+    const node = this.nodeClicked(screenX, screenY);
     if (!node)
       return;
     try {
-      this.onNodeClick(node);
+      this.openNodeFile(node);
     } catch (e) {
       console.error("Graph2DController.onNodeClick handler error", e);
     }
@@ -2384,10 +2440,10 @@ var GraphView = class extends import_obsidian2.ItemView {
   async onOpen() {
     this.containerEl.empty();
     const container = this.containerEl.createDiv({ cls: "greater-graph-view" });
-    this.controller = new GraphController(this.app, container, this.plugin);
+    this.controller = new GraphManager(this.app, container, this.plugin);
     await this.controller.init();
     if (this.controller) {
-      this.controller.setNodeClickHandler((node) => void this.openNodeFile(node));
+      this.controller.setOnNodeClick((node) => this.openNodeFile(node));
     }
     if (!this.scheduleGraphRefresh) {
       this.scheduleGraphRefresh = debounce(() => {

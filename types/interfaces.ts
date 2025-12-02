@@ -167,7 +167,7 @@ export interface InputManagerCallbacks {
 
     // Node Interaction
     onHover(screenX: number, screenY: number): void;
-    onNodeClick(screenX: number, screenY: number): void;
+    onOpenNode(screenX: number, screenY: number): void;
     
     // Node Dragging (Coordinates are relative to the screen for the simulation)
     onDragStart(nodeId: string, screenX: number, screenY: number): void;
@@ -176,5 +176,5 @@ export interface InputManagerCallbacks {
 
     // Utility
     screenToWorld(screenX: number, screenY: number): { x: number, y: number, z: number } | null;
-    findNodeAtScreenPosition(screenX: number, screenY: number): { id: string, filePath?: string, label: string } | null;
+    detectClickedNode(screenX: number, screenY: number): { id: string, filePath?: string, label: string } | null;
 }
