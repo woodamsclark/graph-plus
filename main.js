@@ -23,9 +23,12 @@ __export(main_exports, {
   default: () => GreaterGraphPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian2 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 
 // GraphView.ts
+var import_obsidian2 = require("obsidian");
+
+// graph/Graph2DController.ts
 var import_obsidian = require("obsidian");
 
 // graph/buildGraph.ts
@@ -2602,7 +2605,7 @@ var Graph2DController = class {
   }
   isPreviewModifier(event) {
     try {
-      if (Platform && Platform.isMacOS)
+      if (import_obsidian.Platform && import_obsidian.Platform.isMacOS)
         return Boolean(event.metaKey);
     } catch (e) {
     }
@@ -2794,7 +2797,7 @@ var Graph2DController = class {
 
 // GraphView.ts
 var GREATER_GRAPH_VIEW_TYPE = "greater-graph-view";
-var GraphView = class extends import_obsidian.ItemView {
+var GraphView = class extends import_obsidian2.ItemView {
   controller = null;
   plugin;
   scheduleGraphRefresh = null;
@@ -2850,7 +2853,7 @@ var GraphView = class extends import_obsidian.ItemView {
       file = node.file;
     else if (node.filePath) {
       const af = app.vault.getAbstractFileByPath(node.filePath);
-      if (af instanceof import_obsidian.TFile)
+      if (af instanceof import_obsidian2.TFile)
         file = af;
     }
     if (!file) {
@@ -2916,7 +2919,7 @@ var DEFAULT_SETTINGS = {
   pinnedCenterNotePath: "",
   useOutlinkFallback: false
 };
-var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
+var GreaterGraphPlugin = class extends import_obsidian3.Plugin {
   settings = DEFAULT_SETTINGS;
   settingsListeners = [];
   async onload() {
@@ -2980,7 +2983,7 @@ var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
     }
   }
 };
-var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
+var GreaterGraphSettingTab = class extends import_obsidian3.PluginSettingTab {
   plugin;
   constructor(app, plugin) {
     super(app, plugin);
@@ -2993,7 +2996,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     const visuals = this.plugin.settings.visuals;
     const physics = this.plugin.settings.physics;
     const addSliderSetting = (parent, opts) => {
-      const s = new import_obsidian2.Setting(parent).setName(opts.name).setDesc(opts.desc || "");
+      const s = new import_obsidian3.Setting(parent).setName(opts.name).setDesc(opts.desc || "");
       const wrap = document.createElement("div");
       wrap.style.display = "flex";
       wrap.style.alignItems = "center";
@@ -3222,7 +3225,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     });
     containerEl.createEl("h2", { text: "Colors" });
     {
-      const s = new import_obsidian2.Setting(containerEl).setName("Node color (override)").setDesc("Optional color to override the theme accent for node fill. Leave unset to use the active theme.");
+      const s = new import_obsidian3.Setting(containerEl).setName("Node color (override)").setDesc("Optional color to override the theme accent for node fill. Leave unset to use the active theme.");
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
@@ -3274,7 +3277,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       s.controlEl.appendChild(alphaInput);
     }
     {
-      const s = new import_obsidian2.Setting(containerEl).setName("Edge color (override)").setDesc("Optional color to override edge stroke color. Leave unset to use a theme-appropriate color.");
+      const s = new import_obsidian3.Setting(containerEl).setName("Edge color (override)").setDesc("Optional color to override edge stroke color. Leave unset to use a theme-appropriate color.");
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
@@ -3326,7 +3329,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       s.controlEl.appendChild(edgeAlpha);
     }
     {
-      const s = new import_obsidian2.Setting(containerEl).setName("Tag color (override)").setDesc("Optional color to override tag node color. Leave unset to use the active theme.");
+      const s = new import_obsidian3.Setting(containerEl).setName("Tag color (override)").setDesc("Optional color to override tag node color. Leave unset to use the active theme.");
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
@@ -3378,7 +3381,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       s.controlEl.appendChild(tagAlpha);
     }
     {
-      const s = new import_obsidian2.Setting(containerEl).setName("Label color (override)").setDesc("Optional color to override the label text color. Leave unset to use the active theme.");
+      const s = new import_obsidian3.Setting(containerEl).setName("Label color (override)").setDesc("Optional color to override the label text color. Leave unset to use the active theme.");
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
@@ -3429,7 +3432,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       s.controlEl.appendChild(hint);
       s.controlEl.appendChild(labelAlpha);
     }
-    new import_obsidian2.Setting(containerEl).setName("Use interface font for labels").setDesc("When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.").addToggle((t) => t.setValue(Boolean(visuals.useInterfaceFont)).onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName("Use interface font for labels").setDesc("When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.").addToggle((t) => t.setValue(Boolean(visuals.useInterfaceFont)).onChange(async (v) => {
       visuals.useInterfaceFont = Boolean(v);
       await this.plugin.saveSettings();
     }));
@@ -3560,15 +3563,15 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       }
     });
-    new import_obsidian2.Setting(containerEl).setName("Count duplicate links").setDesc("If enabled, multiple links between the same two files will be counted when computing in/out degrees.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.countDuplicateLinks)).onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName("Count duplicate links").setDesc("If enabled, multiple links between the same two files will be counted when computing in/out degrees.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.countDuplicateLinks)).onChange(async (v) => {
       this.plugin.settings.countDuplicateLinks = Boolean(v);
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Double-line mutual links").setDesc("When enabled, mutual links (A \u2194 B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.mutualLinkDoubleLine)).onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName("Double-line mutual links").setDesc("When enabled, mutual links (A \u2194 B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.mutualLinkDoubleLine)).onChange(async (v) => {
       this.plugin.settings.mutualLinkDoubleLine = Boolean(v);
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Show tag nodes").setDesc("Toggle visibility of tag nodes and their edges in the graph.").addToggle((t) => t.setValue(this.plugin.settings.showTags !== false).onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName("Show tag nodes").setDesc("Toggle visibility of tag nodes and their edges in the graph.").addToggle((t) => t.setValue(this.plugin.settings.showTags !== false).onChange(async (v) => {
       this.plugin.settings.showTags = Boolean(v);
       await this.plugin.saveSettings();
     }));
@@ -3614,21 +3617,21 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       }
     });
-    new import_obsidian2.Setting(containerEl).setName("Mouse gravity").setDesc("Enable the mouse gravity well that attracts nearby nodes.").addToggle((t) => t.setValue(Boolean(phys.mouseGravityEnabled !== false)).onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName("Mouse gravity").setDesc("Enable the mouse gravity well that attracts nearby nodes.").addToggle((t) => t.setValue(Boolean(phys.mouseGravityEnabled !== false)).onChange(async (v) => {
       this.plugin.settings.physics = this.plugin.settings.physics || {};
       this.plugin.settings.physics.mouseGravityEnabled = Boolean(v);
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h2", { text: "Center Node" });
-    new import_obsidian2.Setting(containerEl).setName("Use pinned center note").setDesc("Prefer a specific note path as the graph center. Falls back to max in-links if not found.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.usePinnedCenterNote)).onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName("Use pinned center note").setDesc("Prefer a specific note path as the graph center. Falls back to max in-links if not found.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.usePinnedCenterNote)).onChange(async (v) => {
       this.plugin.settings.usePinnedCenterNote = Boolean(v);
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Pinned center note path").setDesc('e.g., "Home.md" or "Notes/Home" (vault-relative).').addText((txt) => txt.setPlaceholder("path/to/note").setValue(this.plugin.settings.pinnedCenterNotePath || "").onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName("Pinned center note path").setDesc('e.g., "Home.md" or "Notes/Home" (vault-relative).').addText((txt) => txt.setPlaceholder("path/to/note").setValue(this.plugin.settings.pinnedCenterNotePath || "").onChange(async (v) => {
       this.plugin.settings.pinnedCenterNotePath = (v || "").trim();
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Fallback: prefer out-links").setDesc("When picking a center by link count, prefer out-links (out-degree) instead of in-links (in-degree)").addToggle((t) => t.setValue(Boolean(this.plugin.settings.useOutlinkFallback)).onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName("Fallback: prefer out-links").setDesc("When picking a center by link count, prefer out-links (out-degree) instead of in-links (in-degree)").addToggle((t) => t.setValue(Boolean(this.plugin.settings.useOutlinkFallback)).onChange(async (v) => {
       this.plugin.settings.useOutlinkFallback = Boolean(v);
       await this.plugin.saveSettings();
     }));

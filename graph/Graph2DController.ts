@@ -1,6 +1,6 @@
 // --- Graph2DController.ts ---
 // Imports needed by the controller itself
-import { App, Plugin } from 'obsidian'; 
+import { App, Plugin, Platform } from 'obsidian'; 
 import { GraphData, GraphNode, buildGraph } from './buildGraph.ts';
 import { layoutGraph2D, layoutGraph3D } from './layout2d';
 import { createRenderer2D, Renderer2D } from './renderer2d.ts';

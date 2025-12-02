@@ -9,8 +9,9 @@
     "watch": "node esbuild.config.js --watch"
   },
   "devDependencies": {
+    "@types/node": "^20.5.1",
     "esbuild": "^0.18.11",
-    "typescript": "^5.1.6",
-    "@types/node": "^20.5.1"
+    "obsidian": "^1.10.3",
+    "typescript": "^5.1.6"
   }
 }

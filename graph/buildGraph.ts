@@ -3,21 +3,21 @@ import { App, TFile, CachedMetadata } from 'obsidian';
 export type GraphNodeType = 'note' | 'tag';
 
 export interface GraphNode {
-  id: string;
-  label: string;
-  x: number;
-  y: number;
-  z: number;
-  filePath: string;
-  file?: TFile;
-  vx?: number;
-  vy?: number;
-  vz?: number;
-  type?: GraphNodeType;
-  inDegree: number;
-  outDegree: number;
-  totalDegree: number;
-  isCenterNode?: boolean;
+  id            : string;
+  label         : string;
+  x             : number;
+  y             : number;
+  z             : number;
+  filePath      : string;
+  file?         : TFile;
+  vx?           : number;
+  vy?           : number;
+  vz?           : number;
+  type?         : GraphNodeType;
+  inDegree      : number;
+  outDegree     : number;
+  totalDegree   : number;
+  isCenterNode? : boolean;
 }
 
 export interface GraphEdge {

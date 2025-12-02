@@ -187,9 +187,9 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
         const d = Math.max(0, Math.min(1, damping));
-        n.vx *= (1 - d);
-        n.vy *= (1 - d);
-        n.vz *= (1 - d);
+        n.vx = (n.vx ?? 0) * (1 - d);
+        n.vy = (n.vy ?? 0) * (1 - d);
+        n.vz = (n.vz ?? 0) * (1 - d);
       if (Math.abs(n.vx) < 0.001) n.vx = 0;
       if (Math.abs(n.vy) < 0.001) n.vy = 0;
       if (Math.abs(n.vz) < 0.001) n.vz = 0;
