@@ -1,38 +1,8 @@
-import { GraphNode, GraphEdge } from '../types/interfaces.ts';
+import { GraphNode, GraphEdge, Simulation, SimulationSettings} from '../types/interfaces.ts';
 
-export interface Simulation {
-  start(): void;
-  stop(): void;
-  tick(dt: number): void;
-  reset(): void;
-  setOptions(opts: Partial<SimulationOptions>): void;
-  // pinned node control: prevent physics from moving these nodes
-  setPinnedNodes?(ids: Set<string>): void;
-  // allow the controller to provide mouse world coords and hovered node id
-  setMouseAttractor?(x: number | null, y: number | null, nodeId: string | null): void;
-}
 
-export interface SimulationOptions {
-  repulsionStrength   : number;
-  springStrength      : number;
-  springLength        : number;
-  centerPull          : number;
-  damping             : number;
-  // 3D center point
-  centerX?            : number;
-  centerY?            : number;
-  centerZ?            : number;
-  centerNodeId?       : string;
-  // plane constraint stiffness (soft springs to planes)
-  notePlaneStiffness? : number;  // pull notes toward z = 0
-  tagPlaneStiffness?  : number;  // pull tags toward x = 0
-  // mouse attraction tuning
-  mouseAttractionRadius?  : number;
-  mouseAttractionStrength?: number;
-  mouseAttractionExponent?: number;
-}
 
-export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options?: Partial<SimulationOptions>): Simulation {
+export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options?: Partial<SimulationSettings>): Simulation {
   // physics parameters (defaults)
   let repulsionStrength = options?.repulsionStrength ?? 1500;
   let springStrength = options?.springStrength ?? 0.04;
@@ -295,7 +265,7 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options
     }
   }
 
-  function setOptions(opts: Partial<SimulationOptions>) {
+  function setOptions(opts: Partial<SimulationSettings>) {
     if (!opts) return;
     if (typeof opts.repulsionStrength === 'number') repulsionStrength = opts.repulsionStrength;
     if (typeof opts.springStrength === 'number') springStrength = opts.springStrength;

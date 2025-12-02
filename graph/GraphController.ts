@@ -2,9 +2,9 @@ import { App, Plugin, Platform } from 'obsidian';
 import { buildGraph } from './buildGraph.ts';
 import { layoutGraph2D, layoutGraph3D } from './layout2d.ts';
 import { createRenderer2D } from './renderer2d.ts';
-import { createSimulation, Simulation } from './simulation.ts';
+import { createSimulation } from './simulation.ts';
 import { debounce } from '../utils/debounce.ts';
-import { Settings, Renderer2D, GraphData, GraphNode } from '../types/interfaces.ts';
+import { Settings, Renderer2D, GraphData, GraphNode, Simulation} from '../types/interfaces.ts';
 import { DEFAULT_SETTINGS } from '../main';
 
 export class GraphController {
@@ -28,52 +28,52 @@ export class GraphController {
   private mouseDownHandler?       : ((e: MouseEvent) => void);
   private mouseUpHandler?         : ((e: MouseEvent) => void);
   private draggingNode?           : any                   | null;
-  private dragStartDepth          : number = 0;
+  private dragStartDepth          : number        = 0;
   private dragOffsetWorld         : { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
-  private isPanning               : boolean = false;
-  private lastPanX                : number = 0;
-  private lastPanY                : number = 0;
-  private isOrbiting              : boolean = false;
-  private lastOrbitX              : number = 0;
-  private lastOrbitY              : number = 0;
-  private isMiddlePanning         : boolean = false;
-  private panStartX               : number = 0;
-  private panStartY               : number = 0;
-  private panStartTargetX         : number = 0;
-  private panStartTargetY         : number = 0;
+  private isPanning               : boolean       = false;
+  private lastPanX                : number        = 0;
+  private lastPanY                : number        = 0;
+  private isOrbiting              : boolean       = false;
+  private lastOrbitX              : number        = 0;
+  private lastOrbitY              : number        = 0;
+  private isMiddlePanning         : boolean       = false;
+  private panStartX               : number        = 0;
+  private panStartY               : number        = 0;
+  private panStartTargetX         : number        = 0;
+  private panStartTargetY         : number        = 0;
   private pendingFocusNode        : any | null = null;
-  private pendingFocusDownX       : number = 0;
-  private pendingFocusDownY       : number = 0;
+  private pendingFocusDownX       : number        = 0;
+  private pendingFocusDownY       : number        = 0;
   private cameraAnimStart         : number | null = null;
-  private cameraAnimDuration      : number = 300; // ms
-  private cameraAnimFrom          : any = null;
-  private cameraAnimTo            : any = null;
-  private isCameraFollowing       : boolean = false;
-  private cameraFollowNode        : any | null = null;
-  private hasDragged              : boolean = false;
-  private preventClick            : boolean = false;
-  private downScreenX             : number = 0;
-  private downScreenY             : number = 0;
-  private lastWorldX              : number = 0;
-  private lastWorldY              : number = 0;
-  private lastDragTime            : number = 0;
-  private dragVx                  : number = 0;
-  private dragVy                  : number = 0;
-  private momentumScale           : number = 0.12;
-  private dragThreshold           : number = 4;
-  private lastPreviewedNodeId     : string      | null = null;
-  private previewLockNodeId       : string      | null = null;
-  private previewPollTimer        : number      | null = null;
-  private controlsEl              : HTMLElement | null = null;
-  private lastMouseX              : number      | null = null;
-  private lastMouseY              : number      | null = null;
-  private followLockedNodeId      : string      | null = null;
-  private centerNode              : any         | null = null;
-  private defaultCameraDistance   : number = 1200;
-  private lastUsePinnedCenterNote : boolean = false;
-  private lastPinnedCenterNotePath: string = '';
-  private viewCenterX             : number = 0;
-  private viewCenterY             : number = 0;
+  private cameraAnimDuration      : number        = 300; // ms
+  private cameraAnimFrom          : any           = null;
+  private cameraAnimTo            : any           = null;
+  private isCameraFollowing       : boolean       = false;
+  private cameraFollowNode        : any | null    = null;
+  private hasDragged              : boolean       = false;
+  private preventClick            : boolean       = false;
+  private downScreenX             : number        = 0;
+  private downScreenY             : number        = 0;
+  private lastWorldX              : number        = 0;
+  private lastWorldY              : number        = 0;
+  private lastDragTime            : number        = 0;
+  private dragVx                  : number        = 0;
+  private dragVy                  : number        = 0;
+  private momentumScale           : number        = 0.12;
+  private dragThreshold           : number        = 4;
+  private lastPreviewedNodeId     : string        | null = null;
+  private previewLockNodeId       : string        | null = null;
+  private previewPollTimer        : number        | null = null;
+  private controlsEl              : HTMLElement   | null = null;
+  private lastMouseX              : number        | null = null;
+  private lastMouseY              : number        | null = null;
+  private followLockedNodeId      : string        | null = null;
+  private centerNode              : any           | null = null;
+  private defaultCameraDistance   : number        = 1200;
+  private lastUsePinnedCenterNote : boolean       = false;
+  private lastPinnedCenterNotePath: string        = '';
+  private viewCenterX             : number        = 0;
+  private viewCenterY             : number        = 0;
   private suppressAttractorUntilMouseMove : boolean = false;
   private saveNodePositionsDebounced: (() => void) | null = null;
 
@@ -141,12 +141,12 @@ export class GraphController {
 // INIT
 
   async init(): Promise<void> {
-    const canvas = document.createElement('canvas');
-    canvas.style.width = '100%';
+    const canvas        = document.createElement('canvas');
+    canvas.style.width  = '100%';
     canvas.style.height = '100%';
-    canvas.tabIndex = 0;
+    canvas.tabIndex     = 0;
     this.containerEl.appendChild(canvas);
-    this.canvas = canvas;
+    this.canvas         = canvas;
 
     // create in-view controls panel
     //this.createControlsPanel();
@@ -155,36 +155,27 @@ export class GraphController {
     const settings: Settings = Object.assign({}, DEFAULT_SETTINGS, userSettings);
     //const settings = Object.assign({}, (this.plugin as any).settings || {});
     this.renderer = createRenderer2D({ canvas, settings });
-    // Ensure sane fallback alphas so nodes are visible even if settings are unset
-    /*try {
-      const defaults = {
-        nodeColorAlpha: 1.0,
-        edgeColorAlpha: 0.6,
-        tagColorAlpha: 1.0,
-      } as any;
-      const merged = Object.assign({}, defaults, (this.plugin as any).settings?.glow || {});
-      if ((this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings(merged);
-    } catch (e) {}*/
+   
     try {
       const cam0 = (this.renderer as any).getCamera?.();
       if (cam0 && typeof cam0.distance === 'number') this.defaultCameraDistance = cam0.distance;
     } catch (e) {}
     // Apply initial render options (whether to draw mutual links as double lines)
     try {
-      const drawDouble = Boolean((this.plugin as any).settings?.mutualLinkDoubleLine);
-      const showTags = (this.plugin as any).settings?.showTags !== false;
+      const drawDouble  = Boolean((this.plugin as any).settings?.mutualLinkDoubleLine);
+      const showTags    = (this.plugin as any).settings?.showTags !== false;
       if (this.renderer && (this.renderer as any).setRenderOptions) (this.renderer as any).setRenderOptions({ mutualDoubleLines: drawDouble, showTags });
     } catch (e) {}
 
     // track center selection settings for change detection
-    this.lastUsePinnedCenterNote = Boolean((this.plugin as any).settings?.usePinnedCenterNote);
-    this.lastPinnedCenterNotePath = String((this.plugin as any).settings?.pinnedCenterNotePath || '');
+    this.lastUsePinnedCenterNote  = Boolean((this.plugin as any).settings?.usePinnedCenterNote);
+    this.lastPinnedCenterNotePath = String ((this.plugin as any).settings?.pinnedCenterNotePath || '');
 
     this.graph = await buildGraph(this.app, {
-      countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks),
-      usePinnedCenterNote: Boolean((this.plugin as any).settings?.usePinnedCenterNote),
-      pinnedCenterNotePath: String((this.plugin as any).settings?.pinnedCenterNotePath || ''),
-      useOutlinkFallback: Boolean((this.plugin as any).settings?.useOutlinkFallback),
+      countDuplicates     : Boolean((this.plugin as any).settings?.countDuplicateLinks),
+      usePinnedCenterNote : Boolean((this.plugin as any).settings?.usePinnedCenterNote),
+      pinnedCenterNotePath: String ((this.plugin as any).settings?.pinnedCenterNotePath || ''),
+      useOutlinkFallback  : Boolean((this.plugin as any).settings?.useOutlinkFallback),
     } as any);
 
     // Restore saved positions from plugin settings (do not override saved positions)
@@ -305,13 +296,13 @@ export class GraphController {
 
     // read interaction settings (drag momentum / threshold)
     try {
-      const interaction = (this.plugin as any).settings?.interaction || {};
-      this.momentumScale = interaction.momentumScale ?? this.momentumScale;
-      this.dragThreshold = interaction.dragThreshold ?? this.dragThreshold;
+      const interaction   = (this.plugin as any).settings?.interaction || {};
+      this.momentumScale  = interaction.momentumScale ?? this.momentumScale;
+      this.dragThreshold  = interaction.dragThreshold ?? this.dragThreshold;
     } catch (e) {}
 
-    this.running = true;
-    this.lastTime = null;
+    this.running        = true;
+    this.lastTime       = null;
     this.animationFrame = requestAnimationFrame(this.animationLoop);
 
     // setup debounced saver for node positions
@@ -336,9 +327,9 @@ export class GraphController {
         // map screen -> world at the stored camera-space depth so dragging respects yaw/pitch
         let world: any = null;
         try {
-          const cam = (this.renderer as any).getCamera();
-          const width = this.canvas ? this.canvas.width : (this.containerEl.getBoundingClientRect().width || 300);
-          const height = this.canvas ? this.canvas.height : (this.containerEl.getBoundingClientRect().height || 200);
+          const cam     = (this.renderer as any).getCamera();
+          const width   = this.canvas ? this.canvas.width   : (this.containerEl.getBoundingClientRect().width || 300);
+          const height  = this.canvas ? this.canvas.height  : (this.containerEl.getBoundingClientRect().height || 200);
           if ((this.renderer as any).screenToWorldAtDepth) {
             world = (this.renderer as any).screenToWorldAtDepth(screenX, screenY, this.dragStartDepth, width, height, cam);
           } else {
@@ -353,7 +344,7 @@ export class GraphController {
           const dxs = screenX - this.downScreenX;
           const dys = screenY - this.downScreenY;
           if (Math.sqrt(dxs * dxs + dys * dys) > this.dragThreshold) {
-            this.hasDragged = true;
+            this.hasDragged   = true;
             this.preventClick = true;
           }
         }
@@ -364,16 +355,15 @@ export class GraphController {
         this.dragVy = ((world.y + this.dragOffsetWorld.y) - this.lastWorldY) / dt;
 
         // override node position and zero velocities so physics doesn't move it
-        this.draggingNode.x = world.x + this.dragOffsetWorld.x;
-        this.draggingNode.y = world.y + this.dragOffsetWorld.y;
-        this.draggingNode.z = (world.z || 0) + this.dragOffsetWorld.z;
-        this.draggingNode.vx = 0;
-        this.draggingNode.vy = 0;
-        this.draggingNode.vz = 0;
-
-        this.lastWorldX = this.draggingNode.x;
-        this.lastWorldY = this.draggingNode.y;
-        this.lastDragTime = now;
+        this.draggingNode.x   = world.x         + this.dragOffsetWorld.x;
+        this.draggingNode.y   = world.y         + this.dragOffsetWorld.y;
+        this.draggingNode.z   = (world.z || 0)  + this.dragOffsetWorld.z;
+        this.draggingNode.vx  = 0;
+        this.draggingNode.vy  = 0;
+        this.draggingNode.vz  = 0;
+        this.lastWorldX       = this.draggingNode.x;
+        this.lastWorldY       = this.draggingNode.y;
+        this.lastDragTime     = now;
 
         this.renderer.render();
         // while dragging, disable the mouse attractor so physics doesn't fight the drag
@@ -432,9 +422,9 @@ export class GraphController {
         const dy = screenY - this.panStartY;
         try {
           const cam = (this.renderer as any).getCamera();
-          const panSpeed = cam.distance * 0.001 / Math.max(0.0001, cam.zoom);
-          const newTargetX = this.panStartTargetX - dx * panSpeed;
-          const newTargetY = this.panStartTargetY + dy * panSpeed;
+          const panSpeed    = cam.distance * 0.001 / Math.max(0.0001, cam.zoom);
+          const newTargetX  = this.panStartTargetX - dx * panSpeed;
+          const newTargetY  = this.panStartTargetY + dy * panSpeed;
           (this.renderer as any).setCamera({ targetX: newTargetX, targetY: newTargetY });
           (this.renderer as any).render();
         } catch (e) {}
@@ -485,11 +475,11 @@ export class GraphController {
         // any user wheel action cancels camera following but should NOT cancel
         // the preview hover lock so highlighting remains while zooming.
         this.followLockedNodeId = null;
-        const cam = (this.renderer as any).getCamera();
+        const cam       = (this.renderer as any).getCamera();
         const zoomSpeed = 0.0015;
-        const factor = Math.exp(ev.deltaY * zoomSpeed);
-        let distance = (cam.distance || 1000) * factor;
-        distance = Math.max(200, Math.min(8000, distance));
+        const factor    = Math.exp(ev.deltaY * zoomSpeed);
+        let distance    = (cam.distance || 1000) * factor;
+        distance        = Math.max(200, Math.min(8000, distance));
         (this.renderer as any).setCamera({ distance });
         (this.renderer as any).render();
       } catch (e) {}
@@ -497,7 +487,7 @@ export class GraphController {
 
     this.mouseDownHandler = (ev: MouseEvent) => {
       if (!this.canvas || !this.renderer) return;
-      const r = this.canvas.getBoundingClientRect();
+      const r       = this.canvas.getBoundingClientRect();
       const screenX = ev.clientX - r.left;
       const screenY = ev.clientY - r.top;
       // Right button -> either mark pending focus on node or pending focus on empty (origin)
@@ -506,16 +496,16 @@ export class GraphController {
         const hitNode = this.hitTestNodeScreen(screenX, screenY);
         if (hitNode) {
           // pending focus on this node
-          this.pendingFocusNode = hitNode;
-          this.pendingFocusDownX = screenX;
-          this.pendingFocusDownY = screenY;
+          this.pendingFocusNode   = hitNode;
+          this.pendingFocusDownX  = screenX;
+          this.pendingFocusDownY  = screenY;
           ev.preventDefault();
           return;
         } else {
           // pending focus to reset to origin (0,0,0) if click (no drag)
-          this.pendingFocusNode = '__origin__';
-          this.pendingFocusDownX = screenX;
-          this.pendingFocusDownY = screenY;
+          this.pendingFocusNode   = '__origin__';
+          this.pendingFocusDownX  = screenX;
+          this.pendingFocusDownY  = screenY;
           ev.preventDefault();
           return;
         }
@@ -523,12 +513,12 @@ export class GraphController {
       // Middle button -> start camera target pan
       if (ev.button === 1) {
         try {
-          const cam = (this.renderer as any).getCamera();
-          this.isMiddlePanning = true;
-          this.panStartX = screenX;
-          this.panStartY = screenY;
-          this.panStartTargetX = cam.targetX;
-          this.panStartTargetY = cam.targetY;
+          const cam             = (this.renderer as any).getCamera();
+          this.isMiddlePanning  = true;
+          this.panStartX        = screenX;
+          this.panStartY        = screenY;
+          this.panStartTargetX  = cam.targetX;
+          this.panStartTargetY  = cam.targetY;
           ev.preventDefault();
           return;
         } catch (e) {}
@@ -537,12 +527,12 @@ export class GraphController {
       const world = (this.renderer as any).screenToWorld(screenX, screenY);
 
       // initialize drag tracking
-      this.hasDragged = false;
+      this.hasDragged   = false;
       this.preventClick = false;
-      this.downScreenX = screenX;
-      this.downScreenY = screenY;
-      this.lastWorldX = world.x;
-      this.lastWorldY = world.y;
+      this.downScreenX  = screenX;
+      this.downScreenY  = screenY;
+      this.lastWorldX   = world.x;
+      this.lastWorldY   = world.y;
       this.lastDragTime = performance.now();
 
       // Hit-test in screen coords to see if a node was clicked
@@ -558,16 +548,16 @@ export class GraphController {
           // begin 3D-aware drag: compute camera-space depth and world offset at click
           this.draggingNode = hit;
           try {
-            const cam = (this.renderer as any).getCamera();
-            const proj = (this.renderer as any).getProjectedNode ? (this.renderer as any).getProjectedNode(hit) : null;
-            const depth = proj ? proj.depth : 1000;
-            this.dragStartDepth = depth;
-            const width = this.canvas ? this.canvas.width : (this.containerEl.getBoundingClientRect().width || 300);
-            const height = this.canvas ? this.canvas.height : (this.containerEl.getBoundingClientRect().height || 200);
-            const screenXClient = proj ? proj.x : screenX;
-            const screenYClient = proj ? proj.y : screenY;
-            const worldAtCursor = (this.renderer as any).screenToWorldAtDepth ? (this.renderer as any).screenToWorldAtDepth(screenXClient, screenYClient, depth, width, height, cam) : (this.renderer as any).screenToWorld(screenXClient, screenYClient);
-            this.dragOffsetWorld = {
+            const cam             = (this.renderer as any).getCamera();
+            const proj            = (this.renderer as any).getProjectedNode ? (this.renderer as any).getProjectedNode(hit) : null;
+            const depth           = proj ? proj.depth : 1000;
+            this.dragStartDepth   = depth;
+            const width           = this.canvas ? this.canvas.width  : (this.containerEl.getBoundingClientRect().width || 300);
+            const height          = this.canvas ? this.canvas.height : (this.containerEl.getBoundingClientRect().height || 200);
+            const screenXClient   = proj ? proj.x : screenX;
+            const screenYClient   = proj ? proj.y : screenY;
+            const worldAtCursor   = (this.renderer as any).screenToWorldAtDepth ? (this.renderer as any).screenToWorldAtDepth(screenXClient, screenYClient, depth, width, height, cam) : (this.renderer as any).screenToWorld(screenXClient, screenYClient);
+            this.dragOffsetWorld  = {
               x: (hit.x || 0) - (worldAtCursor.x || 0),
               y: (hit.y || 0) - (worldAtCursor.y || 0),
               z: (hit.z || 0) - (worldAtCursor.z || 0),
@@ -632,7 +622,7 @@ export class GraphController {
                 try { if ((this.renderer as any).resetPanToCenter) (this.renderer as any).resetPanToCenter(); } catch (e) {}
                 this.followLockedNodeId = null; this.previewLockNodeId = null;
                 try {
-                  if ((this.renderer as any).setHoverState) (this.renderer as any).setHoverState(null, new Set(), 0, 0);
+                  if ((this.renderer as any).setHoverState ) (this.renderer as any).setHoverState(null, new Set(), 0, 0);
                   if ((this.renderer as any).setHoveredNode) (this.renderer as any).setHoveredNode(null);
                   (this.renderer as any).render?.();
                 } catch (e) {}
@@ -709,19 +699,18 @@ export class GraphController {
           }
           // update interaction settings live
           try {
-            const interaction = (this.plugin as any).settings?.interaction || {};
-            this.momentumScale = interaction.momentumScale ?? this.momentumScale;
-            this.dragThreshold = interaction.dragThreshold ?? this.dragThreshold;
+            const interaction   = (this.plugin as any).settings?.interaction || {};
+            this.momentumScale  = interaction.momentumScale ?? this.momentumScale;
+            this.dragThreshold  = interaction.dragThreshold ?? this.dragThreshold;
           } catch (e) {}
 
           // If center selection settings changed, rebuild graph
           try {
-            const usePinned = Boolean((this.plugin as any).settings?.usePinnedCenterNote);
-            const pinnedPath = String((this.plugin as any).settings?.pinnedCenterNotePath || '');
-            if (usePinned !== this.lastUsePinnedCenterNote || pinnedPath !== this.lastPinnedCenterNotePath) {
-              this.lastUsePinnedCenterNote = usePinned;
+            const usePinned   = Boolean((this.plugin as any).settings?.usePinnedCenterNote);
+            const pinnedPath  = String((this.plugin as any).settings?.pinnedCenterNotePath || '');
+            if (usePinned   !== this.lastUsePinnedCenterNote || pinnedPath !== this.lastPinnedCenterNotePath) {
+              this.lastUsePinnedCenterNote  = usePinned;
               this.lastPinnedCenterNotePath = pinnedPath;
-              // schedule a graph refresh
               this.refreshGraph();
             }
           } catch (e) {}
@@ -732,128 +721,10 @@ export class GraphController {
     }
   }
 
-  
-
-  // Synchronize the toolbox UI controls from current plugin settings
-  /*private refreshControlsFromSettings(): void {
-    try {
-      if (!this.controlsEl) return;
-      const settings = (this.plugin as any).settings || {};
-      const glow = settings.glow || {};
-      const phys = settings.physics || {};
-      // Iterate rows and update known inputs by label text
-      const panel = this.controlsEl;
-      for (let i = 0; i < panel.children.length; i++) {
-        const row = panel.children[i] as HTMLElement;
-        const labelEl = row.querySelector('label');
-        const right = row.querySelector('div:last-child');
-        if (!labelEl || !right) continue;
-        const name = (labelEl.textContent || '').toLowerCase();
-        const inputs = Array.from(right.querySelectorAll('input')) as HTMLInputElement[];
-        // Node color row
-        if (name.includes('node color')) {
-          const color = inputs.find((x) => x.type === 'color');
-          const alpha = inputs.find((x) => x.type === 'number');
-          if (color) color.value = String(glow.nodeColor || (color.value || '#66ccff'));
-          if (alpha) alpha.value = String(glow.nodeColorAlpha ?? 1.0);
-        }
-        // Edge color row
-        else if (name.includes('edge color')) {
-          const color = inputs.find((x) => x.type === 'color');
-          const alpha = inputs.find((x) => x.type === 'number');
-          if (color) color.value = String(glow.edgeColor || (color.value || '#888888'));
-          if (alpha) alpha.value = String(glow.edgeColorAlpha ?? 0.6);
-        }
-        // Tag color row
-        else if (name.includes('tag color')) {
-          const color = inputs.find((x) => x.type === 'color');
-          const alpha = inputs.find((x) => x.type === 'number');
-          if (color) color.value = String(glow.tagColor || (color.value || '#8000ff'));
-          if (alpha) alpha.value = String(glow.tagColorAlpha ?? 1.0);
-        }
-        // Highlight depth
-        else if (name.includes('highlight depth')) {
-          const range = inputs.find((x) => x.type === 'range');
-          const num = inputs.find((x) => x.type === 'number');
-          const v = String(glow.highlightDepth ?? 1);
-          if (range) range.value = v;
-          if (num) num.value = v;
-        }
-        // Label visibility (min + fade)
-        else if (name.includes('label visibility')) {
-          const ranges = inputs.filter((x) => x.type === 'range');
-          const nums = inputs.filter((x) => x.type === 'number');
-          const minV = String(glow.labelMinVisibleRadiusPx ?? 6);
-          const fadeV = String(glow.labelFadeRangePx ?? 8);
-          if (ranges[0]) ranges[0].value = minV;
-          if (nums[0]) nums[0].value = minV;
-          if (ranges[1]) ranges[1].value = fadeV;
-          if (nums[1]) nums[1].value = fadeV;
-        }
-        // Count duplicate links
-        else if (name.includes('count duplicate links')) {
-          const chk = inputs.find((x) => x.type === 'checkbox');
-          if (chk) chk.checked = Boolean(settings.countDuplicateLinks);
-        }
-        // Show tag nodes
-        else if (name.includes('show tag nodes')) {
-          const chk = inputs.find((x) => x.type === 'checkbox');
-          if (chk) chk.checked = (settings.showTags !== false);
-        }
-        // Mouse gravity toggle
-        else if (name.includes('mouse gravity')) {
-          const chk = inputs.find((x) => x.type === 'checkbox');
-          if (chk) chk.checked = (phys.mouseGravityEnabled !== false) && (phys.mouseAttractionEnabled !== false);
-        }
-        // Physics numeric ranges
-        else if (name.includes('repulsion')) {
-          const range = inputs.find((x) => x.type === 'range');
-          const num = inputs.find((x) => x.type === 'number');
-          const internal = Number(phys.repulsionStrength ?? 0);
-          const ui = Math.min(1, Math.max(0, Math.sqrt(Math.max(0, internal / 2000))));
-          const v = String(ui);
-          if (range) range.value = v;
-          if (num) num.value = v;
-        } else if (name.includes('spring len')) {
-          const range = inputs.find((x) => x.type === 'range');
-          const num = inputs.find((x) => x.type === 'number');
-          const val = String(phys.springLength ?? 100);
-          if (range) range.value = val;
-          if (num) num.value = val;
-        } else if (name.includes('spring')) {
-          const range = inputs.find((x) => x.type === 'range');
-          const num = inputs.find((x) => x.type === 'number');
-          // UI is 0..1 for spring strength in toolbox; we keep value as-is
-          const ui = phys.springStrength != null ? String(Math.min(1, Math.max(0, Number(phys.springStrength) / 0.5))) : '0';
-          if (range) range.value = ui;
-          if (num) num.value = ui;
-        } else if (name.includes('center pull')) {
-          const range = inputs.find((x) => x.type === 'range');
-          const num = inputs.find((x) => x.type === 'number');
-          const ui = phys.centerPull != null ? String(Math.min(1, Math.max(0, Number(phys.centerPull) / 0.01))) : '0';
-          if (range) range.value = ui;
-          if (num) num.value = ui;
-        } else if (name.includes('damping')) {
-          const range = inputs.find((x) => x.type === 'range');
-          const num = inputs.find((x) => x.type === 'number');
-          const val = String(phys.damping ?? 0.7);
-          if (range) range.value = val;
-          if (num) num.value = val;
-        } else if (name.includes('mouse attraction exponent')) {
-          const range = inputs.find((x) => x.type === 'range');
-          const num = inputs.find((x) => x.type === 'number');
-          const val = String(phys.mouseAttractionExponent ?? 3);
-          if (range) range.value = val;
-          if (num) num.value = val;
-        }
-      }
-    } catch (e) {}
-  }*/
-
   private animationLoop = (timestamp: number) => {
     if (!this.running) return;
     if (!this.lastTime) {
-      this.lastTime = timestamp;
+      this.lastTime       = timestamp;
       this.animationFrame = requestAnimationFrame(this.animationLoop);
       return;
     }
@@ -867,11 +738,11 @@ export class GraphController {
       if (this.followLockedNodeId && this.graph && this.renderer) {
         const n = this.graph.nodes.find((x: any) => x.id === this.followLockedNodeId);
         if (n) {
-          const cam = (this.renderer as any).getCamera();
+          const cam   = (this.renderer as any).getCamera();
           const alpha = 0.12;
-          const tx = cam.targetX + ((n.x ?? 0) - (cam.targetX ?? 0)) * alpha;
-          const ty = cam.targetY + ((n.y ?? 0) - (cam.targetY ?? 0)) * alpha;
-          const tz = cam.targetZ + ((n.z ?? 0) - (cam.targetZ ?? 0)) * alpha;
+          const tx    = cam.targetX + ((n.x ?? 0) - (cam.targetX ?? 0)) * alpha;
+          const ty    = cam.targetY + ((n.y ?? 0) - (cam.targetY ?? 0)) * alpha;
+          const tz    = cam.targetZ + ((n.z ?? 0) - (cam.targetZ ?? 0)) * alpha;
           (this.renderer as any).setCamera({ targetX: tx, targetY: ty, targetZ: tz });
         }
       }
@@ -908,13 +779,13 @@ export class GraphController {
     // setting as an absolute pixel gravity/glow radius (capped at 50). If
     // unset, fall back to multiplier-based behavior (6× node screen radius).
     const rawGravitySetting = Number.isFinite(glow.gravityRadius) ? Number(glow.gravityRadius) : NaN;
-    const gravityRadiusPx = (Number.isFinite(rawGravitySetting) && rawGravitySetting > 0) ? Math.min(50, rawGravitySetting) : NaN;
+    const gravityRadiusPx   = (Number.isFinite(rawGravitySetting) && rawGravitySetting > 0) ? Math.min(50, rawGravitySetting) : NaN;
     const defaultMultiplier = 6;
-    const steepness = Number.isFinite(glow.gravityCurveSteepness) ? Number(glow.gravityCurveSteepness) : (physics.mouseAttractionExponent ?? 3);
-    const baseStrength = Number.isFinite(physics.mouseAttractionStrength) ? Number(physics.mouseAttractionStrength) : 0.6;
+    const steepness         = Number.isFinite(glow.gravityCurveSteepness) ? Number(glow.gravityCurveSteepness) : (physics.mouseAttractionExponent ?? 3);
+    const baseStrength      = Number.isFinite(physics.mouseAttractionStrength) ? Number(physics.mouseAttractionStrength) : 0.6;
     if (baseStrength === 0) return;
 
-    const cam = (this.renderer as any).getCamera();
+    const cam   = (this.renderer as any).getCamera();
     const basis = (this.renderer as any).getCameraBasis ? (this.renderer as any).getCameraBasis(cam) : null;
     if (!basis) return;
     const { right, up } = basis;
@@ -923,13 +794,13 @@ export class GraphController {
       const proj = (this.renderer as any).getProjectedNode ? (this.renderer as any).getProjectedNode(node) : null;
       if (!proj) continue;
 
-      const dxScreen = (this.lastMouseX as number) - proj.x;
-      const dyScreen = (this.lastMouseY as number) - proj.y;
-      const distScreen = Math.sqrt(dxScreen * dxScreen + dyScreen * dyScreen);
+      const dxScreen    = (this.lastMouseX as number) - proj.x;
+      const dyScreen    = (this.lastMouseY as number) - proj.y;
+      const distScreen  = Math.sqrt(dxScreen * dxScreen + dyScreen * dyScreen);
 
       // Determine per-node attraction radius in screen space
       const nodeScreenR = Number.isFinite(proj.r) ? Math.max(4, Number(proj.r)) : 8;
-      const radius = Number.isFinite(gravityRadiusPx) ? Math.max(8, gravityRadiusPx) : Math.max(8, nodeScreenR * defaultMultiplier);
+      const radius      = Number.isFinite(gravityRadiusPx) ? Math.max(8, gravityRadiusPx) : Math.max(8, nodeScreenR * defaultMultiplier);
       if (distScreen > radius || distScreen === 0) continue;
 
       // Jitter suppression: deadzone near cursor
@@ -976,8 +847,8 @@ export class GraphController {
     // Start an animated camera focus and enable following of the node.
     if (!this.renderer || !node) return;
     try {
-      const cam = (this.renderer as any).getCamera();
-      const from = {
+      const cam   = (this.renderer as any).getCamera();
+      const from  = {
         targetX: cam.targetX ?? 0,
         targetY: cam.targetY ?? 0,
         targetZ: cam.targetZ ?? 0,
@@ -1010,14 +881,14 @@ export class GraphController {
       if (this.isCameraFollowing && this.cameraFollowNode) {
         const n = this.cameraFollowNode;
         try {
-          const cam = (this.renderer as any).getCamera();
+          const cam         = (this.renderer as any).getCamera();
           const followAlpha = 0.12; // smoothing factor per frame (0-1)
-          const curX = cam.targetX ?? 0;
-          const curY = cam.targetY ?? 0;
-          const curZ = cam.targetZ ?? 0;
-          const newX = curX + ((n.x ?? 0) - curX) * followAlpha;
-          const newY = curY + ((n.y ?? 0) - curY) * followAlpha;
-          const newZ = curZ + ((n.z ?? 0) - curZ) * followAlpha;
+          const curX        = cam.targetX ?? 0;
+          const curY        = cam.targetY ?? 0;
+          const curZ        = cam.targetZ ?? 0;
+          const newX        = curX + ((n.x ?? 0) - curX) * followAlpha;
+          const newY        = curY + ((n.y ?? 0) - curY) * followAlpha;
+          const newZ        = curZ + ((n.z ?? 0) - curZ) * followAlpha;
           (this.renderer as any).setCamera({ targetX: newX, targetY: newY, targetZ: newZ });
         } catch (e) {}
       }
@@ -1025,16 +896,16 @@ export class GraphController {
     }
     const t = Math.min(1, (now - this.cameraAnimStart) / this.cameraAnimDuration);
     // easeOutQuad
-    const ease = 1 - (1 - t) * (1 - t);
-    const from = this.cameraAnimFrom || {};
-    const to = this.cameraAnimTo || {};
-    const lerp = (a: number, b: number) => a + (b - a) * ease;
+    const ease  = 1 - (1 - t) * (1 - t);
+    const from  = this.cameraAnimFrom || {};
+    const to    = this.cameraAnimTo || {};
+    const lerp  = (a: number, b: number) => a + (b - a) * ease;
     const cameraState: any = {};
-    if (typeof from.targetX === 'number' && typeof to.targetX === 'number') cameraState.targetX = lerp(from.targetX, to.targetX);
-    if (typeof from.targetY === 'number' && typeof to.targetY === 'number') cameraState.targetY = lerp(from.targetY, to.targetY);
-    if (typeof from.targetZ === 'number' && typeof to.targetZ === 'number') cameraState.targetZ = lerp(from.targetZ, to.targetZ);
-    if (typeof from.distance === 'number' && typeof to.distance === 'number') cameraState.distance = lerp(from.distance, to.distance);
-    if (typeof from.yaw === 'number' && typeof to.yaw === 'number') cameraState.yaw = lerp(from.yaw, to.yaw);
+    if (typeof from.targetX   === 'number' && typeof to.targetX   === 'number')   cameraState.targetX   = lerp(from.targetX, to.targetX);
+    if (typeof from.targetY   === 'number' && typeof to.targetY   === 'number')   cameraState.targetY   = lerp(from.targetY, to.targetY);
+    if (typeof from.targetZ   === 'number' && typeof to.targetZ   === 'number')   cameraState.targetZ   = lerp(from.targetZ, to.targetZ);
+    if (typeof from.distance  === 'number' && typeof to.distance  === 'number')   cameraState.distance  = lerp(from.distance, to.distance);
+    if (typeof from.yaw   === 'number' && typeof to.yaw   === 'number') cameraState.yaw   = lerp(from.yaw, to.yaw);
     if (typeof from.pitch === 'number' && typeof to.pitch === 'number') cameraState.pitch = lerp(from.pitch, to.pitch);
     try { (this.renderer as any).setCamera(cameraState); } catch (e) {}
     // At end of animation, clear anim state but keep follow active so camera follows node
@@ -1052,10 +923,10 @@ export class GraphController {
     if (!this.canvas) return;
     try {
       const newGraph = await buildGraph(this.app, {
-        countDuplicates: Boolean((this.plugin as any).settings?.countDuplicateLinks),
-        usePinnedCenterNote: Boolean((this.plugin as any).settings?.usePinnedCenterNote),
-        pinnedCenterNotePath: String((this.plugin as any).settings?.pinnedCenterNotePath || ''),
-        useOutlinkFallback: Boolean((this.plugin as any).settings?.useOutlinkFallback),
+        countDuplicates       : Boolean((this.plugin as any).settings?.countDuplicateLinks),
+        usePinnedCenterNote   : Boolean((this.plugin as any).settings?.usePinnedCenterNote),
+        pinnedCenterNotePath  : String ((this.plugin as any).settings?.pinnedCenterNotePath || ''),
+        useOutlinkFallback    : Boolean((this.plugin as any).settings?.useOutlinkFallback),
       } as any);
       this.graph = newGraph;
 
@@ -1089,13 +960,13 @@ export class GraphController {
       }
 
       // layout using current size and center
-      const rect = this.containerEl.getBoundingClientRect();
-      const width = rect.width || 300;
-      const height = rect.height || 200;
-      const centerX = width / 2;
-      const centerY = height / 2;
-      this.viewCenterX = centerX;
-      this.viewCenterY = centerY;
+      const rect        = this.containerEl.getBoundingClientRect();
+      const width       = rect.width || 300;
+      const height      = rect.height || 200;
+      const centerX     = width / 2;
+      const centerY     = height / 2;
+      this.viewCenterX  = centerX;
+      this.viewCenterY  = centerY;
 
       if (this.renderer && this.graph) {
         this.renderer.setGraph(this.graph);
@@ -1142,27 +1013,27 @@ export class GraphController {
     try { this.saveNodePositions(); } catch (e) {}
     // clear any preview poll timer and lock
     try { if (this.previewPollTimer) window.clearInterval(this.previewPollTimer as number); } catch (e) {}
-    this.previewPollTimer = null;
-    this.previewLockNodeId = null;
-    this.lastPreviewedNodeId = null;
+    this.previewPollTimer     = null;
+    this.previewLockNodeId    = null;
+    this.lastPreviewedNodeId  = null;
     this.renderer?.destroy();
     if (this.canvas && this.canvas.parentElement) this.canvas.parentElement.removeChild(this.canvas);
-    this.canvas = null;
-    this.renderer = null;
-    this.graph = null;
-    if (this.simulation) { try { this.simulation.stop(); } catch (e) {} this.simulation = null; }
-    if (this.animationFrame) { try { cancelAnimationFrame(this.animationFrame); } catch (e) {} this.animationFrame = null; this.lastTime = null; this.running = false; }
-    this.onNodeClick = null;
-    if (this.settingsUnregister) { try { this.settingsUnregister(); } catch (e) {} this.settingsUnregister = null; }
+    this.canvas                   = null;
+    this.renderer                 = null;
+    this.graph                    = null;
+    if (this.simulation)          { try { this.simulation.stop(); } catch (e) {} this.simulation = null; }
+    if (this.animationFrame)      { try { cancelAnimationFrame(this.animationFrame); } catch (e) {} this.animationFrame = null; this.lastTime = null; this.running = false; }
+    this.onNodeClick              = null;
+    if (this.settingsUnregister)  { try { this.settingsUnregister(); } catch (e) {} this.settingsUnregister = null; }
   }
 
   setNodeClickHandler(handler: ((node: any) => void) | null) { this.onNodeClick = handler; }
 
   private hitTestNodeScreen(screenX: number, screenY: number) {
     if (!this.graph || !this.renderer) return null;
-    let closest: any = null;
-    let closestDist = Infinity;
-    const hitPadding = 6;
+    let closest: any  = null;
+    let closestDist   = Infinity;
+    const hitPadding  = 6;
     const scale = (this.renderer as any).getScale ? (this.renderer as any).getScale() : 1;
     for (const node of this.graph.nodes) {
       const sp = (this.renderer as any).getNodeScreenPosition ? (this.renderer as any).getNodeScreenPosition(node) : null;
@@ -1209,7 +1080,7 @@ export class GraphController {
       this.previewLockNodeId = null;
       this.lastPreviewedNodeId = null;
       try {
-        if (this.renderer && (this.renderer as any).setHoverState) (this.renderer as any).setHoverState(null, new Set(), 0, 0);
+        if (this.renderer && (this.renderer as any).setHoverState ) (this.renderer as any).setHoverState(null, new Set(), 0, 0);
         if (this.renderer && (this.renderer as any).setHoveredNode) (this.renderer as any).setHoveredNode(null);
         if (this.renderer && (this.renderer as any).render) (this.renderer as any).render();
       } catch (e) {}
@@ -1324,12 +1195,12 @@ export class GraphController {
           // trigger native hover preview
           try {
             this.app.workspace.trigger('hover-link', {
-              event: ev,
-              source: 'greater-graph',
-              hoverParent: this.containerEl,
-              targetEl: this.canvas,
-              linktext: closest.filePath || closest.label,
-              sourcePath: closest.filePath,
+              event       : ev,
+              source      : 'greater-graph',
+              hoverParent : this.containerEl,
+              targetEl    : this.canvas,
+              linktext    : closest.filePath || closest.label,
+              sourcePath  : closest.filePath,
             } as any);
           } catch (e) {}
           // lock highlighting to this node until popover disappears
