@@ -21,13 +21,11 @@ export interface GraphNode {
 }
 
 export interface GraphEdge {
-  id?: string;
-  sourceId: string;
-  targetId: string;
-  // number of links from source -> target (resolvedLinks count)
-  linkCount?: number;
-  // whether the reverse edge (target->source) exists
-  hasReverse?: boolean;
+  id?           : string;
+  sourceId      : string;
+  targetId      : string;
+  linkCount?    : number;
+  bidirectional?: boolean;
 }
 
 export interface GraphData {
@@ -77,7 +75,7 @@ export async function buildGraph(app: App, options?: { countDuplicates?: boolean
       if (!edgeSet.has(key)) {
         const rawCount = Number(targets[targetPath] || 1) || 1;
         const linkCount = countDuplicates ? rawCount : 1;
-        edges.push({ id: key, sourceId: sourcePath, targetId: targetPath, linkCount, hasReverse: false });
+        edges.push({ id: key, sourceId: sourcePath, targetId: targetPath, linkCount, bidirectional: false });
         edgeSet.add(key);
       }
     }
@@ -159,7 +157,7 @@ export async function buildGraph(app: App, options?: { countDuplicates?: boolean
       const tagNode = ensureTagNode(tagName);
       const key = `${noteNode.id}->${tagNode.id}`;
       if (!edgeSet.has(key)) {
-        edges.push({ id: key, sourceId: noteNode.id, targetId: tagNode.id, linkCount: 1, hasReverse: false });
+        edges.push({ id: key, sourceId: noteNode.id, targetId: tagNode.id, linkCount: 1, bidirectional: false });
         edgeSet.add(key);
       }
     }
@@ -187,9 +185,9 @@ export async function buildGraph(app: App, options?: { countDuplicates?: boolean
   for (const e of edges) {
     const reverseKey = `${e.targetId}->${e.sourceId}`;
     if (edgeMap.has(reverseKey)) {
-      e.hasReverse = true;
+      e.bidirectional = true;
       const other = edgeMap.get(reverseKey)!;
-      other.hasReverse = true;
+      other.bidirectional = true;
     }
   }
 

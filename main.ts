@@ -1,64 +1,48 @@
-import { App, Plugin, PluginSettingTab, Setting } from 'obsidian';
-import { GraphView, GREATER_GRAPH_VIEW_TYPE } from './GraphView2.ts';
+import { App, Plugin, PluginSettingTab, Setting, TextComponent, ToggleComponent } from 'obsidian';
+import { GraphView, GREATER_GRAPH_VIEW_TYPE } from './GraphView.ts';
 
-export interface GlowSettings {
-  minNodeRadius: number;
-  maxNodeRadius: number;
-  minCenterAlpha: number;
-  maxCenterAlpha: number;
-  
-  // renamed: hoverHighlightDepth -> highlightDepth
-  highlightDepth: number;
-  // unified gravity/glow distance model
-  gravityRadius?: number; // scales per-node screen radius
-  labelRadius?: number;   // screen-space label reveal radius (× size)
-  highlightRadius?: number; // highlight falloff outer radius (× size)
-  gravityCurveSteepness?: number;   // falloff steepness
-  // focus/dimming controls
-  focusSmoothingRate?: number;
-  nodeMinBodyAlpha?: number;
-  // optional color overrides (CSS color strings). If unset, theme vars are used.
-  nodeColor?: string;
-  tagColor?: string;
-  labelColor?: string;
-  edgeColor?: string;
-  // base font size for labels (world-space units mapped to screen px via camera zoom)
-  labelBaseFontSize?: number;
-  // label visibility/fade (screen-space px)
+export interface VisualSettings {
+  minNodeRadius       : number;
+  maxNodeRadius       : number;
+  minCenterAlpha      : number;
+  maxCenterAlpha      : number;
+  highlightDepth      : number;  // screen-space label reveal radius (× size)
+  focusSmoothing      : number;
+  nodeColor?          : string;   // optional color overrides (CSS color strings). If unset, theme vars are used.
+  tagColor?           : string;
+  edgeColor?          : string;
+  labelColor?         : string;
+  labelBaseFontSize   : number;
+  labelFadeRangePx    : number;
+  labelRadius         : number;
+  nodeColorAlpha      : number;
+  tagColorAlpha       : number;
+  labelColorAlpha     : number;
+  edgeColorAlpha      : number;
+  useInterfaceFont    : boolean;
+}
 
-  labelFadeRangePx?: number;
-  // explicit glow radius in pixels (null/undefined to use multiplier-based glow)
-  //glowRadiusPx?: number | null;
-  // per-color alpha multipliers (0..1)
-  nodeColorAlpha?: number;
-  tagColorAlpha?: number;
-  labelColorAlpha?: number;
-  edgeColorAlpha?: number;
-  // whether to use Obsidian's interface font for labels (true) or a monospace/code font (false)
-  useInterfaceFont?: boolean;
+export interface PhysicsSettings {
+  repulsionStrength     : number;
+  springStrength        : number;
+  springLength          : number;
+  centerPull            : number;
+  damping               : number;
+  notePlaneStiffness    : number;
+  tagPlaneStiffness     : number;
+  centerX               : number;
+  centerY               : number;
+  centerZ               : number;
+  mouseGravityEnabled   : boolean;
+  gravityRadius         : number;   // scales per-node screen radius
+  gravityFallOff        : number;   // falloff steepness
 }
 
 export interface GreaterGraphSettings {
-  glow: GlowSettings;
-  physics?: {
-    repulsionStrength?: number;
-    springStrength?: number;
-    springLength?: number;
-    centerPull?: number;
-    damping?: number;
-    // plane constraints & 3D center
-    notePlaneStiffness?: number;
-    tagPlaneStiffness?: number;
-    centerX?: number;
-    centerY?: number;
-    centerZ?: number;
-    // mouse gravity well
-    mouseGravityEnabled?: boolean;
-  };
-  // whether to count duplicate links (multiple links between same files) when computing in/out degrees
-  countDuplicateLinks?: boolean;
-  // render mutual links as two parallel lines when enabled
-  mutualLinkDoubleLine?: boolean;
+  visuals               : VisualSettings;
+  physics               : PhysicsSettings;
+  countDuplicateLinks?  : boolean;
+  mutualLinkDoubleLine? : boolean;
   interaction?: {
     momentumScale?: number;
     dragThreshold?: number; // in screen pixels
@@ -76,52 +60,40 @@ export interface GreaterGraphSettings {
 }
 
 export const DEFAULT_SETTINGS: GreaterGraphSettings = {
-  glow: {
-    minNodeRadius: 3,
-    maxNodeRadius: 20,
-    minCenterAlpha: 0.1,
-    maxCenterAlpha: 0.6,
-    // (legacy hover/neighbor/dim factors removed; use gravity curve settings)
-    // renamed highlight depth
-    highlightDepth: 1,
-    // unified gravity/glow params
-    gravityRadius: 6,
-    gravityCurveSteepness: 3,
-    // focus/dimming defaults
-    focusSmoothingRate: 0.8,
-    
-        // color overrides left undefined by default to follow theme
-        nodeColor: undefined,
-        nodeColorAlpha: 0.1,
-        tagColor: undefined,
-        tagColorAlpha: 0.1,
-        labelColor: undefined,
-        labelBaseFontSize: 24,
-        labelFadeRangePx: 8,
-        //glowRadiusPx: null,
-        labelColorAlpha: 1.0,
-        useInterfaceFont: true,
-        edgeColor: undefined,
-        edgeColorAlpha: 0.1,
-        
+  visuals: {
+    minNodeRadius     : 3,
+    maxNodeRadius     : 20,
+    minCenterAlpha    : 0.1,
+    maxCenterAlpha    : 0.6,
+    highlightDepth    : 1,
+    focusSmoothing    : 0.8,
+    nodeColor         : undefined, // color overrides left undefined by default to follow theme
+    tagColor          : undefined,
+    labelColor        : undefined,
+    edgeColor         : undefined,
+    nodeColorAlpha    : 0.1,
+    tagColorAlpha     : 0.1,
+    labelBaseFontSize : 24,
+    labelFadeRangePx  : 8,
+    labelColorAlpha   : 1.0,
+    labelRadius       : 30,
+    useInterfaceFont  : true,
+    edgeColorAlpha    : 0.1,
   },
   physics: {
-    // Physics defaults (use direct/internal scale values)
-    repulsionStrength: 5000,
-    springStrength: 1,
-    springLength: 100,
-    // Center pull internal
-    centerPull: 0.001,
-    // Damping internal (0..1)
-    damping: 0.7,
-    // plane stiffness defaults
-    notePlaneStiffness: 0,
-    tagPlaneStiffness: 0,
-    centerX: 0,
-    centerY: 0,
-    centerZ: 0,
-    // mouse gravity toggle
+    repulsionStrength  : 5000,
+    springStrength     : 1,
+    springLength       : 100,
+    centerPull         : 0.001,
+    damping            : 0.7,
+    notePlaneStiffness : 0,
+    tagPlaneStiffness  : 0,
+    centerX            : 0,
+    centerY            : 0,
+    centerZ            : 0,
     mouseGravityEnabled: true,
+    gravityRadius      : 6,
+    gravityFallOff     : 3,
   },
   countDuplicateLinks: true,
   interaction: {
@@ -177,10 +149,10 @@ export default class GreaterGraphPlugin extends Plugin {
   async loadSettings() {
     const data = await this.loadData();
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data || {});
-    if (!this.settings.glow) this.settings.glow = DEFAULT_SETTINGS.glow;
+    if (!this.settings.visuals) this.settings.visuals = DEFAULT_SETTINGS.visuals;
     // enforce min/max radius invariant
     try {
-      const g = this.settings.glow;
+      const g = this.settings.visuals;
       if (typeof g.maxNodeRadius === 'number' && typeof g.minNodeRadius === 'number') {
         if (g.maxNodeRadius < g.minNodeRadius + 2) g.maxNodeRadius = g.minNodeRadius + 2;
       }
@@ -229,7 +201,8 @@ class GreaterGraphSettingTab extends PluginSettingTab {
 
     containerEl.createEl('h2', { text: 'Greater Graph – Glow Settings' });
 
-    const glow = this.plugin.settings.glow;
+    const visuals = this.plugin.settings.visuals;
+    const physics = this.plugin.settings.physics;
 
     // helper to create a slider with reset button inside a Setting
     const addSliderSetting = (parent: HTMLElement, opts: { name: string; desc?: string; value: number; min: number; max: number; step?: number; onChange: (v: number) => Promise<void> | void; resetValue?: number | undefined; }) => {
@@ -291,21 +264,21 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Minimum node radius',
       desc: 'Minimum radius for the smallest node (in pixels).',
-      value: glow.minNodeRadius ?? DEFAULT_SETTINGS.glow.minNodeRadius,
+      value: visuals.minNodeRadius ?? DEFAULT_SETTINGS.visuals.minNodeRadius,
       min: 1,
       max: 20,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.glow.minNodeRadius,
+      resetValue: DEFAULT_SETTINGS.visuals.minNodeRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          glow.minNodeRadius = Math.round(v);
+          visuals.minNodeRadius = Math.round(v);
           // ensure max >= min + 2
-          if (typeof glow.maxNodeRadius === 'number' && glow.maxNodeRadius < glow.minNodeRadius + 2) {
-            glow.maxNodeRadius = glow.minNodeRadius + 2;
+          if (typeof visuals.maxNodeRadius === 'number' && visuals.maxNodeRadius < visuals.minNodeRadius + 2) {
+            visuals.maxNodeRadius = visuals.minNodeRadius + 2;
           }
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.minNodeRadius = DEFAULT_SETTINGS.glow.minNodeRadius;
+          visuals.minNodeRadius = DEFAULT_SETTINGS.visuals.minNodeRadius;
           await this.plugin.saveSettings();
         }
       },
@@ -314,18 +287,18 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Maximum node radius',
       desc: 'Maximum radius for the most connected node (in pixels).',
-      value: glow.maxNodeRadius ?? DEFAULT_SETTINGS.glow.maxNodeRadius,
+      value: visuals.maxNodeRadius ?? DEFAULT_SETTINGS.visuals.maxNodeRadius,
       min: 8,
       max: 80,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.glow.maxNodeRadius,
+      resetValue: DEFAULT_SETTINGS.visuals.maxNodeRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v)) {
-          glow.maxNodeRadius = Math.round(v);
-          if (typeof glow.minNodeRadius === 'number' && glow.maxNodeRadius < glow.minNodeRadius + 2) glow.maxNodeRadius = glow.minNodeRadius + 2;
+          visuals.maxNodeRadius = Math.round(v);
+          if (typeof visuals.minNodeRadius === 'number' && visuals.maxNodeRadius < visuals.minNodeRadius + 2) visuals.maxNodeRadius = visuals.minNodeRadius + 2;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.maxNodeRadius = DEFAULT_SETTINGS.glow.maxNodeRadius;
+          visuals.maxNodeRadius = DEFAULT_SETTINGS.visuals.maxNodeRadius;
           await this.plugin.saveSettings();
         }
       },
@@ -334,17 +307,17 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Minimum center glow opacity',
       desc: 'Opacity (0–0.8) at the glow center for the least connected node.',
-      value: glow.minCenterAlpha ?? DEFAULT_SETTINGS.glow.minCenterAlpha,
+      value: visuals.minCenterAlpha ?? DEFAULT_SETTINGS.visuals.minCenterAlpha,
       min: 0,
       max: 0.8,
       step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.minCenterAlpha,
+      resetValue: DEFAULT_SETTINGS.visuals.minCenterAlpha,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 0.8) {
-          glow.minCenterAlpha = v;
+          visuals.minCenterAlpha = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.minCenterAlpha = DEFAULT_SETTINGS.glow.minCenterAlpha;
+          visuals.minCenterAlpha = DEFAULT_SETTINGS.visuals.minCenterAlpha;
           await this.plugin.saveSettings();
         }
       },
@@ -353,17 +326,17 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Maximum center glow opacity',
       desc: 'Opacity (0–1) at the glow center for the most connected node.',
-      value: glow.maxCenterAlpha ?? DEFAULT_SETTINGS.glow.maxCenterAlpha,
+      value: visuals.maxCenterAlpha ?? DEFAULT_SETTINGS.visuals.maxCenterAlpha,
       min: 0,
       max: 1,
       step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.maxCenterAlpha,
+      resetValue: DEFAULT_SETTINGS.visuals.maxCenterAlpha,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          glow.maxCenterAlpha = v;
+          visuals.maxCenterAlpha = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.maxCenterAlpha = DEFAULT_SETTINGS.glow.maxCenterAlpha;
+          visuals.maxCenterAlpha = DEFAULT_SETTINGS.visuals.maxCenterAlpha;
           await this.plugin.saveSettings();
         }
       },
@@ -374,17 +347,17 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Highlight depth',
       desc: 'Graph distance (in hops) from the hovered node that will be highlighted.',
-      value: glow.highlightDepth,
+      value: visuals.highlightDepth,
       min: 0,
       max: 5,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.glow.highlightDepth,
+      resetValue: DEFAULT_SETTINGS.visuals.highlightDepth,
       onChange: async (v) => {
         if (!Number.isNaN(v) && Number.isInteger(v) && v >= 0) {
-          glow.highlightDepth = Math.max(0, Math.floor(v));
+          visuals.highlightDepth = Math.max(0, Math.floor(v));
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.highlightDepth = DEFAULT_SETTINGS.glow.highlightDepth;
+          visuals.highlightDepth = DEFAULT_SETTINGS.visuals.highlightDepth;
           await this.plugin.saveSettings();
         }
       },
@@ -393,17 +366,17 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Gravity Radius',
       desc: 'Scales each node\'s screen-space radius for glow/mouse gravity.',
-      value: glow.gravityRadius ?? DEFAULT_SETTINGS.glow.gravityRadius!,
+      value: physics.gravityRadius ?? DEFAULT_SETTINGS.physics.gravityRadius!,
       min: 1,
       max: 20,
       step: 0.1,
-      resetValue: DEFAULT_SETTINGS.glow.gravityRadius,
+      resetValue: DEFAULT_SETTINGS.physics.gravityRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          glow.gravityRadius = v;
+          physics.gravityRadius = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.gravityRadius = DEFAULT_SETTINGS.glow.gravityRadius;
+          physics.gravityRadius = DEFAULT_SETTINGS.physics.gravityRadius;
           await this.plugin.saveSettings();
         }
       },
@@ -412,17 +385,17 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Gravity curve steepness',
       desc: 'Controls falloff steepness; higher = stronger near cursor.',
-      value: glow.gravityCurveSteepness ?? DEFAULT_SETTINGS.glow.gravityCurveSteepness!,
+      value: physics.gravityFallOff ?? DEFAULT_SETTINGS.physics.gravityFallOff!,
       min: 0.5,
       max: 10,
       step: 0.1,
-      resetValue: DEFAULT_SETTINGS.glow.gravityCurveSteepness,
+      resetValue: DEFAULT_SETTINGS.physics.gravityFallOff,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          glow.gravityCurveSteepness = v;
+          physics.gravityFallOff = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.gravityCurveSteepness = DEFAULT_SETTINGS.glow.gravityCurveSteepness;
+          physics.gravityFallOff = DEFAULT_SETTINGS.physics.gravityFallOff;
           await this.plugin.saveSettings();
         }
       },
@@ -431,17 +404,17 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         addSliderSetting(containerEl, {
       name: 'Label Radius',
       desc: 'Screen-space label reveal radius (× node size).',
-      value: glow.labelRadius ?? DEFAULT_SETTINGS.glow.labelRadius!,
+      value: visuals.labelRadius ?? DEFAULT_SETTINGS.visuals.labelRadius!,
       min: 0.5,
       max: 10,
       step: 0.1,
-      resetValue: DEFAULT_SETTINGS.glow.labelRadius,
+      resetValue: DEFAULT_SETTINGS.visuals.labelRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          glow.labelRadius = v;
+          visuals.labelRadius = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.labelRadius = DEFAULT_SETTINGS.glow.labelRadius;
+          visuals.labelRadius = DEFAULT_SETTINGS.visuals.labelRadius;
           await this.plugin.saveSettings();
         }
       },
@@ -451,17 +424,17 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Focus smoothing rate',
       desc: 'Smoothness of focus transitions (0 = very slow, 1 = fast). Internally used as a lerp factor.',
-      value: glow.focusSmoothingRate ?? DEFAULT_SETTINGS.glow.focusSmoothingRate,
+      value: visuals.focusSmoothing ?? DEFAULT_SETTINGS.visuals.focusSmoothing,
       min: 0,
       max: 1,
       step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.focusSmoothingRate,
+      resetValue: DEFAULT_SETTINGS.visuals.focusSmoothing,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          glow.focusSmoothingRate = v;
+          visuals.focusSmoothing = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.focusSmoothingRate = DEFAULT_SETTINGS.glow.focusSmoothingRate;
+          visuals.focusSmoothing = DEFAULT_SETTINGS.visuals.focusSmoothing;
           await this.plugin.saveSettings();
         }
       },
@@ -478,24 +451,24 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         .setDesc('Optional color to override the theme accent for node fill. Leave unset to use the active theme.');
       const colorInput = document.createElement('input');
       colorInput.type = 'color';
-      try { colorInput.value = glow.nodeColor ? String(glow.nodeColor) : '#000000'; } catch (e) { colorInput.value = '#000000'; }
+      try { colorInput.value = visuals.nodeColor ? String(visuals.nodeColor) : '#000000'; } catch (e) { colorInput.value = '#000000'; }
       colorInput.style.marginLeft = '8px';
       colorInput.addEventListener('change', async (e) => {
         const v = (e.target as HTMLInputElement).value.trim();
-        glow.nodeColor = v === '' ? undefined : v;
+        visuals.nodeColor = v === '' ? undefined : v;
         await this.plugin.saveSettings();
       });
       const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
       const alphaInput = document.createElement('input');
       alphaInput.type = 'number'; alphaInput.min = '0.1'; alphaInput.max = '1'; alphaInput.step = '0.01';
-      alphaInput.value = String(glow.nodeColorAlpha ?? DEFAULT_SETTINGS.glow.nodeColorAlpha);
+      alphaInput.value = String(visuals.nodeColorAlpha ?? DEFAULT_SETTINGS.visuals.nodeColorAlpha);
       alphaInput.style.width = '68px'; alphaInput.style.marginLeft = '8px';
       alphaInput.addEventListener('change', async (e) => {
         const v = Number((e.target as HTMLInputElement).value);
-        glow.nodeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.nodeColorAlpha;
+        visuals.nodeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.visuals.nodeColorAlpha;
         await this.plugin.saveSettings();
       });
-      rb.addEventListener('click', async () => { glow.nodeColor = undefined; glow.nodeColorAlpha = undefined; await this.plugin.saveSettings(); colorInput.value = '#000000'; alphaInput.value = String(DEFAULT_SETTINGS.glow.nodeColorAlpha); });
+      rb.addEventListener('click', async () => { visuals.nodeColor = undefined; visuals.nodeColorAlpha = DEFAULT_SETTINGS.visuals.nodeColorAlpha; await this.plugin.saveSettings(); colorInput.value = '#000000'; alphaInput.value = String(DEFAULT_SETTINGS.visuals.nodeColorAlpha); });
       (s as any).controlEl.appendChild(rb);
       const hint = document.createElement('span'); hint.textContent = '(alpha)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
       (s as any).controlEl.appendChild(hint);
@@ -509,25 +482,25 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         .setDesc('Optional color to override edge stroke color. Leave unset to use a theme-appropriate color.');
       const colorInput = document.createElement('input');
       colorInput.type = 'color';
-      try { colorInput.value = glow.edgeColor ? String(glow.edgeColor) : '#000000'; } catch (e) { colorInput.value = '#000000'; }
+      try { colorInput.value = visuals.edgeColor ? String(visuals.edgeColor) : '#000000'; } catch (e) { colorInput.value = '#000000'; }
       colorInput.style.marginLeft = '8px';
       colorInput.addEventListener('change', async (e) => {
         const v = (e.target as HTMLInputElement).value.trim();
-        glow.edgeColor = v === '' ? undefined : v;
+        visuals.edgeColor = v === '' ? undefined : v;
         await this.plugin.saveSettings();
       });
       const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
       const edgeAlpha = document.createElement('input');
       edgeAlpha.type = 'number'; edgeAlpha.min = '0.1'; edgeAlpha.max = '1'; edgeAlpha.step = '0.01';
-      edgeAlpha.value = String(glow.edgeColorAlpha ?? DEFAULT_SETTINGS.glow.edgeColorAlpha);
+      edgeAlpha.value = String(visuals.edgeColorAlpha ?? DEFAULT_SETTINGS.visuals.edgeColorAlpha);
       edgeAlpha.style.width = '68px'; edgeAlpha.style.marginLeft = '8px';
       edgeAlpha.addEventListener('change', async (e) => {
         const v = Number((e.target as HTMLInputElement).value);
-        glow.edgeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.edgeColorAlpha;
+        visuals.edgeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.visuals.edgeColorAlpha;
         await this.plugin.saveSettings();
       });
 
-      rb.addEventListener('click', async () => { glow.edgeColor = undefined; glow.edgeColorAlpha = undefined; await this.plugin.saveSettings(); colorInput.value = '#000000'; edgeAlpha.value = String(DEFAULT_SETTINGS.glow.edgeColorAlpha); });
+      rb.addEventListener('click', async () => { visuals.edgeColor = undefined; visuals.edgeColorAlpha = DEFAULT_SETTINGS.visuals.edgeColorAlpha; await this.plugin.saveSettings(); colorInput.value = '#000000'; edgeAlpha.value = String(DEFAULT_SETTINGS.visuals.edgeColorAlpha); });
       (s as any).controlEl.appendChild(rb);
       (s as any).controlEl.appendChild(colorInput);
       const hint = document.createElement('span'); hint.textContent = '(alpha)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
@@ -542,24 +515,24 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         .setDesc('Optional color to override tag node color. Leave unset to use the active theme.');
       const colorInput = document.createElement('input');
       colorInput.type = 'color';
-      try { colorInput.value = glow.tagColor ? String(glow.tagColor) : '#000000'; } catch (e) { colorInput.value = '#000000'; }
+      try { colorInput.value = visuals.tagColor ? String(visuals.tagColor) : '#000000'; } catch (e) { colorInput.value = '#000000'; }
       colorInput.style.marginLeft = '8px';
       colorInput.addEventListener('change', async (e) => {
         const v = (e.target as HTMLInputElement).value.trim();
-        glow.tagColor = v === '' ? undefined : v;
+        visuals.tagColor = v === '' ? undefined : v;
         await this.plugin.saveSettings();
       });
       const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
       const tagAlpha = document.createElement('input'); tagAlpha.type = 'number'; tagAlpha.min = '0.1'; tagAlpha.max = '1'; tagAlpha.step = '0.01';
-      tagAlpha.value = String(glow.tagColorAlpha ?? DEFAULT_SETTINGS.glow.tagColorAlpha);
+      tagAlpha.value = String(visuals.tagColorAlpha ?? DEFAULT_SETTINGS.visuals.tagColorAlpha);
       tagAlpha.style.width = '68px'; tagAlpha.style.marginLeft = '8px';
       tagAlpha.addEventListener('change', async (e) => {
         const v = Number((e.target as HTMLInputElement).value);
-        glow.tagColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.tagColorAlpha;
+        visuals.tagColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.visuals.tagColorAlpha;
         await this.plugin.saveSettings();
       });
 
-      rb.addEventListener('click', async () => { glow.tagColor = undefined; glow.tagColorAlpha = undefined; await this.plugin.saveSettings(); colorInput.value = '#000000'; tagAlpha.value = String(DEFAULT_SETTINGS.glow.tagColorAlpha); });
+      rb.addEventListener('click', async () => { visuals.tagColor = undefined; visuals.tagColorAlpha = DEFAULT_SETTINGS.visuals.tagColorAlpha; await this.plugin.saveSettings(); colorInput.value = '#000000'; tagAlpha.value = String(DEFAULT_SETTINGS.visuals.tagColorAlpha); });
       (s as any).controlEl.appendChild(rb);
       (s as any).controlEl.appendChild(colorInput);
       const hint = document.createElement('span'); hint.textContent = '(alpha)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
@@ -573,24 +546,24 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         .setDesc('Optional color to override the label text color. Leave unset to use the active theme.');
       const colorInput = document.createElement('input');
       colorInput.type = 'color';
-      try { colorInput.value = glow.labelColor ? String(glow.labelColor) : '#000000'; } catch (e) { colorInput.value = '#000000'; }
+      try { colorInput.value = visuals.labelColor ? String(visuals.labelColor) : '#000000'; } catch (e) { colorInput.value = '#000000'; }
       colorInput.style.marginLeft = '8px';
       colorInput.addEventListener('change', async (e) => {
         const v = (e.target as HTMLInputElement).value.trim();
-        glow.labelColor = v === '' ? undefined : v;
+        visuals.labelColor = v === '' ? undefined : v;
         await this.plugin.saveSettings();
       });
       const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
       const labelAlpha = document.createElement('input');
       labelAlpha.type = 'number'; labelAlpha.min = '0'; labelAlpha.max = '1'; labelAlpha.step = '0.01';
-      labelAlpha.value = String(glow.labelColorAlpha ?? DEFAULT_SETTINGS.glow.labelColorAlpha);
+      labelAlpha.value = String(visuals.labelColorAlpha ?? DEFAULT_SETTINGS.visuals.labelColorAlpha);
       labelAlpha.style.width = '68px'; labelAlpha.style.marginLeft = '8px';
       labelAlpha.addEventListener('change', async (e) => {
         const v = Number((e.target as HTMLInputElement).value);
-        glow.labelColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.labelColorAlpha;
+        visuals.labelColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.visuals.labelColorAlpha;
         await this.plugin.saveSettings();
       });
-      rb.addEventListener('click', async () => { glow.labelColor = undefined; glow.labelColorAlpha = undefined; await this.plugin.saveSettings(); colorInput.value = '#000000'; labelAlpha.value = String(DEFAULT_SETTINGS.glow.labelColorAlpha); });
+      rb.addEventListener('click', async () => { visuals.labelColor = undefined; visuals.labelColorAlpha = DEFAULT_SETTINGS.visuals.labelColorAlpha; await this.plugin.saveSettings(); colorInput.value = '#000000'; labelAlpha.value = String(DEFAULT_SETTINGS.visuals.labelColorAlpha); });
       (s as any).controlEl.appendChild(rb);
       (s as any).controlEl.appendChild(colorInput);
       const hint = document.createElement('span'); hint.textContent = '(alpha)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
@@ -601,25 +574,25 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Use interface font for labels')
       .setDesc('When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.')
-      .addToggle((t) => t.setValue(Boolean(glow.useInterfaceFont)).onChange(async (v) => {
-        glow.useInterfaceFont = Boolean(v);
+      .addToggle((t: ToggleComponent ) => t.setValue(Boolean(visuals.useInterfaceFont)).onChange(async (v: boolean) => {
+        visuals.useInterfaceFont = Boolean(v);
         await this.plugin.saveSettings();
       }));
 
     addSliderSetting(containerEl, {
       name: 'Base label font size',
       desc: 'Base font size for labels in pixels (before camera zoom scaling).',
-      value: glow.labelBaseFontSize ?? DEFAULT_SETTINGS.glow.labelBaseFontSize,
+      value: visuals.labelBaseFontSize ?? DEFAULT_SETTINGS.visuals.labelBaseFontSize,
       min: 6,
       max: 24,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.glow.labelBaseFontSize,
+      resetValue: DEFAULT_SETTINGS.visuals.labelBaseFontSize,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 1 && v <= 72) {
-          glow.labelBaseFontSize = Math.round(v);
+          visuals.labelBaseFontSize = Math.round(v);
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.labelBaseFontSize = DEFAULT_SETTINGS.glow.labelBaseFontSize;
+          visuals.labelBaseFontSize = DEFAULT_SETTINGS.visuals.labelBaseFontSize;
           await this.plugin.saveSettings();
         }
       },
@@ -750,7 +723,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Count duplicate links')
       .setDesc('If enabled, multiple links between the same two files will be counted when computing in/out degrees.')
-      .addToggle((t) => t.setValue(Boolean(this.plugin.settings.countDuplicateLinks)).onChange(async (v) => {
+      .addToggle((t: ToggleComponent) => t.setValue(Boolean(this.plugin.settings.countDuplicateLinks)).onChange(async (v: boolean) => {
         this.plugin.settings.countDuplicateLinks = Boolean(v);
         await this.plugin.saveSettings();
       }));
@@ -758,7 +731,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Double-line mutual links')
       .setDesc('When enabled, mutual links (A ↔ B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.')
-      .addToggle((t) => t.setValue(Boolean(this.plugin.settings.mutualLinkDoubleLine)).onChange(async (v) => {
+      .addToggle((t: ToggleComponent) => t.setValue(Boolean(this.plugin.settings.mutualLinkDoubleLine)).onChange(async (v: boolean) => {
         this.plugin.settings.mutualLinkDoubleLine = Boolean(v);
         await this.plugin.saveSettings();
       }));
@@ -767,7 +740,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Show tag nodes')
       .setDesc('Toggle visibility of tag nodes and their edges in the graph.')
-      .addToggle((t) => t.setValue(this.plugin.settings.showTags !== false).onChange(async (v) => {
+      .addToggle((t: ToggleComponent) => t.setValue(this.plugin.settings.showTags !== false).onChange(async (v: boolean) => {
         this.plugin.settings.showTags = Boolean(v);
         await this.plugin.saveSettings();
       }));
@@ -838,7 +811,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Use pinned center note')
       .setDesc('Prefer a specific note path as the graph center. Falls back to max in-links if not found.')
-      .addToggle((t) => t
+      .addToggle((t: ToggleComponent) => t
         .setValue(Boolean(this.plugin.settings.usePinnedCenterNote))
         .onChange(async (v: boolean) => {
           this.plugin.settings.usePinnedCenterNote = Boolean(v);
@@ -848,7 +821,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Pinned center note path')
       .setDesc('e.g., "Home.md" or "Notes/Home" (vault-relative).')
-      .addText((txt) => txt
+      .addText((txt: TextComponent) => txt
         .setPlaceholder('path/to/note')
         .setValue(this.plugin.settings.pinnedCenterNotePath || '')
         .onChange(async (v: string) => {
@@ -859,7 +832,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Fallback: prefer out-links')
       .setDesc('When picking a center by link count, prefer out-links (out-degree) instead of in-links (in-degree)')
-      .addToggle((t) => t
+      .addToggle((t: ToggleComponent) => t
         .setValue(Boolean(this.plugin.settings.useOutlinkFallback))
         .onChange(async (v: boolean) => {
           this.plugin.settings.useOutlinkFallback = Boolean(v);

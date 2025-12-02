@@ -1,17 +1,15 @@
 import { GraphData, GraphNode } from './buildGraph';
 
 export interface Layout2DOptions {
-  width: number;
-  height: number;
-  margin?: number;
-  // New optional centering options
-  centerX?: number;
-  centerY?: number;
+  width               : number;
+  height              : number;
+  margin?             : number;
+  centerX?            : number;
+  centerY?            : number;
+  //centerZ?           : number; // wc-c enterZ was missing, I feel like it should be added
   centerOnLargestNode?: boolean;
-  // optional initial jitter (px) applied around center
-  jitter?: number;
-  // If provided, only layout this subset of nodes (useful when restoring saved positions)
-  onlyNodes?: GraphNode[];
+  jitter?             : number; // optional initial jitter (px) applied around center
+  onlyNodes?          : GraphNode[]; // If provided, only layout this subset of nodes (useful when restoring saved positions)
 }
 
 export function layoutGraph2D(graph: GraphData, options: Layout2DOptions): void {
@@ -21,7 +19,7 @@ export function layoutGraph2D(graph: GraphData, options: Layout2DOptions): void 
 
   const centerX = options.centerX ?? width / 2;
   const centerY = options.centerY ?? height / 2;
-  const jitter = typeof options.jitter === 'number' ? options.jitter : 8;
+  const jitter  = typeof options.jitter === 'number' ? options.jitter : 8;
 
   const nodes = options.onlyNodes ?? allNodes;
   if (!nodes || nodes.length === 0) return;
@@ -42,7 +40,7 @@ export function layoutGraph2D(graph: GraphData, options: Layout2DOptions): void 
     const ry = Math.sin(angle) * r;
     node.x = centerX + rx;
     node.y = centerY + ry;
-    node.z = 0;
+    node.z = 0; // this should be updated to centerZ +rz once we have centerZ
   }
 
   // If requested, place the largest node at the provided center only when laying out all nodes
@@ -115,7 +113,6 @@ export function layoutGraph3D(graph: GraphData, options: Layout3DOptions): void 
       node.y = centerY + ry;
       node.z = (Math.random() - 0.5) * tagZSpread;
     } else {
-      // note (default)
       node.x = centerX + rx;
       node.y = centerY + ry;
       node.z = 0;

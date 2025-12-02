@@ -13,21 +13,21 @@ export interface Simulation {
 }
 
 export interface SimulationOptions {
-  repulsionStrength: number;
-  springStrength: number;
-  springLength: number;
-  centerPull: number;
-  damping: number;
+  repulsionStrength   : number;
+  springStrength      : number;
+  springLength        : number;
+  centerPull          : number;
+  damping             : number;
   // 3D center point
-  centerX?: number;
-  centerY?: number;
-  centerZ?: number;
-  centerNodeId?: string;
+  centerX?            : number;
+  centerY?            : number;
+  centerZ?            : number;
+  centerNodeId?       : string;
   // plane constraint stiffness (soft springs to planes)
-  notePlaneStiffness?: number; // pull notes toward z = 0
-  tagPlaneStiffness?: number;  // pull tags toward x = 0
+  notePlaneStiffness? : number;  // pull notes toward z = 0
+  tagPlaneStiffness?  : number;  // pull tags toward x = 0
   // mouse attraction tuning
-  mouseAttractionRadius?: number;
+  mouseAttractionRadius?  : number;
   mouseAttractionStrength?: number;
   mouseAttractionExponent?: number;
 }

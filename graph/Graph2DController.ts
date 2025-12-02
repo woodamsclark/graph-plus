@@ -1,116 +1,16 @@
-import { App, ItemView, WorkspaceLeaf, Plugin, TFile, Platform } from 'obsidian';
-import { buildGraph, GraphData } from './graph/buildGraph';
-import { layoutGraph2D, layoutGraph3D } from './graph/layout2d';
-import { createRenderer2D, Renderer2D } from './graph/renderer2d';
-import { createSimulation, Simulation } from './graph/simulation';
-import { DEFAULT_SETTINGS } from './main';
+// --- Graph2DController.ts ---
+// Imports needed by the controller itself
+import { App, Plugin } from 'obsidian'; 
+import { GraphData, GraphNode, buildGraph } from './buildGraph.ts';
+import { layoutGraph2D, layoutGraph3D } from './layout2d';
+import { createRenderer2D, Renderer2D } from './renderer2d.ts';
+import { createSimulation, Simulation } from './simulation.ts';
+import { debounce } from '../helpers/debounce.ts';
 
-export const GREATER_GRAPH_VIEW_TYPE = 'greater-graph-view';
+// Import the full settings model now that main.ts is updated
+import { GreaterGraphSettings } from '../main.ts';
 
-// Small debounce helper used for coalescing vault/metadata events
-function debounce<T extends (...args: any[]) => void>(fn: T, wait = 300, immediate = false): T {
-  let timeout: number | null = null;
-  // eslint-disable-next-line @typescript-eslint/ban-types
-  return ((...args: any[]) => {
-    const later = () => {
-      timeout = null;
-      if (!immediate) fn(...args);
-    };
-    const callNow = immediate && timeout === null;
-    if (timeout) window.clearTimeout(timeout);
-    timeout = window.setTimeout(later, wait) as unknown as number;
-    if (callNow) fn(...args);
-  }) as unknown as T;
-}
-
-export class GraphView extends ItemView {
-  private controller: Graph2DController | null = null;
-  private plugin: Plugin;
-  private scheduleGraphRefresh: (() => void) | null = null;
-
-  constructor(leaf: WorkspaceLeaf, plugin: Plugin) {
-    super(leaf);
-    this.plugin = plugin;
-  }
-
-  getViewType(): string {
-    return GREATER_GRAPH_VIEW_TYPE;
-  }
-
-  getDisplayText(): string {
-    return 'Greater Graph';
-  }
-
-  getIcon(): string {
-    return 'dot-network';
-  }
-
-  async onOpen() {
-    this.containerEl.empty();
-    const container = this.containerEl.createDiv({ cls: 'greater-graph-view' });
-    this.controller = new Graph2DController(this.app, container, this.plugin);
-    await this.controller.init();
-    if (this.controller) {
-      this.controller.setNodeClickHandler((node: any) => void this.openNodeFile(node));
-    }
-    // Debounced refresh to avoid thrashing on vault events
-    if (!this.scheduleGraphRefresh) {
-      this.scheduleGraphRefresh = debounce(() => {
-        try {
-          this.controller?.refreshGraph();
-        } catch (e) {
-          // eslint-disable-next-line no-console
-          console.error('Greater Graph: refreshGraph error', e);
-        }
-      }, 200, true);
-    }
-
-    // Register only structural vault listeners so the view updates on file changes,
-    // not on every keystroke/content metadata parse.
-    // Use this.registerEvent so Obsidian will unregister them when the view closes
-    this.registerEvent(this.app.vault.on('create', () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
-    this.registerEvent(this.app.vault.on('delete', () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
-    this.registerEvent(this.app.vault.on('rename', () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
-    // Note: We intentionally do NOT rebuild on metadataCache 'changed' to avoid refreshes
-    // while typing. Optional incremental updates can hook into metadata changes separately.
-  }
-
-  onResize() {
-    const rect = this.containerEl.getBoundingClientRect();
-    this.controller?.resize(rect.width, rect.height);
-  }
-
-  async onClose() {
-    this.controller?.destroy();
-    this.controller = null;
-    this.containerEl.empty();
-  }
-
-  private async openNodeFile(node: any): Promise<void> {
-    if (!node) return;
-    const app = this.app;
-    let file: TFile | null = null;
-    if ((node as any).file) file = (node as any).file as TFile;
-    else if ((node as any).filePath) {
-      const af = app.vault.getAbstractFileByPath((node as any).filePath);
-      if (af instanceof TFile) file = af;
-    }
-    if (!file) {
-      // eslint-disable-next-line no-console
-      console.warn('Greater Graph: could not resolve file for node', node);
-      return;
-    }
-    const leaf = app.workspace.getLeaf(false);
-    try {
-      await leaf.openFile(file);
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error('Greater Graph: failed to open file', e);
-    }
-  }
-}
-
-class Graph2DController {
+export class Graph2DController {
   private app: App;
   private containerEl: HTMLElement;
   private canvas: HTMLCanvasElement | null = null;
@@ -255,6 +155,8 @@ class Graph2DController {
     this.containerEl = containerEl;
     this.plugin = plugin;
   }
+
+// INIT
 
   async init(): Promise<void> {
     const canvas = document.createElement('canvas');

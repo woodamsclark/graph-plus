@@ -25,7 +25,7 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian2 = require("obsidian");
 
-// GraphView2.ts
+// GraphView.ts
 var import_obsidian = require("obsidian");
 
 // graph/buildGraph.ts
@@ -63,7 +63,7 @@ async function buildGraph(app, options) {
       if (!edgeSet.has(key)) {
         const rawCount = Number(targets[targetPath] || 1) || 1;
         const linkCount = countDuplicates ? rawCount : 1;
-        edges.push({ id: key, sourceId: sourcePath, targetId: targetPath, linkCount, hasReverse: false });
+        edges.push({ id: key, sourceId: sourcePath, targetId: targetPath, linkCount, bidirectional: false });
         edgeSet.add(key);
       }
     }
@@ -151,7 +151,7 @@ async function buildGraph(app, options) {
       const tagNode = ensureTagNode(tagName);
       const key = `${noteNode.id}->${tagNode.id}`;
       if (!edgeSet.has(key)) {
-        edges.push({ id: key, sourceId: noteNode.id, targetId: tagNode.id, linkCount: 1, hasReverse: false });
+        edges.push({ id: key, sourceId: noteNode.id, targetId: tagNode.id, linkCount: 1, bidirectional: false });
         edgeSet.add(key);
       }
     }
@@ -175,9 +175,9 @@ async function buildGraph(app, options) {
   for (const e of edges) {
     const reverseKey = `${e.targetId}->${e.sourceId}`;
     if (edgeMap.has(reverseKey)) {
-      e.hasReverse = true;
+      e.bidirectional = true;
       const other = edgeMap.get(reverseKey);
-      other.hasReverse = true;
+      other.bidirectional = true;
     }
   }
   function chooseCenterNode(nodesArr, opts) {
@@ -1387,8 +1387,7 @@ function createSimulation(nodes, edges, options) {
   return { start, stop, tick, reset, setOptions, setPinnedNodes, setMouseAttractor };
 }
 
-// GraphView2.ts
-var GREATER_GRAPH_VIEW_TYPE = "greater-graph-view";
+// helpers/debounce.ts
 function debounce(fn, wait = 300, immediate = false) {
   let timeout = null;
   return (...args) => {
@@ -1405,77 +1404,8 @@ function debounce(fn, wait = 300, immediate = false) {
       fn(...args);
   };
 }
-var GraphView = class extends import_obsidian.ItemView {
-  controller = null;
-  plugin;
-  scheduleGraphRefresh = null;
-  constructor(leaf, plugin) {
-    super(leaf);
-    this.plugin = plugin;
-  }
-  getViewType() {
-    return GREATER_GRAPH_VIEW_TYPE;
-  }
-  getDisplayText() {
-    return "Greater Graph";
-  }
-  getIcon() {
-    return "dot-network";
-  }
-  async onOpen() {
-    this.containerEl.empty();
-    const container = this.containerEl.createDiv({ cls: "greater-graph-view" });
-    this.controller = new Graph2DController(this.app, container, this.plugin);
-    await this.controller.init();
-    if (this.controller) {
-      this.controller.setNodeClickHandler((node) => void this.openNodeFile(node));
-    }
-    if (!this.scheduleGraphRefresh) {
-      this.scheduleGraphRefresh = debounce(() => {
-        try {
-          this.controller?.refreshGraph();
-        } catch (e) {
-          console.error("Greater Graph: refreshGraph error", e);
-        }
-      }, 200, true);
-    }
-    this.registerEvent(this.app.vault.on("create", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
-    this.registerEvent(this.app.vault.on("delete", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
-    this.registerEvent(this.app.vault.on("rename", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
-  }
-  onResize() {
-    const rect = this.containerEl.getBoundingClientRect();
-    this.controller?.resize(rect.width, rect.height);
-  }
-  async onClose() {
-    this.controller?.destroy();
-    this.controller = null;
-    this.containerEl.empty();
-  }
-  async openNodeFile(node) {
-    if (!node)
-      return;
-    const app = this.app;
-    let file = null;
-    if (node.file)
-      file = node.file;
-    else if (node.filePath) {
-      const af = app.vault.getAbstractFileByPath(node.filePath);
-      if (af instanceof import_obsidian.TFile)
-        file = af;
-    }
-    if (!file) {
-      console.warn("Greater Graph: could not resolve file for node", node);
-      return;
-    }
-    const leaf = app.workspace.getLeaf(false);
-    try {
-      await leaf.openFile(file);
-    } catch (e) {
-      console.error("Greater Graph: failed to open file", e);
-    }
-  }
-};
+
+// graph/Graph2DController.ts
 var Graph2DController = class {
   app;
   containerEl;
@@ -1630,6 +1560,7 @@ var Graph2DController = class {
     this.containerEl = containerEl;
     this.plugin = plugin;
   }
+  // INIT
   async init() {
     const canvas = document.createElement("canvas");
     canvas.style.width = "100%";
@@ -2671,7 +2602,7 @@ var Graph2DController = class {
   }
   isPreviewModifier(event) {
     try {
-      if (import_obsidian.Platform && import_obsidian.Platform.isMacOS)
+      if (Platform && Platform.isMacOS)
         return Boolean(event.metaKey);
     } catch (e) {
     }
@@ -2861,52 +2792,117 @@ var Graph2DController = class {
   }
 };
 
+// GraphView.ts
+var GREATER_GRAPH_VIEW_TYPE = "greater-graph-view";
+var GraphView = class extends import_obsidian.ItemView {
+  controller = null;
+  plugin;
+  scheduleGraphRefresh = null;
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+  }
+  getViewType() {
+    return GREATER_GRAPH_VIEW_TYPE;
+  }
+  getDisplayText() {
+    return "Greater Graph";
+  }
+  getIcon() {
+    return "dot-network";
+  }
+  async onOpen() {
+    this.containerEl.empty();
+    const container = this.containerEl.createDiv({ cls: "greater-graph-view" });
+    this.controller = new Graph2DController(this.app, container, this.plugin);
+    await this.controller.init();
+    if (this.controller) {
+      this.controller.setNodeClickHandler((node) => void this.openNodeFile(node));
+    }
+    if (!this.scheduleGraphRefresh) {
+      this.scheduleGraphRefresh = debounce(() => {
+        try {
+          this.controller?.refreshGraph();
+        } catch (e) {
+          console.error("Greater Graph: refreshGraph error", e);
+        }
+      }, 200, true);
+    }
+    this.registerEvent(this.app.vault.on("create", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
+    this.registerEvent(this.app.vault.on("delete", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
+    this.registerEvent(this.app.vault.on("rename", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
+  }
+  onResize() {
+    const rect = this.containerEl.getBoundingClientRect();
+    this.controller?.resize(rect.width, rect.height);
+  }
+  async onClose() {
+    this.controller?.destroy();
+    this.controller = null;
+    this.containerEl.empty();
+  }
+  async openNodeFile(node) {
+    if (!node)
+      return;
+    const app = this.app;
+    let file = null;
+    if (node.file)
+      file = node.file;
+    else if (node.filePath) {
+      const af = app.vault.getAbstractFileByPath(node.filePath);
+      if (af instanceof import_obsidian.TFile)
+        file = af;
+    }
+    if (!file) {
+      console.warn("Greater Graph: could not resolve file for node", node);
+      return;
+    }
+    const leaf = app.workspace.getLeaf(false);
+    try {
+      await leaf.openFile(file);
+    } catch (e) {
+      console.error("Greater Graph: failed to open file", e);
+    }
+  }
+};
+
 // main.ts
 var DEFAULT_SETTINGS = {
-  glow: {
+  visuals: {
     minNodeRadius: 3,
     maxNodeRadius: 20,
     minCenterAlpha: 0.1,
     maxCenterAlpha: 0.6,
-    // (legacy hover/neighbor/dim factors removed; use gravity curve settings)
-    // renamed highlight depth
     highlightDepth: 1,
-    // unified gravity/glow params
-    gravityRadius: 6,
-    gravityCurveSteepness: 3,
-    // focus/dimming defaults
-    focusSmoothingRate: 0.8,
-    // color overrides left undefined by default to follow theme
+    focusSmoothing: 0.8,
     nodeColor: void 0,
-    nodeColorAlpha: 0.1,
+    // color overrides left undefined by default to follow theme
     tagColor: void 0,
-    tagColorAlpha: 0.1,
     labelColor: void 0,
+    edgeColor: void 0,
+    nodeColorAlpha: 0.1,
+    tagColorAlpha: 0.1,
     labelBaseFontSize: 24,
     labelFadeRangePx: 8,
-    //glowRadiusPx: null,
     labelColorAlpha: 1,
+    labelRadius: 30,
     useInterfaceFont: true,
-    edgeColor: void 0,
     edgeColorAlpha: 0.1
   },
   physics: {
-    // Physics defaults (use direct/internal scale values)
     repulsionStrength: 5e3,
     springStrength: 1,
     springLength: 100,
-    // Center pull internal
     centerPull: 1e-3,
-    // Damping internal (0..1)
     damping: 0.7,
-    // plane stiffness defaults
     notePlaneStiffness: 0,
     tagPlaneStiffness: 0,
     centerX: 0,
     centerY: 0,
     centerZ: 0,
-    // mouse gravity toggle
-    mouseGravityEnabled: true
+    mouseGravityEnabled: true,
+    gravityRadius: 6,
+    gravityFallOff: 3
   },
   countDuplicateLinks: true,
   interaction: {
@@ -2951,10 +2947,10 @@ var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
   async loadSettings() {
     const data = await this.loadData();
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data || {});
-    if (!this.settings.glow)
-      this.settings.glow = DEFAULT_SETTINGS.glow;
+    if (!this.settings.visuals)
+      this.settings.visuals = DEFAULT_SETTINGS.visuals;
     try {
-      const g = this.settings.glow;
+      const g = this.settings.visuals;
       if (typeof g.maxNodeRadius === "number" && typeof g.minNodeRadius === "number") {
         if (g.maxNodeRadius < g.minNodeRadius + 2)
           g.maxNodeRadius = g.minNodeRadius + 2;
@@ -2994,7 +2990,8 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "Greater Graph \u2013 Glow Settings" });
-    const glow = this.plugin.settings.glow;
+    const visuals = this.plugin.settings.visuals;
+    const physics = this.plugin.settings.physics;
     const addSliderSetting = (parent, opts) => {
       const s = new import_obsidian2.Setting(parent).setName(opts.name).setDesc(opts.desc || "");
       const wrap = document.createElement("div");
@@ -3059,20 +3056,20 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Minimum node radius",
       desc: "Minimum radius for the smallest node (in pixels).",
-      value: glow.minNodeRadius ?? DEFAULT_SETTINGS.glow.minNodeRadius,
+      value: visuals.minNodeRadius ?? DEFAULT_SETTINGS.visuals.minNodeRadius,
       min: 1,
       max: 20,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.glow.minNodeRadius,
+      resetValue: DEFAULT_SETTINGS.visuals.minNodeRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          glow.minNodeRadius = Math.round(v);
-          if (typeof glow.maxNodeRadius === "number" && glow.maxNodeRadius < glow.minNodeRadius + 2) {
-            glow.maxNodeRadius = glow.minNodeRadius + 2;
+          visuals.minNodeRadius = Math.round(v);
+          if (typeof visuals.maxNodeRadius === "number" && visuals.maxNodeRadius < visuals.minNodeRadius + 2) {
+            visuals.maxNodeRadius = visuals.minNodeRadius + 2;
           }
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.minNodeRadius = DEFAULT_SETTINGS.glow.minNodeRadius;
+          visuals.minNodeRadius = DEFAULT_SETTINGS.visuals.minNodeRadius;
           await this.plugin.saveSettings();
         }
       }
@@ -3080,19 +3077,19 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Maximum node radius",
       desc: "Maximum radius for the most connected node (in pixels).",
-      value: glow.maxNodeRadius ?? DEFAULT_SETTINGS.glow.maxNodeRadius,
+      value: visuals.maxNodeRadius ?? DEFAULT_SETTINGS.visuals.maxNodeRadius,
       min: 8,
       max: 80,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.glow.maxNodeRadius,
+      resetValue: DEFAULT_SETTINGS.visuals.maxNodeRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v)) {
-          glow.maxNodeRadius = Math.round(v);
-          if (typeof glow.minNodeRadius === "number" && glow.maxNodeRadius < glow.minNodeRadius + 2)
-            glow.maxNodeRadius = glow.minNodeRadius + 2;
+          visuals.maxNodeRadius = Math.round(v);
+          if (typeof visuals.minNodeRadius === "number" && visuals.maxNodeRadius < visuals.minNodeRadius + 2)
+            visuals.maxNodeRadius = visuals.minNodeRadius + 2;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.maxNodeRadius = DEFAULT_SETTINGS.glow.maxNodeRadius;
+          visuals.maxNodeRadius = DEFAULT_SETTINGS.visuals.maxNodeRadius;
           await this.plugin.saveSettings();
         }
       }
@@ -3100,17 +3097,17 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Minimum center glow opacity",
       desc: "Opacity (0\u20130.8) at the glow center for the least connected node.",
-      value: glow.minCenterAlpha ?? DEFAULT_SETTINGS.glow.minCenterAlpha,
+      value: visuals.minCenterAlpha ?? DEFAULT_SETTINGS.visuals.minCenterAlpha,
       min: 0,
       max: 0.8,
       step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.minCenterAlpha,
+      resetValue: DEFAULT_SETTINGS.visuals.minCenterAlpha,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 0.8) {
-          glow.minCenterAlpha = v;
+          visuals.minCenterAlpha = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.minCenterAlpha = DEFAULT_SETTINGS.glow.minCenterAlpha;
+          visuals.minCenterAlpha = DEFAULT_SETTINGS.visuals.minCenterAlpha;
           await this.plugin.saveSettings();
         }
       }
@@ -3118,17 +3115,17 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Maximum center glow opacity",
       desc: "Opacity (0\u20131) at the glow center for the most connected node.",
-      value: glow.maxCenterAlpha ?? DEFAULT_SETTINGS.glow.maxCenterAlpha,
+      value: visuals.maxCenterAlpha ?? DEFAULT_SETTINGS.visuals.maxCenterAlpha,
       min: 0,
       max: 1,
       step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.maxCenterAlpha,
+      resetValue: DEFAULT_SETTINGS.visuals.maxCenterAlpha,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          glow.maxCenterAlpha = v;
+          visuals.maxCenterAlpha = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.maxCenterAlpha = DEFAULT_SETTINGS.glow.maxCenterAlpha;
+          visuals.maxCenterAlpha = DEFAULT_SETTINGS.visuals.maxCenterAlpha;
           await this.plugin.saveSettings();
         }
       }
@@ -3136,17 +3133,17 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Highlight depth",
       desc: "Graph distance (in hops) from the hovered node that will be highlighted.",
-      value: glow.highlightDepth,
+      value: visuals.highlightDepth,
       min: 0,
       max: 5,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.glow.highlightDepth,
+      resetValue: DEFAULT_SETTINGS.visuals.highlightDepth,
       onChange: async (v) => {
         if (!Number.isNaN(v) && Number.isInteger(v) && v >= 0) {
-          glow.highlightDepth = Math.max(0, Math.floor(v));
+          visuals.highlightDepth = Math.max(0, Math.floor(v));
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.highlightDepth = DEFAULT_SETTINGS.glow.highlightDepth;
+          visuals.highlightDepth = DEFAULT_SETTINGS.visuals.highlightDepth;
           await this.plugin.saveSettings();
         }
       }
@@ -3154,17 +3151,17 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Gravity Radius",
       desc: "Scales each node's screen-space radius for glow/mouse gravity.",
-      value: glow.gravityRadius ?? DEFAULT_SETTINGS.glow.gravityRadius,
+      value: physics.gravityRadius ?? DEFAULT_SETTINGS.physics.gravityRadius,
       min: 1,
       max: 20,
       step: 0.1,
-      resetValue: DEFAULT_SETTINGS.glow.gravityRadius,
+      resetValue: DEFAULT_SETTINGS.physics.gravityRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          glow.gravityRadius = v;
+          physics.gravityRadius = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.gravityRadius = DEFAULT_SETTINGS.glow.gravityRadius;
+          physics.gravityRadius = DEFAULT_SETTINGS.physics.gravityRadius;
           await this.plugin.saveSettings();
         }
       }
@@ -3172,17 +3169,17 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Gravity curve steepness",
       desc: "Controls falloff steepness; higher = stronger near cursor.",
-      value: glow.gravityCurveSteepness ?? DEFAULT_SETTINGS.glow.gravityCurveSteepness,
+      value: physics.gravityFallOff ?? DEFAULT_SETTINGS.physics.gravityFallOff,
       min: 0.5,
       max: 10,
       step: 0.1,
-      resetValue: DEFAULT_SETTINGS.glow.gravityCurveSteepness,
+      resetValue: DEFAULT_SETTINGS.physics.gravityFallOff,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          glow.gravityCurveSteepness = v;
+          physics.gravityFallOff = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.gravityCurveSteepness = DEFAULT_SETTINGS.glow.gravityCurveSteepness;
+          physics.gravityFallOff = DEFAULT_SETTINGS.physics.gravityFallOff;
           await this.plugin.saveSettings();
         }
       }
@@ -3190,17 +3187,17 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Label Radius",
       desc: "Screen-space label reveal radius (\xD7 node size).",
-      value: glow.labelRadius ?? DEFAULT_SETTINGS.glow.labelRadius,
+      value: visuals.labelRadius ?? DEFAULT_SETTINGS.visuals.labelRadius,
       min: 0.5,
       max: 10,
       step: 0.1,
-      resetValue: DEFAULT_SETTINGS.glow.labelRadius,
+      resetValue: DEFAULT_SETTINGS.visuals.labelRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          glow.labelRadius = v;
+          visuals.labelRadius = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.labelRadius = DEFAULT_SETTINGS.glow.labelRadius;
+          visuals.labelRadius = DEFAULT_SETTINGS.visuals.labelRadius;
           await this.plugin.saveSettings();
         }
       }
@@ -3208,17 +3205,17 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Focus smoothing rate",
       desc: "Smoothness of focus transitions (0 = very slow, 1 = fast). Internally used as a lerp factor.",
-      value: glow.focusSmoothingRate ?? DEFAULT_SETTINGS.glow.focusSmoothingRate,
+      value: visuals.focusSmoothing ?? DEFAULT_SETTINGS.visuals.focusSmoothing,
       min: 0,
       max: 1,
       step: 0.01,
-      resetValue: DEFAULT_SETTINGS.glow.focusSmoothingRate,
+      resetValue: DEFAULT_SETTINGS.visuals.focusSmoothing,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          glow.focusSmoothingRate = v;
+          visuals.focusSmoothing = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.focusSmoothingRate = DEFAULT_SETTINGS.glow.focusSmoothingRate;
+          visuals.focusSmoothing = DEFAULT_SETTINGS.visuals.focusSmoothing;
           await this.plugin.saveSettings();
         }
       }
@@ -3229,14 +3226,14 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
-        colorInput.value = glow.nodeColor ? String(glow.nodeColor) : "#000000";
+        colorInput.value = visuals.nodeColor ? String(visuals.nodeColor) : "#000000";
       } catch (e) {
         colorInput.value = "#000000";
       }
       colorInput.style.marginLeft = "8px";
       colorInput.addEventListener("change", async (e) => {
         const v = e.target.value.trim();
-        glow.nodeColor = v === "" ? void 0 : v;
+        visuals.nodeColor = v === "" ? void 0 : v;
         await this.plugin.saveSettings();
       });
       const rb = document.createElement("button");
@@ -3252,20 +3249,20 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       alphaInput.min = "0.1";
       alphaInput.max = "1";
       alphaInput.step = "0.01";
-      alphaInput.value = String(glow.nodeColorAlpha ?? DEFAULT_SETTINGS.glow.nodeColorAlpha);
+      alphaInput.value = String(visuals.nodeColorAlpha ?? DEFAULT_SETTINGS.visuals.nodeColorAlpha);
       alphaInput.style.width = "68px";
       alphaInput.style.marginLeft = "8px";
       alphaInput.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
-        glow.nodeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.nodeColorAlpha;
+        visuals.nodeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.visuals.nodeColorAlpha;
         await this.plugin.saveSettings();
       });
       rb.addEventListener("click", async () => {
-        glow.nodeColor = void 0;
-        glow.nodeColorAlpha = void 0;
+        visuals.nodeColor = void 0;
+        visuals.nodeColorAlpha = DEFAULT_SETTINGS.visuals.nodeColorAlpha;
         await this.plugin.saveSettings();
         colorInput.value = "#000000";
-        alphaInput.value = String(DEFAULT_SETTINGS.glow.nodeColorAlpha);
+        alphaInput.value = String(DEFAULT_SETTINGS.visuals.nodeColorAlpha);
       });
       s.controlEl.appendChild(rb);
       const hint = document.createElement("span");
@@ -3281,14 +3278,14 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
-        colorInput.value = glow.edgeColor ? String(glow.edgeColor) : "#000000";
+        colorInput.value = visuals.edgeColor ? String(visuals.edgeColor) : "#000000";
       } catch (e) {
         colorInput.value = "#000000";
       }
       colorInput.style.marginLeft = "8px";
       colorInput.addEventListener("change", async (e) => {
         const v = e.target.value.trim();
-        glow.edgeColor = v === "" ? void 0 : v;
+        visuals.edgeColor = v === "" ? void 0 : v;
         await this.plugin.saveSettings();
       });
       const rb = document.createElement("button");
@@ -3304,20 +3301,20 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       edgeAlpha.min = "0.1";
       edgeAlpha.max = "1";
       edgeAlpha.step = "0.01";
-      edgeAlpha.value = String(glow.edgeColorAlpha ?? DEFAULT_SETTINGS.glow.edgeColorAlpha);
+      edgeAlpha.value = String(visuals.edgeColorAlpha ?? DEFAULT_SETTINGS.visuals.edgeColorAlpha);
       edgeAlpha.style.width = "68px";
       edgeAlpha.style.marginLeft = "8px";
       edgeAlpha.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
-        glow.edgeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.edgeColorAlpha;
+        visuals.edgeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.visuals.edgeColorAlpha;
         await this.plugin.saveSettings();
       });
       rb.addEventListener("click", async () => {
-        glow.edgeColor = void 0;
-        glow.edgeColorAlpha = void 0;
+        visuals.edgeColor = void 0;
+        visuals.edgeColorAlpha = DEFAULT_SETTINGS.visuals.edgeColorAlpha;
         await this.plugin.saveSettings();
         colorInput.value = "#000000";
-        edgeAlpha.value = String(DEFAULT_SETTINGS.glow.edgeColorAlpha);
+        edgeAlpha.value = String(DEFAULT_SETTINGS.visuals.edgeColorAlpha);
       });
       s.controlEl.appendChild(rb);
       s.controlEl.appendChild(colorInput);
@@ -3333,14 +3330,14 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
-        colorInput.value = glow.tagColor ? String(glow.tagColor) : "#000000";
+        colorInput.value = visuals.tagColor ? String(visuals.tagColor) : "#000000";
       } catch (e) {
         colorInput.value = "#000000";
       }
       colorInput.style.marginLeft = "8px";
       colorInput.addEventListener("change", async (e) => {
         const v = e.target.value.trim();
-        glow.tagColor = v === "" ? void 0 : v;
+        visuals.tagColor = v === "" ? void 0 : v;
         await this.plugin.saveSettings();
       });
       const rb = document.createElement("button");
@@ -3356,20 +3353,20 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       tagAlpha.min = "0.1";
       tagAlpha.max = "1";
       tagAlpha.step = "0.01";
-      tagAlpha.value = String(glow.tagColorAlpha ?? DEFAULT_SETTINGS.glow.tagColorAlpha);
+      tagAlpha.value = String(visuals.tagColorAlpha ?? DEFAULT_SETTINGS.visuals.tagColorAlpha);
       tagAlpha.style.width = "68px";
       tagAlpha.style.marginLeft = "8px";
       tagAlpha.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
-        glow.tagColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.glow.tagColorAlpha;
+        visuals.tagColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : DEFAULT_SETTINGS.visuals.tagColorAlpha;
         await this.plugin.saveSettings();
       });
       rb.addEventListener("click", async () => {
-        glow.tagColor = void 0;
-        glow.tagColorAlpha = void 0;
+        visuals.tagColor = void 0;
+        visuals.tagColorAlpha = DEFAULT_SETTINGS.visuals.tagColorAlpha;
         await this.plugin.saveSettings();
         colorInput.value = "#000000";
-        tagAlpha.value = String(DEFAULT_SETTINGS.glow.tagColorAlpha);
+        tagAlpha.value = String(DEFAULT_SETTINGS.visuals.tagColorAlpha);
       });
       s.controlEl.appendChild(rb);
       s.controlEl.appendChild(colorInput);
@@ -3385,14 +3382,14 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
-        colorInput.value = glow.labelColor ? String(glow.labelColor) : "#000000";
+        colorInput.value = visuals.labelColor ? String(visuals.labelColor) : "#000000";
       } catch (e) {
         colorInput.value = "#000000";
       }
       colorInput.style.marginLeft = "8px";
       colorInput.addEventListener("change", async (e) => {
         const v = e.target.value.trim();
-        glow.labelColor = v === "" ? void 0 : v;
+        visuals.labelColor = v === "" ? void 0 : v;
         await this.plugin.saveSettings();
       });
       const rb = document.createElement("button");
@@ -3408,20 +3405,20 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       labelAlpha.min = "0";
       labelAlpha.max = "1";
       labelAlpha.step = "0.01";
-      labelAlpha.value = String(glow.labelColorAlpha ?? DEFAULT_SETTINGS.glow.labelColorAlpha);
+      labelAlpha.value = String(visuals.labelColorAlpha ?? DEFAULT_SETTINGS.visuals.labelColorAlpha);
       labelAlpha.style.width = "68px";
       labelAlpha.style.marginLeft = "8px";
       labelAlpha.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
-        glow.labelColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.glow.labelColorAlpha;
+        visuals.labelColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : DEFAULT_SETTINGS.visuals.labelColorAlpha;
         await this.plugin.saveSettings();
       });
       rb.addEventListener("click", async () => {
-        glow.labelColor = void 0;
-        glow.labelColorAlpha = void 0;
+        visuals.labelColor = void 0;
+        visuals.labelColorAlpha = DEFAULT_SETTINGS.visuals.labelColorAlpha;
         await this.plugin.saveSettings();
         colorInput.value = "#000000";
-        labelAlpha.value = String(DEFAULT_SETTINGS.glow.labelColorAlpha);
+        labelAlpha.value = String(DEFAULT_SETTINGS.visuals.labelColorAlpha);
       });
       s.controlEl.appendChild(rb);
       s.controlEl.appendChild(colorInput);
@@ -3432,24 +3429,24 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       s.controlEl.appendChild(hint);
       s.controlEl.appendChild(labelAlpha);
     }
-    new import_obsidian2.Setting(containerEl).setName("Use interface font for labels").setDesc("When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.").addToggle((t) => t.setValue(Boolean(glow.useInterfaceFont)).onChange(async (v) => {
-      glow.useInterfaceFont = Boolean(v);
+    new import_obsidian2.Setting(containerEl).setName("Use interface font for labels").setDesc("When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.").addToggle((t) => t.setValue(Boolean(visuals.useInterfaceFont)).onChange(async (v) => {
+      visuals.useInterfaceFont = Boolean(v);
       await this.plugin.saveSettings();
     }));
     addSliderSetting(containerEl, {
       name: "Base label font size",
       desc: "Base font size for labels in pixels (before camera zoom scaling).",
-      value: glow.labelBaseFontSize ?? DEFAULT_SETTINGS.glow.labelBaseFontSize,
+      value: visuals.labelBaseFontSize ?? DEFAULT_SETTINGS.visuals.labelBaseFontSize,
       min: 6,
       max: 24,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.glow.labelBaseFontSize,
+      resetValue: DEFAULT_SETTINGS.visuals.labelBaseFontSize,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 1 && v <= 72) {
-          glow.labelBaseFontSize = Math.round(v);
+          visuals.labelBaseFontSize = Math.round(v);
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          glow.labelBaseFontSize = DEFAULT_SETTINGS.glow.labelBaseFontSize;
+          visuals.labelBaseFontSize = DEFAULT_SETTINGS.visuals.labelBaseFontSize;
           await this.plugin.saveSettings();
         }
       }
