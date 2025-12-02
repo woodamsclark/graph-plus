@@ -1,15 +1,16 @@
 import { App, ItemView, WorkspaceLeaf, Plugin, TFile, Platform } from 'obsidian';
-import { buildGraph, GraphData } from './graph/buildGraph.ts';
+import { buildGraph } from './graph/buildGraph.ts';
 import { layoutGraph2D, layoutGraph3D } from './graph/layout2d.ts';
-import { createRenderer2D, Renderer2D } from './graph/renderer2d.ts';
+import { createRenderer2D } from './graph/renderer2d.ts';
 import { createSimulation, Simulation } from './graph/simulation.ts';
-import { Graph2DController } from './graph/Graph2DController.ts';import { DEFAULT_SETTINGS } from './main';
-import { debounce } from './helpers/debounce.ts';
+import { GraphController } from './graph/GraphController.ts';import { DEFAULT_SETTINGS } from './main';
+import { debounce } from './utils/debounce.ts';
+import { GraphData, Renderer2D } from './types/interfaces.ts';
 
 export const GREATER_GRAPH_VIEW_TYPE = 'greater-graph-view';
 
 export class GraphView extends ItemView {
-  private controller: Graph2DController | null = null;
+  private controller: GraphController | null = null;
   private plugin: Plugin;
   private scheduleGraphRefresh: (() => void) | null = null;
 
@@ -33,7 +34,7 @@ export class GraphView extends ItemView {
   async onOpen() {
     this.containerEl.empty();
     const container = this.containerEl.createDiv({ cls: 'greater-graph-view' });
-    this.controller = new Graph2DController(this.app, container, this.plugin);
+    this.controller = new GraphController(this.app, container, this.plugin);
     await this.controller.init();
     if (this.controller) {
       this.controller.setNodeClickHandler((node: any) => void this.openNodeFile(node));

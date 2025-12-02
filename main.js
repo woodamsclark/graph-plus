@@ -28,7 +28,7 @@ var import_obsidian3 = require("obsidian");
 // GraphView.ts
 var import_obsidian2 = require("obsidian");
 
-// graph/Graph2DController.ts
+// graph/GraphController.ts
 var import_obsidian = require("obsidian");
 
 // graph/buildGraph.ts
@@ -327,7 +327,8 @@ function layoutGraph3D(graph, options) {
 // graph/renderer2d.ts
 function createRenderer2D(options) {
   const canvas = options.canvas;
-  let glowOptions = options.glow;
+  let visuals = options.settings.visuals;
+  let physics = options.settings.physics;
   const ctx = canvas.getContext("2d");
   let graph = null;
   let nodeById = /* @__PURE__ */ new Map();
@@ -337,28 +338,17 @@ function createRenderer2D(options) {
   let maxEdgeCount = 1;
   let drawMutualDoubleLines = true;
   let showTags = true;
-  let minRadius = glowOptions?.minNodeRadius ?? 6;
-  let maxRadius = glowOptions?.maxNodeRadius ?? 24;
-  let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.15;
-  let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.6;
-  let nodeColorAlpha = glowOptions?.nodeColorAlpha ?? 1;
-  let tagColorAlpha = glowOptions?.tagColorAlpha ?? 1;
-  let labelColorAlpha = glowOptions?.labelColorAlpha ?? 1;
-  let edgeColorAlpha = glowOptions?.edgeColorAlpha ?? 1;
-  let nodeMinAlpha = glowOptions?.nodeMinAlpha ?? 0.1;
-  let nodeMaxAlpha = glowOptions?.nodeMaxAlpha ?? 1;
-  let tagMinAlpha = glowOptions?.tagMinAlpha ?? 0.1;
-  let tagMaxAlpha = glowOptions?.tagMaxAlpha ?? 1;
-  let edgeMinAlpha = glowOptions?.edgeMinAlpha ?? 0.1;
-  let edgeMaxAlpha = glowOptions?.edgeMaxAlpha ?? 0.6;
-  let labelMinAlpha = glowOptions?.labelMinAlpha ?? 0;
-  let labelMaxAlpha = glowOptions?.labelMaxAlpha ?? 1;
-  let gravityRadius = glowOptions?.gravityRadius ?? 15;
-  let gravityCurveSteepness = glowOptions?.gravityCurveSteepness ?? 1;
-  let labelRadius = glowOptions?.labelRadius ?? 10;
-  let highlightRadius = glowOptions?.highlightRadius ?? 10;
+  let minRadius = visuals.minNodeRadius;
+  let maxRadius = visuals.maxNodeRadius;
+  let minCenterAlpha = visuals.minCenterAlpha;
+  let maxCenterAlpha = visuals.maxCenterAlpha;
+  let nodeColorAlpha = visuals.nodeColorAlpha;
+  let tagColorAlpha = visuals.tagColorAlpha;
+  let labelColorAlpha = visuals.labelColorAlpha;
+  let edgeColorAlpha = visuals.edgeColorAlpha;
+  let labelRadius = visuals.labelRadius;
   let innerRadius = 1;
-  let focusSmoothingRate = glowOptions?.focusSmoothingRate ?? 0.8;
+  let focusSmoothing = visuals.focusSmoothing;
   let hoveredNodeId = null;
   let hoverHighlightSet = /* @__PURE__ */ new Set();
   let mouseX = 0;
@@ -368,9 +358,8 @@ function createRenderer2D(options) {
   const hoverLerpSpeed = 0.2;
   const nodeFocusMap = /* @__PURE__ */ new Map();
   let lastRenderTime = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
-  let labelAlphaMin = glowOptions?.nodeMinBodyAlpha ?? 0.3;
-  let labelFadeRangePx = glowOptions?.labelFadeRangePx ?? 8;
-  let labelBaseFontSize = glowOptions?.labelBaseFontSize ?? 10;
+  let labelFadeRangePx = visuals.labelFadeRangePx;
+  let labelBaseFontSize = visuals.labelBaseFontSize;
   let themeNodeColor = "#66ccff";
   let themeLabelColor = "#222";
   let themeEdgeColor = "#888888";
@@ -574,8 +563,8 @@ function createRenderer2D(options) {
     const r = getNodeRadius(node);
     return {
       inner: r * innerRadius,
-      outer: r * gravityRadius,
-      curve: gravityCurveSteepness
+      outer: r * physics.gravityRadius,
+      curve: physics.gravityFallOff
     };
   }
   function buildLabelProfile(node) {
@@ -583,15 +572,15 @@ function createRenderer2D(options) {
     return {
       inner: r * innerRadius,
       outer: r * labelRadius,
-      curve: gravityCurveSteepness
+      curve: physics.gravityFallOff
     };
   }
   function buildHighlightProfile(node) {
     const r = getNodeRadius(node);
     return {
       inner: r * innerRadius,
-      outer: r * highlightRadius,
-      curve: gravityCurveSteepness
+      outer: r * visuals.labelRadius,
+      curve: physics.gravityFallOff
     };
   }
   function evalFalloff(node, profile) {
@@ -624,31 +613,31 @@ function createRenderer2D(options) {
     if (!graph)
       return;
     ctx.save();
-    if (glowOptions?.nodeColor)
-      themeNodeColor = glowOptions.nodeColor;
-    if (glowOptions?.labelColor)
-      themeLabelColor = glowOptions.labelColor;
-    if (glowOptions?.edgeColor)
-      themeEdgeColor = glowOptions.edgeColor;
+    if (visuals.nodeColor)
+      themeNodeColor = visuals.nodeColor;
+    if (visuals.labelColor)
+      themeLabelColor = visuals.labelColor;
+    if (visuals.edgeColor)
+      themeEdgeColor = visuals.edgeColor;
     try {
       const cs = window.getComputedStyle(canvas);
       const nodeVar = cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
       const labelVar = cs.getPropertyValue("--text-normal") || cs.getPropertyValue("--text");
       const edgeVar = cs.getPropertyValue("--text-muted") || cs.getPropertyValue("--text-faint") || cs.getPropertyValue("--text-normal");
-      if (!glowOptions?.nodeColor && nodeVar && nodeVar.trim())
+      if (!visuals.nodeColor && nodeVar && nodeVar.trim())
         themeNodeColor = nodeVar.trim();
-      if (!glowOptions?.labelColor && labelVar && labelVar.trim())
+      if (!visuals.labelColor && labelVar && labelVar.trim())
         themeLabelColor = labelVar.trim();
-      if (!glowOptions?.edgeColor && edgeVar && edgeVar.trim())
+      if (!visuals.edgeColor && edgeVar && edgeVar.trim())
         themeEdgeColor = edgeVar.trim();
       const tagVar = cs.getPropertyValue("--accent-2") || cs.getPropertyValue("--accent-secondary") || cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
-      if (!glowOptions?.tagColor && tagVar && tagVar.trim())
+      if (!visuals.tagColor && tagVar && tagVar.trim())
         themeTagColor = tagVar.trim();
     } catch (e) {
     }
     try {
       const cs = window.getComputedStyle(canvas);
-      if (glowOptions?.useInterfaceFont) {
+      if (visuals.useInterfaceFont) {
         if (!resolvedInterfaceFontFamily) {
           const candidates = ["--font-family-interface", "--font-family", "--font-main", "--font-primary", "--font-family-sans", "--text-font"];
           let fam = null;
@@ -706,7 +695,7 @@ function createRenderer2D(options) {
         }
       }
     } catch (e) {
-      if (glowOptions?.useInterfaceFont)
+      if (visuals.useInterfaceFont)
         resolvedInterfaceFontFamily = resolvedInterfaceFontFamily || "sans-serif";
       else
         resolvedMonoFontFamily = resolvedMonoFontFamily || "monospace";
@@ -730,7 +719,7 @@ function createRenderer2D(options) {
         const id = n.id;
         const target = isNodeTargetFocused(id) ? 1 : 0;
         const cur = nodeFocusMap.get(id) ?? target;
-        const alpha = 1 - Math.exp(-focusSmoothingRate * dt);
+        const alpha = 1 - Math.exp(-focusSmoothing * dt);
         const next = cur + (target - cur) * alpha;
         nodeFocusMap.set(id, next);
       }
@@ -766,17 +755,16 @@ function createRenderer2D(options) {
         else
           alpha = 0.08 + (0.9 - 0.08) * edgeFocus;
         ctx.save();
-        const useEdgeAlpha = glowOptions?.edgeColorAlpha ?? edgeColorAlpha;
-        let finalEdgeAlpha = Math.max(edgeMinAlpha, alpha * useEdgeAlpha);
+        let finalEdgeAlpha = visuals.edgeColorAlpha;
         if (hoveredNodeId) {
           const srcInDepth = hoverHighlightSet.has(edge.sourceId);
           const tgtInDepth = hoverHighlightSet.has(edge.targetId);
           const directlyIncident = edge.sourceId === hoveredNodeId || edge.targetId === hoveredNodeId;
           if (srcInDepth && tgtInDepth || directlyIncident)
-            finalEdgeAlpha = edgeMaxAlpha;
+            finalEdgeAlpha = 1;
         }
         ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${finalEdgeAlpha})`;
-        const isMutual = !!edge.hasReverse && drawMutualDoubleLines;
+        const isMutual = !!edge.bidirectional && drawMutualDoubleLines;
         if (isMutual) {
           const dx = tgtP.x - srcP.x;
           const dy = tgtP.y - srcP.y;
@@ -829,51 +817,51 @@ function createRenderer2D(options) {
       const centerAlpha = getCenterAlpha(node);
       const gravityProfile = buildGravityProfile(node);
       const gravityOuterR = gravityProfile.outer;
-      const glowRadius = radius * gravityRadius;
       const focus = nodeFocusMap.get(node.id) ?? 1;
       const focused = focus > 0.01;
       if (focused) {
-        const nodeColorOverride = node && node.type === "tag" ? glowOptions?.tagColor ?? themeTagColor : themeNodeColor;
+        const nodeColorOverride = node && node.type === "tag" ? visuals.tagColor ?? themeTagColor : themeNodeColor;
         const accentRgb = colorToRgb(nodeColorOverride);
-        const useNodeAlpha = node && node.type === "tag" ? glowOptions?.tagColorAlpha ?? tagColorAlpha : glowOptions?.nodeColorAlpha ?? nodeColorAlpha;
+        const useNodeAlpha = node && node.type === "tag" ? visuals.tagColorAlpha ?? tagColorAlpha : visuals.nodeColorAlpha ?? nodeColorAlpha;
         const dimCenter = clamp01(getBaseCenterAlpha(node));
         const fullCenter = centerAlpha;
         let blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
-        let effectiveUseNodeAlpha = Math.max(node && node.type === "tag" ? tagMinAlpha : nodeMinAlpha, useNodeAlpha);
+        let effectiveUseNodeAlpha = visuals.tagColorAlpha;
         if (hoveredNodeId) {
           const inDepth = hoverHighlightSet.has(node.id);
           const isHovered = node.id === hoveredNodeId;
           if (isHovered || inDepth) {
             blendedCenter = 1;
-            effectiveUseNodeAlpha = node && node.type === "tag" ? tagMaxAlpha : nodeMaxAlpha;
+            effectiveUseNodeAlpha = 1;
           }
         }
-        const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
+        console.log(p.x, p.y, 0, p.x, p.y, radius * physics.gravityRadius);
+        const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * physics.gravityRadius);
         gradient.addColorStop(0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * effectiveUseNodeAlpha})`);
         gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.5 * effectiveUseNodeAlpha})`);
         gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.15 * effectiveUseNodeAlpha})`);
         gradient.addColorStop(1, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0)`);
         ctx.save();
         ctx.beginPath();
-        ctx.arc(p.x, p.y, glowRadius, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, radius * physics.gravityRadius, 0, Math.PI * 2);
         ctx.fillStyle = gradient;
         ctx.fill();
         ctx.restore();
-        const bodyAlpha = labelAlphaMin + (1 - labelAlphaMin) * focus;
+        const bodyAlpha = visuals.labelColorAlpha;
         ctx.save();
         ctx.beginPath();
         ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-        const bodyColorOverride = node && node.type === "tag" ? glowOptions?.tagColor ?? themeTagColor : themeNodeColor;
+        const bodyColorOverride = node && node.type === "tag" ? visuals.tagColor ?? themeTagColor : themeNodeColor;
         const accent = colorToRgb(bodyColorOverride);
-        const useBodyAlpha = node && node.type === "tag" ? glowOptions?.tagColorAlpha ?? tagColorAlpha : glowOptions?.nodeColorAlpha ?? nodeColorAlpha;
-        let effectiveUseBodyAlpha = Math.max(node && node.type === "tag" ? tagMinAlpha : nodeMinAlpha, useBodyAlpha);
+        const useBodyAlpha = node && node.type === "tag" ? visuals.tagColorAlpha ?? tagColorAlpha : visuals.nodeColorAlpha ?? nodeColorAlpha;
+        let effectiveUseBodyAlpha = useBodyAlpha;
         let finalBodyAlpha = bodyAlpha;
         if (hoveredNodeId) {
           const inDepthBody = hoverHighlightSet.has(node.id);
           const isHoveredBody = node.id === hoveredNodeId;
           if (isHoveredBody || inDepthBody) {
             finalBodyAlpha = 1;
-            effectiveUseBodyAlpha = node && node.type === "tag" ? tagMaxAlpha : nodeMaxAlpha;
+            effectiveUseBodyAlpha = 1;
           }
         }
         ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${finalBodyAlpha * effectiveUseBodyAlpha})`;
@@ -904,13 +892,13 @@ function createRenderer2D(options) {
           ctx.font = `${fontToSet}px ${resolvedInterfaceFontFamily || "sans-serif"}`;
           const isHoverOrHighlight2 = hoveredNodeId === node.id || hoverHighlightSet && hoverHighlightSet.has(node.id);
           const centerA = isHoverOrHighlight2 ? 1 : clamp01(getCenterAlpha(node));
-          let labelA = Math.max(labelMinAlpha, labelAlphaVis * (glowOptions?.labelColorAlpha ?? labelColorAlpha));
+          let labelA = Math.max(visuals.labelColorAlpha, labelAlphaVis * visuals.labelColorAlpha);
           if (isHoverOrHighlight2)
-            labelA = labelMaxAlpha;
+            labelA = visuals.labelColorAlpha;
           else if (hoveredNodeId && hoverHighlightSet.has(node.id))
-            labelA = Math.max(labelA, glowOptions?.labelColorAlpha ?? labelColorAlpha);
+            labelA = Math.max(labelA, visuals.labelColorAlpha);
           ctx.globalAlpha = Math.max(0, Math.min(1, labelA * centerA));
-          const labelRgb = colorToRgb((glowOptions?.labelColor ?? labelCss) || "#ffffff");
+          const labelRgb = colorToRgb(visuals.labelColor || "#ffffff");
           ctx.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},1.0)`;
           const verticalPadding = 4;
           ctx.fillText(node.label, p.x, p.y + radius + verticalPadding);
@@ -920,7 +908,7 @@ function createRenderer2D(options) {
         const faintRgb = colorToRgb(themeLabelColor || "#999");
         const faintAlpha = 0.15 * (1 - focus) + 0.1 * focus;
         const effectiveCenterAlpha = clamp01(getCenterAlpha(node));
-        const finalAlpha = faintAlpha * effectiveCenterAlpha * (glowOptions?.nodeColorAlpha ?? nodeColorAlpha);
+        const finalAlpha = faintAlpha * effectiveCenterAlpha * visuals.nodeColorAlpha;
         ctx.save();
         ctx.beginPath();
         ctx.arc(p.x, p.y, radius * 0.9, 0, Math.PI * 2);
@@ -948,30 +936,22 @@ function createRenderer2D(options) {
     if (typeof opts.showTags === "boolean")
       showTags = opts.showTags;
   }
-  function setGlowSettings(glow) {
-    if (!glow)
+  function setGlowSettings(visuals2) {
+    if (!visuals2)
       return;
-    glowOptions = glow;
-    minRadius = glow.minNodeRadius;
-    maxRadius = glow.maxNodeRadius;
-    minCenterAlpha = glow.minCenterAlpha;
-    maxCenterAlpha = glow.maxCenterAlpha;
-    if (glow.gravityRadius != null)
-      gravityRadius = glow.gravityRadius;
-    if (glow.gravityCurveSteepness != null)
-      gravityCurveSteepness = glow.gravityCurveSteepness;
-    if (glow.labelRadius != null)
-      labelRadius = glow.labelRadius;
-    if (glow.highlightRadius != null)
-      highlightRadius = glow.highlightRadius;
-    focusSmoothingRate = glow.focusSmoothingRate ?? focusSmoothingRate;
-    labelAlphaMin = glow.nodeMinBodyAlpha ?? labelAlphaMin;
-    labelFadeRangePx = typeof glow.labelFadeRangePx === "number" ? glow.labelFadeRangePx : labelFadeRangePx;
-    labelBaseFontSize = typeof glow.labelBaseFontSize === "number" ? glow.labelBaseFontSize : labelBaseFontSize;
-    nodeColorAlpha = typeof glow.nodeColorAlpha === "number" ? glow.nodeColorAlpha : nodeColorAlpha;
-    tagColorAlpha = typeof glow.tagColorAlpha === "number" ? glow.tagColorAlpha : tagColorAlpha;
-    labelColorAlpha = typeof glow.labelColorAlpha === "number" ? glow.labelColorAlpha : labelColorAlpha;
-    edgeColorAlpha = typeof glow.edgeColorAlpha === "number" ? glow.edgeColorAlpha : edgeColorAlpha;
+    visuals2 = visuals2;
+    minRadius = visuals2.minNodeRadius;
+    maxRadius = visuals2.maxNodeRadius;
+    minCenterAlpha = visuals2.minCenterAlpha;
+    maxCenterAlpha = visuals2.maxCenterAlpha;
+    labelRadius = visuals2.labelRadius;
+    focusSmoothing = visuals2.focusSmoothing;
+    labelFadeRangePx = visuals2.labelFadeRangePx;
+    labelBaseFontSize = visuals2.labelBaseFontSize;
+    nodeColorAlpha = visuals2.nodeColorAlpha;
+    tagColorAlpha = visuals2.tagColorAlpha;
+    labelColorAlpha = visuals2.labelColorAlpha;
+    edgeColorAlpha = visuals2.edgeColorAlpha;
   }
   function setHoverState(hoveredId, highlightedIds, mx, my) {
     hoveredNodeId = hoveredId;
@@ -1235,9 +1215,9 @@ function createSimulation(nodes, edges, options) {
       if (pinnedNodes.has(n.id))
         continue;
       const d = Math.max(0, Math.min(1, damping));
-      n.vx *= 1 - d;
-      n.vy *= 1 - d;
-      n.vz *= 1 - d;
+      n.vx = (n.vx ?? 0) * (1 - d);
+      n.vy = (n.vy ?? 0) * (1 - d);
+      n.vz = (n.vz ?? 0) * (1 - d);
       if (Math.abs(n.vx) < 1e-3)
         n.vx = 0;
       if (Math.abs(n.vy) < 1e-3)
@@ -1390,7 +1370,7 @@ function createSimulation(nodes, edges, options) {
   return { start, stop, tick, reset, setOptions, setPinnedNodes, setMouseAttractor };
 }
 
-// helpers/debounce.ts
+// utils/debounce.ts
 function debounce(fn, wait = 300, immediate = false) {
   let timeout = null;
   return (...args) => {
@@ -1408,8 +1388,8 @@ function debounce(fn, wait = 300, immediate = false) {
   };
 }
 
-// graph/Graph2DController.ts
-var Graph2DController = class {
+// graph/GraphController.ts
+var GraphController = class {
   app;
   containerEl;
   canvas = null;
@@ -1418,26 +1398,23 @@ var Graph2DController = class {
   adjacency = null;
   onNodeClick = null;
   plugin;
-  mouseMoveHandler = null;
-  mouseLeaveHandler = null;
-  mouseClickHandler = null;
+  mouseMoveHandler;
+  mouseClickHandler;
+  mouseLeaveHandler;
   simulation = null;
   animationFrame = null;
   lastTime = null;
-  running = false;
+  running;
   settingsUnregister = null;
-  wheelHandler = null;
-  mouseDownHandler = null;
-  mouseUpHandler = null;
-  lastDragX = 0;
-  lastDragY = 0;
-  draggingNode = null;
+  wheelHandler;
+  mouseDownHandler;
+  mouseUpHandler;
+  draggingNode;
   dragStartDepth = 0;
   dragOffsetWorld = { x: 0, y: 0, z: 0 };
   isPanning = false;
   lastPanX = 0;
   lastPanY = 0;
-  // Camera interaction (Phase 4)
   isOrbiting = false;
   lastOrbitX = 0;
   lastOrbitY = 0;
@@ -1446,11 +1423,9 @@ var Graph2DController = class {
   panStartY = 0;
   panStartTargetX = 0;
   panStartTargetY = 0;
-  // pending right-click focus state
   pendingFocusNode = null;
   pendingFocusDownX = 0;
   pendingFocusDownY = 0;
-  // camera follow / animation state
   cameraAnimStart = null;
   cameraAnimDuration = 300;
   // ms
@@ -1458,7 +1433,6 @@ var Graph2DController = class {
   cameraAnimTo = null;
   isCameraFollowing = false;
   cameraFollowNode = null;
-  // drag tracking for momentum and click suppression
   hasDragged = false;
   preventClick = false;
   downScreenX = 0;
@@ -1470,31 +1444,21 @@ var Graph2DController = class {
   dragVy = 0;
   momentumScale = 0.12;
   dragThreshold = 4;
-  // persistence
-  saveNodePositionsDebounced = null;
-  // last node id that we triggered a hover preview for (to avoid retriggering)
   lastPreviewedNodeId = null;
-  // When a hover preview has been triggered and is visible, lock highlighting
-  // to that node (and neighbors) until the popover disappears.
   previewLockNodeId = null;
   previewPollTimer = null;
   controlsEl = null;
-  controlsVisible = false;
-  // start minimized by default
-  // Screen-space tracking for cursor attractor
   lastMouseX = null;
   lastMouseY = null;
-  // When true, skip running the cursor attractor until the next mousemove event
-  suppressAttractorUntilMouseMove = false;
-  // Simple camera follow flag
   followLockedNodeId = null;
-  // Center node and camera defaults
   centerNode = null;
   defaultCameraDistance = 1200;
   lastUsePinnedCenterNote = false;
   lastPinnedCenterNotePath = "";
   viewCenterX = 0;
   viewCenterY = 0;
+  suppressAttractorUntilMouseMove = false;
+  saveNodePositionsDebounced = null;
   saveNodePositions() {
     if (!this.graph)
       return;
@@ -1571,19 +1535,9 @@ var Graph2DController = class {
     canvas.tabIndex = 0;
     this.containerEl.appendChild(canvas);
     this.canvas = canvas;
-    const initialGlow = Object.assign({}, this.plugin.settings?.glow || {});
-    this.renderer = createRenderer2D({ canvas, glow: initialGlow });
-    try {
-      const defaults = {
-        nodeColorAlpha: 1,
-        edgeColorAlpha: 0.6,
-        tagColorAlpha: 1
-      };
-      const merged = Object.assign({}, defaults, this.plugin.settings?.glow || {});
-      if (this.renderer.setGlowSettings)
-        this.renderer.setGlowSettings(merged);
-    } catch (e) {
-    }
+    const userSettings = await this.plugin.loadData();
+    const settings = Object.assign({}, DEFAULT_SETTINGS, userSettings);
+    this.renderer = createRenderer2D({ canvas, settings });
     try {
       const cam0 = this.renderer.getCamera?.();
       if (cam0 && typeof cam0.distance === "number")
@@ -2078,13 +2032,10 @@ var Graph2DController = class {
     if (this.plugin.registerSettingsListener) {
       this.settingsUnregister = this.plugin.registerSettingsListener(() => {
         if (this.plugin.settings) {
-          const glow = this.plugin.settings.glow;
+          const visuals = this.plugin.settings.visuals;
+          const physics = this.plugin.settings.physics;
           if (this.renderer && this.renderer.setGlowSettings) {
-            const phys2 = this.plugin.settings?.physics || {};
-            const glowWithRadius = Object.assign({}, glow || {});
-            if (typeof phys2.mouseAttractionRadius === "number")
-              glowWithRadius.glowRadiusPx = phys2.mouseAttractionRadius;
-            this.renderer.setGlowSettings(glowWithRadius);
+            this.renderer.setGlowSettings(visuals);
             try {
               const drawDouble = Boolean(this.plugin.settings?.mutualLinkDoubleLine);
               const showTags = this.plugin.settings?.showTags !== false;
@@ -2114,140 +2065,125 @@ var Graph2DController = class {
             }
           } catch (e) {
           }
-          try {
-            this.refreshControlsFromSettings();
-          } catch (e) {
-          }
         }
       });
     }
   }
   // Synchronize the toolbox UI controls from current plugin settings
-  refreshControlsFromSettings() {
+  /*private refreshControlsFromSettings(): void {
     try {
-      if (!this.controlsEl)
-        return;
-      const settings = this.plugin.settings || {};
+      if (!this.controlsEl) return;
+      const settings = (this.plugin as any).settings || {};
       const glow = settings.glow || {};
       const phys = settings.physics || {};
+      // Iterate rows and update known inputs by label text
       const panel = this.controlsEl;
       for (let i = 0; i < panel.children.length; i++) {
-        const row = panel.children[i];
-        const labelEl = row.querySelector("label");
-        const right = row.querySelector("div:last-child");
-        if (!labelEl || !right)
-          continue;
-        const name = (labelEl.textContent || "").toLowerCase();
-        const inputs = Array.from(right.querySelectorAll("input"));
-        if (name.includes("node color")) {
-          const color = inputs.find((x) => x.type === "color");
-          const alpha = inputs.find((x) => x.type === "number");
-          if (color)
-            color.value = String(glow.nodeColor || (color.value || "#66ccff"));
-          if (alpha)
-            alpha.value = String(glow.nodeColorAlpha ?? 1);
-        } else if (name.includes("edge color")) {
-          const color = inputs.find((x) => x.type === "color");
-          const alpha = inputs.find((x) => x.type === "number");
-          if (color)
-            color.value = String(glow.edgeColor || (color.value || "#888888"));
-          if (alpha)
-            alpha.value = String(glow.edgeColorAlpha ?? 0.6);
-        } else if (name.includes("tag color")) {
-          const color = inputs.find((x) => x.type === "color");
-          const alpha = inputs.find((x) => x.type === "number");
-          if (color)
-            color.value = String(glow.tagColor || (color.value || "#8000ff"));
-          if (alpha)
-            alpha.value = String(glow.tagColorAlpha ?? 1);
-        } else if (name.includes("highlight depth")) {
-          const range = inputs.find((x) => x.type === "range");
-          const num = inputs.find((x) => x.type === "number");
+        const row = panel.children[i] as HTMLElement;
+        const labelEl = row.querySelector('label');
+        const right = row.querySelector('div:last-child');
+        if (!labelEl || !right) continue;
+        const name = (labelEl.textContent || '').toLowerCase();
+        const inputs = Array.from(right.querySelectorAll('input')) as HTMLInputElement[];
+        // Node color row
+        if (name.includes('node color')) {
+          const color = inputs.find((x) => x.type === 'color');
+          const alpha = inputs.find((x) => x.type === 'number');
+          if (color) color.value = String(glow.nodeColor || (color.value || '#66ccff'));
+          if (alpha) alpha.value = String(glow.nodeColorAlpha ?? 1.0);
+        }
+        // Edge color row
+        else if (name.includes('edge color')) {
+          const color = inputs.find((x) => x.type === 'color');
+          const alpha = inputs.find((x) => x.type === 'number');
+          if (color) color.value = String(glow.edgeColor || (color.value || '#888888'));
+          if (alpha) alpha.value = String(glow.edgeColorAlpha ?? 0.6);
+        }
+        // Tag color row
+        else if (name.includes('tag color')) {
+          const color = inputs.find((x) => x.type === 'color');
+          const alpha = inputs.find((x) => x.type === 'number');
+          if (color) color.value = String(glow.tagColor || (color.value || '#8000ff'));
+          if (alpha) alpha.value = String(glow.tagColorAlpha ?? 1.0);
+        }
+        // Highlight depth
+        else if (name.includes('highlight depth')) {
+          const range = inputs.find((x) => x.type === 'range');
+          const num = inputs.find((x) => x.type === 'number');
           const v = String(glow.highlightDepth ?? 1);
-          if (range)
-            range.value = v;
-          if (num)
-            num.value = v;
-        } else if (name.includes("label visibility")) {
-          const ranges = inputs.filter((x) => x.type === "range");
-          const nums = inputs.filter((x) => x.type === "number");
+          if (range) range.value = v;
+          if (num) num.value = v;
+        }
+        // Label visibility (min + fade)
+        else if (name.includes('label visibility')) {
+          const ranges = inputs.filter((x) => x.type === 'range');
+          const nums = inputs.filter((x) => x.type === 'number');
           const minV = String(glow.labelMinVisibleRadiusPx ?? 6);
           const fadeV = String(glow.labelFadeRangePx ?? 8);
-          if (ranges[0])
-            ranges[0].value = minV;
-          if (nums[0])
-            nums[0].value = minV;
-          if (ranges[1])
-            ranges[1].value = fadeV;
-          if (nums[1])
-            nums[1].value = fadeV;
-        } else if (name.includes("count duplicate links")) {
-          const chk = inputs.find((x) => x.type === "checkbox");
-          if (chk)
-            chk.checked = Boolean(settings.countDuplicateLinks);
-        } else if (name.includes("show tag nodes")) {
-          const chk = inputs.find((x) => x.type === "checkbox");
-          if (chk)
-            chk.checked = settings.showTags !== false;
-        } else if (name.includes("mouse gravity")) {
-          const chk = inputs.find((x) => x.type === "checkbox");
-          if (chk)
-            chk.checked = phys.mouseGravityEnabled !== false && phys.mouseAttractionEnabled !== false;
-        } else if (name.includes("repulsion")) {
-          const range = inputs.find((x) => x.type === "range");
-          const num = inputs.find((x) => x.type === "number");
+          if (ranges[0]) ranges[0].value = minV;
+          if (nums[0]) nums[0].value = minV;
+          if (ranges[1]) ranges[1].value = fadeV;
+          if (nums[1]) nums[1].value = fadeV;
+        }
+        // Count duplicate links
+        else if (name.includes('count duplicate links')) {
+          const chk = inputs.find((x) => x.type === 'checkbox');
+          if (chk) chk.checked = Boolean(settings.countDuplicateLinks);
+        }
+        // Show tag nodes
+        else if (name.includes('show tag nodes')) {
+          const chk = inputs.find((x) => x.type === 'checkbox');
+          if (chk) chk.checked = (settings.showTags !== false);
+        }
+        // Mouse gravity toggle
+        else if (name.includes('mouse gravity')) {
+          const chk = inputs.find((x) => x.type === 'checkbox');
+          if (chk) chk.checked = (phys.mouseGravityEnabled !== false) && (phys.mouseAttractionEnabled !== false);
+        }
+        // Physics numeric ranges
+        else if (name.includes('repulsion')) {
+          const range = inputs.find((x) => x.type === 'range');
+          const num = inputs.find((x) => x.type === 'number');
           const internal = Number(phys.repulsionStrength ?? 0);
-          const ui = Math.min(1, Math.max(0, Math.sqrt(Math.max(0, internal / 2e3))));
+          const ui = Math.min(1, Math.max(0, Math.sqrt(Math.max(0, internal / 2000))));
           const v = String(ui);
-          if (range)
-            range.value = v;
-          if (num)
-            num.value = v;
-        } else if (name.includes("spring len")) {
-          const range = inputs.find((x) => x.type === "range");
-          const num = inputs.find((x) => x.type === "number");
+          if (range) range.value = v;
+          if (num) num.value = v;
+        } else if (name.includes('spring len')) {
+          const range = inputs.find((x) => x.type === 'range');
+          const num = inputs.find((x) => x.type === 'number');
           const val = String(phys.springLength ?? 100);
-          if (range)
-            range.value = val;
-          if (num)
-            num.value = val;
-        } else if (name.includes("spring")) {
-          const range = inputs.find((x) => x.type === "range");
-          const num = inputs.find((x) => x.type === "number");
-          const ui = phys.springStrength != null ? String(Math.min(1, Math.max(0, Number(phys.springStrength) / 0.5))) : "0";
-          if (range)
-            range.value = ui;
-          if (num)
-            num.value = ui;
-        } else if (name.includes("center pull")) {
-          const range = inputs.find((x) => x.type === "range");
-          const num = inputs.find((x) => x.type === "number");
-          const ui = phys.centerPull != null ? String(Math.min(1, Math.max(0, Number(phys.centerPull) / 0.01))) : "0";
-          if (range)
-            range.value = ui;
-          if (num)
-            num.value = ui;
-        } else if (name.includes("damping")) {
-          const range = inputs.find((x) => x.type === "range");
-          const num = inputs.find((x) => x.type === "number");
+          if (range) range.value = val;
+          if (num) num.value = val;
+        } else if (name.includes('spring')) {
+          const range = inputs.find((x) => x.type === 'range');
+          const num = inputs.find((x) => x.type === 'number');
+          // UI is 0..1 for spring strength in toolbox; we keep value as-is
+          const ui = phys.springStrength != null ? String(Math.min(1, Math.max(0, Number(phys.springStrength) / 0.5))) : '0';
+          if (range) range.value = ui;
+          if (num) num.value = ui;
+        } else if (name.includes('center pull')) {
+          const range = inputs.find((x) => x.type === 'range');
+          const num = inputs.find((x) => x.type === 'number');
+          const ui = phys.centerPull != null ? String(Math.min(1, Math.max(0, Number(phys.centerPull) / 0.01))) : '0';
+          if (range) range.value = ui;
+          if (num) num.value = ui;
+        } else if (name.includes('damping')) {
+          const range = inputs.find((x) => x.type === 'range');
+          const num = inputs.find((x) => x.type === 'number');
           const val = String(phys.damping ?? 0.7);
-          if (range)
-            range.value = val;
-          if (num)
-            num.value = val;
-        } else if (name.includes("mouse attraction exponent")) {
-          const range = inputs.find((x) => x.type === "range");
-          const num = inputs.find((x) => x.type === "number");
+          if (range) range.value = val;
+          if (num) num.value = val;
+        } else if (name.includes('mouse attraction exponent')) {
+          const range = inputs.find((x) => x.type === 'range');
+          const num = inputs.find((x) => x.type === 'number');
           const val = String(phys.mouseAttractionExponent ?? 3);
-          if (range)
-            range.value = val;
-          if (num)
-            num.value = val;
+          if (range) range.value = val;
+          if (num) num.value = val;
         }
       }
-    } catch (e) {
-    }
-  }
+    } catch (e) {}
+  }*/
   animationLoop = (timestamp) => {
     if (!this.running)
       return;
@@ -2817,7 +2753,7 @@ var GraphView = class extends import_obsidian2.ItemView {
   async onOpen() {
     this.containerEl.empty();
     const container = this.containerEl.createDiv({ cls: "greater-graph-view" });
-    this.controller = new Graph2DController(this.app, container, this.plugin);
+    this.controller = new GraphController(this.app, container, this.plugin);
     await this.controller.init();
     if (this.controller) {
       this.controller.setNodeClickHandler((node) => void this.openNodeFile(node));

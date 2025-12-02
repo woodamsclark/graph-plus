@@ -1,4 +1,4 @@
-import { GraphNode, GraphEdge } from './buildGraph';
+import { GraphNode, GraphEdge } from '../types/interfaces.ts';
 
 export interface Simulation {
   start(): void;

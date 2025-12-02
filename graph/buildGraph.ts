@@ -1,37 +1,6 @@
 import { App, TFile, CachedMetadata } from 'obsidian';
+import { GraphNode, GraphEdge, GraphData } from '../types/interfaces.ts';
 
-export type GraphNodeType = 'note' | 'tag';
-
-export interface GraphNode {
-  id            : string;
-  label         : string;
-  x             : number;
-  y             : number;
-  z             : number;
-  filePath      : string;
-  file?         : TFile;
-  vx?           : number;
-  vy?           : number;
-  vz?           : number;
-  type?         : GraphNodeType;
-  inDegree      : number;
-  outDegree     : number;
-  totalDegree   : number;
-  isCenterNode? : boolean;
-}
-
-export interface GraphEdge {
-  id?           : string;
-  sourceId      : string;
-  targetId      : string;
-  linkCount?    : number;
-  bidirectional?: boolean;
-}
-
-export interface GraphData {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
 
 export async function buildGraph(app: App, options?: { countDuplicates?: boolean; usePinnedCenterNote?: boolean; pinnedCenterNotePath?: string; }): Promise<GraphData> {
   const files: TFile[] = app.vault.getMarkdownFiles();
@@ -177,7 +146,7 @@ export async function buildGraph(app: App, options?: { countDuplicates?: boolean
     n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
   }
 
-  // detect mutual edges (reverse links) and mark hasReverse on both
+  // detect mutual edges (reverse links)
   const edgeMap = new Map<string, GraphEdge>();
   for (const e of edges) {
     edgeMap.set(`${e.sourceId}->${e.targetId}`, e);

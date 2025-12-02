@@ -1,97 +1,11 @@
-import { GraphData } from './buildGraph';
+import { VisualSettings, PhysicsSettings, RendererSettings, Camera, Renderer2D, GraphData } from '../types/interfaces';
 
-export interface GlowSettings {
-  minNodeRadius:    number;
-  maxNodeRadius:    number;
-  minCenterAlpha:   number;
-  maxCenterAlpha:   number;
-  highlightRadius?: number;
-  gravityRadius?:   number;
-  labelRadius?:     number;  
-  highlightDepth?:  number;
-  gravityCurveSteepness?: number;
-  focusSmoothingRate?: number;
-  nodeMinBodyAlpha?:number;
 
-  nodeColor?:       string;
-  tagColor?:        string;
-  labelColor?:      string;
-  edgeColor?:       string;
 
-  nodeColorAlpha?:  number;
-  tagColorAlpha?:   number;
-  labelColorAlpha?: number;
-  edgeColorAlpha?:  number;
-
-  labelFadeRangePx?: number;
-  labelBaseFontSize?: number;
-  
-  nodeMinAlpha?:   number;
-  tagMinAlpha?:    number;
-  edgeMinAlpha?:   number;
-  labelMinAlpha?:  number;
-
-  nodeAlpha?:   number;
-  tagAlpha?:    number;
-  edgeAlpha?:   number;
-  labelAlpha?:  number;
-
-  tagMaxAlpha?:    number;
-  nodeMaxAlpha?:   number;
-  edgeMaxAlpha?:   number;
-  labelMaxAlpha?:  number;
-
-  // optional explicit glow radius in world/pixel units. If provided, overrides multiplier-based radius.
-  //glowRadiusPx?: number;
-  // whether to use Obsidian interface font for labels
-  useInterfaceFont?: boolean;
-  // legacy / compatibility fields (optional)
-  hoverHighlightDepth?: number;
-}
-
-export interface Renderer2DOptions {
-  canvas: HTMLCanvasElement;
-  glow?: GlowSettings;
-}
-
-export interface Renderer2D {
-  setGraph(graph: GraphData): void;
-  resize(width: number, height: number): void;
-  render(): void;
-  destroy(): void;
-  setHoveredNode(nodeId: string | null): void;
-  getNodeRadiusForHit(node: any): number;
-  setGlowSettings(glow: GlowSettings): void;
-  setHoverState(hoveredId: string | null, highlightedIds: Set<string>, mouseX: number, mouseY: number): void;
-  zoomAt(screenX: number, screenY: number, factor: number): void;
-  panBy(screenDx: number, screenDy: number): void;
-  resetPanToCenter?(): void;
-  screenToWorld(screenX: number, screenY: number): { x: number; y: number };
-  screenToWorldAtDepth?(screenX: number, screenY: number, zCam: number, width: number, height: number, cam: Camera): { x: number; y: number; z: number };
-  setRenderOptions?(opts: { mutualDoubleLines?: boolean; showTags?: boolean }): void;
-  // projection helpers for hit-testing
-  getNodeScreenPosition?(node: any): { x: number; y: number };
-  getProjectedNode?(node: any): { x: number; y: number; depth: number };
-  getScale?(): number;
-  // camera controls
-  setCamera?(cam: Partial<Camera>): void;
-  getCamera?(): Camera;
-  getCameraBasis?(cam: Camera): { right: { x: number; y: number; z: number }; up: { x: number; y: number; z: number }; forward: { x: number; y: number; z: number } };
-}
-
-export interface Camera {
-  yaw: number;      // rotation around Y axis
-  pitch: number;    // rotation around X axis
-  distance: number; // camera distance from target
-  targetX: number;
-  targetY: number;
-  targetZ: number;
-  zoom: number;     // additional zoom scalar
-}
-
-export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
+export function createRenderer2D(options: RendererSettings): Renderer2D {
   const canvas = options.canvas;
-  let glowOptions = options.glow;
+  let visuals = options.settings.visuals;
+  let physics = options.settings.physics;
   const ctx = canvas.getContext('2d');
   let graph: GraphData | null = null;
   let nodeById: Map<string, any> = new Map();
@@ -106,35 +20,20 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   // whether to show tag nodes & tag-connected edges
   let showTags = true;
 
-  let minRadius = glowOptions?.minNodeRadius ?? 6;
-  let maxRadius = glowOptions?.maxNodeRadius ?? 24;
+  let minRadius = visuals.minNodeRadius;
+  let maxRadius = visuals.maxNodeRadius;
 
-  // explicit glow radius in world units (pixels). If set, this value is used instead of radius*DEFAULT_GLOW_MULTIPLIER
-  //let glowRadiusPx: number | null = glowOptions?.glowRadiusPx ?? null;
-  // Defaults should match the plugin's DEFAULT_SETTINGS.glow where possible
-  let minCenterAlpha = glowOptions?.minCenterAlpha ?? 0.15;
-  let maxCenterAlpha = glowOptions?.maxCenterAlpha ?? 0.6;
+  let minCenterAlpha = visuals.minCenterAlpha;
+  let maxCenterAlpha = visuals.maxCenterAlpha;
   // per-color alpha multipliers (0..1)
-  let nodeColorAlpha = glowOptions?.nodeColorAlpha ?? 1.0;
-  let tagColorAlpha   = glowOptions?.tagColorAlpha ?? 1.0;
-  let labelColorAlpha = glowOptions?.labelColorAlpha ?? 1.0;
-  let edgeColorAlpha  = glowOptions?.edgeColorAlpha ?? 1.0;
-  // new per-type alpha controls
-  let nodeMinAlpha   = glowOptions?.nodeMinAlpha ?? 0.1;
-  let nodeMaxAlpha   = glowOptions?.nodeMaxAlpha ?? 1.0;
-  let tagMinAlpha    = glowOptions?.tagMinAlpha ?? 0.1;
-  let tagMaxAlpha    = glowOptions?.tagMaxAlpha ?? 1.0;
-  let edgeMinAlpha   = glowOptions?.edgeMinAlpha ?? 0.1;
-  let edgeMaxAlpha   = glowOptions?.edgeMaxAlpha ?? 0.6;
-  let labelMinAlpha  = glowOptions?.labelMinAlpha ?? 0.0;
-  let labelMaxAlpha  = glowOptions?.labelMaxAlpha ?? 1.0;
+  let nodeColorAlpha  = visuals.nodeColorAlpha;
+  let tagColorAlpha   = visuals.tagColorAlpha;
+  let labelColorAlpha = visuals.labelColorAlpha;
+  let edgeColorAlpha  = visuals.edgeColorAlpha;
   // focus + gravity
-  let gravityRadius           = glowOptions?.gravityRadius ?? 15;
-  let gravityCurveSteepness   = glowOptions?.gravityCurveSteepness ?? 1.0;
-  let labelRadius             = glowOptions?.labelRadius ?? 10;
-  let highlightRadius         = glowOptions?.highlightRadius ?? 10;
+  let labelRadius             = visuals.labelRadius;
   let innerRadius             = 1.0; // fixed inner = 1×radius
-  let focusSmoothingRate      = glowOptions?.focusSmoothingRate ?? 0.8;
+  let focusSmoothing          = visuals.focusSmoothing;
   let hoveredNodeId: string | null = null;
   let hoverHighlightSet: Set<string> = new Set();
   let mouseX = 0;
@@ -146,14 +45,11 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
   // per-node smooth focus factor (0 = dimmed, 1 = focused)
   const nodeFocusMap: Map<string, number> = new Map();
   let lastRenderTime = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
-  // Focus/dimming controls (configurable via glow settings)
-  // focusSmoothingRate defined above per spec
-  // removed edge dimming controls (unused)
-  let labelAlphaMin = glowOptions?.nodeMinBodyAlpha ?? 0.3;
+
   // label visibility controls
 
-  let labelFadeRangePx = glowOptions?.labelFadeRangePx ?? 8;
-  let labelBaseFontSize = glowOptions?.labelBaseFontSize ?? 10;
+  let labelFadeRangePx  = visuals.labelFadeRangePx
+  let labelBaseFontSize = visuals.labelBaseFontSize;
   
 
   // theme-derived colors (updated each render)
@@ -383,8 +279,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     const r = getNodeRadius(node);
     return {
       inner: r * innerRadius,
-      outer: r * gravityRadius,
-      curve: gravityCurveSteepness,
+      outer: r * physics.gravityRadius,
+      curve: physics.gravityFallOff,
     };
   }
 
@@ -393,7 +289,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     return {
       inner: r * innerRadius,
       outer: r * labelRadius,
-      curve: gravityCurveSteepness,
+      curve: physics.gravityFallOff,
     };
   }
 
@@ -401,8 +297,8 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     const r = getNodeRadius(node);
     return {
       inner: r * innerRadius,
-      outer: r * highlightRadius,
-      curve: gravityCurveSteepness,
+      outer: r * visuals.labelRadius,
+      curve: physics.gravityFallOff,
     };
   }
 
@@ -441,20 +337,20 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
     ctx.save();
       // Allow settings overrides first, then fall back to theme CSS vars
-      if (glowOptions?.nodeColor) themeNodeColor = glowOptions.nodeColor;
-      if (glowOptions?.labelColor) themeLabelColor = glowOptions.labelColor;
-      if (glowOptions?.edgeColor) themeEdgeColor = glowOptions.edgeColor;
+      if (visuals.nodeColor) themeNodeColor = visuals.nodeColor;
+      if (visuals.labelColor) themeLabelColor = visuals.labelColor;
+      if (visuals.edgeColor) themeEdgeColor = visuals.edgeColor;
       try {
         const cs = window.getComputedStyle(canvas);
         const nodeVar  = cs.getPropertyValue('--interactive-accent') || cs.getPropertyValue('--accent-1') || cs.getPropertyValue('--accent');
         const labelVar = cs.getPropertyValue('--text-normal') || cs.getPropertyValue('--text');
         const edgeVar  = cs.getPropertyValue('--text-muted') || cs.getPropertyValue('--text-faint') || cs.getPropertyValue('--text-normal');
-        if (!glowOptions?.nodeColor  && nodeVar  && nodeVar.trim())  themeNodeColor = nodeVar.trim();
-        if (!glowOptions?.labelColor && labelVar && labelVar.trim()) themeLabelColor = labelVar.trim();
-        if (!glowOptions?.edgeColor  && edgeVar  && edgeVar.trim())  themeEdgeColor = edgeVar.trim();
+        if (!visuals.nodeColor  && nodeVar  && nodeVar.trim())  themeNodeColor = nodeVar.trim();
+        if (!visuals.labelColor && labelVar && labelVar.trim()) themeLabelColor = labelVar.trim();
+        if (!visuals.edgeColor  && edgeVar  && edgeVar.trim())  themeEdgeColor = edgeVar.trim();
         // derive a theme tag color from secondary/accent vars (prefer explicit secondary accent if available)
         const tagVar = cs.getPropertyValue('--accent-2') || cs.getPropertyValue('--accent-secondary') || cs.getPropertyValue('--interactive-accent') || cs.getPropertyValue('--accent-1') || cs.getPropertyValue('--accent');
-        if (!glowOptions?.tagColor && tagVar && tagVar.trim()) themeTagColor = tagVar.trim();
+        if (!visuals.tagColor && tagVar && tagVar.trim()) themeTagColor = tagVar.trim();
       } catch (e) {
         // ignore (e.g., server-side build environment)
       }
@@ -462,7 +358,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
       // choose which font family to resolve based on setting: interface font or monospace
       try {
         const cs = window.getComputedStyle(canvas);
-        if (glowOptions?.useInterfaceFont) {
+        if (visuals.useInterfaceFont) {
           if (!resolvedInterfaceFontFamily) {
             const candidates = ['--font-family-interface', '--font-family', '--font-main', '--font-primary', '--font-family-sans', '--text-font'];
             let fam: string | null = null;
@@ -512,7 +408,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
           }
         }
       } catch (e) {
-        if (glowOptions?.useInterfaceFont) resolvedInterfaceFontFamily = resolvedInterfaceFontFamily || 'sans-serif';
+        if (visuals.useInterfaceFont) resolvedInterfaceFontFamily = resolvedInterfaceFontFamily || 'sans-serif';
         else resolvedMonoFontFamily = resolvedMonoFontFamily || 'monospace';
       }
 
@@ -536,7 +432,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         const target = isNodeTargetFocused(id) ? 1 : 0;
         const cur = nodeFocusMap.get(id) ?? target;
         // exponential smoothing: alpha = 1 - exp(-rate * dt)
-        const alpha = 1 - Math.exp(-focusSmoothingRate * dt);
+        const alpha = 1 - Math.exp(-focusSmoothing * dt);
         const next = cur + (target - cur) * alpha;
         nodeFocusMap.set(id, next);
       }
@@ -581,20 +477,18 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         // per-color min/max alpha values so hover max can be customized.
 
         ctx.save();
-        const useEdgeAlpha = glowOptions?.edgeColorAlpha ?? edgeColorAlpha;
-        // compute final edge alpha and bypass user edge alpha when hovered/highlighted.
-        // Use the same reduced-propagation rule as above: require both endpoints
-        // in the highlight set, except allow direct-hover incidence.
-        let finalEdgeAlpha = Math.max(edgeMinAlpha, alpha * useEdgeAlpha);
+      
+        // Computer onHover alpha boost. Move to another function later. refactoring rn.
+        let finalEdgeAlpha = visuals.edgeColorAlpha;
         if (hoveredNodeId) {
           const srcInDepth = hoverHighlightSet.has(edge.sourceId);
           const tgtInDepth = hoverHighlightSet.has(edge.targetId);
           const directlyIncident = edge.sourceId === hoveredNodeId || edge.targetId === hoveredNodeId;
-          if ((srcInDepth && tgtInDepth) || directlyIncident) finalEdgeAlpha = edgeMaxAlpha;
+          if ((srcInDepth && tgtInDepth) || directlyIncident) finalEdgeAlpha = 1.0;
         }
         ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${finalEdgeAlpha})`;
         // mutual edges: draw two parallel lines offset perpendicular to the edge when enabled
-        const isMutual = !!edge.hasReverse && drawMutualDoubleLines;
+        const isMutual = !!edge.bidirectional && drawMutualDoubleLines;
         if (isMutual) {
           const dx = tgtP.x - srcP.x;
           const dy = tgtP.y - srcP.y;
@@ -662,31 +556,31 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
       const gravityProfile = buildGravityProfile(node);
       const gravityOuterR = gravityProfile.outer;
 
-      const glowRadius = radius * gravityRadius;
 
       const focus = nodeFocusMap.get(node.id) ?? 1;
       const focused = focus > 0.01;
 
       if (focused) {
         // radial gradient glow: interpolate alpha between dim and centerAlpha
-        const nodeColorOverride = (node && node.type === 'tag') ? (glowOptions?.tagColor ?? themeTagColor) : themeNodeColor; // tag color
+        const nodeColorOverride = (node && node.type === 'tag') ? (visuals.tagColor ?? themeTagColor) : themeNodeColor; // tag color
         const accentRgb = colorToRgb(nodeColorOverride);
-        const useNodeAlpha = (node && node.type === 'tag') ? (glowOptions?.tagColorAlpha ?? tagColorAlpha) : (glowOptions?.nodeColorAlpha ?? nodeColorAlpha);
+        const useNodeAlpha = (node && node.type === 'tag') ? (visuals.tagColorAlpha ?? tagColorAlpha) : (visuals.nodeColorAlpha ?? nodeColorAlpha);
         const dimCenter = clamp01(getBaseCenterAlpha(node));
         const fullCenter = centerAlpha;
         let blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
         // When hovered/highlighted, force alpha to 1 for node/tag colors
-        let effectiveUseNodeAlpha = Math.max((node && node.type==='tag')?tagMinAlpha:nodeMinAlpha, useNodeAlpha);
+        let effectiveUseNodeAlpha = visuals.tagColorAlpha;
         if (hoveredNodeId) {
           const inDepth = hoverHighlightSet.has(node.id);
           const isHovered = node.id === hoveredNodeId;
           if (isHovered || inDepth) {
             blendedCenter = 1;
             // Use max alpha for hovered/highlighted node glows
-            effectiveUseNodeAlpha = (node && node.type==='tag') ? tagMaxAlpha : nodeMaxAlpha;
+            effectiveUseNodeAlpha = 1.0;//(node && node.type==='tag') ? tagMaxAlpha : nodeMaxAlpha;
           }
         }
-        const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
+        console.log(p.x, p.y, 0, p.x, p.y, radius * physics.gravityRadius);
+        const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * physics.gravityRadius);
         gradient.addColorStop(0.0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * effectiveUseNodeAlpha})`);
         gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.5 * effectiveUseNodeAlpha})`);
         gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.15 * effectiveUseNodeAlpha})`);
@@ -694,21 +588,22 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
 
         ctx.save();
         ctx.beginPath();
-        ctx.arc(p.x, p.y, glowRadius, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, radius * physics.gravityRadius, 0, Math.PI * 2);
         ctx.fillStyle = gradient;
         ctx.fill();
         ctx.restore();
 
         // node body (focused -> blend alpha)
-        const bodyAlpha = labelAlphaMin + (1 - labelAlphaMin) * focus;
+        const bodyAlpha = visuals.labelColorAlpha;// + (1 - labelAlphaMin) * focus;
         ctx.save();
         ctx.beginPath();
         ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-        const bodyColorOverride = (node && node.type === 'tag') ? (glowOptions?.tagColor ?? themeTagColor) : themeNodeColor;
+        const bodyColorOverride = (node && node.type === 'tag') ? (visuals.tagColor ?? themeTagColor) : themeNodeColor;
         const accent = colorToRgb(bodyColorOverride);
-        const useBodyAlpha = (node && node.type === 'tag') ? (glowOptions?.tagColorAlpha ?? tagColorAlpha) : (glowOptions?.nodeColorAlpha ?? nodeColorAlpha);
+        const useBodyAlpha = (node && node.type === 'tag') ? (visuals.tagColorAlpha ?? tagColorAlpha) : (visuals.nodeColorAlpha ?? nodeColorAlpha);
         // When hovered/highlighted, force body alpha to 1 for node/tag colors
-        let effectiveUseBodyAlpha = Math.max((node && node.type==='tag')?tagMinAlpha:nodeMinAlpha, useBodyAlpha);
+        //let effectiveUseBodyAlpha = Math.max((node && node.type==='tag')?tagMinAlpha:nodeMinAlpha, useBodyAlpha);
+        let effectiveUseBodyAlpha = useBodyAlpha;
         let finalBodyAlpha = bodyAlpha;
         if (hoveredNodeId) {
           const inDepthBody = hoverHighlightSet.has(node.id);
@@ -716,7 +611,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
           if (isHoveredBody || inDepthBody) {
             finalBodyAlpha = 1;
             // Use max alpha for hovered/highlighted node bodies
-            effectiveUseBodyAlpha = (node && node.type==='tag') ? tagMaxAlpha : nodeMaxAlpha;
+            effectiveUseBodyAlpha = 1; //(node && node.type==='tag') ? tagMaxAlpha : nodeMaxAlpha;
           }
         }
         ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${finalBodyAlpha * effectiveUseBodyAlpha})`;
@@ -760,12 +655,12 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
             const isHoverOrHighlight = hoveredNodeId === node.id || (hoverHighlightSet && hoverHighlightSet.has(node.id));
             const centerA = isHoverOrHighlight ? 1.0 : clamp01(getCenterAlpha(node));
             // derive label alpha by focus state
-            let labelA = Math.max(labelMinAlpha, labelAlphaVis * (glowOptions?.labelColorAlpha ?? labelColorAlpha));
-            if (isHoverOrHighlight) labelA = labelMaxAlpha;
-            else if (hoveredNodeId && hoverHighlightSet.has(node.id)) labelA = Math.max(labelA, (glowOptions?.labelColorAlpha ?? labelColorAlpha));
+            let labelA = Math.max(visuals.labelColorAlpha, labelAlphaVis * (visuals.labelColorAlpha));
+            if (isHoverOrHighlight) labelA = visuals.labelColorAlpha;
+            else if (hoveredNodeId && hoverHighlightSet.has(node.id)) labelA = Math.max(labelA, (visuals.labelColorAlpha));
             ctx.globalAlpha = Math.max(0, Math.min(1, labelA * centerA));
             // apply label alpha override if present, but force to 1.0 for hovered/highlighted
-            const labelRgb = colorToRgb((glowOptions?.labelColor ?? labelCss) || '#ffffff');
+            const labelRgb = colorToRgb((visuals.labelColor) || '#ffffff');
             ctx.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},1.0)`;
           const verticalPadding = 4; // world units; will be scaled by transform
           ctx.fillText(node.label, p.x, p.y + radius + verticalPadding);
@@ -777,7 +672,7 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
         const faintAlpha = 0.15 * (1 - focus) + 0.1 * focus; // slightly adjust
         // Modulate the faint fill by centerAlpha 
         const effectiveCenterAlpha = clamp01(getCenterAlpha(node));
-        const finalAlpha = faintAlpha * effectiveCenterAlpha * (glowOptions?.nodeColorAlpha ?? nodeColorAlpha);
+        const finalAlpha = faintAlpha * effectiveCenterAlpha * (visuals.nodeColorAlpha);
         ctx.save();
         ctx.beginPath();
         ctx.arc(p.x, p.y, radius * 0.9, 0, Math.PI * 2);
@@ -808,27 +703,21 @@ export function createRenderer2D(options: Renderer2DOptions): Renderer2D {
     if (typeof opts.showTags === 'boolean') showTags = opts.showTags;
   }
 
-  function setGlowSettings(glow: GlowSettings) {
-    if (!glow) return;
-    // keep reference so render() reads up-to-date overrides (nodeColor/edgeColor/labelColor)
-    glowOptions = glow;
-    minRadius = glow.minNodeRadius;
-    maxRadius = glow.maxNodeRadius;
-    //glowRadiusPx = (typeof glow.glowRadiusPx === 'number') ? glow.glowRadiusPx : glowRadiusPx;
-    minCenterAlpha = glow.minCenterAlpha;
-    maxCenterAlpha = glow.maxCenterAlpha;
-    if (glow.gravityRadius              != null) gravityRadius          = glow.gravityRadius;
-    if (glow.gravityCurveSteepness      != null) gravityCurveSteepness  = glow.gravityCurveSteepness;
-    if (glow.labelRadius                != null) labelRadius            = glow.labelRadius;
-    if (glow.highlightRadius            != null) highlightRadius        = glow.highlightRadius;
-    focusSmoothingRate= glow.focusSmoothingRate ?? focusSmoothingRate;
-    labelAlphaMin     = glow.nodeMinBodyAlpha   ?? labelAlphaMin;
-    labelFadeRangePx  = (typeof glow.labelFadeRangePx         === 'number') ? glow.labelFadeRangePx         : labelFadeRangePx;
-    labelBaseFontSize = (typeof glow.labelBaseFontSize        === 'number') ? glow.labelBaseFontSize        : labelBaseFontSize;
-    nodeColorAlpha    = (typeof glow.nodeColorAlpha           === 'number') ? glow.nodeColorAlpha           : nodeColorAlpha;
-    tagColorAlpha     = (typeof glow.tagColorAlpha            === 'number') ? glow.tagColorAlpha            : tagColorAlpha;
-    labelColorAlpha   = (typeof glow.labelColorAlpha          === 'number') ? glow.labelColorAlpha          : labelColorAlpha;
-    edgeColorAlpha    = (typeof glow.edgeColorAlpha           === 'number') ? glow.edgeColorAlpha           : edgeColorAlpha;
+  function setGlowSettings(visuals: VisualSettings) {
+    if (!visuals) return;
+    visuals           = visuals;
+    minRadius         = visuals.minNodeRadius;
+    maxRadius         = visuals.maxNodeRadius;
+    minCenterAlpha    = visuals.minCenterAlpha;
+    maxCenterAlpha    = visuals.maxCenterAlpha;
+    labelRadius       = visuals.labelRadius;
+    focusSmoothing    = visuals.focusSmoothing;
+    labelFadeRangePx  = visuals.labelFadeRangePx;
+    labelBaseFontSize = visuals.labelBaseFontSize;
+    nodeColorAlpha    = visuals.nodeColorAlpha;
+    tagColorAlpha     = visuals.tagColorAlpha;
+    labelColorAlpha   = visuals.labelColorAlpha;
+    edgeColorAlpha    = visuals.edgeColorAlpha;
     // removed *_MaxAlpha and edge dim settings; no-ops
   }
 

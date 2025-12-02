@@ -1,99 +1,81 @@
-// --- Graph2DController.ts ---
-// Imports needed by the controller itself
 import { App, Plugin, Platform } from 'obsidian'; 
-import { GraphData, GraphNode, buildGraph } from './buildGraph.ts';
-import { layoutGraph2D, layoutGraph3D } from './layout2d';
-import { createRenderer2D, Renderer2D } from './renderer2d.ts';
+import { buildGraph } from './buildGraph.ts';
+import { layoutGraph2D, layoutGraph3D } from './layout2d.ts';
+import { createRenderer2D } from './renderer2d.ts';
 import { createSimulation, Simulation } from './simulation.ts';
-import { debounce } from '../helpers/debounce.ts';
+import { debounce } from '../utils/debounce.ts';
+import { Settings, Renderer2D, GraphData, GraphNode } from '../types/interfaces.ts';
+import { DEFAULT_SETTINGS } from '../main';
 
-// Import the full settings model now that main.ts is updated
-import { GreaterGraphSettings } from '../main.ts';
-
-export class Graph2DController {
-  private app: App;
-  private containerEl: HTMLElement;
-  private canvas: HTMLCanvasElement | null = null;
-  private renderer: Renderer2D | null = null;
-  private graph: GraphData | null = null;
-  private adjacency: Map<string, string[]> | null = null;
-  private onNodeClick: ((node: any) => void) | null = null;
-  private plugin: Plugin;
-  private mouseMoveHandler: ((e: MouseEvent) => void) | null = null;
-  private mouseLeaveHandler: (() => void) | null = null;
-  private mouseClickHandler: ((e: MouseEvent) => void) | null = null;
-  private simulation: Simulation | null = null;
-  private animationFrame: number | null = null;
-  private lastTime: number | null = null;
-  private running: boolean = false;
-  private settingsUnregister: (() => void) | null = null;
-  private wheelHandler: ((e: WheelEvent) => void) | null = null;
-  private mouseDownHandler: ((e: MouseEvent) => void) | null = null;
-  private mouseUpHandler: ((e: MouseEvent) => void) | null = null;
-  private lastDragX: number = 0;
-  private lastDragY: number = 0;
-  private draggingNode: any | null = null;
-  private dragStartDepth: number = 0;
-  private dragOffsetWorld: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
-  private isPanning: boolean = false;
-  private lastPanX: number = 0;
-  private lastPanY: number = 0;
-  // Camera interaction (Phase 4)
-  private isOrbiting: boolean = false;
-  private lastOrbitX: number = 0;
-  private lastOrbitY: number = 0;
-  private isMiddlePanning: boolean = false;
-  private panStartX: number = 0;
-  private panStartY: number = 0;
-  private panStartTargetX: number = 0;
-  private panStartTargetY: number = 0;
-  // pending right-click focus state
-  private pendingFocusNode: any | null = null;
-  private pendingFocusDownX: number = 0;
-  private pendingFocusDownY: number = 0;
-  // camera follow / animation state
-  private cameraAnimStart: number | null = null;
-  private cameraAnimDuration: number = 300; // ms
-  private cameraAnimFrom: any = null;
-  private cameraAnimTo: any = null;
-  private isCameraFollowing: boolean = false;
-  private cameraFollowNode: any | null = null;
-  // drag tracking for momentum and click suppression
-  private hasDragged: boolean = false;
-  private preventClick: boolean = false;
-  private downScreenX: number = 0;
-  private downScreenY: number = 0;
-  private lastWorldX: number = 0;
-  private lastWorldY: number = 0;
-  private lastDragTime: number = 0;
-  private dragVx: number = 0;
-  private dragVy: number = 0;
-  private momentumScale: number = 0.12;
-  private dragThreshold: number = 4;
-  // persistence
-  private saveNodePositionsDebounced: (() => void) | null = null;
-  // last node id that we triggered a hover preview for (to avoid retriggering)
-  private lastPreviewedNodeId: string | null = null;
-  // When a hover preview has been triggered and is visible, lock highlighting
-  // to that node (and neighbors) until the popover disappears.
-  private previewLockNodeId: string | null = null;
-  private previewPollTimer: number | null = null;
-  private controlsEl: HTMLElement | null = null;
-  private controlsVisible: boolean = false; // start minimized by default
-  // Screen-space tracking for cursor attractor
-  private lastMouseX: number | null = null;
-  private lastMouseY: number | null = null;
-  // When true, skip running the cursor attractor until the next mousemove event
-  private suppressAttractorUntilMouseMove: boolean = false;
-  // Simple camera follow flag
-  private followLockedNodeId: string | null = null;
-  // Center node and camera defaults
-  private centerNode: any | null = null;
-  private defaultCameraDistance: number = 1200;
-  private lastUsePinnedCenterNote: boolean = false;
+export class GraphController {
+  private app                     : App;
+  private containerEl             : HTMLElement;
+  private canvas                  : HTMLCanvasElement     | null = null;
+  private renderer                : Renderer2D            | null = null;
+  private graph                   : GraphData             | null = null;
+  private adjacency               : Map<string, string[]> | null = null;
+  private onNodeClick             : ((node: any) => void) | null = null;
+  private plugin?                 : Plugin;
+  private mouseMoveHandler?       : ((e: MouseEvent) => void);
+  private mouseClickHandler?      : ((e: MouseEvent) => void);
+  private mouseLeaveHandler?      : (() => void);
+  private simulation?             : Simulation            | null = null;
+  private animationFrame          : number                | null = null;
+  private lastTime                : number                | null = null;
+  private running?                : boolean;
+  private settingsUnregister      : (() => void)          | null = null;
+  private wheelHandler?           : ((e: WheelEvent) => void);
+  private mouseDownHandler?       : ((e: MouseEvent) => void);
+  private mouseUpHandler?         : ((e: MouseEvent) => void);
+  private draggingNode?           : any                   | null;
+  private dragStartDepth          : number = 0;
+  private dragOffsetWorld         : { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
+  private isPanning               : boolean = false;
+  private lastPanX                : number = 0;
+  private lastPanY                : number = 0;
+  private isOrbiting              : boolean = false;
+  private lastOrbitX              : number = 0;
+  private lastOrbitY              : number = 0;
+  private isMiddlePanning         : boolean = false;
+  private panStartX               : number = 0;
+  private panStartY               : number = 0;
+  private panStartTargetX         : number = 0;
+  private panStartTargetY         : number = 0;
+  private pendingFocusNode        : any | null = null;
+  private pendingFocusDownX       : number = 0;
+  private pendingFocusDownY       : number = 0;
+  private cameraAnimStart         : number | null = null;
+  private cameraAnimDuration      : number = 300; // ms
+  private cameraAnimFrom          : any = null;
+  private cameraAnimTo            : any = null;
+  private isCameraFollowing       : boolean = false;
+  private cameraFollowNode        : any | null = null;
+  private hasDragged              : boolean = false;
+  private preventClick            : boolean = false;
+  private downScreenX             : number = 0;
+  private downScreenY             : number = 0;
+  private lastWorldX              : number = 0;
+  private lastWorldY              : number = 0;
+  private lastDragTime            : number = 0;
+  private dragVx                  : number = 0;
+  private dragVy                  : number = 0;
+  private momentumScale           : number = 0.12;
+  private dragThreshold           : number = 4;
+  private lastPreviewedNodeId     : string      | null = null;
+  private previewLockNodeId       : string      | null = null;
+  private previewPollTimer        : number      | null = null;
+  private controlsEl              : HTMLElement | null = null;
+  private lastMouseX              : number      | null = null;
+  private lastMouseY              : number      | null = null;
+  private followLockedNodeId      : string      | null = null;
+  private centerNode              : any         | null = null;
+  private defaultCameraDistance   : number = 1200;
+  private lastUsePinnedCenterNote : boolean = false;
   private lastPinnedCenterNotePath: string = '';
-  private viewCenterX: number = 0;
-  private viewCenterY: number = 0;
+  private viewCenterX             : number = 0;
+  private viewCenterY             : number = 0;
+  private suppressAttractorUntilMouseMove : boolean = false;
+  private saveNodePositionsDebounced: (() => void) | null = null;
 
   private saveNodePositions(): void {
     if (!this.graph) return;
@@ -169,11 +151,12 @@ export class Graph2DController {
     // create in-view controls panel
     //this.createControlsPanel();
 
-    // When creating renderer, pass glow settings only; old mouse-attraction radius is deprecated.
-    const initialGlow = Object.assign({}, (this.plugin as any).settings?.glow || {});
-    this.renderer = createRenderer2D({ canvas, glow: initialGlow });
+    const userSettings = await (this.plugin as any).loadData();
+    const settings: Settings = Object.assign({}, DEFAULT_SETTINGS, userSettings);
+    //const settings = Object.assign({}, (this.plugin as any).settings || {});
+    this.renderer = createRenderer2D({ canvas, settings });
     // Ensure sane fallback alphas so nodes are visible even if settings are unset
-    try {
+    /*try {
       const defaults = {
         nodeColorAlpha: 1.0,
         edgeColorAlpha: 0.6,
@@ -181,7 +164,7 @@ export class Graph2DController {
       } as any;
       const merged = Object.assign({}, defaults, (this.plugin as any).settings?.glow || {});
       if ((this.renderer as any).setGlowSettings) (this.renderer as any).setGlowSettings(merged);
-    } catch (e) {}
+    } catch (e) {}*/
     try {
       const cam0 = (this.renderer as any).getCamera?.();
       if (cam0 && typeof cam0.distance === 'number') this.defaultCameraDistance = cam0.distance;
@@ -708,13 +691,10 @@ export class Graph2DController {
     if ((this.plugin as any).registerSettingsListener) {
       this.settingsUnregister = (this.plugin as any).registerSettingsListener(() => {
         if ((this.plugin as any).settings) {
-          const glow = (this.plugin as any).settings.glow;
+          const visuals = (this.plugin as any).settings.visuals;
+          const physics = (this.plugin as any).settings.physics;
           if (this.renderer && (this.renderer as any).setGlowSettings) {
-            // ensure glow radius matches physics mouse attraction radius
-            const phys = (this.plugin as any).settings?.physics || {};
-            const glowWithRadius = Object.assign({}, glow || {});
-            if (typeof phys.mouseAttractionRadius === 'number') glowWithRadius.glowRadiusPx = phys.mouseAttractionRadius;
-            (this.renderer as any).setGlowSettings(glowWithRadius);
+            (this.renderer as any).setGlowSettings(visuals);
             // update mutual-line rendering option too
             try {
               const drawDouble = Boolean((this.plugin as any).settings?.mutualLinkDoubleLine);
@@ -746,7 +726,7 @@ export class Graph2DController {
             }
           } catch (e) {}
           // Refresh toolbox UI to match latest settings
-          try { this.refreshControlsFromSettings(); } catch (e) {}
+//          try { this.refreshControlsFromSettings(); } catch (e) {}
         }
       });
     }
@@ -755,7 +735,7 @@ export class Graph2DController {
   
 
   // Synchronize the toolbox UI controls from current plugin settings
-  private refreshControlsFromSettings(): void {
+  /*private refreshControlsFromSettings(): void {
     try {
       if (!this.controlsEl) return;
       const settings = (this.plugin as any).settings || {};
@@ -868,7 +848,7 @@ export class Graph2DController {
         }
       }
     } catch (e) {}
-  }
+  }*/
 
   private animationLoop = (timestamp: number) => {
     if (!this.running) return;

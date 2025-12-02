@@ -1,65 +1,10 @@
 import { App, Plugin, PluginSettingTab, Setting, TextComponent, ToggleComponent } from 'obsidian';
 import { GraphView, GREATER_GRAPH_VIEW_TYPE } from './GraphView.ts';
+import { Settings } from './types/interfaces.ts';
 
-export interface VisualSettings {
-  minNodeRadius       : number;
-  maxNodeRadius       : number;
-  minCenterAlpha      : number;
-  maxCenterAlpha      : number;
-  highlightDepth      : number;  // screen-space label reveal radius (× size)
-  focusSmoothing      : number;
-  nodeColor?          : string;   // optional color overrides (CSS color strings). If unset, theme vars are used.
-  tagColor?           : string;
-  edgeColor?          : string;
-  labelColor?         : string;
-  labelBaseFontSize   : number;
-  labelFadeRangePx    : number;
-  labelRadius         : number;
-  nodeColorAlpha      : number;
-  tagColorAlpha       : number;
-  labelColorAlpha     : number;
-  edgeColorAlpha      : number;
-  useInterfaceFont    : boolean;
-}
 
-export interface PhysicsSettings {
-  repulsionStrength     : number;
-  springStrength        : number;
-  springLength          : number;
-  centerPull            : number;
-  damping               : number;
-  notePlaneStiffness    : number;
-  tagPlaneStiffness     : number;
-  centerX               : number;
-  centerY               : number;
-  centerZ               : number;
-  mouseGravityEnabled   : boolean;
-  gravityRadius         : number;   // scales per-node screen radius
-  gravityFallOff        : number;   // falloff steepness
-}
 
-export interface GreaterGraphSettings {
-  visuals               : VisualSettings;
-  physics               : PhysicsSettings;
-  countDuplicateLinks?  : boolean;
-  mutualLinkDoubleLine? : boolean;
-  interaction?: {
-    momentumScale?: number;
-    dragThreshold?: number; // in screen pixels
-  };
-  // persistent node positions keyed by vault name, then by file path
-  // settings.nodePositions[vaultId][filePath] = { x, y }
-  nodePositions?: Record<string, Record<string, { x: number; y: number; z?: number }>>;
-  // visibility toggles
-  showTags?: boolean;
-  // Center node selection
-  usePinnedCenterNote?: boolean;
-  pinnedCenterNotePath?: string;
-  // When choosing a center by degree, prefer out-degree (out-links) instead of in-degree
-  useOutlinkFallback?: boolean;
-}
-
-export const DEFAULT_SETTINGS: GreaterGraphSettings = {
+export const DEFAULT_SETTINGS: Settings = {
   visuals: {
     minNodeRadius     : 3,
     maxNodeRadius     : 20,
@@ -109,7 +54,7 @@ export const DEFAULT_SETTINGS: GreaterGraphSettings = {
 };
 
 export default class GreaterGraphPlugin extends Plugin {
-  settings: GreaterGraphSettings = DEFAULT_SETTINGS;
+  settings: Settings = DEFAULT_SETTINGS;
   private settingsListeners: Array<() => void> = [];
 
   async onload() {
