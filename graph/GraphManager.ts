@@ -8,24 +8,16 @@ import { Settings, Renderer2D, GraphData, GraphNode, Simulation} from '../types/
 import { DEFAULT_SETTINGS } from '../main.ts';
 import { InputManager } from './InputManager.ts';
 
+// This class manages interactions between the graph data, simulation, and renderer.
 export class GraphManager {
-  private app                     : App;
-  private containerEl             : HTMLElement;
-  private canvas                  : HTMLCanvasElement     | null = null;
-  private renderer                : Renderer2D            | null = null;
-  private graph                   : GraphData             | null = null;
-  private adjacency               : Map<string, string[]> | null = null;
-  private openNodeFile             : ((node: any) => void) | null = null;
+  private openNodeFile            : ((node: any) => void) | null = null;
   private settingsUnregister      : (() => void)          | null = null;
   private saveNodePositionsDebounced: (() => void)        | null = null;
+  private app                     : App;
+  private containerEl             : HTMLElement;
   private plugin?                 : Plugin;
-  private simulation?             : Simulation            | null = null;
-  private animationFrame          : number                | null = null;
-  private lastTime                : number                | null = null;
   private running?                : boolean;
-  private draggingNode?           : any                   | null;
   private isPanning               : boolean       = false;
-  private cameraAnimStart         : number | null = null;
   private cameraAnimDuration      : number        = 300; // ms
   private cameraAnimFrom          : any           = null;
   private cameraAnimTo            : any           = null;
@@ -33,20 +25,30 @@ export class GraphManager {
   private cameraFollowNode        : any | null    = null;
   private momentumScale           : number        = 0.12;
   private dragThreshold           : number        = 4;
-  private lastPreviewedNodeId     : string        | null = null;
-  private previewLockNodeId       : string        | null = null;
-  private previewPollTimer        : number        | null = null;
-  private lastMouseX              : number        | null = null;
-  private lastMouseY              : number        | null = null;
-  private followLockedNodeId      : string        | null = null;
-  private centerNode              : any           | null = null;
-  private inputManager            : InputManager  | null = null;
   private defaultCameraDistance   : number        = 1200;
   private lastUsePinnedCenterNote : boolean       = false;
   private lastPinnedCenterNotePath: string        = '';
   private viewCenterX             : number        = 0;
   private viewCenterY             : number        = 0;
   private suppressAttractorUntilMouseMove : boolean = false;
+  private draggingNode?           : any                   | null;
+  private canvas                  : HTMLCanvasElement     | null = null;
+  private renderer                : Renderer2D            | null = null;
+  private graph                   : GraphData             | null = null;
+  private adjacency               : Map<string, string[]> | null = null;
+  private simulation?             : Simulation            | null = null;
+  private animationFrame          : number                | null = null;
+  private lastTime                : number                | null = null;
+  private cameraAnimStart         : number                | null = null;
+  private lastPreviewedNodeId     : string                | null = null;
+  private previewLockNodeId       : string                | null = null;
+  private previewPollTimer        : number                | null = null;
+  private lastMouseX              : number                | null = null;
+  private lastMouseY              : number                | null = null;
+  private followLockedNodeId      : string                | null = null;
+  private centerNode              : any                   | null = null;
+  private inputManager            : InputManager          | null = null;
+  private lastWorldPanPoint: { x: number; y: number; z: number } | null = null;
 
   private saveNodePositions(): void {
     if (!this.graph) return;
@@ -149,15 +151,16 @@ export class GraphManager {
 
     this.inputManager = new InputManager(this.canvas, {
         onOrbit: (dx, dy)                       => { (this.renderer as any).orbitBy(dx, dy); this.renderer?.render(); },
-        onPan: (dx, dy)                         => { (this.renderer as any).panBy(dx, dy); this.renderer?.render(); },
+        onPanMove: (screenX, screenY)           => { (this.updatePan(screenX, screenY)); },
+        onPanStart: (screenX, screenY)          => this.startPan(screenX, screenY),
+        onPanEnd: ()                            => this.endPan(),
         onZoom: (x, y, delta)                   => { (this.renderer as any).zoomAt(x, y, 1 + delta * 0.1); this.renderer?.render(); },
         detectClickedNode: (screenX, screenY)   => { return this.nodeClicked(screenX, screenY); },
         onOpenNode: (screenX, screenY)          => this.openNode(screenX, screenY),
-        onHover: (screenX, screenY)             => this.updateHoverState(screenX, screenY),
+        onHover: (screenX, screenY)             => this.updateHover(screenX, screenY),
         onDragStart: (nodeId, screenX, screenY) => this.startNodeDrag(nodeId, screenX, screenY),
         onDragMove: (screenX, screenY)          => this.dragNodeMove(screenX, screenY),
         onDragEnd: ()                           => this.endNodeDrag(),
-        screenToWorld: (screenX, screenY)       => (this.renderer as any).screenToWorld(screenX, screenY),
     });
 
     
@@ -338,11 +341,11 @@ export class GraphManager {
     }
   }
 
-  public updateHoverState (screenX: number, screenY: number) {
+  public updateHover (screenX: number, screenY: number) {
       return;
     }
 
-  public updateDragState (screenX: number, screenY: number) {
+  public updateDrag (screenX: number, screenY: number) {
       return;
     }
 
@@ -355,25 +358,54 @@ export class GraphManager {
       return;
     }
 
-  public updatePanState (screenX: number, screenY: number) {
-
-      return;
-    }
-
   public dragNodeMove (screenX: number, screenY: number) {
       return;
     }
 
+  public startPan (screenX: number, screenY: number) {
+    if (!this.renderer || !(this.renderer as any).screenToWorld3D) { return; }
+    const renderer = (this.renderer as any);
+    const camera   = renderer.getCamera();
+    const canvas   = renderer.canvas ?? this.canvas;
+    const depth    = camera.distance;
+
+    this.isCameraFollowing = false;
+    this.cameraFollowNode  = null;
+    this.cameraAnimStart   = null;
+    this.cameraAnimFrom    = null;
+    this.cameraAnimTo      = null;
+
+    this.lastWorldPanPoint = renderer.screenToWorld3D(screenX, screenY, depth, camera);
+  }
+
+  public updatePan (screenX: number, screenY: number) {
+    if (!this.renderer || !(this.renderer as any).screenToWorld3D || this.lastWorldPanPoint === null) { return; }
+    const renderer = (this.renderer as any);
+    const camera   = renderer.getCamera();
+    const depth    = camera.distance; 
+
+    
+    const currentWorld = renderer.screenToWorld3D(screenX, screenY, depth, camera);
+
+    if (this.lastWorldPanPoint === null) { return; }
+    const dx = currentWorld.x - (this.lastWorldPanPoint.x as any);
+    const dy = currentWorld.y - (this.lastWorldPanPoint.y as any);
+    const dz = currentWorld.z - (this.lastWorldPanPoint.z as any);
+
+    (this.renderer as any).setCamera({
+        targetX: camera.targetX - dx,
+        targetY: camera.targetY - dy,
+        targetZ: camera.targetZ - dz,
+    });
+    this.lastWorldPanPoint = currentWorld;
+  }
+
+  public endPan(){
+    this.lastWorldPanPoint  = null;
+  }
 
   public openNode (screenX: number, screenY: number) {
           const node = this.nodeClicked(screenX, screenY);
-/*        if (!this.hasDragged) {
-          const dxs = screenX - this.downScreenX;
-          const dys = screenY - this.downScreenY;
-          if (Math.sqrt(dxs * dxs + dys * dys) > this.dragThreshold) {
-            this.hasDragged   = true;
-            this.preventClick = true;
-          }*/
           if (node && this.openNodeFile) { 
             this.openNodeFile(node); 
           }

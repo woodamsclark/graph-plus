@@ -1,20 +1,20 @@
-// InputManager.ts
-
 import { InputManagerCallbacks } from '../types/interfaces.ts';
 
+// This class manages user input (mouse events) on the graph canvas
+// and reports mouse positions and actions back to the GraphManager via callbacks.
 export class InputManager {
-    private canvas           : HTMLCanvasElement;
-    private callbacks        : InputManagerCallbacks;
-    private isOrbiting       : boolean          = false;
-    private isPanning        : boolean          = false;
-    private isDraggingNode   : boolean          = false;
-    private draggedNodeId    : string | null    = null;
-    private lastMouseX       : number           = 0;
-    private lastMouseY       : number           = 0;
-    private downScreenX: number = 0;         // Initial screenX (canvas relative)
-    private downScreenY: number = 0;         // Initial screenY (canvas relative)
-    private isMouseClicking: boolean = false;// True if LMB is down
-    private dragThreshold: number = 5;       // Drag starts after 5 pixels of movement
+    private canvas              : HTMLCanvasElement;
+    private callbacks           : InputManagerCallbacks;
+    private isOrbiting          : boolean           = false;
+    private isPanning           : boolean           = false;
+    private isDraggingNode      : boolean           = false;
+    private draggedNodeId       : string | null     = null;
+    private lastMouseX          : number            = 0;
+    private lastMouseY          : number            = 0;
+    private downScreenX         : number            = 0;         // Initial screenX (canvas relative)
+    private downScreenY         : number            = 0;         // Initial screenY (canvas relative)
+    private isMouseClicking     : boolean           = false;    // True if LMB is down
+    private dragThreshold       : number            = 5;         // Drag starts after 5 pixels of movement
 
     constructor(canvas: HTMLCanvasElement, callbacks: InputManagerCallbacks) {
         this.canvas     = canvas;
@@ -37,8 +37,6 @@ export class InputManager {
         this.lastMouseX         = e.clientX;
         this.lastMouseY         = e.clientY;
         this.isMouseClicking    = true;
-
-        
         const isLeftClick       = e.button === 0;
         const isDragModifier    = e.button === 0;              // Check for left-click (and no modifier)
         const isOrbitModifier   = e.button === 0 && e.ctrlKey; // Example: Ctrl + Left click for Orbit
@@ -52,6 +50,7 @@ export class InputManager {
             if (hitNode) {
                 this.draggedNodeId = hitNode.id; // Store ID for potential drag
             } else {
+                // We don't start panning until movement threshold is exceeded
                 this.draggedNodeId = null; // No node hit, potential pan
             }
         }
@@ -59,50 +58,47 @@ export class InputManager {
     
     // Use this for calculating orbit/drag delta
     private onGlobalMouseMove = (e: MouseEvent) => {
-        const dx = e.clientX - this.lastMouseX;
-        const dy = e.clientY - this.lastMouseY;
+        // 1. Compute deltas in *client* space (used for orbit & pan speed)
+        const dx        = e.clientX - this.lastMouseX;
+        const dy        = e.clientY - this.lastMouseY;
         this.lastMouseX = e.clientX;
         this.lastMouseY = e.clientY;
-
+        // 2. Compute current screen position relative to the canvas once
+        const rect      = this.canvas.getBoundingClientRect();
+        const screenX   = e.clientX - rect.left;
+        const screenY   = e.clientY - rect.top;
+        // 3. If we're orbiting, that's the only thing we care about
         if (this.isOrbiting) {
             this.callbacks.onOrbit(dx, dy);
-            return
-        }
-        if (this.isDraggingNode) {
-            // Pass screen coordinates
-            const rect = this.canvas.getBoundingClientRect();
-            const screenX = e.clientX - rect.left;
-            const screenY = e.clientY - rect.top;
-            this.callbacks.onDragMove(screenX, screenY);
-        } else if (this.isPanning) {
-            this.callbacks.onPan(dx, dy);
+            return;
         }
 
-        const rect = this.canvas.getBoundingClientRect();
-        const screenX = e.clientX - rect.left;
-        const screenY = e.clientY - rect.top;
-        
-        const distSq                = (screenX - this.downScreenX) ** 2 + (screenY - this.downScreenY) ** 2;
-        const thresholdSq           = this.dragThreshold ** 2;
-        const hasExceededThreshold  = distSq > thresholdSq;
-
-        // A. Confirm Drag State (Node Hit)
-        if (this.draggedNodeId !== null && !this.isDraggingNode && hasExceededThreshold) {
-                this.isDraggingNode = true; // CONFIRM DRAG
+        // 4. Decide whether this movement should *promote* to drag or pan
+        const distSq        = (screenX - this.downScreenX) ** 2 + (screenY - this.downScreenY) ** 2;
+        const thresholdSq   = this.dragThreshold ** 2;
+        const overThreshold = distSq > thresholdSq;
+        if (this.isMouseClicking && overThreshold && !this.isPanning && !this.isDraggingNode) {
+            // A. Promote to node drag (we clicked on a node at mousedown)
+            if (this.draggedNodeId !== null && !this.isDraggingNode) {
+                this.isDraggingNode = true;
                 this.callbacks.onDragStart(this.draggedNodeId, this.downScreenX, this.downScreenY);
-        }
-        // B. Confirm Pan State (Empty Space Hit)
-        else if (this.isMouseClicking && this.draggedNodeId === null && !this.isPanning && hasExceededThreshold) {
-            this.isPanning = true; // CONFIRM PAN
+            }
+            // B. Or promote to pan (we clicked empty space)
+            else if (this.draggedNodeId === null && !this.isPanning) {
+                this.isPanning = true;
+                this.callbacks.onPanStart(screenX, screenY);
+            }
         }
 
-        // --- EXECUTE MOVEMENT LOGIC (Only if confirmed) ---
-        
+        // 5. States are decided, perform exactly one kind of movement
         if (this.isDraggingNode) {
+            // drag uses screen coords so GraphManager can do screen->world
             this.callbacks.onDragMove(screenX, screenY);
-        } 
-        else if (this.isPanning) {
-            this.callbacks.onPan(dx, dy); 
+            return;
+        }
+        if (this.isPanning) {
+            this.callbacks.onPanMove(screenX, screenY);
+            return;
         }
     }
 
@@ -119,23 +115,21 @@ export class InputManager {
 
         if (wasDragging) {
             this.callbacks.onDragEnd(); 
-            return; // Suppress click
+            return; // Suppresses click
         }
         if (wasPanning) {
-            return; // Suppress the click that might otherwise fire
+            this.callbacks.onPanEnd();
+            return; // Suppresses click
         }  
         // 4. Handle clean Click (if NO movement passed the threshold)
         if (isLeftClick) {
             const rect      = this.canvas.getBoundingClientRect();
             const screenX   = e.clientX - rect.left;
             const screenY   = e.clientY - rect.top;
-
-            // This is only called if it was a TIGHT, short mouse press
             this.callbacks.onOpenNode(screenX, screenY); 
         }
     }
 
-    // Use this for continuous hover updates
     private onMouseMove = (e: MouseEvent) => {
         // If we're already dragging or orbiting, the global handler takes precedence
         if (this.isDraggingNode || this.isOrbiting) return;

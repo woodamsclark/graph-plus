@@ -82,8 +82,8 @@ export interface Renderer2D {
   zoomAt(screenX: number, screenY: number, factor: number): void;
   panBy(screenDx: number, screenDy: number): void;
   resetPanToCenter?(): void;
-  screenToWorld(screenX: number, screenY: number): { x: number; y: number };
-  screenToWorldAtDepth?(screenX: number, screenY: number, zCam: number, width: number, height: number, cam: Camera): { x: number; y: number; z: number };
+  screenToWorld2D(screenX: number, screenY: number): { x: number; y: number };
+  screenToWorld3D?(screenX: number, screenY: number, zCam: number, cam: Camera): { x: number; y: number; z: number };
   setRenderOptions?(opts: { mutualDoubleLines?: boolean; showTags?: boolean }): void;
   // projection helpers for hit-testing
   getNodeScreenPosition?(node: any): { x: number; y: number };
@@ -161,20 +161,21 @@ export interface SimulationSettings {
 
 export interface InputManagerCallbacks {
     // Camera Control
-    onOrbit(dx: number, dy: number): void;
-    onPan(dx: number, dy: number): void;
-    onZoom(screenX: number, screenY: number, delta: number): void;
+    onOrbit     (dx: number, dy: number): void;
+    onPanMove   (dx: number, dy: number): void;
+    onPanStart  (screenX: number, screenY: number): void;
+    onPanEnd    (): void;
+    onZoom      (screenX: number, screenY: number, delta: number): void;
 
     // Node Interaction
-    onHover(screenX: number, screenY: number): void;
-    onOpenNode(screenX: number, screenY: number): void;
+    onHover     (screenX: number, screenY: number): void;
+    onOpenNode  (screenX: number, screenY: number): void;
     
     // Node Dragging (Coordinates are relative to the screen for the simulation)
-    onDragStart(nodeId: string, screenX: number, screenY: number): void;
-    onDragMove(screenX: number, screenY: number): void;
-    onDragEnd(): void;
+    onDragStart (nodeId: string, screenX: number, screenY: number): void;
+    onDragMove  (screenX: number, screenY: number): void;
+    onDragEnd   (): void;
 
     // Utility
-    screenToWorld(screenX: number, screenY: number): { x: number, y: number, z: number } | null;
-    detectClickedNode(screenX: number, screenY: number): { id: string, filePath?: string, label: string } | null;
+    detectClickedNode   (screenX: number, screenY: number): { id: string, filePath?: string, label: string } | null;
 }

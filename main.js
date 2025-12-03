@@ -329,7 +329,7 @@ function createRenderer2D(options) {
   const canvas = options.canvas;
   let visuals = options.settings.visuals;
   let physics = options.settings.physics;
-  const ctx = canvas.getContext("2d");
+  const context = canvas.getContext("2d");
   let graph = null;
   let nodeById = /* @__PURE__ */ new Map();
   let minDegree = 0;
@@ -410,8 +410,10 @@ function createRenderer2D(options) {
   let offsetX = 0;
   let offsetY = 0;
   let camera = {
+    //yaw: Math.PI / 6,
     yaw: Math.PI / 6,
-    pitch: Math.PI / 8,
+    //pitch: Math.PI / 8,
+    pitch: Math.PI / 2,
     distance: 1200,
     targetX: 0,
     targetY: 0,
@@ -600,7 +602,7 @@ function createRenderer2D(options) {
     return applySCurve(proximity, curve);
   }
   function render() {
-    if (!ctx)
+    if (!context)
       return;
     const now = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
     let dt = (now - lastRenderTime) / 1e3;
@@ -609,10 +611,10 @@ function createRenderer2D(options) {
     if (dt > 0.1)
       dt = 0.1;
     lastRenderTime = now;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    context.clearRect(0, 0, canvas.width, canvas.height);
     if (!graph)
       return;
-    ctx.save();
+    context.save();
     if (visuals.nodeColor)
       themeNodeColor = visuals.nodeColor;
     if (visuals.labelColor)
@@ -700,9 +702,9 @@ function createRenderer2D(options) {
       else
         resolvedMonoFontFamily = resolvedMonoFontFamily || "monospace";
     }
-    ctx.save();
-    ctx.translate(offsetX, offsetY);
-    ctx.scale(scale, scale);
+    context.save();
+    context.translate(offsetX, offsetY);
+    context.scale(scale, scale);
     function isNodeTargetFocused(nodeId) {
       if (!hoveredNodeId)
         return true;
@@ -754,7 +756,7 @@ function createRenderer2D(options) {
           alpha = 0.65;
         else
           alpha = 0.08 + (0.9 - 0.08) * edgeFocus;
-        ctx.save();
+        context.save();
         let finalEdgeAlpha = visuals.edgeColorAlpha;
         if (hoveredNodeId) {
           const srcInDepth = hoverHighlightSet.has(edge.sourceId);
@@ -763,7 +765,7 @@ function createRenderer2D(options) {
           if (srcInDepth && tgtInDepth || directlyIncident)
             finalEdgeAlpha = 1;
         }
-        ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${finalEdgeAlpha})`;
+        context.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${finalEdgeAlpha})`;
         const isMutual = !!edge.bidirectional && drawMutualDoubleLines;
         if (isMutual) {
           const dx = tgtP.x - srcP.x;
@@ -775,31 +777,31 @@ function createRenderer2D(options) {
           const perpY = ux;
           const offsetPx = Math.max(2, screenW * 0.6);
           const offsetWorld = offsetPx / Math.max(1e-4, scale);
-          ctx.beginPath();
-          ctx.moveTo(srcP.x + perpX * offsetWorld, srcP.y + perpY * offsetWorld);
-          ctx.lineTo(tgtP.x + perpX * offsetWorld, tgtP.y + perpY * offsetWorld);
-          ctx.lineWidth = worldLineWidth;
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(srcP.x - perpX * offsetWorld, srcP.y - perpY * offsetWorld);
-          ctx.lineTo(tgtP.x - perpX * offsetWorld, tgtP.y - perpY * offsetWorld);
-          ctx.lineWidth = worldLineWidth;
-          ctx.stroke();
+          context.beginPath();
+          context.moveTo(srcP.x + perpX * offsetWorld, srcP.y + perpY * offsetWorld);
+          context.lineTo(tgtP.x + perpX * offsetWorld, tgtP.y + perpY * offsetWorld);
+          context.lineWidth = worldLineWidth;
+          context.stroke();
+          context.beginPath();
+          context.moveTo(srcP.x - perpX * offsetWorld, srcP.y - perpY * offsetWorld);
+          context.lineTo(tgtP.x - perpX * offsetWorld, tgtP.y - perpY * offsetWorld);
+          context.lineWidth = worldLineWidth;
+          context.stroke();
         } else {
-          ctx.beginPath();
-          ctx.moveTo(srcP.x, srcP.y);
-          ctx.lineTo(tgtP.x, tgtP.y);
-          ctx.lineWidth = worldLineWidth;
-          ctx.stroke();
+          context.beginPath();
+          context.moveTo(srcP.x, srcP.y);
+          context.lineTo(tgtP.x, tgtP.y);
+          context.lineWidth = worldLineWidth;
+          context.stroke();
         }
-        ctx.restore();
+        context.restore();
       }
     }
     const baseFontSize = labelBaseFontSize;
     const minFontSize = 6;
     const maxFontSize = 18;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
+    context.textAlign = "center";
+    context.textBaseline = "top";
     let labelCss = themeLabelColor;
     try {
       const cs = window.getComputedStyle(canvas);
@@ -836,21 +838,21 @@ function createRenderer2D(options) {
           }
         }
         console.log(p.x, p.y, 0, p.x, p.y, radius * physics.gravityRadius);
-        const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * physics.gravityRadius);
+        const gradient = context.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * physics.gravityRadius);
         gradient.addColorStop(0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * effectiveUseNodeAlpha})`);
         gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.5 * effectiveUseNodeAlpha})`);
         gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.15 * effectiveUseNodeAlpha})`);
         gradient.addColorStop(1, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0)`);
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, radius * physics.gravityRadius, 0, Math.PI * 2);
-        ctx.fillStyle = gradient;
-        ctx.fill();
-        ctx.restore();
+        context.save();
+        context.beginPath();
+        context.arc(p.x, p.y, radius * physics.gravityRadius, 0, Math.PI * 2);
+        context.fillStyle = gradient;
+        context.fill();
+        context.restore();
         const bodyAlpha = visuals.labelColorAlpha;
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+        context.save();
+        context.beginPath();
+        context.arc(p.x, p.y, radius, 0, Math.PI * 2);
         const bodyColorOverride = node && node.type === "tag" ? visuals.tagColor ?? themeTagColor : themeNodeColor;
         const accent = colorToRgb(bodyColorOverride);
         const useBodyAlpha = node && node.type === "tag" ? visuals.tagColorAlpha ?? tagColorAlpha : visuals.nodeColorAlpha ?? nodeColorAlpha;
@@ -864,9 +866,9 @@ function createRenderer2D(options) {
             effectiveUseBodyAlpha = 1;
           }
         }
-        ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${finalBodyAlpha * effectiveUseBodyAlpha})`;
-        ctx.fill();
-        ctx.restore();
+        context.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${finalBodyAlpha * effectiveUseBodyAlpha})`;
+        context.fill();
+        context.restore();
         const displayedFont = labelBaseFontSize;
         const radiusScreenPx = radius * Math.max(1e-4, scale);
         let labelAlphaVis = 1;
@@ -888,8 +890,8 @@ function createRenderer2D(options) {
         if (labelAlphaVis > 0) {
           const clampedDisplayed = Math.max(minFontSize, Math.min(maxFontSize, displayedFont));
           const fontToSet = Math.max(1, clampedDisplayed / Math.max(1e-4, scale));
-          ctx.save();
-          ctx.font = `${fontToSet}px ${resolvedInterfaceFontFamily || "sans-serif"}`;
+          context.save();
+          context.font = `${fontToSet}px ${resolvedInterfaceFontFamily || "sans-serif"}`;
           const isHoverOrHighlight2 = hoveredNodeId === node.id || hoverHighlightSet && hoverHighlightSet.has(node.id);
           const centerA = isHoverOrHighlight2 ? 1 : clamp01(getCenterAlpha(node));
           let labelA = Math.max(visuals.labelColorAlpha, labelAlphaVis * visuals.labelColorAlpha);
@@ -897,27 +899,27 @@ function createRenderer2D(options) {
             labelA = visuals.labelColorAlpha;
           else if (hoveredNodeId && hoverHighlightSet.has(node.id))
             labelA = Math.max(labelA, visuals.labelColorAlpha);
-          ctx.globalAlpha = Math.max(0, Math.min(1, labelA * centerA));
+          context.globalAlpha = Math.max(0, Math.min(1, labelA * centerA));
           const labelRgb = colorToRgb(visuals.labelColor || "#ffffff");
-          ctx.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},1.0)`;
+          context.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},1.0)`;
           const verticalPadding = 4;
-          ctx.fillText(node.label, p.x, p.y + radius + verticalPadding);
-          ctx.restore();
+          context.fillText(node.label, p.x, p.y + radius + verticalPadding);
+          context.restore();
         }
       } else {
         const faintRgb = colorToRgb(themeLabelColor || "#999");
         const faintAlpha = 0.15 * (1 - focus) + 0.1 * focus;
         const effectiveCenterAlpha = clamp01(getCenterAlpha(node));
         const finalAlpha = faintAlpha * effectiveCenterAlpha * visuals.nodeColorAlpha;
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, radius * 0.9, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${finalAlpha})`;
-        ctx.fill();
-        ctx.restore();
+        context.save();
+        context.beginPath();
+        context.arc(p.x, p.y, radius * 0.9, 0, Math.PI * 2);
+        context.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${finalAlpha})`;
+        context.fill();
+        context.restore();
       }
     }
-    ctx.restore();
+    context.restore();
   }
   function destroy() {
     graph = null;
@@ -936,7 +938,7 @@ function createRenderer2D(options) {
     if (typeof opts.showTags === "boolean")
       showTags = opts.showTags;
   }
-  function setGlowSettings(visuals2) {
+  function setVisualSettings(visuals2) {
     if (!visuals2)
       return;
     visuals2 = visuals2;
@@ -959,11 +961,11 @@ function createRenderer2D(options) {
     mouseX = mx || 0;
     mouseY = my || 0;
   }
-  function screenToWorld(screenX, screenY) {
+  function screenToWorld2D(screenX, screenY) {
     return { x: (screenX - offsetX) / scale, y: (screenY - offsetY) / scale };
   }
-  function screenToWorldAtDepth(sx, sy, zCam, width, height, cam) {
-    const { yaw, pitch, distance, targetX, targetY, targetZ, zoom } = cam;
+  function screenToWorld3D(sx, sy, zCam, cam) {
+    const { yaw, pitch, distance, targetX, targetY, targetZ, zoom } = cam || getCamera();
     const px = (sx - offsetX) / scale;
     const py = (sy - offsetY) / scale;
     const focal = 800;
@@ -1032,12 +1034,12 @@ function createRenderer2D(options) {
   }
   function panBy(screenDx, screenDy) {
     const cam = getCamera();
-    const SCALE_REFERENCE_DISTANCE = 1e3;
+    const SCALE_REFERENCE_DISTANCE = camera.distance;
     const currentScale = SCALE_REFERENCE_DISTANCE / cam.distance;
     const worldDx = screenDx / currentScale;
     const worldDy = screenDy / currentScale;
-    offsetX += screenDx;
-    offsetY += screenDy;
+    offsetX += worldDx;
+    offsetY += worldDy;
     render();
   }
   function resetPanToCenter() {
@@ -1054,14 +1056,14 @@ function createRenderer2D(options) {
     destroy,
     setHoveredNode,
     getNodeRadiusForHit,
-    setGlowSettings,
+    setGlowSettings: setVisualSettings,
     setHoverState,
     setRenderOptions,
     zoomAt,
     panBy,
     resetPanToCenter,
-    screenToWorld,
-    screenToWorldAtDepth,
+    screenToWorld2D,
+    screenToWorld3D,
     getNodeScreenPosition,
     getProjectedNode,
     getScale,
@@ -1451,34 +1453,32 @@ var InputManager = class {
     const dy = e.clientY - this.lastMouseY;
     this.lastMouseX = e.clientX;
     this.lastMouseY = e.clientY;
+    const rect = this.canvas.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
     if (this.isOrbiting) {
       this.callbacks.onOrbit(dx, dy);
       return;
     }
-    if (this.isDraggingNode) {
-      const rect2 = this.canvas.getBoundingClientRect();
-      const screenX2 = e.clientX - rect2.left;
-      const screenY2 = e.clientY - rect2.top;
-      this.callbacks.onDragMove(screenX2, screenY2);
-    } else if (this.isPanning) {
-      this.callbacks.onPan(dx, dy);
-    }
-    const rect = this.canvas.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
     const distSq = (screenX - this.downScreenX) ** 2 + (screenY - this.downScreenY) ** 2;
     const thresholdSq = this.dragThreshold ** 2;
-    const hasExceededThreshold = distSq > thresholdSq;
-    if (this.draggedNodeId !== null && !this.isDraggingNode && hasExceededThreshold) {
-      this.isDraggingNode = true;
-      this.callbacks.onDragStart(this.draggedNodeId, this.downScreenX, this.downScreenY);
-    } else if (this.isMouseClicking && this.draggedNodeId === null && !this.isPanning && hasExceededThreshold) {
-      this.isPanning = true;
+    const overThreshold = distSq > thresholdSq;
+    if (this.isMouseClicking && overThreshold && !this.isPanning && !this.isDraggingNode) {
+      if (this.draggedNodeId !== null && !this.isDraggingNode) {
+        this.isDraggingNode = true;
+        this.callbacks.onDragStart(this.draggedNodeId, this.downScreenX, this.downScreenY);
+      } else if (this.draggedNodeId === null && !this.isPanning) {
+        this.isPanning = true;
+        this.callbacks.onPanStart(screenX, screenY);
+      }
     }
     if (this.isDraggingNode) {
       this.callbacks.onDragMove(screenX, screenY);
-    } else if (this.isPanning) {
-      this.callbacks.onPan(dx, dy);
+      return;
+    }
+    if (this.isPanning) {
+      this.callbacks.onPanMove(screenX, screenY);
+      return;
     }
   };
   // Use this for ending orbit/drag
@@ -1495,6 +1495,7 @@ var InputManager = class {
       return;
     }
     if (wasPanning) {
+      this.callbacks.onPanEnd();
       return;
     }
     if (isLeftClick) {
@@ -1504,7 +1505,6 @@ var InputManager = class {
       this.callbacks.onOpenNode(screenX, screenY);
     }
   };
-  // Use this for continuous hover updates
   onMouseMove = (e) => {
     if (this.isDraggingNode || this.isOrbiting)
       return;
@@ -1528,23 +1528,14 @@ var InputManager = class {
 
 // graph/GraphManager.ts
 var GraphManager = class {
-  app;
-  containerEl;
-  canvas = null;
-  renderer = null;
-  graph = null;
-  adjacency = null;
   openNodeFile = null;
   settingsUnregister = null;
   saveNodePositionsDebounced = null;
+  app;
+  containerEl;
   plugin;
-  simulation = null;
-  animationFrame = null;
-  lastTime = null;
   running;
-  draggingNode;
   isPanning = false;
-  cameraAnimStart = null;
   cameraAnimDuration = 300;
   // ms
   cameraAnimFrom = null;
@@ -1553,6 +1544,21 @@ var GraphManager = class {
   cameraFollowNode = null;
   momentumScale = 0.12;
   dragThreshold = 4;
+  defaultCameraDistance = 1200;
+  lastUsePinnedCenterNote = false;
+  lastPinnedCenterNotePath = "";
+  viewCenterX = 0;
+  viewCenterY = 0;
+  suppressAttractorUntilMouseMove = false;
+  draggingNode;
+  canvas = null;
+  renderer = null;
+  graph = null;
+  adjacency = null;
+  simulation = null;
+  animationFrame = null;
+  lastTime = null;
+  cameraAnimStart = null;
   lastPreviewedNodeId = null;
   previewLockNodeId = null;
   previewPollTimer = null;
@@ -1561,12 +1567,8 @@ var GraphManager = class {
   followLockedNodeId = null;
   centerNode = null;
   inputManager = null;
-  defaultCameraDistance = 1200;
-  lastUsePinnedCenterNote = false;
-  lastPinnedCenterNotePath = "";
-  viewCenterX = 0;
-  viewCenterY = 0;
-  suppressAttractorUntilMouseMove = false;
+  worldPanStartPoint = null;
+  lastWorldPanPoint = null;
   saveNodePositions() {
     if (!this.graph)
       return;
@@ -1671,10 +1673,11 @@ var GraphManager = class {
         this.renderer.orbitBy(dx, dy);
         this.renderer?.render();
       },
-      onPan: (dx, dy) => {
-        this.renderer.panBy(dx, dy);
-        this.renderer?.render();
+      onPanMove: (screenX, screenY) => {
+        this.updatePan(screenX, screenY);
       },
+      onPanStart: (screenX, screenY) => this.startPan(screenX, screenY),
+      onPanEnd: () => this.endPan(),
       onZoom: (x, y, delta) => {
         this.renderer.zoomAt(x, y, 1 + delta * 0.1);
         this.renderer?.render();
@@ -1683,11 +1686,10 @@ var GraphManager = class {
         return this.nodeClicked(screenX, screenY);
       },
       onOpenNode: (screenX, screenY) => this.openNode(screenX, screenY),
-      onHover: (screenX, screenY) => this.updateHoverState(screenX, screenY),
+      onHover: (screenX, screenY) => this.updateHover(screenX, screenY),
       onDragStart: (nodeId, screenX, screenY) => this.startNodeDrag(nodeId, screenX, screenY),
       onDragMove: (screenX, screenY) => this.dragNodeMove(screenX, screenY),
-      onDragEnd: () => this.endNodeDrag(),
-      screenToWorld: (screenX, screenY) => this.renderer.screenToWorld(screenX, screenY)
+      onDragEnd: () => this.endNodeDrag()
     });
     const vaultId = this.app.vault.getName();
     const rawSaved = this.plugin.settings?.nodePositions || {};
@@ -1841,10 +1843,10 @@ var GraphManager = class {
       });
     }
   }
-  updateHoverState(screenX, screenY) {
+  updateHover(screenX, screenY) {
     return;
   }
-  updateDragState(screenX, screenY) {
+  updateDrag(screenX, screenY) {
     return;
   }
   startNodeDrag(nodeId, screenX, screenY) {
@@ -1854,11 +1856,48 @@ var GraphManager = class {
   endNodeDrag() {
     return;
   }
-  updatePanState(screenX, screenY) {
-    return;
-  }
   dragNodeMove(screenX, screenY) {
     return;
+  }
+  startPan(screenX, screenY) {
+    if (!this.renderer || !this.renderer.screenToWorld3D) {
+      return;
+    }
+    const renderer = this.renderer;
+    const camera = renderer.getCamera();
+    const canvas = renderer.canvas ?? this.canvas;
+    const depth = camera.distance;
+    this.isCameraFollowing = false;
+    this.cameraFollowNode = null;
+    this.cameraAnimStart = null;
+    this.cameraAnimFrom = null;
+    this.cameraAnimTo = null;
+    this.lastWorldPanPoint = renderer.screenToWorld3D(screenX, screenY, depth, camera);
+  }
+  updatePan(screenX, screenY) {
+    if (!this.renderer || !this.renderer.screenToWorld3D || this.lastWorldPanPoint === null) {
+      return;
+    }
+    const renderer = this.renderer;
+    const camera = renderer.getCamera();
+    const depth = camera.distance;
+    const currentWorld = renderer.screenToWorld3D(screenX, screenY, depth, camera);
+    if (this.lastWorldPanPoint === null) {
+      return;
+    }
+    const dx = currentWorld.x - this.lastWorldPanPoint.x;
+    const dy = currentWorld.y - this.lastWorldPanPoint.y;
+    const dz = currentWorld.z - this.lastWorldPanPoint.z;
+    this.renderer.setCamera({
+      targetX: camera.targetX - dx,
+      targetY: camera.targetY - dy,
+      targetZ: camera.targetZ - dz
+    });
+    this.lastWorldPanPoint = currentWorld;
+  }
+  endPan() {
+    this.worldPanStartPoint = null;
+    this.lastWorldPanPoint = null;
   }
   openNode(screenX, screenY) {
     const node = this.nodeClicked(screenX, screenY);

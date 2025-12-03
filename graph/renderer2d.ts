@@ -1,12 +1,12 @@
 import { VisualSettings, PhysicsSettings, RendererSettings, Camera, Renderer2D, GraphData } from '../types/interfaces';
 
-
-
+// The renderer is responsible for rendering the 2D graph visualization onto an HTML canvas.
+// The Graph Manager tells the renderer when and what to render
 export function createRenderer2D(options: RendererSettings): Renderer2D {
   const canvas = options.canvas;
   let visuals = options.settings.visuals;
   let physics = options.settings.physics;
-  const ctx = canvas.getContext('2d');
+  const context = canvas.getContext('2d');
   let graph: GraphData | null = null;
   let nodeById: Map<string, any> = new Map();
   // degree-based styling params
@@ -104,8 +104,10 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
   // removed unused 2D zoom constraints; camera distance controls zoom
 
   let camera: Camera = {
+    //yaw: Math.PI / 6,
     yaw: Math.PI / 6,
-    pitch: Math.PI / 8,
+    //pitch: Math.PI / 8,
+    pitch: Math.PI / 2,
     distance: 1200,
     targetX: 0,
     targetY: 0,
@@ -323,7 +325,7 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
   // removed unused getProjectedRadius helper
 
   function render() {
-    if (!ctx) return;
+    if (!context) return;
     // compute time delta for smooth transitions
     const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
     let dt = (now - lastRenderTime) / 1000;
@@ -331,11 +333,11 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
     if (dt > 0.1) dt = 0.1;
     lastRenderTime = now;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    context.clearRect(0, 0, canvas.width, canvas.height);
 
     if (!graph) return;
 
-    ctx.save();
+    context.save();
       // Allow settings overrides first, then fall back to theme CSS vars
       if (visuals.nodeColor) themeNodeColor = visuals.nodeColor;
       if (visuals.labelColor) themeLabelColor = visuals.labelColor;
@@ -412,9 +414,9 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
         else resolvedMonoFontFamily = resolvedMonoFontFamily || 'monospace';
       }
 
-      ctx.save();
-    ctx.translate(offsetX, offsetY);
-    ctx.scale(scale, scale);
+      context.save();
+    context.translate(offsetX, offsetY);
+    context.scale(scale, scale);
 
     // Helper: determine whether a node is within the focused set (instant target)
     function isNodeTargetFocused(nodeId: string) {
@@ -476,7 +478,7 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
         // Do not force alpha here; we'll decide final alpha below using configured
         // per-color min/max alpha values so hover max can be customized.
 
-        ctx.save();
+        context.save();
       
         // Computer onHover alpha boost. Move to another function later. refactoring rn.
         let finalEdgeAlpha = visuals.edgeColorAlpha;
@@ -486,7 +488,7 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
           const directlyIncident = edge.sourceId === hoveredNodeId || edge.targetId === hoveredNodeId;
           if ((srcInDepth && tgtInDepth) || directlyIncident) finalEdgeAlpha = 1.0;
         }
-        ctx.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${finalEdgeAlpha})`;
+        context.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${finalEdgeAlpha})`;
         // mutual edges: draw two parallel lines offset perpendicular to the edge when enabled
         const isMutual = !!edge.bidirectional && drawMutualDoubleLines;
         if (isMutual) {
@@ -502,27 +504,27 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
           const offsetWorld = offsetPx / Math.max(0.0001, scale);
 
           // first line (offset +)
-          ctx.beginPath();
-          ctx.moveTo(srcP.x + perpX * offsetWorld, srcP.y + perpY * offsetWorld);
-          ctx.lineTo(tgtP.x + perpX * offsetWorld, tgtP.y + perpY * offsetWorld);
-          ctx.lineWidth = worldLineWidth;
-          ctx.stroke();
+          context.beginPath();
+          context.moveTo(srcP.x + perpX * offsetWorld, srcP.y + perpY * offsetWorld);
+          context.lineTo(tgtP.x + perpX * offsetWorld, tgtP.y + perpY * offsetWorld);
+          context.lineWidth = worldLineWidth;
+          context.stroke();
 
           // second line (offset -)
-          ctx.beginPath();
-          ctx.moveTo(srcP.x - perpX * offsetWorld, srcP.y - perpY * offsetWorld);
-          ctx.lineTo(tgtP.x - perpX * offsetWorld, tgtP.y - perpY * offsetWorld);
-          ctx.lineWidth = worldLineWidth;
-          ctx.stroke();
+          context.beginPath();
+          context.moveTo(srcP.x - perpX * offsetWorld, srcP.y - perpY * offsetWorld);
+          context.lineTo(tgtP.x - perpX * offsetWorld, tgtP.y - perpY * offsetWorld);
+          context.lineWidth = worldLineWidth;
+          context.stroke();
         } else {
-          ctx.beginPath();
-          ctx.moveTo(srcP.x, srcP.y);
-          ctx.lineTo(tgtP.x, tgtP.y);
-          ctx.lineWidth = worldLineWidth;
-          ctx.stroke();
+          context.beginPath();
+          context.moveTo(srcP.x, srcP.y);
+          context.lineTo(tgtP.x, tgtP.y);
+          context.lineWidth = worldLineWidth;
+          context.stroke();
         }
 
-        ctx.restore();
+        context.restore();
       }
     }
 
@@ -532,8 +534,8 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
     const minFontSize = 6; // px (screen)
     const maxFontSize = 18; // px (screen)
     // label visibility threshold now driven by node screen-space radius
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
+    context.textAlign = 'center';
+    context.textBaseline = 'top';
 
     // Determine label color: prefer explicit override, otherwise read --text-normal
     let labelCss = themeLabelColor;
@@ -580,24 +582,24 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
           }
         }
         console.log(p.x, p.y, 0, p.x, p.y, radius * physics.gravityRadius);
-        const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * physics.gravityRadius);
+        const gradient = context.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * physics.gravityRadius);
         gradient.addColorStop(0.0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * effectiveUseNodeAlpha})`);
         gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.5 * effectiveUseNodeAlpha})`);
         gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.15 * effectiveUseNodeAlpha})`);
         gradient.addColorStop(1.0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0)`);
 
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, radius * physics.gravityRadius, 0, Math.PI * 2);
-        ctx.fillStyle = gradient;
-        ctx.fill();
-        ctx.restore();
+        context.save();
+        context.beginPath();
+        context.arc(p.x, p.y, radius * physics.gravityRadius, 0, Math.PI * 2);
+        context.fillStyle = gradient;
+        context.fill();
+        context.restore();
 
         // node body (focused -> blend alpha)
         const bodyAlpha = visuals.labelColorAlpha;// + (1 - labelAlphaMin) * focus;
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+        context.save();
+        context.beginPath();
+        context.arc(p.x, p.y, radius, 0, Math.PI * 2);
         const bodyColorOverride = (node && node.type === 'tag') ? (visuals.tagColor ?? themeTagColor) : themeNodeColor;
         const accent = colorToRgb(bodyColorOverride);
         const useBodyAlpha = (node && node.type === 'tag') ? (visuals.tagColorAlpha ?? tagColorAlpha) : (visuals.nodeColorAlpha ?? nodeColorAlpha);
@@ -614,9 +616,9 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
             effectiveUseBodyAlpha = 1; //(node && node.type==='tag') ? tagMaxAlpha : nodeMaxAlpha;
           }
         }
-        ctx.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${finalBodyAlpha * effectiveUseBodyAlpha})`;
-        ctx.fill();
-        ctx.restore();
+        context.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${finalBodyAlpha * effectiveUseBodyAlpha})`;
+        context.fill();
+        context.restore();
 
         // label below node (zoom-aware) - grow with hover and fade with focus
         // incorporate camera zoom scale so labels scale with camera distance
@@ -648,8 +650,8 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
         if (labelAlphaVis > 0) {
           const clampedDisplayed = Math.max(minFontSize, Math.min(maxFontSize, displayedFont));
           const fontToSet = Math.max(1, (clampedDisplayed) / Math.max(0.0001, scale));
-          ctx.save();
-          ctx.font = `${fontToSet}px ${resolvedInterfaceFontFamily || 'sans-serif'}`;
+          context.save();
+          context.font = `${fontToSet}px ${resolvedInterfaceFontFamily || 'sans-serif'}`;
             // Compute final alpha from label visibility. For hovered/highlighted
             // nodes we force full alpha (1.0) so labels are never partially transparent.
             const isHoverOrHighlight = hoveredNodeId === node.id || (hoverHighlightSet && hoverHighlightSet.has(node.id));
@@ -658,13 +660,13 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
             let labelA = Math.max(visuals.labelColorAlpha, labelAlphaVis * (visuals.labelColorAlpha));
             if (isHoverOrHighlight) labelA = visuals.labelColorAlpha;
             else if (hoveredNodeId && hoverHighlightSet.has(node.id)) labelA = Math.max(labelA, (visuals.labelColorAlpha));
-            ctx.globalAlpha = Math.max(0, Math.min(1, labelA * centerA));
+            context.globalAlpha = Math.max(0, Math.min(1, labelA * centerA));
             // apply label alpha override if present, but force to 1.0 for hovered/highlighted
             const labelRgb = colorToRgb((visuals.labelColor) || '#ffffff');
-            ctx.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},1.0)`;
+            context.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},1.0)`;
           const verticalPadding = 4; // world units; will be scaled by transform
-          ctx.fillText(node.label, p.x, p.y + radius + verticalPadding);
-          ctx.restore();
+          context.fillText(node.label, p.x, p.y + radius + verticalPadding);
+          context.restore();
         }
       } else {
         // dimmed node: draw a faint fill but allow smooth focus factor (should be near 0)
@@ -673,16 +675,16 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
         // Modulate the faint fill by centerAlpha 
         const effectiveCenterAlpha = clamp01(getCenterAlpha(node));
         const finalAlpha = faintAlpha * effectiveCenterAlpha * (visuals.nodeColorAlpha);
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, radius * 0.9, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${finalAlpha})`;
-        ctx.fill();
-        ctx.restore();
+        context.save();
+        context.beginPath();
+        context.arc(p.x, p.y, radius * 0.9, 0, Math.PI * 2);
+        context.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${finalAlpha})`;
+        context.fill();
+        context.restore();
       }
     }
 
-    ctx.restore();
+    context.restore();
   }
 
   function destroy() {
@@ -703,7 +705,7 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
     if (typeof opts.showTags === 'boolean') showTags = opts.showTags;
   }
 
-  function setGlowSettings(visuals: VisualSettings) {
+  function setVisualSettings(visuals: VisualSettings) {
     if (!visuals) return;
     visuals           = visuals;
     minRadius         = visuals.minNodeRadius;
@@ -718,7 +720,6 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
     tagColorAlpha     = visuals.tagColorAlpha;
     labelColorAlpha   = visuals.labelColorAlpha;
     edgeColorAlpha    = visuals.edgeColorAlpha;
-    // removed *_MaxAlpha and edge dim settings; no-ops
   }
 
   function setHoverState(hoveredId: string | null, highlightedIds: Set<string>, mx: number, my: number) {
@@ -728,21 +729,14 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
     mouseY = my || 0;
   }
 
-  function screenToWorld(screenX: number, screenY: number) {
+  function screenToWorld2D(screenX: number, screenY: number) {
     return { x: (screenX - offsetX) / scale, y: (screenY - offsetY) / scale };
   }
 
   // Convert a screen point (pixels, canvas coords) to a world position at a given camera-space depth.
   // zCam is the distance along the camera forward axis from the camera to the point (camera-space Z).
-  function screenToWorldAtDepth(
-    sx: number,
-    sy: number,
-    zCam: number,
-    width: number,
-    height: number,
-    cam: Camera
-  ) {
-    const { yaw, pitch, distance, targetX, targetY, targetZ, zoom } = cam;
+  function screenToWorld3D(sx: number,sy: number,zCam: number,cam?: Camera) {
+    const { yaw, pitch, distance, targetX, targetY, targetZ, zoom } = cam || getCamera();
 
     // first convert screen coords into projected px/py (same space as projectWorld produced)
     const px = (sx - offsetX) / scale;
@@ -829,9 +823,29 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
   }
 
   function panBy(screenDx: number, screenDy: number) {
-    offsetX += screenDx;
-    offsetY += screenDy;
+   const cam = getCamera();
+    
+    // 1. Define a reference scale (can be a constant outside the function)
+    const SCALE_REFERENCE_DISTANCE = camera.distance; 
+    
+    // 2. Calculate the current scale factor
+    // Scale = (Screen Pixels per World Unit)
+    const currentScale = SCALE_REFERENCE_DISTANCE / cam.distance;
+    
+    // 3. Convert screen movement to world units
+    const worldDx = screenDx / currentScale;
+    const worldDy = screenDy / currentScale;
+    
+    // 4. Update the world-space camera center (offsetX/Y are likely the center of the view in world space)
+    // Use subtraction (-) because moving the mouse right means moving the *camera* right (relative to the world axes)
+    offsetX += worldDx; 
+    offsetY += worldDy; 
+
     render();
+   
+    /* offsetX += screenDx;
+    offsetY += screenDy;
+    render();*/
   }
 
   function resetPanToCenter() {
@@ -849,16 +863,16 @@ export function createRenderer2D(options: RendererSettings): Renderer2D {
     destroy,
     setHoveredNode,
     getNodeRadiusForHit,
-    setGlowSettings,
+    setGlowSettings: setVisualSettings,
     setHoverState,
     setRenderOptions,
     zoomAt,
     panBy,
     resetPanToCenter,
-    screenToWorld,
-      screenToWorldAtDepth,
+    screenToWorld2D: screenToWorld2D,
+    screenToWorld3D: screenToWorld3D,
     getNodeScreenPosition,
-      getProjectedNode,
+    getProjectedNode,
     getScale,
     setCamera,
     getCamera,
