@@ -48,7 +48,10 @@ export class GraphManager {
   private followLockedNodeId      : string                | null = null;
   private centerNode              : any                   | null = null;
   private inputManager            : InputManager          | null = null;
-  private lastWorldPanPoint: { x: number; y: number; z: number } | null = null;
+  private panStartCamera          : any | null = null;
+  private worldPanStartPoint      : { x: number; y: number; z: number } | null = null;
+  private lastWorldPanPoint       : { x: number; y: number; z: number } | null = null;
+
 
   private saveNodePositions(): void {
     if (!this.graph) return;
@@ -181,6 +184,7 @@ export class GraphManager {
     const rawSaved: any = (this.plugin as any).settings?.nodePositions || {};
     let allSaved: Record<string, Record<string, { x: number; y: number }>> = {};
     let savedPositions: Record<string, { x: number; y: number }> = {};
+    
     if (rawSaved && typeof rawSaved === 'object') {
       if (rawSaved[vaultId] && typeof rawSaved[vaultId] === 'object') {
         // already per-vault
@@ -207,6 +211,7 @@ export class GraphManager {
         }
       }
     }
+
     const needsLayout: any[] = [];
     if (this.graph && this.graph.nodes) {
       for (const node of this.graph.nodes) {
@@ -364,10 +369,11 @@ export class GraphManager {
 
   public startPan (screenX: number, screenY: number) {
     if (!this.renderer || !(this.renderer as any).screenToWorld3D) { return; }
+    console.log("start pan");
     const renderer = (this.renderer as any);
-    const camera   = renderer.getCamera();
+    this.panStartCamera = { ...renderer.getCamera() };
     const canvas   = renderer.canvas ?? this.canvas;
-    const depth    = camera.distance;
+    const depth    = this.panStartCamera.distance;
 
     this.isCameraFollowing = false;
     this.cameraFollowNode  = null;
@@ -375,22 +381,30 @@ export class GraphManager {
     this.cameraAnimFrom    = null;
     this.cameraAnimTo      = null;
 
-    this.lastWorldPanPoint = renderer.screenToWorld3D(screenX, screenY, depth, camera);
+    this.worldPanStartPoint = renderer.screenToWorld3D(screenX, screenY, depth, this.panStartCamera);
+    this.lastWorldPanPoint  = this.worldPanStartPoint;
   }
 
   public updatePan (screenX: number, screenY: number) {
-    if (!this.renderer || !(this.renderer as any).screenToWorld3D || this.lastWorldPanPoint === null) { return; }
+    if (!this.renderer || !(this.renderer as any).screenToWorld3D || this.lastWorldPanPoint === null || this.worldPanStartPoint === null) 
+      { return; }
     const renderer = (this.renderer as any);
-    const camera   = renderer.getCamera();
-    const depth    = camera.distance; 
+    const camSnap  = this.panStartCamera;
+    const depth    = camSnap.distance; 
 
     
-    const currentWorld = renderer.screenToWorld3D(screenX, screenY, depth, camera);
+    const currentWorld = renderer.screenToWorld3D(screenX, screenY, depth, camSnap);
 
     if (this.lastWorldPanPoint === null) { return; }
+    //const dx = currentWorld.x - (this.worldPanStartPoint.x as any);
+    //const dy = currentWorld.y - (this.worldPanStartPoint.y as any);
+    //const dz = currentWorld.z - (this.worldPanStartPoint.z as any);
+
     const dx = currentWorld.x - (this.lastWorldPanPoint.x as any);
     const dy = currentWorld.y - (this.lastWorldPanPoint.y as any);
     const dz = currentWorld.z - (this.lastWorldPanPoint.z as any);
+
+    const camera = renderer.getCamera();
 
     (this.renderer as any).setCamera({
         targetX: camera.targetX - dx,
@@ -402,6 +416,8 @@ export class GraphManager {
 
   public endPan(){
     this.lastWorldPanPoint  = null;
+    this.worldPanStartPoint = null;
+    this.panStartCamera     = null;
   }
 
   public openNode (screenX: number, screenY: number) {
@@ -426,9 +442,9 @@ export class GraphManager {
     if (dt > 0.05) dt = 0.05;
     this.lastTime = timestamp;
     // Apply camera-plane cursor attractor before physics tick
-    try { this.applyCursorAttractor(); } catch (e) {}
+    /*try { this.applyCursorAttractor(); } catch (e) {}*/
     // camera follow to locked node id (no zoom change)
-    try {
+    /*try {
       if (this.followLockedNodeId && this.graph && this.renderer) {
         const n = this.graph.nodes.find((x: any) => x.id === this.followLockedNodeId);
         if (n) {
@@ -440,7 +456,7 @@ export class GraphManager {
           (this.renderer as any).setCamera({ targetX: tx, targetY: ty, targetZ: tz });
         }
       }
-    } catch (e) {}
+    } catch (e) {}*/
     if (this.simulation) this.simulation.tick(dt);
     // Recompute hover even when the cursor is stationary so nodes moving
     // under the pointer (due to physics or attractor) receive hover visuals.
@@ -568,7 +584,7 @@ export class GraphManager {
     } catch (e) {}
   }
 
-  private updateCameraAnimation(now: number) {
+  private updateCameraAnimation(now: number) { return; // delete later
     if (!this.renderer) return;
     if (this.cameraAnimStart == null) {
       // If following without an active animation, smoothly interpolate camera target to node each frame
@@ -782,13 +798,6 @@ export class GraphManager {
         if (this.renderer && (this.renderer as any).render) (this.renderer as any).render();
       } catch (e) {}
     }
-
-  handleClick(screenX: number, screenY: number): void {
-    if (!this.graph || !this.openNodeFile || !this.renderer) return;
-    const node = this.nodeClicked(screenX, screenY);
-    if (!node) return;
-    try { this.openNodeFile(node); } catch (e) { console.error('Graph2DController.onNodeClick handler error', e); }
-  }
 
   // Reusable hover updater: computes hover from screen coords and respects
   // existing preview/drag/pan locks. Accepts an optional MouseEvent so the

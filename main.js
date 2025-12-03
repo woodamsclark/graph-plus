@@ -1457,7 +1457,6 @@ var InputManager = class {
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
     if (this.isOrbiting) {
-      this.callbacks.onOrbit(dx, dy);
       return;
     }
     const distSq = (screenX - this.downScreenX) ** 2 + (screenY - this.downScreenY) ** 2;
@@ -1466,7 +1465,6 @@ var InputManager = class {
     if (this.isMouseClicking && overThreshold && !this.isPanning && !this.isDraggingNode) {
       if (this.draggedNodeId !== null && !this.isDraggingNode) {
         this.isDraggingNode = true;
-        this.callbacks.onDragStart(this.draggedNodeId, this.downScreenX, this.downScreenY);
       } else if (this.draggedNodeId === null && !this.isPanning) {
         this.isPanning = true;
         this.callbacks.onPanStart(screenX, screenY);
@@ -1567,6 +1565,7 @@ var GraphManager = class {
   followLockedNodeId = null;
   centerNode = null;
   inputManager = null;
+  panStartCamera = null;
   worldPanStartPoint = null;
   lastWorldPanPoint = null;
   saveNodePositions() {
@@ -1863,31 +1862,34 @@ var GraphManager = class {
     if (!this.renderer || !this.renderer.screenToWorld3D) {
       return;
     }
+    console.log("start pan");
     const renderer = this.renderer;
-    const camera = renderer.getCamera();
+    this.panStartCamera = { ...renderer.getCamera() };
     const canvas = renderer.canvas ?? this.canvas;
-    const depth = camera.distance;
+    const depth = this.panStartCamera.distance;
     this.isCameraFollowing = false;
     this.cameraFollowNode = null;
     this.cameraAnimStart = null;
     this.cameraAnimFrom = null;
     this.cameraAnimTo = null;
-    this.lastWorldPanPoint = renderer.screenToWorld3D(screenX, screenY, depth, camera);
+    this.worldPanStartPoint = renderer.screenToWorld3D(screenX, screenY, depth, this.panStartCamera);
+    this.lastWorldPanPoint = this.worldPanStartPoint;
   }
   updatePan(screenX, screenY) {
-    if (!this.renderer || !this.renderer.screenToWorld3D || this.lastWorldPanPoint === null) {
+    if (!this.renderer || !this.renderer.screenToWorld3D || this.lastWorldPanPoint === null || this.worldPanStartPoint === null) {
       return;
     }
     const renderer = this.renderer;
-    const camera = renderer.getCamera();
-    const depth = camera.distance;
-    const currentWorld = renderer.screenToWorld3D(screenX, screenY, depth, camera);
+    const camSnap = this.panStartCamera;
+    const depth = camSnap.distance;
+    const currentWorld = renderer.screenToWorld3D(screenX, screenY, depth, camSnap);
     if (this.lastWorldPanPoint === null) {
       return;
     }
     const dx = currentWorld.x - this.lastWorldPanPoint.x;
     const dy = currentWorld.y - this.lastWorldPanPoint.y;
     const dz = currentWorld.z - this.lastWorldPanPoint.z;
+    const camera = renderer.getCamera();
     this.renderer.setCamera({
       targetX: camera.targetX - dx,
       targetY: camera.targetY - dy,
@@ -1896,8 +1898,9 @@ var GraphManager = class {
     this.lastWorldPanPoint = currentWorld;
   }
   endPan() {
-    this.worldPanStartPoint = null;
     this.lastWorldPanPoint = null;
+    this.worldPanStartPoint = null;
+    this.panStartCamera = null;
   }
   openNode(screenX, screenY) {
     const node = this.nodeClicked(screenX, screenY);
@@ -1920,24 +1923,6 @@ var GraphManager = class {
     if (dt > 0.05)
       dt = 0.05;
     this.lastTime = timestamp;
-    try {
-      this.applyCursorAttractor();
-    } catch (e) {
-    }
-    try {
-      if (this.followLockedNodeId && this.graph && this.renderer) {
-        const n = this.graph.nodes.find((x) => x.id === this.followLockedNodeId);
-        if (n) {
-          const cam = this.renderer.getCamera();
-          const alpha = 0.12;
-          const tx = cam.targetX + ((n.x ?? 0) - (cam.targetX ?? 0)) * alpha;
-          const ty = cam.targetY + ((n.y ?? 0) - (cam.targetY ?? 0)) * alpha;
-          const tz = cam.targetZ + ((n.z ?? 0) - (cam.targetZ ?? 0)) * alpha;
-          this.renderer.setCamera({ targetX: tx, targetY: ty, targetZ: tz });
-        }
-      }
-    } catch (e) {
-    }
     if (this.simulation)
       this.simulation.tick(dt);
     try {
@@ -2060,6 +2045,7 @@ var GraphManager = class {
     }
   }
   updateCameraAnimation(now) {
+    return;
     if (!this.renderer)
       return;
     if (this.cameraAnimStart == null) {
@@ -2309,18 +2295,6 @@ var GraphManager = class {
       if (this.renderer && this.renderer.render)
         this.renderer.render();
     } catch (e) {
-    }
-  }
-  handleClick(screenX, screenY) {
-    if (!this.graph || !this.openNodeFile || !this.renderer)
-      return;
-    const node = this.nodeClicked(screenX, screenY);
-    if (!node)
-      return;
-    try {
-      this.openNodeFile(node);
-    } catch (e) {
-      console.error("Graph2DController.onNodeClick handler error", e);
     }
   }
   // Reusable hover updater: computes hover from screen coords and respects

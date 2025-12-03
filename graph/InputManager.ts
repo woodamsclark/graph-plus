@@ -69,7 +69,7 @@ export class InputManager {
         const screenY   = e.clientY - rect.top;
         // 3. If we're orbiting, that's the only thing we care about
         if (this.isOrbiting) {
-            this.callbacks.onOrbit(dx, dy);
+            //this.callbacks.onOrbit(dx, dy);
             return;
         }
 
@@ -81,7 +81,7 @@ export class InputManager {
             // A. Promote to node drag (we clicked on a node at mousedown)
             if (this.draggedNodeId !== null && !this.isDraggingNode) {
                 this.isDraggingNode = true;
-                this.callbacks.onDragStart(this.draggedNodeId, this.downScreenX, this.downScreenY);
+                //this.callbacks.onDragStart(this.draggedNodeId, this.downScreenX, this.downScreenY);
             }
             // B. Or promote to pan (we clicked empty space)
             else if (this.draggedNodeId === null && !this.isPanning) {
@@ -93,7 +93,7 @@ export class InputManager {
         // 5. States are decided, perform exactly one kind of movement
         if (this.isDraggingNode) {
             // drag uses screen coords so GraphManager can do screen->world
-            this.callbacks.onDragMove(screenX, screenY);
+            //this.callbacks.onDragMove(screenX, screenY);
             return;
         }
         if (this.isPanning) {
