@@ -1,50 +1,52 @@
 import { App, TFile, CachedMetadata } from 'obsidian';
 
 export interface VisualSettings {
-  minNodeRadius       : number;
-  maxNodeRadius       : number;
-  minCenterAlpha      : number;
-  maxCenterAlpha      : number;
-  highlightDepth      : number;  // screen-space label reveal radius (× size)
-  focusSmoothing      : number;
-  nodeColor?          : string;   // optional color overrides (CSS color strings). If unset, theme vars are used.
-  nodeColorAlpha      : number;
-  tagColor?           : string;
-  tagColorAlpha       : number;
-  edgeColor?          : string;
-  edgeColorAlpha      : number;
-  labelColor?         : string;
-  labelColorAlpha     : number;
-  labelBaseFontSize   : number;
-  labelFadeRangePx    : number;
-  labelRadius         : number;
-  useInterfaceFont    : boolean;
+  minNodeRadius        : number;
+  maxNodeRadius        : number;
+  minCenterAlpha       : number;
+  maxCenterAlpha       : number;
+  highlightDepth       : number;  // screen-space label reveal radius (× size)
+  focusSmoothing       : number;
+  nodeColor?           : string;   // optional color overrides (CSS color strings). If unset, theme vars are used.
+  nodeColorAlpha       : number;
+  tagColor?            : string;
+  tagColorAlpha        : number;
+  edgeColor?           : string;
+  edgeColorAlpha       : number;
+  labelColor?          : string;
+  labelColorAlpha      : number;
+  labelBaseFontSize    : number;
+  labelFadeRangePx     : number;
+  labelRadius          : number;
+  useInterfaceFont     : boolean;
 }
 
 export interface PhysicsSettings {
-  repulsionStrength     : number;
-  springStrength        : number;
-  springLength          : number;
-  centerPull            : number;
-  damping               : number;
-  notePlaneStiffness    : number;
-  tagPlaneStiffness     : number;
-  centerX               : number;
-  centerY               : number;
-  centerZ               : number;
-  mouseGravityEnabled   : boolean;
-  gravityRadius         : number;   // scales per-node screen radius
-  gravityFallOff        : number;   // falloff steepness
+  repulsionStrength    : number;
+  springStrength       : number;
+  springLength         : number;
+  centerPull           : number;
+  damping              : number;
+  notePlaneStiffness   : number;
+  tagPlaneStiffness    : number;
+  centerX              : number;
+  centerY              : number;
+  centerZ              : number;
+  mouseGravityEnabled  : boolean;
+  gravityRadius        : number;   // scales per-node screen radius
+  gravityFallOff       : number;   // falloff steepness
 }
 
 export interface Settings {
-  visuals               : VisualSettings;
-  physics               : PhysicsSettings;
-  countDuplicateLinks?  : boolean;
-  mutualLinkDoubleLine? : boolean;
-  interaction?: {
-    momentumScale?: number;
-    dragThreshold?: number; // in screen pixels
+  visuals              : VisualSettings;
+  physics              : PhysicsSettings;
+  countDuplicateLinks  : boolean;
+  mutualLinkDoubleLine : boolean;
+  interaction: {
+    momentumScale      : number;
+    dragThreshold      : number; // in screen pixels
+    rotateSensitivityX : number;
+    rotateSensitivityY : number;
   };
   // persistent node positions keyed by vault name, then by file path
   // settings.nodePositions[vaultId][filePath] = { x, y }
@@ -70,7 +72,7 @@ export interface Camera {
   zoom: number;     // additional zoom scalar
 }
 
-export interface Renderer2D {
+export interface Renderer {
   setGraph(graph: GraphData): void;
   resize(width: number, height: number): void;
   render(): void;

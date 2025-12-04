@@ -1,10 +1,10 @@
 import { App, Plugin, Platform } from 'obsidian'; 
 import { buildGraph } from './buildGraph.ts';
 import { layoutGraph2D, layoutGraph3D } from './layout2d.ts';
-import { createRenderer2D } from './renderer2d.ts';
+import { createRenderer } from './renderer.ts';
 import { createSimulation } from './simulation.ts';
 import { debounce } from '../utils/debounce.ts';
-import { Settings, Renderer2D, GraphData, GraphNode, Simulation} from '../types/interfaces.ts';
+import { Settings, Renderer, GraphData, GraphNode, Simulation} from '../types/interfaces.ts';
 import { DEFAULT_SETTINGS } from '../main.ts';
 import { InputManager } from './InputManager.ts';
 
@@ -14,12 +14,7 @@ export class GraphManager {
   private containerEl             : HTMLElement;
   private plugin?                 : Plugin;
   private running?                : boolean;
-  private isPanning               : boolean       = false;
   private cameraAnimDuration      : number        = 300; // ms
-  private cameraAnimFrom          : any           = null;
-  private cameraAnimTo            : any           = null;
-  private isCameraFollowing       : boolean       = false;
-  private cameraFollowNode        : any | null    = null;
   private momentumScale           : number        = 0.12;
   private dragThreshold           : number        = 4;
   private defaultCameraDistance   : number        = 1200;
@@ -27,9 +22,8 @@ export class GraphManager {
   private lastPinnedCenterNotePath: string        = '';
   private viewCenterX             : number        = 0;
   private viewCenterY             : number        = 0;
-  private draggingNode?           : any                                 | null;
   private canvas                  : HTMLCanvasElement                   | null = null;
-  private renderer                : Renderer2D                          | null = null;
+  private renderer                : Renderer                            | null = null;
   private graph                   : GraphData                           | null = null;
   private adjacency               : Map<string, string[]>               | null = null;
   private simulation?             : Simulation                          | null = null;
@@ -44,9 +38,9 @@ export class GraphManager {
   private followLockedNodeId      : string                              | null = null;
   private centerNode              : any                                 | null = null;
   private inputManager            : InputManager                        | null = null;
-  private panStartCamera          : any                                 | null = null;
-  private worldPanStartPoint      : { x: number; y: number; z: number } | null = null;
-  private lastWorldPanPoint       : { x: number; y: number; z: number } | null = null;
+  private cameraSnapShot          : any                                 | null = null;
+  private worldAnchorPoint        : { x: number; y: number; z: number } | null = null;
+  private screenAnchorPoint       : { x: number; y: number }            | null = null;
   private openNodeFile            : ((node: any) => void)               | null = null;
   private settingsUnregister      : (() => void)                        | null = null;
   private saveNodePositionsDebounced: (() => void)                      | null = null;
@@ -121,7 +115,7 @@ export class GraphManager {
     this.canvas.tabIndex      = 0;
     const userSettings        = await (this.plugin as any).loadData();
     const settings: Settings  = Object.assign({}, DEFAULT_SETTINGS, userSettings);
-    this.renderer             = createRenderer2D({ canvas: this.canvas, settings });
+    this.renderer             = createRenderer({ canvas: this.canvas, settings });
     this.containerEl.appendChild(this.canvas);
    
     // Apply initial render options (whether to draw mutual links as double lines)
@@ -356,70 +350,79 @@ export class GraphManager {
     }
 
   public startPan (screenX: number, screenY: number) {
-    if (!this.renderer || !(this.renderer as any).screenToWorld3D) { return; }
-    const renderer = (this.renderer as any);
-    this.panStartCamera = { ...renderer.getCamera() };
-    const canvas   = renderer.canvas ?? this.canvas;
-    const depth    = this.panStartCamera.distance;
+    if (!this.renderer || !(this.renderer as any).screenToWorld3D) { console.log("GM startPan: No renderer or screenToWorld3D method"); return; }
+    
+    const renderer        = (this.renderer as any);
+    this.cameraSnapShot   = { ...renderer.getCamera() };
+    const depth           = this.cameraSnapShot.distance;
 
-    this.isCameraFollowing = false;
-    this.cameraFollowNode  = null;
-    this.cameraAnimStart   = null;
-    this.cameraAnimFrom    = null;
-    this.cameraAnimTo      = null;
-
-    this.worldPanStartPoint = renderer.screenToWorld3D(screenX, screenY, depth, this.panStartCamera);
-    this.lastWorldPanPoint  = this.worldPanStartPoint;
+    this.worldAnchorPoint = renderer.screenToWorld3D(screenX, screenY, depth, this.cameraSnapShot);
   }
 
   public updatePan (screenX: number, screenY: number) {
-    if (!this.renderer || !(this.renderer as any).screenToWorld3D || this.lastWorldPanPoint === null || this.worldPanStartPoint === null) 
+    if (!this.renderer || !(this.renderer as any).screenToWorld3D || this.worldAnchorPoint === null) 
       { return; }
     const renderer = (this.renderer as any);
-    const camSnap  = this.panStartCamera;
+    const camSnap  = this.cameraSnapShot;
     const depth    = camSnap.distance; 
-
     
+    if (this.worldAnchorPoint === null) { return; }
     const currentWorld = renderer.screenToWorld3D(screenX, screenY, depth, camSnap);
 
-    if (this.lastWorldPanPoint === null) { return; }
-    //const dx = currentWorld.x - (this.worldPanStartPoint.x as any);
-    //const dy = currentWorld.y - (this.worldPanStartPoint.y as any);
-    //const dz = currentWorld.z - (this.worldPanStartPoint.z as any);
-
-    const dx = currentWorld.x - (this.lastWorldPanPoint.x as any);
-    const dy = currentWorld.y - (this.lastWorldPanPoint.y as any);
-    const dz = currentWorld.z - (this.lastWorldPanPoint.z as any);
+    const dx = currentWorld.x - (this.worldAnchorPoint.x as any);
+    const dy = currentWorld.y - (this.worldAnchorPoint.y as any);
+    const dz = currentWorld.z - (this.worldAnchorPoint.z as any);
 
     const camera = renderer.getCamera();
-
-    (this.renderer as any).setCamera({
+    (this.renderer as any) .setCamera({
         targetX: camera.targetX - dx,
         targetY: camera.targetY - dy,
         targetZ: camera.targetZ - dz,
     });
-    this.lastWorldPanPoint = currentWorld;
+    this.worldAnchorPoint = currentWorld;
   }
 
   public endPan(){
-    this.lastWorldPanPoint  = null;
-    this.worldPanStartPoint = null;
-    this.panStartCamera     = null;
+    this.worldAnchorPoint = null;
+    this.cameraSnapShot   = null;
   }
 
-  public startOrbit (dx: number, dy: number) {
-    console.log("start orbit", dx, dy);
-    return;
+  public startOrbit (screenX: number, screenY: number) {
+    if (!this.renderer) { console.log("GM startOrbit: No renderer or screenToWorld3D method"); return; }
+    // Similar to startPan but may differ later
+    const renderer              = (this.renderer as any);
+    this.cameraSnapShot         = { ...renderer.getCamera() };
+    const depth                 = this.cameraSnapShot.distance;
+
+    this.screenAnchorPoint = { x: screenX, y: screenY };
   }
 
-  public updateOrbit (dx: number, dy: number) {
-    console.log("update orbit", dx, dy);
-    return;
+  public updateOrbit (screenX: number, screenY: number) {
+    if (!this.renderer || this.screenAnchorPoint === null) 
+      { return; }
+    const renderer = (this.renderer as any);
+    const camSnap  = this.cameraSnapShot;
+    const depth    = camSnap.distance; 
+
+    const ROTATE_SENSITIVITY_X  = DEFAULT_SETTINGS.interaction.rotateSensitivityX;
+    const ROTATE_SENSITIVITY_Y  = DEFAULT_SETTINGS.interaction.rotateSensitivityY;
+    const dx                    = screenX - this.screenAnchorPoint!.x;
+    const dy                    = screenY - this.screenAnchorPoint!.y;
+
+    let yaw                     = camSnap.yaw   - dx * ROTATE_SENSITIVITY_X;
+    let pitch                   = camSnap.pitch - dy * ROTATE_SENSITIVITY_Y;
+
+    const maxPitch              = Math.PI / 2 - 0.05;
+    const minPitch              = -maxPitch;
+    if (pitch > maxPitch) pitch = maxPitch;
+    if (pitch < minPitch) pitch = minPitch;
+
+    renderer.setCamera({yaw,pitch,});
   }
 
   public endOrbit () {
-    console.log("end orbit");
-    return;
+    this.screenAnchorPoint = null;
+    this.cameraSnapShot    = null;
   }
 
   public openNode (screenX: number, screenY: number) {

@@ -1,11 +1,11 @@
 import { App, ItemView, WorkspaceLeaf, Plugin, TFile, Platform } from 'obsidian';
 import { buildGraph } from './graph/buildGraph.ts';
 import { layoutGraph2D, layoutGraph3D } from './graph/layout2d.ts';
-import { createRenderer2D } from './graph/renderer2d.ts';
+import { createRenderer } from './graph/renderer.ts';
 import { createSimulation } from './graph/simulation.ts';
 import { GraphManager } from './graph/GraphManager.ts';import { DEFAULT_SETTINGS } from './main';
 import { debounce } from './utils/debounce.ts';
-import { GraphData, Renderer2D } from './types/interfaces.ts';
+import { GraphData, Renderer } from './types/interfaces.ts';
 
 export const GREATER_GRAPH_VIEW_TYPE = 'greater-graph-view';
 

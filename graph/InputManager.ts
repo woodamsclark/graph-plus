@@ -4,7 +4,7 @@ import { InputManagerCallbacks, PointerMode } from '../types/interfaces.ts';
 // and reports mouse positions and actions back to the GraphManager via callbacks.
 export class InputManager {
     private canvas              : HTMLCanvasElement;
-    private callbacks           : InputManagerCallbacks;
+    private callback           : InputManagerCallbacks;
     private draggedNodeId       : string | null     = null;
     private lastMouseX          : number            = 0;        // ((Client Space))
     private lastMouseY          : number            = 0;        // ((Client Space))
@@ -14,8 +14,8 @@ export class InputManager {
     private pointerMode         : PointerMode       = PointerMode.Idle;
 
     constructor(canvas: HTMLCanvasElement, callbacks: InputManagerCallbacks) {
-        this.canvas     = canvas;
-        this.callbacks  = callbacks;
+        this.canvas   = canvas;
+        this.callback = callbacks;
         this.attachListeners();
     }
 
@@ -39,7 +39,7 @@ export class InputManager {
         const isMiddle      = e.button === 1;
         const isRight       = e.button === 2;
 
-        this.draggedNodeId = this.callbacks.detectClickedNode(this.downClickX, this.downClickY)?.id || null;
+        this.draggedNodeId = this.callback.detectClickedNode(this.downClickX, this.downClickY)?.id || null;
 
         // Right Click + drag = Orbit, Right Click alone = zoom-follow
         if ((isLeft && e.ctrlKey) || (isLeft && e.metaKey) || isRight) {
@@ -78,30 +78,30 @@ export class InputManager {
             if (distSq > thresholdSq) {
                 if (this.draggedNodeId != null) {
                 this.pointerMode        = PointerMode.DragNode;
-                this.callbacks.onDragStart(this.draggedNodeId, screenX, screenY);
+                this.callback.onDragStart(this.draggedNodeId, screenX, screenY);
                 } else {
                 this.pointerMode        = PointerMode.Pan;
-                this.callbacks.onPanStart(screenX, screenY);
+                this.callback.onPanStart(screenX, screenY);
                 }
             }
             return;// ------------------------------------------------------
             case PointerMode.DragNode:
-                this.callbacks.onDragMove(screenX, screenY);
+                this.callback.onDragMove(screenX, screenY);
             return;
             // ------------------------------------------------------
             case PointerMode.Pan:
-                this.callbacks.onPanMove(screenX, screenY);
+                this.callback.onPanMove(screenX, screenY);
             return;
             // ------------------------------------------------------
             case PointerMode.RightClick:
                 // Check for threshold exceed → promote to DragNode or Pan
                 if (distSq > thresholdSq) {
-                    this.callbacks.onOrbitStart(dx, dy);
                     this.pointerMode = PointerMode.Orbit;
+                    this.callback.onOrbitStart(screenX, screenY);
                 } // else on mouse up, we zoom-follow the node
             return;
             case PointerMode.Orbit:
-                this.callbacks.onOrbitMove(dx, dy);
+                this.callback.onOrbitMove(screenX, screenY);
             return;
         }
     };
@@ -112,16 +112,16 @@ export class InputManager {
         const screenY = e.clientY - rect.top;
         switch (this.pointerMode) {
             case PointerMode.DragNode:
-                this.callbacks.onDragEnd();
+                this.callback.onDragEnd();
                 break;
             case PointerMode.Pan:
-                this.callbacks.onPanEnd();
+                this.callback.onPanEnd();
                 break;
             case PointerMode.Orbit:
-                this.callbacks.onOrbitEnd();
+                this.callback.onOrbitEnd();
                 break;
             case PointerMode.Click:
-                this.callbacks.onOpenNode(screenX, screenY);
+                this.callback.onOpenNode(screenX, screenY);
                 break;
             case PointerMode.RightClick:
                 break;
@@ -138,12 +138,12 @@ export class InputManager {
     private onMouseLeave = () => {
         // Clear hover state when leaving the canvas
         // This prevents the graph from thinking the mouse is still over it
-        this.callbacks.onHover(-Infinity, -Infinity); 
+        this.callback.onHover(-Infinity, -Infinity); 
     }
 
     private onWheel = (e: WheelEvent) => {
         e.preventDefault();
-        this.callbacks.onZoom(e.offsetX, e.offsetY, Math.sign(e.deltaY));
+        this.callback.onZoom(e.offsetX, e.offsetY, Math.sign(e.deltaY));
     }
 
     public destroy() {

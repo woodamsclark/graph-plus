@@ -23,12 +23,9 @@ __export(main_exports, {
   default: () => GreaterGraphPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian3 = require("obsidian");
-
-// GraphView.ts
 var import_obsidian2 = require("obsidian");
 
-// graph/GraphManager.ts
+// GraphView.ts
 var import_obsidian = require("obsidian");
 
 // graph/buildGraph.ts
@@ -324,8 +321,8 @@ function layoutGraph3D(graph, options) {
   }
 }
 
-// graph/renderer2d.ts
-function createRenderer2D(options) {
+// graph/renderer.ts
+function createRenderer(options) {
   const canvas = options.canvas;
   let visuals = options.settings.visuals;
   let physics = options.settings.physics;
@@ -1398,7 +1395,7 @@ function debounce(fn, wait = 300, immediate = false) {
 // graph/InputManager.ts
 var InputManager = class {
   canvas;
-  callbacks;
+  callback;
   draggedNodeId = null;
   lastMouseX = 0;
   // ((Client Space))
@@ -1413,7 +1410,7 @@ var InputManager = class {
   pointerMode = 0 /* Idle */;
   constructor(canvas, callbacks) {
     this.canvas = canvas;
-    this.callbacks = callbacks;
+    this.callback = callbacks;
     this.attachListeners();
   }
   attachListeners() {
@@ -1433,7 +1430,7 @@ var InputManager = class {
     const isLeft = e.button === 0;
     const isMiddle = e.button === 1;
     const isRight = e.button === 2;
-    this.draggedNodeId = this.callbacks.detectClickedNode(this.downClickX, this.downClickY)?.id || null;
+    this.draggedNodeId = this.callback.detectClickedNode(this.downClickX, this.downClickY)?.id || null;
     if (isLeft && e.ctrlKey || isLeft && e.metaKey || isRight) {
       this.pointerMode = 3 /* RightClick */;
       return;
@@ -1462,27 +1459,27 @@ var InputManager = class {
         if (distSq > thresholdSq) {
           if (this.draggedNodeId != null) {
             this.pointerMode = 4 /* DragNode */;
-            this.callbacks.onDragStart(this.draggedNodeId, screenX, screenY);
+            this.callback.onDragStart(this.draggedNodeId, screenX, screenY);
           } else {
             this.pointerMode = 5 /* Pan */;
-            this.callbacks.onPanStart(screenX, screenY);
+            this.callback.onPanStart(screenX, screenY);
           }
         }
         return;
       case 4 /* DragNode */:
-        this.callbacks.onDragMove(screenX, screenY);
+        this.callback.onDragMove(screenX, screenY);
         return;
       case 5 /* Pan */:
-        this.callbacks.onPanMove(screenX, screenY);
+        this.callback.onPanMove(screenX, screenY);
         return;
       case 3 /* RightClick */:
         if (distSq > thresholdSq) {
-          this.callbacks.onOrbitStart(dx, dy);
           this.pointerMode = 6 /* Orbit */;
+          this.callback.onOrbitStart(screenX, screenY);
         }
         return;
       case 6 /* Orbit */:
-        this.callbacks.onOrbitMove(dx, dy);
+        this.callback.onOrbitMove(screenX, screenY);
         return;
     }
   };
@@ -1492,16 +1489,16 @@ var InputManager = class {
     const screenY = e.clientY - rect.top;
     switch (this.pointerMode) {
       case 4 /* DragNode */:
-        this.callbacks.onDragEnd();
+        this.callback.onDragEnd();
         break;
       case 5 /* Pan */:
-        this.callbacks.onPanEnd();
+        this.callback.onPanEnd();
         break;
       case 6 /* Orbit */:
-        this.callbacks.onOrbitEnd();
+        this.callback.onOrbitEnd();
         break;
       case 2 /* Click */:
-        this.callbacks.onOpenNode(screenX, screenY);
+        this.callback.onOpenNode(screenX, screenY);
         break;
       case 3 /* RightClick */:
         break;
@@ -1512,11 +1509,11 @@ var InputManager = class {
   onMouseMove = (e) => {
   };
   onMouseLeave = () => {
-    this.callbacks.onHover(-Infinity, -Infinity);
+    this.callback.onHover(-Infinity, -Infinity);
   };
   onWheel = (e) => {
     e.preventDefault();
-    this.callbacks.onZoom(e.offsetX, e.offsetY, Math.sign(e.deltaY));
+    this.callback.onZoom(e.offsetX, e.offsetY, Math.sign(e.deltaY));
   };
   destroy() {
     this.canvas.removeEventListener("mousemove", this.onMouseMove);
@@ -1534,13 +1531,8 @@ var GraphManager = class {
   containerEl;
   plugin;
   running;
-  isPanning = false;
   cameraAnimDuration = 300;
   // ms
-  cameraAnimFrom = null;
-  cameraAnimTo = null;
-  isCameraFollowing = false;
-  cameraFollowNode = null;
   momentumScale = 0.12;
   dragThreshold = 4;
   defaultCameraDistance = 1200;
@@ -1548,7 +1540,6 @@ var GraphManager = class {
   lastPinnedCenterNotePath = "";
   viewCenterX = 0;
   viewCenterY = 0;
-  draggingNode;
   canvas = null;
   renderer = null;
   graph = null;
@@ -1565,9 +1556,9 @@ var GraphManager = class {
   followLockedNodeId = null;
   centerNode = null;
   inputManager = null;
-  panStartCamera = null;
-  worldPanStartPoint = null;
-  lastWorldPanPoint = null;
+  cameraSnapShot = null;
+  worldAnchorPoint = null;
+  screenAnchorPoint = null;
   openNodeFile = null;
   settingsUnregister = null;
   saveNodePositionsDebounced = null;
@@ -1646,7 +1637,7 @@ var GraphManager = class {
     this.canvas.tabIndex = 0;
     const userSettings = await this.plugin.loadData();
     const settings = Object.assign({}, DEFAULT_SETTINGS, userSettings);
-    this.renderer = createRenderer2D({ canvas: this.canvas, settings });
+    this.renderer = createRenderer({ canvas: this.canvas, settings });
     this.containerEl.appendChild(this.canvas);
     try {
       const drawDouble = Boolean(this.plugin.settings?.mutualLinkDoubleLine);
@@ -1852,58 +1843,74 @@ var GraphManager = class {
   }
   startPan(screenX, screenY) {
     if (!this.renderer || !this.renderer.screenToWorld3D) {
+      console.log("GM startPan: No renderer or screenToWorld3D method");
       return;
     }
     const renderer = this.renderer;
-    this.panStartCamera = { ...renderer.getCamera() };
-    const canvas = renderer.canvas ?? this.canvas;
-    const depth = this.panStartCamera.distance;
-    this.isCameraFollowing = false;
-    this.cameraFollowNode = null;
-    this.cameraAnimStart = null;
-    this.cameraAnimFrom = null;
-    this.cameraAnimTo = null;
-    this.worldPanStartPoint = renderer.screenToWorld3D(screenX, screenY, depth, this.panStartCamera);
-    this.lastWorldPanPoint = this.worldPanStartPoint;
+    this.cameraSnapShot = { ...renderer.getCamera() };
+    const depth = this.cameraSnapShot.distance;
+    this.worldAnchorPoint = renderer.screenToWorld3D(screenX, screenY, depth, this.cameraSnapShot);
   }
   updatePan(screenX, screenY) {
-    if (!this.renderer || !this.renderer.screenToWorld3D || this.lastWorldPanPoint === null || this.worldPanStartPoint === null) {
+    if (!this.renderer || !this.renderer.screenToWorld3D || this.worldAnchorPoint === null) {
       return;
     }
     const renderer = this.renderer;
-    const camSnap = this.panStartCamera;
+    const camSnap = this.cameraSnapShot;
     const depth = camSnap.distance;
-    const currentWorld = renderer.screenToWorld3D(screenX, screenY, depth, camSnap);
-    if (this.lastWorldPanPoint === null) {
+    if (this.worldAnchorPoint === null) {
       return;
     }
-    const dx = currentWorld.x - this.lastWorldPanPoint.x;
-    const dy = currentWorld.y - this.lastWorldPanPoint.y;
-    const dz = currentWorld.z - this.lastWorldPanPoint.z;
+    const currentWorld = renderer.screenToWorld3D(screenX, screenY, depth, camSnap);
+    const dx = currentWorld.x - this.worldAnchorPoint.x;
+    const dy = currentWorld.y - this.worldAnchorPoint.y;
+    const dz = currentWorld.z - this.worldAnchorPoint.z;
     const camera = renderer.getCamera();
     this.renderer.setCamera({
       targetX: camera.targetX - dx,
       targetY: camera.targetY - dy,
       targetZ: camera.targetZ - dz
     });
-    this.lastWorldPanPoint = currentWorld;
+    this.worldAnchorPoint = currentWorld;
   }
   endPan() {
-    this.lastWorldPanPoint = null;
-    this.worldPanStartPoint = null;
-    this.panStartCamera = null;
+    this.worldAnchorPoint = null;
+    this.cameraSnapShot = null;
   }
-  startOrbit(dx, dy) {
-    console.log("start orbit", dx, dy);
-    return;
+  startOrbit(screenX, screenY) {
+    if (!this.renderer) {
+      console.log("GM startOrbit: No renderer or screenToWorld3D method");
+      return;
+    }
+    const renderer = this.renderer;
+    this.cameraSnapShot = { ...renderer.getCamera() };
+    const depth = this.cameraSnapShot.distance;
+    this.screenAnchorPoint = { x: screenX, y: screenY };
   }
-  updateOrbit(dx, dy) {
-    console.log("update orbit", dx, dy);
-    return;
+  updateOrbit(screenX, screenY) {
+    if (!this.renderer || this.screenAnchorPoint === null) {
+      return;
+    }
+    const renderer = this.renderer;
+    const camSnap = this.cameraSnapShot;
+    const depth = camSnap.distance;
+    const ROTATE_SENSITIVITY_X = DEFAULT_SETTINGS.interaction.rotateSensitivityX;
+    const ROTATE_SENSITIVITY_Y = DEFAULT_SETTINGS.interaction.rotateSensitivityY;
+    const dx = screenX - this.screenAnchorPoint.x;
+    const dy = screenY - this.screenAnchorPoint.y;
+    let yaw = camSnap.yaw - dx * ROTATE_SENSITIVITY_X;
+    let pitch = camSnap.pitch - dy * ROTATE_SENSITIVITY_Y;
+    const maxPitch = Math.PI / 2 - 0.05;
+    const minPitch = -maxPitch;
+    if (pitch > maxPitch)
+      pitch = maxPitch;
+    if (pitch < minPitch)
+      pitch = minPitch;
+    renderer.setCamera({ yaw, pitch });
   }
   endOrbit() {
-    console.log("end orbit");
-    return;
+    this.screenAnchorPoint = null;
+    this.cameraSnapShot = null;
   }
   openNode(screenX, screenY) {
     const node = this.nodeClicked(screenX, screenY);
@@ -2163,33 +2170,6 @@ var GraphManager = class {
     }
     return closest;
   }
-  isPreviewModifier(event) {
-    try {
-      if (import_obsidian.Platform && import_obsidian.Platform.isMacOS)
-        return Boolean(event.metaKey);
-    } catch (e) {
-    }
-    return Boolean(event.ctrlKey);
-  }
-  // Start a small poll to detect when Obsidian's hover popover is removed from DOM.
-  // While the popover exists we keep the preview lock active; when it's gone we clear it.
-  startPreviewLockMonitor() {
-    try {
-      if (this.previewPollTimer)
-        window.clearInterval(this.previewPollTimer);
-    } catch (e) {
-    }
-    this.previewPollTimer = window.setInterval(() => {
-      try {
-        const sel = ".popover.hover-popover, .hover-popover, .internal-link-popover, .internal-link-hover";
-        const found = document.querySelector(sel);
-        if (!found) {
-          this.clearPreviewLock();
-        }
-      } catch (e) {
-      }
-    }, 250);
-  }
   clearPreviewLock() {
     try {
       if (this.previewPollTimer)
@@ -2213,7 +2193,7 @@ var GraphManager = class {
 
 // GraphView.ts
 var GREATER_GRAPH_VIEW_TYPE = "greater-graph-view";
-var GraphView = class extends import_obsidian2.ItemView {
+var GraphView = class extends import_obsidian.ItemView {
   manager = null;
   plugin;
   scheduleGraphRefresh = null;
@@ -2269,7 +2249,7 @@ var GraphView = class extends import_obsidian2.ItemView {
       file = node.file;
     else if (node.filePath) {
       const af = app.vault.getAbstractFileByPath(node.filePath);
-      if (af instanceof import_obsidian2.TFile)
+      if (af instanceof import_obsidian.TFile)
         file = af;
     }
     if (!file) {
@@ -2326,7 +2306,9 @@ var DEFAULT_SETTINGS = {
   countDuplicateLinks: true,
   interaction: {
     momentumScale: 0.12,
-    dragThreshold: 4
+    dragThreshold: 4,
+    rotateSensitivityX: 5e-3,
+    rotateSensitivityY: 5e-3
   },
   nodePositions: {},
   mutualLinkDoubleLine: true,
@@ -2335,7 +2317,7 @@ var DEFAULT_SETTINGS = {
   pinnedCenterNotePath: "",
   useOutlinkFallback: false
 };
-var GreaterGraphPlugin = class extends import_obsidian3.Plugin {
+var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
   settings = DEFAULT_SETTINGS;
   settingsListeners = [];
   async onload() {
@@ -2399,7 +2381,7 @@ var GreaterGraphPlugin = class extends import_obsidian3.Plugin {
     }
   }
 };
-var GreaterGraphSettingTab = class extends import_obsidian3.PluginSettingTab {
+var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
   plugin;
   constructor(app, plugin) {
     super(app, plugin);
@@ -2412,7 +2394,7 @@ var GreaterGraphSettingTab = class extends import_obsidian3.PluginSettingTab {
     const visuals = this.plugin.settings.visuals;
     const physics = this.plugin.settings.physics;
     const addSliderSetting = (parent, opts) => {
-      const s = new import_obsidian3.Setting(parent).setName(opts.name).setDesc(opts.desc || "");
+      const s = new import_obsidian2.Setting(parent).setName(opts.name).setDesc(opts.desc || "");
       const wrap = document.createElement("div");
       wrap.style.display = "flex";
       wrap.style.alignItems = "center";
@@ -2641,7 +2623,7 @@ var GreaterGraphSettingTab = class extends import_obsidian3.PluginSettingTab {
     });
     containerEl.createEl("h2", { text: "Colors" });
     {
-      const s = new import_obsidian3.Setting(containerEl).setName("Node color (override)").setDesc("Optional color to override the theme accent for node fill. Leave unset to use the active theme.");
+      const s = new import_obsidian2.Setting(containerEl).setName("Node color (override)").setDesc("Optional color to override the theme accent for node fill. Leave unset to use the active theme.");
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
@@ -2693,7 +2675,7 @@ var GreaterGraphSettingTab = class extends import_obsidian3.PluginSettingTab {
       s.controlEl.appendChild(alphaInput);
     }
     {
-      const s = new import_obsidian3.Setting(containerEl).setName("Edge color (override)").setDesc("Optional color to override edge stroke color. Leave unset to use a theme-appropriate color.");
+      const s = new import_obsidian2.Setting(containerEl).setName("Edge color (override)").setDesc("Optional color to override edge stroke color. Leave unset to use a theme-appropriate color.");
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
@@ -2745,7 +2727,7 @@ var GreaterGraphSettingTab = class extends import_obsidian3.PluginSettingTab {
       s.controlEl.appendChild(edgeAlpha);
     }
     {
-      const s = new import_obsidian3.Setting(containerEl).setName("Tag color (override)").setDesc("Optional color to override tag node color. Leave unset to use the active theme.");
+      const s = new import_obsidian2.Setting(containerEl).setName("Tag color (override)").setDesc("Optional color to override tag node color. Leave unset to use the active theme.");
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
@@ -2797,7 +2779,7 @@ var GreaterGraphSettingTab = class extends import_obsidian3.PluginSettingTab {
       s.controlEl.appendChild(tagAlpha);
     }
     {
-      const s = new import_obsidian3.Setting(containerEl).setName("Label color (override)").setDesc("Optional color to override the label text color. Leave unset to use the active theme.");
+      const s = new import_obsidian2.Setting(containerEl).setName("Label color (override)").setDesc("Optional color to override the label text color. Leave unset to use the active theme.");
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
@@ -2848,7 +2830,7 @@ var GreaterGraphSettingTab = class extends import_obsidian3.PluginSettingTab {
       s.controlEl.appendChild(hint);
       s.controlEl.appendChild(labelAlpha);
     }
-    new import_obsidian3.Setting(containerEl).setName("Use interface font for labels").setDesc("When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.").addToggle((t) => t.setValue(Boolean(visuals.useInterfaceFont)).onChange(async (v) => {
+    new import_obsidian2.Setting(containerEl).setName("Use interface font for labels").setDesc("When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.").addToggle((t) => t.setValue(Boolean(visuals.useInterfaceFont)).onChange(async (v) => {
       visuals.useInterfaceFont = Boolean(v);
       await this.plugin.saveSettings();
     }));
@@ -2979,15 +2961,15 @@ var GreaterGraphSettingTab = class extends import_obsidian3.PluginSettingTab {
         }
       }
     });
-    new import_obsidian3.Setting(containerEl).setName("Count duplicate links").setDesc("If enabled, multiple links between the same two files will be counted when computing in/out degrees.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.countDuplicateLinks)).onChange(async (v) => {
+    new import_obsidian2.Setting(containerEl).setName("Count duplicate links").setDesc("If enabled, multiple links between the same two files will be counted when computing in/out degrees.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.countDuplicateLinks)).onChange(async (v) => {
       this.plugin.settings.countDuplicateLinks = Boolean(v);
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Double-line mutual links").setDesc("When enabled, mutual links (A \u2194 B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.mutualLinkDoubleLine)).onChange(async (v) => {
+    new import_obsidian2.Setting(containerEl).setName("Double-line mutual links").setDesc("When enabled, mutual links (A \u2194 B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.mutualLinkDoubleLine)).onChange(async (v) => {
       this.plugin.settings.mutualLinkDoubleLine = Boolean(v);
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Show tag nodes").setDesc("Toggle visibility of tag nodes and their edges in the graph.").addToggle((t) => t.setValue(this.plugin.settings.showTags !== false).onChange(async (v) => {
+    new import_obsidian2.Setting(containerEl).setName("Show tag nodes").setDesc("Toggle visibility of tag nodes and their edges in the graph.").addToggle((t) => t.setValue(this.plugin.settings.showTags !== false).onChange(async (v) => {
       this.plugin.settings.showTags = Boolean(v);
       await this.plugin.saveSettings();
     }));
@@ -3033,21 +3015,21 @@ var GreaterGraphSettingTab = class extends import_obsidian3.PluginSettingTab {
         }
       }
     });
-    new import_obsidian3.Setting(containerEl).setName("Mouse gravity").setDesc("Enable the mouse gravity well that attracts nearby nodes.").addToggle((t) => t.setValue(Boolean(phys.mouseGravityEnabled !== false)).onChange(async (v) => {
+    new import_obsidian2.Setting(containerEl).setName("Mouse gravity").setDesc("Enable the mouse gravity well that attracts nearby nodes.").addToggle((t) => t.setValue(Boolean(phys.mouseGravityEnabled !== false)).onChange(async (v) => {
       this.plugin.settings.physics = this.plugin.settings.physics || {};
       this.plugin.settings.physics.mouseGravityEnabled = Boolean(v);
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h2", { text: "Center Node" });
-    new import_obsidian3.Setting(containerEl).setName("Use pinned center note").setDesc("Prefer a specific note path as the graph center. Falls back to max in-links if not found.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.usePinnedCenterNote)).onChange(async (v) => {
+    new import_obsidian2.Setting(containerEl).setName("Use pinned center note").setDesc("Prefer a specific note path as the graph center. Falls back to max in-links if not found.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.usePinnedCenterNote)).onChange(async (v) => {
       this.plugin.settings.usePinnedCenterNote = Boolean(v);
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Pinned center note path").setDesc('e.g., "Home.md" or "Notes/Home" (vault-relative).').addText((txt) => txt.setPlaceholder("path/to/note").setValue(this.plugin.settings.pinnedCenterNotePath || "").onChange(async (v) => {
+    new import_obsidian2.Setting(containerEl).setName("Pinned center note path").setDesc('e.g., "Home.md" or "Notes/Home" (vault-relative).').addText((txt) => txt.setPlaceholder("path/to/note").setValue(this.plugin.settings.pinnedCenterNotePath || "").onChange(async (v) => {
       this.plugin.settings.pinnedCenterNotePath = (v || "").trim();
       await this.plugin.saveSettings();
     }));
-    new import_obsidian3.Setting(containerEl).setName("Fallback: prefer out-links").setDesc("When picking a center by link count, prefer out-links (out-degree) instead of in-links (in-degree)").addToggle((t) => t.setValue(Boolean(this.plugin.settings.useOutlinkFallback)).onChange(async (v) => {
+    new import_obsidian2.Setting(containerEl).setName("Fallback: prefer out-links").setDesc("When picking a center by link count, prefer out-links (out-degree) instead of in-links (in-degree)").addToggle((t) => t.setValue(Boolean(this.plugin.settings.useOutlinkFallback)).onChange(async (v) => {
       this.plugin.settings.useOutlinkFallback = Boolean(v);
       await this.plugin.saveSettings();
     }));

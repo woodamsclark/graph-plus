@@ -44,6 +44,8 @@ export const DEFAULT_SETTINGS: Settings = {
   interaction: {
     momentumScale: 0.12,
     dragThreshold: 4,
+    rotateSensitivityX: 0.005,
+    rotateSensitivityY: 0.005,
   },
   nodePositions: {},
   mutualLinkDoubleLine: true,
