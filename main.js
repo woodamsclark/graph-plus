@@ -254,7 +254,7 @@ async function buildGraph(app, options) {
   return { nodes, edges };
 }
 
-// graph/layout2d.ts
+// graph/layout.ts
 function layoutGraph3D(graph, options) {
   const { width, height } = options;
   const allNodes = graph.nodes;
@@ -1560,97 +1560,29 @@ var GraphManager = class {
   cameraSnapShot = null;
   worldAnchorPoint = null;
   screenAnchorPoint = null;
-  initialCameraState = null;
   openNodeFile = null;
   settingsUnregister = null;
   saveNodePositionsDebounced = null;
-  saveNodePositions() {
-    if (!this.graph)
-      return;
-    try {
-      const allSaved = this.plugin.settings.nodePositions || {};
-      const vaultId = this.app.vault.getName();
-      if (!allSaved[vaultId])
-        allSaved[vaultId] = {};
-      const map = allSaved[vaultId];
-      for (const node of this.graph.nodes) {
-        if (!Number.isFinite(node.x) || !Number.isFinite(node.y))
-          continue;
-        if (node.filePath)
-          map[node.filePath] = { x: node.x, y: node.y };
-      }
-      this.plugin.settings.nodePositions = allSaved;
-      try {
-        this.plugin.saveSettings && this.plugin.saveSettings();
-      } catch (e) {
-        console.error("Failed to save node positions", e);
-      }
-    } catch (e) {
-      console.error("Greater Graph: saveNodePositions error", e);
-    }
-  }
-  // Recreate the physics simulation, optionally excluding tag nodes.
-  recreateSimulation(showTags, extraOpts) {
-    try {
-      if (this.simulation) {
-        try {
-          this.simulation.stop();
-        } catch (e) {
-        }
-      }
-      if (!this.graph)
-        return;
-      const physOpts = Object.assign({}, this.plugin.settings?.physics || {});
-      const rect = this.containerEl.getBoundingClientRect();
-      const centerX = extraOpts && typeof extraOpts.centerX === "number" ? extraOpts.centerX : rect.width / 2;
-      const centerY = extraOpts && typeof extraOpts.centerY === "number" ? extraOpts.centerY : rect.height / 2;
-      const centerNodeId = extraOpts?.centerNodeId;
-      let simNodes = this.graph.nodes;
-      let simEdges = this.graph.edges || [];
-      if (!showTags) {
-        const tagSet = /* @__PURE__ */ new Set();
-        simNodes = this.graph.nodes.filter((n) => {
-          if (n.type === "tag") {
-            tagSet.add(n.id);
-            return false;
-          }
-          return true;
-        });
-        simEdges = (this.graph.edges || []).filter((e) => !tagSet.has(e.sourceId) && !tagSet.has(e.targetId));
-      }
-      this.simulation = createSimulation(simNodes, simEdges, Object.assign({}, physOpts, { centerX, centerY, centerNodeId }));
-      try {
-        this.simulation.start();
-      } catch (e) {
-      }
-    } catch (e) {
-      console.error("Failed to recreate simulation", e);
-    }
-  }
   constructor(app, containerEl, plugin) {
     this.app = app;
     this.containerEl = containerEl;
     this.plugin = plugin;
   }
   async init() {
+    const vaultId = this.app.vault.getName();
     this.canvas = document.createElement("canvas");
     this.canvas.style.width = "100%";
     this.canvas.style.height = "100%";
     this.canvas.tabIndex = 0;
     const userSettings = await this.plugin.loadData();
     const settings = Object.assign({}, DEFAULT_SETTINGS, userSettings);
+    const rect = this.containerEl.getBoundingClientRect();
+    const centerX = (rect.width || 300) / 2;
+    const centerY = (rect.height || 200) / 2;
+    this.viewCenterX = centerX;
+    this.viewCenterY = centerY;
     this.renderer = createRenderer({ canvas: this.canvas, settings });
     this.containerEl.appendChild(this.canvas);
-    try {
-      const drawDouble = Boolean(this.plugin.settings?.mutualLinkDoubleLine);
-      const showTags = this.plugin.settings?.showTags !== false;
-      if (this.renderer && this.renderer.setRenderOptions)
-        this.renderer.setRenderOptions({
-          mutualDoubleLines: drawDouble,
-          showTags
-        });
-    } catch (e) {
-    }
     this.lastUsePinnedCenterNote = Boolean(this.plugin.settings?.usePinnedCenterNote);
     this.lastPinnedCenterNotePath = String(this.plugin.settings?.pinnedCenterNotePath || "");
     this.graph = await buildGraph(this.app, {
@@ -1679,7 +1611,6 @@ var GraphManager = class {
         return this.nodeClicked(screenX, screenY);
       }
     });
-    const vaultId = this.app.vault.getName();
     const rawSaved = this.plugin.settings?.nodePositions || {};
     let allSaved = {};
     let savedPositions = {};
@@ -1720,22 +1651,7 @@ var GraphManager = class {
       }
       this.centerNode = this.graph.nodes.find((n) => n.isCenterNode) || null;
     }
-    this.adjacency = /* @__PURE__ */ new Map();
-    if (this.graph && this.graph.edges) {
-      for (const e of this.graph.edges) {
-        if (!this.adjacency.has(e.sourceId))
-          this.adjacency.set(e.sourceId, []);
-        if (!this.adjacency.has(e.targetId))
-          this.adjacency.set(e.targetId, []);
-        this.adjacency.get(e.sourceId).push(e.targetId);
-        this.adjacency.get(e.targetId).push(e.sourceId);
-      }
-    }
-    const rect = this.containerEl.getBoundingClientRect();
-    const centerX = (rect.width || 300) / 2;
-    const centerY = (rect.height || 200) / 2;
-    this.viewCenterX = centerX;
-    this.viewCenterY = centerY;
+    this.buildAdjacencyMap();
     this.renderer.setGraph(this.graph);
     if (needsLayout.length > 0) {
       layoutGraph3D(this.graph, {
@@ -1757,20 +1673,8 @@ var GraphManager = class {
     this.renderer.resize(rect.width || 300, rect.height || 200);
     const centerNodeId = this.centerNode ? this.centerNode.id : void 0;
     const showTagsInitial = this.plugin.settings?.showTags !== false;
-    this.recreateSimulation(showTagsInitial, { centerX, centerY, centerNodeId });
-    try {
-      if (this.renderer.setCamera)
-        this.renderer.setCamera({
-          targetX: this.viewCenterX ?? 0,
-          targetY: this.viewCenterY ?? 0,
-          targetZ: 0,
-          distance: this.defaultCameraDistance
-        });
-    } catch (e) {
-    }
-    if (this.renderer.getCamera) {
-      this.initialCameraState = { ...this.renderer.getCamera() };
-    }
+    this.refreshGraph();
+    this.initializeCamera();
     try {
       if (this.renderer.resetPanToCenter)
         this.renderer.resetPanToCenter();
@@ -1796,44 +1700,26 @@ var GraphManager = class {
     if (!this.saveNodePositionsDebounced) {
       this.saveNodePositionsDebounced = debounce(() => this.saveNodePositions(), 2e3, true);
     }
-    if (this.plugin.registerSettingsListener) {
-      this.settingsUnregister = this.plugin.registerSettingsListener(() => {
-        if (this.plugin.settings) {
-          const visuals = this.plugin.settings.visuals;
-          const physics = this.plugin.settings.physics;
-          if (this.renderer && this.renderer.setGlowSettings) {
-            this.renderer.setGlowSettings(visuals);
-            try {
-              const drawDouble = Boolean(this.plugin.settings?.mutualLinkDoubleLine);
-              const showTags = this.plugin.settings?.showTags !== false;
-              if (this.renderer && this.renderer.setRenderOptions)
-                this.renderer.setRenderOptions({ mutualDoubleLines: drawDouble, showTags });
-            } catch (e) {
-            }
-            this.renderer.render();
-          }
-          const phys = this.plugin.settings.physics;
-          if (this.simulation && phys && this.simulation.setOptions) {
-            this.simulation.setOptions(phys);
-          }
-          try {
-            const interaction = this.plugin.settings?.interaction || {};
-            this.momentumScale = interaction.momentumScale ?? this.momentumScale;
-            this.dragThreshold = interaction.dragThreshold ?? this.dragThreshold;
-          } catch (e) {
-          }
-          try {
-            const usePinned = Boolean(this.plugin.settings?.usePinnedCenterNote);
-            const pinnedPath = String(this.plugin.settings?.pinnedCenterNotePath || "");
-            if (usePinned !== this.lastUsePinnedCenterNote || pinnedPath !== this.lastPinnedCenterNotePath) {
-              this.lastUsePinnedCenterNote = usePinned;
-              this.lastPinnedCenterNotePath = pinnedPath;
-              this.refreshGraph();
-            }
-          } catch (e) {
-          }
-        }
-      });
+  }
+  buildAdjacencyMap() {
+    const adjacency = /* @__PURE__ */ new Map();
+    if (this.graph && this.graph.edges) {
+      for (const e of this.graph.edges) {
+        if (!adjacency.has(e.sourceId))
+          adjacency.set(e.sourceId, []);
+        if (!adjacency.has(e.targetId))
+          adjacency.set(e.targetId, []);
+        adjacency.get(e.sourceId).push(e.targetId);
+        adjacency.get(e.targetId).push(e.sourceId);
+      }
+    }
+    this.adjacency = adjacency;
+  }
+  initializeCamera() {
+    try {
+      if (this.renderer.setCamera)
+        this.renderer.setCamera({ targetX: this.viewCenterX ?? 0, targetY: this.viewCenterY ?? 0, targetZ: 0, distance: this.defaultCameraDistance });
+    } catch (e) {
     }
   }
   updateHover(screenX, screenY) {
@@ -1941,10 +1827,7 @@ var GraphManager = class {
     this.followedNode = null;
   }
   resetCamera() {
-    if (!this.renderer || !this.initialCameraState)
-      return;
-    const renderer = this.renderer;
-    renderer.setCamera(this.initialCameraState);
+    this.initializeCamera;
   }
   animationLoop = (timestamp) => {
     if (!this.running)
@@ -1961,21 +1844,11 @@ var GraphManager = class {
     if (this.simulation)
       this.simulation.tick(dt);
     try {
-      if (this.lastMouseX != null && this.lastMouseY != null) {
-      }
-    } catch (e) {
-    }
-    try {
       this.updateCameraAnimation(timestamp);
     } catch (e) {
     }
     if (this.renderer)
       this.renderer.render();
-    try {
-      if (this.saveNodePositionsDebounced)
-        this.saveNodePositionsDebounced();
-    } catch (e) {
-    }
     this.animationFrame = requestAnimationFrame(this.animationLoop);
   };
   resize(width, height) {
@@ -2038,90 +1911,49 @@ var GraphManager = class {
       this.cameraAnimTo = null;
     }
   }
-  // Rebuilds the graph and restarts the simulation. Safe to call repeatedly.
   async refreshGraph() {
-    if (!this.canvas)
+    this.stopSimulation();
+    this.graph = await buildGraph(this.app, {
+      countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks),
+      usePinnedCenterNote: Boolean(this.plugin.settings?.usePinnedCenterNote),
+      pinnedCenterNotePath: String(this.plugin.settings?.pinnedCenterNotePath || ""),
+      useOutlinkFallback: Boolean(this.plugin.settings?.useOutlinkFallback)
+    });
+    const { nodes, edges } = this.filterGraph(this.graph);
+    this.simulation = this.buildSimulation(nodes, edges);
+    this.buildAdjacencyMap();
+    this.startSimulation();
+    this.renderer.setGraph(this.graph);
+    this.renderer?.render();
+  }
+  stopSimulation() {
+    if (this.simulation) {
+      try {
+        this.simulation.stop();
+      } catch {
+      }
+      this.simulation = null;
+    }
+  }
+  buildSimulation(nodes, edges, opts) {
+    const physics = this.plugin.settings.physics;
+    return createSimulation(nodes, edges, { ...physics, ...opts });
+  }
+  startSimulation() {
+    if (!this.simulation)
       return;
     try {
-      const newGraph = await buildGraph(this.app, {
-        countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks),
-        usePinnedCenterNote: Boolean(this.plugin.settings?.usePinnedCenterNote),
-        pinnedCenterNotePath: String(this.plugin.settings?.pinnedCenterNotePath || ""),
-        useOutlinkFallback: Boolean(this.plugin.settings?.useOutlinkFallback)
-      });
-      this.graph = newGraph;
-      const vaultId = this.app.vault.getName();
-      const allSaved = this.plugin.settings?.nodePositions || {};
-      const savedPositions = allSaved[vaultId] || {};
-      const needsLayout = [];
-      if (this.graph && this.graph.nodes) {
-        for (const node of this.graph.nodes) {
-          const s = savedPositions[node.filePath];
-          if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) {
-            node.x = s.x;
-            node.y = s.y;
-          } else {
-            needsLayout.push(node);
-          }
-        }
-        this.centerNode = this.graph.nodes.find((n) => n.isCenterNode) || null;
-      }
-      this.adjacency = /* @__PURE__ */ new Map();
-      if (this.graph && this.graph.edges) {
-        for (const e of this.graph.edges) {
-          if (!this.adjacency.has(e.sourceId))
-            this.adjacency.set(e.sourceId, []);
-          if (!this.adjacency.has(e.targetId))
-            this.adjacency.set(e.targetId, []);
-          this.adjacency.get(e.sourceId).push(e.targetId);
-          this.adjacency.get(e.targetId).push(e.sourceId);
-        }
-      }
-      const rect = this.containerEl.getBoundingClientRect();
-      const width = rect.width || 300;
-      const height = rect.height || 200;
-      const centerX = width / 2;
-      const centerY = height / 2;
-      this.viewCenterX = centerX;
-      this.viewCenterY = centerY;
-      if (this.renderer && this.graph) {
-        this.renderer.setGraph(this.graph);
-        if (needsLayout.length > 0) {
-          layoutGraph3D(this.graph, {
-            width,
-            height,
-            margin: 32,
-            centerX,
-            centerY,
-            centerOnLargestNode: true,
-            onlyNodes: needsLayout
-          });
-        }
-        this.renderer.resize(width, height);
-        if (this.centerNode) {
-          this.centerNode.x = centerX;
-          this.centerNode.y = centerY;
-          this.centerNode.z = 0;
-        }
-      }
-      if (this.simulation) {
-        try {
-          this.simulation.stop();
-        } catch (e) {
-        }
-        this.simulation = null;
-      }
-      this.simulation = createSimulation(
-        this.graph && this.graph.nodes || [],
-        this.graph && this.graph.edges || [],
-        Object.assign({}, this.plugin.settings?.physics || {}, { centerX, centerY })
-      );
       this.simulation.start();
-      if (this.renderer)
-        this.renderer.render();
-    } catch (e) {
-      console.error("Greater Graph: failed to refresh graph", e);
+    } catch {
     }
+  }
+  filterGraph(graph, showTags = true) {
+    if (showTags)
+      return { nodes: graph.nodes, edges: graph.edges };
+    const tagSet = new Set(graph.nodes.filter((n) => n.type === "tag").map((n) => n.id));
+    const nodes = graph.nodes.filter((n) => !tagSet.has(n.id));
+    const edges = graph.edges.filter((e) => !tagSet.has(e.sourceId) && !tagSet.has(e.targetId));
+    return { nodes, edges };
   }
   destroy() {
     try {
@@ -2134,8 +1966,6 @@ var GraphManager = class {
     } catch (e) {
     }
     this.previewPollTimer = null;
-    this.previewLockNodeId = null;
-    this.lastPreviewedNodeId = null;
     this.renderer?.destroy();
     if (this.canvas && this.canvas.parentElement)
       this.canvas.parentElement.removeChild(this.canvas);
@@ -2169,9 +1999,6 @@ var GraphManager = class {
     this.inputManager?.destroy();
     this.inputManager = null;
   }
-  setNodeClickHandler(handler) {
-    this.openNodeFile = handler;
-  }
   nodeClicked(screenX, screenY) {
     if (!this.graph || !this.renderer)
       return null;
@@ -2195,23 +2022,29 @@ var GraphManager = class {
     }
     return closest;
   }
-  clearPreviewLock() {
+  saveNodePositions() {
+    if (!this.graph)
+      return;
     try {
-      if (this.previewPollTimer)
-        window.clearInterval(this.previewPollTimer);
+      const allSaved = this.plugin.settings.nodePositions || {};
+      const vaultId = this.app.vault.getName();
+      if (!allSaved[vaultId])
+        allSaved[vaultId] = {};
+      const map = allSaved[vaultId];
+      for (const node of this.graph.nodes) {
+        if (!Number.isFinite(node.x) || !Number.isFinite(node.y))
+          continue;
+        if (node.filePath)
+          map[node.filePath] = { x: node.x, y: node.y };
+      }
+      this.plugin.settings.nodePositions = allSaved;
+      try {
+        this.plugin.saveSettings && this.plugin.saveSettings();
+      } catch (e) {
+        console.error("Failed to save node positions", e);
+      }
     } catch (e) {
-    }
-    this.previewPollTimer = null;
-    this.previewLockNodeId = null;
-    this.lastPreviewedNodeId = null;
-    try {
-      if (this.renderer && this.renderer.setHoverState)
-        this.renderer.setHoverState(null, /* @__PURE__ */ new Set(), 0, 0);
-      if (this.renderer && this.renderer.setHoveredNode)
-        this.renderer.setHoveredNode(null);
-      if (this.renderer && this.renderer.render)
-        this.renderer.render();
-    } catch (e) {
+      console.error("Greater Graph: saveNodePositions error", e);
     }
   }
 };
