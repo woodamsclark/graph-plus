@@ -170,6 +170,9 @@ export interface InputManagerCallbacks {
     onPanMove        (dx: number, dy: number): void;
     onPanEnd         (): void;
     onZoom           (screenX: number, screenY: number, delta: number): void;
+    onFollowStart    (nodeId: string): void;
+    onFollowEnd      (): void;
+    resetCamera      (): void;
 
     // Node Interaction
     onHover         (screenX: number, screenY: number): void;

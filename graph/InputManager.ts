@@ -4,10 +4,10 @@ import { InputManagerCallbacks, PointerMode } from '../types/interfaces.ts';
 // and reports mouse positions and actions back to the GraphManager via callbacks.
 export class InputManager {
     private canvas              : HTMLCanvasElement;
-    private callback           : InputManagerCallbacks;
+    private callback            : InputManagerCallbacks;
     private draggedNodeId       : string | null     = null;
-    private lastMouseX          : number            = 0;        // ((Client Space))
-    private lastMouseY          : number            = 0;        // ((Client Space))
+    private lastClientX         : number            = 0;        // ((Client Space))
+    private lastClientY         : number            = 0;        // ((Client Space))
     private downClickX          : number            = 0;        // [[Canvas Space]
     private downClickY          : number            = 0;        // [[Canvas Space]
     private dragThreshold       : number            = 5;        // Drag starts after 5 pixels of movement
@@ -33,15 +33,14 @@ export class InputManager {
         const canvas        = this.canvas.getBoundingClientRect();
         this.downClickX     = e.clientX - canvas.left;
         this.downClickY     = e.clientY - canvas.top;
-        this.lastMouseX     = e.clientX;
-        this.lastMouseY     = e.clientY;
+        this.lastClientX    = e.clientX;
+        this.lastClientY    = e.clientY;
         const isLeft        = e.button === 0;
         const isMiddle      = e.button === 1;
         const isRight       = e.button === 2;
+        this.draggedNodeId  = this.callback.detectClickedNode(this.downClickX, this.downClickY)?.id || null;
 
-        this.draggedNodeId = this.callback.detectClickedNode(this.downClickX, this.downClickY)?.id || null;
-
-        // Right Click + drag = Orbit, Right Click alone = zoom-follow
+        // Right Click + drag = Orbit, Right Click no drag = zoom-follow
         if ((isLeft && e.ctrlKey) || (isLeft && e.metaKey) || isRight) {
             this.pointerMode = PointerMode.RightClick;
             return;
@@ -52,15 +51,15 @@ export class InputManager {
     };
   
     private onGlobalMouseMove = (e: MouseEvent) => {
-        const clientX   = e.clientX;
-        const clientY   = e.clientY;
-        const rect      = this.canvas.getBoundingClientRect();
-        const screenX   = clientX - rect.left;
-        const screenY   = clientY - rect.top;
-        const dx        = clientX - this.lastMouseX;
-        const dy        = clientY - this.lastMouseY;
-        this.lastMouseX = clientX;
-        this.lastMouseY = clientY;
+        const clientX       = e.clientX;
+        const clientY       = e.clientY;
+        const rect          = this.canvas.getBoundingClientRect();
+        const screenX       = clientX - rect.left;
+        const screenY       = clientY - rect.top;
+        const dx            = clientX - this.lastClientX;
+        const dy            = clientY - this.lastClientY;
+        this.lastClientX     = clientX;
+        this.lastClientY     = clientY;
 
         const dxScr         = screenX - this.downClickX;
         const dyScr         = screenY - this.downClickY;
@@ -124,6 +123,12 @@ export class InputManager {
                 this.callback.onOpenNode(screenX, screenY);
                 break;
             case PointerMode.RightClick:
+                if (this.draggedNodeId != null) {
+                    this.callback.onFollowStart(this.draggedNodeId!);
+                } else { // empty space click
+                    // reset camera to center
+                    this.callback.resetCamera();
+                }
                 break;
         }
 

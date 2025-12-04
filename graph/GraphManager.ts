@@ -30,17 +30,16 @@ export class GraphManager {
   private animationFrame          : number                              | null = null;
   private lastTime                : number                              | null = null;
   private cameraAnimStart         : number                              | null = null;
-  private lastPreviewedNodeId     : string                              | null = null;
-  private previewLockNodeId       : string                              | null = null;
   private previewPollTimer        : number                              | null = null;
   private lastMouseX              : number                              | null = null;
   private lastMouseY              : number                              | null = null;
-  private followLockedNodeId      : string                              | null = null;
+  private followedNode      : string                              | null = null;
   private centerNode              : any                                 | null = null;
   private inputManager            : InputManager                        | null = null;
   private cameraSnapShot          : any                                 | null = null;
   private worldAnchorPoint        : { x: number; y: number; z: number } | null = null;
   private screenAnchorPoint       : { x: number; y: number }            | null = null;
+  private initialCameraState      : { targetX: number; targetY: number; targetZ: number; distance: number } | null = null;
   private openNodeFile            : ((node: any) => void)               | null = null;
   private settingsUnregister      : (() => void)                        | null = null;
   private saveNodePositionsDebounced: (() => void)                      | null = null;
@@ -151,6 +150,9 @@ export class GraphManager {
       onDragMove: (screenX, screenY)          => this.updateDrag(screenX, screenY),
       onDragEnd: ()                           => this.endDrag(),
       onZoom: (x, y, delta)                   => this.updateZoom(x, y, delta),
+      onFollowStart: (nodeId)                 => this.startFollow(nodeId),
+      onFollowEnd: ()                         => this.endFollow(),
+      resetCamera: ()                         => this.resetCamera(),
       detectClickedNode: (screenX, screenY)   => { return this.nodeClicked(screenX, screenY); },
     });
 
@@ -259,13 +261,19 @@ export class GraphManager {
     const showTagsInitial = (this.plugin as any).settings?.showTags !== false;
     this.recreateSimulation(showTagsInitial, { centerX, centerY, centerNodeId });
 
-    // Center camera on initial load same as a right-click origin focus would do.
-    try {
-      if ((this.renderer as any).setCamera) (this.renderer as any).setCamera({ targetX: this.viewCenterX ?? 0, targetY: this.viewCenterY ?? 0, targetZ: 0, distance: this.defaultCameraDistance });
+    try { // Center camera on initial load same as a right-click origin focus would do.
+      if ((this.renderer as any).setCamera) (this.renderer as any).setCamera({  targetX: this.viewCenterX ?? 0, 
+                                                                                targetY: this.viewCenterY ?? 0, 
+                                                                                targetZ: 0, 
+                                                                                distance: this.defaultCameraDistance 
+                                                                              });
     } catch (e) {}
+    if ((this.renderer as any).getCamera) {
+      this.initialCameraState = { ...(this.renderer as any).getCamera() };
+    }
+
     try { if ((this.renderer as any).resetPanToCenter) (this.renderer as any).resetPanToCenter(); } catch (e) {}
     // Clear any follow/preview locks and reset hover state so initial view is clean
-    this.followLockedNodeId = null; this.previewLockNodeId = null;
     try {
       if ((this.renderer as any).setHoverState) (this.renderer as any).setHoverState(null, new Set(), 0, 0);
       if ((this.renderer as any).setHoveredNode) (this.renderer as any).setHoveredNode(null);
@@ -334,20 +342,20 @@ export class GraphManager {
 
   public updateHover (screenX: number, screenY: number) {
       return;
-    }
+  }
 
   public startDrag (nodeId: string, screenX: number, screenY: number) {
     console.log("dragging", nodeId);
     return;
-    }
+  }
  
   public updateDrag (screenX: number, screenY: number) {
       return;
-    }
+  }
 
   public endDrag () {
       return;
-    }
+  }
 
   public updateZoom (screenX: number, screenY: number, delta: number) {
     (this.renderer as any).zoomAt(screenX, screenY, 1 + delta * -0.1); this.renderer?.render();
@@ -438,6 +446,21 @@ export class GraphManager {
 
   public setOnNodeClick(handler: (node: any) => void): void {
     this.openNodeFile = handler; 
+  }
+
+  public startFollow(nodeId: string) {
+    this.followedNode = nodeId;
+    console.log("start follow", nodeId);
+  }
+
+  public endFollow() {
+    this.followedNode = null;
+  }
+
+  public resetCamera() {
+    if (!this.renderer || !this.initialCameraState) return;
+      const renderer = this.renderer as any;
+      renderer.setCamera(this.initialCameraState);
   }
 
   private animationLoop = (timestamp: number) => {

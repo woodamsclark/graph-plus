@@ -1395,9 +1395,9 @@ var InputManager = class {
   canvas;
   callback;
   draggedNodeId = null;
-  lastMouseX = 0;
+  lastClientX = 0;
   // ((Client Space))
-  lastMouseY = 0;
+  lastClientY = 0;
   // ((Client Space))
   downClickX = 0;
   // [[Canvas Space]
@@ -1423,8 +1423,8 @@ var InputManager = class {
     const canvas = this.canvas.getBoundingClientRect();
     this.downClickX = e.clientX - canvas.left;
     this.downClickY = e.clientY - canvas.top;
-    this.lastMouseX = e.clientX;
-    this.lastMouseY = e.clientY;
+    this.lastClientX = e.clientX;
+    this.lastClientY = e.clientY;
     const isLeft = e.button === 0;
     const isMiddle = e.button === 1;
     const isRight = e.button === 2;
@@ -1441,10 +1441,10 @@ var InputManager = class {
     const rect = this.canvas.getBoundingClientRect();
     const screenX = clientX - rect.left;
     const screenY = clientY - rect.top;
-    const dx = clientX - this.lastMouseX;
-    const dy = clientY - this.lastMouseY;
-    this.lastMouseX = clientX;
-    this.lastMouseY = clientY;
+    const dx = clientX - this.lastClientX;
+    const dy = clientY - this.lastClientY;
+    this.lastClientX = clientX;
+    this.lastClientY = clientY;
     const dxScr = screenX - this.downClickX;
     const dyScr = screenY - this.downClickY;
     const distSq = dxScr * dxScr + dyScr * dyScr;
@@ -1499,6 +1499,11 @@ var InputManager = class {
         this.callback.onOpenNode(screenX, screenY);
         break;
       case 3 /* RightClick */:
+        if (this.draggedNodeId != null) {
+          this.callback.onFollowStart(this.draggedNodeId);
+        } else {
+          this.callback.resetCamera();
+        }
         break;
     }
     this.pointerMode = 0 /* Idle */;
@@ -1546,17 +1551,16 @@ var GraphManager = class {
   animationFrame = null;
   lastTime = null;
   cameraAnimStart = null;
-  lastPreviewedNodeId = null;
-  previewLockNodeId = null;
   previewPollTimer = null;
   lastMouseX = null;
   lastMouseY = null;
-  followLockedNodeId = null;
+  followedNode = null;
   centerNode = null;
   inputManager = null;
   cameraSnapShot = null;
   worldAnchorPoint = null;
   screenAnchorPoint = null;
+  initialCameraState = null;
   openNodeFile = null;
   settingsUnregister = null;
   saveNodePositionsDebounced = null;
@@ -1668,6 +1672,9 @@ var GraphManager = class {
       onDragMove: (screenX, screenY) => this.updateDrag(screenX, screenY),
       onDragEnd: () => this.endDrag(),
       onZoom: (x, y, delta) => this.updateZoom(x, y, delta),
+      onFollowStart: (nodeId) => this.startFollow(nodeId),
+      onFollowEnd: () => this.endFollow(),
+      resetCamera: () => this.resetCamera(),
       detectClickedNode: (screenX, screenY) => {
         return this.nodeClicked(screenX, screenY);
       }
@@ -1753,16 +1760,22 @@ var GraphManager = class {
     this.recreateSimulation(showTagsInitial, { centerX, centerY, centerNodeId });
     try {
       if (this.renderer.setCamera)
-        this.renderer.setCamera({ targetX: this.viewCenterX ?? 0, targetY: this.viewCenterY ?? 0, targetZ: 0, distance: this.defaultCameraDistance });
+        this.renderer.setCamera({
+          targetX: this.viewCenterX ?? 0,
+          targetY: this.viewCenterY ?? 0,
+          targetZ: 0,
+          distance: this.defaultCameraDistance
+        });
     } catch (e) {
+    }
+    if (this.renderer.getCamera) {
+      this.initialCameraState = { ...this.renderer.getCamera() };
     }
     try {
       if (this.renderer.resetPanToCenter)
         this.renderer.resetPanToCenter();
     } catch (e) {
     }
-    this.followLockedNodeId = null;
-    this.previewLockNodeId = null;
     try {
       if (this.renderer.setHoverState)
         this.renderer.setHoverState(null, /* @__PURE__ */ new Set(), 0, 0);
@@ -1919,6 +1932,19 @@ var GraphManager = class {
   }
   setOnNodeClick(handler) {
     this.openNodeFile = handler;
+  }
+  startFollow(nodeId) {
+    this.followedNode = nodeId;
+    console.log("start follow", nodeId);
+  }
+  endFollow() {
+    this.followedNode = null;
+  }
+  resetCamera() {
+    if (!this.renderer || !this.initialCameraState)
+      return;
+    const renderer = this.renderer;
+    renderer.setCamera(this.initialCameraState);
   }
   animationLoop = (timestamp) => {
     if (!this.running)
