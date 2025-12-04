@@ -10,9 +10,6 @@ import { InputManager } from './InputManager.ts';
 
 // This class manages interactions between the graph data, simulation, and renderer.
 export class GraphManager {
-  private openNodeFile            : ((node: any) => void) | null = null;
-  private settingsUnregister      : (() => void)          | null = null;
-  private saveNodePositionsDebounced: (() => void)        | null = null;
   private app                     : App;
   private containerEl             : HTMLElement;
   private plugin?                 : Plugin;
@@ -30,27 +27,29 @@ export class GraphManager {
   private lastPinnedCenterNotePath: string        = '';
   private viewCenterX             : number        = 0;
   private viewCenterY             : number        = 0;
-  private suppressAttractorUntilMouseMove : boolean = false;
-  private draggingNode?           : any                   | null;
-  private canvas                  : HTMLCanvasElement     | null = null;
-  private renderer                : Renderer2D            | null = null;
-  private graph                   : GraphData             | null = null;
-  private adjacency               : Map<string, string[]> | null = null;
-  private simulation?             : Simulation            | null = null;
-  private animationFrame          : number                | null = null;
-  private lastTime                : number                | null = null;
-  private cameraAnimStart         : number                | null = null;
-  private lastPreviewedNodeId     : string                | null = null;
-  private previewLockNodeId       : string                | null = null;
-  private previewPollTimer        : number                | null = null;
-  private lastMouseX              : number                | null = null;
-  private lastMouseY              : number                | null = null;
-  private followLockedNodeId      : string                | null = null;
-  private centerNode              : any                   | null = null;
-  private inputManager            : InputManager          | null = null;
-  private panStartCamera          : any | null = null;
+  private draggingNode?           : any                                 | null;
+  private canvas                  : HTMLCanvasElement                   | null = null;
+  private renderer                : Renderer2D                          | null = null;
+  private graph                   : GraphData                           | null = null;
+  private adjacency               : Map<string, string[]>               | null = null;
+  private simulation?             : Simulation                          | null = null;
+  private animationFrame          : number                              | null = null;
+  private lastTime                : number                              | null = null;
+  private cameraAnimStart         : number                              | null = null;
+  private lastPreviewedNodeId     : string                              | null = null;
+  private previewLockNodeId       : string                              | null = null;
+  private previewPollTimer        : number                              | null = null;
+  private lastMouseX              : number                              | null = null;
+  private lastMouseY              : number                              | null = null;
+  private followLockedNodeId      : string                              | null = null;
+  private centerNode              : any                                 | null = null;
+  private inputManager            : InputManager                        | null = null;
+  private panStartCamera          : any                                 | null = null;
   private worldPanStartPoint      : { x: number; y: number; z: number } | null = null;
   private lastWorldPanPoint       : { x: number; y: number; z: number } | null = null;
+  private openNodeFile            : ((node: any) => void)               | null = null;
+  private settingsUnregister      : (() => void)                        | null = null;
+  private saveNodePositionsDebounced: (() => void)                      | null = null;
 
 
   private saveNodePositions(): void {
@@ -67,7 +66,8 @@ export class GraphManager {
       }
       (this.plugin as any).settings.nodePositions = allSaved;
       // fire-and-forget save
-      try { (this.plugin as any).saveSettings && (this.plugin as any).saveSettings(); } catch (e) { console.error('Failed to save node positions', e); }
+      try { (this.plugin as any).saveSettings && (this.plugin as any).saveSettings(); 
+          } catch (e) { console.error('Failed to save node positions', e); }
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('Greater Graph: saveNodePositions error', e);
@@ -81,10 +81,10 @@ export class GraphManager {
         try { this.simulation.stop(); } catch (e) {}
       }
       if (!this.graph) return;
-      const physOpts = Object.assign({}, (this.plugin as any).settings?.physics || {});
-      const rect = this.containerEl.getBoundingClientRect();
-      const centerX = (extraOpts && typeof extraOpts.centerX === 'number') ? extraOpts.centerX : rect.width / 2;
-      const centerY = (extraOpts && typeof extraOpts.centerY === 'number') ? extraOpts.centerY : rect.height / 2;
+      const physOpts  = Object.assign({}, (this.plugin as any).settings?.physics || {});
+      const rect      = this.containerEl.getBoundingClientRect();
+      const centerX   = (extraOpts && typeof extraOpts.centerX === 'number') ? extraOpts.centerX : rect.width / 2;
+      const centerY   = (extraOpts && typeof extraOpts.centerY === 'number') ? extraOpts.centerY : rect.height / 2;
       const centerNodeId = extraOpts?.centerNodeId;
 
       // Filter nodes/edges when tags are hidden
@@ -109,36 +109,28 @@ export class GraphManager {
   }
 
   constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
-    this.app = app;
-    this.containerEl = containerEl;
-    this.plugin = plugin;
+    this.app          = app;
+    this.containerEl  = containerEl;
+    this.plugin       = plugin;
   }
 
   async init(): Promise<void> {
-    const canvas        = document.createElement('canvas');
-    canvas.style.width  = '100%';
-    canvas.style.height = '100%';
-    canvas.tabIndex     = 0;
-    this.containerEl.appendChild(canvas);
-    this.canvas         = canvas;
-
-    // create in-view controls panel
-    //this.createControlsPanel();
-
+    this.canvas               = document.createElement('canvas');
+    this.canvas.style.width   = '100%';
+    this.canvas.style.height  = '100%';
+    this.canvas.tabIndex      = 0;
     const userSettings        = await (this.plugin as any).loadData();
     const settings: Settings  = Object.assign({}, DEFAULT_SETTINGS, userSettings);
-    //const settings          = Object.assign({}, (this.plugin as any).settings || {});
-    this.renderer             = createRenderer2D({ canvas, settings });
+    this.renderer             = createRenderer2D({ canvas: this.canvas, settings });
+    this.containerEl.appendChild(this.canvas);
    
-    try {
-      const cam0 = (this.renderer as any).getCamera?.();
-      if (cam0 && typeof cam0.distance === 'number') this.defaultCameraDistance = cam0.distance;
-    } catch (e) {}
     // Apply initial render options (whether to draw mutual links as double lines)
     try {
-      const drawDouble  = Boolean((this.plugin as any).settings?.mutualLinkDoubleLine);
-      const showTags    = (this.plugin as any).settings?.showTags !== false;
-      if (this.renderer && (this.renderer as any).setRenderOptions) (this.renderer as any).setRenderOptions({ mutualDoubleLines: drawDouble, showTags });
+      const drawDouble  = Boolean((this.plugin   as any).settings?.mutualLinkDoubleLine);
+      const showTags    =         (this.plugin   as any).settings?.showTags !== false;
+      if (this.renderer && (this.renderer as any).setRenderOptions) (this.renderer as any).setRenderOptions({ 
+        mutualDoubleLines: drawDouble, showTags 
+      });
     } catch (e) {}
 
     // track center selection settings for change detection
@@ -156,16 +148,16 @@ export class GraphManager {
       onOrbitStart: (dx, dy)                  => this.startOrbit(dx, dy),
       onOrbitMove: (dx, dy)                   => this.updateOrbit(dx, dy),
       onOrbitEnd: ()                          => this.endOrbit(),
-      onPanMove: (screenX, screenY)           => this.updatePan(screenX, screenY),
       onPanStart: (screenX, screenY)          => this.startPan(screenX, screenY),
+      onPanMove: (screenX, screenY)           => this.updatePan(screenX, screenY),
       onPanEnd: ()                            => this.endPan(),
-      onZoom: (x, y, delta)                   => { (this.renderer as any).zoomAt(x, y, 1 + delta * 0.1); this.renderer?.render(); },
-      detectClickedNode: (screenX, screenY)   => { return this.nodeClicked(screenX, screenY); },
       onOpenNode: (screenX, screenY)          => this.openNode(screenX, screenY),
       onHover: (screenX, screenY)             => this.updateHover(screenX, screenY),
-      onDragStart: (nodeId, screenX, screenY) => this.startNodeDrag(nodeId, screenX, screenY),
-      onDragMove: (screenX, screenY)          => this.dragNodeMove(screenX, screenY),
-      onDragEnd: ()                           => this.endNodeDrag(),
+      onDragStart: (nodeId, screenX, screenY) => this.startDrag(nodeId, screenX, screenY),
+      onDragMove: (screenX, screenY)          => this.updateDrag(screenX, screenY),
+      onDragEnd: ()                           => this.endDrag(),
+      onZoom: (x, y, delta)                   => { (this.renderer as any).zoomAt(x, y, 1 + delta * 0.1); this.renderer?.render(); },
+      detectClickedNode: (screenX, screenY)   => { return this.nodeClicked(screenX, screenY); },
     });
 
     
@@ -285,8 +277,6 @@ export class GraphManager {
       if ((this.renderer as any).setHoveredNode) (this.renderer as any).setHoveredNode(null);
       (this.renderer as any).render?.();
     } catch (e) {}
-    // Suppress the cursor attractor until the user moves the mouse (matches right-click behavior)
-    this.suppressAttractorUntilMouseMove = true;
 
     // read interaction settings (drag momentum / threshold)
     try {
@@ -352,20 +342,16 @@ export class GraphManager {
       return;
     }
 
+  public startDrag (nodeId: string, screenX: number, screenY: number) {
+    console.log("dragging", nodeId);
+    return;
+    }
+ 
   public updateDrag (screenX: number, screenY: number) {
       return;
     }
 
-  public startNodeDrag (nodeId: string, screenX: number, screenY: number) {
-    console.log("dragging", nodeId);
-    return;
-    }
-  
-  public endNodeDrag () {
-      return;
-    }
-
-  public dragNodeMove (screenX: number, screenY: number) {
+  public endDrag () {
       return;
     }
 
@@ -479,7 +465,7 @@ export class GraphManager {
     // Respect preview locks and active interactions.
     try {
       if (this.lastMouseX != null && this.lastMouseY != null) {
-        this.updateHoverFromCoords(this.lastMouseX, this.lastMouseY);
+        //this.updateHoverFromCoords(this.lastMouseX, this.lastMouseY);
       }
     } catch (e) {}
     // update camera animation/following
@@ -490,75 +476,6 @@ export class GraphManager {
     this.animationFrame = requestAnimationFrame(this.animationLoop);
   };
 
-  // Camera-plane cursor attractor: screen-aligned, O(N) per-frame
-  private applyCursorAttractor() {
-    const physics = (this.plugin as any).settings?.physics || {};
-    const glow = (this.plugin as any).settings?.glow || {};
-    // default to enabled when unset
-    const gravityEnabled = (physics.mouseGravityEnabled !== false) && (physics.mouseAttractionEnabled !== false);
-    if (!gravityEnabled) return;
-    if (this.suppressAttractorUntilMouseMove) return;
-    if (this.lastMouseX == null || this.lastMouseY == null) return;
-    if (!this.renderer || !this.graph) return;
-
-    // Use unified glow/gravity model: interpret the `gravityRadiusMultiplier`
-    // setting as an absolute pixel gravity/glow radius (capped at 50). If
-    // unset, fall back to multiplier-based behavior (6× node screen radius).
-    const rawGravitySetting = Number.isFinite(glow.gravityRadius) ? Number(glow.gravityRadius) : NaN;
-    const gravityRadiusPx   = (Number.isFinite(rawGravitySetting) && rawGravitySetting > 0) ? Math.min(50, rawGravitySetting) : NaN;
-    const defaultMultiplier = 6;
-    const steepness         = Number.isFinite(glow.gravityCurveSteepness) ? Number(glow.gravityCurveSteepness) : (physics.mouseAttractionExponent ?? 3);
-    const baseStrength      = Number.isFinite(physics.mouseAttractionStrength) ? Number(physics.mouseAttractionStrength) : 0.6;
-    if (baseStrength === 0) return;
-
-    const cam   = (this.renderer as any).getCamera();
-    const basis = (this.renderer as any).getCameraBasis ? (this.renderer as any).getCameraBasis(cam) : null;
-    if (!basis) return;
-    const { right, up } = basis;
-
-    for (const node of this.graph.nodes) {
-      const proj = (this.renderer as any).getProjectedNode ? (this.renderer as any).getProjectedNode(node) : null;
-      if (!proj) continue;
-
-      const dxScreen    = (this.lastMouseX as number) - proj.x;
-      const dyScreen    = (this.lastMouseY as number) - proj.y;
-      const distScreen  = Math.sqrt(dxScreen * dxScreen + dyScreen * dyScreen);
-
-      // Determine per-node attraction radius in screen space
-      const nodeScreenR = Number.isFinite(proj.r) ? Math.max(4, Number(proj.r)) : 8;
-      const radius      = Number.isFinite(gravityRadiusPx) ? Math.max(8, gravityRadiusPx) : Math.max(8, nodeScreenR * defaultMultiplier);
-      if (distScreen > radius || distScreen === 0) continue;
-
-      // Jitter suppression: deadzone near cursor
-      const deadzone = Math.max(1, radius * 0.06);
-      if (distScreen < deadzone) {
-        // strong local damping to settle when centered
-        node.vx = (node.vx || 0) * 0.6;
-        node.vy = (node.vy || 0) * 0.6;
-        node.vz = (node.vz || 0) * 0.6;
-        continue;
-      }
-
-      const nx = dxScreen / distScreen;
-      const ny = dyScreen / distScreen;
-
-      // Map screen direction to world using camera basis; use + for up to align attraction
-      let wx = right.x * nx + up.x * ny;
-      let wy = right.y * nx + up.y * ny;
-      let wz = right.z * nx + up.z * ny;
-
-      const len = Math.sqrt(wx * wx + wy * wy + wz * wz) || 1;
-      wx /= len; wy /= len; wz /= len;
-
-      const t = 1 - distScreen / radius;
-      const strength = baseStrength * Math.pow(t, steepness);
-
-      node.vx = (node.vx || 0) + wx * strength;
-      node.vy = (node.vy || 0) + wy * strength;
-      node.vz = (node.vz || 0) + wz * strength;
-    }
-  }
-
   resize(width: number, height: number): void {
     if (!this.renderer) return;
     this.renderer.resize(width, height);
@@ -567,37 +484,6 @@ export class GraphManager {
     if (this.simulation && (this.simulation as any).setOptions) {
       (this.simulation as any).setOptions({ centerX, centerY });
     }
-  }
-
-  private focusCameraOnNode(node: any) {
-    // Start an animated camera focus and enable following of the node.
-    if (!this.renderer || !node) return;
-    try {
-      const cam   = (this.renderer as any).getCamera();
-      const from  = {
-        targetX: cam.targetX ?? 0,
-        targetY: cam.targetY ?? 0,
-        targetZ: cam.targetZ ?? 0,
-        distance: cam.distance ?? 1000,
-        yaw: cam.yaw ?? 0,
-        pitch: cam.pitch ?? 0,
-      };
-      const toDistance = Math.max(200, Math.min(3000, (from.distance || 1000) * 0.6));
-      const to = {
-        targetX: node.x ?? 0,
-        targetY: node.y ?? 0,
-        targetZ: node.z ?? 0,
-        distance: toDistance,
-        yaw: from.yaw,
-        pitch: from.pitch,
-      };
-      this.cameraAnimStart = performance.now();
-      this.cameraAnimDuration = 300;
-      this.cameraAnimFrom = from;
-      this.cameraAnimTo = to;
-      this.isCameraFollowing = true;
-      this.cameraFollowNode = node;
-    } catch (e) {}
   }
 
   private updateCameraAnimation(now: number) { return; // delete later
@@ -776,32 +662,6 @@ export class GraphManager {
     return closest;
   }
 
-  private isPreviewModifier(event: MouseEvent): boolean {
-    try {
-      if (Platform && (Platform as any).isMacOS) return Boolean(event.metaKey);
-    } catch (e) {}
-    return Boolean(event.ctrlKey);
-  }
-
-    // Start a small poll to detect when Obsidian's hover popover is removed from DOM.
-    // While the popover exists we keep the preview lock active; when it's gone we clear it.
-    private startPreviewLockMonitor(): void {
-      try {
-        if (this.previewPollTimer) window.clearInterval(this.previewPollTimer as number);
-      } catch (e) {}
-      this.previewPollTimer = window.setInterval(() => {
-        try {
-          const sel = '.popover.hover-popover, .hover-popover, .internal-link-popover, .internal-link-hover';
-          const found = document.querySelector(sel);
-          if (!found) {
-            this.clearPreviewLock();
-          }
-        } catch (e) {
-          // ignore
-        }
-      }, 250) as unknown as number;
-    }
-
     private clearPreviewLock(): void {
       try {
         if (this.previewPollTimer) window.clearInterval(this.previewPollTimer as number);
@@ -815,134 +675,4 @@ export class GraphManager {
         if (this.renderer && (this.renderer as any).render) (this.renderer as any).render();
       } catch (e) {}
     }
-
-  // Reusable hover updater: computes hover from screen coords and respects
-  // existing preview/drag/pan locks. Accepts an optional MouseEvent so the
-  // preview modifier detection can still run when available.
-  private updateHoverFromCoords(screenX: number, screenY: number, ev?: MouseEvent): void {
-    if (!this.graph || !this.renderer) return;
-    // Respect preview lock and active interactions; handleHover already
-    // contains the logic we want, so delegate to it. Passing through the
-    // optional MouseEvent allows preview-modifier behavior when called from
-    // mousemove. When called from the RAF loop, ev will be undefined.
-    // Avoid updating hover while dragging or panning.
-    if (this.draggingNode || this.isPanning) return;
-    // If preview popover is currently locked, do not override it from RAF.
-    if (this.previewLockNodeId) return;
-    try { this.handleHover(screenX, screenY, ev); } catch (e) {}
-  }
-
-  handleHover(screenX: number, screenY: number, ev?: MouseEvent): void {
-    if (!this.graph || !this.renderer) return;
-    // don't show previews while dragging or panning
-    if (this.draggingNode || this.isPanning) {
-      // if user is panning/dragging, we don't want preview lock to change here
-      return;
-    }
-
-    const world = (this.renderer as any).screenToWorld(screenX, screenY);
-
-    // If a preview is locked, keep that node (and its neighbors) highlighted
-    // and ignore other nodes until the preview is gone.
-    let closest: any = null;
-    if (this.previewLockNodeId && this.graph && this.graph.nodes) {
-      closest = this.graph.nodes.find((n: any) => n.id === this.previewLockNodeId) || null;
-    } else {
-      let closestDist = Infinity; const hitPadding = 6;
-      for (const node of this.graph.nodes) {
-        const screenPos = (this.renderer as any).getNodeScreenPosition ? (this.renderer as any).getNodeScreenPosition(node) : null;
-        if (!screenPos) continue;
-        const radiusWorld = (this.renderer as any).getNodeRadiusForHit ? (this.renderer as any).getNodeRadiusForHit(node) : 8;
-        const scale = (this.renderer as any).getScale ? (this.renderer as any).getScale() : 1;
-        const r = radiusWorld * Math.max(0.0001, scale) + hitPadding;
-        const dxs = (screenPos.x) - screenX;
-        const dys = (screenPos.y) - screenY;
-        const d = Math.sqrt(dxs * dxs + dys * dys);
-        if (d < r && d < closestDist) {
-          closest = node;
-          closestDist = d;
-        }
-      }
-    }
-
-    const newId = closest ? closest.id : null;
-    const depth = (this.plugin as any).settings?.glow?.highlightDepth ?? 1;
-    const highlightSet = new Set<string>(); if (newId) highlightSet.add(newId);
-    if (newId && this.adjacency && depth > 0) {
-      const q: string[] = [newId];
-      const seen = new Set<string>([newId]);
-      let curDepth = 0;
-      while (q.length > 0 && curDepth < depth) {
-        const levelSize = q.length;
-        for (let i = 0; i < levelSize; i++) {
-          const nid = q.shift() as string;
-          const neigh = this.adjacency?.get(nid) || [];
-          for (const nb of neigh) {
-            if (!seen.has(nb)) {
-              seen.add(nb);
-              highlightSet.add(nb);
-              q.push(nb);
-            }
-          }
-        }
-        curDepth++;
-      }
-    }
-
-    // If preview is locked, use the locked node's actual world coords for attraction/hover center
-    let hoverWorldX = world.x;
-    let hoverWorldY = world.y;
-    if (this.previewLockNodeId) {
-      const lockedNode = this.graph.nodes.find((n: any) => n.id === this.previewLockNodeId);
-      if (lockedNode) {
-        hoverWorldX = lockedNode.x;
-        hoverWorldY = lockedNode.y;
-      }
-    }
-
-    if (this.canvas) this.canvas.style.cursor = newId ? 'pointer' : 'default';
-    if ((this.renderer as any).setHoverState) (this.renderer as any).setHoverState(newId, highlightSet, hoverWorldX, hoverWorldY);
-    if (this.renderer.setHoveredNode) this.renderer.setHoveredNode(newId);
-    this.renderer.render();
-
-    // inform simulation of mouse world coords and hovered node so it can apply local attraction
-    try { if (this.simulation && (this.simulation as any).setMouseAttractor) (this.simulation as any).setMouseAttractor(hoverWorldX, hoverWorldY, newId); } catch (e) {}
-
-    // Handle preview modifier: trigger Obsidian's hover-link once per node when modifier held
-    try {
-      if (ev) {
-        const previewModifier = this.isPreviewModifier(ev);
-        const currentId = closest ? closest.id : null;
-        if (previewModifier && closest && currentId !== this.lastPreviewedNodeId && !this.previewLockNodeId) {
-          this.lastPreviewedNodeId = currentId;
-          // trigger native hover preview
-          try {
-            this.app.workspace.trigger('hover-link', {
-              event       : ev,
-              source      : 'greater-graph',
-              hoverParent : this.containerEl,
-              targetEl    : this.canvas,
-              linktext    : closest.filePath || closest.label,
-              sourcePath  : closest.filePath,
-            } as any);
-          } catch (e) {}
-          // lock highlighting to this node until popover disappears
-          this.previewLockNodeId = currentId;
-          this.startPreviewLockMonitor();
-        }
-        if (!previewModifier || !closest) {
-          // only clear lastPreviewedNodeId when there's no active preview lock
-          if (!this.previewLockNodeId) this.lastPreviewedNodeId = null;
-        }
-      }
-    } catch (e) {}
-  }
-
-  clearHover(): void {
-    if (!this.renderer) return;
-    if ((this.renderer as any).setHoverState) (this.renderer as any).setHoverState(null, new Set(), 0, 0);
-    if (this.renderer.setHoveredNode) this.renderer.setHoveredNode(null);
-    this.renderer.render();
-    try { if (this.simulation && (this.simulation as any).setMouseAttractor) (this.simulation as any).setMouseAttractor(null, null, null); } catch (e) {}
-  }
 }
