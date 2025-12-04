@@ -13,7 +13,7 @@ export class GraphManager {
   private app                         : App;
   private containerEl                 : HTMLElement;
   private plugin?                     : Plugin;
-  private running?                    : boolean;
+  private running                     : boolean                                     = false;
   private cameraAnimDuration          : number                                      = 300; // ms
   private momentumScale               : number                                      = 0.12;
   private dragThreshold               : number                                      = 4;
@@ -125,7 +125,7 @@ export class GraphManager {
         }
       }
     }
-
+    // move layout to it's own function
     const needsLayout: any[] = [];
     if (this.graph && this.graph.nodes) {
       for (const node of this.graph.nodes) {
@@ -162,32 +162,9 @@ export class GraphManager {
     if (this.centerNode) { this.centerNode.x = centerX; this.centerNode.y = centerY; this.centerNode.z = 0; }
     this.renderer.resize(rect.width || 300, rect.height || 200);
 
-    // Use the explicitly chosen center node (when pinned mode is enabled) as
-    // the simulation's centerNodeId. If none was chosen, don't pin a center node.
-    const centerNodeId = this.centerNode ? this.centerNode.id : undefined;
-
-    // create physics simulation (respecting showTags setting)
-    const showTagsInitial = (this.plugin as any).settings?.showTags !== false;
     this.refreshGraph();
     this.initializeCamera();
-    
 
-    try { if ((this.renderer as any).resetPanToCenter) (this.renderer as any).resetPanToCenter(); } catch (e) {}
-    // Clear any follow/preview locks and reset hover state so initial view is clean
-    try {
-      if ((this.renderer as any).setHoverState ) (this.renderer as any).setHoverState(null, new Set(), 0, 0);
-      if ((this.renderer as any).setHoveredNode) (this.renderer as any).setHoveredNode(null);
-      (this.renderer as any).render?.();
-    } catch (e) {}
-
-    // read interaction settings (drag momentum / threshold)
-    try {
-      const interaction   = (this.plugin as any).settings?.interaction || {};
-      this.momentumScale  = interaction.momentumScale ?? this.momentumScale;
-      this.dragThreshold  = interaction.dragThreshold ?? this.dragThreshold;
-    } catch (e) {}
-
-    this.running          = true;
     this.lastTime         = null;
     this.animationFrame   = requestAnimationFrame(this.animationLoop);
 
@@ -197,7 +174,7 @@ export class GraphManager {
     }
   }
 
-  private buildAdjacencyMap(): Map<string, string[]> {
+  private buildAdjacencyMap(){
     const adjacency = new Map<string, string[]>();
     if (this.graph && this.graph.edges) {
       for (const e of this.graph.edges) {
@@ -444,7 +421,7 @@ export class GraphManager {
 
   private startSimulation() {
     if (!this.simulation) return;
-    try { this.simulation.start(); } catch {}
+    try { this.simulation.start(); this.running = true; } catch {}
   }
 
   private filterGraph(graph: GraphData, showTags = true) {
