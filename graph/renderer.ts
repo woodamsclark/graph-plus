@@ -104,10 +104,8 @@ export function createRenderer(options: RendererSettings): Renderer {
   // removed unused 2D zoom constraints; camera distance controls zoom
 
   let camera: Camera = {
-    //yaw: Math.PI / 6,
     yaw: Math.PI / 6,
-    //pitch: Math.PI / 8,
-    pitch: Math.PI / 2,
+    pitch: Math.PI / 8,
     distance: 1200,
     targetX: 0,
     targetY: 0,

@@ -150,7 +150,7 @@ export class GraphManager {
       onDragStart: (nodeId, screenX, screenY) => this.startDrag(nodeId, screenX, screenY),
       onDragMove: (screenX, screenY)          => this.updateDrag(screenX, screenY),
       onDragEnd: ()                           => this.endDrag(),
-      onZoom: (x, y, delta)                   => { (this.renderer as any).zoomAt(x, y, 1 + delta * 0.1); this.renderer?.render(); },
+      onZoom: (x, y, delta)                   => this.updateZoom(x, y, delta),
       detectClickedNode: (screenX, screenY)   => { return this.nodeClicked(screenX, screenY); },
     });
 
@@ -349,6 +349,10 @@ export class GraphManager {
       return;
     }
 
+  public updateZoom (screenX: number, screenY: number, delta: number) {
+    (this.renderer as any).zoomAt(screenX, screenY, 1 + delta * -0.1); this.renderer?.render();
+  }
+
   public startPan (screenX: number, screenY: number) {
     if (!this.renderer || !(this.renderer as any).screenToWorld3D) { console.log("GM startPan: No renderer or screenToWorld3D method"); return; }
     
@@ -400,9 +404,9 @@ export class GraphManager {
   public updateOrbit (screenX: number, screenY: number) {
     if (!this.renderer || this.screenAnchorPoint === null) 
       { return; }
-    const renderer = (this.renderer as any);
-    const camSnap  = this.cameraSnapShot;
-    const depth    = camSnap.distance; 
+    const renderer              = (this.renderer as any);
+    const camSnap               = this.cameraSnapShot;
+    const depth                 = camSnap.distance;
 
     const ROTATE_SENSITIVITY_X  = DEFAULT_SETTINGS.interaction.rotateSensitivityX;
     const ROTATE_SENSITIVITY_Y  = DEFAULT_SETTINGS.interaction.rotateSensitivityY;
@@ -412,7 +416,7 @@ export class GraphManager {
     let yaw                     = camSnap.yaw   - dx * ROTATE_SENSITIVITY_X;
     let pitch                   = camSnap.pitch - dy * ROTATE_SENSITIVITY_Y;
 
-    const maxPitch              = Math.PI / 2 - 0.05;
+    const maxPitch              = Math.PI / 2;// - 0.05;
     const minPitch              = -maxPitch;
     if (pitch > maxPitch) pitch = maxPitch;
     if (pitch < minPitch) pitch = minPitch;

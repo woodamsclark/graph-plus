@@ -407,10 +407,8 @@ function createRenderer(options) {
   let offsetX = 0;
   let offsetY = 0;
   let camera = {
-    //yaw: Math.PI / 6,
     yaw: Math.PI / 6,
-    //pitch: Math.PI / 8,
-    pitch: Math.PI / 2,
+    pitch: Math.PI / 8,
     distance: 1200,
     targetX: 0,
     targetY: 0,
@@ -1669,10 +1667,7 @@ var GraphManager = class {
       onDragStart: (nodeId, screenX, screenY) => this.startDrag(nodeId, screenX, screenY),
       onDragMove: (screenX, screenY) => this.updateDrag(screenX, screenY),
       onDragEnd: () => this.endDrag(),
-      onZoom: (x, y, delta) => {
-        this.renderer.zoomAt(x, y, 1 + delta * 0.1);
-        this.renderer?.render();
-      },
+      onZoom: (x, y, delta) => this.updateZoom(x, y, delta),
       detectClickedNode: (screenX, screenY) => {
         return this.nodeClicked(screenX, screenY);
       }
@@ -1841,6 +1836,10 @@ var GraphManager = class {
   endDrag() {
     return;
   }
+  updateZoom(screenX, screenY, delta) {
+    this.renderer.zoomAt(screenX, screenY, 1 + delta * -0.1);
+    this.renderer?.render();
+  }
   startPan(screenX, screenY) {
     if (!this.renderer || !this.renderer.screenToWorld3D) {
       console.log("GM startPan: No renderer or screenToWorld3D method");
@@ -1900,7 +1899,7 @@ var GraphManager = class {
     const dy = screenY - this.screenAnchorPoint.y;
     let yaw = camSnap.yaw - dx * ROTATE_SENSITIVITY_X;
     let pitch = camSnap.pitch - dy * ROTATE_SENSITIVITY_Y;
-    const maxPitch = Math.PI / 2 - 0.05;
+    const maxPitch = Math.PI / 2;
     const minPitch = -maxPitch;
     if (pitch > maxPitch)
       pitch = maxPitch;

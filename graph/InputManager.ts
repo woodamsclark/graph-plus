@@ -142,6 +142,7 @@ export class InputManager {
     }
 
     private onWheel = (e: WheelEvent) => {
+        // Change this to go to GM
         e.preventDefault();
         this.callback.onZoom(e.offsetX, e.offsetY, Math.sign(e.deltaY));
     }
