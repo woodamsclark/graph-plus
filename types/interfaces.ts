@@ -179,3 +179,12 @@ export interface InputManagerCallbacks {
     // Utility
     detectClickedNode   (screenX: number, screenY: number): { id: string, filePath?: string, label: string } | null;
 }
+
+export enum PointerMode {
+  Idle,
+  Hover,
+  Click,
+  DragNode,
+  Pan,
+  Orbit,
+}

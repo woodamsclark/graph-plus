@@ -1,20 +1,18 @@
-import { InputManagerCallbacks } from '../types/interfaces.ts';
+import { InputManagerCallbacks, PointerMode } from '../types/interfaces.ts';
 
 // This class manages user input (mouse events) on the graph canvas
 // and reports mouse positions and actions back to the GraphManager via callbacks.
 export class InputManager {
     private canvas              : HTMLCanvasElement;
     private callbacks           : InputManagerCallbacks;
-    private isOrbiting          : boolean           = false;
-    private isPanning           : boolean           = false;
-    private isDraggingNode      : boolean           = false;
     private draggedNodeId       : string | null     = null;
     private lastMouseX          : number            = 0;
     private lastMouseY          : number            = 0;
-    private downScreenX         : number            = 0;         // Initial screenX (canvas relative)
-    private downScreenY         : number            = 0;         // Initial screenY (canvas relative)
-    private isMouseClicking     : boolean           = false;    // True if LMB is down
-    private dragThreshold       : number            = 5;         // Drag starts after 5 pixels of movement
+    private downScreenX         : number            = 0;        // Initial screenX (canvas relative)
+    private downScreenY         : number            = 0;        // Initial screenY (canvas relative)
+    private dragThreshold       : number            = 5;        // Drag starts after 5 pixels of movement
+    private pointerMode         : PointerMode       = PointerMode.Idle;
+
 
     constructor(canvas: HTMLCanvasElement, callbacks: InputManagerCallbacks) {
         this.canvas     = canvas;
@@ -33,109 +31,95 @@ export class InputManager {
     }
 
     private onMouseDown = (e: MouseEvent) => {
-        e.preventDefault();
-        this.lastMouseX         = e.clientX;
-        this.lastMouseY         = e.clientY;
-        this.isMouseClicking    = true;
-        const isLeftClick       = e.button === 0;
-        const isDragModifier    = e.button === 0;              // Check for left-click (and no modifier)
-        const isOrbitModifier   = e.button === 0 && e.ctrlKey; // Example: Ctrl + Left click for Orbit
-        this.downScreenX        = e.offsetX; 
-        this.downScreenY        = e.offsetY; 
-        this.isDraggingNode     = false;
-        this.isPanning          = false;
+        const rect          = this.canvas.getBoundingClientRect();
+        const screenX       = e.clientX - rect.left;
+        const screenY       = e.clientY - rect.top;
+        this.downScreenX    = screenX;
+        this.downScreenY    = screenY;
+        this.lastMouseX     = e.clientX;
+        this.lastMouseY     = e.clientY;
 
-        const hitNode = this.callbacks.detectClickedNode(e.offsetX, e.offsetY);
-        if (isLeftClick) {
-            if (hitNode) {
-                this.draggedNodeId = hitNode.id; // Store ID for potential drag
-            } else {
-                // We don't start panning until movement threshold is exceeded
-                this.draggedNodeId = null; // No node hit, potential pan
-            }
+        this.draggedNodeId = this.callbacks.detectClickedNode(e.offsetX, e.offsetY)?.id || null;
+
+        // Orbit if middle/right click
+        if (e.button === 1 || e.button === 2) {
+            this.pointerMode = PointerMode.Orbit;
+            return;
         }
-    }
-    
-    // Use this for calculating orbit/drag delta
+
+        // Left click: either clicking on a node or empty space
+        this.pointerMode = PointerMode.Click;
+    };
+  
     private onGlobalMouseMove = (e: MouseEvent) => {
-        // 1. Compute deltas in *client* space (used for orbit & pan speed)
-        const dx        = e.clientX - this.lastMouseX;
-        const dy        = e.clientY - this.lastMouseY;
-        this.lastMouseX = e.clientX;
-        this.lastMouseY = e.clientY;
-        // 2. Compute current screen position relative to the canvas once
+        const clientX   = e.clientX;
+        const clientY   = e.clientY;
         const rect      = this.canvas.getBoundingClientRect();
-        const screenX   = e.clientX - rect.left;
-        const screenY   = e.clientY - rect.top;
-        // 3. If we're orbiting, that's the only thing we care about
-        if (this.isOrbiting) {
-            //this.callbacks.onOrbit(dx, dy);
-            return;
-        }
+        const screenX   = clientX - rect.left;
+        const screenY   = clientY - rect.top;
+        const dx        = clientX - this.lastMouseX;
+        const dy        = clientY - this.lastMouseY;
+        this.lastMouseX = clientX;
+        this.lastMouseY = clientY;
 
-        // 4. Decide whether this movement should *promote* to drag or pan
-        const distSq        = (screenX - this.downScreenX) ** 2 + (screenY - this.downScreenY) ** 2;
-        const thresholdSq   = this.dragThreshold ** 2;
-        const overThreshold = distSq > thresholdSq;
-        if (this.isMouseClicking && overThreshold && !this.isPanning && !this.isDraggingNode) {
-            // A. Promote to node drag (we clicked on a node at mousedown)
-            if (this.draggedNodeId !== null && !this.isDraggingNode) {
-                this.isDraggingNode = true;
-                //this.callbacks.onDragStart(this.draggedNodeId, this.downScreenX, this.downScreenY);
-            }
-            // B. Or promote to pan (we clicked empty space)
-            else if (this.draggedNodeId === null && !this.isPanning) {
-                this.isPanning = true;
+        switch (this.pointerMode) {
+            // ------------------------------------------------------
+            case PointerMode.Idle:
+            case PointerMode.Hover:
+            // Do nothing here. Hover updates happen in canvas mousemove.
+            return;
+            // ------------------------------------------------------
+            case PointerMode.Click: {
+            // Check for threshold exceed → promote to DragNode or Pan
+            const dxScr = screenX - this.downScreenX;
+            const dyScr = screenY - this.downScreenY;
+            const distSq = dxScr*dxScr + dyScr*dyScr;
+
+            if (distSq > this.dragThreshold*this.dragThreshold) {
+                if (this.draggedNodeId != null) {
+                this.pointerMode        = PointerMode.DragNode;
+                this.callbacks.onDragStart(this.draggedNodeId, screenX, screenY);
+                } else {
+                this.pointerMode        = PointerMode.Pan;
                 this.callbacks.onPanStart(screenX, screenY);
+                }
             }
-        }
-
-        // 5. States are decided, perform exactly one kind of movement
-        if (this.isDraggingNode) {
-            // drag uses screen coords so GraphManager can do screen->world
-            //this.callbacks.onDragMove(screenX, screenY);
             return;
-        }
-        if (this.isPanning) {
+            }
+            // ------------------------------------------------------
+            case PointerMode.DragNode:
+            this.callbacks.onDragMove(screenX, screenY);
+            return;
+            // ------------------------------------------------------
+            case PointerMode.Pan:
             this.callbacks.onPanMove(screenX, screenY);
             return;
+            // ------------------------------------------------------
+            case PointerMode.Orbit:
+            // this.callbacks.onOrbit(dx, dy);
+            return;
         }
-    }
+    };
 
-    // Use this for ending orbit/drag
-    private onGlobalMouseUp = (e: MouseEvent) => {
-        const isLeftClick       = e.button === 0;
-        const wasDragging       = this.isDraggingNode;
-        const wasPanning        = this.isPanning;
-        this.isPanning          = false;
-        //this.isOrbiting = false; // we don't want to leave orbit on mouseup
-        this.isDraggingNode     = false;
-        this.isMouseClicking    = false; 
-        this.draggedNodeId      = null; // Clear the potential/confirmed target
-
-        if (wasDragging) {
-            this.callbacks.onDragEnd(); 
-            return; // Suppresses click
-        }
-        if (wasPanning) {
+    private onGlobalMouseUp = () => {
+    switch (this.pointerMode) {
+        case PointerMode.DragNode:
+            this.callbacks.onDragEnd();
+        break;
+        case PointerMode.Pan:
             this.callbacks.onPanEnd();
-            return; // Suppresses click
-        }  
-        // 4. Handle clean Click (if NO movement passed the threshold)
-        if (isLeftClick) {
-            const rect      = this.canvas.getBoundingClientRect();
-            const screenX   = e.clientX - rect.left;
-            const screenY   = e.clientY - rect.top;
-            this.callbacks.onOpenNode(screenX, screenY); 
-        }
+        break;
+        case PointerMode.Orbit:
+        // nothing
+        break;
     }
+
+    this.pointerMode    = PointerMode.Idle;
+    this.draggedNodeId  = null;
+    };
 
     private onMouseMove = (e: MouseEvent) => {
-        // If we're already dragging or orbiting, the global handler takes precedence
-        if (this.isDraggingNode || this.isOrbiting) return;
-        
-        // Handle Hover and Preview logic
-        //this.callbacks.onHover(e.offsetX, e.offsetY);
+  
     }
     
     private onWheel = (e: WheelEvent) => {

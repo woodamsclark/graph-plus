@@ -369,7 +369,6 @@ export class GraphManager {
 
   public startPan (screenX: number, screenY: number) {
     if (!this.renderer || !(this.renderer as any).screenToWorld3D) { return; }
-    console.log("start pan");
     const renderer = (this.renderer as any);
     this.panStartCamera = { ...renderer.getCamera() };
     const canvas   = renderer.canvas ?? this.canvas;
