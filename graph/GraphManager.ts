@@ -420,11 +420,11 @@ export class GraphManager {
   }
 
   public openNode (screenX: number, screenY: number) {
-          const node = this.nodeClicked(screenX, screenY);
-          if (node && this.openNodeFile) { 
-            this.openNodeFile(node); 
-          }
+    const node = this.nodeClicked(screenX, screenY);
+    if (node && this.openNodeFile) { 
+      this.openNodeFile(node); 
     }
+  }
 
   public setOnNodeClick(handler: (node: any) => void): void {
     this.openNodeFile = handler; 
@@ -743,17 +743,17 @@ export class GraphManager {
 
   private nodeClicked(screenX: number, screenY: number) {
     if (!this.graph || !this.renderer) return null;
-    let closest: any  = null;
-    let closestDist   = Infinity;
-    const hitPadding  = 6;
-    const scale = (this.renderer as any).getScale ? (this.renderer as any).getScale() : 1;
+    let closest: any   = null;
+    let closestDist    = Infinity;
+    const hitPadding   = 6;
+    const scale        = (this.renderer as any).getScale ? (this.renderer as any).getScale() : 1;
     for (const node of this.graph.nodes) {
-      const sp = (this.renderer as any).getNodeScreenPosition ? (this.renderer as any).getNodeScreenPosition(node) : null;
+      const sp         = (this.renderer as any).getNodeScreenPosition ? (this.renderer as any).getNodeScreenPosition(node) : null;
       if (!sp) continue;
       const nodeRadius = this.renderer.getNodeRadiusForHit ? this.renderer.getNodeRadiusForHit(node) : 8;
-      const hitR = nodeRadius * Math.max(0.0001, scale) + hitPadding;
-      const dx = screenX - sp.x; const dy = screenY - sp.y; const distSq = dx*dx + dy*dy;
-      if (distSq <= hitR*hitR && distSq < closestDist) { closestDist = distSq; closest = node; }
+      const hitR       = nodeRadius * Math.max(0.0001, scale) + hitPadding;
+      const dx         = screenX - sp.x; const dy = screenY - sp.y; const distSq = dx*dx + dy*dy;
+      if (distSq      <= hitR*hitR && distSq < closestDist) { closestDist = distSq; closest = node; }
     }
     return closest;
   }

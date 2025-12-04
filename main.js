@@ -1399,9 +1399,6 @@ function debounce(fn, wait = 300, immediate = false) {
 var InputManager = class {
   canvas;
   callbacks;
-  isOrbiting = false;
-  isPanning = false;
-  isDraggingNode = false;
   draggedNodeId = null;
   lastMouseX = 0;
   lastMouseY = 0;
@@ -1409,8 +1406,6 @@ var InputManager = class {
   // Initial screenX (canvas relative)
   downScreenY = 0;
   // Initial screenY (canvas relative)
-  isMouseClicking = false;
-  // True if LMB is down
   dragThreshold = 5;
   // Drag starts after 5 pixels of movement
   pointerMode = 0 /* Idle */;
@@ -1442,30 +1437,6 @@ var InputManager = class {
     }
     this.pointerMode = 2 /* Click */;
   };
-  /*    private onMouseDown = (e: MouseEvent) => {
-          e.preventDefault();
-          this.lastMouseX         = e.clientX;
-          this.lastMouseY         = e.clientY;
-          this.isMouseClicking    = true;
-          const isLeftClick       = e.button === 0;
-          const isDragModifier    = e.button === 0;              // Check for left-click (and no modifier)
-          const isOrbitModifier   = e.button === 0 && e.ctrlKey; // Example: Ctrl + Left click for Orbit
-          this.downScreenX        = e.offsetX; 
-          this.downScreenY        = e.offsetY; 
-          this.isDraggingNode     = false;
-          this.isPanning          = false;
-  
-          const hitNode = this.callbacks.detectClickedNode(e.offsetX, e.offsetY);
-          if (isLeftClick) {
-              if (hitNode) {
-                  this.draggedNodeId = hitNode.id; // Store ID for potential drag
-              } else {
-                  // We don't start panning until movement threshold is exceeded
-                  this.draggedNodeId = null; // No node hit, potential pan
-              }
-          }
-      }
-  */
   onGlobalMouseMove = (e) => {
     const clientX = e.clientX;
     const clientY = e.clientY;
@@ -1505,53 +1476,10 @@ var InputManager = class {
         return;
     }
   };
-  // Use this for calculating orbit/drag delta
-  /*    private onGlobalMouseMove = (e: MouseEvent) => {
-          // 1. Compute deltas in *client* space (used for orbit & pan speed)
-          const dx        = e.clientX - this.lastMouseX;
-          const dy        = e.clientY - this.lastMouseY;
-          this.lastMouseX = e.clientX;
-          this.lastMouseY = e.clientY;
-          // 2. Compute current screen position relative to the canvas once
-          const rect      = this.canvas.getBoundingClientRect();
-          const screenX   = e.clientX - rect.left;
-          const screenY   = e.clientY - rect.top;
-          // 3. If we're orbiting, that's the only thing we care about
-          if (this.isOrbiting) {
-              //this.callbacks.onOrbit(dx, dy);
-              return;
-          }
-  
-          // 4. Decide whether this movement should *promote* to drag or pan
-          const distSq        = (screenX - this.downScreenX) ** 2 + (screenY - this.downScreenY) ** 2;
-          const thresholdSq   = this.dragThreshold ** 2;
-          const overThreshold = distSq > thresholdSq;
-          if (this.isMouseClicking && overThreshold && !this.isPanning && !this.isDraggingNode) {
-              // A. Promote to node drag (we clicked on a node at mousedown)
-              if (this.draggedNodeId !== null && !this.isDraggingNode) {
-                  this.isDraggingNode = true;
-                  //this.callbacks.onDragStart(this.draggedNodeId, this.downScreenX, this.downScreenY);
-              }
-              // B. Or promote to pan (we clicked empty space)
-              else if (this.draggedNodeId === null && !this.isPanning) {
-                  this.isPanning = true;
-                  this.callbacks.onPanStart(screenX, screenY);
-              }
-          }
-  
-          // 5. States are decided, perform exactly one kind of movement
-          if (this.isDraggingNode) {
-              // drag uses screen coords so GraphManager can do screen->world
-              //this.callbacks.onDragMove(screenX, screenY);
-              return;
-          }
-          if (this.isPanning) {
-              this.callbacks.onPanMove(screenX, screenY);
-              return;
-          }
-      }
-  */
-  onGlobalMouseUp = () => {
+  onGlobalMouseUp = (e) => {
+    const rect = this.canvas.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
     switch (this.pointerMode) {
       case 3 /* DragNode */:
         this.callbacks.onDragEnd();
@@ -1561,41 +1489,15 @@ var InputManager = class {
         break;
       case 5 /* Orbit */:
         break;
+      case 2 /* Click */:
+        this.callbacks.onOpenNode(screenX, screenY);
+        console.log("Open node at", screenX, screenY);
+        break;
     }
     this.pointerMode = 0 /* Idle */;
     this.draggedNodeId = null;
   };
-  // Use this for ending orbit/drag
-  /*    private onGlobalMouseUp = (e: MouseEvent) => {
-          const isLeftClick       = e.button === 0;
-          const wasDragging       = this.isDraggingNode;
-          const wasPanning        = this.isPanning;
-          this.isPanning          = false;
-          //this.isOrbiting = false; // we don't want to leave orbit on mouseup
-          this.isDraggingNode     = false;
-          this.isMouseClicking    = false; 
-          this.draggedNodeId      = null; // Clear the potential/confirmed target
-  
-          if (wasDragging) {
-              this.callbacks.onDragEnd(); 
-              return; // Suppresses click
-          }
-          if (wasPanning) {
-              this.callbacks.onPanEnd();
-              return; // Suppresses click
-          }  
-          // 4. Handle clean Click (if NO movement passed the threshold)
-          if (isLeftClick) {
-              const rect      = this.canvas.getBoundingClientRect();
-              const screenX   = e.clientX - rect.left;
-              const screenY   = e.clientY - rect.top;
-              this.callbacks.onOpenNode(screenX, screenY); 
-          }
-      }
-  */
   onMouseMove = (e) => {
-    if (this.isDraggingNode || this.isOrbiting)
-      return;
   };
   onWheel = (e) => {
     e.preventDefault();
@@ -2523,7 +2425,7 @@ var GraphManager = class {
 // GraphView.ts
 var GREATER_GRAPH_VIEW_TYPE = "greater-graph-view";
 var GraphView = class extends import_obsidian2.ItemView {
-  controller = null;
+  manager = null;
   plugin;
   scheduleGraphRefresh = null;
   constructor(leaf, plugin) {
@@ -2542,15 +2444,15 @@ var GraphView = class extends import_obsidian2.ItemView {
   async onOpen() {
     this.containerEl.empty();
     const container = this.containerEl.createDiv({ cls: "greater-graph-view" });
-    this.controller = new GraphManager(this.app, container, this.plugin);
-    await this.controller.init();
-    if (this.controller) {
-      this.controller.setOnNodeClick((node) => this.openNodeFile(node));
+    this.manager = new GraphManager(this.app, container, this.plugin);
+    await this.manager.init();
+    if (this.manager) {
+      this.manager.setOnNodeClick((node) => this.openNodeFile(node));
     }
     if (!this.scheduleGraphRefresh) {
       this.scheduleGraphRefresh = debounce(() => {
         try {
-          this.controller?.refreshGraph();
+          this.manager?.refreshGraph();
         } catch (e) {
           console.error("Greater Graph: refreshGraph error", e);
         }
@@ -2562,11 +2464,11 @@ var GraphView = class extends import_obsidian2.ItemView {
   }
   onResize() {
     const rect = this.containerEl.getBoundingClientRect();
-    this.controller?.resize(rect.width, rect.height);
+    this.manager?.resize(rect.width, rect.height);
   }
   async onClose() {
-    this.controller?.destroy();
-    this.controller = null;
+    this.manager?.destroy();
+    this.manager = null;
     this.containerEl.empty();
   }
   async openNodeFile(node) {

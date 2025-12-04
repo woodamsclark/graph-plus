@@ -101,18 +101,23 @@ export class InputManager {
         }
     };
 
-    private onGlobalMouseUp = () => {
-    switch (this.pointerMode) {
-        case PointerMode.DragNode:
-            this.callbacks.onDragEnd();
-        break;
-        case PointerMode.Pan:
-            this.callbacks.onPanEnd();
-        break;
-        case PointerMode.Orbit:
-        // nothing
-        break;
-    }
+    private onGlobalMouseUp = (e: MouseEvent) => {
+        const rect    = this.canvas.getBoundingClientRect();
+        const screenX = e.clientX - rect.left;
+        const screenY = e.clientY - rect.top;
+        switch (this.pointerMode) {
+            case PointerMode.DragNode:
+                this.callbacks.onDragEnd();
+            break;
+            case PointerMode.Pan:
+                this.callbacks.onPanEnd();
+            break;
+            case PointerMode.Orbit:
+            break;
+            case PointerMode.Click:
+                this.callbacks.onOpenNode(screenX, screenY);
+            break;
+        }
 
     this.pointerMode    = PointerMode.Idle;
     this.draggedNodeId  = null;

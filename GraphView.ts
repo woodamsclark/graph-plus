@@ -10,7 +10,7 @@ import { GraphData, Renderer2D } from './types/interfaces.ts';
 export const GREATER_GRAPH_VIEW_TYPE = 'greater-graph-view';
 
 export class GraphView extends ItemView {
-  private controller: GraphManager | null = null;
+  private manager: GraphManager | null = null;
   private plugin: Plugin;
   private scheduleGraphRefresh: (() => void) | null = null;
 
@@ -34,16 +34,16 @@ export class GraphView extends ItemView {
   async onOpen() {
     this.containerEl.empty();
     const container = this.containerEl.createDiv({ cls: 'greater-graph-view' });
-    this.controller = new GraphManager(this.app, container, this.plugin);
-    await this.controller.init();
-    if (this.controller) {
-      this.controller.setOnNodeClick((node) => this.openNodeFile(node));
+    this.manager = new GraphManager(this.app, container, this.plugin);
+    await this.manager.init();
+    if (this.manager) {
+      this.manager.setOnNodeClick((node) => this.openNodeFile(node));
     }
     // Debounced refresh to avoid thrashing on vault events
     if (!this.scheduleGraphRefresh) {
       this.scheduleGraphRefresh = debounce(() => {
         try {
-          this.controller?.refreshGraph();
+          this.manager?.refreshGraph();
         } catch (e) {
           // eslint-disable-next-line no-console
           console.error('Greater Graph: refreshGraph error', e);
@@ -63,13 +63,13 @@ export class GraphView extends ItemView {
 
   onResize() {
     const rect = this.containerEl.getBoundingClientRect();
-    this.controller?.resize(rect.width, rect.height);
+    this.manager?.resize(rect.width, rect.height);
   }
 
   async onClose() {
     // save node positions?
-    this.controller?.destroy();
-    this.controller = null;
+    this.manager?.destroy();
+    this.manager = null;
     this.containerEl.empty();
   }
 
