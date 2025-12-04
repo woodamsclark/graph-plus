@@ -1401,11 +1401,13 @@ var InputManager = class {
   callbacks;
   draggedNodeId = null;
   lastMouseX = 0;
+  // ((Client Space))
   lastMouseY = 0;
-  downScreenX = 0;
-  // Initial screenX (canvas relative)
-  downScreenY = 0;
-  // Initial screenY (canvas relative)
+  // ((Client Space))
+  downClickX = 0;
+  // [[Canvas Space]
+  downClickY = 0;
+  // [[Canvas Space]
   dragThreshold = 5;
   // Drag starts after 5 pixels of movement
   pointerMode = 0 /* Idle */;
@@ -1423,16 +1425,17 @@ var InputManager = class {
     document.addEventListener("mouseup", this.onGlobalMouseUp);
   }
   onMouseDown = (e) => {
-    const rect = this.canvas.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
-    this.downScreenX = screenX;
-    this.downScreenY = screenY;
+    const canvas = this.canvas.getBoundingClientRect();
+    this.downClickX = e.clientX - canvas.left;
+    this.downClickY = e.clientY - canvas.top;
     this.lastMouseX = e.clientX;
     this.lastMouseY = e.clientY;
-    this.draggedNodeId = this.callbacks.detectClickedNode(e.offsetX, e.offsetY)?.id || null;
-    if (e.button === 1 || e.button === 2) {
-      this.pointerMode = 5 /* Orbit */;
+    const isLeft = e.button === 0;
+    const isMiddle = e.button === 1;
+    const isRight = e.button === 2;
+    this.draggedNodeId = this.callbacks.detectClickedNode(this.downClickX, this.downClickY)?.id || null;
+    if (isLeft && e.ctrlKey || isLeft && e.metaKey || isRight) {
+      this.pointerMode = 3 /* RightClick */;
       return;
     }
     this.pointerMode = 2 /* Click */;
@@ -1447,32 +1450,39 @@ var InputManager = class {
     const dy = clientY - this.lastMouseY;
     this.lastMouseX = clientX;
     this.lastMouseY = clientY;
+    const dxScr = screenX - this.downClickX;
+    const dyScr = screenY - this.downClickY;
+    const distSq = dxScr * dxScr + dyScr * dyScr;
+    const thresholdSq = this.dragThreshold * this.dragThreshold;
     switch (this.pointerMode) {
       case 0 /* Idle */:
       case 1 /* Hover */:
         return;
-      case 2 /* Click */: {
-        const dxScr = screenX - this.downScreenX;
-        const dyScr = screenY - this.downScreenY;
-        const distSq = dxScr * dxScr + dyScr * dyScr;
-        if (distSq > this.dragThreshold * this.dragThreshold) {
+      case 2 /* Click */:
+        if (distSq > thresholdSq) {
           if (this.draggedNodeId != null) {
-            this.pointerMode = 3 /* DragNode */;
+            this.pointerMode = 4 /* DragNode */;
             this.callbacks.onDragStart(this.draggedNodeId, screenX, screenY);
           } else {
-            this.pointerMode = 4 /* Pan */;
+            this.pointerMode = 5 /* Pan */;
             this.callbacks.onPanStart(screenX, screenY);
           }
         }
         return;
-      }
-      case 3 /* DragNode */:
+      case 4 /* DragNode */:
         this.callbacks.onDragMove(screenX, screenY);
         return;
-      case 4 /* Pan */:
+      case 5 /* Pan */:
         this.callbacks.onPanMove(screenX, screenY);
         return;
-      case 5 /* Orbit */:
+      case 3 /* RightClick */:
+        if (distSq > thresholdSq) {
+          this.callbacks.onOrbitStart(dx, dy);
+          this.pointerMode = 6 /* Orbit */;
+        }
+        return;
+      case 6 /* Orbit */:
+        this.callbacks.onOrbitMove(dx, dy);
         return;
     }
   };
@@ -1481,17 +1491,19 @@ var InputManager = class {
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
     switch (this.pointerMode) {
-      case 3 /* DragNode */:
+      case 4 /* DragNode */:
         this.callbacks.onDragEnd();
         break;
-      case 4 /* Pan */:
+      case 5 /* Pan */:
         this.callbacks.onPanEnd();
         break;
-      case 5 /* Orbit */:
+      case 6 /* Orbit */:
+        this.callbacks.onOrbitEnd();
         break;
       case 2 /* Click */:
         this.callbacks.onOpenNode(screenX, screenY);
-        console.log("Open node at", screenX, screenY);
+        break;
+      case 3 /* RightClick */:
         break;
     }
     this.pointerMode = 0 /* Idle */;
@@ -1499,12 +1511,12 @@ var InputManager = class {
   };
   onMouseMove = (e) => {
   };
+  onMouseLeave = () => {
+    this.callbacks.onHover(-Infinity, -Infinity);
+  };
   onWheel = (e) => {
     e.preventDefault();
     this.callbacks.onZoom(e.offsetX, e.offsetY, Math.sign(e.deltaY));
-  };
-  onMouseLeave = () => {
-    this.callbacks.onHover(-Infinity, -Infinity);
   };
   destroy() {
     this.canvas.removeEventListener("mousemove", this.onMouseMove);
@@ -1660,13 +1672,10 @@ var GraphManager = class {
       useOutlinkFallback: Boolean(this.plugin.settings?.useOutlinkFallback)
     });
     this.inputManager = new InputManager(this.canvas, {
-      onOrbit: (dx, dy) => {
-        this.renderer.orbitBy(dx, dy);
-        this.renderer?.render();
-      },
-      onPanMove: (screenX, screenY) => {
-        this.updatePan(screenX, screenY);
-      },
+      onOrbitStart: (dx, dy) => this.startOrbit(dx, dy),
+      onOrbitMove: (dx, dy) => this.updateOrbit(dx, dy),
+      onOrbitEnd: () => this.endOrbit(),
+      onPanMove: (screenX, screenY) => this.updatePan(screenX, screenY),
       onPanStart: (screenX, screenY) => this.startPan(screenX, screenY),
       onPanEnd: () => this.endPan(),
       onZoom: (x, y, delta) => {
@@ -1892,6 +1901,18 @@ var GraphManager = class {
     this.lastWorldPanPoint = null;
     this.worldPanStartPoint = null;
     this.panStartCamera = null;
+  }
+  startOrbit(dx, dy) {
+    console.log("start orbit", dx, dy);
+    return;
+  }
+  updateOrbit(dx, dy) {
+    console.log("update orbit", dx, dy);
+    return;
+  }
+  endOrbit() {
+    console.log("end orbit");
+    return;
   }
   openNode(screenX, screenY) {
     const node = this.nodeClicked(screenX, screenY);

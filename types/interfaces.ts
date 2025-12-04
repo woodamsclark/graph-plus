@@ -161,20 +161,22 @@ export interface SimulationSettings {
 
 export interface InputManagerCallbacks {
     // Camera Control
-    onOrbit     (dx: number, dy: number): void;
-    onPanMove   (dx: number, dy: number): void;
-    onPanStart  (screenX: number, screenY: number): void;
-    onPanEnd    (): void;
-    onZoom      (screenX: number, screenY: number, delta: number): void;
+    onOrbitStart     (dx: number, dy: number): void;
+    onOrbitMove      (dx: number, dy: number): void;
+    onOrbitEnd       (): void;
+    onPanStart       (screenX: number, screenY: number): void;
+    onPanMove        (dx: number, dy: number): void;
+    onPanEnd         (): void;
+    onZoom           (screenX: number, screenY: number, delta: number): void;
 
     // Node Interaction
-    onHover     (screenX: number, screenY: number): void;
-    onOpenNode  (screenX: number, screenY: number): void;
-    
+    onHover         (screenX: number, screenY: number): void;
+    onOpenNode      (screenX: number, screenY: number): void;
+
     // Node Dragging (Coordinates are relative to the screen for the simulation)
-    onDragStart (nodeId: string, screenX: number, screenY: number): void;
-    onDragMove  (screenX: number, screenY: number): void;
-    onDragEnd   (): void;
+    onDragStart     (nodeId: string, screenX: number, screenY: number): void;
+    onDragMove      (screenX: number, screenY: number): void;
+    onDragEnd       (): void;
 
     // Utility
     detectClickedNode   (screenX: number, screenY: number): { id: string, filePath?: string, label: string } | null;
@@ -184,6 +186,7 @@ export enum PointerMode {
   Idle,
   Hover,
   Click,
+  RightClick,
   DragNode,
   Pan,
   Orbit,
