@@ -15,11 +15,7 @@ export class GraphManager {
   private plugin?                     : Plugin;
   private running                     : boolean                                     = false;
   private cameraAnimDuration          : number                                      = 300; // ms
-  private momentumScale               : number                                      = 0.12;
-  private dragThreshold               : number                                      = 4;
   private defaultCameraDistance       : number                                      = 1200;
-  private lastUsePinnedCenterNote     : boolean                                     = false;
-  private lastPinnedCenterNotePath    : string                                      = '';
   private viewCenterX                 : number                                      = 0;
   private viewCenterY                 : number                                      = 0;
   private canvas                      : HTMLCanvasElement                   | null  = null;
@@ -31,10 +27,7 @@ export class GraphManager {
   private lastTime                    : number                              | null  = null;
   private cameraAnimStart             : number                              | null  = null;
   private previewPollTimer            : number                              | null  = null;
-  private lastMouseX                  : number                              | null  = null;
-  private lastMouseY                  : number                              | null  = null;
   private followedNode                : string                              | null  = null;
-  private centerNode                  : any                                 | null  = null;
   private inputManager                : InputManager                        | null  = null;
   private cameraSnapShot              : any                                 | null  = null;
   private worldAnchorPoint            : { x: number; y: number; z: number } | null  = null;
@@ -58,23 +51,14 @@ export class GraphManager {
     const userSettings        = await (this.plugin as any).loadData();
     const settings: Settings  = Object.assign({}, DEFAULT_SETTINGS, userSettings);
     const rect                = this.containerEl.getBoundingClientRect();
-    const centerX             = (rect.width  || 300) / 2;
-    const centerY             = (rect.height || 200) / 2;
-    this.viewCenterX          = centerX;
-    this.viewCenterY          = centerY;
+    const centerX             = rect.width  / 2;
+    const centerY             = rect.height / 2;
+    this.viewCenterX          = 0;//centerX;
+    this.viewCenterY          = 0;//centerY;
     this.renderer             = createRenderer({ canvas: this.canvas, settings });
     this.containerEl.appendChild(this.canvas);
 
-    // track center selection settings for change detection
-    this.lastUsePinnedCenterNote  = Boolean((this.plugin as any).settings?.usePinnedCenterNote);
-    this.lastPinnedCenterNotePath = String ((this.plugin as any).settings?.pinnedCenterNotePath || '');
-
-    this.graph = await buildGraph(this.app, {
-      countDuplicates     : Boolean((this.plugin as any).settings?.countDuplicateLinks),
-      usePinnedCenterNote : Boolean((this.plugin as any).settings?.usePinnedCenterNote),
-      pinnedCenterNotePath: String ((this.plugin as any).settings?.pinnedCenterNotePath || ''),
-      useOutlinkFallback  : Boolean((this.plugin as any).settings?.useOutlinkFallback),
-    } as any);
+    this.graph = await buildGraph(this.app, settings);
 
     this.inputManager = new InputManager(this.canvas, {
       onOrbitStart      : (dx, dy)                    => this.startOrbit(dx, dy),
@@ -102,7 +86,7 @@ export class GraphManager {
     if (rawSaved && typeof rawSaved === 'object') {
       if (rawSaved[vaultId] && typeof rawSaved[vaultId] === 'object') {
         // already per-vault
-        allSaved = rawSaved as any;
+        allSaved       = rawSaved as any;
         savedPositions = allSaved[vaultId] || {};
       } else {
         // legacy flat map: treat rawSaved as the vault map and migrate
@@ -125,43 +109,9 @@ export class GraphManager {
         }
       }
     }
-    // move layout to it's own function
-    const needsLayout: any[] = [];
-    if (this.graph && this.graph.nodes) {
-      for (const node of this.graph.nodes) {
-        const s = savedPositions[node.filePath];
-        if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) {
-          node.x = s.x;
-          node.y = s.y;
-        } else {
-          needsLayout.push(node);
-        }
-      }
-      // centerNode will be positioned after we compute the view center (below)
-      this.centerNode = this.graph.nodes.find((n: any) => (n as any).isCenterNode) || null;
-    }
+    
 
     this.buildAdjacencyMap();
-
-    this.renderer.setGraph(this.graph);
-    // Layout only nodes that don't have saved positions so user-placed nodes remain where they were.
-    if (needsLayout.length > 0) {
-      layoutGraph3D(this.graph, {
-        width: rect.width   || 300,
-        height: rect.height || 200,
-        margin: 32,
-        centerX,
-        centerY,
-        centerOnLargestNode: Boolean((this.plugin as any).settings?.usePinnedCenterNote),
-        onlyNodes: needsLayout,
-      });
-    } else {
-      // nothing to layout; ensure renderer has size
-    }
-    // Ensure the center node (if any) is placed at the view center
-    if (this.centerNode) { this.centerNode.x = centerX; this.centerNode.y = centerY; this.centerNode.z = 0; }
-    this.renderer.resize(rect.width || 300, rect.height || 200);
-
     this.refreshGraph();
     this.initializeCamera();
 
@@ -189,7 +139,21 @@ export class GraphManager {
 
   private initializeCamera() {
     try { // Center camera on initial load same as a right-click origin focus would do.
-        if ((this.renderer as any).setCamera) (this.renderer as any).setCamera({  targetX: this.viewCenterX ?? 0, targetY: this.viewCenterY ?? 0, targetZ: 0, distance: this.defaultCameraDistance });
+      const renderer = (this.renderer as any);
+      if (!renderer || typeof renderer.setCamera !== 'function') return;
+        renderer.resetPanToCenter();
+
+        if (renderer.setCamera) {
+          renderer.setCamera({
+          targetX : 0,//this.viewCenterX,
+          targetY : 0,//this.viewCenterY,
+          targetZ : 0,
+          distance: this.defaultCameraDistance,
+          yaw     : Math.PI/6,
+          pitch   : Math.PI/8,
+          zoom    : 1,
+        });
+        }
     } catch (e) {}
   }
 
@@ -311,7 +275,7 @@ export class GraphManager {
   }
 
   public resetCamera() {
-    this.initializeCamera
+    this.initializeCamera();
   }
 
   private animationLoop = (timestamp: number) => {
@@ -337,12 +301,25 @@ export class GraphManager {
 
   resize(width: number, height: number): void {
     if (!this.renderer) return;
-    this.renderer.resize(width, height);
-    const centerX = width / 2;
-    const centerY = height / 2;
+    /*this.renderer.resize(width, height);
+    const centerX     = width / 2;
+    const centerY     = height / 2;
+    this.viewCenterX  = centerX;
+    this.viewCenterY  = centerY;
+
     if (this.simulation && (this.simulation as any).setOptions) {
       (this.simulation as any).setOptions({ centerX, centerY });
     }
+    const rendererAny = this.renderer as any;
+    if (rendererAny && typeof rendererAny.setCamera === 'function') {
+      const cam = rendererAny.getCamera ? rendererAny.getCamera() : {};
+      rendererAny.setCamera({
+        targetX: centerX,
+        targetY: centerY,
+        targetZ: cam.targetZ ?? 0,
+      });
+    }*/
+   this.renderer.resize(width, height);
   }
 
   private updateCameraAnimation(now: number) { return; // smooths camera animations. Revist later
@@ -391,6 +368,7 @@ export class GraphManager {
   public async refreshGraph() {
     this.stopSimulation();
 
+    // try to load graph from file first
     this.graph = await buildGraph (this.app, {
         countDuplicates       : Boolean((this.plugin as any).settings?.countDuplicateLinks),
         usePinnedCenterNote   : Boolean((this.plugin as any).settings?.usePinnedCenterNote),
@@ -399,7 +377,12 @@ export class GraphManager {
       } as any);
 
     const { nodes, edges }  = this.filterGraph    (this.graph);
-    this.simulation         = this.buildSimulation(nodes, edges);
+    const rect    = this.containerEl.getBoundingClientRect();
+    const centerX = (rect.width  || 300) / 2;
+    const centerY = (rect.height || 200) / 2;
+    this.viewCenterX = 0;//centerX;
+    this.viewCenterY = 0;//centerY;
+    this.simulation         = this.buildSimulation(nodes, edges, {centerX, centerY});
 
     this.buildAdjacencyMap(); // rebuild adjacency map after graph refresh or showTags changes
     this.startSimulation();
@@ -629,3 +612,42 @@ export class GraphManager {
     }
   }
 */
+
+
+/* Layout logic
+// move layout to it's own function
+    const needsLayout: any[] = [];
+    if (this.graph && this.graph.nodes) {
+      for (const node of this.graph.nodes) {
+        const s = savedPositions[node.filePath];
+        if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) {
+          node.x = s.x;
+          node.y = s.y;
+        } else {
+          needsLayout.push(node);
+        }
+      }
+      // centerNode will be positioned after we compute the view center (below)
+      this.centerNode = this.graph.nodes.find((n: any) => (n as any).isCenterNode) || null;
+    }
+
+
+    this.renderer.setGraph(this.graph);
+    // Layout only nodes that don't have saved positions so user-placed nodes remain where they were.
+    if (needsLayout.length > 0) {
+      layoutGraph3D(this.graph, {
+        width: rect.width   || 300,
+        height: rect.height || 200,
+        margin: 32,
+        centerX,
+        centerY,
+        centerOnLargestNode: Boolean((this.plugin as any).settings?.usePinnedCenterNote),
+        onlyNodes: needsLayout,
+      });
+    } else {
+      // nothing to layout; ensure renderer has size
+    }
+    // Ensure the center node (if any) is placed at the view center
+    if (this.centerNode) { this.centerNode.x = centerX; this.centerNode.y = centerY; this.centerNode.z = 0; }
+    this.renderer.resize(rect.width || 300, rect.height || 200);
+    */

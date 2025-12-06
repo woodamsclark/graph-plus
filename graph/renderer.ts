@@ -185,9 +185,9 @@ export function createRenderer(options: RendererSettings): Renderer {
 
   function resize(width: number, height: number) {
     // set physical canvas size (pixels)
-    canvas.width = Math.max(1, Math.floor(width));
+    canvas.width  = Math.max(1, Math.floor(width));
     canvas.height = Math.max(1, Math.floor(height));
-    canvas.style.width = '100%';
+    canvas.style.width  = '100%';
     canvas.style.height = '100%';
     render();
   }

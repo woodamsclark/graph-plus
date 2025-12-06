@@ -4,23 +4,23 @@ import { GraphNode, GraphEdge, Simulation, SimulationSettings} from '../types/in
 
 export function createSimulation(nodes: GraphNode[], edges: GraphEdge[], options?: Partial<SimulationSettings>): Simulation {
   // physics parameters (defaults)
-  let repulsionStrength = options?.repulsionStrength ?? 1500;
-  let springStrength = options?.springStrength ?? 0.04;
-  let springLength = options?.springLength ?? 100;
-  let centerPull = options?.centerPull ?? 0.00;
-    let damping = options?.damping ?? 0.7; // normalized 0..1
-  let notePlaneStiffness = options?.notePlaneStiffness ?? 0;
-  let tagPlaneStiffness = options?.tagPlaneStiffness ?? 0;
+  let repulsionStrength   = options?.repulsionStrength  ?? 1500;
+  let springStrength      = options?.springStrength     ?? 0.04;
+  let springLength        = options?.springLength       ?? 100;
+  let centerPull          = options?.centerPull         ?? 0.00;
+  let damping             = options?.damping            ?? 0.7; // normalized 0..1
+  let notePlaneStiffness  = options?.notePlaneStiffness ?? 0;
+  let tagPlaneStiffness   = options?.tagPlaneStiffness  ?? 0;
 
   // mouse attractor defaults
-  let mouseAttractionRadius = options?.mouseAttractionRadius ?? 80;
-  let mouseAttractionStrength = options?.mouseAttractionStrength ?? 0.15;
-  let mouseAttractionExponent = options?.mouseAttractionExponent ?? 3.5;
+  let mouseAttractionRadius   = options?.mouseAttractionRadius    ?? 80;
+  let mouseAttractionStrength = options?.mouseAttractionStrength  ?? 0.15;
+  let mouseAttractionExponent = options?.mouseAttractionExponent  ?? 3.5;
 
   // center options: prefer explicitly provided values; otherwise compute
   // a reasonable default (bounding-box center of current node positions)
-  let centerX: number | undefined = typeof options?.centerX === 'number' ? options!.centerX : undefined;
-  let centerY: number | undefined = typeof options?.centerY === 'number' ? options!.centerY : undefined;
+  let centerX: number | undefined = typeof options?.centerX === 'number' ? options!.centerX : 0;
+  let centerY: number | undefined = typeof options?.centerY === 'number' ? options!.centerY : 0;
   let centerZ: number | undefined = typeof options?.centerZ === 'number' ? options!.centerZ : 0;
   let centerNodeId = options?.centerNodeId ?? null;
   // If center not provided, compute bounding-box center from node positions

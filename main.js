@@ -29,133 +29,76 @@ var import_obsidian2 = require("obsidian");
 var import_obsidian = require("obsidian");
 
 // graph/buildGraph.ts
-async function buildGraph(app, options) {
+async function buildGraph(app) {
   const files = app.vault.getMarkdownFiles();
-  const nodes = files.map((file) => ({
-    id: file.path,
-    filePath: file.path,
-    file,
-    label: file.basename,
-    x: 0,
-    y: 0,
-    z: 0,
-    vx: 0,
-    vy: 0,
-    vz: 0,
-    type: "note",
-    inDegree: 0,
-    outDegree: 0,
-    totalDegree: 0
-  }));
+  const { nodes, nodeByPath } = createNoteNodes(files);
+  const { edges, edgeSet } = buildNoteEdgesFromResolvedLinks(app, nodeByPath);
+  if (DEFAULT_SETTINGS.showTags !== false) {
+    addTagNodesAndEdges(app, files, nodes, nodeByPath, edges, edgeSet);
+  }
+  computeNodeDegrees(nodes, nodeByPath, edges);
+  markBidirectionalEdges(edges);
+  const centerNode = pickCenterNode(app, nodes, DEFAULT_SETTINGS);
+  markCenterNode(nodes, centerNode);
+  return { nodes, edges };
+}
+function createNoteNodes(files) {
+  const nodes = [];
+  for (const file of files) {
+    const jitter = 50;
+    const x0 = (Math.random() - 0.5) * jitter;
+    const y0 = (Math.random() - 0.5) * jitter;
+    const node = {
+      id: file.path,
+      filePath: file.path,
+      file,
+      label: file.basename,
+      x: x0,
+      y: y0,
+      z: 0,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      inDegree: 0,
+      outDegree: 0,
+      totalDegree: 0,
+      isCenterNode: false
+    };
+    nodes.push(node);
+  }
   const nodeByPath = /* @__PURE__ */ new Map();
   for (const n of nodes)
     nodeByPath.set(n.id, n);
+  return { nodes, nodeByPath };
+}
+function buildNoteEdgesFromResolvedLinks(app, nodeByPath) {
   const resolved = app.metadataCache.resolvedLinks || {};
   const edges = [];
   const edgeSet = /* @__PURE__ */ new Set();
-  const countDuplicates = Boolean(options?.countDuplicates);
+  const countDuplicates = Boolean(DEFAULT_SETTINGS.countDuplicateLinks);
   for (const sourcePath of Object.keys(resolved)) {
     const targets = resolved[sourcePath] || {};
     for (const targetPath of Object.keys(targets)) {
       if (!nodeByPath.has(sourcePath) || !nodeByPath.has(targetPath))
         continue;
       const key = `${sourcePath}->${targetPath}`;
-      if (!edgeSet.has(key)) {
-        const rawCount = Number(targets[targetPath] || 1) || 1;
-        const linkCount = countDuplicates ? rawCount : 1;
-        edges.push({ id: key, sourceId: sourcePath, targetId: targetPath, linkCount, bidirectional: false });
-        edgeSet.add(key);
-      }
+      if (edgeSet.has(key))
+        continue;
+      const rawCount = Number(targets[targetPath] || 1) || 1;
+      const linkCount = countDuplicates ? rawCount : 1;
+      edges.push({
+        id: key,
+        sourceId: sourcePath,
+        targetId: targetPath,
+        linkCount,
+        bidirectional: false
+      });
+      edgeSet.add(key);
     }
   }
-  const tagNodeByName = /* @__PURE__ */ new Map();
-  function ensureTagNode(tagName) {
-    let n = tagNodeByName.get(tagName);
-    if (n)
-      return n;
-    n = {
-      id: `tag:${tagName}`,
-      label: `#${tagName}`,
-      x: 0,
-      y: 0,
-      z: 0,
-      // Use the tag id as the persisted key so tag node positions can be
-      // saved/restored in the same `nodePositions` map as notes.
-      filePath: `tag:${tagName}`,
-      vx: 0,
-      vy: 0,
-      vz: 0,
-      type: "tag",
-      inDegree: 0,
-      outDegree: 0,
-      totalDegree: 0
-    };
-    nodes.push(n);
-    tagNodeByName.set(tagName, n);
-    nodeByPath.set(n.id, n);
-    return n;
-  }
-  function extractTags(cache) {
-    if (!cache)
-      return [];
-    const found = [];
-    try {
-      const inline = cache.tags;
-      if (Array.isArray(inline)) {
-        for (const t of inline) {
-          if (!t || !t.tag)
-            continue;
-          const raw = t.tag.startsWith("#") ? t.tag.slice(1) : t.tag;
-          if (raw)
-            found.push(raw);
-        }
-      }
-    } catch {
-    }
-    try {
-      const fm = cache.frontmatter || {};
-      const vals = [];
-      if (fm) {
-        if (Array.isArray(fm.tags))
-          vals.push(...fm.tags);
-        else if (typeof fm.tags === "string")
-          vals.push(fm.tags);
-        if (Array.isArray(fm.tag))
-          vals.push(...fm.tag);
-        else if (typeof fm.tag === "string")
-          vals.push(fm.tag);
-      }
-      for (const v of vals) {
-        if (!v)
-          continue;
-        if (typeof v === "string") {
-          const s = v.startsWith("#") ? v.slice(1) : v;
-          if (s)
-            found.push(s);
-        }
-      }
-    } catch {
-    }
-    const uniq = Array.from(new Set(found));
-    return uniq;
-  }
-  for (const file of files) {
-    const cache = app.metadataCache.getFileCache(file);
-    const tags = extractTags(cache);
-    if (!tags || tags.length === 0)
-      continue;
-    const noteNode = nodeByPath.get(file.path);
-    if (!noteNode)
-      continue;
-    for (const tagName of tags) {
-      const tagNode = ensureTagNode(tagName);
-      const key = `${noteNode.id}->${tagNode.id}`;
-      if (!edgeSet.has(key)) {
-        edges.push({ id: key, sourceId: noteNode.id, targetId: tagNode.id, linkCount: 1, bidirectional: false });
-        edgeSet.add(key);
-      }
-    }
-  }
+  return { edges, edgeSet };
+}
+function computeNodeDegrees(nodes, nodeByPath, edges) {
   for (const e of edges) {
     const src = nodeByPath.get(e.sourceId);
     const tgt = nodeByPath.get(e.targetId);
@@ -168,6 +111,8 @@ async function buildGraph(app, options) {
   for (const n of nodes) {
     n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
   }
+}
+function markBidirectionalEdges(edges) {
   const edgeMap = /* @__PURE__ */ new Map();
   for (const e of edges) {
     edgeMap.set(`${e.sourceId}->${e.targetId}`, e);
@@ -180,152 +125,102 @@ async function buildGraph(app, options) {
       other.bidirectional = true;
     }
   }
-  function chooseCenterNode(nodesArr, opts) {
-    if (!opts?.usePinnedCenterNote)
-      return null;
-    const onlyNotes = nodesArr.filter((n) => n.type !== "tag");
-    let chosen = null;
-    const preferOut = Boolean(opts?.useOutlinkFallback);
-    const metric = (n) => preferOut ? n.outDegree || 0 : n.inDegree || 0;
-    const chooseBy = (predicate) => {
-      let best = null;
-      for (const n of onlyNotes) {
-        if (!predicate(n))
-          continue;
-        if (!best) {
-          best = n;
-          continue;
-        }
-        if (metric(n) > metric(best))
-          best = n;
-      }
-      return best;
+}
+function addTagNodesAndEdges(app, files, nodes, nodeByPath, edges, edgeSet) {
+  const tagNodeByName = /* @__PURE__ */ new Map();
+  const ensureTagNode = (tagName) => {
+    let node = tagNodeByName.get(tagName);
+    if (node)
+      return node;
+    node = {
+      id: `tag:${tagName}`,
+      label: `#${tagName}`,
+      x: 0,
+      y: 0,
+      z: 0,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      filePath: `tag:${tagName}`,
+      type: "tag",
+      inDegree: 0,
+      outDegree: 0,
+      totalDegree: 0
     };
-    if (opts.usePinnedCenterNote && opts.pinnedCenterNotePath) {
-      const raw = String(opts.pinnedCenterNotePath).trim();
-      if (raw) {
-        const mc = app.metadataCache;
-        let resolved2 = null;
-        try {
-          resolved2 = mc?.getFirstLinkpathDest?.(raw, "");
-        } catch {
-        }
-        if (!resolved2 && !raw.endsWith(".md")) {
-          try {
-            resolved2 = mc?.getFirstLinkpathDest?.(raw + ".md", "");
-          } catch {
-          }
-        }
-        if (resolved2 && resolved2.path) {
-          chosen = chooseBy((n) => n.filePath === resolved2.path);
-        }
-        if (!chosen) {
-          const normA = raw;
-          const normB = raw.endsWith(".md") ? raw : raw + ".md";
-          chosen = chooseBy((n) => n.filePath === normA || n.filePath === normB);
-        }
-        if (!chosen) {
-          const base = raw.endsWith(".md") ? raw.slice(0, -3) : raw;
-          chosen = chooseBy((n) => {
-            const f = n.file;
-            const bn = f?.basename || n.label;
-            return String(bn) === base;
-          });
-        }
+    nodes.push(node);
+    tagNodeByName.set(tagName, node);
+    nodeByPath.set(node.id, node);
+    return node;
+  };
+}
+function pickCenterNode(app, nodes, settings) {
+  if (!settings.usePinnedCenterNote)
+    return null;
+  const onlyNotes = nodes.filter((n) => n.type !== "tag");
+  const preferOut = Boolean(settings.useOutlinkFallback);
+  const metric = (n) => preferOut ? n.outDegree || 0 : n.inDegree || 0;
+  const chooseBy = (predicate) => {
+    let best = null;
+    for (const n of onlyNotes) {
+      if (!predicate(n))
+        continue;
+      if (!best || metric(n) > metric(best)) {
+        best = n;
       }
+    }
+    return best;
+  };
+  let chosen = null;
+  const raw = String(settings.pinnedCenterNotePath || "").trim();
+  if (raw) {
+    const mc = app.metadataCache;
+    let resolved = null;
+    try {
+      resolved = mc?.getFirstLinkpathDest?.(raw, "");
+      if (!resolved && !raw.endsWith(".md")) {
+        resolved = mc?.getFirstLinkpathDest?.(raw + ".md", "");
+      }
+    } catch {
+    }
+    if (resolved?.path) {
+      chosen = chooseBy((n) => n.filePath === resolved.path);
     }
     if (!chosen) {
-      for (const n of onlyNotes) {
-        if (!chosen) {
-          chosen = n;
-          continue;
-        }
-        if (metric(n) > metric(chosen))
-          chosen = n;
+      const normA = raw;
+      const normB = raw.endsWith(".md") ? raw : raw + ".md";
+      chosen = chooseBy((n) => n.filePath === normA || n.filePath === normB);
+    }
+    if (!chosen) {
+      const base = raw.endsWith(".md") ? raw.slice(0, -3) : raw;
+      chosen = chooseBy((n) => {
+        const file = n.file;
+        const bn = file?.basename || n.label;
+        return String(bn) === base;
+      });
+    }
+  }
+  if (!chosen) {
+    for (const n of onlyNotes) {
+      if (!chosen || metric(n) > metric(chosen)) {
+        chosen = n;
       }
     }
-    return chosen;
   }
-  for (const n of nodes)
-    n.isCenterNode = false;
-  const centerNode = chooseCenterNode(nodes, { usePinnedCenterNote: Boolean(options?.usePinnedCenterNote), pinnedCenterNotePath: options?.pinnedCenterNotePath || "" });
-  if (centerNode)
-    centerNode.isCenterNode = true;
-  return { nodes, edges };
+  return chosen;
 }
-
-// graph/layout.ts
-function layoutGraph3D(graph, options) {
-  const { width, height } = options;
-  const allNodes = graph.nodes;
-  if (!allNodes || allNodes.length === 0)
-    return;
-  const centerX = options.centerX ?? width / 2;
-  const centerY = options.centerY ?? height / 2;
-  const jitter = typeof options.jitter === "number" ? options.jitter : 8;
-  const tagZSpread = typeof options.tagZSpread === "number" ? options.tagZSpread : 400;
-  const nodes = options.onlyNodes ?? allNodes;
-  if (!nodes || nodes.length === 0)
-    return;
-  const minRadius3D = Math.max(32, jitter * 4);
-  const maxRadius3D = Math.max(minRadius3D + 40, Math.min(Math.max(width, height) / 2 - (options.margin || 32), 800));
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i];
-    if (node.isCenterNode) {
-      if (node.type === "tag") {
-        node.x = 0;
-        node.y = centerY;
-        node.z = 0;
-      } else {
-        node.x = centerX;
-        node.y = centerY;
-        node.z = 0;
-      }
-      continue;
-    }
-    const angle = Math.random() * Math.PI * 2;
-    const r = minRadius3D + Math.random() * (maxRadius3D - minRadius3D);
-    const rx = Math.cos(angle) * r;
-    const ry = Math.sin(angle) * r;
-    if (node.type === "tag") {
-      node.x = centerX + rx;
-      node.y = centerY + ry;
-      node.z = (Math.random() - 0.5) * tagZSpread;
-    } else {
-      node.x = centerX + rx;
-      node.y = centerY + ry;
-      node.z = 0;
-    }
+function markCenterNode(nodes, centerNode) {
+  for (const n of nodes) {
+    n.isCenterNode = false;
   }
-  if (options.centerOnLargestNode && !options.onlyNodes) {
-    let centerNode = null;
-    let maxDeg = -Infinity;
-    for (const n of allNodes) {
-      const d = n.totalDegree || 0;
-      if (d > maxDeg) {
-        maxDeg = d;
-        centerNode = n;
-      }
-    }
-    if (centerNode) {
-      if (centerNode.type === "tag") {
-        centerNode.x = 0;
-        centerNode.y = centerY;
-        centerNode.z = 0;
-      } else {
-        centerNode.x = centerX;
-        centerNode.y = centerY;
-        centerNode.z = 0;
-      }
-    }
+  if (centerNode) {
+    centerNode.isCenterNode = true;
   }
 }
 
 // graph/renderer.ts
-function createRenderer(options) {
-  const canvas = options.canvas;
-  let visuals = options.settings.visuals;
-  let physics = options.settings.physics;
+function createRenderer(canvas) {
+  let visuals = DEFAULT_SETTINGS.visuals;
+  let physics = DEFAULT_SETTINGS.physics;
   const context = canvas.getContext("2d");
   let graph = null;
   let nodeById = /* @__PURE__ */ new Map();
@@ -1069,54 +964,10 @@ function createRenderer(options) {
 }
 
 // graph/simulation.ts
-function createSimulation(nodes, edges, options) {
-  let repulsionStrength = options?.repulsionStrength ?? 1500;
-  let springStrength = options?.springStrength ?? 0.04;
-  let springLength = options?.springLength ?? 100;
-  let centerPull = options?.centerPull ?? 0;
-  let damping = options?.damping ?? 0.7;
-  let notePlaneStiffness = options?.notePlaneStiffness ?? 0;
-  let tagPlaneStiffness = options?.tagPlaneStiffness ?? 0;
-  let mouseAttractionRadius = options?.mouseAttractionRadius ?? 80;
-  let mouseAttractionStrength = options?.mouseAttractionStrength ?? 0.15;
-  let mouseAttractionExponent = options?.mouseAttractionExponent ?? 3.5;
-  let centerX = typeof options?.centerX === "number" ? options.centerX : void 0;
-  let centerY = typeof options?.centerY === "number" ? options.centerY : void 0;
-  let centerZ = typeof options?.centerZ === "number" ? options.centerZ : 0;
-  let centerNodeId = options?.centerNodeId ?? null;
-  if (typeof centerX !== "number" || typeof centerY !== "number") {
-    if (nodes && nodes.length > 0) {
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      for (const n of nodes) {
-        const x = n.x ?? 0;
-        const y = n.y ?? 0;
-        if (x < minX)
-          minX = x;
-        if (x > maxX)
-          maxX = x;
-        if (y < minY)
-          minY = y;
-        if (y > maxY)
-          maxY = y;
-      }
-      if (!isFinite(minX) || !isFinite(maxX)) {
-        centerX = 0;
-      } else {
-        centerX = (minX + maxX) / 2;
-      }
-      if (!isFinite(minY) || !isFinite(maxY)) {
-        centerY = 0;
-      } else {
-        centerY = (minY + maxY) / 2;
-      }
-    } else {
-      centerX = 0;
-      centerY = 0;
-    }
-  }
+function createSimulation(nodes, edges) {
   let centerNode = null;
-  if (centerNodeId && nodes) {
-    centerNode = nodes.find((n) => n.id === centerNodeId) || null;
+  if (DEFAULT_SETTINGS.centerNodeId && nodes) {
+    centerNode = nodes.find((n) => n.id === DEFAULT_SETTINGS.centerNodeId) || null;
   }
   let running = false;
   const nodeById = /* @__PURE__ */ new Map();
@@ -1141,7 +992,7 @@ function createSimulation(nodes, edges, options) {
         const dist = Math.sqrt(distSq);
         const minDist = 40;
         const effectiveDist = Math.max(dist, minDist);
-        const force = repulsionStrength / (effectiveDist * effectiveDist);
+        const force = DEFAULT_SETTINGS.physics.repulsionStrength / (effectiveDist * effectiveDist);
         const fx = dx / dist * force;
         const fy = dy / dist * force;
         const fz = dz / dist * force;
@@ -1170,8 +1021,8 @@ function createSimulation(nodes, edges, options) {
       const dy = b.y - a.y;
       const dz = (b.z || 0) - (a.z || 0);
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-4;
-      const displacement = dist - springLength;
-      const f = springStrength * Math.tanh(displacement / 50);
+      const displacement = dist - (DEFAULT_SETTINGS.physics.springLength || 0);
+      const f = (DEFAULT_SETTINGS.physics.springStrength || 0) * Math.tanh(displacement / 50);
       const fx = dx / dist * f;
       const fy = dy / dist * f;
       const fz = dz / dist * f;
@@ -1188,35 +1039,35 @@ function createSimulation(nodes, edges, options) {
     }
   }
   function applyCentering() {
-    if (centerPull <= 0)
+    if (DEFAULT_SETTINGS.physics.centerPull <= 0)
       return;
-    const cx = centerX ?? 0;
-    const cy = centerY ?? 0;
-    const cz = centerZ ?? 0;
+    const cx = DEFAULT_SETTINGS.physics.centerX;
+    const cy = DEFAULT_SETTINGS.physics.centerY;
+    const cz = DEFAULT_SETTINGS.physics.centerZ;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
-      const dx = cx - (n.x || 0);
-      const dy = cy - (n.y || 0);
-      const dz = cz - (n.z || 0);
-      n.vx = (n.vx || 0) + dx * centerPull;
-      n.vy = (n.vy || 0) + dy * centerPull;
-      n.vz = (n.vz || 0) + dz * centerPull;
+      const dx = cx - n.x;
+      const dy = cy - n.y;
+      const dz = cz - n.z;
+      n.vx = (n.vx || 0) + dx * DEFAULT_SETTINGS.physics.centerPull;
+      n.vy = (n.vy || 0) + dy * DEFAULT_SETTINGS.physics.centerPull;
+      n.vz = (n.vz || 0) + dz * DEFAULT_SETTINGS.physics.centerPull;
     }
     if (centerNode) {
-      const dx = (centerX ?? 0) - (centerNode.x || 0);
-      const dy = (centerY ?? 0) - (centerNode.y || 0);
-      const dz = (centerZ ?? 0) - (centerNode.z || 0);
-      centerNode.vx = (centerNode.vx || 0) + dx * centerPull * 0.5;
-      centerNode.vy = (centerNode.vy || 0) + dy * centerPull * 0.5;
-      centerNode.vz = (centerNode.vz || 0) + dz * centerPull * 0.5;
+      const dx = DEFAULT_SETTINGS.physics.centerX - centerNode.x;
+      const dy = DEFAULT_SETTINGS.physics.centerY - centerNode.y;
+      const dz = DEFAULT_SETTINGS.physics.centerZ - centerNode.z;
+      centerNode.vx = (centerNode.vx || 0) + dx * DEFAULT_SETTINGS.physics.centerPull * 0.5;
+      centerNode.vy = (centerNode.vy || 0) + dy * DEFAULT_SETTINGS.physics.centerPull * 0.5;
+      centerNode.vz = (centerNode.vz || 0) + dz * DEFAULT_SETTINGS.physics.centerPull * 0.5;
     }
   }
   function applyDamping() {
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
-      const d = Math.max(0, Math.min(1, damping));
+      const d = Math.max(0, Math.min(1, DEFAULT_SETTINGS.physics.damping));
       n.vx = (n.vx ?? 0) * (1 - d);
       n.vy = (n.vy ?? 0) * (1 - d);
       n.vz = (n.vz ?? 0) * (1 - d);
@@ -1238,33 +1089,19 @@ function createSimulation(nodes, edges, options) {
       return;
     if (pinnedNodes.has(node.id))
       return;
-    const radius = mouseAttractionRadius ?? 80;
-    const strength = mouseAttractionStrength ?? 0.15;
-    const exponent = mouseAttractionExponent ?? 3.5;
-    const dx = mouseX - node.x;
-    const dy = mouseY - node.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (!dist || dist > radius)
-      return;
-    const t = 1 - dist / radius;
-    const forceMag = strength * Math.pow(Math.max(0, t), exponent);
-    const fx = dx / (dist || 1) * forceMag;
-    const fy = dy / (dist || 1) * forceMag;
-    node.vx = (node.vx || 0) + fx;
-    node.vy = (node.vy || 0) + fy;
   }
   function applyPlaneConstraints() {
-    const noteK = notePlaneStiffness ?? 0;
-    const tagK = tagPlaneStiffness ?? 0;
+    const noteK = DEFAULT_SETTINGS.physics.notePlaneStiffness;
+    const tagK = DEFAULT_SETTINGS.physics.tagPlaneStiffness;
     if (noteK === 0 && tagK === 0)
       return;
-    const targetZ = centerZ ?? 0;
-    const targetX = centerX ?? 0;
+    const targetZ = DEFAULT_SETTINGS.physics.centerZ;
+    const targetX = DEFAULT_SETTINGS.physics.centerX;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
       if (n.type === "note" && noteK > 0) {
-        const dz = targetZ - (n.z || 0);
+        const dz = targetZ - n.z;
         n.vz = (n.vz || 0) + dz * noteK;
       } else if (n.type === "tag" && tagK > 0) {
         const dx = targetX - (n.x || 0);
@@ -1273,9 +1110,9 @@ function createSimulation(nodes, edges, options) {
     }
   }
   function applyCenterNodeLock() {
-    const cx = centerX ?? 0;
-    const cy = centerY ?? 0;
-    const cz = centerZ ?? 0;
+    const cx = DEFAULT_SETTINGS.physics.centerX;
+    const cy = DEFAULT_SETTINGS.physics.centerY;
+    const cz = DEFAULT_SETTINGS.physics.centerZ;
     for (const n of nodes) {
       if (n.isCenterNode) {
         n.x = cx;
@@ -1310,7 +1147,6 @@ function createSimulation(nodes, edges, options) {
     applySprings();
     applyCentering();
     applyPlaneConstraints();
-    applyMouseAttraction();
     applyCenterNodeLock();
     applyDamping();
     integrate(dt);
@@ -1327,40 +1163,6 @@ function createSimulation(nodes, edges, options) {
       n.vy = 0;
     }
   }
-  function setOptions(opts) {
-    if (!opts)
-      return;
-    if (typeof opts.repulsionStrength === "number")
-      repulsionStrength = opts.repulsionStrength;
-    if (typeof opts.springStrength === "number")
-      springStrength = opts.springStrength;
-    if (typeof opts.springLength === "number")
-      springLength = opts.springLength;
-    if (typeof opts.centerPull === "number")
-      centerPull = opts.centerPull;
-    if (typeof opts.damping === "number")
-      damping = opts.damping;
-    if (typeof opts.centerX === "number")
-      centerX = opts.centerX;
-    if (typeof opts.centerY === "number")
-      centerY = opts.centerY;
-    if (typeof opts.centerZ === "number")
-      centerZ = opts.centerZ;
-    if (typeof opts.centerNodeId === "string") {
-      centerNodeId = opts.centerNodeId;
-      centerNode = nodes.find((n) => n.id === centerNodeId) || null;
-    }
-    if (typeof opts.notePlaneStiffness === "number")
-      notePlaneStiffness = opts.notePlaneStiffness;
-    if (typeof opts.tagPlaneStiffness === "number")
-      tagPlaneStiffness = opts.tagPlaneStiffness;
-    if (typeof opts.mouseAttractionRadius === "number")
-      mouseAttractionRadius = opts.mouseAttractionRadius;
-    if (typeof opts.mouseAttractionStrength === "number")
-      mouseAttractionStrength = opts.mouseAttractionStrength;
-    if (typeof opts.mouseAttractionExponent === "number")
-      mouseAttractionExponent = opts.mouseAttractionExponent;
-  }
   function setPinnedNodes(ids) {
     pinnedNodes = new Set(ids || []);
   }
@@ -1369,7 +1171,7 @@ function createSimulation(nodes, edges, options) {
     mouseY = y;
     mouseHoveredNodeId = nodeId;
   }
-  return { start, stop, tick, reset, setOptions, setPinnedNodes, setMouseAttractor };
+  return { start, stop, tick, reset, setPinnedNodes, setMouseAttractor };
 }
 
 // utils/debounce.ts
@@ -1533,14 +1335,10 @@ var GraphManager = class {
   app;
   containerEl;
   plugin;
-  running;
+  running = false;
   cameraAnimDuration = 300;
   // ms
-  momentumScale = 0.12;
-  dragThreshold = 4;
   defaultCameraDistance = 1200;
-  lastUsePinnedCenterNote = false;
-  lastPinnedCenterNotePath = "";
   viewCenterX = 0;
   viewCenterY = 0;
   canvas = null;
@@ -1552,14 +1350,12 @@ var GraphManager = class {
   lastTime = null;
   cameraAnimStart = null;
   previewPollTimer = null;
-  lastMouseX = null;
-  lastMouseY = null;
   followedNode = null;
-  centerNode = null;
   inputManager = null;
   cameraSnapShot = null;
   worldAnchorPoint = null;
   screenAnchorPoint = null;
+  settings = null;
   openNodeFile = null;
   settingsUnregister = null;
   saveNodePositionsDebounced = null;
@@ -1574,23 +1370,15 @@ var GraphManager = class {
     this.canvas.style.width = "100%";
     this.canvas.style.height = "100%";
     this.canvas.tabIndex = 0;
-    const userSettings = await this.plugin.loadData();
-    const settings = Object.assign({}, DEFAULT_SETTINGS, userSettings);
+    this.settings = await this.plugin.loadData();
     const rect = this.containerEl.getBoundingClientRect();
-    const centerX = (rect.width || 300) / 2;
-    const centerY = (rect.height || 200) / 2;
-    this.viewCenterX = centerX;
-    this.viewCenterY = centerY;
-    this.renderer = createRenderer({ canvas: this.canvas, settings });
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    this.viewCenterX = 0;
+    this.viewCenterY = 0;
+    this.renderer = createRenderer(this.canvas);
     this.containerEl.appendChild(this.canvas);
-    this.lastUsePinnedCenterNote = Boolean(this.plugin.settings?.usePinnedCenterNote);
-    this.lastPinnedCenterNotePath = String(this.plugin.settings?.pinnedCenterNotePath || "");
-    this.graph = await buildGraph(this.app, {
-      countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks),
-      usePinnedCenterNote: Boolean(this.plugin.settings?.usePinnedCenterNote),
-      pinnedCenterNotePath: String(this.plugin.settings?.pinnedCenterNotePath || ""),
-      useOutlinkFallback: Boolean(this.plugin.settings?.useOutlinkFallback)
-    });
+    this.graph = await buildGraph(this.app);
     this.inputManager = new InputManager(this.canvas, {
       onOrbitStart: (dx, dy) => this.startOrbit(dx, dy),
       onOrbitMove: (dx, dy) => this.updateOrbit(dx, dy),
@@ -1638,63 +1426,9 @@ var GraphManager = class {
         }
       }
     }
-    const needsLayout = [];
-    if (this.graph && this.graph.nodes) {
-      for (const node of this.graph.nodes) {
-        const s = savedPositions[node.filePath];
-        if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) {
-          node.x = s.x;
-          node.y = s.y;
-        } else {
-          needsLayout.push(node);
-        }
-      }
-      this.centerNode = this.graph.nodes.find((n) => n.isCenterNode) || null;
-    }
     this.buildAdjacencyMap();
-    this.renderer.setGraph(this.graph);
-    if (needsLayout.length > 0) {
-      layoutGraph3D(this.graph, {
-        width: rect.width || 300,
-        height: rect.height || 200,
-        margin: 32,
-        centerX,
-        centerY,
-        centerOnLargestNode: Boolean(this.plugin.settings?.usePinnedCenterNote),
-        onlyNodes: needsLayout
-      });
-    } else {
-    }
-    if (this.centerNode) {
-      this.centerNode.x = centerX;
-      this.centerNode.y = centerY;
-      this.centerNode.z = 0;
-    }
-    this.renderer.resize(rect.width || 300, rect.height || 200);
-    const centerNodeId = this.centerNode ? this.centerNode.id : void 0;
-    const showTagsInitial = this.plugin.settings?.showTags !== false;
     this.refreshGraph();
     this.initializeCamera();
-    try {
-      if (this.renderer.resetPanToCenter)
-        this.renderer.resetPanToCenter();
-    } catch (e) {
-    }
-    try {
-      if (this.renderer.setHoverState)
-        this.renderer.setHoverState(null, /* @__PURE__ */ new Set(), 0, 0);
-      if (this.renderer.setHoveredNode)
-        this.renderer.setHoveredNode(null);
-      this.renderer.render?.();
-    } catch (e) {
-    }
-    try {
-      const interaction = this.plugin.settings?.interaction || {};
-      this.momentumScale = interaction.momentumScale ?? this.momentumScale;
-      this.dragThreshold = interaction.dragThreshold ?? this.dragThreshold;
-    } catch (e) {
-    }
-    this.running = true;
     this.lastTime = null;
     this.animationFrame = requestAnimationFrame(this.animationLoop);
     if (!this.saveNodePositionsDebounced) {
@@ -1717,8 +1451,24 @@ var GraphManager = class {
   }
   initializeCamera() {
     try {
-      if (this.renderer.setCamera)
-        this.renderer.setCamera({ targetX: this.viewCenterX ?? 0, targetY: this.viewCenterY ?? 0, targetZ: 0, distance: this.defaultCameraDistance });
+      const renderer = this.renderer;
+      if (!renderer || typeof renderer.setCamera !== "function")
+        return;
+      renderer.resetPanToCenter();
+      if (renderer.setCamera) {
+        renderer.setCamera({
+          // I think I need to offset the camera so that 0,0,0 is centered
+          targetX: 0,
+          //this.viewCenterX,
+          targetY: 0,
+          //this.viewCenterY,
+          targetZ: 0,
+          distance: this.defaultCameraDistance,
+          yaw: Math.PI / 6,
+          pitch: Math.PI / 8,
+          zoom: 1
+        });
+      }
     } catch (e) {
     }
   }
@@ -1827,7 +1577,7 @@ var GraphManager = class {
     this.followedNode = null;
   }
   resetCamera() {
-    this.initializeCamera;
+    this.initializeCamera();
   }
   animationLoop = (timestamp) => {
     if (!this.running)
@@ -1855,71 +1605,19 @@ var GraphManager = class {
     if (!this.renderer)
       return;
     this.renderer.resize(width, height);
-    const centerX = width / 2;
-    const centerY = height / 2;
-    if (this.simulation && this.simulation.setOptions) {
-      this.simulation.setOptions({ centerX, centerY });
-    }
   }
   updateCameraAnimation(now) {
     return;
-    if (!this.renderer)
-      return;
-    if (this.cameraAnimStart == null) {
-      if (this.isCameraFollowing && this.cameraFollowNode) {
-        const n = this.cameraFollowNode;
-        try {
-          const cam = this.renderer.getCamera();
-          const followAlpha = 0.12;
-          const curX = cam.targetX ?? 0;
-          const curY = cam.targetY ?? 0;
-          const curZ = cam.targetZ ?? 0;
-          const newX = curX + ((n.x ?? 0) - curX) * followAlpha;
-          const newY = curY + ((n.y ?? 0) - curY) * followAlpha;
-          const newZ = curZ + ((n.z ?? 0) - curZ) * followAlpha;
-          this.renderer.setCamera({ targetX: newX, targetY: newY, targetZ: newZ });
-        } catch (e) {
-        }
-      }
-      return;
-    }
-    const t = Math.min(1, (now - this.cameraAnimStart) / this.cameraAnimDuration);
-    const ease = 1 - (1 - t) * (1 - t);
-    const from = this.cameraAnimFrom || {};
-    const to = this.cameraAnimTo || {};
-    const lerp = (a, b) => a + (b - a) * ease;
-    const cameraState = {};
-    if (typeof from.targetX === "number" && typeof to.targetX === "number")
-      cameraState.targetX = lerp(from.targetX, to.targetX);
-    if (typeof from.targetY === "number" && typeof to.targetY === "number")
-      cameraState.targetY = lerp(from.targetY, to.targetY);
-    if (typeof from.targetZ === "number" && typeof to.targetZ === "number")
-      cameraState.targetZ = lerp(from.targetZ, to.targetZ);
-    if (typeof from.distance === "number" && typeof to.distance === "number")
-      cameraState.distance = lerp(from.distance, to.distance);
-    if (typeof from.yaw === "number" && typeof to.yaw === "number")
-      cameraState.yaw = lerp(from.yaw, to.yaw);
-    if (typeof from.pitch === "number" && typeof to.pitch === "number")
-      cameraState.pitch = lerp(from.pitch, to.pitch);
-    try {
-      this.renderer.setCamera(cameraState);
-    } catch (e) {
-    }
-    if (t >= 1) {
-      this.cameraAnimStart = null;
-      this.cameraAnimFrom = null;
-      this.cameraAnimTo = null;
-    }
   }
   async refreshGraph() {
     this.stopSimulation();
-    this.graph = await buildGraph(this.app, {
-      countDuplicates: Boolean(this.plugin.settings?.countDuplicateLinks),
-      usePinnedCenterNote: Boolean(this.plugin.settings?.usePinnedCenterNote),
-      pinnedCenterNotePath: String(this.plugin.settings?.pinnedCenterNotePath || ""),
-      useOutlinkFallback: Boolean(this.plugin.settings?.useOutlinkFallback)
-    });
+    this.graph = await buildGraph(this.app);
     const { nodes, edges } = this.filterGraph(this.graph);
+    const rect = this.containerEl.getBoundingClientRect();
+    const centerX = rect.width || 300;
+    const centerY = rect.height || 200;
+    this.viewCenterX = 0;
+    this.viewCenterY = 0;
     this.simulation = this.buildSimulation(nodes, edges);
     this.buildAdjacencyMap();
     this.startSimulation();
@@ -1935,15 +1633,15 @@ var GraphManager = class {
       this.simulation = null;
     }
   }
-  buildSimulation(nodes, edges, opts) {
-    const physics = this.plugin.settings.physics;
-    return createSimulation(nodes, edges, { ...physics, ...opts });
+  buildSimulation(nodes, edges) {
+    return createSimulation(nodes, edges);
   }
   startSimulation() {
     if (!this.simulation)
       return;
     try {
       this.simulation.start();
+      this.running = true;
     } catch {
     }
   }
@@ -2159,7 +1857,11 @@ var DEFAULT_SETTINGS = {
     centerZ: 0,
     mouseGravityEnabled: true,
     gravityRadius: 6,
-    gravityFallOff: 3
+    gravityFallOff: 3,
+    mouseGravityRadius: 15,
+    // change these settings later
+    mouseGravityStrength: 1,
+    mouseGravityExponent: 2
   },
   countDuplicateLinks: true,
   interaction: {
