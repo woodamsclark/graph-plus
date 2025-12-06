@@ -7,7 +7,7 @@ export async function buildGraph(app: App): Promise<GraphData> {
   const { nodes, nodeByPath } = createNoteNodes(files);
   const { edges, edgeSet    } = buildNoteEdgesFromResolvedLinks(app, nodeByPath);
 
-  if (DEFAULT_SETTINGS.showTags !== false) {
+  if (DEFAULT_SETTINGS.visuals.showTags !== false) {
     addTagNodesAndEdges(app, files, nodes, nodeByPath, edges, edgeSet);
   }
   computeNodeDegrees(nodes, nodeByPath, edges);
@@ -52,7 +52,7 @@ function buildNoteEdgesFromResolvedLinks(app: App, nodeByPath: Map<string, Graph
   const resolved: any       = (app.metadataCache as any).resolvedLinks || {};
   const edges: GraphEdge[]  = [];
   const edgeSet             = new Set<string>();
-  const countDuplicates     = Boolean(DEFAULT_SETTINGS.countDuplicateLinks);
+  const countDuplicates     = Boolean(DEFAULT_SETTINGS.visuals.countDuplicateLinks);
 
   for (const sourcePath of Object.keys(resolved)) {
     const targets = resolved[sourcePath] || {};

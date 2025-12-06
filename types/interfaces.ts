@@ -1,79 +1,96 @@
 import { App, TFile, CachedMetadata } from 'obsidian';
 
 export interface VisualSettings {
-  minNodeRadius        : number;
-  maxNodeRadius        : number;
-  minCenterAlpha       : number;
-  maxCenterAlpha       : number;
-  highlightDepth       : number;  // screen-space label reveal radius (× size)
-  focusSmoothing       : number;
-  nodeColor?           : string;   // optional color overrides (CSS color strings). If unset, theme vars are used.
-  nodeColorAlpha       : number;
-  tagColor?            : string;
-  tagColorAlpha        : number;
-  edgeColor?           : string;
-  edgeColorAlpha       : number;
-  labelColor?          : string;
-  labelColorAlpha      : number;
-  labelBaseFontSize    : number;
-  labelFadeRangePx     : number;
-  labelRadius          : number;
-  useInterfaceFont     : boolean;
+  minNodeRadius         : number;
+  maxNodeRadius         : number;
+  minCenterAlpha        : number;
+  maxCenterAlpha        : number;
+  highlightDepth        : number;  // screen-space label reveal radius (× size)
+  focusSmoothing        : number;
+  nodeColor?            : string;   // optional color overrides (CSS color strings). If unset, theme vars are used.
+  nodeColorAlpha        : number;
+  tagColor?             : string;
+  tagColorAlpha         : number;
+  edgeColor?            : string;
+  edgeColorAlpha        : number;
+  labelColor?           : string;
+  labelColorAlpha       : number;
+  labelBaseFontSize     : number;
+  labelFadeRangePx      : number;
+  labelRadius           : number;
+  useInterfaceFont      : boolean;
+  countDuplicateLinks   : boolean;
+  drawDoubleLines       : boolean;
+  showTags              : boolean;
+  usePinnedCenterNote   : boolean;
+  pinnedCenterNotePath  : string;
+  useOutlinkFallback    : boolean;
+  hoverScale            : number;
 }
 
 export interface PhysicsSettings {
-  repulsionStrength    : number;
-  springStrength       : number;
-  springLength         : number;
-  centerPull           : number;
-  damping              : number;
-  notePlaneStiffness   : number;
-  tagPlaneStiffness    : number;
-  centerX              : number;
-  centerY              : number;
-  centerZ              : number;
-  gravityRadius        : number;   // scales per-node screen radius
-  gravityFallOff       : number;   // falloff steepness
-  mouseGravityEnabled  : boolean;
-  mouseGravityRadius   : number;
-  mouseGravityStrength : number;
-  mouseGravityExponent : number;
+  repulsionStrength     : number;
+  springStrength        : number;
+  springLength          : number;
+  centerPull            : number;
+  damping               : number;
+  notePlaneStiffness    : number;
+  tagPlaneStiffness     : number;
+  centerX               : number;
+  centerY               : number;
+  centerZ               : number;
+  gravityRadius         : number;   // scales per-node screen radius
+  gravityFallOff        : number;   // falloff steepness
+  mouseGravityEnabled   : boolean;
+  mouseGravityRadius    : number;
+  mouseGravityStrength  : number;
+  mouseGravityExponent  : number;
+}
+
+export interface CameraSettings {
+  momentumScale         : number;
+  dragThreshold         : number;
+  rotateSensitivityX    : number;
+  rotateSensitivityY    : number;
+  cameraAnimDuration    : number;
+  // Initial camera state below
+  distance              : number;
+  yaw                   : number;
+  pitch                 : number;
+  targetX               : number;
+  targetY               : number;
+  targetZ               : number;
+  zoom                  : number;
+  offsetX               : number;
+  offsetY               : number;
 }
 
 export interface Settings {
-  visuals              : VisualSettings;
-  physics              : PhysicsSettings;
-  centerNodeId?        : string;
-  countDuplicateLinks  : boolean;
-  mutualLinkDoubleLine : boolean;
-  interaction: {
-    momentumScale      : number;
-    dragThreshold      : number; // in screen pixels
-    rotateSensitivityX : number;
-    rotateSensitivityY : number;
-  };
-  // persistent node positions keyed by vault name, then by file path
-  // settings.nodePositions[vaultId][filePath] = { x, y }
-  nodePositions?: Record<string, Record<string, { x: number; y: number; z?: number }>>;
-  showTags?: boolean;
-  usePinnedCenterNote?: boolean;
-  pinnedCenterNotePath?: string;
-  useOutlinkFallback?: boolean;
+  visuals               : VisualSettings;
+  physics               : PhysicsSettings;
+  camera                : CameraSettings;
+  renderer              : RendererSettings;
+  nodePositions?        : Record<string, Record<string, { x: number; y: number; z?: number }>>;
+  centerNodeId?         : string;
+  usePinnedCenterNote?  : boolean;
+  pinnedCenterNotePath? : string;
+  useOutlinkFallback?   : boolean;
 }
 
 export interface RendererSettings {
   canvas: HTMLCanvasElement;
-  settings: Settings
 }
 
-export interface Camera {
-  yaw: number;      // rotation around Y axis
-  pitch: number;    // rotation around X axis
-  distance: number; // camera distance from target
-  targetX: number;
-  targetY: number;
-  targetZ: number;
-  zoom: number;     // additional zoom scalar
+export interface CameraState {
+  yaw                   : number;      // rotation around Y axis
+  pitch                 : number;      // rotation around X axis
+  distance              : number;      // camera distance from target
+  targetX               : number;
+  targetY               : number;
+  targetZ               : number;
+  zoom                  : number;     // additional zoom scalar
+  offsetX               : number;
+  offsetY               : number;
 }
 
 export interface Renderer {
@@ -83,22 +100,20 @@ export interface Renderer {
   destroy(): void;
   setHoveredNode(nodeId: string | null): void;
   getNodeRadiusForHit(node: any): number;
-  setGlowSettings(visuals: VisualSettings): void;
   setHoverState(hoveredId: string | null, highlightedIds: Set<string>, mouseX: number, mouseY: number): void;
   zoomAt(screenX: number, screenY: number, factor: number): void;
-  panBy(screenDx: number, screenDy: number): void;
   resetPanToCenter?(): void;
   screenToWorld2D(screenX: number, screenY: number): { x: number; y: number };
-  screenToWorld3D?(screenX: number, screenY: number, zCam: number, cam: Camera): { x: number; y: number; z: number };
+  screenToWorld3D?(screenX: number, screenY: number, zCam: number, cam: CameraState): { x: number; y: number; z: number };
   setRenderOptions?(opts: { mutualDoubleLines?: boolean; showTags?: boolean }): void;
   // projection helpers for hit-testing
   getNodeScreenPosition?(node: any): { x: number; y: number };
   getProjectedNode?(node: any): { x: number; y: number; depth: number };
   getScale?(): number;
   // camera controls
-  setCamera?(cam: Partial<Camera>): void;
-  getCamera?(): Camera;
-  getCameraBasis?(cam: Camera): { right: { x: number; y: number; z: number }; up: { x: number; y: number; z: number }; forward: { x: number; y: number; z: number } };
+  setCamera?(cam: Partial<CameraState>): void;
+  getCamera?(): CameraState;
+  getCameraBasis?(cam: CameraState): { right: { x: number; y: number; z: number }; up: { x: number; y: number; z: number }; forward: { x: number; y: number; z: number } };
 }
 export type GraphNodeType = 'note' | 'tag';
 

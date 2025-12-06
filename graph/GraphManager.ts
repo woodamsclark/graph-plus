@@ -14,10 +14,6 @@ export class GraphManager {
   private containerEl                 : HTMLElement;
   private plugin?                     : Plugin;
   private running                     : boolean                                     = false;
-  private cameraAnimDuration          : number                                      = 300; // ms
-  private defaultCameraDistance       : number                                      = 1200;
-  private viewCenterX                 : number                                      = 0;
-  private viewCenterY                 : number                                      = 0;
   private canvas                      : HTMLCanvasElement                   | null  = null;
   private renderer                    : Renderer                            | null  = null;
   private graph                       : GraphData                           | null  = null;
@@ -25,14 +21,12 @@ export class GraphManager {
   private simulation?                 : Simulation                          | null  = null;
   private animationFrame              : number                              | null  = null;
   private lastTime                    : number                              | null  = null;
-  private cameraAnimStart             : number                              | null  = null;
   private previewPollTimer            : number                              | null  = null;
   private followedNode                : string                              | null  = null;
   private inputManager                : InputManager                        | null  = null;
   private cameraSnapShot              : any                                 | null  = null;
   private worldAnchorPoint            : { x: number; y: number; z: number } | null  = null;
   private screenAnchorPoint           : { x: number; y: number }            | null  = null;
-  private settings                    : Settings                            | null  = null;
   private openNodeFile                : ((node: any) => void)               | null  = null;
   private settingsUnregister          : (() => void)                        | null  = null;
   private saveNodePositionsDebounced  : (() => void)                        | null  = null;
@@ -49,12 +43,6 @@ export class GraphManager {
     this.canvas.style.width   = '100%';
     this.canvas.style.height  = '100%';
     this.canvas.tabIndex      = 0;
-    this.settings             = await (this.plugin as any).loadData();
-    const rect                = this.containerEl.getBoundingClientRect();
-    const centerX             = rect.width  / 2;
-    const centerY             = rect.height / 2;
-    this.viewCenterX          = 0;//centerX;
-    this.viewCenterY          = 0;//centerY;
     this.renderer             = createRenderer(this.canvas);
     this.containerEl.appendChild(this.canvas);
 
@@ -79,7 +67,7 @@ export class GraphManager {
       detectClickedNode : (screenX, screenY)          => { return this.nodeClicked(screenX, screenY); },
     });
 
-    const rawSaved    : any = (this.plugin as any).settings?.nodePositions || {};
+    const rawSaved    : any = (this.plugin as any).settings.nodePositions || {};
     let allSaved      : Record<string, Record<string, { x: number; y: number }>> = {};
     let savedPositions: Record<string,                { x: number; y: number }> = {};
     
@@ -145,13 +133,13 @@ export class GraphManager {
 
         if (renderer.setCamera) {
           renderer.setCamera({ // I think I need to offset the camera so that 0,0,0 is centered
-          targetX : 0,//this.viewCenterX,
-          targetY : 0,//this.viewCenterY,
-          targetZ : 0,
-          distance: this.defaultCameraDistance,
-          yaw     : Math.PI/6,
-          pitch   : Math.PI/8,
-          zoom    : 1,
+          targetX : DEFAULT_SETTINGS.camera.targetX,//this.viewCenterX,
+          targetY : DEFAULT_SETTINGS.camera.targetY,//this.viewCenterY,
+          targetZ : DEFAULT_SETTINGS.camera.targetZ,
+          distance: DEFAULT_SETTINGS.camera.distance,
+          yaw     : DEFAULT_SETTINGS.camera.yaw,
+          pitch   : DEFAULT_SETTINGS.camera.pitch,
+          zoom    : DEFAULT_SETTINGS.camera.zoom,
         });
         }
     } catch (e) {}
@@ -182,7 +170,7 @@ export class GraphManager {
     if (!this.renderer || !(this.renderer as any).screenToWorld3D) { console.log("GM startPan: No renderer or screenToWorld3D method"); return; }
     
     const renderer        = (this.renderer as any);
-    this.cameraSnapShot   = { ...renderer.getCamera() };
+    this.cameraSnapShot   = { ...renderer.getCamera() }; // check on this later
     const depth           = this.cameraSnapShot.distance;
 
     this.worldAnchorPoint = renderer.screenToWorld3D(screenX, screenY, depth, this.cameraSnapShot);
@@ -233,13 +221,13 @@ export class GraphManager {
     const camSnap               = this.cameraSnapShot;
     const depth                 = camSnap.distance;
 
-    const ROTATE_SENSITIVITY_X  = DEFAULT_SETTINGS.interaction.rotateSensitivityX;
-    const ROTATE_SENSITIVITY_Y  = DEFAULT_SETTINGS.interaction.rotateSensitivityY;
+    const rotateSensitivityX  = DEFAULT_SETTINGS.camera.rotateSensitivityX;
+    const rotateSensitivityY  = DEFAULT_SETTINGS.camera.rotateSensitivityY;
     const dx                    = screenX - this.screenAnchorPoint!.x;
     const dy                    = screenY - this.screenAnchorPoint!.y;
 
-    let yaw                     = camSnap.yaw   - dx * ROTATE_SENSITIVITY_X;
-    let pitch                   = camSnap.pitch - dy * ROTATE_SENSITIVITY_Y;
+    let yaw                     = camSnap.yaw   - dx * rotateSensitivityX;
+    let pitch                   = camSnap.pitch - dy * rotateSensitivityY;
 
     const maxPitch              = Math.PI / 2;// - 0.05;
     const minPitch              = -maxPitch;
@@ -372,11 +360,6 @@ export class GraphManager {
     this.graph = await buildGraph (this.app);
 
     const { nodes, edges }  = this.filterGraph    (this.graph);
-    const rect    = this.containerEl.getBoundingClientRect();
-    const centerX = (rect.width  || 300);// / 2;
-    const centerY = (rect.height || 200);// / 2;
-    this.viewCenterX = 0;//centerX;
-    this.viewCenterY = 0;//centerY;
     this.simulation         = this.buildSimulation(nodes, edges);
 
     this.buildAdjacencyMap(); // rebuild adjacency map after graph refresh or showTags changes

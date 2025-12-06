@@ -33,7 +33,7 @@ async function buildGraph(app) {
   const files = app.vault.getMarkdownFiles();
   const { nodes, nodeByPath } = createNoteNodes(files);
   const { edges, edgeSet } = buildNoteEdgesFromResolvedLinks(app, nodeByPath);
-  if (DEFAULT_SETTINGS.showTags !== false) {
+  if (DEFAULT_SETTINGS.visuals.showTags !== false) {
     addTagNodesAndEdges(app, files, nodes, nodeByPath, edges, edgeSet);
   }
   computeNodeDegrees(nodes, nodeByPath, edges);
@@ -75,7 +75,7 @@ function buildNoteEdgesFromResolvedLinks(app, nodeByPath) {
   const resolved = app.metadataCache.resolvedLinks || {};
   const edges = [];
   const edgeSet = /* @__PURE__ */ new Set();
-  const countDuplicates = Boolean(DEFAULT_SETTINGS.countDuplicateLinks);
+  const countDuplicates = Boolean(DEFAULT_SETTINGS.visuals.countDuplicateLinks);
   for (const sourcePath of Object.keys(resolved)) {
     const targets = resolved[sourcePath] || {};
     for (const targetPath of Object.keys(targets)) {
@@ -299,26 +299,26 @@ function createRenderer(canvas) {
     return { r: 102, g: 204, b: 255 };
   }
   let scale = 1;
-  let offsetX = 0;
-  let offsetY = 0;
   let camera = {
-    yaw: Math.PI / 6,
-    pitch: Math.PI / 8,
-    distance: 1200,
-    targetX: 0,
-    targetY: 0,
-    targetZ: 0,
-    zoom: 1
+    yaw: DEFAULT_SETTINGS.camera.yaw,
+    pitch: DEFAULT_SETTINGS.camera.pitch,
+    distance: DEFAULT_SETTINGS.camera.distance,
+    targetX: DEFAULT_SETTINGS.camera.targetX,
+    targetY: DEFAULT_SETTINGS.camera.targetY,
+    targetZ: DEFAULT_SETTINGS.camera.targetZ,
+    zoom: DEFAULT_SETTINGS.camera.zoom,
+    offsetX: DEFAULT_SETTINGS.camera.offsetX,
+    offsetY: DEFAULT_SETTINGS.camera.offsetY
   };
   const baseCameraDistance = camera.distance || 1200;
   function getZoomScale() {
     const d = camera.distance || baseCameraDistance;
     return baseCameraDistance / Math.max(1e-6, d);
   }
-  function setCamera(newCamera) {
+  function setCameraState(newCamera) {
     camera = { ...camera, ...newCamera };
   }
-  function getCamera() {
+  function getCameraState() {
     return camera;
   }
   function projectWorld(node) {
@@ -380,10 +380,14 @@ function createRenderer(canvas) {
       maxDegree = 0;
   }
   function resize(width, height) {
+    const oldWidth = canvas.width;
+    const oldHeight = canvas.height;
     canvas.width = Math.max(1, Math.floor(width));
     canvas.height = Math.max(1, Math.floor(height));
     canvas.style.width = "100%";
     canvas.style.height = "100%";
+    camera.offsetX += (canvas.width - oldWidth) / 2;
+    camera.offsetY += (canvas.height - oldHeight) / 2;
     render();
   }
   function getDegreeNormalized(node) {
@@ -593,7 +597,7 @@ function createRenderer(canvas) {
         resolvedMonoFontFamily = resolvedMonoFontFamily || "monospace";
     }
     context.save();
-    context.translate(offsetX, offsetY);
+    context.translate(camera.offsetX, camera.offsetY);
     context.scale(scale, scale);
     function isNodeTargetFocused(nodeId) {
       if (!hoveredNodeId)
@@ -852,12 +856,12 @@ function createRenderer(canvas) {
     mouseY = my || 0;
   }
   function screenToWorld2D(screenX, screenY) {
-    return { x: (screenX - offsetX) / scale, y: (screenY - offsetY) / scale };
+    return { x: (screenX - camera.offsetX) / scale, y: (screenY - camera.offsetY) / scale };
   }
   function screenToWorld3D(sx, sy, zCam, cam) {
-    const { yaw, pitch, distance, targetX, targetY, targetZ, zoom } = cam || getCamera();
-    const px = (sx - offsetX) / scale;
-    const py = (sy - offsetY) / scale;
+    const { yaw, pitch, distance, targetX, targetY, targetZ, zoom } = cam || getCameraState();
+    const px = (sx - camera.offsetX) / scale;
+    const py = (sy - camera.offsetY) / scale;
     const focal = 800;
     const perspective = zoom * focal / (zCam || 1e-4);
     const xCam = px / perspective;
@@ -877,11 +881,11 @@ function createRenderer(canvas) {
   }
   function getNodeScreenPosition(node) {
     const p = projectWorld(node);
-    return { x: p.x * scale + offsetX, y: p.y * scale + offsetY };
+    return { x: p.x * scale + camera.offsetX, y: p.y * scale + camera.offsetY };
   }
   function getProjectedNode(node) {
     const p = projectWorld(node);
-    return { x: p.x * scale + offsetX, y: p.y * scale + offsetY, depth: p.depth };
+    return { x: p.x * scale + camera.offsetX, y: p.y * scale + camera.offsetY, depth: p.depth };
   }
   function getScale() {
     return scale;
@@ -916,27 +920,27 @@ function createRenderer(canvas) {
   function zoomAt(screenX, screenY, factor) {
     if (factor <= 0)
       return;
-    const cam = getCamera();
+    const cam = getCameraState();
     let newDistance = cam.distance / factor;
     newDistance = Math.max(200, Math.min(5e3, newDistance));
-    setCamera({ distance: newDistance });
+    setCameraState({ distance: newDistance });
     render();
   }
   function panBy(screenDx, screenDy) {
-    const cam = getCamera();
+    const cam = getCameraState();
     const SCALE_REFERENCE_DISTANCE = camera.distance;
     const currentScale = SCALE_REFERENCE_DISTANCE / cam.distance;
     const worldDx = screenDx / currentScale;
     const worldDy = screenDy / currentScale;
-    offsetX += worldDx;
-    offsetY += worldDy;
+    camera.offsetX += worldDx;
+    camera.offsetY += worldDy;
     render();
   }
   function resetPanToCenter() {
     const w = canvas.width || 1;
     const h = canvas.height || 1;
-    offsetX = w / 2;
-    offsetY = h / 2;
+    camera.offsetX = w / 2;
+    camera.offsetY = h / 2;
     render();
   }
   return {
@@ -957,8 +961,8 @@ function createRenderer(canvas) {
     getNodeScreenPosition,
     getProjectedNode,
     getScale,
-    setCamera,
-    getCamera,
+    setCamera: setCameraState,
+    getCamera: getCameraState,
     getCameraBasis
   };
 }
@@ -1336,11 +1340,6 @@ var GraphManager = class {
   containerEl;
   plugin;
   running = false;
-  cameraAnimDuration = 300;
-  // ms
-  defaultCameraDistance = 1200;
-  viewCenterX = 0;
-  viewCenterY = 0;
   canvas = null;
   renderer = null;
   graph = null;
@@ -1348,14 +1347,12 @@ var GraphManager = class {
   simulation = null;
   animationFrame = null;
   lastTime = null;
-  cameraAnimStart = null;
   previewPollTimer = null;
   followedNode = null;
   inputManager = null;
   cameraSnapShot = null;
   worldAnchorPoint = null;
   screenAnchorPoint = null;
-  settings = null;
   openNodeFile = null;
   settingsUnregister = null;
   saveNodePositionsDebounced = null;
@@ -1370,12 +1367,6 @@ var GraphManager = class {
     this.canvas.style.width = "100%";
     this.canvas.style.height = "100%";
     this.canvas.tabIndex = 0;
-    this.settings = await this.plugin.loadData();
-    const rect = this.containerEl.getBoundingClientRect();
-    const centerX = rect.width / 2;
-    const centerY = rect.height / 2;
-    this.viewCenterX = 0;
-    this.viewCenterY = 0;
     this.renderer = createRenderer(this.canvas);
     this.containerEl.appendChild(this.canvas);
     this.graph = await buildGraph(this.app);
@@ -1399,7 +1390,7 @@ var GraphManager = class {
         return this.nodeClicked(screenX, screenY);
       }
     });
-    const rawSaved = this.plugin.settings?.nodePositions || {};
+    const rawSaved = this.plugin.settings.nodePositions || {};
     let allSaved = {};
     let savedPositions = {};
     if (rawSaved && typeof rawSaved === "object") {
@@ -1458,15 +1449,15 @@ var GraphManager = class {
       if (renderer.setCamera) {
         renderer.setCamera({
           // I think I need to offset the camera so that 0,0,0 is centered
-          targetX: 0,
+          targetX: DEFAULT_SETTINGS.camera.targetX,
           //this.viewCenterX,
-          targetY: 0,
+          targetY: DEFAULT_SETTINGS.camera.targetY,
           //this.viewCenterY,
-          targetZ: 0,
-          distance: this.defaultCameraDistance,
-          yaw: Math.PI / 6,
-          pitch: Math.PI / 8,
-          zoom: 1
+          targetZ: DEFAULT_SETTINGS.camera.targetZ,
+          distance: DEFAULT_SETTINGS.camera.distance,
+          yaw: DEFAULT_SETTINGS.camera.yaw,
+          pitch: DEFAULT_SETTINGS.camera.pitch,
+          zoom: DEFAULT_SETTINGS.camera.zoom
         });
       }
     } catch (e) {
@@ -1542,12 +1533,12 @@ var GraphManager = class {
     const renderer = this.renderer;
     const camSnap = this.cameraSnapShot;
     const depth = camSnap.distance;
-    const ROTATE_SENSITIVITY_X = DEFAULT_SETTINGS.interaction.rotateSensitivityX;
-    const ROTATE_SENSITIVITY_Y = DEFAULT_SETTINGS.interaction.rotateSensitivityY;
+    const rotateSensitivityX = DEFAULT_SETTINGS.camera.rotateSensitivityX;
+    const rotateSensitivityY = DEFAULT_SETTINGS.camera.rotateSensitivityY;
     const dx = screenX - this.screenAnchorPoint.x;
     const dy = screenY - this.screenAnchorPoint.y;
-    let yaw = camSnap.yaw - dx * ROTATE_SENSITIVITY_X;
-    let pitch = camSnap.pitch - dy * ROTATE_SENSITIVITY_Y;
+    let yaw = camSnap.yaw - dx * rotateSensitivityX;
+    let pitch = camSnap.pitch - dy * rotateSensitivityY;
     const maxPitch = Math.PI / 2;
     const minPitch = -maxPitch;
     if (pitch > maxPitch)
@@ -1613,11 +1604,6 @@ var GraphManager = class {
     this.stopSimulation();
     this.graph = await buildGraph(this.app);
     const { nodes, edges } = this.filterGraph(this.graph);
-    const rect = this.containerEl.getBoundingClientRect();
-    const centerX = rect.width || 300;
-    const centerY = rect.height || 200;
-    this.viewCenterX = 0;
-    this.viewCenterY = 0;
     this.simulation = this.buildSimulation(nodes, edges);
     this.buildAdjacencyMap();
     this.startSimulation();
@@ -1842,7 +1828,13 @@ var DEFAULT_SETTINGS = {
     labelColorAlpha: 1,
     labelRadius: 30,
     useInterfaceFont: true,
-    edgeColorAlpha: 0.1
+    edgeColorAlpha: 0.1,
+    countDuplicateLinks: true,
+    mutualLinkDoubleLine: true,
+    showTags: true,
+    usePinnedCenterNote: false,
+    pinnedCenterNotePath: "",
+    useOutlinkFallback: false
   },
   physics: {
     repulsionStrength: 5e3,
@@ -1863,19 +1855,27 @@ var DEFAULT_SETTINGS = {
     mouseGravityStrength: 1,
     mouseGravityExponent: 2
   },
-  countDuplicateLinks: true,
-  interaction: {
+  camera: {
     momentumScale: 0.12,
     dragThreshold: 4,
     rotateSensitivityX: 5e-3,
-    rotateSensitivityY: 5e-3
+    rotateSensitivityY: 5e-3,
+    cameraAnimDuration: 300,
+    // initial camera state below. Not UI Settings
+    yaw: Math.PI / 6,
+    pitch: Math.PI / 8,
+    distance: 1200,
+    targetX: 0,
+    targetY: 0,
+    targetZ: 0,
+    zoom: 1,
+    offsetX: 0,
+    offsetY: 0
   },
-  nodePositions: {},
-  mutualLinkDoubleLine: true,
-  showTags: true,
-  usePinnedCenterNote: false,
-  pinnedCenterNotePath: "",
-  useOutlinkFallback: false
+  renderer: {
+    canvas: document.createElement("canvas")
+  },
+  nodePositions: {}
 };
 var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
   settings = DEFAULT_SETTINGS;
@@ -2521,16 +2521,16 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       }
     });
-    new import_obsidian2.Setting(containerEl).setName("Count duplicate links").setDesc("If enabled, multiple links between the same two files will be counted when computing in/out degrees.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.countDuplicateLinks)).onChange(async (v) => {
-      this.plugin.settings.countDuplicateLinks = Boolean(v);
+    new import_obsidian2.Setting(containerEl).setName("Count duplicate links").setDesc("If enabled, multiple links between the same two files will be counted when computing in/out degrees.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.visuals.countDuplicateLinks)).onChange(async (v) => {
+      this.plugin.settings.visuals.countDuplicateLinks = Boolean(v);
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Double-line mutual links").setDesc("When enabled, mutual links (A \u2194 B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.mutualLinkDoubleLine)).onChange(async (v) => {
-      this.plugin.settings.mutualLinkDoubleLine = Boolean(v);
+    new import_obsidian2.Setting(containerEl).setName("Double-line mutual links").setDesc("When enabled, mutual links (A \u2194 B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.visuals.mutualLinkDoubleLine)).onChange(async (v) => {
+      this.plugin.settings.visuals.mutualLinkDoubleLine = Boolean(v);
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Show tag nodes").setDesc("Toggle visibility of tag nodes and their edges in the graph.").addToggle((t) => t.setValue(this.plugin.settings.showTags !== false).onChange(async (v) => {
-      this.plugin.settings.showTags = Boolean(v);
+    new import_obsidian2.Setting(containerEl).setName("Show tag nodes").setDesc("Toggle visibility of tag nodes and their edges in the graph.").addToggle((t) => t.setValue(this.plugin.settings.visuals.showTags !== false).onChange(async (v) => {
+      this.plugin.settings.visuals.showTags = Boolean(v);
       await this.plugin.saveSettings();
     }));
     const notePlaneUi = Math.min(1, Math.max(0, (phys.notePlaneStiffness ?? DEFAULT_SETTINGS.physics.notePlaneStiffness) / 0.02));
