@@ -1,6 +1,7 @@
 import { App, TFile, CachedMetadata } from 'obsidian';
 
 export interface VisualSettings {
+  // user defined//updated settings
   minNodeRadius         : number;
   maxNodeRadius         : number;
   minCenterAlpha        : number;
@@ -29,6 +30,7 @@ export interface VisualSettings {
 }
 
 export interface PhysicsSettings {
+  //user defined/updated settings
   repulsionStrength     : number;
   springStrength        : number;
   springLength          : number;
@@ -36,33 +38,36 @@ export interface PhysicsSettings {
   damping               : number;
   notePlaneStiffness    : number;
   tagPlaneStiffness     : number;
-  centerX               : number;
-  centerY               : number;
-  centerZ               : number;
   gravityRadius         : number;   // scales per-node screen radius
   gravityFallOff        : number;   // falloff steepness
   mouseGravityEnabled   : boolean;
   mouseGravityRadius    : number;
   mouseGravityStrength  : number;
-  mouseGravityExponent  : number;
+  mouseGravityExponent  : number;  
+  // not changeable by user, maybe move these elsewhere conceptually
+  readonly worldCenterX : number;
+  readonly worldCenterY : number;
+  readonly worldCenterZ : number;
+
 }
 
 export interface CameraSettings {
+  // user defined/updated settings
   momentumScale         : number;
   dragThreshold         : number;
   rotateSensitivityX    : number;
   rotateSensitivityY    : number;
   cameraAnimDuration    : number;
-  // Initial camera state below
-  distance              : number;
-  yaw                   : number;
-  pitch                 : number;
-  targetX               : number;
-  targetY               : number;
-  targetZ               : number;
-  zoom                  : number;
-  offsetX               : number;
-  offsetY               : number;
+  readonly state: { // initial camera state
+    readonly distance              : number;
+    readonly yaw                   : number;
+    readonly pitch                 : number;
+    readonly targetX               : number;
+    readonly targetY               : number;
+    readonly targetZ               : number;
+    readonly offsetX               : number;
+    readonly offsetY               : number;
+  };
 }
 
 export interface Settings {
@@ -88,7 +93,6 @@ export interface CameraState {
   targetX               : number;
   targetY               : number;
   targetZ               : number;
-  zoom                  : number;     // additional zoom scalar
   offsetX               : number;
   offsetY               : number;
 }
@@ -102,7 +106,6 @@ export interface Renderer {
   getNodeRadiusForHit(node: any): number;
   setHoverState(hoveredId: string | null, highlightedIds: Set<string>, mouseX: number, mouseY: number): void;
   zoomAt(screenX: number, screenY: number, factor: number): void;
-  resetPanToCenter?(): void;
   screenToWorld2D(screenX: number, screenY: number): { x: number; y: number };
   screenToWorld3D?(screenX: number, screenY: number, zCam: number, cam: CameraState): { x: number; y: number; z: number };
   setRenderOptions?(opts: { mutualDoubleLines?: boolean; showTags?: boolean }): void;
@@ -111,8 +114,10 @@ export interface Renderer {
   getProjectedNode?(node: any): { x: number; y: number; depth: number };
   getScale?(): number;
   // camera controls
-  setCamera?(cam: Partial<CameraState>): void;
-  getCamera?(): CameraState;
+  resetCamera?(): void;
+  recenterCamera?(): void;
+  setCameraState?(cam: Partial<CameraState>): void;
+  getCameraState?(): CameraState;
   getCameraBasis?(cam: CameraState): { right: { x: number; y: number; z: number }; up: { x: number; y: number; z: number }; forward: { x: number; y: number; z: number } };
 }
 export type GraphNodeType = 'note' | 'tag';

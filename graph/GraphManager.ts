@@ -5,7 +5,7 @@ import { createRenderer } from './renderer.ts';
 import { createSimulation } from './simulation.ts';
 import { debounce } from '../utils/debounce.ts';
 import { Settings, Renderer, GraphData, GraphNode, GraphEdge, Simulation} from '../types/interfaces.ts';
-import { DEFAULT_SETTINGS } from '../main.ts';
+import { GRAPH_SETTINGS } from '../main.ts';
 import { InputManager } from './InputManager.ts';
 
 // This class manages interactions between the graph data, simulation, and renderer.
@@ -39,16 +39,16 @@ export class GraphManager {
 
   async init(): Promise<void> {
     const vaultId             = this.app.vault.getName();
-    this.canvas               = document.createElement('canvas');
-    this.canvas.style.width   = '100%';
-    this.canvas.style.height  = '100%';
-    this.canvas.tabIndex      = 0;
-    this.renderer             = createRenderer(this.canvas);
-    this.containerEl.appendChild(this.canvas);
+    const canvas              = document.createElement('canvas');
+    canvas.style.width        = '100%';
+    canvas.style.height       = '100%';
+    canvas.tabIndex           = 0;
+    this.renderer             = createRenderer(canvas);
+    this.containerEl.appendChild(canvas);
 
     this.graph = await buildGraph(this.app);
 
-    this.inputManager = new InputManager(this.canvas, {
+    this.inputManager = new InputManager(canvas, {
       onOrbitStart      : (dx, dy)                    => this.startOrbit(dx, dy),
       onOrbitMove       : (dx, dy)                    => this.updateOrbit(dx, dy),
       onOrbitEnd        : ()                          => this.endOrbit(),
@@ -101,7 +101,7 @@ export class GraphManager {
 
     this.buildAdjacencyMap();
     this.refreshGraph();
-    this.initializeCamera();
+    this.resetCamera();
 
     this.lastTime         = null;
     this.animationFrame   = requestAnimationFrame(this.animationLoop);
@@ -123,26 +123,6 @@ export class GraphManager {
       }
     }
     this.adjacency = adjacency;
-  }
-
-  private initializeCamera() {
-    try { // Center camera on initial load same as a right-click origin focus would do.
-      const renderer = (this.renderer as any);
-      if (!renderer || typeof renderer.setCamera !== 'function') return;
-        renderer.resetPanToCenter();
-
-        if (renderer.setCamera) {
-          renderer.setCamera({ // I think I need to offset the camera so that 0,0,0 is centered
-          targetX : DEFAULT_SETTINGS.camera.targetX,//this.viewCenterX,
-          targetY : DEFAULT_SETTINGS.camera.targetY,//this.viewCenterY,
-          targetZ : DEFAULT_SETTINGS.camera.targetZ,
-          distance: DEFAULT_SETTINGS.camera.distance,
-          yaw     : DEFAULT_SETTINGS.camera.yaw,
-          pitch   : DEFAULT_SETTINGS.camera.pitch,
-          zoom    : DEFAULT_SETTINGS.camera.zoom,
-        });
-        }
-    } catch (e) {}
   }
 
   public updateHover (screenX: number, screenY: number) {
@@ -170,7 +150,7 @@ export class GraphManager {
     if (!this.renderer || !(this.renderer as any).screenToWorld3D) { console.log("GM startPan: No renderer or screenToWorld3D method"); return; }
     
     const renderer        = (this.renderer as any);
-    this.cameraSnapShot   = { ...renderer.getCamera() }; // check on this later
+    this.cameraSnapShot   = { ...renderer.getCameraState() }; // check on this later
     const depth           = this.cameraSnapShot.distance;
 
     this.worldAnchorPoint = renderer.screenToWorld3D(screenX, screenY, depth, this.cameraSnapShot);
@@ -190,8 +170,8 @@ export class GraphManager {
     const dy = currentWorld.y - (this.worldAnchorPoint.y as any);
     const dz = currentWorld.z - (this.worldAnchorPoint.z as any);
 
-    const camera = renderer.getCamera();
-    (this.renderer as any) .setCamera({
+    const camera = renderer.getCameraState();
+    (this.renderer as any) .setCameraState({
         targetX: camera.targetX - dx,
         targetY: camera.targetY - dy,
         targetZ: camera.targetZ - dz,
@@ -208,7 +188,7 @@ export class GraphManager {
     if (!this.renderer) { console.log("GM startOrbit: No renderer or screenToWorld3D method"); return; }
     // Similar to startPan but may differ later
     const renderer              = (this.renderer as any);
-    this.cameraSnapShot         = { ...renderer.getCamera() };
+    this.cameraSnapShot         = { ...renderer.getCameraState() };
     const depth                 = this.cameraSnapShot.distance;
 
     this.screenAnchorPoint = { x: screenX, y: screenY };
@@ -221,8 +201,8 @@ export class GraphManager {
     const camSnap               = this.cameraSnapShot;
     const depth                 = camSnap.distance;
 
-    const rotateSensitivityX  = DEFAULT_SETTINGS.camera.rotateSensitivityX;
-    const rotateSensitivityY  = DEFAULT_SETTINGS.camera.rotateSensitivityY;
+    const rotateSensitivityX  = GRAPH_SETTINGS.camera.rotateSensitivityX;
+    const rotateSensitivityY  = GRAPH_SETTINGS.camera.rotateSensitivityY;
     const dx                    = screenX - this.screenAnchorPoint!.x;
     const dy                    = screenY - this.screenAnchorPoint!.y;
 
@@ -234,7 +214,7 @@ export class GraphManager {
     if (pitch > maxPitch) pitch = maxPitch;
     if (pitch < minPitch) pitch = minPitch;
 
-    renderer.setCamera({yaw,pitch,});
+    renderer.setCameraState({yaw,pitch,});
   }
 
   public endOrbit () {
@@ -262,9 +242,6 @@ export class GraphManager {
     this.followedNode = null;
   }
 
-  public resetCamera() {
-    this.initializeCamera();
-  }
 
   private animationLoop = (timestamp: number) => {
     if (!this.running) return;
@@ -300,7 +277,7 @@ export class GraphManager {
     }
     const rendererAny = this.renderer as any;
     if (rendererAny && typeof rendererAny.setCamera === 'function') {
-      const cam = rendererAny.getCamera ? rendererAny.getCamera() : {};
+      const cam = rendererAny.getCameraState ? rendererAny.getCameraState() : {};
       rendererAny.setCamera({
         targetX: centerX,
         targetY: centerY,
@@ -310,6 +287,16 @@ export class GraphManager {
    this.renderer.resize(width, height);
   }
 
+  public resetCamera() {
+    if (!this.renderer) return;
+    try {
+      const renderer = (this.renderer as any);
+      if (renderer.resetCamera) {
+        renderer.resetCamera();
+      }
+    } catch (e) {}  
+  }
+
   private updateCameraAnimation(now: number) { return; // smooths camera animations. Revist later
   /*  if (!this.renderer) return;
     if (this.cameraAnimStart == null) {
@@ -317,7 +304,7 @@ export class GraphManager {
       if (this.isCameraFollowing && this.cameraFollowNode) {
         const n = this.cameraFollowNode;
         try {
-          const cam         = (this.renderer as any).getCamera();
+          const cam         = (this.renderer as any).getCameraState();
           const followAlpha = 0.12; // smoothing factor per frame (0-1)
           const curX        = cam.targetX ?? 0;
           const curY        = cam.targetY ?? 0;
@@ -325,7 +312,7 @@ export class GraphManager {
           const newX        = curX + ((n.x ?? 0) - curX) * followAlpha;
           const newY        = curY + ((n.y ?? 0) - curY) * followAlpha;
           const newZ        = curZ + ((n.z ?? 0) - curZ) * followAlpha;
-          (this.renderer as any).setCamera({ targetX: newX, targetY: newY, targetZ: newZ });
+          (this.renderer as any).setCameraState({ targetX: newX, targetY: newY, targetZ: newZ });
         } catch (e) {}
       }
       return;
@@ -343,7 +330,7 @@ export class GraphManager {
     if (typeof from.distance  === 'number' && typeof to.distance  === 'number')   cameraState.distance  = lerp(from.distance, to.distance);
     if (typeof from.yaw       === 'number' && typeof to.yaw       === 'number')   cameraState.yaw       = lerp(from.yaw, to.yaw);
     if (typeof from.pitch     === 'number' && typeof to.pitch === 'number') cameraState.pitch = lerp(from.pitch, to.pitch);
-    try { (this.renderer as any).setCamera(cameraState); } catch (e) {}
+    try { (this.renderer as any).setCameraState(cameraState); } catch (e) {}
     // At end of animation, clear anim state but keep follow active so camera follows node
     if (t >= 1) {
       this.cameraAnimStart  = null;
@@ -402,8 +389,8 @@ export class GraphManager {
     this.previewPollTimer         = null;
     this.renderer?.destroy();
 
-    if (this.canvas && this.canvas.parentElement) this.canvas.parentElement.removeChild(this.canvas);
-    this.canvas                   = null;
+    //if (this.renderer.canvas && this.renderer.canvas.parentElement) this.renderer.canvas.parentElement.removeChild(this.renderer.canvas);
+    //this.renderer.canvas                   = null;
     this.renderer                 = null;
     this.graph                    = null;
     if (this.simulation)          { 

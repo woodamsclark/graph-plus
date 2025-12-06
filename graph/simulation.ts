@@ -1,13 +1,13 @@
 import { GraphNode, GraphEdge, Simulation } from '../types/interfaces.ts';
-import { DEFAULT_SETTINGS } from '../main';
+import { GRAPH_SETTINGS } from '../main';
 
 
 export function createSimulation(nodes: GraphNode[], edges: GraphEdge[]) {
   // If center not provided, compute bounding-box center from node positions
   let centerNode: GraphNode | null = null;
 
-  if (DEFAULT_SETTINGS.centerNodeId && nodes) {
-    centerNode = nodes.find((n) => n.id === DEFAULT_SETTINGS.centerNodeId) || null;
+  if (GRAPH_SETTINGS.centerNodeId && nodes) {
+    centerNode = nodes.find((n) => n.id === GRAPH_SETTINGS.centerNodeId) || null;
   }
 
   let running = false;
@@ -37,7 +37,7 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[]) {
         // minimum separation to avoid extreme forces
         const minDist = 40;
         const effectiveDist = Math.max(dist, minDist);
-        const force = DEFAULT_SETTINGS.physics.repulsionStrength / (effectiveDist * effectiveDist);
+        const force = GRAPH_SETTINGS.physics.repulsionStrength / (effectiveDist * effectiveDist);
         const fx = (dx / dist) * force;
         const fy = (dy / dist) * force;
         const fz = (dz / dist) * force;
@@ -65,8 +65,8 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[]) {
       const dy = (b.y - a.y);
       const dz = ((b.z || 0) - (a.z || 0));
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.0001;
-      const displacement = dist - (DEFAULT_SETTINGS.physics.springLength || 0);
-      const f = (DEFAULT_SETTINGS.physics.springStrength || 0) * Math.tanh(displacement / 50);
+      const displacement = dist - (GRAPH_SETTINGS.physics.springLength || 0);
+      const f = (GRAPH_SETTINGS.physics.springStrength || 0) * Math.tanh(displacement / 50);
       const fx = (dx / dist) * f;
       const fy = (dy / dist) * f;
       const fz = (dz / dist) * f;
@@ -84,33 +84,33 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[]) {
   }
 
   function applyCentering() {
-    if (DEFAULT_SETTINGS.physics.centerPull <= 0) return;
-    const cx = DEFAULT_SETTINGS.physics.centerX;
-    const cy = DEFAULT_SETTINGS.physics.centerY;
-    const cz = DEFAULT_SETTINGS.physics.centerZ;
+    if (GRAPH_SETTINGS.physics.centerPull <= 0) return;
+    const cx = GRAPH_SETTINGS.physics.worldCenterX;
+    const cy = GRAPH_SETTINGS.physics.worldCenterY;
+    const cz = GRAPH_SETTINGS.physics.worldCenterZ;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
       const dx = (cx - n.x);
       const dy = (cy - n.y);
       const dz = (cz - n.z);
-      n.vx = (n.vx || 0) + dx * DEFAULT_SETTINGS.physics.centerPull;
-      n.vy = (n.vy || 0) + dy * DEFAULT_SETTINGS.physics.centerPull;
-      n.vz = (n.vz || 0) + dz * DEFAULT_SETTINGS.physics.centerPull;
+      n.vx = (n.vx || 0) + dx * GRAPH_SETTINGS.physics.centerPull;
+      n.vy = (n.vy || 0) + dy * GRAPH_SETTINGS.physics.centerPull;
+      n.vz = (n.vz || 0) + dz * GRAPH_SETTINGS.physics.centerPull;
     }
     if (centerNode) {
-      const dx = DEFAULT_SETTINGS.physics.centerX - centerNode.x;
-      const dy = DEFAULT_SETTINGS.physics.centerY - centerNode.y;
-      const dz = DEFAULT_SETTINGS.physics.centerZ - centerNode.z;
-      centerNode.vx = (centerNode.vx || 0) + dx * DEFAULT_SETTINGS.physics.centerPull * 0.5;
-      centerNode.vy = (centerNode.vy || 0) + dy * DEFAULT_SETTINGS.physics.centerPull * 0.5;
-      centerNode.vz = (centerNode.vz || 0) + dz * DEFAULT_SETTINGS.physics.centerPull * 0.5;
+      const dx = GRAPH_SETTINGS.physics.worldCenterX - centerNode.x;
+      const dy = GRAPH_SETTINGS.physics.worldCenterY - centerNode.y;
+      const dz = GRAPH_SETTINGS.physics.worldCenterZ - centerNode.z;
+      centerNode.vx = (centerNode.vx || 0) + dx * GRAPH_SETTINGS.physics.centerPull * 0.5;
+      centerNode.vy = (centerNode.vy || 0) + dy * GRAPH_SETTINGS.physics.centerPull * 0.5;
+      centerNode.vz = (centerNode.vz || 0) + dz * GRAPH_SETTINGS.physics.centerPull * 0.5;
     }
   }
 
   function applyDamping() {
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
-        const d = Math.max(0, Math.min(1, DEFAULT_SETTINGS.physics.damping));
+        const d = Math.max(0, Math.min(1, GRAPH_SETTINGS.physics.damping));
         n.vx = (n.vx ?? 0) * (1 - d);
         n.vy = (n.vy ?? 0) * (1 - d);
         n.vz = (n.vz ?? 0) * (1 - d);
@@ -149,12 +149,12 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[]) {
   }
 
   function applyPlaneConstraints() {
-    const noteK = DEFAULT_SETTINGS.physics.notePlaneStiffness;
-    const tagK  = DEFAULT_SETTINGS.physics.tagPlaneStiffness;
+    const noteK = GRAPH_SETTINGS.physics.notePlaneStiffness;
+    const tagK  = GRAPH_SETTINGS.physics.tagPlaneStiffness;
     if (noteK === 0 && tagK === 0) return;
     // Pull notes/tags toward the simulation center (not always world origin)
-    const targetZ = DEFAULT_SETTINGS.physics.centerZ;
-    const targetX = DEFAULT_SETTINGS.physics.centerX;
+    const targetZ = GRAPH_SETTINGS.physics.worldCenterZ;
+    const targetX = GRAPH_SETTINGS.physics.worldCenterX;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
       if ((n as any).type === 'note' && noteK > 0) {
@@ -168,9 +168,9 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[]) {
   }
 
   function applyCenterNodeLock() {
-    const cx = DEFAULT_SETTINGS.physics.centerX;
-    const cy = DEFAULT_SETTINGS.physics.centerY;
-    const cz = DEFAULT_SETTINGS.physics.centerZ;
+    const cx = GRAPH_SETTINGS.physics.worldCenterX;
+    const cy = GRAPH_SETTINGS.physics.worldCenterY;
+    const cz = GRAPH_SETTINGS.physics.worldCenterZ;
     for (const n of nodes) {
       if ((n as any).isCenterNode) {
         n.x = cx; n.y = cy; n.z = cz;

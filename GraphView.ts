@@ -3,7 +3,7 @@ import { buildGraph } from './graph/buildGraph.ts';
 import { layoutGraph2D, layoutGraph3D } from './graph/layout.ts';
 import { createRenderer } from './graph/renderer.ts';
 import { createSimulation } from './graph/simulation.ts';
-import { GraphManager } from './graph/GraphManager.ts';import { DEFAULT_SETTINGS } from './main';
+import { GraphManager } from './graph/GraphManager.ts';import { GRAPH_SETTINGS } from './main';
 import { debounce } from './utils/debounce.ts';
 import { GraphData, Renderer } from './types/interfaces.ts';
 

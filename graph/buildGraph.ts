@@ -1,18 +1,18 @@
 import { App, TFile, CachedMetadata } from 'obsidian';
 import { GraphNode, GraphEdge, GraphData, Settings } from '../types/interfaces.ts';
-import { DEFAULT_SETTINGS } from '../main';
+import { GRAPH_SETTINGS } from '../main';
 
 export async function buildGraph(app: App): Promise<GraphData> {
   const files: TFile[]        = app.vault.getMarkdownFiles();
   const { nodes, nodeByPath } = createNoteNodes(files);
   const { edges, edgeSet    } = buildNoteEdgesFromResolvedLinks(app, nodeByPath);
 
-  if (DEFAULT_SETTINGS.visuals.showTags !== false) {
+  if (GRAPH_SETTINGS.visuals.showTags !== false) {
     addTagNodesAndEdges(app, files, nodes, nodeByPath, edges, edgeSet);
   }
   computeNodeDegrees(nodes, nodeByPath, edges);
   markBidirectionalEdges(edges);
-  const centerNode = pickCenterNode(app, nodes, DEFAULT_SETTINGS);
+  const centerNode = pickCenterNode(app, nodes, GRAPH_SETTINGS);
   markCenterNode(nodes, centerNode);
   return { nodes, edges };
 }
@@ -52,7 +52,7 @@ function buildNoteEdgesFromResolvedLinks(app: App, nodeByPath: Map<string, Graph
   const resolved: any       = (app.metadataCache as any).resolvedLinks || {};
   const edges: GraphEdge[]  = [];
   const edgeSet             = new Set<string>();
-  const countDuplicates     = Boolean(DEFAULT_SETTINGS.visuals.countDuplicateLinks);
+  const countDuplicates     = Boolean(GRAPH_SETTINGS.visuals.countDuplicateLinks);
 
   for (const sourcePath of Object.keys(resolved)) {
     const targets = resolved[sourcePath] || {};
