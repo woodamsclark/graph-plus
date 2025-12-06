@@ -1,52 +1,58 @@
 import { App, TFile, CachedMetadata } from 'obsidian';
 import { GraphNode, GraphEdge, GraphData, Settings } from '../types/interfaces.ts';
+import { DEFAULT_SETTINGS } from '../main';
 
-export async function buildGraph(app: App, settings: Settings): Promise<GraphData> {
+export async function buildGraph(app: App): Promise<GraphData> {
   const files: TFile[]        = app.vault.getMarkdownFiles();
   const { nodes, nodeByPath } = createNoteNodes(files);
-  const { edges, edgeSet    } = buildNoteEdgesFromResolvedLinks(app, nodeByPath, settings);
+  const { edges, edgeSet    } = buildNoteEdgesFromResolvedLinks(app, nodeByPath);
 
-  if (settings.showTags !== false) {
+  if (DEFAULT_SETTINGS.showTags !== false) {
     addTagNodesAndEdges(app, files, nodes, nodeByPath, edges, edgeSet);
   }
   computeNodeDegrees(nodes, nodeByPath, edges);
   markBidirectionalEdges(edges);
-  const centerNode = pickCenterNode(app, nodes, settings);
+  const centerNode = pickCenterNode(app, nodes, DEFAULT_SETTINGS);
   markCenterNode(nodes, centerNode);
   return { nodes, edges };
 }
 
 function createNoteNodes(files: TFile[]){
-  const jitter = 50; // world units; tweak to taste
-  const x0 = (Math.random() - 0.5) * jitter;
-  const y0 = (Math.random() - 0.5) * jitter;
-  const nodes: GraphNode[] = files.map((file) => ({
-                                                    id          : file.path,
-                                                    filePath    : file.path,
-                                                    file        : file,
-                                                    label       : file.basename,
-                                                    x           : x0,
-                                                    y           : y0,
-                                                    z           : 0,
-                                                    vx          : 0,
-                                                    vy          : 0,
-                                                    vz          : 0,
-                                                    inDegree    : 0,
-                                                    outDegree   : 0,
-                                                    totalDegree : 0,
-                                                  }));
+  const nodes: GraphNode[] = [];
+  for (const file of files) {
+    const jitter = 50; // world units; tweak to taste
+    const x0 = (Math.random() - 0.5) * jitter;
+    const y0 = (Math.random() - 0.5) * jitter;
+    const node: GraphNode = {
+      id: file.path,
+      filePath: file.path,
+      file: file,
+      label: file.basename,
+      x: x0,
+      y: y0,
+      z: 0,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      inDegree: 0,
+      outDegree: 0,
+      totalDegree: 0,
+      isCenterNode: false,
+    };
+    nodes.push(node);
+  }
 
-const nodeByPath = new Map<string, GraphNode>();
-for (const n of nodes) nodeByPath.set(n.id, n);
+  const nodeByPath = new Map<string, GraphNode>();
+  for (const n of nodes) nodeByPath.set(n.id, n);
 
-return { nodes, nodeByPath };
+  return { nodes, nodeByPath };
 }
 
-function buildNoteEdgesFromResolvedLinks(app: App, nodeByPath: Map<string, GraphNode>,settings: Settings): { edges: GraphEdge[]; edgeSet: Set<string> } {
+function buildNoteEdgesFromResolvedLinks(app: App, nodeByPath: Map<string, GraphNode>): { edges: GraphEdge[]; edgeSet: Set<string> } {
   const resolved: any       = (app.metadataCache as any).resolvedLinks || {};
   const edges: GraphEdge[]  = [];
   const edgeSet             = new Set<string>();
-  const countDuplicates     = Boolean(settings.countDuplicateLinks);
+  const countDuplicates     = Boolean(DEFAULT_SETTINGS.countDuplicateLinks);
 
   for (const sourcePath of Object.keys(resolved)) {
     const targets = resolved[sourcePath] || {};
@@ -201,6 +207,6 @@ function pickCenterNode(app: App, nodes: GraphNode[], settings: Settings): Graph
 }
 
 function markCenterNode(nodes: GraphNode[], centerNode: GraphNode | null): void {
-  for (const n of nodes) (n as any).isCenterNode = false;
-  if (centerNode) (centerNode as any).isCenterNode = true;
+  for (const n of nodes) { (n as any).isCenterNode          = false;  }
+  if (centerNode)        { (centerNode as any).isCenterNode = true;   }
 }

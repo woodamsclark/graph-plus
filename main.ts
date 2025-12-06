@@ -39,6 +39,9 @@ export const DEFAULT_SETTINGS: Settings = {
     mouseGravityEnabled: true,
     gravityRadius      : 6,
     gravityFallOff     : 3,
+    mouseGravityRadius : 15, // change these settings later
+    mouseGravityStrength : 1,
+    mouseGravityExponent : 2,
   },
   countDuplicateLinks: true,
   interaction: {

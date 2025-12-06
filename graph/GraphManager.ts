@@ -4,7 +4,7 @@ import { layoutGraph2D, layoutGraph3D } from './layout.ts';
 import { createRenderer } from './renderer.ts';
 import { createSimulation } from './simulation.ts';
 import { debounce } from '../utils/debounce.ts';
-import { Settings, Renderer, GraphData, GraphNode, GraphEdge, Simulation, SimulationSettings} from '../types/interfaces.ts';
+import { Settings, Renderer, GraphData, GraphNode, GraphEdge, Simulation} from '../types/interfaces.ts';
 import { DEFAULT_SETTINGS } from '../main.ts';
 import { InputManager } from './InputManager.ts';
 
@@ -32,6 +32,7 @@ export class GraphManager {
   private cameraSnapShot              : any                                 | null  = null;
   private worldAnchorPoint            : { x: number; y: number; z: number } | null  = null;
   private screenAnchorPoint           : { x: number; y: number }            | null  = null;
+  private settings                    : Settings                            | null  = null;
   private openNodeFile                : ((node: any) => void)               | null  = null;
   private settingsUnregister          : (() => void)                        | null  = null;
   private saveNodePositionsDebounced  : (() => void)                        | null  = null;
@@ -48,17 +49,16 @@ export class GraphManager {
     this.canvas.style.width   = '100%';
     this.canvas.style.height  = '100%';
     this.canvas.tabIndex      = 0;
-    const userSettings        = await (this.plugin as any).loadData();
-    const settings: Settings  = Object.assign({}, DEFAULT_SETTINGS, userSettings);
+    this.settings             = await (this.plugin as any).loadData();
     const rect                = this.containerEl.getBoundingClientRect();
     const centerX             = rect.width  / 2;
     const centerY             = rect.height / 2;
     this.viewCenterX          = 0;//centerX;
     this.viewCenterY          = 0;//centerY;
-    this.renderer             = createRenderer({ canvas: this.canvas, settings });
+    this.renderer             = createRenderer(this.canvas);
     this.containerEl.appendChild(this.canvas);
 
-    this.graph = await buildGraph(this.app, settings);
+    this.graph = await buildGraph(this.app);
 
     this.inputManager = new InputManager(this.canvas, {
       onOrbitStart      : (dx, dy)                    => this.startOrbit(dx, dy),
@@ -144,7 +144,7 @@ export class GraphManager {
         renderer.resetPanToCenter();
 
         if (renderer.setCamera) {
-          renderer.setCamera({
+          renderer.setCamera({ // I think I need to offset the camera so that 0,0,0 is centered
           targetX : 0,//this.viewCenterX,
           targetY : 0,//this.viewCenterY,
           targetZ : 0,
@@ -323,7 +323,7 @@ export class GraphManager {
   }
 
   private updateCameraAnimation(now: number) { return; // smooths camera animations. Revist later
-    if (!this.renderer) return;
+  /*  if (!this.renderer) return;
     if (this.cameraAnimStart == null) {
       // If following without an active animation, smoothly interpolate camera target to node each frame
       if (this.isCameraFollowing && this.cameraFollowNode) {
@@ -362,27 +362,22 @@ export class GraphManager {
       this.cameraAnimFrom   = null;
       this.cameraAnimTo     = null;
       // keep isCameraFollowing = true and cameraFollowNode set
-    }
+    }*/
   }
 
   public async refreshGraph() {
     this.stopSimulation();
 
     // try to load graph from file first
-    this.graph = await buildGraph (this.app, {
-        countDuplicates       : Boolean((this.plugin as any).settings?.countDuplicateLinks),
-        usePinnedCenterNote   : Boolean((this.plugin as any).settings?.usePinnedCenterNote),
-        pinnedCenterNotePath  : String ((this.plugin as any).settings?.pinnedCenterNotePath || ''),
-        useOutlinkFallback    : Boolean((this.plugin as any).settings?.useOutlinkFallback),
-      } as any);
+    this.graph = await buildGraph (this.app);
 
     const { nodes, edges }  = this.filterGraph    (this.graph);
     const rect    = this.containerEl.getBoundingClientRect();
-    const centerX = (rect.width  || 300) / 2;
-    const centerY = (rect.height || 200) / 2;
+    const centerX = (rect.width  || 300);// / 2;
+    const centerY = (rect.height || 200);// / 2;
     this.viewCenterX = 0;//centerX;
     this.viewCenterY = 0;//centerY;
-    this.simulation         = this.buildSimulation(nodes, edges, {centerX, centerY});
+    this.simulation         = this.buildSimulation(nodes, edges);
 
     this.buildAdjacencyMap(); // rebuild adjacency map after graph refresh or showTags changes
     this.startSimulation();
@@ -397,9 +392,9 @@ export class GraphManager {
     }
   }
 
-  private buildSimulation(nodes: GraphNode[], edges: GraphEdge[], opts?: Partial<SimulationSettings>) {
-    const physics = (this.plugin as any).settings.physics;
-    return createSimulation(nodes, edges, { ...physics, ...opts });
+  private buildSimulation(nodes: GraphNode[], edges: GraphEdge[]) {
+    // maybe I want to add more to this, idk
+    return createSimulation(nodes, edges);
   }
 
   private startSimulation() {

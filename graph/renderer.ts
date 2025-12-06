@@ -1,11 +1,12 @@
 import { VisualSettings, PhysicsSettings, RendererSettings, Camera, Renderer as Renderer, GraphData } from '../types/interfaces';
+import { DEFAULT_SETTINGS } from '../main';
+import { Settings } from 'http2';
 
 // The renderer is responsible for rendering the 2D graph visualization onto an HTML canvas.
 // The Graph Manager tells the renderer when and what to render
-export function createRenderer(options: RendererSettings): Renderer {
-  const canvas = options.canvas;
-  let visuals = options.settings.visuals;
-  let physics = options.settings.physics;
+export function createRenderer(canvas: HTMLCanvasElement): Renderer {
+  let visuals = DEFAULT_SETTINGS.visuals;
+  let physics = DEFAULT_SETTINGS.physics;
   const context = canvas.getContext('2d');
   let graph: GraphData | null = null;
   let nodeById: Map<string, any> = new Map();
