@@ -1,19 +1,18 @@
 import { App, TFile, CachedMetadata } from 'obsidian';
 import { GraphNode, GraphEdge, GraphData, Settings } from '../types/interfaces.ts';
-import { GRAPH_SETTINGS } from '../main';
+import { SETTINGS } from '../main';
 
 export async function buildGraph(app: App): Promise<GraphData> {
   const files: TFile[]        = app.vault.getMarkdownFiles();
   const { nodes, nodeByPath } = createNoteNodes(files);
   const { edges, edgeSet    } = buildNoteEdgesFromResolvedLinks(app, nodeByPath);
 
-  if (GRAPH_SETTINGS.visuals.showTags !== false) {
+  if (SETTINGS.graph.showTags !== false) {
     addTagNodesAndEdges(app, files, nodes, nodeByPath, edges, edgeSet);
   }
   computeNodeDegrees(nodes, nodeByPath, edges);
   markBidirectionalEdges(edges);
-  const centerNode = pickCenterNode(app, nodes, GRAPH_SETTINGS);
-  markCenterNode(nodes, centerNode);
+  const centerNode = pickCenterNode(app, nodes, SETTINGS);
   return { nodes, edges };
 }
 
@@ -24,20 +23,19 @@ function createNoteNodes(files: TFile[]){
     const x0 = (Math.random() - 0.5) * jitter;
     const y0 = (Math.random() - 0.5) * jitter;
     const node: GraphNode = {
-      id: file.path,
-      filePath: file.path,
-      file: file,
-      label: file.basename,
-      x: x0,
-      y: y0,
-      z: 0,
-      vx: 0,
-      vy: 0,
-      vz: 0,
-      inDegree: 0,
-      outDegree: 0,
-      totalDegree: 0,
-      isCenterNode: false,
+      id          : file.path,
+      filePath    : file.path,
+      file        : file,
+      label       : file.basename,
+      x           : x0,
+      y           : y0,
+      z           : 0,
+      vx          : 0,
+      vy          : 0,
+      vz          : 0,
+      inDegree    : 0,
+      outDegree   : 0,
+      totalDegree : 0,
     };
     nodes.push(node);
   }
@@ -52,7 +50,7 @@ function buildNoteEdgesFromResolvedLinks(app: App, nodeByPath: Map<string, Graph
   const resolved: any       = (app.metadataCache as any).resolvedLinks || {};
   const edges: GraphEdge[]  = [];
   const edgeSet             = new Set<string>();
-  const countDuplicates     = Boolean(GRAPH_SETTINGS.visuals.countDuplicateLinks);
+  const countDuplicates     = Boolean(SETTINGS.graph.countDuplicateLinks);
 
   for (const sourcePath of Object.keys(resolved)) {
     const targets = resolved[sourcePath] || {};
@@ -119,19 +117,19 @@ function addTagNodesAndEdges(
     if (node) return node;
 
     node = {
-      id: `tag:${tagName}`,
-      label: `#${tagName}`,
-      x: 0,
-      y: 0,
-      z: 0,
-      vx: 0,
-      vy: 0,
-      vz: 0,
-      filePath: `tag:${tagName}`,
-      type: 'tag',
-      inDegree: 0,
-      outDegree: 0,
-      totalDegree: 0,
+      id          : `tag:${tagName}`,
+      label       : `#${tagName}`,
+      x           : 0,
+      y           : 0,
+      z           : 0,
+      vx          : 0,
+      vy          : 0,
+      vz          : 0,
+      filePath    : `tag:${tagName}`,
+      type        : 'tag',
+      inDegree    : 0,
+      outDegree   : 0,
+      totalDegree : 0,
     };
 
     nodes.push(node);
@@ -140,15 +138,20 @@ function addTagNodesAndEdges(
 
     return node;
   };
-
-  // ...existing extractTags + loop over files, same as before...
 }
 
 function pickCenterNode(app: App, nodes: GraphNode[], settings: Settings): GraphNode | null {
-  if (!settings.usePinnedCenterNote) return null;
+  if (!settings.graph.useCenterNote) return null;
 
+  // if centerNoteTitle is defined, use it.
+  if (SETTINGS.graph.centerNoteTitle) {
+    const centerNode = nodes.find((n) => n.id === SETTINGS.graph.centerNoteTitle);
+    SETTINGS.graph.centerNode = centerNode;
+  }
+
+  // ...else calculate it. SETTINGS.graph.useOutlinkFallback as alternative
   const onlyNotes = nodes.filter((n) => (n as any).type !== 'tag');
-  const preferOut = Boolean(settings.useOutlinkFallback);
+  const preferOut = Boolean(settings.graph.useOutlinkFallback);
   const metric = (n: GraphNode) => (preferOut ? n.outDegree || 0 : n.inDegree || 0);
 
   const chooseBy = (predicate: (n: GraphNode) => boolean): GraphNode | null => {
@@ -163,7 +166,7 @@ function pickCenterNode(app: App, nodes: GraphNode[], settings: Settings): Graph
   };
 
   let chosen: GraphNode | null = null;
-  const raw = String(settings.pinnedCenterNotePath || '').trim();
+  const raw = String(settings.graph.centerNoteTitle || '').trim();
 
   if (raw) {
     const mc    : any = (app as any).metadataCache;
@@ -204,9 +207,4 @@ function pickCenterNode(app: App, nodes: GraphNode[], settings: Settings): Graph
     }
   }
   return chosen;
-}
-
-function markCenterNode(nodes: GraphNode[], centerNode: GraphNode | null): void {
-  for (const n of nodes) { (n as any).isCenterNode          = false;  }
-  if (centerNode)        { (centerNode as any).isCenterNode = true;   }
 }

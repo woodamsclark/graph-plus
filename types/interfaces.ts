@@ -1,6 +1,6 @@
 import { App, TFile, CachedMetadata } from 'obsidian';
 
-export interface VisualSettings {
+export interface GraphSettings {
   // user defined//updated settings
   minNodeRadius         : number;
   maxNodeRadius         : number;
@@ -23,10 +23,11 @@ export interface VisualSettings {
   countDuplicateLinks   : boolean;
   drawDoubleLines       : boolean;
   showTags              : boolean;
-  usePinnedCenterNote   : boolean;
-  pinnedCenterNotePath  : string;
-  useOutlinkFallback    : boolean;
   hoverScale            : number;
+  centerNoteTitle       : string;
+  useCenterNote         : boolean;
+  centerNode?           : GraphNode | null;
+  useOutlinkFallback    : boolean;
 }
 
 export interface PhysicsSettings {
@@ -53,37 +54,29 @@ export interface PhysicsSettings {
 
 export interface CameraSettings {
   // user defined/updated settings
-  momentumScale         : number;
-  dragThreshold         : number;
-  rotateSensitivityX    : number;
-  rotateSensitivityY    : number;
-  cameraAnimDuration    : number;
+  momentumScale                     : number;
+  dragThreshold                     : number;
+  rotateSensitivityX                : number;
+  rotateSensitivityY                : number;
+  cameraAnimDuration                : number;
   readonly state: { // initial camera state
-    readonly distance              : number;
-    readonly yaw                   : number;
-    readonly pitch                 : number;
-    readonly targetX               : number;
-    readonly targetY               : number;
-    readonly targetZ               : number;
-    readonly offsetX               : number;
-    readonly offsetY               : number;
+    readonly distance               : number;
+    readonly yaw                    : number;
+    readonly pitch                  : number;
+    readonly targetX                : number;
+    readonly targetY                : number;
+    readonly targetZ                : number;
+    readonly offsetX                : number;
+    readonly offsetY                : number;
   };
 }
 
 export interface Settings {
-  visuals               : VisualSettings;
+  graph                 : GraphSettings;
   physics               : PhysicsSettings;
   camera                : CameraSettings;
-  renderer              : RendererSettings;
   nodePositions?        : Record<string, Record<string, { x: number; y: number; z?: number }>>;
-  centerNodeId?         : string;
-  usePinnedCenterNote?  : boolean;
-  pinnedCenterNotePath? : string;
-  useOutlinkFallback?   : boolean;
-}
 
-export interface RendererSettings {
-  canvas: HTMLCanvasElement;
 }
 
 export interface CameraState {
@@ -104,7 +97,6 @@ export interface Renderer {
   destroy(): void;
   setHoveredNode(nodeId: string | null): void;
   getNodeRadiusForHit(node: any): number;
-  setHoverState(hoveredId: string | null, highlightedIds: Set<string>, mouseX: number, mouseY: number): void;
   zoomAt(screenX: number, screenY: number, factor: number): void;
   screenToWorld2D(screenX: number, screenY: number): { x: number; y: number };
   screenToWorld3D?(screenX: number, screenY: number, zCam: number, cam: CameraState): { x: number; y: number; z: number };
@@ -122,6 +114,12 @@ export interface Renderer {
 }
 export type GraphNodeType = 'note' | 'tag';
 
+export interface GraphData {
+  nodes         : GraphNode[];
+  edges         : GraphEdge[];
+  centerNode?   : GraphNode | null;
+}
+
 export interface GraphNode {
   id            : string;
   label         : string;
@@ -130,14 +128,13 @@ export interface GraphNode {
   z             : number;
   filePath      : string;
   file?         : TFile;
-  vx?           : number;
-  vy?           : number;
-  vz?           : number;
+  vx            : number;
+  vy            : number;
+  vz            : number;
   type?         : GraphNodeType;
   inDegree      : number;
   outDegree     : number;
   totalDegree   : number;
-  isCenterNode? : boolean;
 }
 
 export interface GraphEdge {
@@ -148,46 +145,35 @@ export interface GraphEdge {
   bidirectional?: boolean;
 }
 
-export interface GraphData {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
-
 export interface Simulation {
-  start(): void;
-  stop(): void;
-  tick(dt: number): void;
-  reset(): void;
-  // pinned node control: prevent physics from moving these nodes
-  setPinnedNodes?(ids: Set<string>): void;
-  // allow the controller to provide mouse world coords and hovered node id
-  setMouseAttractor?(x: number | null, y: number | null, nodeId: string | null): void;
+  start()                           : void;
+  stop()                            : void;
+  tick(dt: number)                  : void;
+  reset()                           : void;
+  setPinnedNodes?(ids: Set<string>) : void;
 }
 
 export interface InputManagerCallbacks {
     // Camera Control
-    onOrbitStart     (dx: number, dy: number): void;
-    onOrbitMove      (dx: number, dy: number): void;
-    onOrbitEnd       (): void;
-    onPanStart       (screenX: number, screenY: number): void;
-    onPanMove        (dx: number, dy: number): void;
-    onPanEnd         (): void;
-    onZoom           (screenX: number, screenY: number, delta: number): void;
-    onFollowStart    (nodeId: string): void;
-    onFollowEnd      (): void;
-    resetCamera      (): void;
-
+    onOrbitStart        (dx: number, dy: number)                          : void;
+    onOrbitMove         (dx: number, dy: number)                          : void;
+    onOrbitEnd          ()                                                : void;
+    onPanStart          (screenX: number, screenY: number)                : void;
+    onPanMove           (dx: number, dy: number)                          : void;
+    onPanEnd            ()                                                : void;
+    onZoom              (screenX: number, screenY: number, delta: number) : void;
+    onFollowStart       (nodeId: string)                                  : void;
+    onFollowEnd         ()                                                : void;
+    resetCamera         ()                                                : void;
     // Node Interaction
-    onHover         (screenX: number, screenY: number): void;
-    onOpenNode      (screenX: number, screenY: number): void;
-
-    // Node Dragging (Coordinates are relative to the screen for the simulation)
-    onDragStart     (nodeId: string, screenX: number, screenY: number): void;
-    onDragMove      (screenX: number, screenY: number): void;
-    onDragEnd       (): void;
-
+    onHover             (screenX: number, screenY: number)                : void;
+    onOpenNode          (screenX: number, screenY: number)                : void;
+    // Node Dragging 
+    onDragStart         (nodeId: string, screenX: number, screenY: number): void;
+    onDragMove          (screenX: number, screenY: number)                : void;
+    onDragEnd           (): void;
     // Utility
-    detectClickedNode   (screenX: number, screenY: number): { id: string, filePath?: string, label: string } | null;
+    detectClickedNode   (screenX: number, screenY: number)                : { id: string, filePath?: string, label: string } | null;
 }
 
 export enum PointerMode {

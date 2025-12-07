@@ -4,8 +4,8 @@ import { Settings } from './types/interfaces.ts';
 
 
 
-export const GRAPH_SETTINGS: Settings = {
-  visuals: {
+export const SETTINGS: Settings = {
+  graph: {
     minNodeRadius       : 3,
     maxNodeRadius       : 20,
     minCenterAlpha      : 0.1,
@@ -27,10 +27,10 @@ export const GRAPH_SETTINGS: Settings = {
     countDuplicateLinks : true,
     drawDoubleLines     : true,
     showTags            : true,
-    usePinnedCenterNote : false,
-    pinnedCenterNotePath: '',
-    useOutlinkFallback  : false,
     hoverScale          : 1.0,
+    useCenterNote       : false,
+    centerNoteTitle     : '',
+    useOutlinkFallback  : false,
   },
   physics: {
     repulsionStrength   : 5000,
@@ -67,15 +67,11 @@ export const GRAPH_SETTINGS: Settings = {
       offsetY             : 0,
     }
   },
-  renderer: {
-    canvas: document.createElement('canvas'),
-  },
-
   nodePositions: {},
 };
 
 export default class GreaterGraphPlugin extends Plugin {
-  settings: Settings = GRAPH_SETTINGS;
+  settings: Settings = SETTINGS;
   private settingsListeners: Array<() => void> = [];
 
   async onload() {
@@ -114,11 +110,11 @@ export default class GreaterGraphPlugin extends Plugin {
 
   async loadSettings() {
     const data = await this.loadData();
-    this.settings = Object.assign({}, GRAPH_SETTINGS, data || {});
-    if (!this.settings.visuals) this.settings.visuals = GRAPH_SETTINGS.visuals;
+    this.settings = Object.assign({}, SETTINGS, data || {});
+    if (!this.settings.graph) this.settings.graph = SETTINGS.graph;
     // enforce min/max radius invariant
     try {
-      const g = this.settings.visuals;
+      const g = this.settings.graph;
       if (typeof g.maxNodeRadius === 'number' && typeof g.minNodeRadius === 'number') {
         if (g.maxNodeRadius < g.minNodeRadius + 2) g.maxNodeRadius = g.minNodeRadius + 2;
       }
@@ -229,21 +225,21 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Minimum node radius',
       desc: 'Minimum radius for the smallest node (in pixels).',
-      value: GRAPH_SETTINGS.visuals.minNodeRadius ?? GRAPH_SETTINGS.visuals.minNodeRadius,
+      value: SETTINGS.graph.minNodeRadius ?? SETTINGS.graph.minNodeRadius,
       min: 1,
       max: 20,
       step: 1,
-      resetValue: GRAPH_SETTINGS.visuals.minNodeRadius,
+      resetValue: SETTINGS.graph.minNodeRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          GRAPH_SETTINGS.visuals.minNodeRadius = Math.round(v);
+          SETTINGS.graph.minNodeRadius = Math.round(v);
           // ensure max >= min + 2
-          if (typeof GRAPH_SETTINGS.visuals.maxNodeRadius === 'number' && GRAPH_SETTINGS.visuals.maxNodeRadius < GRAPH_SETTINGS.visuals.minNodeRadius + 2) {
-            GRAPH_SETTINGS.visuals.maxNodeRadius = GRAPH_SETTINGS.visuals.minNodeRadius + 2;
+          if (typeof SETTINGS.graph.maxNodeRadius === 'number' && SETTINGS.graph.maxNodeRadius < SETTINGS.graph.minNodeRadius + 2) {
+            SETTINGS.graph.maxNodeRadius = SETTINGS.graph.minNodeRadius + 2;
           }
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          GRAPH_SETTINGS.visuals.minNodeRadius = GRAPH_SETTINGS.visuals.minNodeRadius;
+          SETTINGS.graph.minNodeRadius = SETTINGS.graph.minNodeRadius;
           await this.plugin.saveSettings();
         }
       },
@@ -252,18 +248,18 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Maximum node radius',
       desc: 'Maximum radius for the most connected node (in pixels).',
-      value: GRAPH_SETTINGS.visuals.maxNodeRadius ?? GRAPH_SETTINGS.visuals.maxNodeRadius,
+      value: SETTINGS.graph.maxNodeRadius ?? SETTINGS.graph.maxNodeRadius,
       min: 8,
       max: 80,
       step: 1,
-      resetValue: GRAPH_SETTINGS.visuals.maxNodeRadius,
+      resetValue: SETTINGS.graph.maxNodeRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v)) {
-          GRAPH_SETTINGS.visuals.maxNodeRadius = Math.round(v);
-          if (typeof GRAPH_SETTINGS.visuals.minNodeRadius === 'number' && GRAPH_SETTINGS.visuals.maxNodeRadius < GRAPH_SETTINGS.visuals.minNodeRadius + 2) GRAPH_SETTINGS.visuals.maxNodeRadius = GRAPH_SETTINGS.visuals.minNodeRadius + 2;
+          SETTINGS.graph.maxNodeRadius = Math.round(v);
+          if (typeof SETTINGS.graph.minNodeRadius === 'number' && SETTINGS.graph.maxNodeRadius < SETTINGS.graph.minNodeRadius + 2) SETTINGS.graph.maxNodeRadius = SETTINGS.graph.minNodeRadius + 2;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          GRAPH_SETTINGS.visuals.maxNodeRadius = GRAPH_SETTINGS.visuals.maxNodeRadius;
+          SETTINGS.graph.maxNodeRadius = SETTINGS.graph.maxNodeRadius;
           await this.plugin.saveSettings();
         }
       },
@@ -272,17 +268,17 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Minimum center glow opacity',
       desc: 'Opacity (0–0.8) at the glow center for the least connected node.',
-      value: GRAPH_SETTINGS.visuals.minCenterAlpha ?? GRAPH_SETTINGS.visuals.minCenterAlpha,
+      value: SETTINGS.graph.minCenterAlpha ?? SETTINGS.graph.minCenterAlpha,
       min: 0,
       max: 0.8,
       step: 0.01,
-      resetValue: GRAPH_SETTINGS.visuals.minCenterAlpha,
+      resetValue: SETTINGS.graph.minCenterAlpha,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 0.8) {
-          GRAPH_SETTINGS.visuals.minCenterAlpha = v;
+          SETTINGS.graph.minCenterAlpha = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          GRAPH_SETTINGS.visuals.minCenterAlpha = GRAPH_SETTINGS.visuals.minCenterAlpha;
+          SETTINGS.graph.minCenterAlpha = SETTINGS.graph.minCenterAlpha;
           await this.plugin.saveSettings();
         }
       },
@@ -291,17 +287,17 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Maximum center glow opacity',
       desc: 'Opacity (0–1) at the glow center for the most connected node.',
-      value: GRAPH_SETTINGS.visuals.maxCenterAlpha ?? GRAPH_SETTINGS.visuals.maxCenterAlpha,
+      value: SETTINGS.graph.maxCenterAlpha ?? SETTINGS.graph.maxCenterAlpha,
       min: 0,
       max: 1,
       step: 0.01,
-      resetValue: GRAPH_SETTINGS.visuals.maxCenterAlpha,
+      resetValue: SETTINGS.graph.maxCenterAlpha,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          GRAPH_SETTINGS.visuals.maxCenterAlpha = v;
+          SETTINGS.graph.maxCenterAlpha = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          GRAPH_SETTINGS.visuals.maxCenterAlpha = GRAPH_SETTINGS.visuals.maxCenterAlpha;
+          SETTINGS.graph.maxCenterAlpha = SETTINGS.graph.maxCenterAlpha;
           await this.plugin.saveSettings();
         }
       },
@@ -312,17 +308,17 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Highlight depth',
       desc: 'Graph distance (in hops) from the hovered node that will be highlighted.',
-      value: GRAPH_SETTINGS.visuals.highlightDepth,
+      value: SETTINGS.graph.highlightDepth,
       min: 0,
       max: 5,
       step: 1,
-      resetValue: GRAPH_SETTINGS.visuals.highlightDepth,
+      resetValue: SETTINGS.graph.highlightDepth,
       onChange: async (v) => {
         if (!Number.isNaN(v) && Number.isInteger(v) && v >= 0) {
-          GRAPH_SETTINGS.visuals.highlightDepth = Math.max(0, Math.floor(v));
+          SETTINGS.graph.highlightDepth = Math.max(0, Math.floor(v));
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          GRAPH_SETTINGS.visuals.highlightDepth = GRAPH_SETTINGS.visuals.highlightDepth;
+          SETTINGS.graph.highlightDepth = SETTINGS.graph.highlightDepth;
           await this.plugin.saveSettings();
         }
       },
@@ -331,17 +327,17 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Gravity Radius',
       desc: 'Scales each node\'s screen-space radius for glow/mouse gravity.',
-      value: physics.gravityRadius ?? GRAPH_SETTINGS.physics.gravityRadius!,
+      value: physics.gravityRadius ?? SETTINGS.physics.gravityRadius!,
       min: 1,
       max: 20,
       step: 0.1,
-      resetValue: GRAPH_SETTINGS.physics.gravityRadius,
+      resetValue: SETTINGS.physics.gravityRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
           physics.gravityRadius = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          physics.gravityRadius = GRAPH_SETTINGS.physics.gravityRadius;
+          physics.gravityRadius = SETTINGS.physics.gravityRadius;
           await this.plugin.saveSettings();
         }
       },
@@ -350,17 +346,17 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Gravity curve steepness',
       desc: 'Controls falloff steepness; higher = stronger near cursor.',
-      value: physics.gravityFallOff ?? GRAPH_SETTINGS.physics.gravityFallOff!,
+      value: physics.gravityFallOff ?? SETTINGS.physics.gravityFallOff!,
       min: 0.5,
       max: 10,
       step: 0.1,
-      resetValue: GRAPH_SETTINGS.physics.gravityFallOff,
+      resetValue: SETTINGS.physics.gravityFallOff,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
           physics.gravityFallOff = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          physics.gravityFallOff = GRAPH_SETTINGS.physics.gravityFallOff;
+          physics.gravityFallOff = SETTINGS.physics.gravityFallOff;
           await this.plugin.saveSettings();
         }
       },
@@ -369,17 +365,17 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         addSliderSetting(containerEl, {
       name: 'Label Radius',
       desc: 'Screen-space label reveal radius (× node size).',
-      value: GRAPH_SETTINGS.visuals.labelRadius ?? GRAPH_SETTINGS.visuals.labelRadius!,
+      value: SETTINGS.graph.labelRadius ?? SETTINGS.graph.labelRadius!,
       min: 0.5,
       max: 10,
       step: 0.1,
-      resetValue: GRAPH_SETTINGS.visuals.labelRadius,
+      resetValue: SETTINGS.graph.labelRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          GRAPH_SETTINGS.visuals.labelRadius = v;
+          SETTINGS.graph.labelRadius = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          GRAPH_SETTINGS.visuals.labelRadius = GRAPH_SETTINGS.visuals.labelRadius;
+          SETTINGS.graph.labelRadius = SETTINGS.graph.labelRadius;
           await this.plugin.saveSettings();
         }
       },
@@ -389,17 +385,17 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Focus smoothing rate',
       desc: 'Smoothness of focus transitions (0 = very slow, 1 = fast). Internally used as a lerp factor.',
-      value: GRAPH_SETTINGS.visuals.focusSmoothing ?? GRAPH_SETTINGS.visuals.focusSmoothing,
+      value: SETTINGS.graph.focusSmoothing ?? SETTINGS.graph.focusSmoothing,
       min: 0,
       max: 1,
       step: 0.01,
-      resetValue: GRAPH_SETTINGS.visuals.focusSmoothing,
+      resetValue: SETTINGS.graph.focusSmoothing,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          GRAPH_SETTINGS.visuals.focusSmoothing = v;
+          SETTINGS.graph.focusSmoothing = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          GRAPH_SETTINGS.visuals.focusSmoothing = GRAPH_SETTINGS.visuals.focusSmoothing;
+          SETTINGS.graph.focusSmoothing = SETTINGS.graph.focusSmoothing;
           await this.plugin.saveSettings();
         }
       },
@@ -416,24 +412,24 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         .setDesc('Optional color to override the theme accent for node fill. Leave unset to use the active theme.');
       const colorInput = document.createElement('input');
       colorInput.type = 'color';
-      try { colorInput.value = GRAPH_SETTINGS.visuals.nodeColor ? String(GRAPH_SETTINGS.visuals.nodeColor) : '#000000'; } catch (e) { colorInput.value = '#000000'; }
+      try { colorInput.value = SETTINGS.graph.nodeColor ? String(SETTINGS.graph.nodeColor) : '#000000'; } catch (e) { colorInput.value = '#000000'; }
       colorInput.style.marginLeft = '8px';
       colorInput.addEventListener('change', async (e) => {
         const v = (e.target as HTMLInputElement).value.trim();
-        GRAPH_SETTINGS.visuals.nodeColor = v === '' ? undefined : v;
+        SETTINGS.graph.nodeColor = v === '' ? undefined : v;
         await this.plugin.saveSettings();
       });
       const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
       const alphaInput = document.createElement('input');
       alphaInput.type = 'number'; alphaInput.min = '0.1'; alphaInput.max = '1'; alphaInput.step = '0.01';
-      alphaInput.value = String(GRAPH_SETTINGS.visuals.nodeColorAlpha ?? GRAPH_SETTINGS.visuals.nodeColorAlpha);
+      alphaInput.value = String(SETTINGS.graph.nodeColorAlpha ?? SETTINGS.graph.nodeColorAlpha);
       alphaInput.style.width = '68px'; alphaInput.style.marginLeft = '8px';
       alphaInput.addEventListener('change', async (e) => {
         const v = Number((e.target as HTMLInputElement).value);
-        GRAPH_SETTINGS.visuals.nodeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : GRAPH_SETTINGS.visuals.nodeColorAlpha;
+        SETTINGS.graph.nodeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : SETTINGS.graph.nodeColorAlpha;
         await this.plugin.saveSettings();
       });
-      rb.addEventListener('click', async () => { GRAPH_SETTINGS.visuals.nodeColor = undefined; GRAPH_SETTINGS.visuals.nodeColorAlpha = GRAPH_SETTINGS.visuals.nodeColorAlpha; await this.plugin.saveSettings(); colorInput.value = '#000000'; alphaInput.value = String(GRAPH_SETTINGS.visuals.nodeColorAlpha); });
+      rb.addEventListener('click', async () => { SETTINGS.graph.nodeColor = undefined; SETTINGS.graph.nodeColorAlpha = SETTINGS.graph.nodeColorAlpha; await this.plugin.saveSettings(); colorInput.value = '#000000'; alphaInput.value = String(SETTINGS.graph.nodeColorAlpha); });
       (s as any).controlEl.appendChild(rb);
       const hint = document.createElement('span'); hint.textContent = '(alpha)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
       (s as any).controlEl.appendChild(hint);
@@ -447,25 +443,25 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         .setDesc('Optional color to override edge stroke color. Leave unset to use a theme-appropriate color.');
       const colorInput = document.createElement('input');
       colorInput.type = 'color';
-      try { colorInput.value = GRAPH_SETTINGS.visuals.edgeColor ? String(GRAPH_SETTINGS.visuals.edgeColor) : '#000000'; } catch (e) { colorInput.value = '#000000'; }
+      try { colorInput.value = SETTINGS.graph.edgeColor ? String(SETTINGS.graph.edgeColor) : '#000000'; } catch (e) { colorInput.value = '#000000'; }
       colorInput.style.marginLeft = '8px';
       colorInput.addEventListener('change', async (e) => {
         const v = (e.target as HTMLInputElement).value.trim();
-        GRAPH_SETTINGS.visuals.edgeColor = v === '' ? undefined : v;
+        SETTINGS.graph.edgeColor = v === '' ? undefined : v;
         await this.plugin.saveSettings();
       });
       const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
       const edgeAlpha = document.createElement('input');
       edgeAlpha.type = 'number'; edgeAlpha.min = '0.1'; edgeAlpha.max = '1'; edgeAlpha.step = '0.01';
-      edgeAlpha.value = String(GRAPH_SETTINGS.visuals.edgeColorAlpha ?? GRAPH_SETTINGS.visuals.edgeColorAlpha);
+      edgeAlpha.value = String(SETTINGS.graph.edgeColorAlpha ?? SETTINGS.graph.edgeColorAlpha);
       edgeAlpha.style.width = '68px'; edgeAlpha.style.marginLeft = '8px';
       edgeAlpha.addEventListener('change', async (e) => {
         const v = Number((e.target as HTMLInputElement).value);
-        GRAPH_SETTINGS.visuals.edgeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : GRAPH_SETTINGS.visuals.edgeColorAlpha;
+        SETTINGS.graph.edgeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : SETTINGS.graph.edgeColorAlpha;
         await this.plugin.saveSettings();
       });
 
-      rb.addEventListener('click', async () => { GRAPH_SETTINGS.visuals.edgeColor = undefined; GRAPH_SETTINGS.visuals.edgeColorAlpha = GRAPH_SETTINGS.visuals.edgeColorAlpha; await this.plugin.saveSettings(); colorInput.value = '#000000'; edgeAlpha.value = String(GRAPH_SETTINGS.visuals.edgeColorAlpha); });
+      rb.addEventListener('click', async () => { SETTINGS.graph.edgeColor = undefined; SETTINGS.graph.edgeColorAlpha = SETTINGS.graph.edgeColorAlpha; await this.plugin.saveSettings(); colorInput.value = '#000000'; edgeAlpha.value = String(SETTINGS.graph.edgeColorAlpha); });
       (s as any).controlEl.appendChild(rb);
       (s as any).controlEl.appendChild(colorInput);
       const hint = document.createElement('span'); hint.textContent = '(alpha)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
@@ -480,24 +476,24 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         .setDesc('Optional color to override tag node color. Leave unset to use the active theme.');
       const colorInput = document.createElement('input');
       colorInput.type = 'color';
-      try { colorInput.value = GRAPH_SETTINGS.visuals.tagColor ? String(GRAPH_SETTINGS.visuals.tagColor) : '#000000'; } catch (e) { colorInput.value = '#000000'; }
+      try { colorInput.value = SETTINGS.graph.tagColor ? String(SETTINGS.graph.tagColor) : '#000000'; } catch (e) { colorInput.value = '#000000'; }
       colorInput.style.marginLeft = '8px';
       colorInput.addEventListener('change', async (e) => {
         const v = (e.target as HTMLInputElement).value.trim();
-        GRAPH_SETTINGS.visuals.tagColor = v === '' ? undefined : v;
+        SETTINGS.graph.tagColor = v === '' ? undefined : v;
         await this.plugin.saveSettings();
       });
       const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
       const tagAlpha = document.createElement('input'); tagAlpha.type = 'number'; tagAlpha.min = '0.1'; tagAlpha.max = '1'; tagAlpha.step = '0.01';
-      tagAlpha.value = String(GRAPH_SETTINGS.visuals.tagColorAlpha ?? GRAPH_SETTINGS.visuals.tagColorAlpha);
+      tagAlpha.value = String(SETTINGS.graph.tagColorAlpha ?? SETTINGS.graph.tagColorAlpha);
       tagAlpha.style.width = '68px'; tagAlpha.style.marginLeft = '8px';
       tagAlpha.addEventListener('change', async (e) => {
         const v = Number((e.target as HTMLInputElement).value);
-        GRAPH_SETTINGS.visuals.tagColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : GRAPH_SETTINGS.visuals.tagColorAlpha;
+        SETTINGS.graph.tagColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : SETTINGS.graph.tagColorAlpha;
         await this.plugin.saveSettings();
       });
 
-      rb.addEventListener('click', async () => { GRAPH_SETTINGS.visuals.tagColor = undefined; GRAPH_SETTINGS.visuals.tagColorAlpha = GRAPH_SETTINGS.visuals.tagColorAlpha; await this.plugin.saveSettings(); colorInput.value = '#000000'; tagAlpha.value = String(GRAPH_SETTINGS.visuals.tagColorAlpha); });
+      rb.addEventListener('click', async () => { SETTINGS.graph.tagColor = undefined; SETTINGS.graph.tagColorAlpha = SETTINGS.graph.tagColorAlpha; await this.plugin.saveSettings(); colorInput.value = '#000000'; tagAlpha.value = String(SETTINGS.graph.tagColorAlpha); });
       (s as any).controlEl.appendChild(rb);
       (s as any).controlEl.appendChild(colorInput);
       const hint = document.createElement('span'); hint.textContent = '(alpha)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
@@ -511,24 +507,24 @@ class GreaterGraphSettingTab extends PluginSettingTab {
         .setDesc('Optional color to override the label text color. Leave unset to use the active theme.');
       const colorInput = document.createElement('input');
       colorInput.type = 'color';
-      try { colorInput.value = GRAPH_SETTINGS.visuals.labelColor ? String(GRAPH_SETTINGS.visuals.labelColor) : '#000000'; } catch (e) { colorInput.value = '#000000'; }
+      try { colorInput.value = SETTINGS.graph.labelColor ? String(SETTINGS.graph.labelColor) : '#000000'; } catch (e) { colorInput.value = '#000000'; }
       colorInput.style.marginLeft = '8px';
       colorInput.addEventListener('change', async (e) => {
         const v = (e.target as HTMLInputElement).value.trim();
-        GRAPH_SETTINGS.visuals.labelColor = v === '' ? undefined : v;
+        SETTINGS.graph.labelColor = v === '' ? undefined : v;
         await this.plugin.saveSettings();
       });
       const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = '↺'; rb.title = 'Reset to default'; rb.style.marginLeft = '8px'; rb.style.border='none'; rb.style.background='transparent'; rb.style.cursor='pointer';
       const labelAlpha = document.createElement('input');
       labelAlpha.type = 'number'; labelAlpha.min = '0'; labelAlpha.max = '1'; labelAlpha.step = '0.01';
-      labelAlpha.value = String(GRAPH_SETTINGS.visuals.labelColorAlpha ?? GRAPH_SETTINGS.visuals.labelColorAlpha);
+      labelAlpha.value = String(SETTINGS.graph.labelColorAlpha ?? SETTINGS.graph.labelColorAlpha);
       labelAlpha.style.width = '68px'; labelAlpha.style.marginLeft = '8px';
       labelAlpha.addEventListener('change', async (e) => {
         const v = Number((e.target as HTMLInputElement).value);
-        GRAPH_SETTINGS.visuals.labelColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : GRAPH_SETTINGS.visuals.labelColorAlpha;
+        SETTINGS.graph.labelColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : SETTINGS.graph.labelColorAlpha;
         await this.plugin.saveSettings();
       });
-      rb.addEventListener('click', async () => { GRAPH_SETTINGS.visuals.labelColor = undefined; GRAPH_SETTINGS.visuals.labelColorAlpha = GRAPH_SETTINGS.visuals.labelColorAlpha; await this.plugin.saveSettings(); colorInput.value = '#000000'; labelAlpha.value = String(GRAPH_SETTINGS.visuals.labelColorAlpha); });
+      rb.addEventListener('click', async () => { SETTINGS.graph.labelColor = undefined; SETTINGS.graph.labelColorAlpha = SETTINGS.graph.labelColorAlpha; await this.plugin.saveSettings(); colorInput.value = '#000000'; labelAlpha.value = String(SETTINGS.graph.labelColorAlpha); });
       (s as any).controlEl.appendChild(rb);
       (s as any).controlEl.appendChild(colorInput);
       const hint = document.createElement('span'); hint.textContent = '(alpha)'; hint.style.marginLeft = '8px'; hint.style.marginRight = '6px';
@@ -539,25 +535,25 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Use interface font for labels')
       .setDesc('When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.')
-      .addToggle((t: ToggleComponent ) => t.setValue(Boolean(GRAPH_SETTINGS.visuals.useInterfaceFont)).onChange(async (v: boolean) => {
-        GRAPH_SETTINGS.visuals.useInterfaceFont = Boolean(v);
+      .addToggle((t: ToggleComponent ) => t.setValue(Boolean(SETTINGS.graph.useInterfaceFont)).onChange(async (v: boolean) => {
+        SETTINGS.graph.useInterfaceFont = Boolean(v);
         await this.plugin.saveSettings();
       }));
 
     addSliderSetting(containerEl, {
       name: 'Base label font size',
       desc: 'Base font size for labels in pixels (before camera zoom scaling).',
-      value: GRAPH_SETTINGS.visuals.labelBaseFontSize ?? GRAPH_SETTINGS.visuals.labelBaseFontSize,
+      value: SETTINGS.graph.labelBaseFontSize ?? SETTINGS.graph.labelBaseFontSize,
       min: 6,
       max: 24,
       step: 1,
-      resetValue: GRAPH_SETTINGS.visuals.labelBaseFontSize,
+      resetValue: SETTINGS.graph.labelBaseFontSize,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 1 && v <= 72) {
-          GRAPH_SETTINGS.visuals.labelBaseFontSize = Math.round(v);
+          SETTINGS.graph.labelBaseFontSize = Math.round(v);
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          GRAPH_SETTINGS.visuals.labelBaseFontSize = GRAPH_SETTINGS.visuals.labelBaseFontSize;
+          SETTINGS.graph.labelBaseFontSize = SETTINGS.graph.labelBaseFontSize;
           await this.plugin.saveSettings();
         }
       },
@@ -570,7 +566,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
 
     // Repulsion: UI 0..1 maps to internal repulsion = ui^2 * 2000
     const repulsionUi = (() => {
-      const internal = (phys.repulsionStrength ?? GRAPH_SETTINGS.physics!.repulsionStrength);
+      const internal = (phys.repulsionStrength ?? SETTINGS.physics!.repulsionStrength);
       const ui = Math.sqrt(Math.max(0, internal / 2000));
       return Math.min(1, Math.max(0, ui));
     })();
@@ -589,14 +585,14 @@ class GreaterGraphSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.repulsionStrength = GRAPH_SETTINGS.physics!.repulsionStrength;
+          this.plugin.settings.physics.repulsionStrength = SETTINGS.physics!.repulsionStrength;
           await this.plugin.saveSettings();
         }
       },
     });
 
     // Spring strength: UI 0..1 -> internal = ui * 0.5
-    const springUi = Math.min(1, Math.max(0, (phys.springStrength ?? GRAPH_SETTINGS.physics!.springStrength) / 0.5));
+    const springUi = Math.min(1, Math.max(0, (phys.springStrength ?? SETTINGS.physics!.springStrength) / 0.5));
     addSliderSetting(containerEl, {
       name: 'Spring strength',
       desc: 'UI 0–1 mapped to internal spring constant (higher = stiffer).',
@@ -612,7 +608,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.springStrength = GRAPH_SETTINGS.physics!.springStrength;
+          this.plugin.settings.physics.springStrength = SETTINGS.physics!.springStrength;
           await this.plugin.saveSettings();
         }
       },
@@ -621,11 +617,11 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Spring length',
       desc: 'Preferred length (px) for edge springs.',
-      value: phys.springLength ?? GRAPH_SETTINGS.physics!.springLength,
+      value: phys.springLength ?? SETTINGS.physics!.springLength,
       min: 20,
       max: 400,
       step: 1,
-      resetValue: GRAPH_SETTINGS.physics!.springLength,
+      resetValue: SETTINGS.physics!.springLength,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
@@ -633,14 +629,14 @@ class GreaterGraphSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.springLength = GRAPH_SETTINGS.physics!.springLength;
+          this.plugin.settings.physics.springLength = SETTINGS.physics!.springLength;
           await this.plugin.saveSettings();
         }
       },
     });
 
     // Center pull UI 0..1 -> internal = ui * 0.01
-    const centerUi = Math.min(1, Math.max(0, (phys.centerPull ?? GRAPH_SETTINGS.physics!.centerPull) / 0.01));
+    const centerUi = Math.min(1, Math.max(0, (phys.centerPull ?? SETTINGS.physics!.centerPull) / 0.01));
     addSliderSetting(containerEl, {
       name: 'Center pull',
       desc: 'UI 0–1 mapped to a small centering force (internal scale).',
@@ -656,7 +652,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.centerPull = GRAPH_SETTINGS.physics!.centerPull;
+          this.plugin.settings.physics.centerPull = SETTINGS.physics!.centerPull;
           await this.plugin.saveSettings();
         }
       },
@@ -666,11 +662,11 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Damping',
       desc: 'Velocity damping (0.7–1.0). Higher values reduce motion faster.',
-      value: phys.damping ?? GRAPH_SETTINGS.physics!.damping,
+      value: phys.damping ?? SETTINGS.physics!.damping,
       min: 0.7,
       max: 1,
       step: 0.01,
-      resetValue: GRAPH_SETTINGS.physics!.damping,
+      resetValue: SETTINGS.physics!.damping,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0.7 && v <= 1) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
@@ -678,7 +674,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
           this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.damping = GRAPH_SETTINGS.physics!.damping;
+          this.plugin.settings.physics.damping = SETTINGS.physics!.damping;
           await this.plugin.saveSettings();
         }
       },
@@ -688,16 +684,16 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Count duplicate links')
       .setDesc('If enabled, multiple links between the same two files will be counted when computing in/out degrees.')
-      .addToggle((t: ToggleComponent) => t.setValue(Boolean(this.plugin.settings.visuals.countDuplicateLinks)).onChange(async (v: boolean) => {
-        this.plugin.settings.visuals.countDuplicateLinks = Boolean(v);
+      .addToggle((t: ToggleComponent) => t.setValue(Boolean(this.plugin.settings.graph.countDuplicateLinks)).onChange(async (v: boolean) => {
+        this.plugin.settings.graph.countDuplicateLinks = Boolean(v);
         await this.plugin.saveSettings();
       }));
 
     new Setting(containerEl)
       .setName('Double-line mutual links')
       .setDesc('When enabled, mutual links (A ↔ B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.')
-      .addToggle((t: ToggleComponent) => t.setValue(Boolean(this.plugin.settings.visuals.drawDoubleLines)).onChange(async (v: boolean) => {
-        this.plugin.settings.visuals.drawDoubleLines = Boolean(v);
+      .addToggle((t: ToggleComponent) => t.setValue(Boolean(this.plugin.settings.graph.drawDoubleLines)).onChange(async (v: boolean) => {
+        this.plugin.settings.graph.drawDoubleLines = Boolean(v);
         await this.plugin.saveSettings();
       }));
 
@@ -705,15 +701,15 @@ class GreaterGraphSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Show tag nodes')
       .setDesc('Toggle visibility of tag nodes and their edges in the graph.')
-      .addToggle((t: ToggleComponent) => t.setValue(this.plugin.settings.visuals.showTags !== false).onChange(async (v: boolean) => {
-        this.plugin.settings.visuals.showTags = Boolean(v);
+      .addToggle((t: ToggleComponent) => t.setValue(this.plugin.settings.graph.showTags !== false).onChange(async (v: boolean) => {
+        this.plugin.settings.graph.showTags = Boolean(v);
         await this.plugin.saveSettings();
       }));
     
     // (Mouse attraction controls below — single copy retained later in the settings)
 
     // Plane stiffness controls (UI 0..1 -> internal = ui * 0.02)
-      const notePlaneUi = Math.min(1, Math.max(0, (phys.notePlaneStiffness ?? GRAPH_SETTINGS.physics!.notePlaneStiffness) / 0.02));
+      const notePlaneUi = Math.min(1, Math.max(0, (phys.notePlaneStiffness ?? SETTINGS.physics!.notePlaneStiffness) / 0.02));
       addSliderSetting(containerEl, {
         name: 'Note plane stiffness (z)',
         desc: 'How strongly notes are pulled toward the z=0 plane (UI 0–1).',
@@ -729,13 +725,13 @@ class GreaterGraphSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           } else if (Number.isNaN(v)) {
             this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.notePlaneStiffness = GRAPH_SETTINGS.physics!.notePlaneStiffness;
+            this.plugin.settings.physics.notePlaneStiffness = SETTINGS.physics!.notePlaneStiffness;
             await this.plugin.saveSettings();
           }
         },
       });
 
-      const tagPlaneUi = Math.min(1, Math.max(0, (phys.tagPlaneStiffness ?? GRAPH_SETTINGS.physics!.tagPlaneStiffness) / 0.02));
+      const tagPlaneUi = Math.min(1, Math.max(0, (phys.tagPlaneStiffness ?? SETTINGS.physics!.tagPlaneStiffness) / 0.02));
       addSliderSetting(containerEl, {
         name: 'Tag plane stiffness (x)',
         desc: 'How strongly tag nodes are pulled toward the x=0 plane (UI 0–1).',
@@ -751,7 +747,7 @@ class GreaterGraphSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           } else if (Number.isNaN(v)) {
             this.plugin.settings.physics = this.plugin.settings.physics || {};
-            this.plugin.settings.physics.tagPlaneStiffness = GRAPH_SETTINGS.physics!.tagPlaneStiffness;
+            this.plugin.settings.physics.tagPlaneStiffness = SETTINGS.physics!.tagPlaneStiffness;
             await this.plugin.saveSettings();
           }
         },
@@ -777,9 +773,9 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       .setName('Use pinned center note')
       .setDesc('Prefer a specific note path as the graph center. Falls back to max in-links if not found.')
       .addToggle((t: ToggleComponent) => t
-        .setValue(Boolean(this.plugin.settings.usePinnedCenterNote))
+        .setValue(Boolean(this.plugin.settings.graph.useCenterNote))
         .onChange(async (v: boolean) => {
-          this.plugin.settings.usePinnedCenterNote = Boolean(v);
+          this.plugin.settings.graph.useCenterNote = Boolean(v);
           await this.plugin.saveSettings();
         }));
 
@@ -788,9 +784,9 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       .setDesc('e.g., "Home.md" or "Notes/Home" (vault-relative).')
       .addText((txt: TextComponent) => txt
         .setPlaceholder('path/to/note')
-        .setValue(this.plugin.settings.pinnedCenterNotePath || '')
+        .setValue(this.plugin.settings.graph.centerNoteTitle || '')
         .onChange(async (v: string) => {
-          this.plugin.settings.pinnedCenterNotePath = (v || '').trim();
+          this.plugin.settings.graph.centerNoteTitle = (v || '').trim();
           await this.plugin.saveSettings();
         }));
 
@@ -798,9 +794,9 @@ class GreaterGraphSettingTab extends PluginSettingTab {
       .setName('Fallback: prefer out-links')
       .setDesc('When picking a center by link count, prefer out-links (out-degree) instead of in-links (in-degree)')
       .addToggle((t: ToggleComponent) => t
-        .setValue(Boolean(this.plugin.settings.useOutlinkFallback))
+        .setValue(Boolean(this.plugin.settings.graph.useOutlinkFallback))
         .onChange(async (v: boolean) => {
-          this.plugin.settings.useOutlinkFallback = Boolean(v);
+          this.plugin.settings.graph.useOutlinkFallback = Boolean(v);
           await this.plugin.saveSettings();
         }));
   }

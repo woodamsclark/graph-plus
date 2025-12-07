@@ -3,7 +3,7 @@ import { buildGraph } from './graph/buildGraph.ts';
 import { layoutGraph2D, layoutGraph3D } from './graph/layout.ts';
 import { createRenderer } from './graph/renderer.ts';
 import { createSimulation } from './graph/simulation.ts';
-import { GraphManager } from './graph/GraphManager.ts';import { GRAPH_SETTINGS } from './main';
+import { GraphManager } from './graph/GraphManager.ts';import { SETTINGS } from './main';
 import { debounce } from './utils/debounce.ts';
 import { GraphData, Renderer } from './types/interfaces.ts';
 
@@ -24,7 +24,7 @@ export class GraphView extends ItemView {
   }
 
   getDisplayText(): string {
-    return 'Greater Graph';
+    return 'graph+';
   }
 
   getIcon(): string {
@@ -34,7 +34,7 @@ export class GraphView extends ItemView {
   async onOpen() {
     this.containerEl.empty();
     const container = this.containerEl.createDiv({ cls: 'greater-graph-view' });
-    this.manager = new GraphManager(this.app, container, this.plugin);
+    this.manager    = new GraphManager(this.app, container, this.plugin);
     await this.manager.init();
     if (this.manager) {
       this.manager.setOnNodeClick((node) => this.openNodeFile(node));
@@ -83,7 +83,6 @@ export class GraphView extends ItemView {
       if (af instanceof TFile) file = af;
     }
     if (!file) {
-      // eslint-disable-next-line no-console
       console.warn('Greater Graph: could not resolve file for node', node);
       return;
     }
@@ -91,10 +90,7 @@ export class GraphView extends ItemView {
     try {
       await leaf.openFile(file);
     } catch (e) {
-      // eslint-disable-next-line no-console
       console.error('Greater Graph: failed to open file', e);
-    }
-    
+    } 
   }
-  
 }

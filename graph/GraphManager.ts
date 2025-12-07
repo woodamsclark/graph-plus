@@ -5,7 +5,7 @@ import { createRenderer } from './renderer.ts';
 import { createSimulation } from './simulation.ts';
 import { debounce } from '../utils/debounce.ts';
 import { Settings, Renderer, GraphData, GraphNode, GraphEdge, Simulation} from '../types/interfaces.ts';
-import { GRAPH_SETTINGS } from '../main.ts';
+import { SETTINGS } from '../main.ts';
 import { InputManager } from './InputManager.ts';
 
 // This class manages interactions between the graph data, simulation, and renderer.
@@ -201,8 +201,8 @@ export class GraphManager {
     const camSnap               = this.cameraSnapShot;
     const depth                 = camSnap.distance;
 
-    const rotateSensitivityX  = GRAPH_SETTINGS.camera.rotateSensitivityX;
-    const rotateSensitivityY  = GRAPH_SETTINGS.camera.rotateSensitivityY;
+    const rotateSensitivityX  = SETTINGS.camera.rotateSensitivityX;
+    const rotateSensitivityY  = SETTINGS.camera.rotateSensitivityY;
     const dx                    = screenX - this.screenAnchorPoint!.x;
     const dy                    = screenY - this.screenAnchorPoint!.y;
 
