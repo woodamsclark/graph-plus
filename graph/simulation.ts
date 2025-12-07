@@ -4,11 +4,8 @@ import { SETTINGS } from '../main';
 
 export function createSimulation(nodes: GraphNode[], edges: GraphEdge[]) {
   // If center not provided, compute bounding-box center from node positions
-  let centerNode: GraphNode | null = null;
-
-
-
-  let running = false;
+  let centerNode: GraphNode | null  = null;
+  let running                       = false;
 
   const nodeById = new Map<string, GraphNode>();
   for (const n of nodes) nodeById.set(n.id, n);
@@ -185,9 +182,5 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[]) {
     }
   }
 
-  function setPinnedNodes(ids: Set<string>) {
-    pinnedNodes = new Set(ids || []);
-  }
-
-  return { start, stop, tick, reset, setPinnedNodes };
+  return { start, stop, tick, reset };
 }

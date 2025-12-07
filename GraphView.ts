@@ -7,7 +7,7 @@ import { GraphManager } from './graph/GraphManager.ts';import { SETTINGS } from 
 import { debounce } from './utils/debounce.ts';
 import { GraphData, Renderer } from './types/interfaces.ts';
 
-export const GREATER_GRAPH_VIEW_TYPE = 'greater-graph-view';
+export const GREATER_GRAPH_VIEW_TYPE = 'graph-plus';
 
 export class GraphView extends ItemView {
   private manager: GraphManager | null = null;
@@ -33,7 +33,7 @@ export class GraphView extends ItemView {
 
   async onOpen() {
     this.containerEl.empty();
-    const container = this.containerEl.createDiv({ cls: 'greater-graph-view' });
+    const container = this.containerEl.createDiv({ cls: 'graph+' });
     this.manager    = new GraphManager(this.app, container, this.plugin);
     await this.manager.init();
     if (this.manager) {

@@ -67,7 +67,7 @@ export class GraphManager {
       detectClickedNode : (screenX, screenY)          => { return this.nodeClicked(screenX, screenY); },
     });
 
-    const rawSaved    : any = (this.plugin as any).settings.nodePositions || {};
+    const rawSaved    : any = SETTINGS.nodePositions || {};
     let allSaved      : Record<string, Record<string, { x: number; y: number }>> = {};
     let savedPositions: Record<string,                { x: number; y: number }> = {};
     
@@ -97,7 +97,6 @@ export class GraphManager {
         }
       }
     }
-    
 
     this.buildAdjacencyMap();
     this.refreshGraph();

@@ -1065,10 +1065,7 @@ function createSimulation(nodes, edges) {
       n.vy = 0;
     }
   }
-  function setPinnedNodes(ids) {
-    pinnedNodes = new Set(ids || []);
-  }
-  return { start, stop, tick, reset, setPinnedNodes };
+  return { start, stop, tick, reset };
 }
 
 // utils/debounce.ts
@@ -1283,7 +1280,7 @@ var GraphManager = class {
         return this.nodeClicked(screenX, screenY);
       }
     });
-    const rawSaved = this.plugin.settings.nodePositions || {};
+    const rawSaved = SETTINGS.nodePositions || {};
     let allSaved = {};
     let savedPositions = {};
     if (rawSaved && typeof rawSaved === "object") {
@@ -1609,7 +1606,7 @@ var GraphManager = class {
 };
 
 // GraphView.ts
-var GREATER_GRAPH_VIEW_TYPE = "greater-graph-view";
+var GREATER_GRAPH_VIEW_TYPE = "graph-plus";
 var GraphView = class extends import_obsidian.ItemView {
   manager = null;
   plugin;
@@ -1622,14 +1619,14 @@ var GraphView = class extends import_obsidian.ItemView {
     return GREATER_GRAPH_VIEW_TYPE;
   }
   getDisplayText() {
-    return "Graph+";
+    return "graph+";
   }
   getIcon() {
     return "dot-network";
   }
   async onOpen() {
     this.containerEl.empty();
-    const container = this.containerEl.createDiv({ cls: "greater-graph-view" });
+    const container = this.containerEl.createDiv({ cls: "graph+" });
     this.manager = new GraphManager(this.app, container, this.plugin);
     await this.manager.init();
     if (this.manager) {
@@ -1751,14 +1748,12 @@ var SETTINGS = {
   nodePositions: {}
 };
 var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
-  settings = SETTINGS;
   settingsListeners = [];
   async onload() {
-    await this.loadSettings();
     this.registerView(GREATER_GRAPH_VIEW_TYPE, (leaf) => new GraphView(leaf, this));
     this.addCommand({
-      id: "open-greater-graph",
-      name: "Open Greater Graph",
+      id: "open-graph+",
+      name: "open graph+",
       callback: () => this.activateView()
     });
     this.addSettingTab(new GreaterGraphSettingTab(this.app, this));
@@ -1778,22 +1773,8 @@ var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
   }
   onunload() {
   }
-  async loadSettings() {
-    const data = await this.loadData();
-    this.settings = Object.assign({}, SETTINGS, data || {});
-    if (!this.settings.graph)
-      this.settings.graph = SETTINGS.graph;
-    try {
-      const g = this.settings.graph;
-      if (typeof g.maxNodeRadius === "number" && typeof g.minNodeRadius === "number") {
-        if (g.maxNodeRadius < g.minNodeRadius + 2)
-          g.maxNodeRadius = g.minNodeRadius + 2;
-      }
-    } catch (e) {
-    }
-  }
   async saveSettings() {
-    await this.saveData(this.settings);
+    await this.saveData(SETTINGS);
     this.notifySettingsChanged();
   }
   registerSettingsListener(listener) {
@@ -1823,8 +1804,9 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Greater Graph \u2013 Glow Settings" });
-    const physics = this.plugin.settings.physics;
+    containerEl.createEl("h2", { text: "Graph Settings" });
+    const graph = SETTINGS.graph;
+    const physics = SETTINGS.physics;
     const addSliderSetting = (parent, opts) => {
       const s = new import_obsidian2.Setting(parent).setName(opts.name).setDesc(opts.desc || "");
       const wrap = document.createElement("div");
@@ -1850,12 +1832,12 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       range.addEventListener("input", (e) => {
         num.value = e.target.value;
       });
+      num.addEventListener("input", (e) => {
+        range.value = e.target.value;
+      });
       range.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
         await opts.onChange(v);
-      });
-      num.addEventListener("input", (e) => {
-        range.value = e.target.value;
       });
       num.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
@@ -2053,7 +2035,7 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       }
     });
-    containerEl.createEl("h2", { text: "Colors" });
+    containerEl.createEl("h2", { text: "Color Settings" });
     {
       const s = new import_obsidian2.Setting(containerEl).setName("Node color (override)").setDesc("Optional color to override the theme accent for node fill. Leave unset to use the active theme.");
       const colorInput = document.createElement("input");
@@ -2284,10 +2266,9 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       }
     });
-    const phys = this.plugin.settings.physics || {};
-    containerEl.createEl("h2", { text: "Greater Graph \u2013 Physics" });
+    containerEl.createEl("h2", { text: "Physics Settings" });
     const repulsionUi = (() => {
-      const internal = phys.repulsionStrength ?? SETTINGS.physics.repulsionStrength;
+      const internal = physics.repulsionStrength ?? SETTINGS.physics.repulsionStrength;
       const ui = Math.sqrt(Math.max(0, internal / 2e3));
       return Math.min(1, Math.max(0, ui));
     })();
@@ -2301,17 +2282,15 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       resetValue: repulsionUi,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.repulsionStrength = v * v * 2e3;
+          physics.repulsionStrength = v * v * 2e3;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.repulsionStrength = SETTINGS.physics.repulsionStrength;
+          physics.repulsionStrength = SETTINGS.physics.repulsionStrength;
           await this.plugin.saveSettings();
         }
       }
     });
-    const springUi = Math.min(1, Math.max(0, (phys.springStrength ?? SETTINGS.physics.springStrength) / 0.5));
+    const springUi = Math.min(1, Math.max(0, (physics.springStrength ?? SETTINGS.physics.springStrength) / 0.5));
     addSliderSetting(containerEl, {
       name: "Spring strength",
       desc: "UI 0\u20131 mapped to internal spring constant (higher = stiffer).",
@@ -2322,12 +2301,10 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       resetValue: springUi,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.springStrength = v * 0.5;
+          physics.springStrength = v * 0.5;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.springStrength = SETTINGS.physics.springStrength;
+          physics.springStrength = SETTINGS.physics.springStrength;
           await this.plugin.saveSettings();
         }
       }
@@ -2335,24 +2312,22 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Spring length",
       desc: "Preferred length (px) for edge springs.",
-      value: phys.springLength ?? SETTINGS.physics.springLength,
+      value: physics.springLength ?? SETTINGS.physics.springLength,
       min: 20,
       max: 400,
       step: 1,
       resetValue: SETTINGS.physics.springLength,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.springLength = v;
+          physics.springLength = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.springLength = SETTINGS.physics.springLength;
+          physics.springLength = SETTINGS.physics.springLength;
           await this.plugin.saveSettings();
         }
       }
     });
-    const centerUi = Math.min(1, Math.max(0, (phys.centerPull ?? SETTINGS.physics.centerPull) / 0.01));
+    const centerUi = Math.min(1, Math.max(0, (physics.centerPull ?? SETTINGS.physics.centerPull) / 0.01));
     addSliderSetting(containerEl, {
       name: "Center pull",
       desc: "UI 0\u20131 mapped to a small centering force (internal scale).",
@@ -2363,12 +2338,9 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       resetValue: 0.1,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.centerPull = v * 0.01;
+          physics.centerPull = v * 0.01;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.centerPull = SETTINGS.physics.centerPull;
           await this.plugin.saveSettings();
         }
       }
@@ -2376,36 +2348,33 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Damping",
       desc: "Velocity damping (0.7\u20131.0). Higher values reduce motion faster.",
-      value: phys.damping ?? SETTINGS.physics.damping,
+      value: physics.damping ?? SETTINGS.physics.damping,
       min: 0.7,
       max: 1,
       step: 0.01,
       resetValue: SETTINGS.physics.damping,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0.7 && v <= 1) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.damping = v;
+          physics.damping = v;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.damping = SETTINGS.physics.damping;
           await this.plugin.saveSettings();
         }
       }
     });
-    new import_obsidian2.Setting(containerEl).setName("Count duplicate links").setDesc("If enabled, multiple links between the same two files will be counted when computing in/out degrees.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.graph.countDuplicateLinks)).onChange(async (v) => {
-      this.plugin.settings.graph.countDuplicateLinks = Boolean(v);
+    new import_obsidian2.Setting(containerEl).setName("Count duplicate links").setDesc("If enabled, multiple links between the same two files will be counted when computing in/out degrees.").addToggle((t) => t.setValue(Boolean(graph.countDuplicateLinks)).onChange(async (v) => {
+      graph.countDuplicateLinks = Boolean(v);
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Double-line mutual links").setDesc("When enabled, mutual links (A \u2194 B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.graph.drawDoubleLines)).onChange(async (v) => {
-      this.plugin.settings.graph.drawDoubleLines = Boolean(v);
+    new import_obsidian2.Setting(containerEl).setName("Double-line mutual links").setDesc("When enabled, mutual links (A \u2194 B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.").addToggle((t) => t.setValue(Boolean(graph.drawDoubleLines)).onChange(async (v) => {
+      graph.drawDoubleLines = Boolean(v);
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Show tag nodes").setDesc("Toggle visibility of tag nodes and their edges in the graph.").addToggle((t) => t.setValue(this.plugin.settings.graph.showTags !== false).onChange(async (v) => {
-      this.plugin.settings.graph.showTags = Boolean(v);
+    new import_obsidian2.Setting(containerEl).setName("Show tag nodes").setDesc("Toggle visibility of tag nodes and their edges in the graph.").addToggle((t) => t.setValue(graph.showTags !== false).onChange(async (v) => {
+      graph.showTags = Boolean(v);
       await this.plugin.saveSettings();
     }));
-    const notePlaneUi = Math.min(1, Math.max(0, (phys.notePlaneStiffness ?? SETTINGS.physics.notePlaneStiffness) / 0.02));
+    const notePlaneUi = Math.min(1, Math.max(0, (physics.notePlaneStiffness ?? SETTINGS.physics.notePlaneStiffness) / 0.02));
     addSliderSetting(containerEl, {
       name: "Note plane stiffness (z)",
       desc: "How strongly notes are pulled toward the z=0 plane (UI 0\u20131).",
@@ -2416,17 +2385,14 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       resetValue: 0.2,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.notePlaneStiffness = v * 0.02;
+          physics.notePlaneStiffness = v * 0.02;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.notePlaneStiffness = SETTINGS.physics.notePlaneStiffness;
           await this.plugin.saveSettings();
         }
       }
     });
-    const tagPlaneUi = Math.min(1, Math.max(0, (phys.tagPlaneStiffness ?? SETTINGS.physics.tagPlaneStiffness) / 0.02));
+    const tagPlaneUi = Math.min(1, Math.max(0, (physics.tagPlaneStiffness ?? SETTINGS.physics.tagPlaneStiffness) / 0.02));
     addSliderSetting(containerEl, {
       name: "Tag plane stiffness (x)",
       desc: "How strongly tag nodes are pulled toward the x=0 plane (UI 0\u20131).",
@@ -2437,32 +2403,27 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       resetValue: 0.4,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.tagPlaneStiffness = v * 0.02;
+          physics.tagPlaneStiffness = v * 0.02;
           await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          this.plugin.settings.physics = this.plugin.settings.physics || {};
-          this.plugin.settings.physics.tagPlaneStiffness = SETTINGS.physics.tagPlaneStiffness;
           await this.plugin.saveSettings();
         }
       }
     });
-    new import_obsidian2.Setting(containerEl).setName("Mouse gravity").setDesc("Enable the mouse gravity well that attracts nearby nodes.").addToggle((t) => t.setValue(Boolean(phys.mouseGravityEnabled !== false)).onChange(async (v) => {
-      this.plugin.settings.physics = this.plugin.settings.physics || {};
-      this.plugin.settings.physics.mouseGravityEnabled = Boolean(v);
+    new import_obsidian2.Setting(containerEl).setName("Mouse gravity").setDesc("Enable the mouse gravity well that attracts nearby nodes.").addToggle((t) => t.setValue(Boolean(physics.mouseGravityEnabled !== false)).onChange(async (v) => {
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h2", { text: "Center Node" });
-    new import_obsidian2.Setting(containerEl).setName("Use pinned center note").setDesc("Prefer a specific note path as the graph center. Falls back to max in-links if not found.").addToggle((t) => t.setValue(Boolean(this.plugin.settings.graph.useCenterNote)).onChange(async (v) => {
-      this.plugin.settings.graph.useCenterNote = Boolean(v);
+    new import_obsidian2.Setting(containerEl).setName("Use pinned center note").setDesc("Prefer a specific note path as the graph center. Falls back to max in-links if not found.").addToggle((t) => t.setValue(Boolean(graph.useCenterNote)).onChange(async (v) => {
+      graph.useCenterNote = Boolean(v);
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Pinned center note path").setDesc('e.g., "Home.md" or "Notes/Home" (vault-relative).').addText((txt) => txt.setPlaceholder("path/to/note").setValue(this.plugin.settings.graph.centerNoteTitle || "").onChange(async (v) => {
-      this.plugin.settings.graph.centerNoteTitle = (v || "").trim();
+    new import_obsidian2.Setting(containerEl).setName("Pinned center note path").setDesc('e.g., "Home.md" or "Notes/Home" (vault-relative).').addText((txt) => txt.setPlaceholder("path/to/note").setValue(graph.centerNoteTitle || "").onChange(async (v) => {
+      graph.centerNoteTitle = (v || "").trim();
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Fallback: prefer out-links").setDesc("When picking a center by link count, prefer out-links (out-degree) instead of in-links (in-degree)").addToggle((t) => t.setValue(Boolean(this.plugin.settings.graph.useOutlinkFallback)).onChange(async (v) => {
-      this.plugin.settings.graph.useOutlinkFallback = Boolean(v);
+    new import_obsidian2.Setting(containerEl).setName("Fallback: prefer out-links").setDesc("When picking a center by link count, prefer out-links (out-degree) instead of in-links (in-degree)").addToggle((t) => t.setValue(Boolean(graph.useOutlinkFallback)).onChange(async (v) => {
+      graph.useOutlinkFallback = Boolean(v);
       await this.plugin.saveSettings();
     }));
   }
