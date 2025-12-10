@@ -1,5 +1,5 @@
 // utils/defaultSettings.ts
-import type { Settings } from './interfaces.ts';
+import type { Settings } from './Interfaces.ts';
 
 export const DEFAULT_SETTINGS: Settings = {
   graph: {

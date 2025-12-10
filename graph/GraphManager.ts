@@ -3,10 +3,10 @@ import { buildGraph } from './buildGraph.ts';
 import { layoutGraph2D, layoutGraph3D } from './layout.ts';
 import { createRenderer } from './renderer.ts';
 import { createSimulation } from './simulation.ts';
-import { debounce } from '../utils/debounce.ts';
-import { Settings, Renderer, GraphData, GraphNode, GraphEdge, Simulation} from '../utils/interfaces.ts';
+import { debounce } from '../utilities/debounce.ts';
+import { Settings, Renderer, GraphData, GraphNode, GraphEdge, Simulation} from '../utilities/Interfaces.ts';
 import { InputManager } from './InputManager.ts';
-import { getSettings, updateSettings } from '../utils/SettingsStore.ts';
+import { getSettings, updateSettings } from '../utilities/settingsStore.ts';
 
 // This class manages interactions between the graph data, simulation, and renderer.
 export class GraphManager {

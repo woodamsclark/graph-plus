@@ -1,5 +1,5 @@
-import { GraphNode, GraphEdge, Simulation } from '../utils/interfaces.ts';
-import { getSettings } from '../utils/SettingsStore.ts';
+import { GraphNode, GraphEdge, Simulation } from '../utilities/Interfaces.ts';
+import { getSettings } from '../utilities/settingsStore.ts';
 
 
 export function createSimulation(nodes: GraphNode[], edges: GraphEdge[]) {

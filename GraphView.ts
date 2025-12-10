@@ -1,6 +1,6 @@
 import { App, ItemView, WorkspaceLeaf, Plugin, TFile, Platform } from 'obsidian';
 import { GraphManager } from './graph/GraphManager.ts';
-import { debounce } from './utils/debounce.ts';
+import { debounce } from './utilities/debounce.ts';
 
 export const GRAPH_PLUS_TYPE = 'graph-plus';
 

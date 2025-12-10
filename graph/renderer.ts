@@ -1,5 +1,5 @@
-import { GraphSettings, PhysicsSettings, Renderer, GraphData, CameraState } from '../utils/interfaces';
-import { getSettings } from '../utils/SettingsStore.ts';
+import { GraphSettings, PhysicsSettings, Renderer, GraphData, CameraState } from '../utilities/Interfaces.ts';
+import { getSettings } from '../utilities/settingsStore.ts';
 
 // The renderer is responsible for rendering the 2D graph visualization onto an HTML canvas.
 // The Graph Manager tells the renderer when and what to render
