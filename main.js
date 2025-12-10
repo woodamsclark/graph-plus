@@ -19,26 +19,41 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // main.ts
 var main_exports = {};
 __export(main_exports, {
-  SETTINGS: () => SETTINGS,
-  default: () => GreaterGraphPlugin
+  default: () => GraphPlus
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian2 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 
 // GraphView.ts
 var import_obsidian = require("obsidian");
 
+// utils/SettingsStore.ts
+var currentSettings;
+var listeners = /* @__PURE__ */ new Set();
+function initSettings(initial) {
+  currentSettings = initial;
+}
+function getSettings() {
+  return currentSettings;
+}
+function updateSettings(mutator) {
+  mutator(currentSettings);
+  for (const l of listeners)
+    l();
+}
+
 // graph/buildGraph.ts
 async function buildGraph(app) {
+  const settings = getSettings();
   const files = app.vault.getMarkdownFiles();
   const { nodes, nodeByPath } = createNoteNodes(files);
   const { edges, edgeSet } = buildNoteEdgesFromResolvedLinks(app, nodeByPath);
-  if (SETTINGS.graph.showTags !== false) {
+  if (settings.graph.showTags !== false) {
     addTagNodesAndEdges(app, files, nodes, nodeByPath, edges, edgeSet);
   }
   computeNodeDegrees(nodes, nodeByPath, edges);
   markBidirectionalEdges(edges);
-  const centerNode = pickCenterNode(app, nodes, SETTINGS);
+  const centerNode = pickCenterNode(app, nodes);
   return { nodes, edges };
 }
 function createNoteNodes(files) {
@@ -70,10 +85,11 @@ function createNoteNodes(files) {
   return { nodes, nodeByPath };
 }
 function buildNoteEdgesFromResolvedLinks(app, nodeByPath) {
+  const settings = getSettings();
   const resolved = app.metadataCache.resolvedLinks || {};
   const edges = [];
   const edgeSet = /* @__PURE__ */ new Set();
-  const countDuplicates = Boolean(SETTINGS.graph.countDuplicateLinks);
+  const countDuplicates = Boolean(settings.graph.countDuplicateLinks);
   for (const sourcePath of Object.keys(resolved)) {
     const targets = resolved[sourcePath] || {};
     for (const targetPath of Object.keys(targets)) {
@@ -151,12 +167,13 @@ function addTagNodesAndEdges(app, files, nodes, nodeByPath, edges, edgeSet) {
     return node;
   };
 }
-function pickCenterNode(app, nodes, settings) {
+function pickCenterNode(app, nodes) {
+  const settings = getSettings();
   if (!settings.graph.useCenterNote)
     return null;
-  if (SETTINGS.graph.centerNoteTitle) {
-    const centerNode = nodes.find((n) => n.id === SETTINGS.graph.centerNoteTitle);
-    SETTINGS.graph.centerNode = centerNode;
+  if (settings.graph.centerNoteTitle) {
+    const centerNode = nodes.find((n) => n.id === settings.graph.centerNoteTitle);
+    settings.graph.centerNode = centerNode;
   }
   const onlyNotes = nodes.filter((n) => n.type !== "tag");
   const preferOut = Boolean(settings.graph.useOutlinkFallback);
@@ -213,6 +230,7 @@ function pickCenterNode(app, nodes, settings) {
 
 // graph/renderer.ts
 function createRenderer(canvas) {
+  const settings = getSettings();
   const context = canvas.getContext("2d");
   let graph = null;
   let nodeById = /* @__PURE__ */ new Map();
@@ -235,7 +253,7 @@ function createRenderer(canvas) {
   let themeTagColor = "#8000ff";
   let resolvedInterfaceFontFamily = null;
   let resolvedMonoFontFamily = null;
-  let camera = { ...SETTINGS.camera.state };
+  let camera = { ...settings.camera.state };
   function parseHexColor(hex) {
     if (!hex)
       return null;
@@ -363,20 +381,20 @@ function createRenderer(canvas) {
     const isHovered = hoveredNodeId === node.id;
     const isNeighbor = hoverHighlightSet && hoverHighlightSet.has(node.id);
     if (isHovered) {
-      hoverScale = 1 + hoverScaleMax * SETTINGS.graph.hoverScale;
+      hoverScale = 1 + hoverScaleMax * settings.graph.hoverScale;
     } else if (isNeighbor) {
-      hoverScale = 1 + hoverScaleMax * 0.4 * SETTINGS.graph.hoverScale;
+      hoverScale = 1 + hoverScaleMax * 0.4 * settings.graph.hoverScale;
     }
-    const zoomScale = SETTINGS.camera.state.distance / camera.distance;
+    const zoomScale = settings.camera.state.distance / camera.distance;
     return base * hoverScale * zoomScale;
   }
   function getBaseNodeRadius(node) {
     const t = getDegreeNormalized(node);
-    return SETTINGS.graph.minNodeRadius + t * (SETTINGS.graph.maxNodeRadius - SETTINGS.graph.minNodeRadius);
+    return settings.graph.minNodeRadius + t * (settings.graph.maxNodeRadius - settings.graph.minNodeRadius);
   }
   function getBaseCenterAlpha(node) {
     const t = getDegreeNormalized(node);
-    return SETTINGS.graph.minCenterAlpha + t * (SETTINGS.graph.maxCenterAlpha - SETTINGS.graph.minCenterAlpha);
+    return settings.graph.minCenterAlpha + t * (settings.graph.maxCenterAlpha - settings.graph.minCenterAlpha);
   }
   function getCenterAlpha(node) {
     const base = getBaseCenterAlpha(node);
@@ -420,24 +438,24 @@ function createRenderer(canvas) {
     const r = getNodeRadius(node);
     return {
       inner: r * innerRadius,
-      outer: r * SETTINGS.physics.gravityRadius,
-      curve: SETTINGS.physics.gravityFallOff
+      outer: r * settings.physics.gravityRadius,
+      curve: settings.physics.gravityFallOff
     };
   }
   function buildLabelProfile(node) {
     const r = getNodeRadius(node);
     return {
       inner: r * innerRadius,
-      outer: r * SETTINGS.graph.labelRadius,
-      curve: SETTINGS.physics.gravityFallOff
+      outer: r * settings.graph.labelRadius,
+      curve: settings.physics.gravityFallOff
     };
   }
   function buildHighlightProfile(node) {
     const r = getNodeRadius(node);
     return {
       inner: r * innerRadius,
-      outer: r * SETTINGS.graph.labelRadius,
-      curve: SETTINGS.physics.gravityFallOff
+      outer: r * settings.graph.labelRadius,
+      curve: settings.physics.gravityFallOff
     };
   }
   function evalFalloff(node, profile) {
@@ -470,31 +488,31 @@ function createRenderer(canvas) {
     if (!graph)
       return;
     context.save();
-    if (SETTINGS.graph.nodeColor)
-      themeNodeColor = SETTINGS.graph.nodeColor;
-    if (SETTINGS.graph.labelColor)
-      themeLabelColor = SETTINGS.graph.labelColor;
-    if (SETTINGS.graph.edgeColor)
-      themeEdgeColor = SETTINGS.graph.edgeColor;
+    if (settings.graph.nodeColor)
+      themeNodeColor = settings.graph.nodeColor;
+    if (settings.graph.labelColor)
+      themeLabelColor = settings.graph.labelColor;
+    if (settings.graph.edgeColor)
+      themeEdgeColor = settings.graph.edgeColor;
     try {
       const cs = window.getComputedStyle(canvas);
       const nodeVar = cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
       const labelVar = cs.getPropertyValue("--text-normal") || cs.getPropertyValue("--text");
       const edgeVar = cs.getPropertyValue("--text-muted") || cs.getPropertyValue("--text-faint") || cs.getPropertyValue("--text-normal");
-      if (!SETTINGS.graph.nodeColor && nodeVar && nodeVar.trim())
+      if (!settings.graph.nodeColor && nodeVar && nodeVar.trim())
         themeNodeColor = nodeVar.trim();
-      if (!SETTINGS.graph.labelColor && labelVar && labelVar.trim())
+      if (!settings.graph.labelColor && labelVar && labelVar.trim())
         themeLabelColor = labelVar.trim();
-      if (!SETTINGS.graph.edgeColor && edgeVar && edgeVar.trim())
+      if (!settings.graph.edgeColor && edgeVar && edgeVar.trim())
         themeEdgeColor = edgeVar.trim();
       const tagVar = cs.getPropertyValue("--accent-2") || cs.getPropertyValue("--accent-secondary") || cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
-      if (!SETTINGS.graph.tagColor && tagVar && tagVar.trim())
+      if (!settings.graph.tagColor && tagVar && tagVar.trim())
         themeTagColor = tagVar.trim();
     } catch (e) {
     }
     try {
       const cs = window.getComputedStyle(canvas);
-      if (SETTINGS.graph.useInterfaceFont) {
+      if (settings.graph.useInterfaceFont) {
         if (!resolvedInterfaceFontFamily) {
           const candidates = ["--font-family-interface", "--font-family", "--font-main", "--font-primary", "--font-family-sans", "--text-font"];
           let fam = null;
@@ -552,7 +570,7 @@ function createRenderer(canvas) {
         }
       }
     } catch (e) {
-      if (SETTINGS.graph.useInterfaceFont)
+      if (settings.graph.useInterfaceFont)
         resolvedInterfaceFontFamily = resolvedInterfaceFontFamily || "sans-serif";
       else
         resolvedMonoFontFamily = resolvedMonoFontFamily || "monospace";
@@ -575,14 +593,14 @@ function createRenderer(canvas) {
         const id = n.id;
         const target = isNodeTargetFocused(id) ? 1 : 0;
         const cur = nodeFocusMap.get(id) ?? target;
-        const alpha = 1 - Math.exp(-SETTINGS.graph.focusSmoothing * dt);
+        const alpha = 1 - Math.exp(-settings.graph.focusSmoothing * dt);
         const next = cur + (target - cur) * alpha;
         nodeFocusMap.set(id, next);
       }
     }
     updateFocusMap();
     const targetHover = hoveredNodeId ? 1 : 0;
-    SETTINGS.graph.hoverScale += (targetHover - SETTINGS.graph.hoverScale) * hoverLerpSpeed;
+    settings.graph.hoverScale += (targetHover - settings.graph.hoverScale) * hoverLerpSpeed;
     if (graph.edges && graph.edges.length > 0) {
       const edgeRgb = colorToRgb(themeEdgeColor);
       for (const edge of graph.edges) {
@@ -590,7 +608,7 @@ function createRenderer(canvas) {
         const tgt = nodeById.get(edge.targetId);
         if (!src || !tgt)
           continue;
-        if (!SETTINGS.graph.showTags && (src.type === "tag" || tgt.type === "tag"))
+        if (!settings.graph.showTags && (src.type === "tag" || tgt.type === "tag"))
           continue;
         const srcP = projectWorld(src);
         const tgtP = projectWorld(tgt);
@@ -611,7 +629,7 @@ function createRenderer(canvas) {
         else
           alpha = 0.08 + (0.9 - 0.08) * edgeFocus;
         context.save();
-        let finalEdgeAlpha = SETTINGS.graph.edgeColorAlpha;
+        let finalEdgeAlpha = settings.graph.edgeColorAlpha;
         if (hoveredNodeId) {
           const srcInDepth = hoverHighlightSet.has(edge.sourceId);
           const tgtInDepth = hoverHighlightSet.has(edge.targetId);
@@ -620,7 +638,7 @@ function createRenderer(canvas) {
             finalEdgeAlpha = 1;
         }
         context.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${finalEdgeAlpha})`;
-        const isMutual = !!edge.bidirectional && SETTINGS.graph.drawDoubleLines;
+        const isMutual = !!edge.bidirectional && settings.graph.drawDoubleLines;
         if (isMutual) {
           const dx = tgtP.x - srcP.x;
           const dy = tgtP.y - srcP.y;
@@ -651,7 +669,7 @@ function createRenderer(canvas) {
         context.restore();
       }
     }
-    const baseFontSize = SETTINGS.graph.labelBaseFontSize;
+    const baseFontSize = settings.graph.labelBaseFontSize;
     const minFontSize = 6;
     const maxFontSize = 18;
     context.textAlign = "center";
@@ -665,7 +683,7 @@ function createRenderer(canvas) {
     } catch (e) {
     }
     for (const node of graph.nodes) {
-      if (!SETTINGS.graph.showTags && node.type === "tag")
+      if (!settings.graph.showTags && node.type === "tag")
         continue;
       const p = projectWorld(node);
       const baseRadius = getBaseNodeRadius(node);
@@ -676,13 +694,13 @@ function createRenderer(canvas) {
       const focus = nodeFocusMap.get(node.id) ?? 1;
       const focused = focus > 0.01;
       if (focused) {
-        const nodeColorOverride = node && node.type === "tag" ? SETTINGS.graph.tagColor ?? themeTagColor : themeNodeColor;
+        const nodeColorOverride = node && node.type === "tag" ? settings.graph.tagColor ?? themeTagColor : themeNodeColor;
         const accentRgb = colorToRgb(nodeColorOverride);
-        const useNodeAlpha = node && node.type === "tag" ? SETTINGS.graph.tagColorAlpha ?? SETTINGS.graph.tagColorAlpha : SETTINGS.graph.nodeColorAlpha ?? SETTINGS.graph.nodeColorAlpha;
+        const useNodeAlpha = node && node.type === "tag" ? settings.graph.tagColorAlpha ?? settings.graph.tagColorAlpha : settings.graph.nodeColorAlpha ?? settings.graph.nodeColorAlpha;
         const dimCenter = clamp01(getBaseCenterAlpha(node));
         const fullCenter = centerAlpha;
         let blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
-        let effectiveUseNodeAlpha = SETTINGS.graph.tagColorAlpha;
+        let effectiveUseNodeAlpha = settings.graph.tagColorAlpha;
         if (hoveredNodeId) {
           const inDepth = hoverHighlightSet.has(node.id);
           const isHovered = node.id === hoveredNodeId;
@@ -691,24 +709,24 @@ function createRenderer(canvas) {
             effectiveUseNodeAlpha = 1;
           }
         }
-        const gradient = context.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * SETTINGS.physics.gravityRadius);
+        const gradient = context.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * settings.physics.gravityRadius);
         gradient.addColorStop(0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * effectiveUseNodeAlpha})`);
         gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.5 * effectiveUseNodeAlpha})`);
         gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.15 * effectiveUseNodeAlpha})`);
         gradient.addColorStop(1, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0)`);
         context.save();
         context.beginPath();
-        context.arc(p.x, p.y, radius * SETTINGS.physics.gravityRadius, 0, Math.PI * 2);
+        context.arc(p.x, p.y, radius * settings.physics.gravityRadius, 0, Math.PI * 2);
         context.fillStyle = gradient;
         context.fill();
         context.restore();
-        const bodyAlpha = SETTINGS.graph.labelColorAlpha;
+        const bodyAlpha = settings.graph.labelColorAlpha;
         context.save();
         context.beginPath();
         context.arc(p.x, p.y, radius, 0, Math.PI * 2);
-        const bodyColorOverride = node && node.type === "tag" ? SETTINGS.graph.tagColor ?? themeTagColor : themeNodeColor;
+        const bodyColorOverride = node && node.type === "tag" ? settings.graph.tagColor ?? themeTagColor : themeNodeColor;
         const accent = colorToRgb(bodyColorOverride);
-        const useBodyAlpha = node && node.type === "tag" ? SETTINGS.graph.tagColorAlpha ?? SETTINGS.graph.tagColorAlpha : SETTINGS.graph.nodeColorAlpha ?? SETTINGS.graph.nodeColorAlpha;
+        const useBodyAlpha = node && node.type === "tag" ? settings.graph.tagColorAlpha ?? settings.graph.tagColorAlpha : settings.graph.nodeColorAlpha ?? settings.graph.nodeColorAlpha;
         let effectiveUseBodyAlpha = useBodyAlpha;
         let finalBodyAlpha = bodyAlpha;
         if (hoveredNodeId) {
@@ -722,11 +740,11 @@ function createRenderer(canvas) {
         context.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${finalBodyAlpha * effectiveUseBodyAlpha})`;
         context.fill();
         context.restore();
-        const displayedFont = SETTINGS.graph.labelBaseFontSize;
+        const displayedFont = settings.graph.labelBaseFontSize;
         const radiusScreenPx = radius;
         let labelAlphaVis = 1;
         const minR = 0;
-        const fadeRange = Math.max(0, SETTINGS.graph.labelFadeRangePx);
+        const fadeRange = Math.max(0, settings.graph.labelFadeRangePx);
         if (radiusScreenPx <= minR) {
           labelAlphaVis = 0;
         } else if (radiusScreenPx <= minR + fadeRange) {
@@ -747,13 +765,13 @@ function createRenderer(canvas) {
           context.font = `${fontToSet}px ${resolvedInterfaceFontFamily || "sans-serif"}`;
           const isHoverOrHighlight2 = hoveredNodeId === node.id || hoverHighlightSet && hoverHighlightSet.has(node.id);
           const centerA = isHoverOrHighlight2 ? 1 : clamp01(getCenterAlpha(node));
-          let labelA = Math.max(SETTINGS.graph.labelColorAlpha, labelAlphaVis * SETTINGS.graph.labelColorAlpha);
+          let labelA = Math.max(settings.graph.labelColorAlpha, labelAlphaVis * settings.graph.labelColorAlpha);
           if (isHoverOrHighlight2)
-            labelA = SETTINGS.graph.labelColorAlpha;
+            labelA = settings.graph.labelColorAlpha;
           else if (hoveredNodeId && hoverHighlightSet.has(node.id))
-            labelA = Math.max(labelA, SETTINGS.graph.labelColorAlpha);
+            labelA = Math.max(labelA, settings.graph.labelColorAlpha);
           context.globalAlpha = Math.max(0, Math.min(1, labelA * centerA));
-          const labelRgb = colorToRgb(SETTINGS.graph.labelColor || "#ffffff");
+          const labelRgb = colorToRgb(settings.graph.labelColor || "#ffffff");
           context.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},1.0)`;
           const verticalPadding = 4;
           context.fillText(node.label, p.x, p.y + radius + verticalPadding);
@@ -763,7 +781,7 @@ function createRenderer(canvas) {
         const faintRgb = colorToRgb(themeLabelColor || "#999");
         const faintAlpha = 0.15 * (1 - focus) + 0.1 * focus;
         const effectiveCenterAlpha = clamp01(getCenterAlpha(node));
-        const finalAlpha = faintAlpha * effectiveCenterAlpha * SETTINGS.graph.nodeColorAlpha;
+        const finalAlpha = faintAlpha * effectiveCenterAlpha * settings.graph.nodeColorAlpha;
         context.save();
         context.beginPath();
         context.arc(p.x, p.y, radius * 0.9, 0, Math.PI * 2);
@@ -852,7 +870,7 @@ function createRenderer(canvas) {
     render();
   }
   function resetCamera() {
-    camera = { ...SETTINGS.camera.state };
+    camera = { ...settings.camera.state };
     recenterCamera();
   }
   function recenterCamera() {
@@ -891,6 +909,7 @@ function createSimulation(nodes, edges) {
     nodeById.set(n.id, n);
   let pinnedNodes = /* @__PURE__ */ new Set();
   function applyRepulsion() {
+    const settings = getSettings();
     const N = nodes.length;
     for (let i = 0; i < N; i++) {
       const a = nodes[i];
@@ -905,7 +924,7 @@ function createSimulation(nodes, edges) {
         const dist = Math.sqrt(distSq);
         const minDist = 40;
         const effectiveDist = Math.max(dist, minDist);
-        const force = SETTINGS.physics.repulsionStrength / (effectiveDist * effectiveDist);
+        const force = settings.physics.repulsionStrength / (effectiveDist * effectiveDist);
         const fx = dx / dist * force;
         const fy = dy / dist * force;
         const fz = dz / dist * force;
@@ -923,6 +942,7 @@ function createSimulation(nodes, edges) {
     }
   }
   function applySprings() {
+    const settings = getSettings();
     if (!edges)
       return;
     for (const e of edges) {
@@ -934,8 +954,8 @@ function createSimulation(nodes, edges) {
       const dy = b.y - a.y;
       const dz = (b.z || 0) - (a.z || 0);
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-4;
-      const displacement = dist - (SETTINGS.physics.springLength || 0);
-      const f = (SETTINGS.physics.springStrength || 0) * Math.tanh(displacement / 50);
+      const displacement = dist - (settings.physics.springLength || 0);
+      const f = (settings.physics.springStrength || 0) * Math.tanh(displacement / 50);
       const fx = dx / dist * f;
       const fy = dy / dist * f;
       const fz = dz / dist * f;
@@ -952,35 +972,37 @@ function createSimulation(nodes, edges) {
     }
   }
   function applyCentering() {
-    if (SETTINGS.physics.centerPull <= 0)
+    const settings = getSettings();
+    if (settings.physics.centerPull <= 0)
       return;
-    const cx = SETTINGS.physics.worldCenterX;
-    const cy = SETTINGS.physics.worldCenterY;
-    const cz = SETTINGS.physics.worldCenterZ;
+    const cx = settings.physics.worldCenterX;
+    const cy = settings.physics.worldCenterY;
+    const cz = settings.physics.worldCenterZ;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
       const dx = cx - n.x;
       const dy = cy - n.y;
       const dz = cz - n.z;
-      n.vx = (n.vx || 0) + dx * SETTINGS.physics.centerPull;
-      n.vy = (n.vy || 0) + dy * SETTINGS.physics.centerPull;
-      n.vz = (n.vz || 0) + dz * SETTINGS.physics.centerPull;
+      n.vx = (n.vx || 0) + dx * settings.physics.centerPull;
+      n.vy = (n.vy || 0) + dy * settings.physics.centerPull;
+      n.vz = (n.vz || 0) + dz * settings.physics.centerPull;
     }
     if (centerNode) {
-      const dx = SETTINGS.physics.worldCenterX - centerNode.x;
-      const dy = SETTINGS.physics.worldCenterY - centerNode.y;
-      const dz = SETTINGS.physics.worldCenterZ - centerNode.z;
-      centerNode.vx = (centerNode.vx || 0) + dx * SETTINGS.physics.centerPull * 0.5;
-      centerNode.vy = (centerNode.vy || 0) + dy * SETTINGS.physics.centerPull * 0.5;
-      centerNode.vz = (centerNode.vz || 0) + dz * SETTINGS.physics.centerPull * 0.5;
+      const dx = settings.physics.worldCenterX - centerNode.x;
+      const dy = settings.physics.worldCenterY - centerNode.y;
+      const dz = settings.physics.worldCenterZ - centerNode.z;
+      centerNode.vx = (centerNode.vx || 0) + dx * settings.physics.centerPull * 0.5;
+      centerNode.vy = (centerNode.vy || 0) + dy * settings.physics.centerPull * 0.5;
+      centerNode.vz = (centerNode.vz || 0) + dz * settings.physics.centerPull * 0.5;
     }
   }
   function applyDamping() {
+    const settings = getSettings();
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
-      const d = Math.max(0, Math.min(1, SETTINGS.physics.damping));
+      const d = Math.max(0, Math.min(1, settings.physics.damping));
       n.vx = (n.vx ?? 0) * (1 - d);
       n.vy = (n.vy ?? 0) * (1 - d);
       n.vz = (n.vz ?? 0) * (1 - d);
@@ -993,12 +1015,13 @@ function createSimulation(nodes, edges) {
     }
   }
   function applyPlaneConstraints() {
-    const noteK = SETTINGS.physics.notePlaneStiffness;
-    const tagK = SETTINGS.physics.tagPlaneStiffness;
+    const settings = getSettings();
+    const noteK = settings.physics.notePlaneStiffness;
+    const tagK = settings.physics.tagPlaneStiffness;
     if (noteK === 0 && tagK === 0)
       return;
-    const targetZ = SETTINGS.physics.worldCenterZ;
-    const targetX = SETTINGS.physics.worldCenterX;
+    const targetZ = settings.physics.worldCenterZ;
+    const targetX = settings.physics.worldCenterX;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
@@ -1012,9 +1035,10 @@ function createSimulation(nodes, edges) {
     }
   }
   function applyCenterNodeLock() {
-    const cx = SETTINGS.physics.worldCenterX;
-    const cy = SETTINGS.physics.worldCenterY;
-    const cz = SETTINGS.physics.worldCenterZ;
+    const settings = getSettings();
+    const cx = settings.physics.worldCenterX;
+    const cy = settings.physics.worldCenterY;
+    const cz = settings.physics.worldCenterZ;
     for (const n of nodes) {
       if (n.isCenterNode) {
         n.x = cx;
@@ -1252,6 +1276,7 @@ var GraphManager = class {
     this.plugin = plugin;
   }
   async init() {
+    const settings = getSettings();
     const vaultId = this.app.vault.getName();
     const canvas = document.createElement("canvas");
     canvas.style.width = "100%";
@@ -1280,7 +1305,7 @@ var GraphManager = class {
         return this.nodeClicked(screenX, screenY);
       }
     });
-    const rawSaved = SETTINGS.nodePositions || {};
+    const rawSaved = settings.nodePositions || {};
     let allSaved = {};
     let savedPositions = {};
     if (rawSaved && typeof rawSaved === "object") {
@@ -1394,14 +1419,15 @@ var GraphManager = class {
     this.screenAnchorPoint = { x: screenX, y: screenY };
   }
   updateOrbit(screenX, screenY) {
+    const settings = getSettings();
     if (!this.renderer || this.screenAnchorPoint === null) {
       return;
     }
     const renderer = this.renderer;
     const camSnap = this.cameraSnapShot;
     const depth = camSnap.distance;
-    const rotateSensitivityX = SETTINGS.camera.rotateSensitivityX;
-    const rotateSensitivityY = SETTINGS.camera.rotateSensitivityY;
+    const rotateSensitivityX = settings.camera.rotateSensitivityX;
+    const rotateSensitivityY = settings.camera.rotateSensitivityY;
     const dx = screenX - this.screenAnchorPoint.x;
     const dy = screenY - this.screenAnchorPoint.y;
     let yaw = camSnap.yaw - dx * rotateSensitivityX;
@@ -1606,7 +1632,7 @@ var GraphManager = class {
 };
 
 // GraphView.ts
-var GREATER_GRAPH_VIEW_TYPE = "graph-plus";
+var GRAPH_PLUS_TYPE = "graph-plus";
 var GraphView = class extends import_obsidian.ItemView {
   manager = null;
   plugin;
@@ -1616,7 +1642,7 @@ var GraphView = class extends import_obsidian.ItemView {
     this.plugin = plugin;
   }
   getViewType() {
-    return GREATER_GRAPH_VIEW_TYPE;
+    return GRAPH_PLUS_TYPE;
   }
   getDisplayText() {
     return "graph+";
@@ -1679,8 +1705,11 @@ var GraphView = class extends import_obsidian.ItemView {
   }
 };
 
-// main.ts
-var SETTINGS = {
+// GraphSettingsTab.ts
+var import_obsidian2 = require("obsidian");
+
+// utils/DefaultSettings.ts
+var DEFAULT_SETTINGS = {
   graph: {
     minNodeRadius: 3,
     maxNodeRadius: 20,
@@ -1689,7 +1718,7 @@ var SETTINGS = {
     highlightDepth: 1,
     focusSmoothing: 0.8,
     nodeColor: void 0,
-    // color overrides left undefined by default to follow theme
+    // use theme
     tagColor: void 0,
     labelColor: void 0,
     edgeColor: void 0,
@@ -1721,7 +1750,7 @@ var SETTINGS = {
     gravityRadius: 6,
     gravityFallOff: 3,
     mouseGravityRadius: 15,
-    // change these settings later
+    // change later if you want
     mouseGravityStrength: 1,
     mouseGravityExponent: 2,
     worldCenterX: 0,
@@ -1746,67 +1775,21 @@ var SETTINGS = {
     }
   },
   nodePositions: {}
+  // Record<string, {x:number;y:number;z:number}> or whatever your type is
 };
-var GreaterGraphPlugin = class extends import_obsidian2.Plugin {
-  settingsListeners = [];
-  async onload() {
-    this.registerView(GREATER_GRAPH_VIEW_TYPE, (leaf) => new GraphView(leaf, this));
-    this.addCommand({
-      id: "open-graph+",
-      name: "open graph+",
-      callback: () => this.activateView()
-    });
-    this.addSettingTab(new GreaterGraphSettingTab(this.app, this));
-  }
-  async activateView() {
-    const leaves = this.app.workspace.getLeavesOfType(GREATER_GRAPH_VIEW_TYPE);
-    if (leaves.length === 0) {
-      const leaf = this.app.workspace.getLeaf(true);
-      await leaf.setViewState({
-        type: GREATER_GRAPH_VIEW_TYPE,
-        active: true
-      });
-      this.app.workspace.revealLeaf(leaf);
-    } else {
-      this.app.workspace.revealLeaf(leaves[0]);
-    }
-  }
-  onunload() {
-  }
-  async saveSettings() {
-    await this.saveData(SETTINGS);
-    this.notifySettingsChanged();
-  }
-  registerSettingsListener(listener) {
-    this.settingsListeners.push(listener);
-    return () => {
-      const idx = this.settingsListeners.indexOf(listener);
-      if (idx !== -1)
-        this.settingsListeners.splice(idx, 1);
-    };
-  }
-  notifySettingsChanged() {
-    for (const l of this.settingsListeners) {
-      try {
-        l();
-      } catch (e) {
-        console.error("Greater Graph settings listener error:", e);
-      }
-    }
-  }
-};
-var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
+
+// GraphSettingsTab.ts
+var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
   plugin;
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
   }
   display() {
+    const settings = getSettings();
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "Graph Settings" });
-    const graph = SETTINGS.graph;
-    const physics = SETTINGS.physics;
     const addSliderSetting = (parent, opts) => {
       const s = new import_obsidian2.Setting(parent).setName(opts.name).setDesc(opts.desc || "");
       const wrap = document.createElement("div");
@@ -1871,167 +1854,190 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Minimum node radius",
       desc: "Minimum radius for the smallest node (in pixels).",
-      value: SETTINGS.graph.minNodeRadius ?? SETTINGS.graph.minNodeRadius,
+      value: settings.graph.minNodeRadius,
       min: 1,
       max: 20,
       step: 1,
-      resetValue: SETTINGS.graph.minNodeRadius,
+      resetValue: DEFAULT_SETTINGS.graph.minNodeRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          SETTINGS.graph.minNodeRadius = Math.round(v);
-          if (typeof SETTINGS.graph.maxNodeRadius === "number" && SETTINGS.graph.maxNodeRadius < SETTINGS.graph.minNodeRadius + 2) {
-            SETTINGS.graph.maxNodeRadius = SETTINGS.graph.minNodeRadius + 2;
+          this.applySettings((s) => {
+            s.graph.minNodeRadius = Math.round(v);
+          });
+          if (typeof settings.graph.maxNodeRadius === "number" && settings.graph.maxNodeRadius < settings.graph.minNodeRadius + 2) {
+            this.applySettings((s) => {
+              s.graph.maxNodeRadius = settings.graph.minNodeRadius + 2;
+            });
           }
-          await this.plugin.saveSettings();
         } else if (Number.isNaN(v)) {
-          SETTINGS.graph.minNodeRadius = SETTINGS.graph.minNodeRadius;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.graph.minNodeRadius = settings.graph.minNodeRadius;
+          });
         }
       }
     });
     addSliderSetting(containerEl, {
       name: "Maximum node radius",
       desc: "Maximum radius for the most connected node (in pixels).",
-      value: SETTINGS.graph.maxNodeRadius ?? SETTINGS.graph.maxNodeRadius,
+      value: settings.graph.maxNodeRadius,
       min: 8,
       max: 80,
       step: 1,
-      resetValue: SETTINGS.graph.maxNodeRadius,
+      resetValue: DEFAULT_SETTINGS.graph.maxNodeRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v)) {
-          SETTINGS.graph.maxNodeRadius = Math.round(v);
-          if (typeof SETTINGS.graph.minNodeRadius === "number" && SETTINGS.graph.maxNodeRadius < SETTINGS.graph.minNodeRadius + 2)
-            SETTINGS.graph.maxNodeRadius = SETTINGS.graph.minNodeRadius + 2;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.graph.maxNodeRadius = Math.round(v);
+          });
+          if (typeof settings.graph.minNodeRadius === "number" && settings.graph.maxNodeRadius < settings.graph.minNodeRadius + 2) {
+            this.applySettings((s) => {
+              s.graph.maxNodeRadius = settings.graph.minNodeRadius + 2;
+            });
+          }
         } else if (Number.isNaN(v)) {
-          SETTINGS.graph.maxNodeRadius = SETTINGS.graph.maxNodeRadius;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.graph.maxNodeRadius = settings.graph.maxNodeRadius;
+          });
         }
       }
     });
     addSliderSetting(containerEl, {
       name: "Minimum center glow opacity",
       desc: "Opacity (0\u20130.8) at the glow center for the least connected node.",
-      value: SETTINGS.graph.minCenterAlpha ?? SETTINGS.graph.minCenterAlpha,
+      value: settings.graph.minCenterAlpha,
       min: 0,
       max: 0.8,
       step: 0.01,
-      resetValue: SETTINGS.graph.minCenterAlpha,
+      resetValue: DEFAULT_SETTINGS.graph.minCenterAlpha,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 0.8) {
-          SETTINGS.graph.minCenterAlpha = v;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.graph.minCenterAlpha = v;
+          });
         } else if (Number.isNaN(v)) {
-          SETTINGS.graph.minCenterAlpha = SETTINGS.graph.minCenterAlpha;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.graph.minCenterAlpha = settings.graph.minCenterAlpha;
+          });
         }
       }
     });
     addSliderSetting(containerEl, {
       name: "Maximum center glow opacity",
       desc: "Opacity (0\u20131) at the glow center for the most connected node.",
-      value: SETTINGS.graph.maxCenterAlpha ?? SETTINGS.graph.maxCenterAlpha,
+      value: settings.graph.maxCenterAlpha,
       min: 0,
       max: 1,
       step: 0.01,
-      resetValue: SETTINGS.graph.maxCenterAlpha,
+      resetValue: DEFAULT_SETTINGS.graph.maxCenterAlpha,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          SETTINGS.graph.maxCenterAlpha = v;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.graph.maxCenterAlpha = v;
+          });
         } else if (Number.isNaN(v)) {
-          SETTINGS.graph.maxCenterAlpha = SETTINGS.graph.maxCenterAlpha;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.graph.maxCenterAlpha = settings.graph.maxCenterAlpha;
+          });
         }
       }
     });
     addSliderSetting(containerEl, {
       name: "Highlight depth",
       desc: "Graph distance (in hops) from the hovered node that will be highlighted.",
-      value: SETTINGS.graph.highlightDepth,
+      value: settings.graph.highlightDepth,
       min: 0,
       max: 5,
       step: 1,
-      resetValue: SETTINGS.graph.highlightDepth,
+      resetValue: DEFAULT_SETTINGS.graph.highlightDepth,
       onChange: async (v) => {
         if (!Number.isNaN(v) && Number.isInteger(v) && v >= 0) {
-          SETTINGS.graph.highlightDepth = Math.max(0, Math.floor(v));
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.graph.highlightDepth = v;
+          });
         } else if (Number.isNaN(v)) {
-          SETTINGS.graph.highlightDepth = SETTINGS.graph.highlightDepth;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.graph.highlightDepth = settings.graph.highlightDepth;
+          });
         }
       }
     });
     addSliderSetting(containerEl, {
       name: "Gravity Radius",
       desc: "Scales each node's screen-space radius for glow/mouse gravity.",
-      value: physics.gravityRadius ?? SETTINGS.physics.gravityRadius,
+      value: settings.physics.gravityRadius,
       min: 1,
       max: 20,
       step: 0.1,
-      resetValue: SETTINGS.physics.gravityRadius,
+      resetValue: DEFAULT_SETTINGS.physics.gravityRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          physics.gravityRadius = v;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.gravityRadius = v;
+          });
         } else if (Number.isNaN(v)) {
-          physics.gravityRadius = SETTINGS.physics.gravityRadius;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.gravityRadius = settings.physics.gravityRadius;
+          });
         }
       }
     });
     addSliderSetting(containerEl, {
       name: "Gravity curve steepness",
       desc: "Controls falloff steepness; higher = stronger near cursor.",
-      value: physics.gravityFallOff ?? SETTINGS.physics.gravityFallOff,
+      value: settings.physics.gravityFallOff,
       min: 0.5,
       max: 10,
       step: 0.1,
-      resetValue: SETTINGS.physics.gravityFallOff,
+      resetValue: DEFAULT_SETTINGS.physics.gravityFallOff,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          physics.gravityFallOff = v;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.gravityFallOff = v;
+          });
         } else if (Number.isNaN(v)) {
-          physics.gravityFallOff = SETTINGS.physics.gravityFallOff;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.gravityFallOff = settings.physics.gravityFallOff;
+          });
         }
       }
     });
     addSliderSetting(containerEl, {
       name: "Label Radius",
       desc: "Screen-space label reveal radius (\xD7 node size).",
-      value: SETTINGS.graph.labelRadius ?? SETTINGS.graph.labelRadius,
+      value: settings.graph.labelRadius,
       min: 0.5,
       max: 10,
       step: 0.1,
-      resetValue: SETTINGS.graph.labelRadius,
+      resetValue: DEFAULT_SETTINGS.graph.labelRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          SETTINGS.graph.labelRadius = v;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.graph.labelRadius = v;
+          });
         } else if (Number.isNaN(v)) {
-          SETTINGS.graph.labelRadius = SETTINGS.graph.labelRadius;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.graph.labelRadius = settings.graph.labelRadius;
+          });
         }
       }
     });
     addSliderSetting(containerEl, {
       name: "Focus smoothing rate",
       desc: "Smoothness of focus transitions (0 = very slow, 1 = fast). Internally used as a lerp factor.",
-      value: SETTINGS.graph.focusSmoothing ?? SETTINGS.graph.focusSmoothing,
+      value: settings.graph.focusSmoothing,
       min: 0,
       max: 1,
       step: 0.01,
-      resetValue: SETTINGS.graph.focusSmoothing,
+      resetValue: DEFAULT_SETTINGS.graph.focusSmoothing,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          SETTINGS.graph.focusSmoothing = v;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.graph.focusSmoothing = v;
+          });
         } else if (Number.isNaN(v)) {
-          SETTINGS.graph.focusSmoothing = SETTINGS.graph.focusSmoothing;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.graph.focusSmoothing = settings.graph.focusSmoothing;
+          });
         }
       }
     });
@@ -2041,15 +2047,16 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
-        colorInput.value = SETTINGS.graph.nodeColor ? String(SETTINGS.graph.nodeColor) : "#000000";
+        colorInput.value = settings.graph.nodeColor ? String(settings.graph.nodeColor) : "#000000";
       } catch (e) {
         colorInput.value = "#000000";
       }
       colorInput.style.marginLeft = "8px";
       colorInput.addEventListener("change", async (e) => {
         const v = e.target.value.trim();
-        SETTINGS.graph.nodeColor = v === "" ? void 0 : v;
-        await this.plugin.saveSettings();
+        this.applySettings((s2) => {
+          s2.graph.nodeColor = v === "" ? void 0 : v;
+        });
       });
       const rb = document.createElement("button");
       rb.type = "button";
@@ -2064,20 +2071,22 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       alphaInput.min = "0.1";
       alphaInput.max = "1";
       alphaInput.step = "0.01";
-      alphaInput.value = String(SETTINGS.graph.nodeColorAlpha ?? SETTINGS.graph.nodeColorAlpha);
+      alphaInput.value = String(settings.graph.nodeColorAlpha);
       alphaInput.style.width = "68px";
       alphaInput.style.marginLeft = "8px";
       alphaInput.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
-        SETTINGS.graph.nodeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : SETTINGS.graph.nodeColorAlpha;
-        await this.plugin.saveSettings();
+        this.applySettings((s2) => {
+          s2.graph.nodeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : settings.graph.nodeColorAlpha;
+        });
       });
       rb.addEventListener("click", async () => {
-        SETTINGS.graph.nodeColor = void 0;
-        SETTINGS.graph.nodeColorAlpha = SETTINGS.graph.nodeColorAlpha;
-        await this.plugin.saveSettings();
+        this.applySettings((s2) => {
+          s2.graph.nodeColor = void 0;
+          s2.graph.nodeColorAlpha = settings.graph.nodeColorAlpha;
+        });
         colorInput.value = "#000000";
-        alphaInput.value = String(SETTINGS.graph.nodeColorAlpha);
+        alphaInput.value = String(settings.graph.nodeColorAlpha);
       });
       s.controlEl.appendChild(rb);
       const hint = document.createElement("span");
@@ -2093,15 +2102,16 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
-        colorInput.value = SETTINGS.graph.edgeColor ? String(SETTINGS.graph.edgeColor) : "#000000";
+        colorInput.value = settings.graph.edgeColor ? String(settings.graph.edgeColor) : "#000000";
       } catch (e) {
         colorInput.value = "#000000";
       }
       colorInput.style.marginLeft = "8px";
       colorInput.addEventListener("change", async (e) => {
         const v = e.target.value.trim();
-        SETTINGS.graph.edgeColor = v === "" ? void 0 : v;
-        await this.plugin.saveSettings();
+        this.applySettings((s2) => {
+          s2.graph.edgeColor = v === "" ? void 0 : v;
+        });
       });
       const rb = document.createElement("button");
       rb.type = "button";
@@ -2116,20 +2126,22 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       edgeAlpha.min = "0.1";
       edgeAlpha.max = "1";
       edgeAlpha.step = "0.01";
-      edgeAlpha.value = String(SETTINGS.graph.edgeColorAlpha ?? SETTINGS.graph.edgeColorAlpha);
+      edgeAlpha.value = String(settings.graph.edgeColorAlpha);
       edgeAlpha.style.width = "68px";
       edgeAlpha.style.marginLeft = "8px";
       edgeAlpha.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
-        SETTINGS.graph.edgeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : SETTINGS.graph.edgeColorAlpha;
-        await this.plugin.saveSettings();
+        this.applySettings((s2) => {
+          s2.graph.edgeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : settings.graph.edgeColorAlpha;
+        });
       });
       rb.addEventListener("click", async () => {
-        SETTINGS.graph.edgeColor = void 0;
-        SETTINGS.graph.edgeColorAlpha = SETTINGS.graph.edgeColorAlpha;
-        await this.plugin.saveSettings();
+        this.applySettings((s2) => {
+          s2.graph.edgeColor = void 0;
+          s2.graph.edgeColorAlpha = settings.graph.edgeColorAlpha;
+        });
         colorInput.value = "#000000";
-        edgeAlpha.value = String(SETTINGS.graph.edgeColorAlpha);
+        edgeAlpha.value = String(settings.graph.edgeColorAlpha);
       });
       s.controlEl.appendChild(rb);
       s.controlEl.appendChild(colorInput);
@@ -2145,14 +2157,14 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
-        colorInput.value = SETTINGS.graph.tagColor ? String(SETTINGS.graph.tagColor) : "#000000";
+        colorInput.value = settings.graph.tagColor ? String(settings.graph.tagColor) : "#000000";
       } catch (e) {
         colorInput.value = "#000000";
       }
       colorInput.style.marginLeft = "8px";
       colorInput.addEventListener("change", async (e) => {
         const v = e.target.value.trim();
-        SETTINGS.graph.tagColor = v === "" ? void 0 : v;
+        settings.graph.tagColor = v === "" ? void 0 : v;
         await this.plugin.saveSettings();
       });
       const rb = document.createElement("button");
@@ -2168,20 +2180,23 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       tagAlpha.min = "0.1";
       tagAlpha.max = "1";
       tagAlpha.step = "0.01";
-      tagAlpha.value = String(SETTINGS.graph.tagColorAlpha ?? SETTINGS.graph.tagColorAlpha);
+      tagAlpha.value = String(settings.graph.tagColorAlpha);
       tagAlpha.style.width = "68px";
       tagAlpha.style.marginLeft = "8px";
       tagAlpha.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
-        SETTINGS.graph.tagColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : SETTINGS.graph.tagColorAlpha;
-        await this.plugin.saveSettings();
+        this.applySettings((s2) => {
+          s2.graph.tagColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : settings.graph.tagColorAlpha;
+        });
       });
       rb.addEventListener("click", async () => {
-        SETTINGS.graph.tagColor = void 0;
-        SETTINGS.graph.tagColorAlpha = SETTINGS.graph.tagColorAlpha;
+        this.applySettings((s2) => {
+          s2.graph.tagColor = void 0;
+          s2.graph.tagColorAlpha = settings.graph.tagColorAlpha;
+        });
         await this.plugin.saveSettings();
         colorInput.value = "#000000";
-        tagAlpha.value = String(SETTINGS.graph.tagColorAlpha);
+        tagAlpha.value = String(settings.graph.tagColorAlpha);
       });
       s.controlEl.appendChild(rb);
       s.controlEl.appendChild(colorInput);
@@ -2197,14 +2212,14 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
-        colorInput.value = SETTINGS.graph.labelColor ? String(SETTINGS.graph.labelColor) : "#000000";
+        colorInput.value = settings.graph.labelColor ? String(settings.graph.labelColor) : "#000000";
       } catch (e) {
         colorInput.value = "#000000";
       }
       colorInput.style.marginLeft = "8px";
       colorInput.addEventListener("change", async (e) => {
         const v = e.target.value.trim();
-        SETTINGS.graph.labelColor = v === "" ? void 0 : v;
+        settings.graph.labelColor = v === "" ? void 0 : v;
         await this.plugin.saveSettings();
       });
       const rb = document.createElement("button");
@@ -2220,20 +2235,22 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       labelAlpha.min = "0";
       labelAlpha.max = "1";
       labelAlpha.step = "0.01";
-      labelAlpha.value = String(SETTINGS.graph.labelColorAlpha ?? SETTINGS.graph.labelColorAlpha);
+      labelAlpha.value = String(settings.graph.labelColorAlpha);
       labelAlpha.style.width = "68px";
       labelAlpha.style.marginLeft = "8px";
       labelAlpha.addEventListener("change", async (e) => {
         const v = Number(e.target.value);
-        SETTINGS.graph.labelColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : SETTINGS.graph.labelColorAlpha;
-        await this.plugin.saveSettings();
+        this.applySettings((s2) => {
+          s2.graph.labelColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : settings.graph.labelColorAlpha;
+        });
       });
       rb.addEventListener("click", async () => {
-        SETTINGS.graph.labelColor = void 0;
-        SETTINGS.graph.labelColorAlpha = SETTINGS.graph.labelColorAlpha;
-        await this.plugin.saveSettings();
+        this.applySettings((s2) => {
+          s2.graph.labelColor = void 0;
+          s2.graph.labelColorAlpha = settings.graph.labelColorAlpha;
+        });
         colorInput.value = "#000000";
-        labelAlpha.value = String(SETTINGS.graph.labelColorAlpha);
+        labelAlpha.value = String(settings.graph.labelColorAlpha);
       });
       s.controlEl.appendChild(rb);
       s.controlEl.appendChild(colorInput);
@@ -2244,31 +2261,34 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       s.controlEl.appendChild(hint);
       s.controlEl.appendChild(labelAlpha);
     }
-    new import_obsidian2.Setting(containerEl).setName("Use interface font for labels").setDesc("When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.").addToggle((t) => t.setValue(Boolean(SETTINGS.graph.useInterfaceFont)).onChange(async (v) => {
-      SETTINGS.graph.useInterfaceFont = Boolean(v);
-      await this.plugin.saveSettings();
+    new import_obsidian2.Setting(containerEl).setName("Use interface font for labels").setDesc("When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.").addToggle((t) => t.setValue(Boolean(settings.graph.useInterfaceFont)).onChange(async (v) => {
+      this.applySettings((s) => {
+        s.graph.useInterfaceFont = v;
+      });
     }));
     addSliderSetting(containerEl, {
       name: "Base label font size",
       desc: "Base font size for labels in pixels (before camera zoom scaling).",
-      value: SETTINGS.graph.labelBaseFontSize ?? SETTINGS.graph.labelBaseFontSize,
+      value: settings.graph.labelBaseFontSize,
       min: 6,
       max: 24,
       step: 1,
-      resetValue: SETTINGS.graph.labelBaseFontSize,
+      resetValue: DEFAULT_SETTINGS.graph.labelBaseFontSize,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 1 && v <= 72) {
-          SETTINGS.graph.labelBaseFontSize = Math.round(v);
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.graph.labelBaseFontSize = Math.round(v);
+          });
         } else if (Number.isNaN(v)) {
-          SETTINGS.graph.labelBaseFontSize = SETTINGS.graph.labelBaseFontSize;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.graph.labelBaseFontSize = settings.graph.labelBaseFontSize;
+          });
         }
       }
     });
     containerEl.createEl("h2", { text: "Physics Settings" });
     const repulsionUi = (() => {
-      const internal = physics.repulsionStrength ?? SETTINGS.physics.repulsionStrength;
+      const internal = settings.physics.repulsionStrength;
       const ui = Math.sqrt(Math.max(0, internal / 2e3));
       return Math.min(1, Math.max(0, ui));
     })();
@@ -2282,15 +2302,17 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       resetValue: repulsionUi,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          physics.repulsionStrength = v * v * 2e3;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.repulsionStrength = v * v * 2e3;
+          });
         } else if (Number.isNaN(v)) {
-          physics.repulsionStrength = SETTINGS.physics.repulsionStrength;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.repulsionStrength = settings.physics.repulsionStrength;
+          });
         }
       }
     });
-    const springUi = Math.min(1, Math.max(0, (physics.springStrength ?? SETTINGS.physics.springStrength) / 0.5));
+    const springUi = Math.min(1, Math.max(0, settings.physics.springStrength / 0.5));
     addSliderSetting(containerEl, {
       name: "Spring strength",
       desc: "UI 0\u20131 mapped to internal spring constant (higher = stiffer).",
@@ -2301,33 +2323,37 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       resetValue: springUi,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          physics.springStrength = v * 0.5;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.springStrength = v * 0.5;
+          });
         } else if (Number.isNaN(v)) {
-          physics.springStrength = SETTINGS.physics.springStrength;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.springStrength = settings.physics.springStrength;
+          });
         }
       }
     });
     addSliderSetting(containerEl, {
       name: "Spring length",
       desc: "Preferred length (px) for edge springs.",
-      value: physics.springLength ?? SETTINGS.physics.springLength,
+      value: settings.physics.springLength,
       min: 20,
       max: 400,
       step: 1,
-      resetValue: SETTINGS.physics.springLength,
+      resetValue: DEFAULT_SETTINGS.physics.springLength,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0) {
-          physics.springLength = v;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.springLength = v;
+          });
         } else if (Number.isNaN(v)) {
-          physics.springLength = SETTINGS.physics.springLength;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.springLength = settings.physics.springLength;
+          });
         }
       }
     });
-    const centerUi = Math.min(1, Math.max(0, (physics.centerPull ?? SETTINGS.physics.centerPull) / 0.01));
+    const centerUi = Math.min(1, Math.max(0, settings.physics.centerPull / 0.01));
     addSliderSetting(containerEl, {
       name: "Center pull",
       desc: "UI 0\u20131 mapped to a small centering force (internal scale).",
@@ -2338,43 +2364,52 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       resetValue: 0.1,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          physics.centerPull = v * 0.01;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.centerPull = v * 0.01;
+          });
         } else if (Number.isNaN(v)) {
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.centerPull = 0;
+          });
         }
       }
     });
     addSliderSetting(containerEl, {
       name: "Damping",
       desc: "Velocity damping (0.7\u20131.0). Higher values reduce motion faster.",
-      value: physics.damping ?? SETTINGS.physics.damping,
+      value: settings.physics.damping,
       min: 0.7,
       max: 1,
       step: 0.01,
-      resetValue: SETTINGS.physics.damping,
+      resetValue: DEFAULT_SETTINGS.physics.damping,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0.7 && v <= 1) {
-          physics.damping = v;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.damping = v;
+          });
         } else if (Number.isNaN(v)) {
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.damping = settings.physics.damping;
+          });
         }
       }
     });
-    new import_obsidian2.Setting(containerEl).setName("Count duplicate links").setDesc("If enabled, multiple links between the same two files will be counted when computing in/out degrees.").addToggle((t) => t.setValue(Boolean(graph.countDuplicateLinks)).onChange(async (v) => {
-      graph.countDuplicateLinks = Boolean(v);
-      await this.plugin.saveSettings();
+    new import_obsidian2.Setting(containerEl).setName("Count duplicate links").setDesc("If enabled, multiple links between the same two files will be counted when computing in/out degrees.").addToggle((t) => t.setValue(Boolean(settings.graph.countDuplicateLinks)).onChange(async (v) => {
+      this.applySettings((s) => {
+        s.graph.countDuplicateLinks = Boolean(v);
+      });
     }));
-    new import_obsidian2.Setting(containerEl).setName("Double-line mutual links").setDesc("When enabled, mutual links (A \u2194 B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.").addToggle((t) => t.setValue(Boolean(graph.drawDoubleLines)).onChange(async (v) => {
-      graph.drawDoubleLines = Boolean(v);
-      await this.plugin.saveSettings();
+    new import_obsidian2.Setting(containerEl).setName("Double-line mutual links").setDesc("When enabled, mutual links (A \u2194 B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.").addToggle((t) => t.setValue(Boolean(settings.graph.drawDoubleLines)).onChange(async (v) => {
+      this.applySettings((s) => {
+        s.graph.drawDoubleLines = Boolean(v);
+      });
     }));
-    new import_obsidian2.Setting(containerEl).setName("Show tag nodes").setDesc("Toggle visibility of tag nodes and their edges in the graph.").addToggle((t) => t.setValue(graph.showTags !== false).onChange(async (v) => {
-      graph.showTags = Boolean(v);
-      await this.plugin.saveSettings();
+    new import_obsidian2.Setting(containerEl).setName("Show tag nodes").setDesc("Toggle visibility of tag nodes and their edges in the graph.").addToggle((t) => t.setValue(settings.graph.showTags !== false).onChange(async (v) => {
+      this.applySettings((s) => {
+        s.graph.showTags = Boolean(v);
+      });
     }));
-    const notePlaneUi = Math.min(1, Math.max(0, (physics.notePlaneStiffness ?? SETTINGS.physics.notePlaneStiffness) / 0.02));
+    const notePlaneUi = Math.min(1, Math.max(0, settings.physics.notePlaneStiffness / 0.02));
     addSliderSetting(containerEl, {
       name: "Note plane stiffness (z)",
       desc: "How strongly notes are pulled toward the z=0 plane (UI 0\u20131).",
@@ -2385,14 +2420,17 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       resetValue: 0.2,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          physics.notePlaneStiffness = v * 0.02;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.notePlaneStiffness = v * 0.02;
+          });
         } else if (Number.isNaN(v)) {
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.notePlaneStiffness = 0;
+          });
         }
       }
     });
-    const tagPlaneUi = Math.min(1, Math.max(0, (physics.tagPlaneStiffness ?? SETTINGS.physics.tagPlaneStiffness) / 0.02));
+    const tagPlaneUi = Math.min(1, Math.max(0, settings.physics.tagPlaneStiffness / 0.02));
     addSliderSetting(containerEl, {
       name: "Tag plane stiffness (x)",
       desc: "How strongly tag nodes are pulled toward the x=0 plane (UI 0\u20131).",
@@ -2403,32 +2441,72 @@ var GreaterGraphSettingTab = class extends import_obsidian2.PluginSettingTab {
       resetValue: 0.4,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          physics.tagPlaneStiffness = v * 0.02;
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.tagPlaneStiffness = v * 0.02;
+          });
         } else if (Number.isNaN(v)) {
-          await this.plugin.saveSettings();
+          this.applySettings((s) => {
+            s.physics.tagPlaneStiffness = 0;
+          });
         }
       }
     });
-    new import_obsidian2.Setting(containerEl).setName("Mouse gravity").setDesc("Enable the mouse gravity well that attracts nearby nodes.").addToggle((t) => t.setValue(Boolean(physics.mouseGravityEnabled !== false)).onChange(async (v) => {
-      await this.plugin.saveSettings();
+    new import_obsidian2.Setting(containerEl).setName("Mouse gravity").setDesc("Enable the mouse gravity well that attracts nearby nodes.").addToggle((t) => t.setValue(Boolean(settings.physics.mouseGravityEnabled !== false)).onChange(async (v) => {
+      this.applySettings((s) => {
+        s.physics.mouseGravityEnabled = Boolean(v);
+      });
     }));
     containerEl.createEl("h2", { text: "Center Node" });
-    new import_obsidian2.Setting(containerEl).setName("Use pinned center note").setDesc("Prefer a specific note path as the graph center. Falls back to max in-links if not found.").addToggle((t) => t.setValue(Boolean(graph.useCenterNote)).onChange(async (v) => {
-      graph.useCenterNote = Boolean(v);
-      await this.plugin.saveSettings();
+    new import_obsidian2.Setting(containerEl).setName("Use pinned center note").setDesc("Prefer a specific note path as the graph center. Falls back to max in-links if not found.").addToggle((t) => t.setValue(Boolean(settings.graph.useCenterNote)).onChange(async (v) => {
+      this.applySettings((s) => {
+        s.graph.useCenterNote = Boolean(v);
+      });
     }));
-    new import_obsidian2.Setting(containerEl).setName("Pinned center note path").setDesc('e.g., "Home.md" or "Notes/Home" (vault-relative).').addText((txt) => txt.setPlaceholder("path/to/note").setValue(graph.centerNoteTitle || "").onChange(async (v) => {
-      graph.centerNoteTitle = (v || "").trim();
-      await this.plugin.saveSettings();
+    new import_obsidian2.Setting(containerEl).setName("Pinned center note path").setDesc('e.g., "Home.md" or "Notes/Home" (vault-relative).').addText((txt) => txt.setPlaceholder("path/to/note").setValue(settings.graph.centerNoteTitle || "").onChange(async (v) => {
+      this.applySettings((s) => {
+        s.graph.centerNoteTitle = (v || "").trim();
+      });
     }));
-    new import_obsidian2.Setting(containerEl).setName("Fallback: prefer out-links").setDesc("When picking a center by link count, prefer out-links (out-degree) instead of in-links (in-degree)").addToggle((t) => t.setValue(Boolean(graph.useOutlinkFallback)).onChange(async (v) => {
-      graph.useOutlinkFallback = Boolean(v);
-      await this.plugin.saveSettings();
+    new import_obsidian2.Setting(containerEl).setName("Fallback: prefer out-links").setDesc("When picking a center by link count, prefer out-links (out-degree) instead of in-links (in-degree)").addToggle((t) => t.setValue(Boolean(settings.graph.useOutlinkFallback)).onChange(async (v) => {
+      this.applySettings((s) => {
+        s.graph.useOutlinkFallback = Boolean(v);
+      });
     }));
   }
+  async applySettings(mutator) {
+    updateSettings(mutator);
+    await this.plugin.saveSettings();
+  }
 };
-// Annotate the CommonJS export names for ESM import in node:
-0 && (module.exports = {
-  SETTINGS
-});
+
+// main.ts
+var GraphPlus = class extends import_obsidian3.Plugin {
+  async onload() {
+    initSettings({ ...DEFAULT_SETTINGS });
+    this.registerView(GRAPH_PLUS_TYPE, (leaf) => new GraphView(leaf, this));
+    this.addCommand({
+      id: "open-graph+",
+      name: "open graph+",
+      callback: () => this.activateView()
+    });
+    this.addSettingTab(new GraphPlusSettingTab(this.app, this));
+  }
+  async activateView() {
+    const leaves = this.app.workspace.getLeavesOfType(GRAPH_PLUS_TYPE);
+    if (leaves.length === 0) {
+      const leaf = this.app.workspace.getLeaf(true);
+      await leaf.setViewState({
+        type: GRAPH_PLUS_TYPE,
+        active: true
+      });
+      this.app.workspace.revealLeaf(leaf);
+    } else {
+      this.app.workspace.revealLeaf(leaves[0]);
+    }
+  }
+  onunload() {
+  }
+  async saveSettings() {
+    await this.saveData(getSettings());
+  }
+};

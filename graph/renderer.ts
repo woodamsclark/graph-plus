@@ -1,27 +1,26 @@
-import { GraphSettings, PhysicsSettings, Renderer, GraphData, CameraState } from '../types/interfaces';
-import { SETTINGS } from '../main';
-import { Settings } from 'http2';
+import { GraphSettings, PhysicsSettings, Renderer, GraphData, CameraState } from '../utils/interfaces';
+import { getSettings } from '../utils/SettingsStore.ts';
 
 // The renderer is responsible for rendering the 2D graph visualization onto an HTML canvas.
 // The Graph Manager tells the renderer when and what to render
 export function createRenderer(canvas: HTMLCanvasElement): Renderer {
-  const context = canvas.getContext('2d');
-  let graph               : GraphData | null = null;
-  let nodeById            : Map<string, any> = new Map();
-  let minDegree           : number = 0;
-  let maxDegree           : number = 0;
-  let minEdgeCount        : number = 1;
-  let maxEdgeCount        : number = 1;
-  let innerRadius         : number = 1.0; // fixed inner = 1×radius
-  let hoveredNodeId       : string | null = null;
-  let hoverHighlightSet   : Set<string> = new Set();
-  let mouseX              : number = 0;
-  let mouseY              : number = 0;
-  const hoverScaleMax     : number = 0.25; // +25% radius at full hover
-  const hoverLerpSpeed    : number = 0.2; // how quickly hoverScale interpolates each frame (0-1)
-  // per-node smooth focus factor (0 = dimmed, 1 = focused)
+  const settings                                = getSettings();
+  const context                                 = canvas.getContext('2d');
+  let graph               : GraphData | null    = null;
+  let nodeById            : Map<string, any>    = new Map();
+  let minDegree           : number              = 0;
+  let maxDegree           : number              = 0;
+  let minEdgeCount        : number              = 1;
+  let maxEdgeCount        : number              = 1;
+  let innerRadius         : number              = 1.0; // fixed inner = 1×radius
+  let hoveredNodeId       : string | null       = null;
+  let hoverHighlightSet   : Set<string>         = new Set();
+  let mouseX              : number              = 0;
+  let mouseY              : number              = 0;
+  const hoverScaleMax     : number              = 0.25; // +25% radius at full hover
+  const hoverLerpSpeed    : number              = 0.2;  // how quickly hoverScale interpolates each frame (0-1)
   const nodeFocusMap      : Map<string, number> = new Map();
-  let lastRenderTime      : number = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+  let lastRenderTime      : number              = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
   
 
   // theme-derived colors (updated each render)
@@ -33,7 +32,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   let resolvedInterfaceFontFamily : string | null = null;
   let resolvedMonoFontFamily      : string | null = null;
 
-  let camera: CameraState = { ...SETTINGS.camera.state };
+  let camera: CameraState = { ...settings.camera.state };
 
   function parseHexColor(hex: string) {
     if (!hex) return null;
@@ -163,23 +162,23 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     const isHovered  = hoveredNodeId === node.id;
     const isNeighbor = hoverHighlightSet && hoverHighlightSet.has(node.id);
     if (isHovered) {
-      hoverScale = 1 + hoverScaleMax * SETTINGS.graph.hoverScale;
+      hoverScale = 1 + hoverScaleMax * settings.graph.hoverScale;
     } else if (isNeighbor) {
-      hoverScale = 1 + (hoverScaleMax * 0.4) * SETTINGS.graph.hoverScale;
+      hoverScale = 1 + (hoverScaleMax * 0.4) * settings.graph.hoverScale;
     }
     // Apply camera zoom scale so nodes grow/shrink as camera distance changes
-    const zoomScale = SETTINGS.camera.state.distance / camera.distance;
+    const zoomScale = settings.camera.state.distance / camera.distance;
     return base * hoverScale * zoomScale;
   }
 
   function getBaseNodeRadius(node: any) {
     const t = getDegreeNormalized(node);
-    return SETTINGS.graph.minNodeRadius + t * (SETTINGS.graph.maxNodeRadius - SETTINGS.graph.minNodeRadius);
+    return settings.graph.minNodeRadius + t * (settings.graph.maxNodeRadius - settings.graph.minNodeRadius);
   }
 
   function getBaseCenterAlpha(node: any) {
     const t = getDegreeNormalized(node);
-    return SETTINGS.graph.minCenterAlpha + t * (SETTINGS.graph.maxCenterAlpha - SETTINGS.graph.minCenterAlpha);
+    return settings.graph.minCenterAlpha + t * (settings.graph.maxCenterAlpha - settings.graph.minCenterAlpha);
   }
 
   function getCenterAlpha(node: any) {
@@ -237,8 +236,8 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     const r = getNodeRadius(node);
     return {
       inner: r * innerRadius,
-      outer: r * SETTINGS.physics.gravityRadius,
-      curve: SETTINGS.physics.gravityFallOff,
+      outer: r * settings.physics.gravityRadius,
+      curve: settings.physics.gravityFallOff,
     };
   }
 
@@ -246,8 +245,8 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     const r = getNodeRadius(node);
     return {
       inner: r * innerRadius,
-      outer: r * SETTINGS.graph.labelRadius,
-      curve: SETTINGS.physics.gravityFallOff,
+      outer: r * settings.graph.labelRadius,
+      curve: settings.physics.gravityFallOff,
     };
   }
 
@@ -255,8 +254,8 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     const r = getNodeRadius(node);
     return {
       inner: r * innerRadius,
-      outer: r * SETTINGS.graph.labelRadius,
-      curve: SETTINGS.physics.gravityFallOff,
+      outer: r * settings.graph.labelRadius,
+      curve: settings.physics.gravityFallOff,
     };
   }
 
@@ -295,20 +294,20 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
 
     context.save();
       // Allow settings overrides first, then fall back to theme CSS vars
-      if (SETTINGS.graph.nodeColor) themeNodeColor    = SETTINGS.graph.nodeColor;
-      if (SETTINGS.graph.labelColor) themeLabelColor  = SETTINGS.graph.labelColor;
-      if (SETTINGS.graph.edgeColor) themeEdgeColor    = SETTINGS.graph.edgeColor;
+      if (settings.graph.nodeColor) themeNodeColor    = settings.graph.nodeColor;
+      if (settings.graph.labelColor) themeLabelColor  = settings.graph.labelColor;
+      if (settings.graph.edgeColor) themeEdgeColor    = settings.graph.edgeColor;
       try {
         const cs = window.getComputedStyle(canvas);
         const nodeVar  = cs.getPropertyValue('--interactive-accent' ) || cs.getPropertyValue('--accent-1'   ) || cs.getPropertyValue('--accent'     );
         const labelVar = cs.getPropertyValue('--text-normal'        ) || cs.getPropertyValue('--text');
         const edgeVar  = cs.getPropertyValue('--text-muted'         ) || cs.getPropertyValue('--text-faint' ) || cs.getPropertyValue('--text-normal');
-        if (!SETTINGS.graph.nodeColor  && nodeVar  && nodeVar.trim()  ) themeNodeColor   = nodeVar.trim();
-        if (!SETTINGS.graph.labelColor && labelVar && labelVar.trim() ) themeLabelColor  = labelVar.trim();
-        if (!SETTINGS.graph.edgeColor  && edgeVar  && edgeVar.trim()  ) themeEdgeColor   = edgeVar.trim();
+        if (!settings.graph.nodeColor  && nodeVar  && nodeVar.trim()  ) themeNodeColor   = nodeVar.trim();
+        if (!settings.graph.labelColor && labelVar && labelVar.trim() ) themeLabelColor  = labelVar.trim();
+        if (!settings.graph.edgeColor  && edgeVar  && edgeVar.trim()  ) themeEdgeColor   = edgeVar.trim();
         // derive a theme tag color from secondary/accent vars (prefer explicit secondary accent if available)
         const tagVar = cs.getPropertyValue('--accent-2') || cs.getPropertyValue('--accent-secondary') || cs.getPropertyValue('--interactive-accent') || cs.getPropertyValue('--accent-1') || cs.getPropertyValue('--accent');
-        if (!SETTINGS.graph.tagColor && tagVar && tagVar.trim()) themeTagColor = tagVar.trim();
+        if (!settings.graph.tagColor && tagVar && tagVar.trim()) themeTagColor = tagVar.trim();
       } catch (e) {
         // ignore (e.g., server-side build environment)
       }
@@ -316,7 +315,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
       // choose which font family to resolve based on setting: interface font or monospace
       try {
         const cs = window.getComputedStyle(canvas);
-        if (SETTINGS.graph.useInterfaceFont) {
+        if (settings.graph.useInterfaceFont) {
           if (!resolvedInterfaceFontFamily) {
             const candidates = ['--font-family-interface', '--font-family', '--font-main', '--font-primary', '--font-family-sans', '--text-font'];
             let fam: string | null = null;
@@ -366,7 +365,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
           }
         }
       } catch (e) {
-        if (SETTINGS.graph.useInterfaceFont) resolvedInterfaceFontFamily = resolvedInterfaceFontFamily || 'sans-serif';
+        if (settings.graph.useInterfaceFont) resolvedInterfaceFontFamily = resolvedInterfaceFontFamily || 'sans-serif';
         else resolvedMonoFontFamily = resolvedMonoFontFamily || 'monospace';
       }
 
@@ -389,7 +388,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
         const target = isNodeTargetFocused(id) ? 1 : 0;
         const cur = nodeFocusMap.get(id) ?? target;
         // exponential smoothing: alpha = 1 - exp(-rate * dt)
-        const alpha = 1 - Math.exp(-SETTINGS.graph.focusSmoothing * dt);
+        const alpha = 1 - Math.exp(-settings.graph.focusSmoothing * dt);
         const next = cur + (target - cur) * alpha;
         nodeFocusMap.set(id, next);
       }
@@ -398,7 +397,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
 
     // Ease hoverScale towards target each frame (simple lerp)
     const targetHover                   = hoveredNodeId ? 1 : 0;
-    SETTINGS.graph.hoverScale  += (targetHover - SETTINGS.graph.hoverScale) * hoverLerpSpeed;
+    settings.graph.hoverScale  += (targetHover - settings.graph.hoverScale) * hoverLerpSpeed;
 
     // Draw edges first so nodes appear on top. Draw per-edge so we can dim edges
     // that are outside the focus region (at least one endpoint not focused).
@@ -408,7 +407,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
         const src = nodeById.get(edge.sourceId);
         const tgt = nodeById.get(edge.targetId);
         if (!src || !tgt) continue;
-        if (!SETTINGS.graph.showTags && (src.type === 'tag' || tgt.type === 'tag')) continue;
+        if (!settings.graph.showTags && (src.type === 'tag' || tgt.type === 'tag')) continue;
         const srcP = projectWorld(src);
         const tgtP = projectWorld(tgt);
 
@@ -436,7 +435,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
         context.save();
       
         // Computer onHover alpha boost. Move to another function later. refactoring rn.
-        let finalEdgeAlpha = SETTINGS.graph.edgeColorAlpha;
+        let finalEdgeAlpha = settings.graph.edgeColorAlpha;
         if (hoveredNodeId) {
           const srcInDepth = hoverHighlightSet.has(edge.sourceId);
           const tgtInDepth = hoverHighlightSet.has(edge.targetId);
@@ -445,7 +444,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
         }
         context.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${finalEdgeAlpha})`;
         // mutual edges: draw two parallel lines offset perpendicular to the edge when enabled
-        const isMutual = !!edge.bidirectional && SETTINGS.graph.drawDoubleLines;
+        const isMutual = !!edge.bidirectional && settings.graph.drawDoubleLines;
         if (isMutual) {
           const dx = tgtP.x - srcP.x;
           const dy = tgtP.y - srcP.y;
@@ -485,7 +484,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
 
     // Draw node glows (radial gradient), node bodies, and labels
     // Compute zoom-aware font sizing. Font size displayed on screen = baseFontSize * scale
-    const baseFontSize    = SETTINGS.graph.labelBaseFontSize; // world-space base font size (configurable)
+    const baseFontSize    = settings.graph.labelBaseFontSize; // world-space base font size (configurable)
     const minFontSize     = 6; // px (screen)
     const maxFontSize     = 18; // px (screen)
     context.textAlign     = 'center';
@@ -502,7 +501,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     }
 
     for (const node of graph.nodes) {
-      if (!SETTINGS.graph.showTags && node.type === 'tag') continue;
+      if (!settings.graph.showTags && node.type === 'tag') continue;
       const p             = projectWorld(node);
       const baseRadius    = getBaseNodeRadius(node);
       const radius        = getNodeRadius(node);
@@ -518,13 +517,13 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
 
       if (focused) {
         // radial gradient glow: interpolate alpha between dim and centerAlpha
-        const nodeColorOverride   = (node && node.type === 'tag') ? (SETTINGS.graph.tagColor ?? themeTagColor) : themeNodeColor; // tag color
+        const nodeColorOverride   = (node && node.type === 'tag') ? (settings.graph.tagColor ?? themeTagColor) : themeNodeColor; // tag color
         const accentRgb           = colorToRgb(nodeColorOverride);
-        const useNodeAlpha        = (node && node.type === 'tag') ? (SETTINGS.graph.tagColorAlpha ?? SETTINGS.graph.tagColorAlpha) : (SETTINGS.graph.nodeColorAlpha ?? SETTINGS.graph.nodeColorAlpha);
+        const useNodeAlpha        = (node && node.type === 'tag') ? (settings.graph.tagColorAlpha ?? settings.graph.tagColorAlpha) : (settings.graph.nodeColorAlpha ?? settings.graph.nodeColorAlpha);
         const dimCenter           = clamp01(getBaseCenterAlpha(node));
         const fullCenter          = centerAlpha;
         let blendedCenter         = dimCenter + (fullCenter - dimCenter) * focus;
-        let effectiveUseNodeAlpha = SETTINGS.graph.tagColorAlpha;
+        let effectiveUseNodeAlpha = settings.graph.tagColorAlpha;
         if (hoveredNodeId) {
           const inDepth = hoverHighlightSet.has(node.id);
           const isHovered = node.id === hoveredNodeId;
@@ -535,7 +534,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
           }
         }
 
-        const gradient = context.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * SETTINGS.physics.gravityRadius);
+        const gradient = context.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * settings.physics.gravityRadius);
         gradient.addColorStop(0.0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * effectiveUseNodeAlpha})`);
         gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.5 * effectiveUseNodeAlpha})`);
         gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.15 * effectiveUseNodeAlpha})`);
@@ -543,19 +542,19 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
 
         context.save();
         context.beginPath();
-        context.arc(p.x, p.y, radius * SETTINGS.physics.gravityRadius, 0, Math.PI * 2);
+        context.arc(p.x, p.y, radius * settings.physics.gravityRadius, 0, Math.PI * 2);
         context.fillStyle = gradient;
         context.fill();
         context.restore();
 
         // node body (focused -> blend alpha)
-        const bodyAlpha = SETTINGS.graph.labelColorAlpha;// + (1 - labelAlphaMin) * focus;
+        const bodyAlpha = settings.graph.labelColorAlpha;// + (1 - labelAlphaMin) * focus;
         context.save();
         context.beginPath();
         context.arc(p.x, p.y, radius, 0, Math.PI * 2);
-        const bodyColorOverride = (node && node.type === 'tag') ? (SETTINGS.graph.tagColor ?? themeTagColor) : themeNodeColor;
+        const bodyColorOverride = (node && node.type === 'tag') ? (settings.graph.tagColor ?? themeTagColor) : themeNodeColor;
         const accent = colorToRgb(bodyColorOverride);
-        const useBodyAlpha = (node && node.type === 'tag') ? (SETTINGS.graph.tagColorAlpha ?? SETTINGS.graph.tagColorAlpha) : (SETTINGS.graph.nodeColorAlpha ?? SETTINGS.graph.nodeColorAlpha);
+        const useBodyAlpha = (node && node.type === 'tag') ? (settings.graph.tagColorAlpha ?? settings.graph.tagColorAlpha) : (settings.graph.nodeColorAlpha ?? settings.graph.nodeColorAlpha);
         // When hovered/highlighted, force body alpha to 1 for node/tag colors
         //let effectiveUseBodyAlpha = Math.max((node && node.type==='tag')?tagMinAlpha:nodeMinAlpha, useBodyAlpha);
         let effectiveUseBodyAlpha = useBodyAlpha;
@@ -576,11 +575,11 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
         // label below node (zoom-aware) - grow with hover and fade with focus
         // incorporate camera zoom scale so labels scale with camera distance
         // Font size invariant to zoom
-        const displayedFont   = SETTINGS.graph.labelBaseFontSize;
+        const displayedFont   = settings.graph.labelBaseFontSize;
         const radiusScreenPx  = radius;
         let labelAlphaVis     = 1;
         const minR            = 0;
-        const fadeRange       = Math.max(0, SETTINGS.graph.labelFadeRangePx);
+        const fadeRange       = Math.max(0, settings.graph.labelFadeRangePx);
         if (radiusScreenPx <= minR) {
           labelAlphaVis = 0;
         } else if (radiusScreenPx <= minR + fadeRange) {
@@ -609,12 +608,12 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
             const isHoverOrHighlight = hoveredNodeId === node.id || (hoverHighlightSet && hoverHighlightSet.has(node.id));
             const centerA = isHoverOrHighlight ? 1.0 : clamp01(getCenterAlpha(node));
             // derive label alpha by focus state
-            let labelA = Math.max(SETTINGS.graph.labelColorAlpha, labelAlphaVis * (SETTINGS.graph.labelColorAlpha));
-            if (isHoverOrHighlight) labelA = SETTINGS.graph.labelColorAlpha;
-            else if (hoveredNodeId && hoverHighlightSet.has(node.id)) labelA = Math.max(labelA, (SETTINGS.graph.labelColorAlpha));
+            let labelA = Math.max(settings.graph.labelColorAlpha, labelAlphaVis * (settings.graph.labelColorAlpha));
+            if (isHoverOrHighlight) labelA = settings.graph.labelColorAlpha;
+            else if (hoveredNodeId && hoverHighlightSet.has(node.id)) labelA = Math.max(labelA, (settings.graph.labelColorAlpha));
             context.globalAlpha = Math.max(0, Math.min(1, labelA * centerA));
             // apply label alpha override if present, but force to 1.0 for hovered/highlighted
-            const labelRgb = colorToRgb((SETTINGS.graph.labelColor) || '#ffffff');
+            const labelRgb = colorToRgb((settings.graph.labelColor) || '#ffffff');
             context.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},1.0)`;
           const verticalPadding = 4; // world units; will be scaled by transform
           context.fillText(node.label, p.x, p.y + radius + verticalPadding);
@@ -626,7 +625,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
         const faintAlpha = 0.15 * (1 - focus) + 0.1 * focus; // slightly adjust
         // Modulate the faint fill by centerAlpha 
         const effectiveCenterAlpha = clamp01(getCenterAlpha(node));
-        const finalAlpha = faintAlpha * effectiveCenterAlpha * (SETTINGS.graph.nodeColorAlpha);
+        const finalAlpha = faintAlpha * effectiveCenterAlpha * (settings.graph.nodeColorAlpha);
         context.save();
         context.beginPath();
         context.arc(p.x, p.y, radius * 0.9, 0, Math.PI * 2);
@@ -745,7 +744,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   }
 
   function resetCamera(){
-    camera = { ...SETTINGS.camera.state };
+    camera = { ...settings.camera.state };
     recenterCamera();
   }
   

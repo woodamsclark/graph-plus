@@ -1,18 +1,19 @@
 import { App, TFile, CachedMetadata } from 'obsidian';
-import { GraphNode, GraphEdge, GraphData, Settings } from '../types/interfaces.ts';
-import { SETTINGS } from '../main';
+import { GraphNode, GraphEdge, GraphData, Settings } from '../utils/interfaces.ts';
+import { getSettings } from '../utils/SettingsStore.ts';
 
 export async function buildGraph(app: App): Promise<GraphData> {
+  const settings = getSettings();
   const files: TFile[]        = app.vault.getMarkdownFiles();
   const { nodes, nodeByPath } = createNoteNodes(files);
   const { edges, edgeSet    } = buildNoteEdgesFromResolvedLinks(app, nodeByPath);
 
-  if (SETTINGS.graph.showTags !== false) {
+  if (settings.graph.showTags !== false) {
     addTagNodesAndEdges(app, files, nodes, nodeByPath, edges, edgeSet);
   }
   computeNodeDegrees(nodes, nodeByPath, edges);
   markBidirectionalEdges(edges);
-  const centerNode = pickCenterNode(app, nodes, SETTINGS);
+  const centerNode = pickCenterNode(app, nodes);
   return { nodes, edges };
 }
 
@@ -47,10 +48,11 @@ function createNoteNodes(files: TFile[]){
 }
 
 function buildNoteEdgesFromResolvedLinks(app: App, nodeByPath: Map<string, GraphNode>): { edges: GraphEdge[]; edgeSet: Set<string> } {
+  const settings            = getSettings();
   const resolved: any       = (app.metadataCache as any).resolvedLinks || {};
   const edges: GraphEdge[]  = [];
   const edgeSet             = new Set<string>();
-  const countDuplicates     = Boolean(SETTINGS.graph.countDuplicateLinks);
+  const countDuplicates     = Boolean(settings.graph.countDuplicateLinks);
 
   for (const sourcePath of Object.keys(resolved)) {
     const targets = resolved[sourcePath] || {};
@@ -140,16 +142,17 @@ function addTagNodesAndEdges(
   };
 }
 
-function pickCenterNode(app: App, nodes: GraphNode[], settings: Settings): GraphNode | null {
+function pickCenterNode(app: App, nodes: GraphNode[]): GraphNode | null {
+  const settings = getSettings();
   if (!settings.graph.useCenterNote) return null;
 
   // if centerNoteTitle is defined, use it.
-  if (SETTINGS.graph.centerNoteTitle) {
-    const centerNode = nodes.find((n) => n.id === SETTINGS.graph.centerNoteTitle);
-    SETTINGS.graph.centerNode = centerNode;
+  if (settings.graph.centerNoteTitle) {
+    const centerNode = nodes.find((n) => n.id === settings.graph.centerNoteTitle);
+    settings.graph.centerNode = centerNode;
   }
 
-  // ...else calculate it. SETTINGS.graph.useOutlinkFallback as alternative
+  // ...else calculate it. settings.graph.useOutlinkFallback as alternative
   const onlyNotes = nodes.filter((n) => (n as any).type !== 'tag');
   const preferOut = Boolean(settings.graph.useOutlinkFallback);
   const metric = (n: GraphNode) => (preferOut ? n.outDegree || 0 : n.inDegree || 0);

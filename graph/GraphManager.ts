@@ -4,9 +4,9 @@ import { layoutGraph2D, layoutGraph3D } from './layout.ts';
 import { createRenderer } from './renderer.ts';
 import { createSimulation } from './simulation.ts';
 import { debounce } from '../utils/debounce.ts';
-import { Settings, Renderer, GraphData, GraphNode, GraphEdge, Simulation} from '../types/interfaces.ts';
-import { SETTINGS } from '../main.ts';
+import { Settings, Renderer, GraphData, GraphNode, GraphEdge, Simulation} from '../utils/interfaces.ts';
 import { InputManager } from './InputManager.ts';
+import { getSettings, updateSettings } from '../utils/SettingsStore.ts';
 
 // This class manages interactions between the graph data, simulation, and renderer.
 export class GraphManager {
@@ -38,6 +38,7 @@ export class GraphManager {
   }
 
   async init(): Promise<void> {
+    const settings            = getSettings();
     const vaultId             = this.app.vault.getName();
     const canvas              = document.createElement('canvas');
     canvas.style.width        = '100%';
@@ -67,7 +68,7 @@ export class GraphManager {
       detectClickedNode : (screenX, screenY)          => { return this.nodeClicked(screenX, screenY); },
     });
 
-    const rawSaved    : any = SETTINGS.nodePositions || {};
+    const rawSaved    : any = settings.nodePositions || {};
     let allSaved      : Record<string, Record<string, { x: number; y: number }>> = {};
     let savedPositions: Record<string,                { x: number; y: number }> = {};
     
@@ -194,14 +195,15 @@ export class GraphManager {
   }
 
   public updateOrbit (screenX: number, screenY: number) {
+    const settings = getSettings();
     if (!this.renderer || this.screenAnchorPoint === null) 
       { return; }
     const renderer              = (this.renderer as any);
     const camSnap               = this.cameraSnapShot;
     const depth                 = camSnap.distance;
 
-    const rotateSensitivityX  = SETTINGS.camera.rotateSensitivityX;
-    const rotateSensitivityY  = SETTINGS.camera.rotateSensitivityY;
+    const rotateSensitivityX    = settings.camera.rotateSensitivityX;
+    const rotateSensitivityY    = settings.camera.rotateSensitivityY;
     const dx                    = screenX - this.screenAnchorPoint!.x;
     const dy                    = screenY - this.screenAnchorPoint!.y;
 

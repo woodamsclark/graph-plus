@@ -1,17 +1,12 @@
 import { App, ItemView, WorkspaceLeaf, Plugin, TFile, Platform } from 'obsidian';
-import { buildGraph } from './graph/buildGraph.ts';
-import { layoutGraph2D, layoutGraph3D } from './graph/layout.ts';
-import { createRenderer } from './graph/renderer.ts';
-import { createSimulation } from './graph/simulation.ts';
-import { GraphManager } from './graph/GraphManager.ts';import { SETTINGS } from './main';
+import { GraphManager } from './graph/GraphManager.ts';
 import { debounce } from './utils/debounce.ts';
-import { GraphData, Renderer } from './types/interfaces.ts';
 
-export const GREATER_GRAPH_VIEW_TYPE = 'graph-plus';
+export const GRAPH_PLUS_TYPE = 'graph-plus';
 
 export class GraphView extends ItemView {
-  private manager: GraphManager | null = null;
-  private plugin: Plugin;
+  private manager             : GraphManager | null = null;
+  private plugin              : Plugin;
   private scheduleGraphRefresh: (() => void) | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: Plugin) {
@@ -20,7 +15,7 @@ export class GraphView extends ItemView {
   }
 
   getViewType(): string {
-    return GREATER_GRAPH_VIEW_TYPE;
+    return GRAPH_PLUS_TYPE;
   }
 
   getDisplayText(): string {

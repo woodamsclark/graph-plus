@@ -1,4 +1,4 @@
-import { GraphData, GraphNode } from '../types/interfaces.ts';
+import { GraphData, GraphNode } from '../utils/interfaces.ts';
 
 export interface Layout2DOptions {
   width               : number;
