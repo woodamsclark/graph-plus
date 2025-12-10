@@ -27,7 +27,7 @@ var import_obsidian3 = require("obsidian");
 // GraphView.ts
 var import_obsidian = require("obsidian");
 
-// utils/SettingsStore.ts
+// utilities/settingsStore.ts
 var currentSettings;
 var listeners = /* @__PURE__ */ new Set();
 function initSettings(initial) {
@@ -1092,7 +1092,7 @@ function createSimulation(nodes, edges) {
   return { start, stop, tick, reset };
 }
 
-// utils/debounce.ts
+// utilities/debounce.ts
 function debounce(fn, wait = 300, immediate = false) {
   let timeout = null;
   return (...args) => {
@@ -1705,10 +1705,10 @@ var GraphView = class extends import_obsidian.ItemView {
   }
 };
 
-// GraphSettingsTab.ts
+// SettingsTab.ts
 var import_obsidian2 = require("obsidian");
 
-// utils/DefaultSettings.ts
+// utilities/defaultSettings.ts
 var DEFAULT_SETTINGS = {
   graph: {
     minNodeRadius: 3,
@@ -1778,7 +1778,7 @@ var DEFAULT_SETTINGS = {
   // Record<string, {x:number;y:number;z:number}> or whatever your type is
 };
 
-// GraphSettingsTab.ts
+// SettingsTab.ts
 var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
   plugin;
   constructor(app, plugin) {

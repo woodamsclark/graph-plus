@@ -1,4 +1,4 @@
-import type { Settings } from './Interfaces';
+import type { Settings } from './interfaces';
 
 let currentSettings: Settings;
 const listeners = new Set<() => void>();

@@ -1,5 +1,5 @@
 import { App, TFile, CachedMetadata } from 'obsidian';
-import { GraphNode, GraphEdge, GraphData, Settings } from '../utilities/Interfaces.ts';
+import { GraphNode, GraphEdge, GraphData, Settings } from '../utilities/interfaces.ts';
 import { getSettings } from '../utilities/settingsStore.ts';
 
 export async function buildGraph(app: App): Promise<GraphData> {

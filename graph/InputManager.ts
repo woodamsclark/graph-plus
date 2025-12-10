@@ -1,4 +1,4 @@
-import { InputManagerCallbacks, PointerMode } from '../utilities/Interfaces.ts';
+import { InputManagerCallbacks, PointerMode } from '../utilities/interfaces.ts';
 
 // This class manages user input (mouse events) on the graph canvas
 // and reports mouse positions and actions back to the GraphManager via callbacks.

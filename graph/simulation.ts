@@ -1,4 +1,4 @@
-import { GraphNode, GraphEdge, Simulation } from '../utilities/Interfaces.ts';
+import { GraphNode, GraphEdge, Simulation } from '../utilities/interfaces.ts';
 import { getSettings } from '../utilities/settingsStore.ts';
 
 

@@ -4,7 +4,7 @@ import { layoutGraph2D, layoutGraph3D } from './layout.ts';
 import { createRenderer } from './renderer.ts';
 import { createSimulation } from './simulation.ts';
 import { debounce } from '../utilities/debounce.ts';
-import { Settings, Renderer, GraphData, GraphNode, GraphEdge, Simulation} from '../utilities/Interfaces.ts';
+import { Settings, Renderer, GraphData, GraphNode, GraphEdge, Simulation} from '../utilities/interfaces.ts';
 import { InputManager } from './InputManager.ts';
 import { getSettings, updateSettings } from '../utilities/settingsStore.ts';
 

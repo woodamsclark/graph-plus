@@ -1,4 +1,4 @@
-import { GraphSettings, PhysicsSettings, Renderer, GraphData, CameraState } from '../utilities/Interfaces.ts';
+import { GraphSettings, PhysicsSettings, Renderer, GraphData, CameraState } from '../utilities/interfaces.ts';
 import { getSettings } from '../utilities/settingsStore.ts';
 
 // The renderer is responsible for rendering the 2D graph visualization onto an HTML canvas.
