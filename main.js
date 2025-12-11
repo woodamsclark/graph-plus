@@ -247,13 +247,14 @@ function createRenderer(canvas) {
   const hoverLerpSpeed = 0.2;
   const nodeFocusMap = /* @__PURE__ */ new Map();
   let lastRenderTime = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+  let offsetX = 0;
+  let offsetY = 0;
   let themeNodeColor = "#66ccff";
   let themeLabelColor = "#222";
   let themeEdgeColor = "#888888";
   let themeTagColor = "#8000ff";
   let resolvedInterfaceFontFamily = null;
   let resolvedMonoFontFamily = null;
-  let camera = { ...settings.camera.state };
   function parseHexColor(hex) {
     if (!hex)
       return null;
@@ -294,14 +295,8 @@ function createRenderer(canvas) {
       return fromRgb;
     return { r: 102, g: 204, b: 255 };
   }
-  function setCameraState(newCamera) {
-    camera = { ...camera, ...newCamera };
-  }
-  function getCameraState() {
-    return camera;
-  }
-  function projectWorld(node) {
-    const { yaw, pitch, distance, targetX, targetY, targetZ } = camera;
+  function projectWorld(node, cam) {
+    const { yaw, pitch, distance, targetX, targetY, targetZ } = cam;
     const wx = (node.x || 0) - targetX;
     const wy = (node.y || 0) - targetY;
     const wz = (node.z || 0) - targetZ;
@@ -358,16 +353,16 @@ function createRenderer(canvas) {
     if (!isFinite(maxDegree))
       maxDegree = 0;
   }
-  function resize(width, height) {
+  function resize(width, height, cam) {
     const oldWidth = canvas.width;
     const oldHeight = canvas.height;
     canvas.width = Math.max(1, Math.floor(width));
     canvas.height = Math.max(1, Math.floor(height));
     canvas.style.width = "100%";
     canvas.style.height = "100%";
-    camera.offsetX += (canvas.width - oldWidth) / 2;
-    camera.offsetY += (canvas.height - oldHeight) / 2;
-    render();
+    offsetX += (canvas.width - oldWidth) / 2;
+    offsetY += (canvas.height - oldHeight) / 2;
+    render(cam);
   }
   function getDegreeNormalized(node) {
     const d = node.inDegree || 0;
@@ -385,8 +380,7 @@ function createRenderer(canvas) {
     } else if (isNeighbor) {
       hoverScale = 1 + hoverScaleMax * 0.4 * settings.graph.hoverScale;
     }
-    const zoomScale = settings.camera.state.distance / camera.distance;
-    return base * hoverScale * zoomScale;
+    return base * hoverScale;
   }
   function getBaseNodeRadius(node) {
     const t = getDegreeNormalized(node);
@@ -396,10 +390,10 @@ function createRenderer(canvas) {
     const t = getDegreeNormalized(node);
     return settings.graph.minCenterAlpha + t * (settings.graph.maxCenterAlpha - settings.graph.minCenterAlpha);
   }
-  function getCenterAlpha(node) {
+  function getCenterAlpha(node, cam) {
     const base = getBaseCenterAlpha(node);
     if (!hoveredNodeId) {
-      const hl2 = evalFalloff(node, buildHighlightProfile(node));
+      const hl2 = evalFalloff(node, buildHighlightProfile(node), cam);
       const normal2 = base;
       const highlighted2 = base;
       const blended2 = normal2 + (highlighted2 - normal2) * hl2;
@@ -409,7 +403,7 @@ function createRenderer(canvas) {
     const isHovered = node.id === hoveredNodeId;
     if (!inDepth)
       return clamp01(base);
-    const hl = evalFalloff(node, buildHighlightProfile(node));
+    const hl = evalFalloff(node, buildHighlightProfile(node), cam);
     const normal = base;
     const highlighted = base;
     const blended = normal + (highlighted - normal) * hl;
@@ -458,11 +452,11 @@ function createRenderer(canvas) {
       curve: settings.physics.gravityFallOff
     };
   }
-  function evalFalloff(node, profile) {
+  function evalFalloff(node, profile, cam) {
     const { inner, outer, curve } = profile;
     if (outer <= inner || outer <= 0)
       return 0;
-    const p = projectWorld(node);
+    const p = projectWorld(node, cam);
     const dx = mouseX - p.x;
     const dy = mouseY - p.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -474,7 +468,7 @@ function createRenderer(canvas) {
     const proximity = 1 - t;
     return applySCurve(proximity, curve);
   }
-  function render() {
+  function render(cam) {
     if (!context)
       return;
     const now = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
@@ -576,7 +570,7 @@ function createRenderer(canvas) {
         resolvedMonoFontFamily = resolvedMonoFontFamily || "monospace";
     }
     context.save();
-    context.translate(camera.offsetX, camera.offsetY);
+    context.translate(offsetX, offsetY);
     function isNodeTargetFocused(nodeId) {
       if (!hoveredNodeId)
         return true;
@@ -610,8 +604,8 @@ function createRenderer(canvas) {
           continue;
         if (!settings.graph.showTags && (src.type === "tag" || tgt.type === "tag"))
           continue;
-        const srcP = projectWorld(src);
-        const tgtP = projectWorld(tgt);
+        const srcP = projectWorld(src, cam);
+        const tgtP = projectWorld(tgt, cam);
         const srcF = nodeFocusMap.get(edge.sourceId) ?? 1;
         const tgtF = nodeFocusMap.get(edge.targetId) ?? 1;
         const edgeFocus = (srcF + tgtF) * 0.5;
@@ -685,10 +679,10 @@ function createRenderer(canvas) {
     for (const node of graph.nodes) {
       if (!settings.graph.showTags && node.type === "tag")
         continue;
-      const p = projectWorld(node);
+      const p = projectWorld(node, cam);
       const baseRadius = getBaseNodeRadius(node);
       const radius = getNodeRadius(node);
-      const centerAlpha = getCenterAlpha(node);
+      const centerAlpha = getCenterAlpha(node, cam);
       const gravityProfile = buildGravityProfile(node);
       const gravityOuterR = gravityProfile.outer;
       const focus = nodeFocusMap.get(node.id) ?? 1;
@@ -709,17 +703,6 @@ function createRenderer(canvas) {
             effectiveUseNodeAlpha = 1;
           }
         }
-        const gradient = context.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * settings.physics.gravityRadius);
-        gradient.addColorStop(0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * effectiveUseNodeAlpha})`);
-        gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.5 * effectiveUseNodeAlpha})`);
-        gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.15 * effectiveUseNodeAlpha})`);
-        gradient.addColorStop(1, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},0)`);
-        context.save();
-        context.beginPath();
-        context.arc(p.x, p.y, radius * settings.physics.gravityRadius, 0, Math.PI * 2);
-        context.fillStyle = gradient;
-        context.fill();
-        context.restore();
         const bodyAlpha = settings.graph.labelColorAlpha;
         context.save();
         context.beginPath();
@@ -753,7 +736,7 @@ function createRenderer(canvas) {
         } else {
           labelAlphaVis = 1;
         }
-        const proximityFactor = evalFalloff(node, buildLabelProfile(node));
+        const proximityFactor = evalFalloff(node, buildLabelProfile(node), cam);
         labelAlphaVis = Math.max(labelAlphaVis, labelAlphaVis + proximityFactor * (1 - labelAlphaVis));
         const isHoverOrHighlight = hoveredNodeId === node.id || hoverHighlightSet && hoverHighlightSet.has(node.id);
         if (isHoverOrHighlight)
@@ -764,7 +747,7 @@ function createRenderer(canvas) {
           context.save();
           context.font = `${fontToSet}px ${resolvedInterfaceFontFamily || "sans-serif"}`;
           const isHoverOrHighlight2 = hoveredNodeId === node.id || hoverHighlightSet && hoverHighlightSet.has(node.id);
-          const centerA = isHoverOrHighlight2 ? 1 : clamp01(getCenterAlpha(node));
+          const centerA = isHoverOrHighlight2 ? 1 : clamp01(getCenterAlpha(node, cam));
           let labelA = Math.max(settings.graph.labelColorAlpha, labelAlphaVis * settings.graph.labelColorAlpha);
           if (isHoverOrHighlight2)
             labelA = settings.graph.labelColorAlpha;
@@ -780,7 +763,7 @@ function createRenderer(canvas) {
       } else {
         const faintRgb = colorToRgb(themeLabelColor || "#999");
         const faintAlpha = 0.15 * (1 - focus) + 0.1 * focus;
-        const effectiveCenterAlpha = clamp01(getCenterAlpha(node));
+        const effectiveCenterAlpha = clamp01(getCenterAlpha(node, cam));
         const finalAlpha = faintAlpha * effectiveCenterAlpha * settings.graph.nodeColorAlpha;
         context.save();
         context.beginPath();
@@ -802,12 +785,12 @@ function createRenderer(canvas) {
     return getNodeRadius(node);
   }
   function screenToWorld2D(screenX, screenY) {
-    return { x: screenX - camera.offsetX, y: screenY - camera.offsetY };
+    return { x: screenX - offsetX, y: screenY - offsetY };
   }
   function screenToWorld3D(sx, sy, zCam, cam) {
-    const { yaw, pitch, distance, targetX, targetY, targetZ } = cam || getCameraState();
-    const px = sx - camera.offsetX;
-    const py = sy - camera.offsetY;
+    const { yaw, pitch, distance, targetX, targetY, targetZ } = cam;
+    const px = sx - offsetX;
+    const py = sy - offsetY;
     const focal = 800;
     const perspective = focal / (zCam || 1e-4);
     const xCam = px / perspective;
@@ -823,62 +806,15 @@ function createRenderer(canvas) {
     const sinY = Math.sin(yaw);
     const wx = cx * cosY + wz1 * sinY;
     const wz = -cx * sinY + wz1 * cosY;
-    return { x: wx + targetX, y: wy + targetY, z: wz + targetZ };
+    return { screenX: wx + targetX, screenY: wy + targetY, screenZ: wz + targetZ };
   }
-  function getNodeScreenPosition(node) {
-    const p = projectWorld(node);
-    return { x: p.x + camera.offsetX, y: p.y + camera.offsetY };
+  function getNodeScreenPosition(node, cam) {
+    const p = projectWorld(node, cam);
+    return { x: p.x + offsetX, y: p.y + offsetY };
   }
-  function getProjectedNode(node) {
-    const p = projectWorld(node);
-    return { x: p.x + camera.offsetX, y: p.y + camera.offsetY, depth: p.depth };
-  }
-  function getCameraBasis(cam) {
-    const { yaw, pitch } = cam;
-    const cosPitch = Math.cos(pitch);
-    const sinPitch = Math.sin(pitch);
-    const cosYaw = Math.cos(yaw);
-    const sinYaw = Math.sin(yaw);
-    const forward = {
-      x: Math.sin(yaw) * cosPitch,
-      y: sinPitch,
-      z: Math.cos(yaw) * cosPitch
-    };
-    const right = {
-      x: cosYaw,
-      y: 0,
-      z: -sinYaw
-    };
-    const up = {
-      x: forward.y * right.z - forward.z * right.y,
-      y: forward.z * right.x - forward.x * right.z,
-      z: forward.x * right.y - forward.y * right.x
-    };
-    const len = Math.sqrt(up.x * up.x + up.y * up.y + up.z * up.z) || 1;
-    up.x /= len;
-    up.y /= len;
-    up.z /= len;
-    return { right, up, forward };
-  }
-  function zoomAt(screenX, screenY, factor) {
-    if (factor <= 0)
-      return;
-    const cam = getCameraState();
-    let newDistance = cam.distance / factor;
-    newDistance = Math.max(200, Math.min(5e3, newDistance));
-    setCameraState({ distance: newDistance });
-    render();
-  }
-  function resetCamera() {
-    camera = { ...settings.camera.state };
-    recenterCamera();
-  }
-  function recenterCamera() {
-    const w = canvas.width || 1;
-    const h = canvas.height || 1;
-    camera.offsetX = w / 2;
-    camera.offsetY = h / 2;
-    render();
+  function getProjectedNode(node, cam) {
+    const p = projectWorld(node, cam);
+    return { x: p.x + offsetX, y: p.y + offsetY, depth: p.depth };
   }
   return {
     setGraph,
@@ -887,16 +823,16 @@ function createRenderer(canvas) {
     destroy,
     setHoveredNode,
     getNodeRadiusForHit,
-    zoomAt,
+    //zoomAt,
     screenToWorld2D,
     screenToWorld3D,
     getNodeScreenPosition,
-    getProjectedNode,
-    resetCamera,
-    recenterCamera,
-    setCameraState,
-    getCameraState,
-    getCameraBasis
+    getProjectedNode
+    //resetCamera: resetCamera,
+    //recenterCamera: recenterCamera,
+    //setCameraState     : setCameraState,
+    //getCameraState     : getCameraState,
+    //getCameraBasis,
   };
 }
 
@@ -1248,6 +1184,135 @@ var InputManager = class {
   }
 };
 
+// CameraManager.ts
+var MIN_DISTANCE = 100;
+var MAX_DISTANCE = 5e3;
+var MIN_PITCH = -Math.PI / 2 + 0.05;
+var MAX_PITCH = Math.PI / 2 - 0.05;
+var CameraManager = class {
+  cameraSettings;
+  cameraState;
+  cameraSnapShot = null;
+  renderer;
+  worldAnchor = null;
+  screenAnchor = null;
+  constructor(initialState, renderer) {
+    this.cameraState = { ...initialState };
+    this.cameraSettings = getSettings().camera;
+    this.renderer = renderer;
+  }
+  getState() {
+    return { ...this.cameraState };
+  }
+  /** Directly overwrite full state (e.g. when loading from saved camera state) */
+  setState(next) {
+    this.cameraState = { ...next };
+  }
+  patchState(partial) {
+    this.cameraState = { ...this.cameraState, ...partial };
+  }
+  /** If user changes camera settings in UI */
+  updateSettings(settings) {
+    this.cameraSettings = { ...settings };
+  }
+  /** Reset to initial pose, clearing momentum */
+  reset(initial) {
+    this.cameraState = { ...initial };
+    this.clearMomentum();
+  }
+  clearMomentum() {
+    this.cameraState.orbitVelX = 0;
+    this.cameraState.orbitVelY = 0;
+    this.cameraState.panVelX = 0;
+    this.cameraState.panVelY = 0;
+    this.cameraState.zoomVel = 0;
+  }
+  startPan(screenX, screenY) {
+    const cam = this.cameraState;
+    this.screenAnchor = { screenX, screenY };
+    this.worldAnchor = this.renderer.screenToWorld3D(screenX, screenY, cam.distance, cam);
+  }
+  updatePan(screenX, screenY) {
+    if (!this.worldAnchor)
+      return;
+    const cam = this.cameraState;
+    const current = this.renderer.screenToWorld3D(screenX, screenY, cam.distance, cam);
+    const dx = current.screenX - this.worldAnchor.screenX;
+    const dy = current.screenY - this.worldAnchor.screenY;
+    const dz = current.screenZ - this.worldAnchor.screenZ;
+    cam.targetX -= dx;
+    cam.targetY -= dy;
+    cam.targetZ -= dz;
+    this.worldAnchor = this.renderer.screenToWorld3D(screenX, screenY, cam.distance, cam);
+  }
+  endPan() {
+    this.screenAnchor = null;
+    this.worldAnchor = null;
+  }
+  startOrbit(screenX, screenY) {
+    this.screenAnchor = { screenX, screenY };
+    this.cameraSnapShot = { ...this.cameraState };
+  }
+  updateOrbit(screenX, screenY) {
+    const rotateSensitivityX = this.cameraSettings.rotateSensitivityX;
+    const rotateSensitivityY = this.cameraSettings.rotateSensitivityY;
+    const dx = screenX - this.screenAnchor.screenX;
+    const dy = screenY - this.screenAnchor.screenY;
+    let yaw = this.cameraSnapShot.yaw - dx * rotateSensitivityX;
+    let pitch = this.cameraSnapShot.pitch - dy * rotateSensitivityY;
+    const maxPitch = Math.PI / 2;
+    const minPitch = -maxPitch;
+    if (pitch > maxPitch)
+      pitch = maxPitch;
+    if (pitch < minPitch)
+      pitch = minPitch;
+    this.cameraState.yaw = yaw;
+    this.cameraState.pitch = pitch;
+  }
+  endOrbit() {
+    this.screenAnchor = null;
+    this.cameraSnapShot = null;
+  }
+  startDrag(nodeId, screenX, screenY) {
+  }
+  updateDrag(screenX, screenY) {
+  }
+  endDrag() {
+  }
+  updateZoom(screenX, screenY, delta) {
+  }
+  updateHover(screenX, screenY) {
+  }
+  /**
+   * Step forward in time for momentum-based smoothing.
+   * dtMs is elapsed milliseconds since last frame.
+   */
+  step(dtMs) {
+    const t = dtMs / 16.67;
+    const damping = Math.pow(1 - this.cameraSettings.momentumScale, t);
+    if (Math.abs(this.cameraState.orbitVelX) > 1e-4 || Math.abs(this.cameraState.orbitVelY) > 1e-4) {
+      this.cameraState.yaw += this.cameraState.orbitVelX;
+      this.cameraState.pitch += this.cameraState.orbitVelY;
+      this.cameraState.pitch = clamp(this.cameraState.pitch, MIN_PITCH, MAX_PITCH);
+      this.cameraState.orbitVelX *= damping;
+      this.cameraState.orbitVelY *= damping;
+    }
+    if (Math.abs(this.cameraState.panVelX) > 1e-4 || Math.abs(this.cameraState.panVelY) > 1e-4) {
+      this.cameraState.targetX += this.cameraState.panVelX;
+      this.cameraState.targetY += this.cameraState.panVelY;
+      this.cameraState.panVelX *= damping;
+      this.cameraState.panVelY *= damping;
+    }
+    if (Math.abs(this.cameraState.zoomVel) > 1e-4) {
+      this.cameraState.distance = clamp(this.cameraState.distance + this.cameraState.zoomVel, MIN_DISTANCE, MAX_DISTANCE);
+      this.cameraState.zoomVel *= damping;
+    }
+  }
+};
+function clamp(v, min, max) {
+  return v < min ? min : v > max ? max : v;
+}
+
 // graph/GraphManager.ts
 var GraphManager = class {
   app;
@@ -1264,9 +1329,7 @@ var GraphManager = class {
   previewPollTimer = null;
   followedNode = null;
   inputManager = null;
-  cameraSnapShot = null;
-  worldAnchorPoint = null;
-  screenAnchorPoint = null;
+  cameraManager = null;
   openNodeFile = null;
   settingsUnregister = null;
   saveNodePositionsDebounced = null;
@@ -1305,6 +1368,7 @@ var GraphManager = class {
         return this.nodeClicked(screenX, screenY);
       }
     });
+    this.cameraManager = new CameraManager(settings.camera.state, this.renderer);
     const rawSaved = settings.nodePositions || {};
     let allSaved = {};
     let savedPositions = {};
@@ -1356,93 +1420,40 @@ var GraphManager = class {
     this.adjacency = adjacency;
   }
   updateHover(screenX, screenY) {
-    return;
+    this.cameraManager?.updateHover(screenX, screenY);
   }
   startDrag(nodeId, screenX, screenY) {
-    console.log("dragging", nodeId);
+    this.cameraManager?.startDrag(nodeId, screenX, screenY);
     return;
   }
   updateDrag(screenX, screenY) {
+    this.cameraManager?.updateDrag(screenX, screenY);
     return;
   }
   endDrag() {
+    this.cameraManager?.endDrag();
     return;
   }
   updateZoom(screenX, screenY, delta) {
-    this.renderer.zoomAt(screenX, screenY, 1 + delta * -0.1);
-    this.renderer?.render();
+    this.cameraManager?.updateZoom(screenX, screenY, delta);
   }
   startPan(screenX, screenY) {
-    if (!this.renderer || !this.renderer.screenToWorld3D) {
-      console.log("GM startPan: No renderer or screenToWorld3D method");
-      return;
-    }
-    const renderer = this.renderer;
-    this.cameraSnapShot = { ...renderer.getCameraState() };
-    const depth = this.cameraSnapShot.distance;
-    this.worldAnchorPoint = renderer.screenToWorld3D(screenX, screenY, depth, this.cameraSnapShot);
+    this.cameraManager?.startPan(screenX, screenY);
   }
   updatePan(screenX, screenY) {
-    if (!this.renderer || !this.renderer.screenToWorld3D || this.worldAnchorPoint === null) {
-      return;
-    }
-    const renderer = this.renderer;
-    const camSnap = this.cameraSnapShot;
-    const depth = camSnap.distance;
-    if (this.worldAnchorPoint === null) {
-      return;
-    }
-    const currentWorld = renderer.screenToWorld3D(screenX, screenY, depth, camSnap);
-    const dx = currentWorld.x - this.worldAnchorPoint.x;
-    const dy = currentWorld.y - this.worldAnchorPoint.y;
-    const dz = currentWorld.z - this.worldAnchorPoint.z;
-    const camera = renderer.getCameraState();
-    this.renderer.setCameraState({
-      targetX: camera.targetX - dx,
-      targetY: camera.targetY - dy,
-      targetZ: camera.targetZ - dz
-    });
-    this.worldAnchorPoint = currentWorld;
+    this.cameraManager?.updatePan(screenX, screenY);
   }
   endPan() {
-    this.worldAnchorPoint = null;
-    this.cameraSnapShot = null;
+    this.cameraManager?.endPan();
   }
   startOrbit(screenX, screenY) {
-    if (!this.renderer) {
-      console.log("GM startOrbit: No renderer or screenToWorld3D method");
-      return;
-    }
-    const renderer = this.renderer;
-    this.cameraSnapShot = { ...renderer.getCameraState() };
-    const depth = this.cameraSnapShot.distance;
-    this.screenAnchorPoint = { x: screenX, y: screenY };
+    this.cameraManager?.startOrbit(screenX, screenY);
   }
   updateOrbit(screenX, screenY) {
-    const settings = getSettings();
-    if (!this.renderer || this.screenAnchorPoint === null) {
-      return;
-    }
-    const renderer = this.renderer;
-    const camSnap = this.cameraSnapShot;
-    const depth = camSnap.distance;
-    const rotateSensitivityX = settings.camera.rotateSensitivityX;
-    const rotateSensitivityY = settings.camera.rotateSensitivityY;
-    const dx = screenX - this.screenAnchorPoint.x;
-    const dy = screenY - this.screenAnchorPoint.y;
-    let yaw = camSnap.yaw - dx * rotateSensitivityX;
-    let pitch = camSnap.pitch - dy * rotateSensitivityY;
-    const maxPitch = Math.PI / 2;
-    const minPitch = -maxPitch;
-    if (pitch > maxPitch)
-      pitch = maxPitch;
-    if (pitch < minPitch)
-      pitch = minPitch;
-    renderer.setCameraState({ yaw, pitch });
+    this.cameraManager?.updateOrbit(screenX, screenY);
   }
   endOrbit() {
-    this.screenAnchorPoint = null;
-    this.cameraSnapShot = null;
+    this.cameraManager?.endOrbit();
   }
   openNode(screenX, screenY) {
     const node = this.nodeClicked(screenX, screenY);
@@ -1479,13 +1490,13 @@ var GraphManager = class {
     } catch (e) {
     }
     if (this.renderer)
-      this.renderer.render();
+      this.renderer.render(this.cameraManager.getState());
     this.animationFrame = requestAnimationFrame(this.animationLoop);
   };
   resize(width, height) {
-    if (!this.renderer)
+    if (!this.renderer || !this.cameraManager)
       return;
-    this.renderer.resize(width, height);
+    this.renderer.resize(width, height, this.cameraManager.getState());
   }
   resetCamera() {
     if (!this.renderer)
@@ -1509,7 +1520,7 @@ var GraphManager = class {
     this.buildAdjacencyMap();
     this.startSimulation();
     this.renderer.setGraph(this.graph);
-    this.renderer?.render();
+    this.renderer?.render(this.cameraManager.getState());
   }
   stopSimulation() {
     if (this.simulation) {
@@ -1589,7 +1600,7 @@ var GraphManager = class {
     const hitPadding = 6;
     const scale = this.renderer.getScale ? this.renderer.getScale() : 1;
     for (const node of this.graph.nodes) {
-      const sp = this.renderer.getNodeScreenPosition ? this.renderer.getNodeScreenPosition(node) : null;
+      const sp = this.renderer.getNodeScreenPosition(node, this.cameraManager.getState());
       if (!sp)
         continue;
       const nodeRadius = this.renderer.getNodeRadiusForHit ? this.renderer.getNodeRadiusForHit(node) : 8;
@@ -1634,7 +1645,7 @@ var GraphManager = class {
 // GraphView.ts
 var GRAPH_PLUS_TYPE = "graph-plus";
 var GraphView = class extends import_obsidian.ItemView {
-  manager = null;
+  graphManager = null;
   plugin;
   scheduleGraphRefresh = null;
   constructor(leaf, plugin) {
@@ -1653,15 +1664,15 @@ var GraphView = class extends import_obsidian.ItemView {
   async onOpen() {
     this.containerEl.empty();
     const container = this.containerEl.createDiv({ cls: "graph+" });
-    this.manager = new GraphManager(this.app, container, this.plugin);
-    await this.manager.init();
-    if (this.manager) {
-      this.manager.setOnNodeClick((node) => this.openNodeFile(node));
+    this.graphManager = new GraphManager(this.app, container, this.plugin);
+    await this.graphManager.init();
+    if (this.graphManager) {
+      this.graphManager.setOnNodeClick((node) => this.openNodeFile(node));
     }
     if (!this.scheduleGraphRefresh) {
       this.scheduleGraphRefresh = debounce(() => {
         try {
-          this.manager?.refreshGraph();
+          this.graphManager?.refreshGraph();
         } catch (e) {
           console.error("Greater Graph: refreshGraph error", e);
         }
@@ -1673,11 +1684,11 @@ var GraphView = class extends import_obsidian.ItemView {
   }
   onResize() {
     const rect = this.containerEl.getBoundingClientRect();
-    this.manager?.resize(rect.width, rect.height);
+    this.graphManager?.resize(rect.width, rect.height);
   }
   async onClose() {
-    this.manager?.destroy();
-    this.manager = null;
+    this.graphManager?.destroy();
+    this.graphManager = null;
     this.containerEl.empty();
   }
   async openNodeFile(node) {

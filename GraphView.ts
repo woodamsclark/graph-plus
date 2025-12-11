@@ -5,7 +5,7 @@ import { debounce } from './utilities/debounce.ts';
 export const GRAPH_PLUS_TYPE = 'graph-plus';
 
 export class GraphView extends ItemView {
-  private manager             : GraphManager | null = null;
+  private graphManager        : GraphManager | null = null;
   private plugin              : Plugin;
   private scheduleGraphRefresh: (() => void) | null = null;
 
@@ -28,17 +28,17 @@ export class GraphView extends ItemView {
 
   async onOpen() {
     this.containerEl.empty();
-    const container = this.containerEl.createDiv({ cls: 'graph+' });
-    this.manager    = new GraphManager(this.app, container, this.plugin);
-    await this.manager.init();
-    if (this.manager) {
-      this.manager.setOnNodeClick((node) => this.openNodeFile(node));
+    const container       = this.containerEl.createDiv({ cls: 'graph+' });
+    this.graphManager     = new GraphManager(this.app, container, this.plugin);
+    await this.graphManager.init();
+    if (this.graphManager) {
+      this.graphManager.setOnNodeClick((node) => this.openNodeFile(node));
     }
     // Debounced refresh to avoid thrashing on vault events
     if (!this.scheduleGraphRefresh) {
       this.scheduleGraphRefresh = debounce(() => {
         try {
-          this.manager?.refreshGraph();
+          this.graphManager?.refreshGraph();
         } catch (e) {
           // eslint-disable-next-line no-console
           console.error('Greater Graph: refreshGraph error', e);
@@ -58,21 +58,21 @@ export class GraphView extends ItemView {
 
   onResize() {
     const rect = this.containerEl.getBoundingClientRect();
-    this.manager?.resize(rect.width, rect.height);
+    this.graphManager?.resize(rect.width, rect.height);
   }
 
   async onClose() {
     // save node positions?
-    this.manager?.destroy();
-    this.manager = null;
+    this.graphManager?.destroy();
+    this.graphManager = null;
     this.containerEl.empty();
   }
 
   private async openNodeFile(node: any): Promise<void> {
     if (!node) return;
-    const app = this.app;
-    let file: TFile | null = null;
-    if ((node as any).file) file = (node as any).file as TFile;
+    const app                     = this.app;
+    let file: TFile | null        = null;
+    if ((node as any).file) file  = (node as any).file as TFile;
     else if ((node as any).filePath) {
       const af = app.vault.getAbstractFileByPath((node as any).filePath);
       if (af instanceof TFile) file = af;

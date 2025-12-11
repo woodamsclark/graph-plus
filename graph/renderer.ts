@@ -21,6 +21,8 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   const hoverLerpSpeed    : number              = 0.2;  // how quickly hoverScale interpolates each frame (0-1)
   const nodeFocusMap      : Map<string, number> = new Map();
   let lastRenderTime      : number              = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+  let offsetX             : number              = 0;
+  let offsetY             : number              = 0;
   
 
   // theme-derived colors (updated each render)
@@ -32,7 +34,6 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
   let resolvedInterfaceFontFamily : string | null = null;
   let resolvedMonoFontFamily      : string | null = null;
 
-  let camera: CameraState = { ...settings.camera.state };
 
   function parseHexColor(hex: string) {
     if (!hex) return null;
@@ -71,12 +72,10 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     return { r: 102, g: 204, b: 255 };
   }
 
-  function setCameraState(newCamera : Partial<CameraState>) { camera = { ...camera, ...newCamera } as CameraState; }
-  function getCameraState()         : CameraState           { return camera; }
 
   // Camera-based projection: returns projected world-plane coordinates
-  function projectWorld(node: any): { x: number; y: number; depth: number } {
-    const { yaw, pitch, distance, targetX, targetY, targetZ } = camera;
+  function projectWorld(node: any, cam: CameraState): { x: number; y: number; depth: number } {
+    const { yaw, pitch, distance, targetX, targetY, targetZ } = cam;
     const wx = (node.x || 0) - targetX;
     const wy = (node.y || 0) - targetY;
     const wz = (node.z || 0) - targetZ;
@@ -131,7 +130,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     if (!isFinite(maxDegree)) maxDegree = 0;
   }
 
-  function resize(width: number, height: number) {
+  function resize(width: number, height: number, cam: CameraState) {
     const oldWidth = canvas.width;
     const oldHeight = canvas.height;
 
@@ -140,13 +139,10 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     canvas.style.width  = '100%';
     canvas.style.height = '100%';
 
-    // Shift the offsets by half the delta.
-    // This keeps the camera centered relative to the resize.
-    // If width grows by 700px, we move the center right by 350px.
-    camera.offsetX += (canvas.width  - oldWidth)  / 2;
-    camera.offsetY += (canvas.height - oldHeight) / 2;
+    offsetX += (canvas.width  - oldWidth)  / 2;
+    offsetY += (canvas.height - oldHeight) / 2;
 
-    render();
+    render(cam);
   }
 
   function getDegreeNormalized(node: any) {
@@ -167,8 +163,8 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
       hoverScale = 1 + (hoverScaleMax * 0.4) * settings.graph.hoverScale;
     }
     // Apply camera zoom scale so nodes grow/shrink as camera distance changes
-    const zoomScale = settings.camera.state.distance / camera.distance;
-    return base * hoverScale * zoomScale;
+    //const zoomScale = settings.camera.state.distance / camera.distance;
+    return base * hoverScale;// * zoomScale;
   }
 
   function getBaseNodeRadius(node: any) {
@@ -181,12 +177,12 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     return settings.graph.minCenterAlpha + t * (settings.graph.maxCenterAlpha - settings.graph.minCenterAlpha);
   }
 
-  function getCenterAlpha(node: any) {
+  function getCenterAlpha(node: any, cam: CameraState) {
     const base = getBaseCenterAlpha(node);
     // CASE 1: No hovered node yet → only highlight profile based brightening
     if (!hoveredNodeId) {
       // Highlight factor based on highlight profile (0 far, 1 near)
-      const hl = evalFalloff(node, buildHighlightProfile(node));
+      const hl = evalFalloff(node, buildHighlightProfile(node), cam);
       // Interpolate between normal and highlighted brightness
       const normal = base;
       const highlighted = base;
@@ -202,7 +198,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     if (!inDepth) return clamp01(base);
 
     // Inside highlight depth → use highlight profile
-    const hl = evalFalloff(node, buildHighlightProfile(node)); // 0..1
+    const hl = evalFalloff(node, buildHighlightProfile(node), cam); // 0..1
     // Interpolate but without extra boost (legacy boosts removed)
     const normal = base;
     const highlighted = base;
@@ -259,12 +255,12 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     };
   }
 
-  function evalFalloff(node: any, profile: FalloffProfile): number {
+  function evalFalloff(node: any, profile: FalloffProfile, cam: CameraState): number {
     const { inner, outer, curve } = profile;
 
     if (outer <= inner || outer <= 0) return 0;
 
-    const p  = projectWorld(node);
+    const p  = projectWorld(node, cam);
     const dx = mouseX - p.x;
     const dy = mouseY - p.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -279,7 +275,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
 
   // removed unused getProjectedRadius helper
 
-  function render() {
+  function render(cam: CameraState) {
     if (!context) return;
     // compute time delta for smooth transitions
     const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
@@ -370,7 +366,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
       }
 
       context.save();
-    context.translate(camera.offsetX, camera.offsetY);
+    context.translate(offsetX, offsetY);
 
     // Helper: determine whether a node is within the focused set (instant target)
     function isNodeTargetFocused(nodeId: string) {
@@ -408,8 +404,8 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
         const tgt = nodeById.get(edge.targetId);
         if (!src || !tgt) continue;
         if (!settings.graph.showTags && (src.type === 'tag' || tgt.type === 'tag')) continue;
-        const srcP = projectWorld(src);
-        const tgtP = projectWorld(tgt);
+        const srcP = projectWorld(src, cam);
+        const tgtP = projectWorld(tgt, cam);
 
         const srcF = nodeFocusMap.get(edge.sourceId) ?? 1;
         const tgtF = nodeFocusMap.get(edge.targetId) ?? 1;
@@ -502,10 +498,10 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
 
     for (const node of graph.nodes) {
       if (!settings.graph.showTags && node.type === 'tag') continue;
-      const p             = projectWorld(node);
+      const p             = projectWorld(node, cam);
       const baseRadius    = getBaseNodeRadius(node);
       const radius        = getNodeRadius(node);
-      const centerAlpha   = getCenterAlpha(node);
+      const centerAlpha   = getCenterAlpha(node, cam);
       // Use the same outer radius as the gravity profile, so the visual glow
       // ring matches the outer limit of mouse attraction.
       const gravityProfile = buildGravityProfile(node);
@@ -534,7 +530,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
           }
         }
 
-        const gradient = context.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * settings.physics.gravityRadius);
+        /*const gradient = context.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * settings.physics.gravityRadius);
         gradient.addColorStop(0.0, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * effectiveUseNodeAlpha})`);
         gradient.addColorStop(0.4, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.5 * effectiveUseNodeAlpha})`);
         gradient.addColorStop(0.8, `rgba(${accentRgb.r},${accentRgb.g},${accentRgb.b},${blendedCenter * 0.15 * effectiveUseNodeAlpha})`);
@@ -545,7 +541,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
         context.arc(p.x, p.y, radius * settings.physics.gravityRadius, 0, Math.PI * 2);
         context.fillStyle = gradient;
         context.fill();
-        context.restore();
+        context.restore();*/
 
         // node body (focused -> blend alpha)
         const bodyAlpha = settings.graph.labelColorAlpha;// + (1 - labelAlphaMin) * focus;
@@ -591,7 +587,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
         // Also allow mouse proximity to reveal labels: compute proximity (0..1)
         // and blend it with the radius-based visibility so labels start to appear
         // as the mouse approaches small nodes.
-        const proximityFactor = evalFalloff(node, buildLabelProfile(node)); // 0..1
+        const proximityFactor = evalFalloff(node, buildLabelProfile(node), cam); // 0..1
         // blend: if either screen-size or proximity suggests visibility, allow it
         labelAlphaVis = Math.max(labelAlphaVis, labelAlphaVis + proximityFactor * (1 - labelAlphaVis));
         // Always show label at full visibility if hovered or in highlight set
@@ -606,7 +602,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
             // Compute final alpha from label visibility. For hovered/highlighted
             // nodes we force full alpha (1.0) so labels are never partially transparent.
             const isHoverOrHighlight = hoveredNodeId === node.id || (hoverHighlightSet && hoverHighlightSet.has(node.id));
-            const centerA = isHoverOrHighlight ? 1.0 : clamp01(getCenterAlpha(node));
+            const centerA = isHoverOrHighlight ? 1.0 : clamp01(getCenterAlpha(node, cam));
             // derive label alpha by focus state
             let labelA = Math.max(settings.graph.labelColorAlpha, labelAlphaVis * (settings.graph.labelColorAlpha));
             if (isHoverOrHighlight) labelA = settings.graph.labelColorAlpha;
@@ -623,8 +619,8 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
         // dimmed node: draw a faint fill but allow smooth focus factor (should be near 0)
         const faintRgb = colorToRgb(themeLabelColor || '#999');
         const faintAlpha = 0.15 * (1 - focus) + 0.1 * focus; // slightly adjust
-        // Modulate the faint fill by centerAlpha 
-        const effectiveCenterAlpha = clamp01(getCenterAlpha(node));
+        // Modulate the faint fill by centerAlpha
+        const effectiveCenterAlpha = clamp01(getCenterAlpha(node, cam));
         const finalAlpha = faintAlpha * effectiveCenterAlpha * (settings.graph.nodeColorAlpha);
         context.save();
         context.beginPath();
@@ -653,17 +649,17 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
  
 
   function screenToWorld2D(screenX: number, screenY: number) {
-    return { x: (screenX - camera.offsetX), y: (screenY - camera.offsetY) };
+    return { x: (screenX - offsetX), y: (screenY - offsetY) };
   }
 
   // Convert a screen point (pixels, canvas coords) to a world position at a given camera-space depth.
   // zCam is the distance along the camera forward axis from the camera to the point (camera-space Z).
-  function screenToWorld3D(sx: number,sy: number,zCam: number,cam?: CameraState) {
-    const { yaw, pitch, distance, targetX, targetY, targetZ } = cam || getCameraState();
+  function screenToWorld3D(sx: number,sy: number,zCam: number,cam: CameraState) {
+    const { yaw, pitch, distance, targetX, targetY, targetZ } = cam;
 
     // first convert screen coords into projected px/py (same space as projectWorld produced)
-    const px = (sx - camera.offsetX);
-    const py = (sy - camera.offsetY);
+    const px = (sx - offsetX);
+    const py = (sy - offsetY);
 
     const focal = 800; // match projectWorld
     const perspective = (focal) / (zCam || 0.0001);
@@ -687,21 +683,21 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     const wx = cx * cosY + wz1 * sinY;
     const wz = -cx * sinY + wz1 * cosY;
 
-    return { x: wx + targetX, y: wy + targetY, z: wz + targetZ };
+    return { screenX: wx + targetX, screenY: wy + targetY, screenZ: wz + targetZ };
   }
 
-  function getNodeScreenPosition(node: any): { x: number; y: number } {
-    const p = projectWorld(node);
-    return { x: p.x + camera.offsetX, y: p.y + camera.offsetY };
+  function getNodeScreenPosition(node: any, cam: CameraState): { x: number; y: number } {
+    const p = projectWorld(node, cam);
+    return { x: p.x + offsetX, y: p.y + offsetY };
   }
 
-  function getProjectedNode(node: any): { x: number; y: number; depth: number } {
-    const p = projectWorld(node);
-    return { x: p.x + camera.offsetX, y: p.y + camera.offsetY, depth: p.depth };
+  function getProjectedNode(node: any, cam: CameraState): { x: number; y: number; depth: number } {
+    const p = projectWorld(node, cam);
+    return { x: p.x + offsetX, y: p.y + offsetY, depth: p.depth };
   }
 
   // Camera basis helper: returns right, up, forward unit vectors in world space
-  function getCameraBasis(cam: CameraState) {
+/*  function getCameraBasis(cam: CameraState) {
     const { yaw, pitch } = cam;
 
     const cosPitch = Math.cos(pitch);
@@ -731,9 +727,9 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     up.x /= len; up.y /= len; up.z /= len;
 
     return { right, up, forward };
-  }
+  }*/
 
-  function zoomAt(screenX: number, screenY: number, factor: number) {
+  /*function zoomAt(screenX: number, screenY: number, factor: number) {
     if (factor <= 0) return;
     // prefer camera-based zoom by adjusting distance
     const cam       = getCameraState();
@@ -741,20 +737,20 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     newDistance     = Math.max(200, Math.min(5000, newDistance));
     setCameraState({ distance: newDistance });
     render();
-  }
+  }*/
 
-  function resetCamera(){
+  /*function resetCamera(){
     camera = { ...settings.camera.state };
     recenterCamera();
-  }
+  }*/
   
-  function recenterCamera() {
+  /*function recenterCamera() {
     const w = canvas.width || 1;
     const h = canvas.height || 1;
-    camera.offsetX = w / 2;
-    camera.offsetY = h / 2;
+    offsetX = w / 2;
+    offsetY = h / 2;
     render();
-  }
+  }*/
 
   return {
     setGraph,
@@ -763,16 +759,16 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     destroy,
     setHoveredNode,
     getNodeRadiusForHit,
-    zoomAt,
+    //zoomAt,
     screenToWorld2D: screenToWorld2D,
     screenToWorld3D: screenToWorld3D,
     getNodeScreenPosition,
     getProjectedNode,
-    resetCamera: resetCamera,
-    recenterCamera: recenterCamera,
-    setCameraState     : setCameraState,
-    getCameraState     : getCameraState,
-    getCameraBasis,
+    //resetCamera: resetCamera,
+    //recenterCamera: recenterCamera,
+    //setCameraState     : setCameraState,
+    //getCameraState     : getCameraState,
+    //getCameraBasis,
   };
 }
 

@@ -1,12 +1,12 @@
 import { App, Plugin, Platform } from 'obsidian'; 
 import { buildGraph } from './buildGraph.ts';
-import { layoutGraph2D, layoutGraph3D } from './layout.ts';
 import { createRenderer } from './renderer.ts';
 import { createSimulation } from './simulation.ts';
 import { debounce } from '../utilities/debounce.ts';
-import { Settings, Renderer, GraphData, GraphNode, GraphEdge, Simulation} from '../utilities/interfaces.ts';
+import { Settings, Renderer, GraphData, GraphNode, GraphEdge, Simulation, CameraState} from '../utilities/interfaces.ts';
 import { InputManager } from './InputManager.ts';
 import { getSettings, updateSettings } from '../utilities/settingsStore.ts';
+import { CameraManager } from '../CameraManager.ts';
 
 // This class manages interactions between the graph data, simulation, and renderer.
 export class GraphManager {
@@ -24,9 +24,7 @@ export class GraphManager {
   private previewPollTimer            : number                              | null  = null;
   private followedNode                : string                              | null  = null;
   private inputManager                : InputManager                        | null  = null;
-  private cameraSnapShot              : any                                 | null  = null;
-  private worldAnchorPoint            : { x: number; y: number; z: number } | null  = null;
-  private screenAnchorPoint           : { x: number; y: number }            | null  = null;
+  private cameraManager               : CameraManager                       | null  = null;
   private openNodeFile                : ((node: any) => void)               | null  = null;
   private settingsUnregister          : (() => void)                        | null  = null;
   private saveNodePositionsDebounced  : (() => void)                        | null  = null;
@@ -67,6 +65,8 @@ export class GraphManager {
       resetCamera       : ()                          => this.resetCamera(),
       detectClickedNode : (screenX, screenY)          => { return this.nodeClicked(screenX, screenY); },
     });
+
+     this.cameraManager = new CameraManager(settings.camera.state, this.renderer);
 
     const rawSaved    : any = settings.nodePositions || {};
     let allSaved      : Record<string, Record<string, { x: number; y: number }>> = {};
@@ -126,101 +126,50 @@ export class GraphManager {
   }
 
   public updateHover (screenX: number, screenY: number) {
-      return;
+      this.cameraManager?.updateHover(screenX, screenY);
   }
 
   public startDrag (nodeId: string, screenX: number, screenY: number) {
-    console.log("dragging", nodeId);
+    this.cameraManager?.startDrag(nodeId, screenX, screenY);
     return;
   }
  
   public updateDrag (screenX: number, screenY: number) {
+      this.cameraManager?.updateDrag(screenX, screenY);
       return;
   }
 
   public endDrag () {
+      this.cameraManager?.endDrag();
       return;
   }
 
   public updateZoom (screenX: number, screenY: number, delta: number) {
-    (this.renderer as any).zoomAt(screenX, screenY, 1 + delta * -0.1); this.renderer?.render();
+    this.cameraManager?.updateZoom(screenX, screenY, delta);
   }
 
   public startPan (screenX: number, screenY: number) {
-    if (!this.renderer || !(this.renderer as any).screenToWorld3D) { console.log("GM startPan: No renderer or screenToWorld3D method"); return; }
-    
-    const renderer        = (this.renderer as any);
-    this.cameraSnapShot   = { ...renderer.getCameraState() }; // check on this later
-    const depth           = this.cameraSnapShot.distance;
-
-    this.worldAnchorPoint = renderer.screenToWorld3D(screenX, screenY, depth, this.cameraSnapShot);
+    this.cameraManager?.startPan(screenX, screenY);
   }
 
   public updatePan (screenX: number, screenY: number) {
-    if (!this.renderer || !(this.renderer as any).screenToWorld3D || this.worldAnchorPoint === null) 
-      { return; }
-    const renderer = (this.renderer as any);
-    const camSnap  = this.cameraSnapShot;
-    const depth    = camSnap.distance; 
-    
-    if (this.worldAnchorPoint === null) { return; }
-    const currentWorld = renderer.screenToWorld3D(screenX, screenY, depth, camSnap);
-
-    const dx = currentWorld.x - (this.worldAnchorPoint.x as any);
-    const dy = currentWorld.y - (this.worldAnchorPoint.y as any);
-    const dz = currentWorld.z - (this.worldAnchorPoint.z as any);
-
-    const camera = renderer.getCameraState();
-    (this.renderer as any) .setCameraState({
-        targetX: camera.targetX - dx,
-        targetY: camera.targetY - dy,
-        targetZ: camera.targetZ - dz,
-    });
-    this.worldAnchorPoint = currentWorld;
+    this.cameraManager?.updatePan(screenX, screenY);
   }
 
   public endPan(){
-    this.worldAnchorPoint = null;
-    this.cameraSnapShot   = null;
+    this.cameraManager?.endPan();
   }
 
   public startOrbit (screenX: number, screenY: number) {
-    if (!this.renderer) { console.log("GM startOrbit: No renderer or screenToWorld3D method"); return; }
-    // Similar to startPan but may differ later
-    const renderer              = (this.renderer as any);
-    this.cameraSnapShot         = { ...renderer.getCameraState() };
-    const depth                 = this.cameraSnapShot.distance;
-
-    this.screenAnchorPoint = { x: screenX, y: screenY };
+    this.cameraManager?.startOrbit(screenX, screenY);
   }
 
   public updateOrbit (screenX: number, screenY: number) {
-    const settings = getSettings();
-    if (!this.renderer || this.screenAnchorPoint === null) 
-      { return; }
-    const renderer              = (this.renderer as any);
-    const camSnap               = this.cameraSnapShot;
-    const depth                 = camSnap.distance;
-
-    const rotateSensitivityX    = settings.camera.rotateSensitivityX;
-    const rotateSensitivityY    = settings.camera.rotateSensitivityY;
-    const dx                    = screenX - this.screenAnchorPoint!.x;
-    const dy                    = screenY - this.screenAnchorPoint!.y;
-
-    let yaw                     = camSnap.yaw   - dx * rotateSensitivityX;
-    let pitch                   = camSnap.pitch - dy * rotateSensitivityY;
-
-    const maxPitch              = Math.PI / 2;// - 0.05;
-    const minPitch              = -maxPitch;
-    if (pitch > maxPitch) pitch = maxPitch;
-    if (pitch < minPitch) pitch = minPitch;
-
-    renderer.setCameraState({yaw,pitch,});
+    this.cameraManager?.updateOrbit(screenX, screenY);
   }
 
   public endOrbit () {
-    this.screenAnchorPoint = null;
-    this.cameraSnapShot    = null;
+    this.cameraManager?.endOrbit();
   }
 
   public openNode (screenX: number, screenY: number) {
@@ -258,7 +207,7 @@ export class GraphManager {
 
     // update camera animation/following
     try { this.updateCameraAnimation(timestamp); } catch (e) {}
-    if (this.renderer) this.renderer.render();
+    if (this.renderer) this.renderer.render(this.cameraManager!.getState());
 
     // periodically persist node positions (debounced)
     //try { if (this.saveNodePositionsDebounced) this.saveNodePositionsDebounced(); } catch (e) {}
@@ -266,26 +215,8 @@ export class GraphManager {
   };
 
   resize(width: number, height: number): void {
-    if (!this.renderer) return;
-    /*this.renderer.resize(width, height);
-    const centerX     = width / 2;
-    const centerY     = height / 2;
-    this.viewCenterX  = centerX;
-    this.viewCenterY  = centerY;
-
-    if (this.simulation && (this.simulation as any).setOptions) {
-      (this.simulation as any).setOptions({ centerX, centerY });
-    }
-    const rendererAny = this.renderer as any;
-    if (rendererAny && typeof rendererAny.setCamera === 'function') {
-      const cam = rendererAny.getCameraState ? rendererAny.getCameraState() : {};
-      rendererAny.setCamera({
-        targetX: centerX,
-        targetY: centerY,
-        targetZ: cam.targetZ ?? 0,
-      });
-    }*/
-   this.renderer.resize(width, height);
+    if (!this.renderer || !this.cameraManager) return;
+    this.renderer.resize(width, height, this.cameraManager!.getState());
   }
 
   public resetCamera() {
@@ -353,7 +284,7 @@ export class GraphManager {
     this.buildAdjacencyMap(); // rebuild adjacency map after graph refresh or showTags changes
     this.startSimulation();
     this.renderer!.setGraph(this.graph!);
-    this.renderer?.render();
+    this.renderer?.render(this.cameraManager!.getState());
   }
 
   private stopSimulation() {
@@ -419,7 +350,7 @@ export class GraphManager {
     const scale        = (this.renderer as any).getScale ? (this.renderer as any).getScale() : 1;
 
     for (const node of this.graph.nodes) {
-      const sp         = (this.renderer as any).getNodeScreenPosition ? (this.renderer as any).getNodeScreenPosition(node) : null;
+      const sp         = (this.renderer as any).getNodeScreenPosition(node, this.cameraManager!.getState());
       if (!sp) continue;
       const nodeRadius = this.renderer.getNodeRadiusForHit ? this.renderer.getNodeRadiusForHit(node) : 8;
       const hitR       = nodeRadius * Math.max(0.0001, scale) + hitPadding;
@@ -430,6 +361,7 @@ export class GraphManager {
   }
 
   private saveNodePositions(): void {
+    // undefined error within here after destroy() called
     if (!this.graph) return;
     try {
       // top-level map keyed by vault name
@@ -450,170 +382,3 @@ export class GraphManager {
     }
   }
 }
-
-
-  /*// Recreate the physics simulation, optionally excluding tag nodes.
-  private recreateSimulation(showTags: boolean, extraOpts?: { centerX?: number; centerY?: number; centerNodeId?: string }) {
-    try {
-      if (this.simulation) {
-        try { this.simulation.stop(); } catch (e) {}
-      }
-      if (!this.graph) return;
-      const physOpts  = Object.assign({}, (this.plugin as any).settings?.physics || {});
-      const rect      = this.containerEl.getBoundingClientRect();
-      const centerX   = (extraOpts && typeof extraOpts.centerX === 'number') ? extraOpts.centerX : rect.width / 2;
-      const centerY   = (extraOpts && typeof extraOpts.centerY === 'number') ? extraOpts.centerY : rect.height / 2;
-      const centerNodeId = extraOpts?.centerNodeId;
-
-      // Filter nodes/edges when tags are hidden
-      let simNodes = this.graph.nodes;
-      let simEdges = this.graph.edges || [];
-      if (!showTags) {
-        const tagSet = new Set<string>();
-        simNodes = this.graph.nodes.filter((n: any) => {
-          if ((n as any).type === 'tag') { tagSet.add(n.id); return false; }
-          return true;
-        });
-        simEdges = (this.graph.edges  || []).filter((e: any) => !tagSet.has(e.sourceId) && !tagSet.has(e.targetId));
-      }
-
-      this.simulation = createSimulation(simNodes, simEdges, Object.assign({}, physOpts, { centerX, centerY, centerNodeId }));
-      try { this.simulation.start(); } catch (e) {}
-    } catch (e) {
-      console.error('Failed to recreate simulation', e);
-    }
-  }*/
-
-
-
-/*  // Rebuilds the graph and restarts the simulation. Safe to call repeatedly.
-  async refreshGraph(): Promise<void> {
-    // If the manager has been destroyed or no canvas, abort
-    if (!this.canvas) return;
-    try {
-      const newGraph = await buildGraph (this.app, {
-        countDuplicates       : Boolean((this.plugin as any).settings?.countDuplicateLinks),
-        usePinnedCenterNote   : Boolean((this.plugin as any).settings?.usePinnedCenterNote),
-        pinnedCenterNotePath  : String ((this.plugin as any).settings?.pinnedCenterNotePath || ''),
-        useOutlinkFallback    : Boolean((this.plugin as any).settings?.useOutlinkFallback),
-      } as any);
-      this.graph = newGraph;
-
-      // Restore saved positions for the new graph as with init
-      const vaultId = this.app.vault.getName();
-      const allSaved        : Record<string, Record<string, { x: number; y: number }>> = (this.plugin as any).settings?.nodePositions || {};
-      const savedPositions  : Record<string,                { x: number; y: number }>  = allSaved[vaultId] || {};
-      const needsLayout     : any[]                                                    = [];
-      
-      if (this.graph &&    this.graph.nodes) {
-        for (const node of this.graph.nodes) {
-          const s  = savedPositions[node.filePath];
-          const isFiniteX = Number.isFinite(s?.x);
-          const isFiniteY = Number.isFinite(s?.y);
-          if (s && isFiniteX && isFiniteY) {
-            node.x = s.x;
-            node.y = s.y;
-          } else {
-            needsLayout.push(node);
-          }
-        }
-        this.centerNode = this.graph.nodes.find((n: any) => (n as any).isCenterNode) || null;
-      }
-
-      // rebuild adjacency
-      this.adjacency = new Map<string, string[]>();
-      if (this.graph && this.graph.edges) {
-        for (const e of this.graph.edges) {
-          if (!this.adjacency.has(e.sourceId)) this.adjacency.set(e.sourceId, []);
-          if (!this.adjacency.has(e.targetId)) this.adjacency.set(e.targetId, []);
-          this.adjacency.get(e.sourceId)!.push(e.targetId);
-          this.adjacency.get(e.targetId)!.push(e.sourceId);
-        }
-      }
-
-      // layout using current size and center
-      const rect        = this.containerEl.getBoundingClientRect();
-      const width       = rect.width || 300;
-      const height      = rect.height || 200;
-      const centerX     = width / 2;
-      const centerY     = height / 2;
-      this.viewCenterX  = centerX;
-      this.viewCenterY  = centerY;
-
-      if (this.renderer && this.graph) {
-        this.renderer.setGraph(this.graph);
-        if (needsLayout.length > 0) {
-          layoutGraph3D(this.graph, {
-            width,
-            height,
-            margin: 32,
-            centerX,
-            centerY,
-            centerOnLargestNode : true,
-            onlyNodes           : needsLayout,
-          });
-        }
-        this.renderer.resize(width, height);
-        // ensure center node aligned with view center
-        if (this.centerNode) { this.centerNode.x = centerX; this.centerNode.y = centerY; this.centerNode.z = 0; }
-      }
-
-      // recreate simulation using new nodes/edges
-      if (this.simulation) {
-        try { this.simulation.stop(); } catch (e) {}
-        this.simulation = null;
-      }
-
-      this.simulation = createSimulation(
-        (this.graph && this.graph.nodes) || [],
-        (this.graph && this.graph.edges) || [],
-        Object.assign({}, (this.plugin as any).settings?.physics || {}, { centerX, centerY })
-      );
-
-      this.simulation.start();
-
-      if (this.renderer) this.renderer.render();
-    } catch (e) {
-      console.error('Greater Graph: failed to refresh graph', e);
-    }
-  }
-*/
-
-
-/* Layout logic
-// move layout to it's own function
-    const needsLayout: any[] = [];
-    if (this.graph && this.graph.nodes) {
-      for (const node of this.graph.nodes) {
-        const s = savedPositions[node.filePath];
-        if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) {
-          node.x = s.x;
-          node.y = s.y;
-        } else {
-          needsLayout.push(node);
-        }
-      }
-      // centerNode will be positioned after we compute the view center (below)
-      this.centerNode = this.graph.nodes.find((n: any) => (n as any).isCenterNode) || null;
-    }
-
-
-    this.renderer.setGraph(this.graph);
-    // Layout only nodes that don't have saved positions so user-placed nodes remain where they were.
-    if (needsLayout.length > 0) {
-      layoutGraph3D(this.graph, {
-        width: rect.width   || 300,
-        height: rect.height || 200,
-        margin: 32,
-        centerX,
-        centerY,
-        centerOnLargestNode: Boolean((this.plugin as any).settings?.usePinnedCenterNote),
-        onlyNodes: needsLayout,
-      });
-    } else {
-      // nothing to layout; ensure renderer has size
-    }
-    // Ensure the center node (if any) is placed at the view center
-    if (this.centerNode) { this.centerNode.x = centerX; this.centerNode.y = centerY; this.centerNode.z = 0; }
-    this.renderer.resize(rect.width || 300, rect.height || 200);
-    */
