@@ -752,6 +752,7 @@ export function createRenderer(canvas: HTMLCanvasElement): Renderer {
     render();
   }*/
 
+
   return {
     setGraph,
     resize,

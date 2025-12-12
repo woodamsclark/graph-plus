@@ -1,4 +1,4 @@
-import type { CameraState, CameraSettings } from './utilities/interfaces.ts';
+import type { CameraState, CameraSettings, Renderer } from './utilities/interfaces.ts';
 import { getSettings, updateSettings } from './utilities/settingsStore.ts';
 
 const MIN_DISTANCE = 100;
@@ -7,12 +7,12 @@ const MIN_PITCH    = -Math.PI / 2 + 0.05;
 const MAX_PITCH    =  Math.PI / 2 - 0.05;
 
 export class CameraManager {
-    private cameraSettings: CameraSettings;
-    private cameraState   : CameraState;
-    private cameraSnapShot: CameraState                           | null = null;
-    private renderer      : any;
-    private worldAnchor   : { screenX: number; screenY: number; screenZ: number }   | null = null;
-    private screenAnchor  : { screenX: number; screenY: number }  | null = null;
+    private cameraSettings : CameraSettings;
+    private cameraState    : CameraState;
+    private renderer       : Renderer;
+    private cameraSnapShot : CameraState                                                | null = null;
+    private worldAnchor    : { screenX: number; screenY: number; screenZ: number }      | null = null;
+    private screenAnchor   : { screenX: number; screenY: number                  }      | null = null;
 
     constructor(initialState: CameraState, renderer: any) {
         this.cameraState     = { ...initialState };
@@ -45,13 +45,12 @@ export class CameraManager {
     }
 
     private clearMomentum() {
-        this.cameraState.orbitVelX = 0;
-        this.cameraState.orbitVelY = 0;
-        this.cameraState.panVelX   = 0;
-        this.cameraState.panVelY   = 0;
-        this.cameraState.zoomVel   = 0;
+        this.cameraState.orbitVelX    = 0;
+        this.cameraState.orbitVelY    = 0;
+        this.cameraState.panVelX      = 0;
+        this.cameraState.panVelY      = 0;
+        this.cameraState.zoomVel      = 0;
     }
-
 
     startPan(screenX: number, screenY: number) {
         const cam                   = this.cameraState;
@@ -133,25 +132,25 @@ export class CameraManager {
 
     // orbit momentum
     if (Math.abs(this.cameraState.orbitVelX) > 1e-4 || Math.abs(this.cameraState.orbitVelY) > 1e-4) {
-      this.cameraState.yaw   += this.cameraState.orbitVelX;
-      this.cameraState.pitch += this.cameraState.orbitVelY;
-      this.cameraState.pitch  = clamp(this.cameraState.pitch, MIN_PITCH, MAX_PITCH);
-      this.cameraState.orbitVelX   *= damping;
-      this.cameraState.orbitVelY   *= damping;
+      this.cameraState.yaw          += this.cameraState.orbitVelX;
+      this.cameraState.pitch        += this.cameraState.orbitVelY;
+      this.cameraState.pitch         = clamp(this.cameraState.pitch, MIN_PITCH, MAX_PITCH);
+      this.cameraState.orbitVelX    *= damping;
+      this.cameraState.orbitVelY    *= damping;
     }
 
     // pan momentum
     if (Math.abs(this.cameraState.panVelX) > 1e-4 || Math.abs(this.cameraState.panVelY) > 1e-4) {
-      this.cameraState.targetX += this.cameraState.panVelX;
-      this.cameraState.targetY += this.cameraState.panVelY;
-      this.cameraState.panVelX       *= damping;
-      this.cameraState.panVelY       *= damping;
+      this.cameraState.targetX     += this.cameraState.panVelX;
+      this.cameraState.targetY     += this.cameraState.panVelY;
+      this.cameraState.panVelX     *= damping;
+      this.cameraState.panVelY     *= damping;
     }
 
     // zoom momentum
     if (Math.abs(this.cameraState.zoomVel) > 1e-4) {
-      this.cameraState.distance = clamp(this.cameraState.distance + this.cameraState.zoomVel, MIN_DISTANCE, MAX_DISTANCE);
-      this.cameraState.zoomVel       *= damping;
+      this.cameraState.distance     = clamp(this.cameraState.distance + this.cameraState.zoomVel, MIN_DISTANCE, MAX_DISTANCE);
+      this.cameraState.zoomVel     *= damping;
     }
   }
 }

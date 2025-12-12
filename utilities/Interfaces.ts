@@ -89,26 +89,20 @@ export interface CameraState {
 }
 
 export interface Renderer {
-  setGraph(graph: GraphData): void;
-  resize(width: number, height: number, cam: CameraState): void;
-  render(cam: CameraState): void;
-  destroy(): void;
-  setHoveredNode(nodeId: string | null): void;
-  getNodeRadiusForHit(node: any): number;
+  setGraph(graph: GraphData)                                                        : void;
+  resize(width: number, height: number, cam: CameraState)                           : void;
+  render(cam: CameraState)                                                          : void;
+  destroy()                                                                         : void;
+  setHoveredNode(nodeId: string | null)                                             : void;
+  getNodeRadiusForHit(node: any)                                                    : number;
   //zoomAt(screenX: number, screenY: number, factor: number): void;
-  screenToWorld2D(screenX: number, screenY: number): { x: number; y: number };
-  screenToWorld3D?(screenX: number, screenY: number, zCam: number, cam: CameraState): { x: number; y: number; z: number };
-  setRenderOptions?(opts: { mutualDoubleLines?: boolean; showTags?: boolean }): void;
+  screenToWorld2D(screenX: number, screenY: number)                                 : { x: number; y: number };
+  screenToWorld3D(screenX: number, screenY: number, zCam: number, cam: CameraState) : { screenX: number; screenY: number; screenZ: number };
+  //setRenderOptions(opts: { mutualDoubleLines?: boolean; showTags?: boolean })       : void;
   // projection helpers for hit-testing
-  getNodeScreenPosition?(node: any, cam: CameraState): { x: number; y: number };
-  getProjectedNode?(node: any, cam: CameraState): { x: number; y: number; depth: number };
-  getScale?(): number;
-  // camera controls
-  //resetCamera?(): void;
-  //recenterCamera?(): void;
-  //setCameraState?(cam: Partial<CameraState>): void;
-  //getCameraState?(): CameraState;
-  //getCameraBasis?(cam: CameraState): { right: { x: number; y: number; z: number }; up: { x: number; y: number; z: number }; forward: { x: number; y: number; z: number } };
+  getNodeScreenPosition(node: any, cam: CameraState)                                : { x: number; y: number };
+  getProjectedNode(node: any, cam: CameraState)                                     : { x: number; y: number; depth: number };
+ // getScale()                                                                        : number;
 }
 export type GraphNodeType = 'note' | 'tag';
 
