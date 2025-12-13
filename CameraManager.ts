@@ -1,4 +1,4 @@
-import type { CameraState, CameraSettings, Renderer } from './utilities/interfaces.ts';
+import type { CameraState, CameraSettings } from './utilities/interfaces.ts';
 import { getSettings, updateSettings } from './utilities/settingsStore.ts';
 
 const MIN_DISTANCE = 100;
@@ -9,15 +9,17 @@ const MAX_PITCH    =  Math.PI / 2 - 0.05;
 export class CameraManager {
     private cameraSettings : CameraSettings;
     private cameraState    : CameraState;
-    private renderer       : Renderer;
+    //private renderer       : Renderer;
     private cameraSnapShot : CameraState                                                | null = null;
-    private worldAnchor    : { screenX: number; screenY: number; screenZ: number }      | null = null;
+    //private worldAnchor    : { screenX: number; screenY: number; screenZ: number }      | null = null;
+    private worldAnchor    : { x: number; y: number; z: number } | null = null;
     private screenAnchor   : { screenX: number; screenY: number                  }      | null = null;
+    private viewport       : { width  : number; height : number; offsetX: number; offsetY: number } = { width: 0, height: 0, offsetX: 0, offsetY: 0 };
 
-    constructor(initialState: CameraState, renderer: any) {
+    constructor(initialState: CameraState) {
         this.cameraState     = { ...initialState };
         this.cameraSettings  = getSettings().camera;
-        this.renderer        = renderer;
+        //this.renderer        = renderer;
     }
 
     getState(): CameraState {
@@ -44,6 +46,83 @@ export class CameraManager {
         this.clearMomentum();
     }
 
+    /** Projects a world point to screen coordinates */
+    worldToScreen(node: { x: number; y: number; z: number }): { x: number; y: number; depth: number } {
+        const { yaw, pitch, distance, targetX, targetY, targetZ } = this.cameraState;
+        const { offsetX, offsetY } = this.viewport;
+
+        // 1. Translate world to camera target
+        const wx = (node.x || 0) - targetX;
+        const wy = (node.y || 0) - targetY;
+        const wz = (node.z || 0) - targetZ;
+
+        // 2. Rotate (Yaw then Pitch)
+        const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
+        const xz = wx * cosYaw - wz * sinYaw;
+        const zz = wx * sinYaw + wz * cosYaw;
+
+        const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+        const yz = wy * cosP - zz * sinP;
+        const zz2 = wy * sinP + zz * cosP;
+
+        // 3. Project
+        const camZ = distance;
+        const dz   = camZ - zz2; // distance from camera lens to point
+        const safeDz = Math.max(0.0001, dz);
+        const focal = 800; 
+        const perspective = focal / safeDz;
+
+        return {
+            x: xz * perspective + offsetX,
+            y: yz * perspective + offsetY,
+            depth: dz
+        };
+    }
+
+    setViewport(width: number, height: number) {
+        this.viewport.width   = width;
+        this.viewport.height  = height;
+        this.viewport.offsetX = width / 2;
+        this.viewport.offsetY = height / 2;
+    }
+
+    /** Unprojects screen coords to world coords on a plane at camera-distance (for panning) */
+    screenToWorld(screenX: number, screenY: number, depthFromCamera: number): { x: number; y: number; z: number } {
+        const { yaw, pitch, targetX, targetY, targetZ } = this.cameraState;
+        const { offsetX, offsetY } = this.viewport;
+
+        const focal = 800;
+        const px = screenX - offsetX;
+        const py = screenY - offsetY;
+        
+        // Reverse Projection
+        const perspective = focal / depthFromCamera;
+        const xCam = px / perspective;
+        const yCam = py / perspective;
+        
+        // Un-Rotate
+        const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+        const wy = yCam * cosP + depthFromCamera * sinP;
+        const wz1 = -yCam * sinP + depthFromCamera * cosP;
+
+        const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
+        const wx = xCam * cosY + wz1 * sinY;
+        const wz = -xCam * sinY + wz1 * cosY;
+
+        return { x: wx + targetX, y: wy + targetY, z: wz + targetZ };
+    }
+
+    screenToWorld3D(screenX: number, screenY: number, depthFromCamera: number) {
+        return this.screenToWorld(screenX, screenY, depthFromCamera);
+    }
+
+    screenToWorld2D(screenX: number, screenY: number) {
+        const cam   = this.cameraState;
+        const world = this.screenToWorld(screenX, screenY, cam.distance);
+        return { x: world.x, y: world.y };
+    }
+
+
     private clearMomentum() {
         this.cameraState.orbitVelX    = 0;
         this.cameraState.orbitVelY    = 0;
@@ -53,26 +132,28 @@ export class CameraManager {
     }
 
     startPan(screenX: number, screenY: number) {
-        const cam                   = this.cameraState;
-        this.screenAnchor           = { screenX, screenY };
-        this.worldAnchor            = this.renderer.screenToWorld3D(screenX, screenY, cam.distance, cam);
+        const cam             = this.cameraState;
+        this.screenAnchor     = { screenX, screenY };
+        // world-space anchor at the plane in front of the camera
+        this.worldAnchor      = this.screenToWorld(screenX, screenY, cam.distance);
     }
 
     updatePan(screenX: number, screenY: number) {
-
         if (!this.worldAnchor) return;
 
-        const cam                   = this.cameraState;
-        const current               = this.renderer.screenToWorld3D(screenX, screenY, cam.distance, cam);
+        const cam     = this.cameraState;
+        const current = this.screenToWorld(screenX, screenY, cam.distance);
 
-        const dx                    = current.screenX - this.worldAnchor.screenX;
-        const dy                    = current.screenY - this.worldAnchor.screenY;
-        const dz                    = current.screenZ - this.worldAnchor.screenZ;
+        const dx = current.x - this.worldAnchor.x;
+        const dy = current.y - this.worldAnchor.y;
+        const dz = current.z - this.worldAnchor.z;
 
-        cam.targetX                -= dx;
-        cam.targetY                -= dy;
-        cam.targetZ                -= dz;
-        this.worldAnchor           = this.renderer.screenToWorld3D(screenX, screenY, cam.distance, cam);
+        cam.targetX -= dx;
+        cam.targetY -= dy;
+        cam.targetZ -= dz;
+
+        // keep anchor sliding along with the drag
+        this.worldAnchor = this.screenToWorld(screenX, screenY, cam.distance);
     }
 
     endPan() {

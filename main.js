@@ -229,592 +229,136 @@ function pickCenterNode(app, nodes) {
 }
 
 // graph/renderer.ts
-function createRenderer(canvas) {
-  const settings = getSettings();
+function createRenderer(canvas, cameraManager) {
   const context = canvas.getContext("2d");
+  const settings = getSettings();
   let graph = null;
-  let nodeById = /* @__PURE__ */ new Map();
-  let minDegree = 0;
-  let maxDegree = 0;
-  let minEdgeCount = 1;
-  let maxEdgeCount = 1;
-  let innerRadius = 1;
+  const nodeById = /* @__PURE__ */ new Map();
   let hoveredNodeId = null;
-  let hoverHighlightSet = /* @__PURE__ */ new Set();
-  let mouseX = 0;
-  let mouseY = 0;
-  const hoverScaleMax = 0.25;
-  const hoverLerpSpeed = 0.2;
-  const nodeFocusMap = /* @__PURE__ */ new Map();
-  let lastRenderTime = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
-  let offsetX = 0;
-  let offsetY = 0;
-  let themeNodeColor = "#66ccff";
-  let themeLabelColor = "#222";
-  let themeEdgeColor = "#888888";
-  let themeTagColor = "#8000ff";
-  let resolvedInterfaceFontFamily = null;
-  let resolvedMonoFontFamily = null;
-  function parseHexColor(hex) {
-    if (!hex)
-      return null;
-    hex = hex.trim();
-    if (hex.startsWith("#"))
-      hex = hex.slice(1);
-    if (hex.length === 3) {
-      const r = parseInt(hex[0] + hex[0], 16);
-      const g = parseInt(hex[1] + hex[1], 16);
-      const b = parseInt(hex[2] + hex[2], 16);
-      return { r, g, b };
-    }
-    if (hex.length === 6) {
-      const r = parseInt(hex.slice(0, 2), 16);
-      const g = parseInt(hex.slice(2, 4), 16);
-      const b = parseInt(hex.slice(4, 6), 16);
-      return { r, g, b };
-    }
-    return null;
-  }
-  function parseRgbString(s) {
-    const m = s.match(/rgba?\(([^)]+)\)/);
-    if (!m)
-      return null;
-    const parts = m[1].split(",").map((p) => Number(p.trim()));
-    if (parts.length < 3)
-      return null;
-    return { r: parts[0], g: parts[1], b: parts[2] };
-  }
-  function colorToRgb(color) {
-    if (!color)
-      return { r: 102, g: 204, b: 255 };
-    const fromHex = parseHexColor(color);
-    if (fromHex)
-      return fromHex;
-    const fromRgb = parseRgbString(color);
-    if (fromRgb)
-      return fromRgb;
-    return { r: 102, g: 204, b: 255 };
-  }
-  function projectWorld(node, cam) {
-    const { yaw, pitch, distance, targetX, targetY, targetZ } = cam;
-    const wx = (node.x || 0) - targetX;
-    const wy = (node.y || 0) - targetY;
-    const wz = (node.z || 0) - targetZ;
-    const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
-    const xz = wx * cosYaw - wz * sinYaw;
-    const zz = wx * sinYaw + wz * cosYaw;
-    const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
-    const yz = wy * cosP - zz * sinP;
-    const zz2 = wy * sinP + zz * cosP;
-    const camZ = distance;
-    const dz = camZ - zz2;
-    const eps = 1e-4;
-    const safeDz = dz < eps ? eps : dz;
-    const focal = 800;
-    const perspective = focal / safeDz;
-    const px = xz * perspective;
-    const py = yz * perspective;
-    return { x: px, y: py, depth: dz };
-  }
+  let hoverNeighbors = null;
   function setGraph(g) {
     graph = g;
-    nodeById = /* @__PURE__ */ new Map();
+    nodeById.clear();
     if (graph && graph.nodes) {
-      for (const n of graph.nodes) {
-        nodeById.set(n.id, n);
-        if (!nodeFocusMap.has(n.id))
-          nodeFocusMap.set(n.id, 1);
+      for (const node of graph.nodes) {
+        nodeById.set(node.id, node);
       }
     }
-    minDegree = Infinity;
-    maxDegree = -Infinity;
-    if (graph && graph.nodes) {
-      for (const n of graph.nodes) {
-        const d = n.inDegree || 0;
-        if (d < minDegree)
-          minDegree = d;
-        if (d > maxDegree)
-          maxDegree = d;
-      }
-    }
-    minEdgeCount = Infinity;
-    maxEdgeCount = -Infinity;
-    if (graph && graph.edges) {
-      for (const e of graph.edges) {
-        const c = Number(e.linkCount || 1) || 1;
-        if (c < minEdgeCount)
-          minEdgeCount = c;
-        if (c > maxEdgeCount)
-          maxEdgeCount = c;
-      }
-    }
-    if (!isFinite(minDegree))
-      minDegree = 0;
-    if (!isFinite(maxDegree))
-      maxDegree = 0;
   }
-  function resize(width, height, cam) {
-    const oldWidth = canvas.width;
-    const oldHeight = canvas.height;
-    canvas.width = Math.max(1, Math.floor(width));
-    canvas.height = Math.max(1, Math.floor(height));
+  function resize(width, height) {
+    const w = Math.max(1, Math.floor(width));
+    const h = Math.max(1, Math.floor(height));
+    canvas.width = w;
+    canvas.height = h;
     canvas.style.width = "100%";
     canvas.style.height = "100%";
-    offsetX += (canvas.width - oldWidth) / 2;
-    offsetY += (canvas.height - oldHeight) / 2;
-    render(cam);
+    cameraManager.setViewport(w, h);
+    render(cameraManager.getState());
   }
-  function getDegreeNormalized(node) {
-    const d = node.inDegree || 0;
-    if (maxDegree <= minDegree)
-      return 0.5;
-    return (d - minDegree) / (maxDegree - minDegree);
-  }
-  function getNodeRadius(node) {
-    const base = getBaseNodeRadius(node);
-    let hoverScale = 1;
-    const isHovered = hoveredNodeId === node.id;
-    const isNeighbor = hoverHighlightSet && hoverHighlightSet.has(node.id);
-    if (isHovered) {
-      hoverScale = 1 + hoverScaleMax * settings.graph.hoverScale;
-    } else if (isNeighbor) {
-      hoverScale = 1 + hoverScaleMax * 0.4 * settings.graph.hoverScale;
-    }
-    return base * hoverScale;
-  }
-  function getBaseNodeRadius(node) {
-    const t = getDegreeNormalized(node);
-    return settings.graph.minNodeRadius + t * (settings.graph.maxNodeRadius - settings.graph.minNodeRadius);
-  }
-  function getBaseCenterAlpha(node) {
-    const t = getDegreeNormalized(node);
-    return settings.graph.minCenterAlpha + t * (settings.graph.maxCenterAlpha - settings.graph.minCenterAlpha);
-  }
-  function getCenterAlpha(node, cam) {
-    const base = getBaseCenterAlpha(node);
-    if (!hoveredNodeId) {
-      const hl2 = evalFalloff(node, buildHighlightProfile(node), cam);
-      const normal2 = base;
-      const highlighted2 = base;
-      const blended2 = normal2 + (highlighted2 - normal2) * hl2;
-      return clamp01(blended2);
-    }
-    const inDepth = hoverHighlightSet.has(node.id);
-    const isHovered = node.id === hoveredNodeId;
-    if (!inDepth)
-      return clamp01(base);
-    const hl = evalFalloff(node, buildHighlightProfile(node), cam);
-    const normal = base;
-    const highlighted = base;
-    const blended = normal + (highlighted - normal) * hl;
-    return clamp01(blended);
-  }
-  function clamp01(v) {
-    if (v <= 0)
-      return 0;
-    if (v >= 1)
-      return 1;
-    return v;
-  }
-  function applySCurve(p, steepness) {
-    if (p <= 0)
-      return 0;
-    if (p >= 1)
-      return 1;
-    const k = steepness <= 0 ? 1e-4 : steepness;
-    const a = Math.pow(p, k);
-    const b = Math.pow(1 - p, k);
-    if (a + b === 0)
-      return 0.5;
-    return a / (a + b);
-  }
-  function buildGravityProfile(node) {
-    const r = getNodeRadius(node);
-    return {
-      inner: r * innerRadius,
-      outer: r * settings.physics.gravityRadius,
-      curve: settings.physics.gravityFallOff
-    };
-  }
-  function buildLabelProfile(node) {
-    const r = getNodeRadius(node);
-    return {
-      inner: r * innerRadius,
-      outer: r * settings.graph.labelRadius,
-      curve: settings.physics.gravityFallOff
-    };
-  }
-  function buildHighlightProfile(node) {
-    const r = getNodeRadius(node);
-    return {
-      inner: r * innerRadius,
-      outer: r * settings.graph.labelRadius,
-      curve: settings.physics.gravityFallOff
-    };
-  }
-  function evalFalloff(node, profile, cam) {
-    const { inner, outer, curve } = profile;
-    if (outer <= inner || outer <= 0)
-      return 0;
-    const p = projectWorld(node, cam);
-    const dx = mouseX - p.x;
-    const dy = mouseY - p.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist <= inner)
-      return 1;
-    if (dist >= outer)
-      return 0;
-    const t = (dist - inner) / (outer - inner);
-    const proximity = 1 - t;
-    return applySCurve(proximity, curve);
-  }
-  function render(cam) {
+  function render(_cam) {
     if (!context)
       return;
-    const now = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
-    let dt = (now - lastRenderTime) / 1e3;
-    if (!isFinite(dt) || dt <= 0)
-      dt = 0.016;
-    if (dt > 0.1)
-      dt = 0.1;
-    lastRenderTime = now;
-    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#202020";
+    context.fillRect(0, 0, canvas.width, canvas.height);
     if (!graph)
       return;
-    context.save();
-    if (settings.graph.nodeColor)
-      themeNodeColor = settings.graph.nodeColor;
-    if (settings.graph.labelColor)
-      themeLabelColor = settings.graph.labelColor;
-    if (settings.graph.edgeColor)
-      themeEdgeColor = settings.graph.edgeColor;
-    try {
-      const cs = window.getComputedStyle(canvas);
-      const nodeVar = cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
-      const labelVar = cs.getPropertyValue("--text-normal") || cs.getPropertyValue("--text");
-      const edgeVar = cs.getPropertyValue("--text-muted") || cs.getPropertyValue("--text-faint") || cs.getPropertyValue("--text-normal");
-      if (!settings.graph.nodeColor && nodeVar && nodeVar.trim())
-        themeNodeColor = nodeVar.trim();
-      if (!settings.graph.labelColor && labelVar && labelVar.trim())
-        themeLabelColor = labelVar.trim();
-      if (!settings.graph.edgeColor && edgeVar && edgeVar.trim())
-        themeEdgeColor = edgeVar.trim();
-      const tagVar = cs.getPropertyValue("--accent-2") || cs.getPropertyValue("--accent-secondary") || cs.getPropertyValue("--interactive-accent") || cs.getPropertyValue("--accent-1") || cs.getPropertyValue("--accent");
-      if (!settings.graph.tagColor && tagVar && tagVar.trim())
-        themeTagColor = tagVar.trim();
-    } catch (e) {
-    }
-    try {
-      const cs = window.getComputedStyle(canvas);
-      if (settings.graph.useInterfaceFont) {
-        if (!resolvedInterfaceFontFamily) {
-          const candidates = ["--font-family-interface", "--font-family", "--font-main", "--font-primary", "--font-family-sans", "--text-font"];
-          let fam = null;
-          for (const v of candidates) {
-            const val = cs.getPropertyValue(v);
-            if (val && val.trim()) {
-              fam = val.trim();
-              break;
-            }
-          }
-          if (!fam) {
-            const el = document.createElement("div");
-            el.style.position = "absolute";
-            el.style.left = "-9999px";
-            el.style.top = "-9999px";
-            el.textContent = "x";
-            document.body.appendChild(el);
-            try {
-              const cs2 = window.getComputedStyle(el);
-              fam = cs2.fontFamily || null;
-            } finally {
-              if (el.parentElement)
-                el.parentElement.removeChild(el);
-            }
-          }
-          resolvedInterfaceFontFamily = fam && fam.trim() ? fam.trim() : "sans-serif";
-        }
-      } else {
-        if (!resolvedMonoFontFamily) {
-          const candidates = ["--font-family-monospace", "--font-family-code", "--mono-font", "--code-font", "--font-mono", "--font-family-mono"];
-          let fam = null;
-          for (const v of candidates) {
-            const val = cs.getPropertyValue(v);
-            if (val && val.trim()) {
-              fam = val.trim();
-              break;
-            }
-          }
-          if (!fam) {
-            const codeEl = document.createElement("code");
-            codeEl.style.position = "absolute";
-            codeEl.style.left = "-9999px";
-            codeEl.style.top = "-9999px";
-            codeEl.textContent = "x";
-            document.body.appendChild(codeEl);
-            try {
-              const cs2 = window.getComputedStyle(codeEl);
-              fam = cs2.fontFamily || null;
-            } finally {
-              if (codeEl.parentElement)
-                codeEl.parentElement.removeChild(codeEl);
-            }
-          }
-          resolvedMonoFontFamily = fam && fam.trim() ? fam.trim() : "monospace";
-        }
-      }
-    } catch (e) {
-      if (settings.graph.useInterfaceFont)
-        resolvedInterfaceFontFamily = resolvedInterfaceFontFamily || "sans-serif";
-      else
-        resolvedMonoFontFamily = resolvedMonoFontFamily || "monospace";
-    }
-    context.save();
-    context.translate(offsetX, offsetY);
-    function isNodeTargetFocused(nodeId) {
-      if (!hoveredNodeId)
-        return true;
-      if (nodeId === hoveredNodeId)
-        return true;
-      if (hoverHighlightSet && hoverHighlightSet.has(nodeId))
-        return true;
-      return false;
-    }
-    function updateFocusMap() {
-      if (!graph || !graph.nodes)
-        return;
-      for (const n of graph.nodes) {
-        const id = n.id;
-        const target = isNodeTargetFocused(id) ? 1 : 0;
-        const cur = nodeFocusMap.get(id) ?? target;
-        const alpha = 1 - Math.exp(-settings.graph.focusSmoothing * dt);
-        const next = cur + (target - cur) * alpha;
-        nodeFocusMap.set(id, next);
-      }
-    }
-    updateFocusMap();
-    const targetHover = hoveredNodeId ? 1 : 0;
-    settings.graph.hoverScale += (targetHover - settings.graph.hoverScale) * hoverLerpSpeed;
-    if (graph.edges && graph.edges.length > 0) {
-      const edgeRgb = colorToRgb(themeEdgeColor);
-      for (const edge of graph.edges) {
-        const src = nodeById.get(edge.sourceId);
-        const tgt = nodeById.get(edge.targetId);
-        if (!src || !tgt)
-          continue;
-        if (!settings.graph.showTags && (src.type === "tag" || tgt.type === "tag"))
-          continue;
-        const srcP = projectWorld(src, cam);
-        const tgtP = projectWorld(tgt, cam);
-        const srcF = nodeFocusMap.get(edge.sourceId) ?? 1;
-        const tgtF = nodeFocusMap.get(edge.targetId) ?? 1;
-        const edgeFocus = (srcF + tgtF) * 0.5;
-        const c = Number(edge.linkCount || 1) || 1;
-        let t = 0.5;
-        if (maxEdgeCount > minEdgeCount)
-          t = (c - minEdgeCount) / (maxEdgeCount - minEdgeCount);
-        const minScreenW = 0.8;
-        const maxScreenW = 6;
-        const screenW = minScreenW + t * (maxScreenW - minScreenW);
-        const worldLineWidth = Math.max(0.4, screenW / Math.max(1e-4, 1));
-        let alpha = 0.65;
-        if (!hoveredNodeId)
-          alpha = 0.65;
-        else
-          alpha = 0.08 + (0.9 - 0.08) * edgeFocus;
-        context.save();
-        let finalEdgeAlpha = settings.graph.edgeColorAlpha;
-        if (hoveredNodeId) {
-          const srcInDepth = hoverHighlightSet.has(edge.sourceId);
-          const tgtInDepth = hoverHighlightSet.has(edge.targetId);
-          const directlyIncident = edge.sourceId === hoveredNodeId || edge.targetId === hoveredNodeId;
-          if (srcInDepth && tgtInDepth || directlyIncident)
-            finalEdgeAlpha = 1;
-        }
-        context.strokeStyle = `rgba(${edgeRgb.r},${edgeRgb.g},${edgeRgb.b},${finalEdgeAlpha})`;
-        const isMutual = !!edge.bidirectional && settings.graph.drawDoubleLines;
-        if (isMutual) {
-          const dx = tgtP.x - srcP.x;
-          const dy = tgtP.y - srcP.y;
-          const len = Math.sqrt(dx * dx + dy * dy) || 1;
-          const ux = dx / len;
-          const uy = dy / len;
-          const perpX = -uy;
-          const perpY = ux;
-          const offsetPx = Math.max(2, screenW * 0.6);
-          const offsetWorld = offsetPx;
-          context.beginPath();
-          context.moveTo(srcP.x + perpX * offsetWorld, srcP.y + perpY * offsetWorld);
-          context.lineTo(tgtP.x + perpX * offsetWorld, tgtP.y + perpY * offsetWorld);
-          context.lineWidth = worldLineWidth;
-          context.stroke();
-          context.beginPath();
-          context.moveTo(srcP.x - perpX * offsetWorld, srcP.y - perpY * offsetWorld);
-          context.lineTo(tgtP.x - perpX * offsetWorld, tgtP.y - perpY * offsetWorld);
-          context.lineWidth = worldLineWidth;
-          context.stroke();
-        } else {
-          context.beginPath();
-          context.moveTo(srcP.x, srcP.y);
-          context.lineTo(tgtP.x, tgtP.y);
-          context.lineWidth = worldLineWidth;
-          context.stroke();
-        }
-        context.restore();
-      }
-    }
-    const baseFontSize = settings.graph.labelBaseFontSize;
-    const minFontSize = 6;
-    const maxFontSize = 18;
-    context.textAlign = "center";
-    context.textBaseline = "top";
-    let labelCss = themeLabelColor;
-    try {
-      const cs = window.getComputedStyle(canvas);
-      const v = cs.getPropertyValue("--text-normal");
-      if (v && v.trim())
-        labelCss = v.trim();
-    } catch (e) {
-    }
-    for (const node of graph.nodes) {
-      if (!settings.graph.showTags && node.type === "tag")
-        continue;
-      const p = projectWorld(node, cam);
-      const baseRadius = getBaseNodeRadius(node);
-      const radius = getNodeRadius(node);
-      const centerAlpha = getCenterAlpha(node, cam);
-      const gravityProfile = buildGravityProfile(node);
-      const gravityOuterR = gravityProfile.outer;
-      const focus = nodeFocusMap.get(node.id) ?? 1;
-      const focused = focus > 0.01;
-      if (focused) {
-        const nodeColorOverride = node && node.type === "tag" ? settings.graph.tagColor ?? themeTagColor : themeNodeColor;
-        const accentRgb = colorToRgb(nodeColorOverride);
-        const useNodeAlpha = node && node.type === "tag" ? settings.graph.tagColorAlpha ?? settings.graph.tagColorAlpha : settings.graph.nodeColorAlpha ?? settings.graph.nodeColorAlpha;
-        const dimCenter = clamp01(getBaseCenterAlpha(node));
-        const fullCenter = centerAlpha;
-        let blendedCenter = dimCenter + (fullCenter - dimCenter) * focus;
-        let effectiveUseNodeAlpha = settings.graph.tagColorAlpha;
-        if (hoveredNodeId) {
-          const inDepth = hoverHighlightSet.has(node.id);
-          const isHovered = node.id === hoveredNodeId;
-          if (isHovered || inDepth) {
-            blendedCenter = 1;
-            effectiveUseNodeAlpha = 1;
-          }
-        }
-        const bodyAlpha = settings.graph.labelColorAlpha;
-        context.save();
-        context.beginPath();
-        context.arc(p.x, p.y, radius, 0, Math.PI * 2);
-        const bodyColorOverride = node && node.type === "tag" ? settings.graph.tagColor ?? themeTagColor : themeNodeColor;
-        const accent = colorToRgb(bodyColorOverride);
-        const useBodyAlpha = node && node.type === "tag" ? settings.graph.tagColorAlpha ?? settings.graph.tagColorAlpha : settings.graph.nodeColorAlpha ?? settings.graph.nodeColorAlpha;
-        let effectiveUseBodyAlpha = useBodyAlpha;
-        let finalBodyAlpha = bodyAlpha;
-        if (hoveredNodeId) {
-          const inDepthBody = hoverHighlightSet.has(node.id);
-          const isHoveredBody = node.id === hoveredNodeId;
-          if (isHoveredBody || inDepthBody) {
-            finalBodyAlpha = 1;
-            effectiveUseBodyAlpha = 1;
-          }
-        }
-        context.fillStyle = `rgba(${accent.r},${accent.g},${accent.b},${finalBodyAlpha * effectiveUseBodyAlpha})`;
-        context.fill();
-        context.restore();
-        const displayedFont = settings.graph.labelBaseFontSize;
-        const radiusScreenPx = radius;
-        let labelAlphaVis = 1;
-        const minR = 0;
-        const fadeRange = Math.max(0, settings.graph.labelFadeRangePx);
-        if (radiusScreenPx <= minR) {
-          labelAlphaVis = 0;
-        } else if (radiusScreenPx <= minR + fadeRange) {
-          const t = (radiusScreenPx - minR) / Math.max(1e-4, fadeRange);
-          labelAlphaVis = Math.max(0, Math.min(1, t));
-        } else {
-          labelAlphaVis = 1;
-        }
-        const proximityFactor = evalFalloff(node, buildLabelProfile(node), cam);
-        labelAlphaVis = Math.max(labelAlphaVis, labelAlphaVis + proximityFactor * (1 - labelAlphaVis));
-        const isHoverOrHighlight = hoveredNodeId === node.id || hoverHighlightSet && hoverHighlightSet.has(node.id);
-        if (isHoverOrHighlight)
-          labelAlphaVis = 1;
-        if (labelAlphaVis > 0) {
-          const clampedDisplayed = Math.max(minFontSize, Math.min(maxFontSize, displayedFont));
-          const fontToSet = Math.max(1, clampedDisplayed);
-          context.save();
-          context.font = `${fontToSet}px ${resolvedInterfaceFontFamily || "sans-serif"}`;
-          const isHoverOrHighlight2 = hoveredNodeId === node.id || hoverHighlightSet && hoverHighlightSet.has(node.id);
-          const centerA = isHoverOrHighlight2 ? 1 : clamp01(getCenterAlpha(node, cam));
-          let labelA = Math.max(settings.graph.labelColorAlpha, labelAlphaVis * settings.graph.labelColorAlpha);
-          if (isHoverOrHighlight2)
-            labelA = settings.graph.labelColorAlpha;
-          else if (hoveredNodeId && hoverHighlightSet.has(node.id))
-            labelA = Math.max(labelA, settings.graph.labelColorAlpha);
-          context.globalAlpha = Math.max(0, Math.min(1, labelA * centerA));
-          const labelRgb = colorToRgb(settings.graph.labelColor || "#ffffff");
-          context.fillStyle = `rgba(${labelRgb.r},${labelRgb.g},${labelRgb.b},1.0)`;
-          const verticalPadding = 4;
-          context.fillText(node.label, p.x, p.y + radius + verticalPadding);
-          context.restore();
-        }
-      } else {
-        const faintRgb = colorToRgb(themeLabelColor || "#999");
-        const faintAlpha = 0.15 * (1 - focus) + 0.1 * focus;
-        const effectiveCenterAlpha = clamp01(getCenterAlpha(node, cam));
-        const finalAlpha = faintAlpha * effectiveCenterAlpha * settings.graph.nodeColorAlpha;
-        context.save();
-        context.beginPath();
-        context.arc(p.x, p.y, radius * 0.9, 0, Math.PI * 2);
-        context.fillStyle = `rgba(${faintRgb.r},${faintRgb.g},${faintRgb.b},${finalAlpha})`;
-        context.fill();
-        context.restore();
-      }
-    }
-    context.restore();
+    drawEdges();
+    drawNodes();
+    drawLabels();
   }
   function destroy() {
     graph = null;
+    nodeById.clear();
   }
-  function setHoveredNode(nodeId) {
+  function drawEdges() {
+    if (!context || !graph || !graph.edges)
+      return;
+    const edges = graph.edges;
+    context.save();
+    const edgeColor = settings.graph.edgeColor || "#888888";
+    const edgeAlpha = typeof settings.graph.edgeColorAlpha === "number" ? settings.graph.edgeColorAlpha : 0.3;
+    context.strokeStyle = edgeColor;
+    context.globalAlpha = edgeAlpha;
+    context.lineWidth = 1;
+    context.lineCap = "round";
+    for (const edge of edges) {
+      const src = nodeById.get(edge.sourceId);
+      const tgt = nodeById.get(edge.targetId);
+      if (!src || !tgt)
+        continue;
+      const p1 = cameraManager.worldToScreen(src);
+      const p2 = cameraManager.worldToScreen(tgt);
+      if (p1.depth < 0 || p2.depth < 0)
+        continue;
+      context.beginPath();
+      context.moveTo(p1.x, p1.y);
+      context.lineTo(p2.x, p2.y);
+      context.stroke();
+    }
+    context.restore();
+  }
+  function drawNodes() {
+    if (!context || !graph || !graph.nodes)
+      return;
+    const nodes = graph.nodes;
+    context.save();
+    const defaultNodeColor = settings.graph.nodeColor || "#66ccff";
+    const tagColor = settings.graph.tagColor || "#8000ff";
+    const minRadius = settings.graph.minNodeRadius || 4;
+    for (const node of nodes) {
+      const p = cameraManager.worldToScreen(node);
+      if (p.depth < 0)
+        continue;
+      let radius = minRadius;
+      if (hoveredNodeId && node.id === hoveredNodeId) {
+        radius *= 1.25;
+      }
+      const isTag = node.type === "tag";
+      const fillColor = isTag ? tagColor : defaultNodeColor;
+      context.beginPath();
+      context.arc(p.x, p.y, radius, 0, Math.PI * 2);
+      context.fillStyle = fillColor;
+      context.globalAlpha = 1;
+      context.fill();
+    }
+    context.restore();
+  }
+  function drawLabels() {
+    if (!context || !graph || !graph.nodes)
+      return;
+    const nodes = graph.nodes;
+    const baseSize = settings.graph.labelBaseFontSize || 12;
+    const labelColor = settings.graph.labelColor || "#dddddd";
+    context.save();
+    context.font = `${baseSize}px sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "top";
+    context.fillStyle = labelColor;
+    context.globalAlpha = 1;
+    const radius = settings.graph.minNodeRadius || 4;
+    for (const node of nodes) {
+      const label = node.label || node.name || node.id;
+      if (!label)
+        continue;
+      const p = cameraManager.worldToScreen(node);
+      if (p.depth < 0)
+        continue;
+      context.fillText(label, p.x, p.y + radius + 4);
+    }
+    context.restore();
+  }
+  function setHoveredNode(nodeId, neighbors) {
     hoveredNodeId = nodeId;
+    hoverNeighbors = neighbors ?? null;
   }
-  function getNodeRadiusForHit(node) {
-    return getNodeRadius(node);
+  function getNodeRadiusForHit(_node) {
+    return settings.graph.minNodeRadius || 4;
   }
-  function screenToWorld2D(screenX, screenY) {
-    return { x: screenX - offsetX, y: screenY - offsetY };
+  function getNodeScreenPosition(node, _cam) {
+    return cameraManager.worldToScreen(node);
   }
-  function screenToWorld3D(sx, sy, zCam, cam) {
-    const { yaw, pitch, distance, targetX, targetY, targetZ } = cam;
-    const px = sx - offsetX;
-    const py = sy - offsetY;
-    const focal = 800;
-    const perspective = focal / (zCam || 1e-4);
-    const xCam = px / perspective;
-    const yCam = py / perspective;
-    let cx = xCam;
-    let cy = yCam;
-    let cz = zCam;
-    const cosP = Math.cos(pitch);
-    const sinP = Math.sin(pitch);
-    const wy = cy * cosP + cz * sinP;
-    const wz1 = -cy * sinP + cz * cosP;
-    const cosY = Math.cos(yaw);
-    const sinY = Math.sin(yaw);
-    const wx = cx * cosY + wz1 * sinY;
-    const wz = -cx * sinY + wz1 * cosY;
-    return { screenX: wx + targetX, screenY: wy + targetY, screenZ: wz + targetZ };
-  }
-  function getNodeScreenPosition(node, cam) {
-    const p = projectWorld(node, cam);
-    return { x: p.x + offsetX, y: p.y + offsetY };
-  }
-  function getProjectedNode(node, cam) {
-    const p = projectWorld(node, cam);
-    return { x: p.x + offsetX, y: p.y + offsetY, depth: p.depth };
+  function getScale() {
+    return 1;
   }
   return {
     setGraph,
@@ -823,16 +367,8 @@ function createRenderer(canvas) {
     destroy,
     setHoveredNode,
     getNodeRadiusForHit,
-    //zoomAt,
-    screenToWorld2D,
-    screenToWorld3D,
     getNodeScreenPosition,
-    getProjectedNode
-    //resetCamera: resetCamera,
-    //recenterCamera: recenterCamera,
-    //setCameraState     : setCameraState,
-    //getCameraState     : getCameraState,
-    //getCameraBasis,
+    getScale
   };
 }
 
@@ -1192,14 +728,15 @@ var MAX_PITCH = Math.PI / 2 - 0.05;
 var CameraManager = class {
   cameraSettings;
   cameraState;
+  //private renderer       : Renderer;
   cameraSnapShot = null;
-  renderer;
+  //private worldAnchor    : { screenX: number; screenY: number; screenZ: number }      | null = null;
   worldAnchor = null;
   screenAnchor = null;
-  constructor(initialState, renderer) {
+  viewport = { width: 0, height: 0, offsetX: 0, offsetY: 0 };
+  constructor(initialState) {
     this.cameraState = { ...initialState };
     this.cameraSettings = getSettings().camera;
-    this.renderer = renderer;
   }
   getState() {
     return { ...this.cameraState };
@@ -1220,6 +757,62 @@ var CameraManager = class {
     this.cameraState = { ...initial };
     this.clearMomentum();
   }
+  /** Projects a world point to screen coordinates */
+  worldToScreen(node) {
+    const { yaw, pitch, distance, targetX, targetY, targetZ } = this.cameraState;
+    const { offsetX, offsetY } = this.viewport;
+    const wx = (node.x || 0) - targetX;
+    const wy = (node.y || 0) - targetY;
+    const wz = (node.z || 0) - targetZ;
+    const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
+    const xz = wx * cosYaw - wz * sinYaw;
+    const zz = wx * sinYaw + wz * cosYaw;
+    const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+    const yz = wy * cosP - zz * sinP;
+    const zz2 = wy * sinP + zz * cosP;
+    const camZ = distance;
+    const dz = camZ - zz2;
+    const safeDz = Math.max(1e-4, dz);
+    const focal = 800;
+    const perspective = focal / safeDz;
+    return {
+      x: xz * perspective + offsetX,
+      y: yz * perspective + offsetY,
+      depth: dz
+    };
+  }
+  setViewport(width, height) {
+    this.viewport.width = width;
+    this.viewport.height = height;
+    this.viewport.offsetX = width / 2;
+    this.viewport.offsetY = height / 2;
+  }
+  /** Unprojects screen coords to world coords on a plane at camera-distance (for panning) */
+  screenToWorld(screenX, screenY, depthFromCamera) {
+    const { yaw, pitch, targetX, targetY, targetZ } = this.cameraState;
+    const { offsetX, offsetY } = this.viewport;
+    const focal = 800;
+    const px = screenX - offsetX;
+    const py = screenY - offsetY;
+    const perspective = focal / depthFromCamera;
+    const xCam = px / perspective;
+    const yCam = py / perspective;
+    const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+    const wy = yCam * cosP + depthFromCamera * sinP;
+    const wz1 = -yCam * sinP + depthFromCamera * cosP;
+    const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
+    const wx = xCam * cosY + wz1 * sinY;
+    const wz = -xCam * sinY + wz1 * cosY;
+    return { x: wx + targetX, y: wy + targetY, z: wz + targetZ };
+  }
+  screenToWorld3D(screenX, screenY, depthFromCamera) {
+    return this.screenToWorld(screenX, screenY, depthFromCamera);
+  }
+  screenToWorld2D(screenX, screenY) {
+    const cam = this.cameraState;
+    const world = this.screenToWorld(screenX, screenY, cam.distance);
+    return { x: world.x, y: world.y };
+  }
   clearMomentum() {
     this.cameraState.orbitVelX = 0;
     this.cameraState.orbitVelY = 0;
@@ -1230,20 +823,20 @@ var CameraManager = class {
   startPan(screenX, screenY) {
     const cam = this.cameraState;
     this.screenAnchor = { screenX, screenY };
-    this.worldAnchor = this.renderer.screenToWorld3D(screenX, screenY, cam.distance, cam);
+    this.worldAnchor = this.screenToWorld(screenX, screenY, cam.distance);
   }
   updatePan(screenX, screenY) {
     if (!this.worldAnchor)
       return;
     const cam = this.cameraState;
-    const current = this.renderer.screenToWorld3D(screenX, screenY, cam.distance, cam);
-    const dx = current.screenX - this.worldAnchor.screenX;
-    const dy = current.screenY - this.worldAnchor.screenY;
-    const dz = current.screenZ - this.worldAnchor.screenZ;
+    const current = this.screenToWorld(screenX, screenY, cam.distance);
+    const dx = current.x - this.worldAnchor.x;
+    const dy = current.y - this.worldAnchor.y;
+    const dz = current.z - this.worldAnchor.z;
     cam.targetX -= dx;
     cam.targetY -= dy;
     cam.targetZ -= dz;
-    this.worldAnchor = this.renderer.screenToWorld3D(screenX, screenY, cam.distance, cam);
+    this.worldAnchor = this.screenToWorld(screenX, screenY, cam.distance);
   }
   endPan() {
     this.screenAnchor = null;
@@ -1345,7 +938,10 @@ var GraphManager = class {
     canvas.style.width = "100%";
     canvas.style.height = "100%";
     canvas.tabIndex = 0;
-    this.renderer = createRenderer(canvas);
+    this.cameraManager = new CameraManager(settings.camera.state);
+    this.renderer = createRenderer(canvas, this.cameraManager);
+    const rect = this.containerEl.getBoundingClientRect();
+    this.renderer.resize(rect.width, rect.height);
     this.containerEl.appendChild(canvas);
     this.graph = await buildGraph(this.app);
     this.inputManager = new InputManager(canvas, {
@@ -1368,7 +964,6 @@ var GraphManager = class {
         return this.nodeClicked(screenX, screenY);
       }
     });
-    this.cameraManager = new CameraManager(settings.camera.state, this.renderer);
     const rawSaved = settings.nodePositions || {};
     let allSaved = {};
     let savedPositions = {};
@@ -1496,7 +1091,7 @@ var GraphManager = class {
   resize(width, height) {
     if (!this.renderer || !this.cameraManager)
       return;
-    this.renderer.resize(width, height, this.cameraManager.getState());
+    this.renderer.resize(width, height);
   }
   resetCamera() {
     if (!this.renderer)

@@ -42,12 +42,17 @@ export class GraphManager {
     canvas.style.width        = '100%';
     canvas.style.height       = '100%';
     canvas.tabIndex           = 0;
-    this.renderer             = createRenderer(canvas);
+
+    this.cameraManager        = new CameraManager(settings.camera.state);
+    this.renderer             = createRenderer(canvas, this.cameraManager);
+    // (This is critical because CameraManager needs the viewport center to project correctly)
+    const rect                = this.containerEl.getBoundingClientRect();
+    this.renderer.resize(rect.width, rect.height);
+
     this.containerEl.appendChild(canvas);
+    this.graph                = await buildGraph(this.app);
 
-    this.graph = await buildGraph(this.app);
-
-    this.inputManager = new InputManager(canvas, {
+    this.inputManager         = new InputManager(canvas, {
       onOrbitStart      : (dx, dy)                    => this.startOrbit(dx, dy),
       onOrbitMove       : (dx, dy)                    => this.updateOrbit(dx, dy),
       onOrbitEnd        : ()                          => this.endOrbit(),
@@ -66,7 +71,6 @@ export class GraphManager {
       detectClickedNode : (screenX, screenY)          => { return this.nodeClicked(screenX, screenY); },
     });
 
-     this.cameraManager = new CameraManager(settings.camera.state, this.renderer);
 
     const rawSaved    : any = settings.nodePositions || {};
     let allSaved      : Record<string, Record<string, { x: number; y: number }>> = {};
@@ -216,7 +220,7 @@ export class GraphManager {
 
   resize(width: number, height: number): void {
     if (!this.renderer || !this.cameraManager) return;
-    this.renderer.resize(width, height, this.cameraManager!.getState());
+    this.renderer.resize(width, height);
   }
 
   public resetCamera() {
