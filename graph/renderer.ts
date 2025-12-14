@@ -49,9 +49,16 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
 
     if (!graph) return;
 
-    drawEdges();
-    drawNodes();
-    drawLabels();
+    const nodeMap = new Map<string, { x: number; y: number; depth: number }>();
+    for (const node of graph.nodes) {
+      const p = cameraManager.worldToScreen(node);
+      nodeMap.set(node.id, p);
+    }
+
+
+    drawEdges(nodeMap);
+    drawNodes(nodeMap);
+    drawLabels(nodeMap);
   }
 
   function destroy() {
@@ -63,7 +70,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
   // Drawing helpers (bare minimum)
   // ─────────────────────────────────────────────
 
-  function drawEdges() {
+  function drawEdges(nodeMap: Map<string, { x: number; y: number; depth: number }>) {
     if (!context || !graph || !graph.edges) return;
 
     const edges: GraphEdge[] = graph.edges;
@@ -87,9 +94,10 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
       const tgt = nodeById.get(edge.targetId);
       if (!src || !tgt) continue;
 
-      const p1 = cameraManager.worldToScreen(src);
-      const p2 = cameraManager.worldToScreen(tgt);
+      const p1 = nodeMap.get(edge.sourceId);
+      const p2 = nodeMap.get(edge.targetId);
 
+      if (!p1 || !p2) continue;
       // Simple "behind camera" cull
       if (p1.depth < 0 || p2.depth < 0) continue;
 
@@ -102,7 +110,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
     context.restore();
   }
 
-  function drawNodes() {
+  function drawNodes(nodeMap: Map<string, { x: number; y: number; depth: number }>) {
     if (!context || !graph || !graph.nodes) return;
 
     const nodes: GraphNode[] = graph.nodes;
@@ -114,8 +122,9 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
     const minRadius = settings.graph.minNodeRadius || 4;
 
     for (const node of nodes) {
-      const p = cameraManager.worldToScreen(node);
-      if (p.depth < 0) continue;
+      //const p = cameraManager.worldToScreen(node);
+      const p = nodeMap.get(node.id);
+      if (!p || p.depth < 0) continue;
 
       // Base radius: flat, no degree scaling
       let radius = minRadius;
@@ -138,7 +147,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
     context.restore();
   }
 
-  function drawLabels() {
+  function drawLabels(nodeMap: Map<string, { x: number; y: number; depth: number }> ) {
     if (!context || !graph || !graph.nodes) return;
 
     const nodes : GraphNode[]= graph.nodes;
@@ -155,8 +164,9 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
     const radius = settings.graph.minNodeRadius || 4;
 
     for (const node of nodes) {
-      const p = cameraManager.worldToScreen(node);
-      if (p.depth < 0) continue;
+      //const p = cameraManager.worldToScreen(node);
+      const p = nodeMap.get(node.id);
+      if (!p || p.depth < 0) continue;
 
       context.fillText(node.label, p.x, p.y + radius + 4);
     }

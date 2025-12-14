@@ -190,7 +190,6 @@ export class GraphManager {
 
   public startFollow(nodeId: string) {
     this.followedNode = nodeId;
-    console.log("start follow", nodeId);
   }
 
   public endFollow() {

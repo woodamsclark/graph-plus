@@ -1,4 +1,4 @@
-import { GraphNode, GraphData, GraphEdge, Simulation } from '../utilities/interfaces.ts';
+import { GraphNode, GraphData, GraphEdge, Simulation, PhysicsSettings } from '../utilities/interfaces.ts';
 import { getSettings } from '../utilities/settingsStore.ts';
 
 
@@ -15,8 +15,7 @@ export function createSimulation(graph: GraphData) {
   // set of node ids that should be pinned (physics skip)
   let pinnedNodes = new Set<string>();
 
-  function applyRepulsion() {
-    const settings = getSettings();
+  function applyRepulsion(physicsSettings: PhysicsSettings) {
     const N = nodes.length;
     for (let i = 0; i < N; i++) {
       const a = nodes[i];
@@ -31,7 +30,7 @@ export function createSimulation(graph: GraphData) {
         // minimum separation to avoid extreme forces
         const minDist = 40;
         const effectiveDist = Math.max(dist, minDist);
-        const force = settings.physics.repulsionStrength / (effectiveDist * effectiveDist);
+        const force = physicsSettings.repulsionStrength / (effectiveDist * effectiveDist);
         const fx = (dx / dist) * force;
         const fy = (dy / dist) * force;
         const fz = (dz / dist) * force;
@@ -49,8 +48,7 @@ export function createSimulation(graph: GraphData) {
     }
   }
 
-  function applySprings() {
-    const settings = getSettings();
+  function applySprings(physicsSettings: PhysicsSettings) {
     if (!edges) return;
     for (const e of edges) {
       const a = nodeById.get(e.sourceId);
@@ -60,8 +58,8 @@ export function createSimulation(graph: GraphData) {
       const dy = (b.y - a.y);
       const dz = ((b.z || 0) - (a.z || 0));
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.0001;
-      const displacement = dist - (settings.physics.springLength || 0);
-      const f = (settings.physics.springStrength || 0) * Math.tanh(displacement / 50);
+      const displacement = dist - (physicsSettings.springLength || 0);
+      const f = (physicsSettings.springStrength || 0) * Math.tanh(displacement / 50);
       const fx = (dx / dist) * f;
       const fy = (dy / dist) * f;
       const fz = (dz / dist) * f;
@@ -166,8 +164,12 @@ export function createSimulation(graph: GraphData) {
   function tick(dt: number) {
     if (!running) return;
     if (!nodes.length) return;
-    applyRepulsion();
-    applySprings();
+
+    const settings = getSettings(); 
+    const physicsSettings = settings.physics;
+
+    applyRepulsion(physicsSettings);
+    applySprings(physicsSettings);
     applyCentering();
     applyPlaneConstraints();
     //applyMouseAttraction();

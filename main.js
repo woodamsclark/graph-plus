@@ -255,15 +255,20 @@ function createRenderer(canvas, cameraManager) {
     context.fillRect(0, 0, canvas.width, canvas.height);
     if (!graph)
       return;
-    drawEdges();
-    drawNodes();
-    drawLabels();
+    const nodeMap = /* @__PURE__ */ new Map();
+    for (const node of graph.nodes) {
+      const p = cameraManager.worldToScreen(node);
+      nodeMap.set(node.id, p);
+    }
+    drawEdges(nodeMap);
+    drawNodes(nodeMap);
+    drawLabels(nodeMap);
   }
   function destroy() {
     graph = null;
     nodeById.clear();
   }
-  function drawEdges() {
+  function drawEdges(nodeMap) {
     if (!context || !graph || !graph.edges)
       return;
     const edges = graph.edges;
@@ -279,8 +284,10 @@ function createRenderer(canvas, cameraManager) {
       const tgt = nodeById.get(edge.targetId);
       if (!src || !tgt)
         continue;
-      const p1 = cameraManager.worldToScreen(src);
-      const p2 = cameraManager.worldToScreen(tgt);
+      const p1 = nodeMap.get(edge.sourceId);
+      const p2 = nodeMap.get(edge.targetId);
+      if (!p1 || !p2)
+        continue;
       if (p1.depth < 0 || p2.depth < 0)
         continue;
       context.beginPath();
@@ -290,7 +297,7 @@ function createRenderer(canvas, cameraManager) {
     }
     context.restore();
   }
-  function drawNodes() {
+  function drawNodes(nodeMap) {
     if (!context || !graph || !graph.nodes)
       return;
     const nodes = graph.nodes;
@@ -299,8 +306,8 @@ function createRenderer(canvas, cameraManager) {
     const tagColor = settings.graph.tagColor || "#8000ff";
     const minRadius = settings.graph.minNodeRadius || 4;
     for (const node of nodes) {
-      const p = cameraManager.worldToScreen(node);
-      if (p.depth < 0)
+      const p = nodeMap.get(node.id);
+      if (!p || p.depth < 0)
         continue;
       let radius = minRadius;
       if (hoveredNodeId && node.id === hoveredNodeId) {
@@ -316,7 +323,7 @@ function createRenderer(canvas, cameraManager) {
     }
     context.restore();
   }
-  function drawLabels() {
+  function drawLabels(nodeMap) {
     if (!context || !graph || !graph.nodes)
       return;
     const nodes = graph.nodes;
@@ -330,8 +337,8 @@ function createRenderer(canvas, cameraManager) {
     context.globalAlpha = 1;
     const radius = settings.graph.minNodeRadius || 4;
     for (const node of nodes) {
-      const p = cameraManager.worldToScreen(node);
-      if (p.depth < 0)
+      const p = nodeMap.get(node.id);
+      if (!p || p.depth < 0)
         continue;
       context.fillText(node.label, p.x, p.y + radius + 4);
     }
@@ -376,8 +383,7 @@ function createSimulation(graph) {
   for (const n of nodes)
     nodeById.set(n.id, n);
   let pinnedNodes = /* @__PURE__ */ new Set();
-  function applyRepulsion() {
-    const settings = getSettings();
+  function applyRepulsion(physicsSettings) {
     const N = nodes.length;
     for (let i = 0; i < N; i++) {
       const a = nodes[i];
@@ -392,7 +398,7 @@ function createSimulation(graph) {
         const dist = Math.sqrt(distSq);
         const minDist = 40;
         const effectiveDist = Math.max(dist, minDist);
-        const force = settings.physics.repulsionStrength / (effectiveDist * effectiveDist);
+        const force = physicsSettings.repulsionStrength / (effectiveDist * effectiveDist);
         const fx = dx / dist * force;
         const fy = dy / dist * force;
         const fz = dz / dist * force;
@@ -409,8 +415,7 @@ function createSimulation(graph) {
       }
     }
   }
-  function applySprings() {
-    const settings = getSettings();
+  function applySprings(physicsSettings) {
     if (!edges)
       return;
     for (const e of edges) {
@@ -422,8 +427,8 @@ function createSimulation(graph) {
       const dy = b.y - a.y;
       const dz = (b.z || 0) - (a.z || 0);
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-4;
-      const displacement = dist - (settings.physics.springLength || 0);
-      const f = (settings.physics.springStrength || 0) * Math.tanh(displacement / 50);
+      const displacement = dist - (physicsSettings.springLength || 0);
+      const f = (physicsSettings.springStrength || 0) * Math.tanh(displacement / 50);
       const fx = dx / dist * f;
       const fy = dy / dist * f;
       const fz = dz / dist * f;
@@ -537,8 +542,10 @@ function createSimulation(graph) {
       return;
     if (!nodes.length)
       return;
-    applyRepulsion();
-    applySprings();
+    const settings = getSettings();
+    const physicsSettings = settings.physics;
+    applyRepulsion(physicsSettings);
+    applySprings(physicsSettings);
     applyCentering();
     applyPlaneConstraints();
     applyCenterNodeLock();
@@ -651,14 +658,11 @@ var InputManager = class {
       case 1 /* Hover */:
         return;
       case 2 /* Click */:
-        console.log("PointerMode.Click", distSq, thresholdSq);
-        console.log("draggedNode", this.draggedNodeId);
         if (distSq > thresholdSq) {
           if (this.draggedNodeId != null) {
             this.pointerMode = 4 /* DragNode */;
             this.callback.onDragStart(this.draggedNodeId, screenX, screenY);
           } else {
-            console.log("Promote to Pan");
             this.pointerMode = 5 /* Pan */;
             this.callback.onPanStart(screenX, screenY);
           }
@@ -668,7 +672,6 @@ var InputManager = class {
         this.callback.onDragMove(screenX, screenY);
         return;
       case 5 /* Pan */:
-        console.log("updatePan", screenX, screenY);
         this.callback.onPanMove(screenX, screenY);
         return;
       case 3 /* RightClick */:
@@ -1069,7 +1072,6 @@ var GraphManager = class {
   }
   startFollow(nodeId) {
     this.followedNode = nodeId;
-    console.log("start follow", nodeId);
   }
   endFollow() {
     this.followedNode = null;
