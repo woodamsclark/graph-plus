@@ -1,5 +1,5 @@
 // renderer.ts
-import { Renderer, GraphData, CameraState } from '../utilities/interfaces.ts';
+import { Renderer, GraphData, CameraState, GraphNode, GraphEdge } from '../utilities/interfaces.ts';
 import { getSettings } from '../utilities/settingsStore.ts';
 import { CameraManager } from '../CameraManager.ts';
 
@@ -14,20 +14,10 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
   const settings = getSettings();
 
   let graph: GraphData | null = null;
-  const nodeById = new Map<string, any>();
+  const nodeById = new Map<string, GraphNode>();
 
   let hoveredNodeId: string | null = null;
   let hoverNeighbors: Set<string> | null = null;
-
-  function setGraph(g: GraphData | null) {
-    graph = g;
-    nodeById.clear();
-    if (graph && graph.nodes) {
-      for (const node of graph.nodes as any[]) {
-        nodeById.set(node.id, node);
-      }
-    }
-  }
 
   function resize(width: number, height: number) {
     const w = Math.max(1, Math.floor(width));
@@ -76,7 +66,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
   function drawEdges() {
     if (!context || !graph || !graph.edges) return;
 
-    const edges = graph.edges as any[];
+    const edges: GraphEdge[] = graph.edges;
 
     context.save();
 
@@ -115,7 +105,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
   function drawNodes() {
     if (!context || !graph || !graph.nodes) return;
 
-    const nodes = graph.nodes as any[];
+    const nodes: GraphNode[] = graph.nodes;
 
     context.save();
 
@@ -135,7 +125,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
         radius *= 1.25;
       }
 
-      const isTag = (node as any).type === 'tag';
+      const isTag = node.type === 'tag';
       const fillColor = isTag ? tagColor : defaultNodeColor;
 
       context.beginPath();
@@ -151,7 +141,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
   function drawLabels() {
     if (!context || !graph || !graph.nodes) return;
 
-    const nodes = graph.nodes as any[];
+    const nodes : GraphNode[]= graph.nodes;
     const baseSize = settings.graph.labelBaseFontSize || 12;
     const labelColor = settings.graph.labelColor || '#dddddd';
 
@@ -165,13 +155,10 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
     const radius = settings.graph.minNodeRadius || 4;
 
     for (const node of nodes) {
-      const label = (node as any).label || (node as any).name || node.id;
-      if (!label) continue;
-
       const p = cameraManager.worldToScreen(node);
       if (p.depth < 0) continue;
 
-      context.fillText(label, p.x, p.y + radius + 4);
+      context.fillText(node.label, p.x, p.y + radius + 4);
     }
 
     context.restore();
@@ -202,23 +189,16 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
     return settings.graph.minNodeRadius || 4;
   }
 
-  /**
-   * Return current screen position of a node via CameraManager.
-   */
-  function getNodeScreenPosition(node: any, _cam?: CameraState) {
-    return cameraManager.worldToScreen(node);
+function setGraph(data: GraphData | null) {
+  graph = data;
+  nodeById.clear();
+
+  if (!data) return;
+
+  for (const node of data.nodes) {
+    nodeById.set(node.id, node);
   }
-
-  /**
-   * Simple scale helper; GraphManager uses this sometimes.
-   * With CameraManager handling zoom, we can treat this as 1.
-   */
-  function getScale(): number {
-    return 1;
-  }
-
-
-
+}
   // ─────────────────────────────────────────────
   // Return object matching the Renderer interface
   // ─────────────────────────────────────────────
@@ -230,7 +210,5 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
     destroy,
     setHoveredNode,
     getNodeRadiusForHit,
-    getNodeScreenPosition,
-    getScale,
   } as unknown as Renderer;
 }

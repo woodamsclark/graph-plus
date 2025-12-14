@@ -3,12 +3,16 @@ import { GraphView, GRAPH_PLUS_TYPE } from './GraphView.ts';
 import { initSettings, getSettings } from './utilities/settingsStore.ts';
 import { GraphPlusSettingTab } from './SettingsTab.ts';
 import { DEFAULT_SETTINGS } from './utilities/defaultSettings.ts';
+import { GraphPlusSettings } from './utilities/interfaces.ts';
 
 
 export default class GraphPlus extends Plugin {
+  settings!: GraphPlusSettings;
 
   async onload() {
     initSettings({ ...DEFAULT_SETTINGS });
+    this.settings = getSettings();
+    
     this.registerView(GRAPH_PLUS_TYPE, (leaf) => new GraphView(leaf, this));
     this.addCommand({
       id  : 'open-graph+',

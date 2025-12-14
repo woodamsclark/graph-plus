@@ -41,8 +41,8 @@ export class CameraManager {
     }
 
     /** Reset to initial pose, clearing momentum */
-    reset(initial: CameraState) {
-        this.cameraState = { ...initial };
+    resetCamera() {
+        this.cameraState = { ...getSettings().camera.state };
         this.clearMomentum();
     }
 

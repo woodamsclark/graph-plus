@@ -1,8 +1,14 @@
 import { App, PluginSettingTab, Setting, TextComponent, ToggleComponent } from 'obsidian';
 import GraphPlus from './main.ts';
 import { getSettings, updateSettings } from './utilities/settingsStore.ts';
-import { Settings } from './utilities/interfaces.ts';
+import { GraphPlusSettings } from './utilities/interfaces.ts';
 import { DEFAULT_SETTINGS } from './utilities/defaultSettings.ts';
+
+declare module 'obsidian' {
+  interface Setting {
+    controlEl: HTMLElement;
+  }
+}
 
 export class GraphPlusSettingTab extends PluginSettingTab {
   plugin: GraphPlus;
@@ -81,7 +87,7 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       wrap.appendChild(range);
       wrap.appendChild(num);
       wrap.appendChild(rbtn);
-      (s as any).controlEl.appendChild(wrap);
+      s.controlEl.appendChild(wrap);
       return { range, num, reset: rbtn };
     };
 
@@ -294,14 +300,14 @@ export class GraphPlusSettingTab extends PluginSettingTab {
         colorInput.value                = '#000000'; 
         alphaInput.value                = String(settings.graph.nodeColorAlpha); 
     });
-      (s as any).controlEl.appendChild(rb);
+      s.controlEl.appendChild(rb);
       const hint                = document.createElement('span'); 
       hint.textContent          = '(alpha)'; 
       hint.style.marginLeft     = '8px'; 
       hint.style.marginRight    = '6px';
-      (s as any).controlEl.appendChild(hint);
-      (s as any).controlEl.appendChild(colorInput);
-      (s as any).controlEl.appendChild(alphaInput);
+      s.controlEl.appendChild(hint);
+      s.controlEl.appendChild(colorInput);
+      s.controlEl.appendChild(alphaInput);
     }
 
     {
@@ -347,14 +353,14 @@ export class GraphPlusSettingTab extends PluginSettingTab {
         colorInput.value = '#000000'; 
         edgeAlpha.value = String(settings.graph.edgeColorAlpha); 
       });
-      (s as any).controlEl.appendChild(rb);
-      (s as any).controlEl.appendChild(colorInput);
+      s.controlEl.appendChild(rb);
+      s.controlEl.appendChild(colorInput);
       const hint                = document.createElement('span'); 
       hint.textContent          = '(alpha)'; 
       hint.style.marginLeft     = '8px'; 
       hint.style.marginRight    = '6px';
-      (s as any).controlEl.appendChild(hint);
-      (s as any).controlEl.appendChild(edgeAlpha);
+      s.controlEl.appendChild(hint);
+      s.controlEl.appendChild(edgeAlpha);
     }
 
     // Tag color (override)
@@ -402,14 +408,14 @@ export class GraphPlusSettingTab extends PluginSettingTab {
         colorInput.value                = '#000000'; 
         tagAlpha.value                  = String(settings.graph.tagColorAlpha); 
     });
-      (s as any).controlEl.appendChild(rb);
-      (s as any).controlEl.appendChild(colorInput);
+      s.controlEl.appendChild(rb);
+      s.controlEl.appendChild(colorInput);
       const hint                = document.createElement('span'); 
       hint.textContent          = '(alpha)'; 
       hint.style.marginLeft     = '8px'; 
       hint.style.marginRight    = '6px';
-      (s as any).controlEl.appendChild(hint);
-      (s as any).controlEl.appendChild(tagAlpha);
+      s.controlEl.appendChild(hint);
+      s.controlEl.appendChild(tagAlpha);
     }
 
     {
@@ -452,14 +458,14 @@ export class GraphPlusSettingTab extends PluginSettingTab {
         this.applySettings((s) => { s.graph.labelColor = undefined; s.graph.labelColorAlpha = settings.graph.labelColorAlpha; });
         colorInput.value = '#000000'; 
         labelAlpha.value = String(settings.graph.labelColorAlpha); });
-      (s as any).controlEl.appendChild(rb);
-      (s as any).controlEl.appendChild(colorInput);
+      s.controlEl.appendChild(rb);
+      s.controlEl.appendChild(colorInput);
       const hint = document.createElement('span'); 
       hint.textContent          = '(alpha)'; 
       hint.style.marginLeft     = '8px'; 
       hint.style.marginRight    = '6px';
-      (s as any).controlEl.appendChild(hint);
-      (s as any).controlEl.appendChild(labelAlpha);
+      s.controlEl.appendChild(hint);
+      s.controlEl.appendChild(labelAlpha);
     }
 
     new Setting(containerEl)
@@ -680,7 +686,7 @@ export class GraphPlusSettingTab extends PluginSettingTab {
             this.applySettings((s) => { s.graph.useOutlinkFallback = Boolean(v); });
         }));
   }
-  async applySettings(mutator: (s: Settings) => void) {
+  async applySettings(mutator: (s: GraphPlusSettings) => void) {
     updateSettings(mutator);
     await this.plugin.saveSettings();
   }

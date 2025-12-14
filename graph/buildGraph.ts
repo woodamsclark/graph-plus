@@ -1,6 +1,12 @@
 import { App, TFile, CachedMetadata } from 'obsidian';
-import { GraphNode, GraphEdge, GraphData, Settings } from '../utilities/interfaces.ts';
+import { GraphNode, GraphEdge, GraphData, GraphPlusSettings } from '../utilities/interfaces.ts';
 import { getSettings } from '../utilities/settingsStore.ts';
+
+interface ResolvedLinks {
+  [sourcePath: string]: {
+    [targetPath: string]: number; // number = link count
+  };
+}
 
 export async function buildGraph(app: App): Promise<GraphData> {
   const settings = getSettings();
@@ -14,7 +20,7 @@ export async function buildGraph(app: App): Promise<GraphData> {
   computeNodeDegrees(nodes, nodeByPath, edges);
   markBidirectionalEdges(edges);
   const centerNode = pickCenterNode(app, nodes);
-  return { nodes, edges };
+  return { nodes, edges, centerNode };
 }
 
 function createNoteNodes(files: TFile[]){
@@ -49,7 +55,7 @@ function createNoteNodes(files: TFile[]){
 
 function buildNoteEdgesFromResolvedLinks(app: App, nodeByPath: Map<string, GraphNode>): { edges: GraphEdge[]; edgeSet: Set<string> } {
   const settings            = getSettings();
-  const resolved: any       = (app.metadataCache as any).resolvedLinks || {};
+  const resolved: ResolvedLinks = (app.metadataCache as any).resolvedLinks || {};
   const edges: GraphEdge[]  = [];
   const edgeSet             = new Set<string>();
   const countDuplicates     = Boolean(settings.graph.countDuplicateLinks);
@@ -146,14 +152,16 @@ function pickCenterNode(app: App, nodes: GraphNode[]): GraphNode | null {
   const settings = getSettings();
   if (!settings.graph.useCenterNote) return null;
 
+  let centerNode = undefined;
+
   // if centerNoteTitle is defined, use it.
   if (settings.graph.centerNoteTitle) {
-    const centerNode = nodes.find((n) => n.id === settings.graph.centerNoteTitle);
-    settings.graph.centerNode = centerNode;
+    centerNode = nodes.find((n) => n.id === settings.graph.centerNoteTitle);
+    if (centerNode !== undefined) return centerNode; // if found, return it
   }
 
   // ...else calculate it. settings.graph.useOutlinkFallback as alternative
-  const onlyNotes = nodes.filter((n) => (n as any).type !== 'tag');
+  const onlyNotes = nodes.filter((n) => n.type !== 'tag');
   const preferOut = Boolean(settings.graph.useOutlinkFallback);
   const metric = (n: GraphNode) => (preferOut ? n.outDegree || 0 : n.inDegree || 0);
 
@@ -172,7 +180,11 @@ function pickCenterNode(app: App, nodes: GraphNode[]): GraphNode | null {
   const raw = String(settings.graph.centerNoteTitle || '').trim();
 
   if (raw) {
-    const mc    : any = (app as any).metadataCache;
+    const mc = app.metadataCache as unknown as {
+      resolvedLinks: ResolvedLinks;
+      getFirstLinkpathDest(path: string, source: string): TFile | null;
+    };
+
     let resolved: any = null;
 
     try {

@@ -1,10 +1,13 @@
-import { GraphNode, GraphEdge, Simulation } from '../utilities/interfaces.ts';
+import { GraphNode, GraphData, GraphEdge, Simulation } from '../utilities/interfaces.ts';
 import { getSettings } from '../utilities/settingsStore.ts';
 
 
-export function createSimulation(nodes: GraphNode[], edges: GraphEdge[]) {
+export function createSimulation(graph: GraphData) {
   // If center not provided, compute bounding-box center from node positions
   let centerNode: GraphNode | null  = null;
+  if(graph.centerNode) {centerNode = graph.centerNode;}
+  const nodes                       = graph.nodes;
+  const edges                       = graph.edges;
   let running                       = false;
 
   const nodeById = new Map<string, GraphNode>();
@@ -124,10 +127,10 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[]) {
     const targetX = settings.physics.worldCenterX;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
-      if ((n as any).type === 'note' && noteK > 0) {
+      if (isNote(n) && noteK > 0) {
         const dz = targetZ - n.z;
         n.vz = (n.vz || 0) + dz * noteK;
-      } else if ((n as any).type === 'tag' && tagK > 0) {
+      } else if (isTag(n) && tagK > 0) {
         const dx = (targetX) - (n.x || 0);
         n.vx = (n.vx || 0) + dx * tagK;
       }
@@ -140,7 +143,7 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[]) {
     const cy = settings.physics.worldCenterY;
     const cz = settings.physics.worldCenterZ;
     for (const n of nodes) {
-      if ((n as any).isCenterNode) {
+      if (isCenterNode(n)) {
         n.x = cx; n.y = cy; n.z = cz;
         n.vx = 0; n.vy = 0; n.vz = 0;
       }
@@ -155,8 +158,8 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[]) {
       n.y += (n.vy || 0) * scale;
       n.z = (n.z || 0) + (n.vz || 0) * scale;
       // optional gentle hard clamp epsilon
-      if ((n as any).type === 'note' && Math.abs(n.z) < 0.0001) n.z = 0;
-      if ((n as any).type === 'tag'  && Math.abs(n.x) < 0.0001) n.x = 0;
+      if (isNote(n) && Math.abs(n.z) < 0.0001) n.z = 0;
+      if (isTag(n) && Math.abs(n.x) < 0.0001) n.x = 0;
     }
   }
 
@@ -189,4 +192,19 @@ export function createSimulation(nodes: GraphNode[], edges: GraphEdge[]) {
   }
 
   return { start, stop, tick, reset };
+
+
+  // Type guards
+  function isTag(n: GraphNode): boolean {
+    return n.type === "tag";
+  }
+
+  function isNote(n: GraphNode): boolean {
+    return n.type === "note";
+  }
+
+  function isCenterNode(n: GraphNode): n is GraphNode & { isCenterNode: true } {
+    return n === graph.centerNode;
+    //return (n as any).isCenterNode === true;
+  }
 }

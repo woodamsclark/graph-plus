@@ -54,7 +54,7 @@ async function buildGraph(app) {
   computeNodeDegrees(nodes, nodeByPath, edges);
   markBidirectionalEdges(edges);
   const centerNode = pickCenterNode(app, nodes);
-  return { nodes, edges };
+  return { nodes, edges, centerNode };
 }
 function createNoteNodes(files) {
   const nodes = [];
@@ -171,9 +171,11 @@ function pickCenterNode(app, nodes) {
   const settings = getSettings();
   if (!settings.graph.useCenterNote)
     return null;
+  let centerNode = void 0;
   if (settings.graph.centerNoteTitle) {
-    const centerNode = nodes.find((n) => n.id === settings.graph.centerNoteTitle);
-    settings.graph.centerNode = centerNode;
+    centerNode = nodes.find((n) => n.id === settings.graph.centerNoteTitle);
+    if (centerNode !== void 0)
+      return centerNode;
   }
   const onlyNotes = nodes.filter((n) => n.type !== "tag");
   const preferOut = Boolean(settings.graph.useOutlinkFallback);
@@ -236,15 +238,6 @@ function createRenderer(canvas, cameraManager) {
   const nodeById = /* @__PURE__ */ new Map();
   let hoveredNodeId = null;
   let hoverNeighbors = null;
-  function setGraph(g) {
-    graph = g;
-    nodeById.clear();
-    if (graph && graph.nodes) {
-      for (const node of graph.nodes) {
-        nodeById.set(node.id, node);
-      }
-    }
-  }
   function resize(width, height) {
     const w = Math.max(1, Math.floor(width));
     const h = Math.max(1, Math.floor(height));
@@ -337,13 +330,10 @@ function createRenderer(canvas, cameraManager) {
     context.globalAlpha = 1;
     const radius = settings.graph.minNodeRadius || 4;
     for (const node of nodes) {
-      const label = node.label || node.name || node.id;
-      if (!label)
-        continue;
       const p = cameraManager.worldToScreen(node);
       if (p.depth < 0)
         continue;
-      context.fillText(label, p.x, p.y + radius + 4);
+      context.fillText(node.label, p.x, p.y + radius + 4);
     }
     context.restore();
   }
@@ -354,11 +344,14 @@ function createRenderer(canvas, cameraManager) {
   function getNodeRadiusForHit(_node) {
     return settings.graph.minNodeRadius || 4;
   }
-  function getNodeScreenPosition(node, _cam) {
-    return cameraManager.worldToScreen(node);
-  }
-  function getScale() {
-    return 1;
+  function setGraph(data) {
+    graph = data;
+    nodeById.clear();
+    if (!data)
+      return;
+    for (const node of data.nodes) {
+      nodeById.set(node.id, node);
+    }
   }
   return {
     setGraph,
@@ -366,15 +359,18 @@ function createRenderer(canvas, cameraManager) {
     render,
     destroy,
     setHoveredNode,
-    getNodeRadiusForHit,
-    getNodeScreenPosition,
-    getScale
+    getNodeRadiusForHit
   };
 }
 
 // graph/simulation.ts
-function createSimulation(nodes, edges) {
+function createSimulation(graph) {
   let centerNode = null;
+  if (graph.centerNode) {
+    centerNode = graph.centerNode;
+  }
+  const nodes = graph.nodes;
+  const edges = graph.edges;
   let running = false;
   const nodeById = /* @__PURE__ */ new Map();
   for (const n of nodes)
@@ -497,10 +493,10 @@ function createSimulation(nodes, edges) {
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
-      if (n.type === "note" && noteK > 0) {
+      if (isNote(n) && noteK > 0) {
         const dz = targetZ - n.z;
         n.vz = (n.vz || 0) + dz * noteK;
-      } else if (n.type === "tag" && tagK > 0) {
+      } else if (isTag(n) && tagK > 0) {
         const dx = targetX - (n.x || 0);
         n.vx = (n.vx || 0) + dx * tagK;
       }
@@ -512,7 +508,7 @@ function createSimulation(nodes, edges) {
     const cy = settings.physics.worldCenterY;
     const cz = settings.physics.worldCenterZ;
     for (const n of nodes) {
-      if (n.isCenterNode) {
+      if (isCenterNode(n)) {
         n.x = cx;
         n.y = cy;
         n.z = cz;
@@ -530,9 +526,9 @@ function createSimulation(nodes, edges) {
       n.x += (n.vx || 0) * scale;
       n.y += (n.vy || 0) * scale;
       n.z = (n.z || 0) + (n.vz || 0) * scale;
-      if (n.type === "note" && Math.abs(n.z) < 1e-4)
+      if (isNote(n) && Math.abs(n.z) < 1e-4)
         n.z = 0;
-      if (n.type === "tag" && Math.abs(n.x) < 1e-4)
+      if (isTag(n) && Math.abs(n.x) < 1e-4)
         n.x = 0;
     }
   }
@@ -562,6 +558,15 @@ function createSimulation(nodes, edges) {
     }
   }
   return { start, stop, tick, reset };
+  function isTag(n) {
+    return n.type === "tag";
+  }
+  function isNote(n) {
+    return n.type === "note";
+  }
+  function isCenterNode(n) {
+    return n === graph.centerNode;
+  }
 }
 
 // utilities/debounce.ts
@@ -646,11 +651,14 @@ var InputManager = class {
       case 1 /* Hover */:
         return;
       case 2 /* Click */:
+        console.log("PointerMode.Click", distSq, thresholdSq);
+        console.log("draggedNode", this.draggedNodeId);
         if (distSq > thresholdSq) {
           if (this.draggedNodeId != null) {
             this.pointerMode = 4 /* DragNode */;
             this.callback.onDragStart(this.draggedNodeId, screenX, screenY);
           } else {
+            console.log("Promote to Pan");
             this.pointerMode = 5 /* Pan */;
             this.callback.onPanStart(screenX, screenY);
           }
@@ -660,6 +668,7 @@ var InputManager = class {
         this.callback.onDragMove(screenX, screenY);
         return;
       case 5 /* Pan */:
+        console.log("updatePan", screenX, screenY);
         this.callback.onPanMove(screenX, screenY);
         return;
       case 3 /* RightClick */:
@@ -753,8 +762,8 @@ var CameraManager = class {
     this.cameraSettings = { ...settings };
   }
   /** Reset to initial pose, clearing momentum */
-  reset(initial) {
-    this.cameraState = { ...initial };
+  resetCamera() {
+    this.cameraState = { ...getSettings().camera.state };
     this.clearMomentum();
   }
   /** Projects a world point to screen coordinates */
@@ -943,7 +952,6 @@ var GraphManager = class {
     const rect = this.containerEl.getBoundingClientRect();
     this.renderer.resize(rect.width, rect.height);
     this.containerEl.appendChild(canvas);
-    this.graph = await buildGraph(this.app);
     this.inputManager = new InputManager(canvas, {
       onOrbitStart: (dx, dy) => this.startOrbit(dx, dy),
       onOrbitMove: (dx, dy) => this.updateOrbit(dx, dy),
@@ -1094,15 +1102,7 @@ var GraphManager = class {
     this.renderer.resize(width, height);
   }
   resetCamera() {
-    if (!this.renderer)
-      return;
-    try {
-      const renderer = this.renderer;
-      if (renderer.resetCamera) {
-        renderer.resetCamera();
-      }
-    } catch (e) {
-    }
+    this.cameraManager?.resetCamera();
   }
   updateCameraAnimation(now) {
     return;
@@ -1110,11 +1110,13 @@ var GraphManager = class {
   async refreshGraph() {
     this.stopSimulation();
     this.graph = await buildGraph(this.app);
+    if (!this.graph)
+      return;
+    this.renderer?.setGraph(this.graph);
     const { nodes, edges } = this.filterGraph(this.graph);
-    this.simulation = this.buildSimulation(nodes, edges);
+    this.simulation = createSimulation(this.graph);
     this.buildAdjacencyMap();
     this.startSimulation();
-    this.renderer.setGraph(this.graph);
     this.renderer?.render(this.cameraManager.getState());
   }
   stopSimulation() {
@@ -1126,8 +1128,7 @@ var GraphManager = class {
       this.simulation = null;
     }
   }
-  buildSimulation(nodes, edges) {
-    return createSimulation(nodes, edges);
+  buildSimulation() {
   }
   startSimulation() {
     if (!this.simulation)
@@ -1193,15 +1194,15 @@ var GraphManager = class {
     let closest = null;
     let closestDist = Infinity;
     const hitPadding = 6;
-    const scale = this.renderer.getScale ? this.renderer.getScale() : 1;
+    const scale = this.cameraManager ? this.cameraManager.getState().distance : 1;
     for (const node of this.graph.nodes) {
-      const sp = this.renderer.getNodeScreenPosition(node, this.cameraManager.getState());
-      if (!sp)
+      const projected = this.cameraManager?.worldToScreen(node);
+      if (!projected)
         continue;
       const nodeRadius = this.renderer.getNodeRadiusForHit ? this.renderer.getNodeRadiusForHit(node) : 8;
-      const hitR = nodeRadius * Math.max(1e-4, scale) + hitPadding;
-      const dx = screenX - sp.x;
-      const dy = screenY - sp.y;
+      const hitR = nodeRadius + hitPadding;
+      const dx = screenX - projected.x;
+      const dy = screenY - projected.y;
       const distSq = dx * dx + dy * dy;
       if (distSq <= hitR * hitR && distSq < closestDist) {
         closestDist = distSq;
@@ -1214,16 +1215,18 @@ var GraphManager = class {
     if (!this.graph)
       return;
     try {
-      const allSaved = this.plugin.settings.nodePositions || {};
+      const allSaved = getSettings().nodePositions;
       const vaultId = this.app.vault.getName();
-      if (!allSaved[vaultId])
+      if (!allSaved[vaultId]) {
         allSaved[vaultId] = {};
+      }
       const map = allSaved[vaultId];
       for (const node of this.graph.nodes) {
         if (!Number.isFinite(node.x) || !Number.isFinite(node.y))
           continue;
-        if (node.filePath)
+        if (node.filePath) {
           map[node.filePath] = { x: node.x, y: node.y };
+        }
       }
       this.plugin.settings.nodePositions = allSaved;
       try {
@@ -2087,8 +2090,10 @@ var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
 
 // main.ts
 var GraphPlus = class extends import_obsidian3.Plugin {
+  settings;
   async onload() {
     initSettings({ ...DEFAULT_SETTINGS });
+    this.settings = getSettings();
     this.registerView(GRAPH_PLUS_TYPE, (leaf) => new GraphView(leaf, this));
     this.addCommand({
       id: "open-graph+",

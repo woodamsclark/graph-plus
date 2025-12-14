@@ -3,16 +3,18 @@ import { buildGraph } from './buildGraph.ts';
 import { createRenderer } from './renderer.ts';
 import { createSimulation } from './simulation.ts';
 import { debounce } from '../utilities/debounce.ts';
-import { Settings, Renderer, GraphData, GraphNode, GraphEdge, Simulation, CameraState} from '../utilities/interfaces.ts';
+import { GraphPlusSettings, Renderer, GraphNode, GraphData, GraphEdge, Simulation, CameraState} from '../utilities/interfaces.ts';
 import { InputManager } from './InputManager.ts';
 import { getSettings, updateSettings } from '../utilities/settingsStore.ts';
 import { CameraManager } from '../CameraManager.ts';
+import type GraphPlus from '../main.ts';
+
 
 // This class manages interactions between the graph data, simulation, and renderer.
 export class GraphManager {
   private app                         : App;
   private containerEl                 : HTMLElement;
-  private plugin?                     : Plugin;
+  private plugin                      : GraphPlus;
   private running                     : boolean                                     = false;
   private canvas                      : HTMLCanvasElement                   | null  = null;
   private renderer                    : Renderer                            | null  = null;
@@ -32,7 +34,7 @@ export class GraphManager {
   constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
     this.app          = app;
     this.containerEl  = containerEl;
-    this.plugin       = plugin;
+    this.plugin       = plugin as GraphPlus;
   }
 
   async init(): Promise<void> {
@@ -50,7 +52,6 @@ export class GraphManager {
     this.renderer.resize(rect.width, rect.height);
 
     this.containerEl.appendChild(canvas);
-    this.graph                = await buildGraph(this.app);
 
     this.inputManager         = new InputManager(canvas, {
       onOrbitStart      : (dx, dy)                    => this.startOrbit(dx, dy),
@@ -91,9 +92,9 @@ export class GraphManager {
           allSaved = {} as any;
           allSaved[vaultId] = Object.assign({}, rawSaved);
           try {
-            (this.plugin as any).settings.nodePositions = allSaved;
+            this.plugin.settings.nodePositions = allSaved;
             // persist migrated shape (best-effort)
-            try { (this.plugin as any).saveSettings && (this.plugin as any).saveSettings(); } catch (e) {}
+            try { this.plugin.saveSettings && this.plugin.saveSettings(); } catch (e) {}
           } catch (e) {}
         } else {
           // empty or unexpected shape: treat as empty
@@ -224,56 +225,11 @@ export class GraphManager {
   }
 
   public resetCamera() {
-    if (!this.renderer) return;
-    try {
-      const renderer = (this.renderer as any);
-      if (renderer.resetCamera) {
-        renderer.resetCamera();
-      }
-    } catch (e) {}  
+    this.cameraManager?.resetCamera();
   }
 
-  private updateCameraAnimation(now: number) { return; // smooths camera animations. Revist later
-  /*  if (!this.renderer) return;
-    if (this.cameraAnimStart == null) {
-      // If following without an active animation, smoothly interpolate camera target to node each frame
-      if (this.isCameraFollowing && this.cameraFollowNode) {
-        const n = this.cameraFollowNode;
-        try {
-          const cam         = (this.renderer as any).getCameraState();
-          const followAlpha = 0.12; // smoothing factor per frame (0-1)
-          const curX        = cam.targetX ?? 0;
-          const curY        = cam.targetY ?? 0;
-          const curZ        = cam.targetZ ?? 0;
-          const newX        = curX + ((n.x ?? 0) - curX) * followAlpha;
-          const newY        = curY + ((n.y ?? 0) - curY) * followAlpha;
-          const newZ        = curZ + ((n.z ?? 0) - curZ) * followAlpha;
-          (this.renderer as any).setCameraState({ targetX: newX, targetY: newY, targetZ: newZ });
-        } catch (e) {}
-      }
-      return;
-    }
-    const t = Math.min(1, (now - this.cameraAnimStart) / this.cameraAnimDuration);
-    // easeOutQuad
-    const ease  = 1 - (1 - t) * (1 - t);
-    const from  = this.cameraAnimFrom || {};
-    const to    = this.cameraAnimTo || {};
-    const lerp  = (a: number, b: number) => a + (b - a) * ease;
-    const cameraState: any = {};
-    if (typeof from.targetX   === 'number' && typeof to.targetX   === 'number')   cameraState.targetX   = lerp(from.targetX, to.targetX);
-    if (typeof from.targetY   === 'number' && typeof to.targetY   === 'number')   cameraState.targetY   = lerp(from.targetY, to.targetY);
-    if (typeof from.targetZ   === 'number' && typeof to.targetZ   === 'number')   cameraState.targetZ   = lerp(from.targetZ, to.targetZ);
-    if (typeof from.distance  === 'number' && typeof to.distance  === 'number')   cameraState.distance  = lerp(from.distance, to.distance);
-    if (typeof from.yaw       === 'number' && typeof to.yaw       === 'number')   cameraState.yaw       = lerp(from.yaw, to.yaw);
-    if (typeof from.pitch     === 'number' && typeof to.pitch === 'number') cameraState.pitch = lerp(from.pitch, to.pitch);
-    try { (this.renderer as any).setCameraState(cameraState); } catch (e) {}
-    // At end of animation, clear anim state but keep follow active so camera follows node
-    if (t >= 1) {
-      this.cameraAnimStart  = null;
-      this.cameraAnimFrom   = null;
-      this.cameraAnimTo     = null;
-      // keep isCameraFollowing = true and cameraFollowNode set
-    }*/
+  private updateCameraAnimation(now: number) { 
+    return; // smooths camera animations. Revist later
   }
 
   public async refreshGraph() {
@@ -281,13 +237,15 @@ export class GraphManager {
 
     // try to load graph from file first
     this.graph = await buildGraph (this.app);
+    if (!this.graph) return;
 
-    const { nodes, edges }  = this.filterGraph    (this.graph);
-    this.simulation         = this.buildSimulation(nodes, edges);
+     this.renderer?.setGraph(this.graph);
+
+    const { nodes, edges }  = this.filterGraph(this.graph);
+    this.simulation         = createSimulation(this.graph);
 
     this.buildAdjacencyMap(); // rebuild adjacency map after graph refresh or showTags changes
     this.startSimulation();
-    this.renderer!.setGraph(this.graph!);
     this.renderer?.render(this.cameraManager!.getState());
   }
 
@@ -298,9 +256,8 @@ export class GraphManager {
     }
   }
 
-  private buildSimulation(nodes: GraphNode[], edges: GraphEdge[]) {
-    // maybe I want to add more to this, idk
-    return createSimulation(nodes, edges);
+  private buildSimulation() {
+    //return createSimulation(this.graph);
   }
 
   private startSimulation() {
@@ -348,18 +305,23 @@ export class GraphManager {
 
   private nodeClicked(screenX: number, screenY: number) {
     if (!this.graph || !this.renderer) return null;
-    let closest: any   = null;
-    let closestDist    = Infinity;
-    const hitPadding   = 6;
-    const scale        = (this.renderer as any).getScale ? (this.renderer as any).getScale() : 1;
+    let closest: GraphNode | null    = null;
+    let closestDist     = Infinity;
+    const hitPadding    = 6;
+    const scale         = this.cameraManager ? this.cameraManager.getState().distance : 1;
 
     for (const node of this.graph.nodes) {
-      const sp         = (this.renderer as any).getNodeScreenPosition(node, this.cameraManager!.getState());
-      if (!sp) continue;
+      const projected   = this.cameraManager?.worldToScreen(node);
+      if (!projected) continue;
       const nodeRadius = this.renderer.getNodeRadiusForHit ? this.renderer.getNodeRadiusForHit(node) : 8;
-      const hitR       = nodeRadius * Math.max(0.0001, scale) + hitPadding;
-      const dx         = screenX - sp.x; const dy = screenY - sp.y; const distSq = dx*dx + dy*dy;
-      if (distSq      <= hitR*hitR && distSq < closestDist) { closestDist = distSq; closest = node; }
+      const hitR       = nodeRadius /** Math.max(0.0001, scale)*/ + hitPadding;
+      const dx         = screenX - projected.x; 
+      const dy         = screenY - projected.y; 
+      const distSq     = dx*dx + dy*dy;
+      if (distSq      <= hitR*hitR && distSq < closestDist) { 
+        closestDist   = distSq;
+        closest       = node;
+      }
     }
     return closest;
   }
@@ -368,19 +330,24 @@ export class GraphManager {
     // undefined error within here after destroy() called
     if (!this.graph) return;
     try {
-      // top-level map keyed by vault name
-      const allSaved: Record<string, Record<string, { x: number; y: number }>> = (this.plugin as any).settings.nodePositions || {};
-      const vaultId                               = this.app.vault.getName();
-      if (!allSaved[vaultId]) allSaved[vaultId]   = {};
-      const map                                   = allSaved[vaultId];
+      const allSaved        = getSettings().nodePositions;
+      const vaultId         = this.app.vault.getName();
+      if (!allSaved[vaultId]) {
+        allSaved[vaultId]   = {};
+      }
+      const map             = allSaved[vaultId];
       for (const node of this.graph.nodes) {
         if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) continue;
-        if (node.filePath) map[node.filePath]     = { x: node.x, y: node.y };
+        if (node.filePath) {
+          map[node.filePath] = { x: node.x, y: node.y };
+        }
       }
-      (this.plugin as any).settings.nodePositions = allSaved;
-      // fire-and-forget save
-      try { (this.plugin as any).saveSettings && (this.plugin as any).saveSettings(); 
-          } catch (e) { console.error('Failed to save node positions', e); }
+      this.plugin.settings.nodePositions = allSaved;
+      try {
+        this.plugin.saveSettings && this.plugin.saveSettings();
+      } catch (e) {
+        console.error('Failed to save node positions', e);
+      }
     } catch (e) {
       console.error('Greater Graph: saveNodePositions error', e);
     }

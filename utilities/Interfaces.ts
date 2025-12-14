@@ -27,7 +27,6 @@ export interface GraphSettings {
   hoverScale            : number;
   centerNoteTitle       : string;
   useCenterNote         : boolean;
-  centerNode?           : GraphNode | null;
   useOutlinkFallback    : boolean;
 }
 
@@ -63,12 +62,11 @@ export interface CameraSettings {
   state                             : CameraState;
 }
 
-export interface Settings {
+export interface GraphPlusSettings {
   graph                 : GraphSettings;
   physics               : PhysicsSettings;
   camera                : CameraSettings;
-  nodePositions?        : Record<string, Record<string, { x: number; y: number; z?: number }>>;
-
+  nodePositions         : Record<string, Record<string, { x: number; y: number; z?: number }>>;
 }
 
 export interface CameraState {
@@ -90,22 +88,18 @@ export interface CameraState {
 }
 
 export interface Renderer {
-  setGraph(graph: GraphData)                                                        : void;
   resize(width: number, height: number)                                             : void;
   render(cam: CameraState)                                                          : void;
   destroy()                                                                         : void;
   setHoveredNode(nodeId: string | null)                                             : void;
   getNodeRadiusForHit(node: any)                                                    : number;
-  //zoomAt(screenX: number, screenY: number, factor: number): void;
   screenToWorld2D(screenX: number, screenY: number)                                 : { screenX: number; screenY: number };
   screenToWorld3D(screenX: number, screenY: number, zCam: number) : { screenX: number; screenY: number; screenZ: number };
-  //setRenderOptions(opts: { mutualDoubleLines?: boolean; showTags?: boolean })       : void;
-  // projection helpers for hit-testing
   getNodeScreenPosition(node: any, cam: CameraState)                                : { screenX: number; screenY: number };
   getProjectedNode(node: any, cam: CameraState)                                     : { screenX: number; screenY: number; depth: number };
- // getScale()                                                                        : number;
   setHoveredNode                                                                    : Renderer['setHoveredNode'];
-  getNodeRadius(node: any)                                                              : number;
+  setGraph(data: GraphData)                                                         : void;
+  getNodeRadius(node: any)                                                          : number;
 }
 export type GraphNodeType = 'note' | 'tag';
 

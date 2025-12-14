@@ -1,7 +1,7 @@
 // utils/defaultSettings.ts
-import type { Settings } from './interfaces.ts';
+import type { GraphPlusSettings } from './interfaces.ts';
 
-export const DEFAULT_SETTINGS: Settings = {
+export const DEFAULT_SETTINGS: GraphPlusSettings = {
   graph: {
     minNodeRadius      : 3,
     maxNodeRadius      : 20,

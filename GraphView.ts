@@ -1,17 +1,19 @@
 import { App, ItemView, WorkspaceLeaf, Plugin, TFile, Platform } from 'obsidian';
 import { GraphManager } from './graph/GraphManager.ts';
 import { debounce } from './utilities/debounce.ts';
+import { GraphNode } from './utilities/interfaces.ts';
+import GraphPlus from './main.ts';
 
 export const GRAPH_PLUS_TYPE = 'graph-plus';
 
 export class GraphView extends ItemView {
   private graphManager        : GraphManager | null = null;
-  private plugin              : Plugin;
+  private plugin              : GraphPlus;
   private scheduleGraphRefresh: (() => void) | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: Plugin) {
     super(leaf);
-    this.plugin = plugin;
+    this.plugin = plugin as GraphPlus;
   }
 
   getViewType(): string {
@@ -68,13 +70,13 @@ export class GraphView extends ItemView {
     this.containerEl.empty();
   }
 
-  private async openNodeFile(node: any): Promise<void> {
+  private async openNodeFile(node: GraphNode): Promise<void> {
     if (!node) return;
     const app                     = this.app;
     let file: TFile | null        = null;
-    if ((node as any).file) file  = (node as any).file as TFile;
-    else if ((node as any).filePath) {
-      const af = app.vault.getAbstractFileByPath((node as any).filePath);
+    if (node.file) file  = node.file as TFile;
+    else if (node.filePath) {
+      const af = app.vault.getAbstractFileByPath(node.filePath);
       if (af instanceof TFile) file = af;
     }
     if (!file) {

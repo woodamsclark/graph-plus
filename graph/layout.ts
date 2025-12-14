@@ -1,4 +1,10 @@
 import { GraphData, GraphNode } from '../utilities/interfaces.ts';
+import { getSettings } from '../utilities/settingsStore.ts';
+
+// This is currently unused
+// but likely could be useful for initial graph layout
+// either merged into buildGraph or used as a post-process step
+// it should be reworked once reintegrated
 
 export interface Layout2DOptions {
   width               : number;
@@ -10,6 +16,11 @@ export interface Layout2DOptions {
   centerOnLargestNode?: boolean;
   jitter?             : number; // optional initial jitter (px) applied around center
   onlyNodes?          : GraphNode[]; // If provided, only layout this subset of nodes (useful when restoring saved positions)
+}
+
+export interface Layout3DOptions extends Layout2DOptions {
+  // spread for tag plane along Z axis
+  tagZSpread?: number; // default 400
 }
 
 export function layoutGraph2D(graph: GraphData, options: Layout2DOptions): void {
@@ -28,12 +39,9 @@ export function layoutGraph2D(graph: GraphData, options: Layout2DOptions): void 
   // nodes initially load around the central node rather than stacked.
   const minRadius = Math.max(32, jitter * 4);
   const maxRadius = Math.max(minRadius + 40, Math.min(Math.max(width, height) / 2 - (options.margin || 32), 800));
+  
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
-    if ((node as any).isCenterNode) {
-      node.x = centerX; node.y = centerY; node.z = 0;
-      continue;
-    }
     const angle = Math.random() * Math.PI * 2;
     const r = minRadius + Math.random() * (maxRadius - minRadius);
     const rx = Math.cos(angle) * r;
@@ -42,29 +50,30 @@ export function layoutGraph2D(graph: GraphData, options: Layout2DOptions): void 
     node.y = centerY + ry;
     node.z = 0; // this should be updated to centerZ +rz once we have centerZ
   }
-
-  // If requested, place the largest node at the provided center only when laying out all nodes
-  if (options.centerOnLargestNode && !options.onlyNodes) {
-    let centerNode: typeof allNodes[0] | null = null;
-    let maxDeg = -Infinity;
-    for (const n of allNodes) {
-      const d = (n.totalDegree || 0);
-      if (d > maxDeg) {
-        maxDeg = d;
-        centerNode = n;
-      }
-    }
-    if (centerNode) {
-      centerNode.x = centerX;
-      centerNode.y = centerY;
-    }
+  
+  // if centerNode is defined, use it. else use largest node
+  if (getSettings().graph.useCenterNote) {
+    let centerNode = getSettings().graph.centerNode;
+    if (!centerNode) centerNode = largestNodeOf(allNodes);
+    centerNode!.x = 0;
+    centerNode!.y = 0;
+    centerNode!.z = 0;
   }
 }
 
-export interface Layout3DOptions extends Layout2DOptions {
-  // spread for tag plane along Z axis
-  tagZSpread?: number; // default 400
+function largestNodeOf(allNodes: GraphNode[]): GraphNode | null {
+  let largestNode: GraphNode | null = null;
+  let maxDeg = -Infinity;
+  for (const node of allNodes) {
+    const degree = (node.totalDegree || 0);
+    if (degree > maxDeg) {
+      maxDeg = degree;
+      largestNode = node;
+    }
+  }
+  return largestNode;
 }
+
 
 // Phase 2 helper: layout notes in XY plane (z=0) and tags in ZY plane (x=0)
 export function layoutGraph3D(graph: GraphData, options: Layout3DOptions): void {
