@@ -213,12 +213,14 @@ function setGraph(data: GraphData | null) {
   // Return object matching the Renderer interface
   // ─────────────────────────────────────────────
 
-  return {
-    setGraph,
-    resize,
-    render,
-    destroy,
-    setHoveredNode,
-    getNodeRadiusForHit,
-  } as unknown as Renderer;
+ const renderer: Renderer = {
+  resize,
+  render,
+  destroy,
+  setHoveredNode,
+  getNodeRadiusForHit,
+  setGraph,
+};
+
+return renderer;
 }

@@ -88,18 +88,13 @@ export interface CameraState {
 }
 
 export interface Renderer {
-  resize(width: number, height: number)                                             : void;
-  render(cam: CameraState)                                                          : void;
-  destroy()                                                                         : void;
-  setHoveredNode(nodeId: string | null)                                             : void;
-  getNodeRadiusForHit(node: any)                                                    : number;
-  screenToWorld2D(screenX: number, screenY: number)                                 : { screenX: number; screenY: number };
-  screenToWorld3D(screenX: number, screenY: number, zCam: number) : { screenX: number; screenY: number; screenZ: number };
-  getNodeScreenPosition(node: any, cam: CameraState)                                : { screenX: number; screenY: number };
-  getProjectedNode(node: any, cam: CameraState)                                     : { screenX: number; screenY: number; depth: number };
-  setHoveredNode                                                                    : Renderer['setHoveredNode'];
-  setGraph(data: GraphData)                                                         : void;
-  getNodeRadius(node: any)                                                          : number;
+  resize(width: number, height: number)   : void;
+  render(cam: CameraState)                : void;
+  destroy()                               : void;
+  setHoveredNode(nodeId: string | null)   : void;
+  getNodeRadiusForHit(node: any)          : number;
+  setHoveredNode                          : Renderer['setHoveredNode'];
+  setGraph(data: GraphData)               : void;
 }
 export type GraphNodeType = 'note' | 'tag';
 
