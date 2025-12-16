@@ -3,9 +3,9 @@ import { buildGraph } from './buildGraph.ts';
 import { createRenderer } from './renderer.ts';
 import { createSimulation } from './simulation.ts';
 import { debounce } from '../utilities/debounce.ts';
-import { GraphPlusSettings, Renderer, GraphNode, GraphData, GraphEdge, Simulation, CameraState} from '../utilities/interfaces.ts';
+import { Renderer, GraphNode, GraphData, Simulation, WorldTransform, LayoutMode } from '../utilities/interfaces.ts';
 import { InputManager } from './InputManager.ts';
-import { getSettings, updateSettings } from '../utilities/settingsStore.ts';
+import { getSettings } from '../utilities/settingsStore.ts';
 import { CameraManager } from '../CameraManager.ts';
 import type GraphPlus from '../main.ts';
 
@@ -30,6 +30,13 @@ export class GraphManager {
   private openNodeFile                : ((node: any) => void)               | null  = null;
   private settingsUnregister          : (() => void)                        | null  = null;
   private saveNodePositionsDebounced  : (() => void)                        | null  = null;
+  private layoutMode: LayoutMode = "cartesian";
+
+  private worldTransform: WorldTransform = {
+  rotationX: 0,
+  rotationY: 0,
+  scale: 1,
+};
 
   constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
     this.app          = app;
@@ -46,6 +53,8 @@ export class GraphManager {
     canvas.tabIndex           = 0;
 
     this.cameraManager        = new CameraManager(settings.camera.state);
+    this.cameraManager.setWorldTransform(null);
+
     this.renderer             = createRenderer(canvas, this.cameraManager);
     // (This is critical because CameraManager needs the viewport center to project correctly)
     const rect                = this.containerEl.getBoundingClientRect();
@@ -351,4 +360,26 @@ export class GraphManager {
       console.error('Greater Graph: saveNodePositions error', e);
     }
   }
+
+  public setLayoutMode(mode: LayoutMode): void {
+  if (this.layoutMode === mode) return;
+  this.layoutMode = mode;
+
+  // simulation toggle
+  this.simulation?.setLayoutMode?.(mode);
+
+  // rendering toggle (turntable world transform)
+  if (mode === "spherical") {
+    this.cameraManager?.setWorldTransform(this.worldTransform);
+
+    // optional: reset camera pose so you’re “looking at” the shell consistently
+    // this.cameraManager?.resetCamera();
+    // this.turntable?.reset();
+
+  } else {
+    this.cameraManager?.setWorldTransform(null);
+  }
+}
+
+
 }

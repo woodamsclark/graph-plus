@@ -1,4 +1,4 @@
-import { GraphData, GraphNode } from '../utilities/interfaces.ts';
+import { GraphData, GraphNode, LayoutMode} from '../utilities/interfaces.ts';
 import { getSettings } from '../utilities/settingsStore.ts';
 
 // This is currently unused
@@ -150,4 +150,22 @@ export function layoutGraph3D(graph: GraphData, options: Layout3DOptions): void 
       }
     }
   }
+}
+
+
+export interface WorldTransform {
+  rotationX: number; // radians
+  rotationY: number; // radians
+  scale: number;     // unitless zoom scalar
+}
+
+// Extend Simulation with mode control (non-breaking if you make it optional)
+export interface Simulation {
+  start()                           : void;
+  stop()                            : void;
+  tick(dt: number)                  : void;
+  reset()                           : void;
+  setPinnedNodes?(ids: Set<string>) : void;
+
+  setLayoutMode?(mode: LayoutMode)  : void;
 }

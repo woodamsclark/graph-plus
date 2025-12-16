@@ -1,4 +1,4 @@
-import { GraphNode, GraphData, GraphEdge, Simulation, PhysicsSettings } from '../utilities/interfaces.ts';
+import { GraphNode, GraphData, PhysicsSettings, LayoutMode } from '../utilities/interfaces.ts';
 import { getSettings } from '../utilities/settingsStore.ts';
 
 
@@ -9,6 +9,7 @@ export function createSimulation(graph: GraphData) {
   const nodes                       = graph.nodes;
   const edges                       = graph.edges;
   let running                       = false;
+  let layoutMode: LayoutMode = "spherical"; // cahange to DEFAULT_SETTINGS
 
   const nodeById = new Map<string, GraphNode>();
   for (const n of nodes) nodeById.set(n.id, n);
@@ -156,26 +157,9 @@ export function createSimulation(graph: GraphData) {
       n.y += (n.vy || 0) * scale;
       n.z = (n.z || 0) + (n.vz || 0) * scale;
       // optional gentle hard clamp epsilon
-      if (isNote(n) && Math.abs(n.z) < 0.0001) n.z = 0;
+      //if (isNote(n) && Math.abs(n.z) < 0.0001) n.z = 0;
       if (isTag(n) && Math.abs(n.x) < 0.0001) n.x = 0;
     }
-  }
-
-  function tick(dt: number) {
-    if (!running) return;
-    if (!nodes.length) return;
-
-    const settings = getSettings(); 
-    const physicsSettings = settings.physics;
-
-    applyRepulsion(physicsSettings);
-    applySprings(physicsSettings);
-    applyCentering();
-    applyPlaneConstraints();
-    //applyMouseAttraction();
-    applyCenterNodeLock();
-    applyDamping();
-    integrate(dt);
   }
 
   function start() {
@@ -209,4 +193,122 @@ export function createSimulation(graph: GraphData) {
     return n === graph.centerNode;
     //return (n as any).isCenterNode === true;
   }
+
+/*function applySphericalShell(dt: number) {
+    const settings = getSettings();
+
+    // You can expose these later as settings; hardcode for now.
+    const rTarget = 400;   // shell radius in your world units
+    const k       = 0.02;  // stiffness in "your velocity units"
+
+    const cx = settings.physics.worldCenterX;
+    const cy = settings.physics.worldCenterY;
+    const cz = settings.physics.worldCenterZ;
+
+    // Match your integrator convention (forces act as per-frame velocity nudges)
+    const dtScale = dt * 60;
+    const kScaled = k * dtScale;
+
+    for (const n of nodes) {
+      if (pinnedNodes.has(n.id)) continue;
+
+      const dx = (n.x - cx);
+      const dy = (n.y - cy);
+      const dz = (n.z - cz);
+
+      const lenSq = dx*dx + dy*dy + dz*dz;
+      if (lenSq <= 1e-12) continue;
+
+      const len = Math.sqrt(lenSq);
+      const displacement = len - rTarget;
+
+      // dir = (dx,dy,dz)/len
+      // dv += (-k * displacement) * dir
+      const scalar = (-kScaled * displacement) / len;
+
+      n.vx = (n.vx || 0) + dx * scalar;
+      n.vy = (n.vy || 0) + dy * scalar;
+      n.vz = (n.vz || 0) + dz * scalar;
+    }
+  }*/
+
+  function applySphericalBand(dt: number) {
+    const settings = getSettings();
+    const cx = settings.physics.worldCenterX;
+    const cy = settings.physics.worldCenterY;
+    const cz = settings.physics.worldCenterZ;
+
+    // Tune these (later: put into settings)
+    const rMin = 500;
+    const rMax = 650;
+    const k    = 10;
+
+    // match your integrator feel
+    const kk = k * (dt * 60);
+
+    for (const n of nodes) {
+      if (pinnedNodes.has(n.id)) continue;
+
+      const dx = n.x - cx;
+      const dy = n.y - cy;
+      const dz = (n.z || 0) - cz;
+
+      const r2 = dx*dx + dy*dy + dz*dz;
+      if (r2 < 1e-12) {
+        // deterministic “kick” so we can normalize next frame
+        n.vx += kk;
+        continue;
+      }
+
+      const r = Math.sqrt(r2);
+
+      // inside band => no constraint force
+      if (r >= rMin && r <= rMax) continue;
+
+      // normalize direction
+      const invR = 1.0 / r;
+      const nx = dx * invR;
+      const ny = dy * invR;
+      const nz = dz * invR;
+
+      // displacement to nearest boundary
+      const target = (r < rMin) ? rMin : rMax;
+      const disp = r - target; // positive if outside max, negative if inside min
+      const f = -kk * disp;    // pull toward boundary
+
+      n.vx += nx * f;
+      n.vy += ny * f;
+      n.vz = (n.vz || 0) + nz * f;
+    }
+  }
+
+
+  function tick(dt: number) {
+    if (!running) return;
+    if (!nodes.length) return;
+
+    const settings = getSettings();
+    const physicsSettings = settings.physics;
+
+    applyRepulsion(physicsSettings);
+    applySprings(physicsSettings);
+
+    if (layoutMode === "spherical") {
+        applySphericalBand(dt);
+    } else { // cartesian
+        applyCentering();
+        applyPlaneConstraints();
+        applyCenterNodeLock();
+    }
+
+    applyDamping();
+    integrate(dt);
+  }
+
+  function setLayoutMode(mode: LayoutMode) {
+    layoutMode = mode;
+  }
+
+  return { start, stop, tick, reset, setLayoutMode };
+
 }

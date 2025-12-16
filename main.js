@@ -69,7 +69,7 @@ function createNoteNodes(files) {
       label: file.basename,
       x: x0,
       y: y0,
-      z: 0,
+      z: jitter,
       vx: 0,
       vy: 0,
       vz: 0,
@@ -262,7 +262,6 @@ function createRenderer(canvas, cameraManager) {
     }
     drawEdges(nodeMap);
     drawNodes(nodeMap);
-    drawLabels(nodeMap);
   }
   function destroy() {
     graph = null;
@@ -360,14 +359,15 @@ function createRenderer(canvas, cameraManager) {
       nodeById.set(node.id, node);
     }
   }
-  return {
-    setGraph,
+  const renderer = {
     resize,
     render,
     destroy,
     setHoveredNode,
-    getNodeRadiusForHit
+    getNodeRadiusForHit,
+    setGraph
   };
+  return renderer;
 }
 
 // graph/simulation.ts
@@ -379,6 +379,7 @@ function createSimulation(graph) {
   const nodes = graph.nodes;
   const edges = graph.edges;
   let running = false;
+  let layoutMode = "spherical";
   const nodeById = /* @__PURE__ */ new Map();
   for (const n of nodes)
     nodeById.set(n.id, n);
@@ -531,26 +532,9 @@ function createSimulation(graph) {
       n.x += (n.vx || 0) * scale;
       n.y += (n.vy || 0) * scale;
       n.z = (n.z || 0) + (n.vz || 0) * scale;
-      if (isNote(n) && Math.abs(n.z) < 1e-4)
-        n.z = 0;
       if (isTag(n) && Math.abs(n.x) < 1e-4)
         n.x = 0;
     }
-  }
-  function tick(dt) {
-    if (!running)
-      return;
-    if (!nodes.length)
-      return;
-    const settings = getSettings();
-    const physicsSettings = settings.physics;
-    applyRepulsion(physicsSettings);
-    applySprings(physicsSettings);
-    applyCentering();
-    applyPlaneConstraints();
-    applyCenterNodeLock();
-    applyDamping();
-    integrate(dt);
   }
   function start() {
     running = true;
@@ -574,6 +558,64 @@ function createSimulation(graph) {
   function isCenterNode(n) {
     return n === graph.centerNode;
   }
+  function applySphericalBand(dt) {
+    const settings = getSettings();
+    const cx = settings.physics.worldCenterX;
+    const cy = settings.physics.worldCenterY;
+    const cz = settings.physics.worldCenterZ;
+    const rMin = 500;
+    const rMax = 650;
+    const k = 10;
+    const kk = k * (dt * 60);
+    for (const n of nodes) {
+      if (pinnedNodes.has(n.id))
+        continue;
+      const dx = n.x - cx;
+      const dy = n.y - cy;
+      const dz = (n.z || 0) - cz;
+      const r2 = dx * dx + dy * dy + dz * dz;
+      if (r2 < 1e-12) {
+        n.vx += kk;
+        continue;
+      }
+      const r = Math.sqrt(r2);
+      if (r >= rMin && r <= rMax)
+        continue;
+      const invR = 1 / r;
+      const nx = dx * invR;
+      const ny = dy * invR;
+      const nz = dz * invR;
+      const target = r < rMin ? rMin : rMax;
+      const disp = r - target;
+      const f = -kk * disp;
+      n.vx += nx * f;
+      n.vy += ny * f;
+      n.vz = (n.vz || 0) + nz * f;
+    }
+  }
+  function tick(dt) {
+    if (!running)
+      return;
+    if (!nodes.length)
+      return;
+    const settings = getSettings();
+    const physicsSettings = settings.physics;
+    applyRepulsion(physicsSettings);
+    applySprings(physicsSettings);
+    if (layoutMode === "spherical") {
+      applySphericalBand(dt);
+    } else {
+      applyCentering();
+      applyPlaneConstraints();
+      applyCenterNodeLock();
+    }
+    applyDamping();
+    integrate(dt);
+  }
+  function setLayoutMode(mode) {
+    layoutMode = mode;
+  }
+  return { start, stop, tick, reset, setLayoutMode };
 }
 
 // utilities/debounce.ts
@@ -746,6 +788,7 @@ var CameraManager = class {
   worldAnchor = null;
   screenAnchor = null;
   viewport = { width: 0, height: 0, offsetX: 0, offsetY: 0 };
+  worldTransform = null;
   constructor(initialState) {
     this.cameraState = { ...initialState };
     this.cameraSettings = getSettings().camera;
@@ -769,13 +812,31 @@ var CameraManager = class {
     this.cameraState = { ...getSettings().camera.state };
     this.clearMomentum();
   }
-  /** Projects a world point to screen coordinates */
   worldToScreen(node) {
     const { yaw, pitch, distance, targetX, targetY, targetZ } = this.cameraState;
     const { offsetX, offsetY } = this.viewport;
-    const wx = (node.x || 0) - targetX;
-    const wy = (node.y || 0) - targetY;
-    const wz = (node.z || 0) - targetZ;
+    let wx0 = node.x || 0;
+    let wy0 = node.y || 0;
+    let wz0 = node.z || 0;
+    const wt = this.worldTransform;
+    if (wt) {
+      wx0 *= wt.scale;
+      wy0 *= wt.scale;
+      wz0 *= wt.scale;
+      const cy = Math.cos(wt.rotationY), sy = Math.sin(wt.rotationY);
+      const x1 = wx0 * cy - wz0 * sy;
+      const z1 = wx0 * sy + wz0 * cy;
+      wx0 = x1;
+      wz0 = z1;
+      const cx = Math.cos(wt.rotationX), sx = Math.sin(wt.rotationX);
+      const y2 = wy0 * cx - wz0 * sx;
+      const z2 = wy0 * sx + wz0 * cx;
+      wy0 = y2;
+      wz0 = z2;
+    }
+    const wx = wx0 - targetX;
+    const wy = wy0 - targetY;
+    const wz = wz0 - targetZ;
     const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
     const xz = wx * cosYaw - wz * sinYaw;
     const zz = wx * sinYaw + wz * cosYaw;
@@ -793,13 +854,49 @@ var CameraManager = class {
       depth: dz
     };
   }
+  setWorldTransform(t) {
+    this.worldTransform = t;
+  }
+  /*// Projects a world point to screen coordinates
+      worldToScreen(node: { x: number; y: number; z: number }): { x: number; y: number; depth: number } {
+          const { yaw, pitch, distance, targetX, targetY, targetZ } = this.cameraState;
+          const { offsetX, offsetY } = this.viewport;
+  
+          // 1. Translate world to camera target
+          const wx = (node.x || 0) - targetX;
+          const wy = (node.y || 0) - targetY;
+          const wz = (node.z || 0) - targetZ;
+  
+          // 2. Rotate (Yaw then Pitch)
+          const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
+          const xz = wx * cosYaw - wz * sinYaw;
+          const zz = wx * sinYaw + wz * cosYaw;
+  
+          const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+          const yz = wy * cosP - zz * sinP;
+          const zz2 = wy * sinP + zz * cosP;
+  
+          // 3. Project
+          const camZ = distance;
+          const dz   = camZ - zz2; // distance from camera lens to point
+          const safeDz = Math.max(0.0001, dz);
+          const focal = 800; 
+          const perspective = focal / safeDz;
+  
+          return {
+              x: xz * perspective + offsetX,
+              y: yz * perspective + offsetY,
+              depth: dz
+          };
+      }
+  */
   setViewport(width, height) {
     this.viewport.width = width;
     this.viewport.height = height;
     this.viewport.offsetX = width / 2;
     this.viewport.offsetY = height / 2;
   }
-  /** Unprojects screen coords to world coords on a plane at camera-distance (for panning) */
+  // Unprojects screen coords to world coords on a plane at camera-distance (for panning)
   screenToWorld(screenX, screenY, depthFromCamera) {
     const { yaw, pitch, targetX, targetY, targetZ } = this.cameraState;
     const { offsetX, offsetY } = this.viewport;
@@ -938,6 +1035,12 @@ var GraphManager = class {
   openNodeFile = null;
   settingsUnregister = null;
   saveNodePositionsDebounced = null;
+  layoutMode = "cartesian";
+  worldTransform = {
+    rotationX: 0,
+    rotationY: 0,
+    scale: 1
+  };
   constructor(app, containerEl, plugin) {
     this.app = app;
     this.containerEl = containerEl;
@@ -951,6 +1054,7 @@ var GraphManager = class {
     canvas.style.height = "100%";
     canvas.tabIndex = 0;
     this.cameraManager = new CameraManager(settings.camera.state);
+    this.cameraManager.setWorldTransform(null);
     this.renderer = createRenderer(canvas, this.cameraManager);
     const rect = this.containerEl.getBoundingClientRect();
     this.renderer.resize(rect.width, rect.height);
@@ -1240,6 +1344,17 @@ var GraphManager = class {
       console.error("Greater Graph: saveNodePositions error", e);
     }
   }
+  setLayoutMode(mode) {
+    if (this.layoutMode === mode)
+      return;
+    this.layoutMode = mode;
+    this.simulation?.setLayoutMode?.(mode);
+    if (mode === "spherical") {
+      this.cameraManager?.setWorldTransform(this.worldTransform);
+    } else {
+      this.cameraManager?.setWorldTransform(null);
+    }
+  }
 };
 
 // GraphView.ts
@@ -1344,6 +1459,7 @@ var DEFAULT_SETTINGS = {
     countDuplicateLinks: true,
     drawDoubleLines: true,
     showTags: true,
+    showLabels: true,
     hoverScale: 1,
     useCenterNote: false,
     centerNoteTitle: "",
@@ -1375,8 +1491,8 @@ var DEFAULT_SETTINGS = {
     rotateSensitivityY: 5e-3,
     cameraAnimDuration: 300,
     state: {
-      yaw: Math.PI / 6,
-      pitch: Math.PI / 8,
+      yaw: 0,
+      pitch: 0,
       distance: 1200,
       targetX: 0,
       targetY: 0,
@@ -1462,95 +1578,57 @@ var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
       s.controlEl.appendChild(wrap);
       return { range, num, reset: rbtn };
     };
-    addSliderSetting(containerEl, {
+    const addNumericSlider = (parent, opts) => {
+      const current = opts.get(settings);
+      const def = opts.getDefault(DEFAULT_SETTINGS);
+      addSliderSetting(parent, {
+        name: opts.name,
+        desc: opts.desc,
+        value: current,
+        min: opts.min,
+        max: opts.max,
+        step: opts.step,
+        resetValue: def,
+        onChange: async (raw) => {
+          if (Number.isNaN(raw)) {
+            const dv = opts.clamp ? opts.clamp(def) : def;
+            this.applySettings((s) => {
+              opts.set(s, dv);
+            });
+            return;
+          }
+          const v = opts.clamp ? opts.clamp(raw) : raw;
+          this.applySettings((s) => {
+            opts.set(s, v);
+          });
+        }
+      });
+    };
+    addNumericSlider(containerEl, {
       name: "Minimum node radius",
       desc: "Minimum radius for the smallest node (in pixels).",
-      value: settings.graph.minNodeRadius,
       min: 1,
       max: 20,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.graph.minNodeRadius,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v > 0) {
-          this.applySettings((s) => {
-            s.graph.minNodeRadius = Math.round(v);
-          });
-          if (typeof settings.graph.maxNodeRadius === "number" && settings.graph.maxNodeRadius < settings.graph.minNodeRadius + 2) {
-            this.applySettings((s) => {
-              s.graph.maxNodeRadius = settings.graph.minNodeRadius + 2;
-            });
-          }
-        } else if (Number.isNaN(v)) {
-          this.applySettings((s) => {
-            s.graph.minNodeRadius = settings.graph.minNodeRadius;
-          });
-        }
-      }
+      get: (s) => s.graph.minNodeRadius,
+      getDefault: (s) => s.graph.minNodeRadius,
+      set: (s, v) => {
+        s.graph.minNodeRadius = Math.round(v);
+      },
+      clamp: (v) => Math.max(1, Math.min(20, Math.round(v)))
     });
-    addSliderSetting(containerEl, {
+    addNumericSlider(containerEl, {
       name: "Maximum node radius",
       desc: "Maximum radius for the most connected node (in pixels).",
-      value: settings.graph.maxNodeRadius,
       min: 8,
       max: 80,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.graph.maxNodeRadius,
-      onChange: async (v) => {
-        if (!Number.isNaN(v)) {
-          this.applySettings((s) => {
-            s.graph.maxNodeRadius = Math.round(v);
-          });
-          if (typeof settings.graph.minNodeRadius === "number" && settings.graph.maxNodeRadius < settings.graph.minNodeRadius + 2) {
-            this.applySettings((s) => {
-              s.graph.maxNodeRadius = settings.graph.minNodeRadius + 2;
-            });
-          }
-        } else if (Number.isNaN(v)) {
-          this.applySettings((s) => {
-            s.graph.maxNodeRadius = settings.graph.maxNodeRadius;
-          });
-        }
-      }
-    });
-    addSliderSetting(containerEl, {
-      name: "Minimum center glow opacity",
-      desc: "Opacity (0\u20130.8) at the glow center for the least connected node.",
-      value: settings.graph.minCenterAlpha,
-      min: 0,
-      max: 0.8,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.graph.minCenterAlpha,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 0.8) {
-          this.applySettings((s) => {
-            s.graph.minCenterAlpha = v;
-          });
-        } else if (Number.isNaN(v)) {
-          this.applySettings((s) => {
-            s.graph.minCenterAlpha = settings.graph.minCenterAlpha;
-          });
-        }
-      }
-    });
-    addSliderSetting(containerEl, {
-      name: "Maximum center glow opacity",
-      desc: "Opacity (0\u20131) at the glow center for the most connected node.",
-      value: settings.graph.maxCenterAlpha,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.graph.maxCenterAlpha,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          this.applySettings((s) => {
-            s.graph.maxCenterAlpha = v;
-          });
-        } else if (Number.isNaN(v)) {
-          this.applySettings((s) => {
-            s.graph.maxCenterAlpha = settings.graph.maxCenterAlpha;
-          });
-        }
-      }
+      get: (s) => s.graph.maxNodeRadius,
+      getDefault: (s) => s.graph.maxNodeRadius,
+      set: (s, v) => {
+        s.graph.maxNodeRadius = Math.round(v);
+      },
+      clamp: (v) => Math.max(8, Math.min(80, Math.round(v)))
     });
     addSliderSetting(containerEl, {
       name: "Highlight depth",

@@ -1,4 +1,4 @@
-import { App, TFile, CachedMetadata } from 'obsidian';
+import { App, TFile } from 'obsidian';
 
 export interface GraphSettings {
   // user defined//updated settings
@@ -168,4 +168,25 @@ export enum PointerMode {
   DragNode,
   Pan,
   Orbit,
+}
+
+// utilities/interfaces.ts
+
+export type LayoutMode = "cartesian" | "spherical";
+
+export interface WorldTransform {
+  rotationX: number; // radians
+  rotationY: number; // radians
+  scale: number;     // unitless zoom scalar
+}
+
+// Extend Simulation with mode control (non-breaking if you make it optional)
+export interface Simulation {
+  start()                           : void;
+  stop()                            : void;
+  tick(dt: number)                  : void;
+  reset()                           : void;
+  setPinnedNodes?(ids: Set<string>) : void;
+
+  setLayoutMode?(mode: LayoutMode)  : void;
 }

@@ -24,6 +24,7 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
     countDuplicateLinks: true,
     drawDoubleLines    : true,
     showTags           : true,
+    showLabels         : true,
     hoverScale         : 1.0,
     useCenterNote      : false,
     centerNoteTitle    : '',
@@ -56,8 +57,8 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
     rotateSensitivityY: 0.005,
     cameraAnimDuration: 300,
     state: {
-      yaw     : Math.PI / 6,
-      pitch   : Math.PI / 8,
+      yaw     : 0,
+      pitch   : 0,
       distance: 1200,
       targetX : 0,
       targetY : 0,

@@ -10,7 +10,7 @@ export class InputManager {
     private lastClientY         : number            = 0;        // ((Client Space))
     private downClickX          : number            = 0;        // [[Canvas Space]
     private downClickY          : number            = 0;        // [[Canvas Space]
-    private dragThreshold       : number            = 5;        // Drag starts after 5 pixels of movement
+    private dragThreshold      : number            = 5;        // Drag starts after 5 pixels of movement
     private pointerMode         : PointerMode       = PointerMode.Idle;
 
     constructor(canvas: HTMLCanvasElement, callbacks: InputManagerCallbacks) {

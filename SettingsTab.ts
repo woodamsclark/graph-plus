@@ -91,83 +91,95 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       return { range, num, reset: rbtn };
     };
 
+    const addNumericSlider = (parent: HTMLElement, opts: {
+  name      : string;
+  desc?     : string;
+  min       : number;
+  max       : number;
+  step?     : number;
+  get       : (s: GraphPlusSettings)            => number;
+  getDefault: (s: GraphPlusSettings)            => number;
+  set       : (s: GraphPlusSettings, v: number) => void;
+  clamp?    : (v: number)                       => number;
+}) => {
+  const current = opts.get(settings);
+  const def     = opts.getDefault(DEFAULT_SETTINGS);
+
+  addSliderSetting(parent, {
+    name : opts.name,
+    desc : opts.desc,
+    value: current,
+    min  : opts.min,
+    max  : opts.max,
+    step : opts.step,
+    resetValue: def,
+    onChange: async (raw) => {
+      if (Number.isNaN(raw)) {
+        // reset to default
+        const dv = opts.clamp ? opts.clamp(def) : def;
+        this.applySettings((s) => { opts.set(s, dv); });
+        return;
+      }
+      const v = opts.clamp ? opts.clamp(raw) : raw;
+      this.applySettings((s) => { opts.set(s, v); });
+    },
+  });
+};
 
 
     // Minimum node radius (UI in pixels)
-    addSliderSetting(containerEl, {
-      name: 'Minimum node radius',
-      desc: 'Minimum radius for the smallest node (in pixels).',
-      value: settings.graph.minNodeRadius,
-      min: 1,
-      max: 20,
-      step: 1,
-      resetValue: DEFAULT_SETTINGS.graph.minNodeRadius,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v > 0) {
-            this.applySettings((s) => { s.graph.minNodeRadius = Math.round(v); });
-          // ensure max >= min + 2
-          if (typeof settings.graph.maxNodeRadius === 'number' && settings.graph.maxNodeRadius < settings.graph.minNodeRadius + 2) {
-            this.applySettings((s) => { s.graph.maxNodeRadius = settings.graph.minNodeRadius + 2; });
-          }
-        } else if (Number.isNaN(v)) {
-            this.applySettings((s) => { s.graph.minNodeRadius = settings.graph.minNodeRadius; });
-        }
-      },
+    addNumericSlider(containerEl, {
+      name      : 'Minimum node radius',
+      desc      : 'Minimum radius for the smallest node (in pixels).',
+      min       : 1,
+      max       : 20,
+      step      : 1,
+      get       : (s) => s.graph.minNodeRadius,
+      getDefault: (s) => s.graph.minNodeRadius,
+      set       : (s, v) => { s.graph.minNodeRadius = Math.round(v); },
+      clamp     : (v) => Math.max(1, Math.min(20, Math.round(v))),
     });
 
-    addSliderSetting(containerEl, {
-      name: 'Maximum node radius',
-      desc: 'Maximum radius for the most connected node (in pixels).',
-      value: settings.graph.maxNodeRadius,
-      min: 8,
-      max: 80,
-      step: 1,
-      resetValue: DEFAULT_SETTINGS.graph.maxNodeRadius,
-      onChange: async (v) => {
-        if (!Number.isNaN(v)) {
-          this.applySettings((s) => { s.graph.maxNodeRadius = Math.round(v); });
-          if (typeof settings.graph.minNodeRadius === 'number' && settings.graph.maxNodeRadius < settings.graph.minNodeRadius + 2){
-             this.applySettings((s) => { s.graph.maxNodeRadius = settings.graph.minNodeRadius + 2; });
-          }
-        } else if (Number.isNaN(v)) {
-          this.applySettings((s) => { s.graph.maxNodeRadius = settings.graph.maxNodeRadius; });
-        }
-      },
+
+    addNumericSlider(containerEl, {
+      name      : 'Maximum node radius',
+      desc      : 'Maximum radius for the most connected node (in pixels).',
+      min       : 8,
+      max       : 80,
+      step      : 1,
+      get       : (s) => s.graph.maxNodeRadius,
+      getDefault: (s) => s.graph.maxNodeRadius,
+      set       : (s, v) => { s.graph.maxNodeRadius = Math.round(v); },
+      clamp     : (v) => Math.max(8, Math.min(80, Math.round(v))),
     });
 
-    addSliderSetting(containerEl, {
-      name: 'Minimum center glow opacity',
-      desc: 'Opacity (0–0.8) at the glow center for the least connected node.',
-      value: settings.graph.minCenterAlpha,
-      min: 0,
-      max: 0.8,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.graph.minCenterAlpha,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 0.8) {
-            this.applySettings((s) => { s.graph.minCenterAlpha = v; });
-        } else if (Number.isNaN(v)) {
-          this.applySettings((s) => { s.graph.minCenterAlpha = settings.graph.minCenterAlpha; });
-        }
-      },
+    /*
+    addNumericSlider(containerEl, {
+      name      : 'Minimum center glow opacity',
+      desc      : 'Opacity (0–0.8) at the glow center for the least connected node.',
+      min       : 0,
+      max       : 0.8,
+      step      : 0.01,
+      get       : (s) => s.graph.minCenterAlpha,
+      getDefault: (s) => s.graph.minCenterAlpha,
+      set       : (s, v) => { s.graph.minCenterAlpha = v; },
+      clamp     : (v) => Math.max(0, Math.min(0.8, v)),
     });
 
-    addSliderSetting(containerEl, {
+
+    addNumericSlider(containerEl, {
       name: 'Maximum center glow opacity',
       desc: 'Opacity (0–1) at the glow center for the most connected node.',
       value: settings.graph.maxCenterAlpha,
       min: 0,
       max: 1,
       step: 0.01,
-      resetValue: DEFAULT_SETTINGS.graph.maxCenterAlpha,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-            this.applySettings((s) => { s.graph.maxCenterAlpha = v; });
-        } else if (Number.isNaN(v)) {
-            this.applySettings((s) => { s.graph.maxCenterAlpha = settings.graph.maxCenterAlpha; });
-        }
-      },
+      get       : (s) => s.graph.maxCenterAlpha,
+      getDefault: (s) => s.graph.maxCenterAlpha,
+      set       : (s, v) => { s.graph.maxCenterAlpha = v; },
+      clamp     : (v) => Math.max(0, Math.min(1, v)),
     });
+    */
 
     addSliderSetting(containerEl, {
       name: 'Highlight depth',

@@ -36,7 +36,7 @@ function createNoteNodes(files: TFile[]){
       label       : file.basename,
       x           : x0,
       y           : y0,
-      z           : 0,
+      z           : jitter,
       vx          : 0,
       vy          : 0,
       vz          : 0,

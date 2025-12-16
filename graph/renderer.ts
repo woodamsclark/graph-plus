@@ -58,7 +58,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
 
     drawEdges(nodeMap);
     drawNodes(nodeMap);
-    drawLabels(nodeMap);
+    //drawLabels(nodeMap);
   }
 
   function destroy() {
@@ -173,7 +173,6 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
 
     context.restore();
   }
-
   // ─────────────────────────────────────────────
   // Helpers used externally
   // ─────────────────────────────────────────────

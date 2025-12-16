@@ -1,5 +1,5 @@
-import type { CameraState, CameraSettings } from './utilities/interfaces.ts';
-import { getSettings, updateSettings } from './utilities/settingsStore.ts';
+import type { CameraState, CameraSettings, WorldTransform } from './utilities/interfaces.ts';
+import { getSettings } from './utilities/settingsStore.ts';
 
 const MIN_DISTANCE = 100;
 const MAX_DISTANCE = 5000;
@@ -12,9 +12,11 @@ export class CameraManager {
     //private renderer       : Renderer;
     private cameraSnapShot : CameraState                                                | null = null;
     //private worldAnchor    : { screenX: number; screenY: number; screenZ: number }      | null = null;
-    private worldAnchor    : { x: number; y: number; z: number } | null = null;
-    private screenAnchor   : { screenX: number; screenY: number                  }      | null = null;
-    private viewport       : { width  : number; height : number; offsetX: number; offsetY: number } = { width: 0, height: 0, offsetX: 0, offsetY: 0 };
+    private worldAnchor     : { x: number; y: number; z: number } | null = null;
+    private screenAnchor    : { screenX: number; screenY: number                  }      | null = null;
+    private viewport: { width  : number; height : number; offsetX: number; offsetY: number } = { width: 0, height: 0, offsetX: 0, offsetY: 0 };
+
+    private worldTransform: WorldTransform | null = null;
 
     constructor(initialState: CameraState) {
         this.cameraState     = { ...initialState };
@@ -46,7 +48,72 @@ export class CameraManager {
         this.clearMomentum();
     }
 
-    /** Projects a world point to screen coordinates */
+    worldToScreen(node: { x: number; y: number; z: number }): { x: number; y: number; depth: number } {
+    const { yaw, pitch, distance, targetX, targetY, targetZ } = this.cameraState;
+    const { offsetX, offsetY } = this.viewport;
+
+    // Read raw world coords
+    let wx0 = (node.x || 0);
+    let wy0 = (node.y || 0);
+    let wz0 = (node.z || 0);
+
+    // Apply "Turntable World" transform BEFORE camera target/rotation/projection
+    // (camera stays “still”; world rotates/scales)
+    const wt = this.worldTransform;
+    if (wt) {
+      // scale
+      wx0 *= wt.scale;
+      wy0 *= wt.scale;
+      wz0 *= wt.scale;
+
+      // rotate around Y (yaw)
+      const cy = Math.cos(wt.rotationY), sy = Math.sin(wt.rotationY);
+      const x1 = wx0 * cy - wz0 * sy;
+      const z1 = wx0 * sy + wz0 * cy;
+      wx0 = x1;
+      wz0 = z1;
+
+      // rotate around X (pitch)
+      const cx = Math.cos(wt.rotationX), sx = Math.sin(wt.rotationX);
+      const y2 = wy0 * cx - wz0 * sx;
+      const z2 = wy0 * sx + wz0 * cx;
+      wy0 = y2;
+      wz0 = z2;
+    }
+
+    // 1) Translate world to camera target
+    const wx = wx0 - targetX;
+    const wy = wy0 - targetY;
+    const wz = wz0 - targetZ;
+
+    // 2) Camera rotate (Yaw then Pitch) — existing logic
+    const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
+    const xz = wx * cosYaw - wz * sinYaw;
+    const zz = wx * sinYaw + wz * cosYaw;
+
+    const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+    const yz = wy * cosP - zz * sinP;
+    const zz2 = wy * sinP + zz * cosP;
+
+    // 3) Project — existing logic
+    const camZ = distance;
+    const dz   = camZ - zz2;
+    const safeDz = Math.max(0.0001, dz);
+    const focal = 800;
+    const perspective = focal / safeDz;
+
+    return {
+      x: xz * perspective + offsetX,
+      y: yz * perspective + offsetY,
+      depth: dz
+    };
+  }
+
+  setWorldTransform(t: WorldTransform | null) {
+        this.worldTransform = t;
+    }
+
+    /*// Projects a world point to screen coordinates
     worldToScreen(node: { x: number; y: number; z: number }): { x: number; y: number; depth: number } {
         const { yaw, pitch, distance, targetX, targetY, targetZ } = this.cameraState;
         const { offsetX, offsetY } = this.viewport;
@@ -78,7 +145,7 @@ export class CameraManager {
             depth: dz
         };
     }
-
+*/
     setViewport(width: number, height: number) {
         this.viewport.width   = width;
         this.viewport.height  = height;
@@ -86,7 +153,7 @@ export class CameraManager {
         this.viewport.offsetY = height / 2;
     }
 
-    /** Unprojects screen coords to world coords on a plane at camera-distance (for panning) */
+    // Unprojects screen coords to world coords on a plane at camera-distance (for panning)
     screenToWorld(screenX: number, screenY: number, depthFromCamera: number): { x: number; y: number; z: number } {
         const { yaw, pitch, targetX, targetY, targetZ } = this.cameraState;
         const { offsetX, offsetY } = this.viewport;

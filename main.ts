@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, Setting, TextComponent, ToggleComponent } from 'obsidian';
+import { App, Plugin } from 'obsidian';
 import { GraphView, GRAPH_PLUS_TYPE } from './GraphView.ts';
 import { initSettings, getSettings } from './utilities/settingsStore.ts';
 import { GraphPlusSettingTab } from './SettingsTab.ts';
@@ -12,7 +12,7 @@ export default class GraphPlus extends Plugin {
   async onload() {
     initSettings({ ...DEFAULT_SETTINGS });
     this.settings = getSettings();
-    
+
     this.registerView(GRAPH_PLUS_TYPE, (leaf) => new GraphView(leaf, this));
     this.addCommand({
       id  : 'open-graph+',
