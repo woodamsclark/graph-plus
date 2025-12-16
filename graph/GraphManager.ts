@@ -3,7 +3,7 @@ import { buildGraph } from './buildGraph.ts';
 import { createRenderer } from './renderer.ts';
 import { createSimulation } from './simulation.ts';
 import { debounce } from '../utilities/debounce.ts';
-import { Renderer, GraphNode, GraphData, Simulation, WorldTransform, LayoutMode } from '../utilities/interfaces.ts';
+import { Renderer, GraphNode, GraphData, Simulation, WorldTransform } from '../utilities/interfaces.ts';
 import { InputManager } from './InputManager.ts';
 import { getSettings } from '../utilities/settingsStore.ts';
 import { CameraManager } from '../CameraManager.ts';
@@ -30,7 +30,6 @@ export class GraphManager {
   private openNodeFile                : ((node: any) => void)               | null  = null;
   private settingsUnregister          : (() => void)                        | null  = null;
   private saveNodePositionsDebounced  : (() => void)                        | null  = null;
-  private layoutMode: LayoutMode = "cartesian";
 
   private worldTransform: WorldTransform = {
   rotationX: 0,
@@ -360,26 +359,4 @@ export class GraphManager {
       console.error('Greater Graph: saveNodePositions error', e);
     }
   }
-
-  public setLayoutMode(mode: LayoutMode): void {
-  if (this.layoutMode === mode) return;
-  this.layoutMode = mode;
-
-  // simulation toggle
-  this.simulation?.setLayoutMode?.(mode);
-
-  // rendering toggle (turntable world transform)
-  if (mode === "spherical") {
-    this.cameraManager?.setWorldTransform(this.worldTransform);
-
-    // optional: reset camera pose so you’re “looking at” the shell consistently
-    // this.cameraManager?.resetCamera();
-    // this.turntable?.reset();
-
-  } else {
-    this.cameraManager?.setWorldTransform(null);
-  }
-}
-
-
 }

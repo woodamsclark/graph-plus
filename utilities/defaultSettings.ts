@@ -29,6 +29,8 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
     useCenterNote      : false,
     centerNoteTitle    : '',
     useOutlinkFallback : false,
+    minSphereRadius     : 200,
+    maxSphereRadius     : 200,
   },
 
   physics: {
@@ -55,6 +57,7 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
     dragThreshold     : 4,
     rotateSensitivityX: 0.005,
     rotateSensitivityY: 0.005,
+    zoomSensitivity   : 5,
     cameraAnimDuration: 300,
     state: {
       yaw     : 0,
@@ -65,7 +68,14 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
       targetZ : 0,
       offsetX : 0,
       offsetY : 0,
+      offsetZ : 0,
+      orbitVelX: 0,
+      orbitVelY: 0,
+      panVelX  : 0,
+      panVelY  : 0,
+      zoomVel  : 0,
     },
+    layoutMode        : "spherical",
   },
 
   nodePositions: {}, // Record<string, {x:number;y:number;z:number}> or whatever your type is

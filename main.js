@@ -379,7 +379,6 @@ function createSimulation(graph) {
   const nodes = graph.nodes;
   const edges = graph.edges;
   let running = false;
-  let layoutMode = "spherical";
   const nodeById = /* @__PURE__ */ new Map();
   for (const n of nodes)
     nodeById.set(n.id, n);
@@ -563,8 +562,8 @@ function createSimulation(graph) {
     const cx = settings.physics.worldCenterX;
     const cy = settings.physics.worldCenterY;
     const cz = settings.physics.worldCenterZ;
-    const rMin = 500;
-    const rMax = 650;
+    const rMin = settings.graph.minSphereRadius;
+    const rMax = settings.graph.maxSphereRadius;
     const k = 10;
     const kk = k * (dt * 60);
     for (const n of nodes) {
@@ -600,6 +599,7 @@ function createSimulation(graph) {
       return;
     const settings = getSettings();
     const physicsSettings = settings.physics;
+    const layoutMode = settings.camera.layoutMode;
     applyRepulsion(physicsSettings);
     applySprings(physicsSettings);
     if (layoutMode === "spherical") {
@@ -612,10 +612,7 @@ function createSimulation(graph) {
     applyDamping();
     integrate(dt);
   }
-  function setLayoutMode(mode) {
-    layoutMode = mode;
-  }
-  return { start, stop, tick, reset, setLayoutMode };
+  return { start, stop, tick, reset };
 }
 
 // utilities/debounce.ts
@@ -695,6 +692,7 @@ var InputManager = class {
     const dyScr = screenY - this.downClickY;
     const distSq = dxScr * dxScr + dyScr * dyScr;
     const thresholdSq = this.dragThreshold * this.dragThreshold;
+    const layoutMode = getSettings().camera.layoutMode;
     switch (this.pointerMode) {
       case 0 /* Idle */:
       case 1 /* Hover */:
@@ -705,6 +703,11 @@ var InputManager = class {
             this.pointerMode = 4 /* DragNode */;
             this.callback.onDragStart(this.draggedNodeId, screenX, screenY);
           } else {
+            if (layoutMode === "spherical") {
+              this.pointerMode = 6 /* Orbit */;
+              this.callback.onOrbitStart(screenX, screenY);
+              return;
+            }
             this.pointerMode = 5 /* Pan */;
             this.callback.onPanStart(screenX, screenY);
           }
@@ -958,6 +961,7 @@ var CameraManager = class {
   updateOrbit(screenX, screenY) {
     const rotateSensitivityX = this.cameraSettings.rotateSensitivityX;
     const rotateSensitivityY = this.cameraSettings.rotateSensitivityY;
+    const zoomSensitivity = this.cameraSettings.zoomSensitivity;
     const dx = screenX - this.screenAnchor.screenX;
     const dy = screenY - this.screenAnchor.screenY;
     let yaw = this.cameraSnapShot.yaw - dx * rotateSensitivityX;
@@ -982,6 +986,7 @@ var CameraManager = class {
   endDrag() {
   }
   updateZoom(screenX, screenY, delta) {
+    this.cameraState.distance += delta * this.cameraSettings.zoomSensitivity;
   }
   updateHover(screenX, screenY) {
   }
@@ -1035,7 +1040,6 @@ var GraphManager = class {
   openNodeFile = null;
   settingsUnregister = null;
   saveNodePositionsDebounced = null;
-  layoutMode = "cartesian";
   worldTransform = {
     rotationX: 0,
     rotationY: 0,
@@ -1344,17 +1348,6 @@ var GraphManager = class {
       console.error("Greater Graph: saveNodePositions error", e);
     }
   }
-  setLayoutMode(mode) {
-    if (this.layoutMode === mode)
-      return;
-    this.layoutMode = mode;
-    this.simulation?.setLayoutMode?.(mode);
-    if (mode === "spherical") {
-      this.cameraManager?.setWorldTransform(this.worldTransform);
-    } else {
-      this.cameraManager?.setWorldTransform(null);
-    }
-  }
 };
 
 // GraphView.ts
@@ -1463,7 +1456,9 @@ var DEFAULT_SETTINGS = {
     hoverScale: 1,
     useCenterNote: false,
     centerNoteTitle: "",
-    useOutlinkFallback: false
+    useOutlinkFallback: false,
+    minSphereRadius: 200,
+    maxSphereRadius: 200
   },
   physics: {
     repulsionStrength: 5e3,
@@ -1489,6 +1484,7 @@ var DEFAULT_SETTINGS = {
     dragThreshold: 4,
     rotateSensitivityX: 5e-3,
     rotateSensitivityY: 5e-3,
+    zoomSensitivity: 5,
     cameraAnimDuration: 300,
     state: {
       yaw: 0,
@@ -1498,8 +1494,15 @@ var DEFAULT_SETTINGS = {
       targetY: 0,
       targetZ: 0,
       offsetX: 0,
-      offsetY: 0
-    }
+      offsetY: 0,
+      offsetZ: 0,
+      orbitVelX: 0,
+      orbitVelY: 0,
+      panVelX: 0,
+      panVelY: 0,
+      zoomVel: 0
+    },
+    layoutMode: "spherical"
   },
   nodePositions: {}
   // Record<string, {x:number;y:number;z:number}> or whatever your type is

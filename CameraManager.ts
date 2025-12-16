@@ -236,6 +236,7 @@ export class CameraManager {
     updateOrbit(screenX: number, screenY: number) {
         const rotateSensitivityX    = this.cameraSettings.rotateSensitivityX;
         const rotateSensitivityY    = this.cameraSettings.rotateSensitivityY;
+        const zoomSensitivity       = this.cameraSettings.zoomSensitivity;
         const dx                    = screenX - this.screenAnchor!.screenX;
         const dy                    = screenY - this.screenAnchor!.screenY;
 
@@ -265,6 +266,7 @@ export class CameraManager {
     }
 
     updateZoom(screenX: number, screenY: number, delta: number) {
+        this.cameraState.distance += delta * this.cameraSettings.zoomSensitivity;
     }
 
     updateHover(screenX: number, screenY: number) {

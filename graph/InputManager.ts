@@ -1,5 +1,5 @@
-import { InputManagerCallbacks, PointerMode } from '../utilities/interfaces.ts';
-
+import { InputManagerCallbacks, PointerMode, LayoutMode } from '../utilities/interfaces.ts';
+import { getSettings } from '../utilities/settingsStore.ts';
 // This class manages user input (mouse events) on the graph canvas
 // and reports mouse positions and actions back to the GraphManager via callbacks.
 export class InputManager {
@@ -65,6 +65,7 @@ export class InputManager {
         const dyScr         = screenY - this.downClickY;
         const distSq        = dxScr*dxScr + dyScr*dyScr;
         const thresholdSq   = this.dragThreshold*this.dragThreshold;
+        const layoutMode    : LayoutMode = getSettings().camera.layoutMode;
 
         switch (this.pointerMode) {
             case PointerMode.Idle:
@@ -79,6 +80,11 @@ export class InputManager {
                 this.pointerMode        = PointerMode.DragNode;
                 this.callback.onDragStart(this.draggedNodeId, screenX, screenY);
                 } else {
+                if (layoutMode === "spherical") {
+                    this.pointerMode = PointerMode.Orbit;
+                    this.callback.onOrbitStart(screenX, screenY);
+                    return;
+                }
                 this.pointerMode        = PointerMode.Pan;
                 this.callback.onPanStart(screenX, screenY);
                 }
@@ -147,7 +153,6 @@ export class InputManager {
     }
 
     private onWheel = (e: WheelEvent) => {
-        // Change this to go to GM
         e.preventDefault();
         this.callback.onZoom(e.offsetX, e.offsetY, Math.sign(e.deltaY));
     }

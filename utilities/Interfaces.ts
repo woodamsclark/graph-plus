@@ -28,6 +28,8 @@ export interface GraphSettings {
   centerNoteTitle       : string;
   useCenterNote         : boolean;
   useOutlinkFallback    : boolean;
+  minSphereRadius       : number;
+  maxSphereRadius       : number;
 }
 
 export interface PhysicsSettings {
@@ -58,8 +60,10 @@ export interface CameraSettings {
   dragThreshold                     : number;
   rotateSensitivityX                : number;
   rotateSensitivityY                : number;
+  zoomSensitivity                   : number;
   cameraAnimDuration                : number;
   state                             : CameraState;
+  layoutMode                        : LayoutMode;
 }
 
 export interface GraphPlusSettings {

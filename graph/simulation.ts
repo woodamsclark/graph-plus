@@ -9,7 +9,6 @@ export function createSimulation(graph: GraphData) {
   const nodes                       = graph.nodes;
   const edges                       = graph.edges;
   let running                       = false;
-  let layoutMode: LayoutMode = "spherical"; // cahange to DEFAULT_SETTINGS
 
   const nodeById = new Map<string, GraphNode>();
   for (const n of nodes) nodeById.set(n.id, n);
@@ -239,8 +238,8 @@ export function createSimulation(graph: GraphData) {
     const cz = settings.physics.worldCenterZ;
 
     // Tune these (later: put into settings)
-    const rMin = 500;
-    const rMax = 650;
+    const rMin = settings.graph.minSphereRadius;
+    const rMax = settings.graph.maxSphereRadius;
     const k    = 10;
 
     // match your integrator feel
@@ -289,6 +288,7 @@ export function createSimulation(graph: GraphData) {
 
     const settings = getSettings();
     const physicsSettings = settings.physics;
+    const layoutMode = settings.camera.layoutMode;
 
     applyRepulsion(physicsSettings);
     applySprings(physicsSettings);
@@ -305,10 +305,6 @@ export function createSimulation(graph: GraphData) {
     integrate(dt);
   }
 
-  function setLayoutMode(mode: LayoutMode) {
-    layoutMode = mode;
-  }
-
-  return { start, stop, tick, reset, setLayoutMode };
+  return { start, stop, tick, reset };
 
 }
