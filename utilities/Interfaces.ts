@@ -179,9 +179,9 @@ export enum PointerMode {
 export type LayoutMode = "cartesian" | "spherical";
 
 export interface WorldTransform {
-  rotationX: number; // radians
-  rotationY: number; // radians
-  scale: number;     // unitless zoom scalar
+  rotationX : number; // radians
+  rotationY : number;  // radians
+  scale     : number; // unitless zoom scalar
 }
 
 // Extend Simulation with mode control (non-breaking if you make it optional)
