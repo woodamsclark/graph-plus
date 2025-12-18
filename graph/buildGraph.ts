@@ -11,14 +11,15 @@ interface ResolvedLinks {
 export async function buildGraph(app: App): Promise<GraphData> {
   const settings = getSettings();
   const files: TFile[]        = app.vault.getMarkdownFiles();
-  const { nodes, nodeByPath } = createNoteNodes(files);
-  const { edges, edgeSet    } = buildNoteEdgesFromResolvedLinks(app, nodeByPath);
+  const { nodes, nodeByPath: nodeByID } = createNoteNodes(files);
+  const { edges, edgeSet    } = buildNoteEdgesFromResolvedLinks(app, nodeByID);
 
   if (settings.graph.showTags !== false) {
-    addTagNodesAndEdges(app, files, nodes, nodeByPath, edges, edgeSet);
+    addTagNodesAndEdges(app, files, nodes, nodeByID, edges, edgeSet);
   }
-  computeNodeDegrees(nodes, nodeByPath, edges);
+  computeNodeDegrees(nodes, nodeByID, edges);
   markBidirectionalEdges(edges);
+
   const centerNode = pickCenterNode(app, nodes);
   return { nodes, edges, centerNode };
 }
@@ -29,6 +30,7 @@ function createNoteNodes(files: TFile[]){
     const jitter = 50; // world units; tweak to taste
     const x0 = (Math.random() - 0.5) * jitter;
     const y0 = (Math.random() - 0.5) * jitter;
+    const z0 = (Math.random() - 0.5) * jitter;
     const node: GraphNode = {
       id          : file.path,
       filePath    : file.path,
@@ -36,34 +38,35 @@ function createNoteNodes(files: TFile[]){
       label       : file.basename,
       x           : x0,
       y           : y0,
-      z           : jitter,
+      z           : z0,
       vx          : 0,
       vy          : 0,
       vz          : 0,
       inDegree    : 0,
       outDegree   : 0,
       totalDegree : 0,
+      radius      : 0,
     };
     nodes.push(node);
   }
 
-  const nodeByPath = new Map<string, GraphNode>();
-  for (const n of nodes) nodeByPath.set(n.id, n);
+  const nodeByID = new Map<string, GraphNode>();
+  for (const node of nodes) nodeByID.set(node.id, node);
 
-  return { nodes, nodeByPath };
+  return { nodes, nodeByPath: nodeByID };
 }
 
-function buildNoteEdgesFromResolvedLinks(app: App, nodeByPath: Map<string, GraphNode>): { edges: GraphEdge[]; edgeSet: Set<string> } {
-  const settings            = getSettings();
+function buildNoteEdgesFromResolvedLinks(app: App, nodeByID: Map<string, GraphNode>): { edges: GraphEdge[]; edgeSet: Set<string> } {
+  const settings                = getSettings();
   const resolved: ResolvedLinks = (app.metadataCache as any).resolvedLinks || {};
-  const edges: GraphEdge[]  = [];
-  const edgeSet             = new Set<string>();
-  const countDuplicates     = Boolean(settings.graph.countDuplicateLinks);
+  const edges: GraphEdge[]      = [];
+  const edgeSet                 = new Set<string>();
+  const countDuplicates         = Boolean(settings.graph.countDuplicateLinks);
 
   for (const sourcePath of Object.keys(resolved)) {
     const targets = resolved[sourcePath] || {};
     for (const targetPath of Object.keys(targets)) {
-      if (!nodeByPath.has(sourcePath) || !nodeByPath.has(targetPath)) continue;
+      if (!nodeByID.has(sourcePath) || !nodeByID.has(targetPath)) continue;
 
       const key       = `${sourcePath}->${targetPath}`;
       if (edgeSet.has(key)) continue;
@@ -84,18 +87,21 @@ function buildNoteEdgesFromResolvedLinks(app: App, nodeByPath: Map<string, Graph
   return { edges, edgeSet };
 }
 
-function computeNodeDegrees(nodes: GraphNode[], nodeByPath: Map<string, GraphNode>, edges: GraphEdge[]): void {
-  for (const e of edges) {
-    const src = nodeByPath.get(e.sourceId);
-    const tgt = nodeByPath.get(e.targetId);
+function computeNodeDegrees(nodes: GraphNode[], nodeByID: Map<string, GraphNode>, edges: GraphEdge[]): void {
+  for (const edge of edges) {
+    const src = nodeByID.get(edge.sourceId);
+    const tgt = nodeByID.get(edge.targetId);
 
     if (!src || !tgt) continue;
-    const c       = Number(e.linkCount  || 1) || 1;
-    src.outDegree = (src.outDegree      || 0) + c;
-    tgt.inDegree  = (tgt.inDegree       || 0) + c;
+    const c       = Number(edge.linkCount   || 1) || 1;
+    src.outDegree = (src.outDegree          || 0) + c;
+    tgt.inDegree  = (tgt.inDegree           || 0) + c;
   }
 
-  for (const n of nodes) { n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0); }
+  for (const node of nodes) { 
+    node.totalDegree  = (node.inDegree || 0) + (node.outDegree || 0); 
+    node.radius       = 4 + Math.log2(1 + node.totalDegree); // base radius formula
+  }
 }
 
 function markBidirectionalEdges(edges: GraphEdge[]): void {
@@ -138,6 +144,7 @@ function addTagNodesAndEdges(
       inDegree    : 0,
       outDegree   : 0,
       totalDegree : 0,
+      radius      : 0,
     };
 
     nodes.push(node);

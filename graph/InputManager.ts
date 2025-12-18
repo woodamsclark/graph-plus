@@ -1,4 +1,4 @@
-import { InputManagerCallbacks, PointerMode, LayoutMode } from '../utilities/interfaces.ts';
+import { InputManagerCallbacks, PointerMode } from '../utilities/interfaces.ts';
 import { getSettings } from '../utilities/settingsStore.ts';
 // This class manages user input (mouse events) on the graph canvas
 // and reports mouse positions and actions back to the GraphManager via callbacks.
@@ -10,7 +10,7 @@ export class InputManager {
     private lastClientY         : number            = 0;        // ((Client Space))
     private downClickX          : number            = 0;        // [[Canvas Space]
     private downClickY          : number            = 0;        // [[Canvas Space]
-    private dragThreshold      : number            = 5;        // Drag starts after 5 pixels of movement
+    private dragThreshold       : number            = 5;        // Drag starts after 5 pixels of movement
     private pointerMode         : PointerMode       = PointerMode.Idle;
 
     constructor(canvas: HTMLCanvasElement, callbacks: InputManagerCallbacks) {
@@ -65,7 +65,6 @@ export class InputManager {
         const dyScr         = screenY - this.downClickY;
         const distSq        = dxScr*dxScr + dyScr*dyScr;
         const thresholdSq   = this.dragThreshold*this.dragThreshold;
-        const layoutMode    : LayoutMode = getSettings().camera.layoutMode;
 
         switch (this.pointerMode) {
             case PointerMode.Idle:
@@ -80,11 +79,6 @@ export class InputManager {
                 this.pointerMode        = PointerMode.DragNode;
                 this.callback.onDragStart(this.draggedNodeId, screenX, screenY);
                 } else {
-                if (layoutMode === "spherical") {
-                    this.pointerMode = PointerMode.Orbit;
-                    this.callback.onOrbitStart(screenX, screenY);
-                    return;
-                }
                 this.pointerMode        = PointerMode.Pan;
                 this.callback.onPanStart(screenX, screenY);
                 }
@@ -142,8 +136,14 @@ export class InputManager {
     this.draggedNodeId  = null;
     };
 
+    // local canvas mouse move for hover state
     private onMouseMove = (e: MouseEvent) => {
-        // the not global mouse move is only for hover state
+        const rect = this.canvas.getBoundingClientRect();
+        const screenX = e.clientX - rect.left;
+        const screenY = e.clientY - rect.top;
+        
+        // Report hover position for highlighting AND mouse gravity
+        this.callback.onHover(screenX, screenY);
     }
 
     private onMouseLeave = () => {

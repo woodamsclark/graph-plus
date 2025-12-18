@@ -113,39 +113,6 @@ export class CameraManager {
         this.worldTransform = t;
     }
 
-    /*// Projects a world point to screen coordinates
-    worldToScreen(node: { x: number; y: number; z: number }): { x: number; y: number; depth: number } {
-        const { yaw, pitch, distance, targetX, targetY, targetZ } = this.cameraState;
-        const { offsetX, offsetY } = this.viewport;
-
-        // 1. Translate world to camera target
-        const wx = (node.x || 0) - targetX;
-        const wy = (node.y || 0) - targetY;
-        const wz = (node.z || 0) - targetZ;
-
-        // 2. Rotate (Yaw then Pitch)
-        const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
-        const xz = wx * cosYaw - wz * sinYaw;
-        const zz = wx * sinYaw + wz * cosYaw;
-
-        const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
-        const yz = wy * cosP - zz * sinP;
-        const zz2 = wy * sinP + zz * cosP;
-
-        // 3. Project
-        const camZ = distance;
-        const dz   = camZ - zz2; // distance from camera lens to point
-        const safeDz = Math.max(0.0001, dz);
-        const focal = 800; 
-        const perspective = focal / safeDz;
-
-        return {
-            x: xz * perspective + offsetX,
-            y: yz * perspective + offsetY,
-            depth: dz
-        };
-    }
-*/
     setViewport(width: number, height: number) {
         this.viewport.width   = width;
         this.viewport.height  = height;
@@ -154,30 +121,40 @@ export class CameraManager {
     }
 
     // Unprojects screen coords to world coords on a plane at camera-distance (for panning)
-    screenToWorld(screenX: number, screenY: number, depthFromCamera: number): { x: number; y: number; z: number } {
-        const { yaw, pitch, targetX, targetY, targetZ } = this.cameraState;
-        const { offsetX, offsetY } = this.viewport;
+    screenToWorld(screenX: number, screenY: number, dz: number): { x: number; y: number; z: number } {
+  const { yaw, pitch, distance: camZ, targetX, targetY, targetZ } = this.cameraState;
+  const { offsetX, offsetY } = this.viewport;
 
-        const focal = 800;
-        const px = screenX - offsetX;
-        const py = screenY - offsetY;
-        
-        // Reverse Projection
-        const perspective = focal / depthFromCamera;
-        const xCam = px / perspective;
-        const yCam = py / perspective;
-        
-        // Un-Rotate
-        const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
-        const wy = yCam * cosP + depthFromCamera * sinP;
-        const wz1 = -yCam * sinP + depthFromCamera * cosP;
+  const focal = 800;
+  const px = screenX - offsetX;
+  const py = screenY - offsetY;
 
-        const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
-        const wx = xCam * cosY + wz1 * sinY;
-        const wz = -xCam * sinY + wz1 * cosY;
+  // Reverse projection (dz is what worldToScreen() returned as "depth")
+  const perspective = focal / dz;
+  const xz = px / perspective;
+  const yz = py / perspective;
 
-        return { x: wx + targetX, y: wy + targetY, z: wz + targetZ };
-    }
+  // Convert dz back to camera-rotated Z coordinate (zz2)
+  const zz2 = camZ - dz;
+
+  // Inverse pitch
+  const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+  const wy = yz * cosP + zz2 * sinP;
+  const zz = -yz * sinP + zz2 * cosP;
+
+  // Inverse yaw
+  const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
+  const wx = xz * cosY + zz * sinY;
+  const wz = -xz * sinY + zz * cosY;
+
+  let world = { x: wx + targetX, y: wy + targetY, z: wz + targetZ };
+
+  // If you’re using worldTransform, undo it here (inverse)
+  // ... your inverse worldTransform code ...
+
+  return world;
+}
+
 
     screenToWorld3D(screenX: number, screenY: number, depthFromCamera: number) {
         return this.screenToWorld(screenX, screenY, depthFromCamera);

@@ -41,8 +41,6 @@ export interface PhysicsSettings {
   damping               : number;
   notePlaneStiffness    : number;
   tagPlaneStiffness     : number;
-  gravityRadius         : number;   // scales per-node screen radius
-  gravityFallOff        : number;   // falloff steepness
   mouseGravityEnabled   : boolean;
   mouseGravityRadius    : number;
   mouseGravityStrength  : number;
@@ -63,7 +61,6 @@ export interface CameraSettings {
   zoomSensitivity                   : number;
   cameraAnimDuration                : number;
   state                             : CameraState;
-  layoutMode                        : LayoutMode;
 }
 
 export interface GraphPlusSettings {
@@ -123,6 +120,7 @@ export interface GraphNode {
   inDegree      : number;
   outDegree     : number;
   totalDegree   : number;
+  radius        : number; 
 }
 
 export interface GraphEdge {
@@ -174,10 +172,6 @@ export enum PointerMode {
   Orbit,
 }
 
-// utilities/interfaces.ts
-
-export type LayoutMode = "cartesian" | "spherical";
-
 export interface WorldTransform {
   rotationX : number; // radians
   rotationY : number;  // radians
@@ -191,6 +185,4 @@ export interface Simulation {
   tick(dt: number)                  : void;
   reset()                           : void;
   setPinnedNodes?(ids: Set<string>) : void;
-
-  setLayoutMode?(mode: LayoutMode)  : void;
 }

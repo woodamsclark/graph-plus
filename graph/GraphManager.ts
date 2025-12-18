@@ -30,6 +30,7 @@ export class GraphManager {
   private openNodeFile                : ((node: any) => void)               | null  = null;
   private settingsUnregister          : (() => void)                        | null  = null;
   private saveNodePositionsDebounced  : (() => void)                        | null  = null;
+  private currentMousePosition        : { mouseX: number, mouseY: number } | null = null;
 
   private worldTransform: WorldTransform = {
   rotationX: 0,
@@ -139,7 +140,14 @@ export class GraphManager {
   }
 
   public updateHover (screenX: number, screenY: number) {
-      this.cameraManager?.updateHover(screenX, screenY);
+    if (screenX === -Infinity || screenY === -Infinity) {
+        this.currentMousePosition = null;
+    } else {
+        this.currentMousePosition = { mouseX: screenX, mouseY: screenY };
+    }
+    
+    // Also tell the camera manager for any hover effects (highlighting)
+    this.cameraManager?.updateHover(screenX, screenY);
   }
 
   public startDrag (nodeId: string, screenX: number, screenY: number) {
@@ -248,8 +256,7 @@ export class GraphManager {
 
      this.renderer?.setGraph(this.graph);
 
-    const { nodes, edges }  = this.filterGraph(this.graph);
-    this.simulation         = createSimulation(this.graph);
+    this.simulation         = createSimulation(this.graph, this.cameraManager!, () => this.currentMousePosition);
 
     this.buildAdjacencyMap(); // rebuild adjacency map after graph refresh or showTags changes
     this.startSimulation();
@@ -318,7 +325,7 @@ export class GraphManager {
     const scale         = this.cameraManager ? this.cameraManager.getState().distance : 1;
 
     for (const node of this.graph.nodes) {
-      const projected   = this.cameraManager?.worldToScreen(node);
+      const projected  = this.cameraManager?.worldToScreen(node);
       if (!projected) continue;
       const nodeRadius = this.renderer.getNodeRadiusForHit ? this.renderer.getNodeRadiusForHit(node) : 8;
       const hitR       = nodeRadius /** Math.max(0.0001, scale)*/ + hitPadding;
@@ -326,8 +333,8 @@ export class GraphManager {
       const dy         = screenY - projected.y; 
       const distSq     = dx*dx + dy*dy;
       if (distSq      <= hitR*hitR && distSq < closestDist) { 
-        closestDist   = distSq;
-        closest       = node;
+        closestDist    = distSq;
+        closest        = node;
       }
     }
     return closest;

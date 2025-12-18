@@ -119,17 +119,15 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
 
     const defaultNodeColor = settings.graph.nodeColor || '#66ccff';
     const tagColor = settings.graph.tagColor || '#8000ff';
-    const minRadius = settings.graph.minNodeRadius || 4;
 
     for (const node of nodes) {
       //const p = cameraManager.worldToScreen(node);
       const p = nodeMap.get(node.id);
       if (!p || p.depth < 0) continue;
 
-      // Base radius: flat, no degree scaling
-      let radius = minRadius;
+      let radius = node.radius;
 
-      // Simple hover bump (optional; still "bare" enough)
+      // Simple hover bump
       if (hoveredNodeId && node.id === hoveredNodeId) {
         radius *= 1.25;
       }

@@ -42,10 +42,8 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
     notePlaneStiffness  : 0,
     tagPlaneStiffness   : 0,
     mouseGravityEnabled : true,
-    gravityRadius       : 6,
-    gravityFallOff      : 3,
-    mouseGravityRadius  : 15, // change later if you want
-    mouseGravityStrength: 1,
+    mouseGravityRadius  : 15,
+    mouseGravityStrength: 10,
     mouseGravityExponent: 2,
     worldCenterX        : 0,
     worldCenterY        : 0,
@@ -75,7 +73,6 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
       panVelY  : 0,
       zoomVel  : 0,
     },
-    layoutMode        : "spherical",
   },
 
   nodePositions: {}, // Record<string, {x:number;y:number;z:number}> or whatever your type is

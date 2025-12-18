@@ -1,19 +1,77 @@
-import { GraphNode, GraphData, PhysicsSettings, LayoutMode } from '../utilities/interfaces.ts';
+import { CameraManager } from '../CameraManager.ts';
+import { GraphNode, GraphData, PhysicsSettings, Simulation } from '../utilities/interfaces.ts';
 import { getSettings } from '../utilities/settingsStore.ts';
 
 
-export function createSimulation(graph: GraphData) {
+export function createSimulation(graph: GraphData, camera : CameraManager, getMousePos: () => { mouseX: number, mouseY: number } | null) : Simulation{
   // If center not provided, compute bounding-box center from node positions
   let centerNode: GraphNode | null  = null;
-  if(graph.centerNode) {centerNode = graph.centerNode;}
+  if(graph.centerNode)  {centerNode = graph.centerNode;}
   const nodes                       = graph.nodes;
   const edges                       = graph.edges;
   let running                       = false;
 
   const nodeById = new Map<string, GraphNode>();
   for (const n of nodes) nodeById.set(n.id, n);
-  // set of node ids that should be pinned (physics skip)
-  let pinnedNodes = new Set<string>();
+  
+  let pinnedNodes = new Set<string>(); // set of node ids that should be pinned (physics skip)
+
+  function applyMouseGravity() {
+    const settings = getSettings();
+    if (!settings.physics.mouseGravityEnabled) return;
+
+    const mousePos = getMousePos(); 
+    if (!mousePos) return;
+    const { mouseX: mouseX, mouseY: mouseY } = mousePos;
+
+    // Radius in pixels on screen
+    const radius    = settings.physics.mouseGravityRadius; 
+    const strength  = settings.physics.mouseGravityStrength;
+
+    for (const node of nodes) {
+        if (pinnedNodes.has(node.id)) continue;
+
+        // 1. Where is the node on screen?
+        const nodePos = camera.worldToScreen(node);
+
+        // Skip if behind camera
+        if (nodePos.depth < 0) continue; 
+
+        // 2. Distance check (Screen Space 2D)
+        const dx = mouseX - nodePos.x;
+        const dy = mouseY - nodePos.y;
+        const distSq = dx * dx + dy * dy;
+
+        // If outside the interaction radius, skip
+        if (distSq > radius * radius) continue;
+
+        // 3. Calculate "Ideal" World Position
+        // We want the node to move to the position (x,y,z) that corresponds 
+        // to the mouse's screen coordinates, BUT at the node's current depth.
+        // This ensures the pull is purely "visual" relative to the camera angle.
+        const targetWorld = camera.screenToWorld(mouseX, mouseY, nodePos.depth);
+
+        // 4. Calculate Vector in World Space
+        const wx = targetWorld.x - node.x;
+        const wy = targetWorld.y - node.y;
+        const wz = targetWorld.z - node.z;
+
+        // 5. Apply Force
+        const dist = Math.sqrt(wx*wx + wy*wy + wz*wz) + 1e-6;
+        const maxBoost = 1 / (node.radius);
+
+        // aggressive near the target (asymptote-ish), capped
+        const boost = Math.min(maxBoost, 1 / (dist*dist)); // or 1/(dist*dist)
+
+        // effective strength
+        const k = strength * boost;
+
+        node.vx += wx * k;
+        node.vy += wy * k;
+        node.vz += wz * k;
+
+    }
+  }
 
   function applyRepulsion(physicsSettings: PhysicsSettings) {
     const N = nodes.length;
@@ -193,44 +251,6 @@ export function createSimulation(graph: GraphData) {
     //return (n as any).isCenterNode === true;
   }
 
-/*function applySphericalShell(dt: number) {
-    const settings = getSettings();
-
-    // You can expose these later as settings; hardcode for now.
-    const rTarget = 400;   // shell radius in your world units
-    const k       = 0.02;  // stiffness in "your velocity units"
-
-    const cx = settings.physics.worldCenterX;
-    const cy = settings.physics.worldCenterY;
-    const cz = settings.physics.worldCenterZ;
-
-    // Match your integrator convention (forces act as per-frame velocity nudges)
-    const dtScale = dt * 60;
-    const kScaled = k * dtScale;
-
-    for (const n of nodes) {
-      if (pinnedNodes.has(n.id)) continue;
-
-      const dx = (n.x - cx);
-      const dy = (n.y - cy);
-      const dz = (n.z - cz);
-
-      const lenSq = dx*dx + dy*dy + dz*dz;
-      if (lenSq <= 1e-12) continue;
-
-      const len = Math.sqrt(lenSq);
-      const displacement = len - rTarget;
-
-      // dir = (dx,dy,dz)/len
-      // dv += (-k * displacement) * dir
-      const scalar = (-kScaled * displacement) / len;
-
-      n.vx = (n.vx || 0) + dx * scalar;
-      n.vy = (n.vy || 0) + dy * scalar;
-      n.vz = (n.vz || 0) + dz * scalar;
-    }
-  }*/
-
   function applySphericalBand(dt: number) {
     const settings = getSettings();
     const cx = settings.physics.worldCenterX;
@@ -288,18 +308,15 @@ export function createSimulation(graph: GraphData) {
 
     const settings = getSettings();
     const physicsSettings = settings.physics;
-    const layoutMode = settings.camera.layoutMode;
+    
 
     applyRepulsion(physicsSettings);
     applySprings(physicsSettings);
+    applyMouseGravity();
 
-    if (layoutMode === "spherical") {
-        applySphericalBand(dt);
-    } else { // cartesian
-        applyCentering();
-        applyPlaneConstraints();
-        applyCenterNodeLock();
-    }
+    applyCentering();
+    applyPlaneConstraints();
+    applyCenterNodeLock();
 
     applyDamping();
     integrate(dt);

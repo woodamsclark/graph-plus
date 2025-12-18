@@ -46,12 +46,12 @@ function updateSettings(mutator) {
 async function buildGraph(app) {
   const settings = getSettings();
   const files = app.vault.getMarkdownFiles();
-  const { nodes, nodeByPath } = createNoteNodes(files);
-  const { edges, edgeSet } = buildNoteEdgesFromResolvedLinks(app, nodeByPath);
+  const { nodes, nodeByPath: nodeByID } = createNoteNodes(files);
+  const { edges, edgeSet } = buildNoteEdgesFromResolvedLinks(app, nodeByID);
   if (settings.graph.showTags !== false) {
-    addTagNodesAndEdges(app, files, nodes, nodeByPath, edges, edgeSet);
+    addTagNodesAndEdges(app, files, nodes, nodeByID, edges, edgeSet);
   }
-  computeNodeDegrees(nodes, nodeByPath, edges);
+  computeNodeDegrees(nodes, nodeByID, edges);
   markBidirectionalEdges(edges);
   const centerNode = pickCenterNode(app, nodes);
   return { nodes, edges, centerNode };
@@ -62,6 +62,7 @@ function createNoteNodes(files) {
     const jitter = 50;
     const x0 = (Math.random() - 0.5) * jitter;
     const y0 = (Math.random() - 0.5) * jitter;
+    const z0 = (Math.random() - 0.5) * jitter;
     const node = {
       id: file.path,
       filePath: file.path,
@@ -69,22 +70,23 @@ function createNoteNodes(files) {
       label: file.basename,
       x: x0,
       y: y0,
-      z: jitter,
+      z: z0,
       vx: 0,
       vy: 0,
       vz: 0,
       inDegree: 0,
       outDegree: 0,
-      totalDegree: 0
+      totalDegree: 0,
+      radius: 0
     };
     nodes.push(node);
   }
-  const nodeByPath = /* @__PURE__ */ new Map();
-  for (const n of nodes)
-    nodeByPath.set(n.id, n);
-  return { nodes, nodeByPath };
+  const nodeByID = /* @__PURE__ */ new Map();
+  for (const node of nodes)
+    nodeByID.set(node.id, node);
+  return { nodes, nodeByPath: nodeByID };
 }
-function buildNoteEdgesFromResolvedLinks(app, nodeByPath) {
+function buildNoteEdgesFromResolvedLinks(app, nodeByID) {
   const settings = getSettings();
   const resolved = app.metadataCache.resolvedLinks || {};
   const edges = [];
@@ -93,7 +95,7 @@ function buildNoteEdgesFromResolvedLinks(app, nodeByPath) {
   for (const sourcePath of Object.keys(resolved)) {
     const targets = resolved[sourcePath] || {};
     for (const targetPath of Object.keys(targets)) {
-      if (!nodeByPath.has(sourcePath) || !nodeByPath.has(targetPath))
+      if (!nodeByID.has(sourcePath) || !nodeByID.has(targetPath))
         continue;
       const key = `${sourcePath}->${targetPath}`;
       if (edgeSet.has(key))
@@ -112,18 +114,19 @@ function buildNoteEdgesFromResolvedLinks(app, nodeByPath) {
   }
   return { edges, edgeSet };
 }
-function computeNodeDegrees(nodes, nodeByPath, edges) {
-  for (const e of edges) {
-    const src = nodeByPath.get(e.sourceId);
-    const tgt = nodeByPath.get(e.targetId);
+function computeNodeDegrees(nodes, nodeByID, edges) {
+  for (const edge of edges) {
+    const src = nodeByID.get(edge.sourceId);
+    const tgt = nodeByID.get(edge.targetId);
     if (!src || !tgt)
       continue;
-    const c = Number(e.linkCount || 1) || 1;
+    const c = Number(edge.linkCount || 1) || 1;
     src.outDegree = (src.outDegree || 0) + c;
     tgt.inDegree = (tgt.inDegree || 0) + c;
   }
-  for (const n of nodes) {
-    n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
+  for (const node of nodes) {
+    node.totalDegree = (node.inDegree || 0) + (node.outDegree || 0);
+    node.radius = 4 + Math.log2(1 + node.totalDegree);
   }
 }
 function markBidirectionalEdges(edges) {
@@ -159,7 +162,8 @@ function addTagNodesAndEdges(app, files, nodes, nodeByPath, edges, edgeSet) {
       type: "tag",
       inDegree: 0,
       outDegree: 0,
-      totalDegree: 0
+      totalDegree: 0,
+      radius: 0
     };
     nodes.push(node);
     tagNodeByName.set(tagName, node);
@@ -303,12 +307,11 @@ function createRenderer(canvas, cameraManager) {
     context.save();
     const defaultNodeColor = settings.graph.nodeColor || "#66ccff";
     const tagColor = settings.graph.tagColor || "#8000ff";
-    const minRadius = settings.graph.minNodeRadius || 4;
     for (const node of nodes) {
       const p = nodeMap.get(node.id);
       if (!p || p.depth < 0)
         continue;
-      let radius = minRadius;
+      let radius = node.radius;
       if (hoveredNodeId && node.id === hoveredNodeId) {
         radius *= 1.25;
       }
@@ -371,7 +374,7 @@ function createRenderer(canvas, cameraManager) {
 }
 
 // graph/simulation.ts
-function createSimulation(graph) {
+function createSimulation(graph, camera, getMousePos) {
   let centerNode = null;
   if (graph.centerNode) {
     centerNode = graph.centerNode;
@@ -383,6 +386,40 @@ function createSimulation(graph) {
   for (const n of nodes)
     nodeById.set(n.id, n);
   let pinnedNodes = /* @__PURE__ */ new Set();
+  function applyMouseGravity() {
+    const settings = getSettings();
+    if (!settings.physics.mouseGravityEnabled)
+      return;
+    const mousePos = getMousePos();
+    if (!mousePos)
+      return;
+    const { mouseX, mouseY } = mousePos;
+    const radius = settings.physics.mouseGravityRadius;
+    const strength = settings.physics.mouseGravityStrength;
+    for (const n of nodes) {
+      if (pinnedNodes.has(n.id))
+        continue;
+      const screenPos = camera.worldToScreen(n);
+      if (screenPos.depth < 0)
+        continue;
+      const dx = mouseX - screenPos.x;
+      const dy = mouseY - screenPos.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq > radius * radius)
+        continue;
+      const targetWorld = camera.screenToWorld(mouseX, mouseY, screenPos.depth);
+      const wx = targetWorld.x - n.x;
+      const wy = targetWorld.y - n.y;
+      const wz = targetWorld.z - n.z;
+      const dist = Math.sqrt(wx * wx + wy * wy + wz * wz) + 1e-6;
+      const maxBoost = 1 / n.radius;
+      const boost = Math.min(maxBoost, 1 / (dist * dist));
+      const k = strength * boost;
+      n.vx += wx * k;
+      n.vy += wy * k;
+      n.vz += wz * k;
+    }
+  }
   function applyRepulsion(physicsSettings) {
     const N = nodes.length;
     for (let i = 0; i < N; i++) {
@@ -599,16 +636,12 @@ function createSimulation(graph) {
       return;
     const settings = getSettings();
     const physicsSettings = settings.physics;
-    const layoutMode = settings.camera.layoutMode;
     applyRepulsion(physicsSettings);
     applySprings(physicsSettings);
-    if (layoutMode === "spherical") {
-      applySphericalBand(dt);
-    } else {
-      applyCentering();
-      applyPlaneConstraints();
-      applyCenterNodeLock();
-    }
+    applyMouseGravity();
+    applyCentering();
+    applyPlaneConstraints();
+    applyCenterNodeLock();
     applyDamping();
     integrate(dt);
   }
@@ -692,7 +725,6 @@ var InputManager = class {
     const dyScr = screenY - this.downClickY;
     const distSq = dxScr * dxScr + dyScr * dyScr;
     const thresholdSq = this.dragThreshold * this.dragThreshold;
-    const layoutMode = getSettings().camera.layoutMode;
     switch (this.pointerMode) {
       case 0 /* Idle */:
       case 1 /* Hover */:
@@ -703,11 +735,6 @@ var InputManager = class {
             this.pointerMode = 4 /* DragNode */;
             this.callback.onDragStart(this.draggedNodeId, screenX, screenY);
           } else {
-            if (layoutMode === "spherical") {
-              this.pointerMode = 6 /* Orbit */;
-              this.callback.onOrbitStart(screenX, screenY);
-              return;
-            }
             this.pointerMode = 5 /* Pan */;
             this.callback.onPanStart(screenX, screenY);
           }
@@ -758,7 +785,12 @@ var InputManager = class {
     this.pointerMode = 0 /* Idle */;
     this.draggedNodeId = null;
   };
+  // local canvas mouse move for hover state
   onMouseMove = (e) => {
+    const rect = this.canvas.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    this.callback.onHover(screenX, screenY);
   };
   onMouseLeave = () => {
     this.callback.onHover(-Infinity, -Infinity);
@@ -860,39 +892,6 @@ var CameraManager = class {
   setWorldTransform(t) {
     this.worldTransform = t;
   }
-  /*// Projects a world point to screen coordinates
-      worldToScreen(node: { x: number; y: number; z: number }): { x: number; y: number; depth: number } {
-          const { yaw, pitch, distance, targetX, targetY, targetZ } = this.cameraState;
-          const { offsetX, offsetY } = this.viewport;
-  
-          // 1. Translate world to camera target
-          const wx = (node.x || 0) - targetX;
-          const wy = (node.y || 0) - targetY;
-          const wz = (node.z || 0) - targetZ;
-  
-          // 2. Rotate (Yaw then Pitch)
-          const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
-          const xz = wx * cosYaw - wz * sinYaw;
-          const zz = wx * sinYaw + wz * cosYaw;
-  
-          const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
-          const yz = wy * cosP - zz * sinP;
-          const zz2 = wy * sinP + zz * cosP;
-  
-          // 3. Project
-          const camZ = distance;
-          const dz   = camZ - zz2; // distance from camera lens to point
-          const safeDz = Math.max(0.0001, dz);
-          const focal = 800; 
-          const perspective = focal / safeDz;
-  
-          return {
-              x: xz * perspective + offsetX,
-              y: yz * perspective + offsetY,
-              depth: dz
-          };
-      }
-  */
   setViewport(width, height) {
     this.viewport.width = width;
     this.viewport.height = height;
@@ -900,22 +899,24 @@ var CameraManager = class {
     this.viewport.offsetY = height / 2;
   }
   // Unprojects screen coords to world coords on a plane at camera-distance (for panning)
-  screenToWorld(screenX, screenY, depthFromCamera) {
-    const { yaw, pitch, targetX, targetY, targetZ } = this.cameraState;
+  screenToWorld(screenX, screenY, dz) {
+    const { yaw, pitch, distance: camZ, targetX, targetY, targetZ } = this.cameraState;
     const { offsetX, offsetY } = this.viewport;
     const focal = 800;
     const px = screenX - offsetX;
     const py = screenY - offsetY;
-    const perspective = focal / depthFromCamera;
-    const xCam = px / perspective;
-    const yCam = py / perspective;
+    const perspective = focal / dz;
+    const xz = px / perspective;
+    const yz = py / perspective;
+    const zz2 = camZ - dz;
     const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
-    const wy = yCam * cosP + depthFromCamera * sinP;
-    const wz1 = -yCam * sinP + depthFromCamera * cosP;
+    const wy = yz * cosP + zz2 * sinP;
+    const zz = -yz * sinP + zz2 * cosP;
     const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
-    const wx = xCam * cosY + wz1 * sinY;
-    const wz = -xCam * sinY + wz1 * cosY;
-    return { x: wx + targetX, y: wy + targetY, z: wz + targetZ };
+    const wx = xz * cosY + zz * sinY;
+    const wz = -xz * sinY + zz * cosY;
+    let world = { x: wx + targetX, y: wy + targetY, z: wz + targetZ };
+    return world;
   }
   screenToWorld3D(screenX, screenY, depthFromCamera) {
     return this.screenToWorld(screenX, screenY, depthFromCamera);
@@ -1040,6 +1041,7 @@ var GraphManager = class {
   openNodeFile = null;
   settingsUnregister = null;
   saveNodePositionsDebounced = null;
+  currentMousePosition = null;
   worldTransform = {
     rotationX: 0,
     rotationY: 0,
@@ -1134,6 +1136,11 @@ var GraphManager = class {
     this.adjacency = adjacency;
   }
   updateHover(screenX, screenY) {
+    if (screenX === -Infinity || screenY === -Infinity) {
+      this.currentMousePosition = null;
+    } else {
+      this.currentMousePosition = { mouseX: screenX, mouseY: screenY };
+    }
     this.cameraManager?.updateHover(screenX, screenY);
   }
   startDrag(nodeId, screenX, screenY) {
@@ -1223,8 +1230,7 @@ var GraphManager = class {
     if (!this.graph)
       return;
     this.renderer?.setGraph(this.graph);
-    const { nodes, edges } = this.filterGraph(this.graph);
-    this.simulation = createSimulation(this.graph);
+    this.simulation = createSimulation(this.graph, this.cameraManager, () => this.currentMousePosition);
     this.buildAdjacencyMap();
     this.startSimulation();
     this.renderer?.render(this.cameraManager.getState());
@@ -1469,11 +1475,8 @@ var DEFAULT_SETTINGS = {
     notePlaneStiffness: 0,
     tagPlaneStiffness: 0,
     mouseGravityEnabled: true,
-    gravityRadius: 6,
-    gravityFallOff: 3,
     mouseGravityRadius: 15,
-    // change later if you want
-    mouseGravityStrength: 1,
+    mouseGravityStrength: 10,
     mouseGravityExponent: 2,
     worldCenterX: 0,
     worldCenterY: 0,
@@ -1501,8 +1504,7 @@ var DEFAULT_SETTINGS = {
       panVelX: 0,
       panVelY: 0,
       zoomVel: 0
-    },
-    layoutMode: "spherical"
+    }
   },
   nodePositions: {}
   // Record<string, {x:number;y:number;z:number}> or whatever your type is
@@ -1656,39 +1658,39 @@ var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
     addSliderSetting(containerEl, {
       name: "Gravity Radius",
       desc: "Scales each node's screen-space radius for glow/mouse gravity.",
-      value: settings.physics.gravityRadius,
-      min: 1,
-      max: 20,
-      step: 0.1,
-      resetValue: DEFAULT_SETTINGS.physics.gravityRadius,
+      value: settings.physics.mouseGravityRadius,
+      min: 10,
+      max: 30,
+      step: 1,
+      resetValue: DEFAULT_SETTINGS.physics.mouseGravityRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
           this.applySettings((s) => {
-            s.physics.gravityRadius = v;
+            s.physics.mouseGravityRadius = v;
           });
         } else if (Number.isNaN(v)) {
           this.applySettings((s) => {
-            s.physics.gravityRadius = settings.physics.gravityRadius;
+            s.physics.mouseGravityRadius = settings.physics.mouseGravityRadius;
           });
         }
       }
     });
     addSliderSetting(containerEl, {
-      name: "Gravity curve steepness",
-      desc: "Controls falloff steepness; higher = stronger near cursor.",
-      value: settings.physics.gravityFallOff,
-      min: 0.5,
-      max: 10,
-      step: 0.1,
-      resetValue: DEFAULT_SETTINGS.physics.gravityFallOff,
+      name: "Gravity strength",
+      desc: "Overall strength of the mouse gravity effect.",
+      value: settings.physics.mouseGravityStrength,
+      min: 1,
+      max: 20,
+      step: 1,
+      resetValue: DEFAULT_SETTINGS.physics.mouseGravityStrength,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
           this.applySettings((s) => {
-            s.physics.gravityFallOff = v;
+            s.physics.mouseGravityStrength = v;
           });
         } else if (Number.isNaN(v)) {
           this.applySettings((s) => {
-            s.physics.gravityFallOff = settings.physics.gravityFallOff;
+            s.physics.mouseGravityStrength = settings.physics.mouseGravityStrength;
           });
         }
       }

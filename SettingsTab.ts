@@ -201,33 +201,33 @@ export class GraphPlusSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Gravity Radius',
       desc: 'Scales each node\'s screen-space radius for glow/mouse gravity.',
-      value: settings.physics.gravityRadius,
-      min: 1,
-      max: 20,
-      step: 0.1,
-      resetValue: DEFAULT_SETTINGS.physics.gravityRadius,
+      value: settings.physics.mouseGravityRadius,
+      min: 10,
+      max: 30,
+      step: 1,
+      resetValue: DEFAULT_SETTINGS.physics.mouseGravityRadius,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          this.applySettings((s) => { s.physics.gravityRadius = v; });
+          this.applySettings((s) => { s.physics.mouseGravityRadius = v; });
         } else if (Number.isNaN(v)) {
-          this.applySettings((s) => { s.physics.gravityRadius = settings.physics.gravityRadius; });
+          this.applySettings((s) => { s.physics.mouseGravityRadius = settings.physics.mouseGravityRadius; });
         }
       },
     });
 
     addSliderSetting(containerEl, {
-      name: 'Gravity curve steepness',
-      desc: 'Controls falloff steepness; higher = stronger near cursor.',
-      value: settings.physics.gravityFallOff,
-      min: 0.5,
-      max: 10,
-      step: 0.1,
-      resetValue: DEFAULT_SETTINGS.physics.gravityFallOff,
+      name: 'Gravity strength',
+      desc: 'Overall strength of the mouse gravity effect.',
+      value: settings.physics.mouseGravityStrength,
+      min: 1,
+      max: 20,
+      step: 1,
+      resetValue: DEFAULT_SETTINGS.physics.mouseGravityStrength,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v > 0) {
-          this.applySettings((s) => { s.physics.gravityFallOff = v; });
+          this.applySettings((s) => { s.physics.mouseGravityStrength = v; });
         } else if (Number.isNaN(v)) {
-          this.applySettings((s) => { s.physics.gravityFallOff = settings.physics.gravityFallOff; });
+          this.applySettings((s) => { s.physics.mouseGravityStrength = settings.physics.mouseGravityStrength; });
         }
       },
     });
