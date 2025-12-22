@@ -7,106 +7,104 @@ const MIN_PITCH    = -Math.PI / 2 + 0.05;
 const MAX_PITCH    =  Math.PI / 2 - 0.05;
 
 export class CameraManager {
-    private cameraSettings : CameraSettings;
-    private cameraState    : CameraState;
-    //private renderer       : Renderer;
-    private cameraSnapShot : CameraState                                                | null = null;
-    //private worldAnchor    : { screenX: number; screenY: number; screenZ: number }      | null = null;
-    private worldAnchor     : { x: number; y: number; z: number } | null = null;
-    private screenAnchor    : { screenX: number; screenY: number                  }      | null = null;
-    private viewport: { width  : number; height : number; offsetX: number; offsetY: number } = { width: 0, height: 0, offsetX: 0, offsetY: 0 };
+  private cameraSettings  : CameraSettings;
+  private cameraState     : CameraState;
+  //private renderer       : Renderer;
+  private cameraSnapShot  : CameraState                                                 | null  = null;
+//private worldAnchor     : { screenX: number; screenY: number; screenZ: number }       | null  = null;
+  private worldAnchor     : { x: number; y: number; z: number }                         | null  = null;
+  private screenAnchor    : { screenX: number; screenY: number                  }       | null  = null;
+  private viewport: { width  : number; height : number; offsetX: number; offsetY: number }      = { width: 0, height: 0, offsetX: 0, offsetY: 0 };
 
-    private worldTransform: WorldTransform | null = null;
+  private worldTransform: WorldTransform | null = null;
 
-    constructor(initialState: CameraState) {
-      this.cameraState     = { ...initialState };
-      this.cameraSettings  = getSettings().camera;
-      //this.renderer        = renderer;
-    }
+  constructor(initialState: CameraState) {
+    this.cameraState     = { ...initialState };
+    this.cameraSettings  = getSettings().camera;
+    //this.renderer        = renderer;
+  }
 
-    getState(): CameraState {
-      return { ...this.cameraState };
-    }
+  getState(): CameraState {
+    return { ...this.cameraState };
+  }
 
-    /** Directly overwrite full state (e.g. when loading from saved camera state) */
-    setState(next: CameraState) {
-      this.cameraState = { ...next };
-    }
+  setState(next: CameraState) {
+    this.cameraState = { ...next };
+  }
 
-    patchState(partial: Partial<CameraState>) {
-      this.cameraState = { ...this.cameraState, ...partial };
-    }
+  patchState(partial: Partial<CameraState>) {
+    this.cameraState = { ...this.cameraState, ...partial };
+  }
 
-    /** If user changes camera settings in UI */
-    updateSettings(settings: CameraSettings) {
-      this.cameraSettings = { ...settings }; // update settins tab callback?
-    }
+  /** If user changes camera settings in UI */
+  updateSettings(settings: CameraSettings) {
+    this.cameraSettings = { ...settings }; // update settins tab callback?
+  }
 
-    /** Reset to initial pose, clearing momentum */
-    resetCamera() {
-      this.cameraState = { ...getSettings().camera.state };
-      this.clearMomentum();
-    }
+  resetCamera() {
+    this.cameraState = { ...getSettings().camera.state };
+    this.clearMomentum();
+  }
 
-    worldToScreen(node: { x: number; y: number; z: number }): { x: number; y: number; depth: number } {
-    const { yaw, pitch, distance, targetX, targetY, targetZ } = this.cameraState;
-    const { offsetX, offsetY } = this.viewport;
+  worldToScreen(node: { x: number; y: number; z: number }): { x: number; y: number; depth: number } {
+  const { yaw, pitch, distance, targetX, targetY, targetZ } = this.cameraState;
+  const { offsetX, offsetY } = this.viewport;
 
-    // Read raw world coords
-    let wx0 = (node.x || 0);
-    let wy0 = (node.y || 0);
-    let wz0 = (node.z || 0);
+  // Read raw world coords
+  let wx0 = (node.x || 0);
+  let wy0 = (node.y || 0);
+  let wz0 = (node.z || 0);
 
-    // Apply "Turntable World" transform BEFORE camera target/rotation/projection
-    // (camera stays “still”; world rotates/scales)
-    const wt = this.worldTransform;
-    if (wt) {
-      // scale
-      wx0 *= wt.scale;
-      wy0 *= wt.scale;
-      wz0 *= wt.scale;
+  // Apply "Turntable World" transform BEFORE camera target/rotation/projection
+  // (camera stays “still”; world rotates/scales)
+  const wt = this.worldTransform;
+  if (wt) {
+    // scale
+    wx0 *= wt.scale;
+    wy0 *= wt.scale;
+    wz0 *= wt.scale;
 
-      // rotate around Y (yaw)
-      const cy = Math.cos(wt.rotationY), sy = Math.sin(wt.rotationY);
-      const x1 = wx0 * cy - wz0 * sy;
-      const z1 = wx0 * sy + wz0 * cy;
-      wx0 = x1;
-      wz0 = z1;
+    // rotate around Y (yaw)
+    const cy = Math.cos(wt.rotationY), sy = Math.sin(wt.rotationY);
+    const x1 = wx0 * cy - wz0 * sy;
+    const z1 = wx0 * sy + wz0 * cy;
+    wx0 = x1;
+    wz0 = z1;
 
-      // rotate around X (pitch)
-      const cx = Math.cos(wt.rotationX), sx = Math.sin(wt.rotationX);
-      const y2 = wy0 * cx - wz0 * sx;
-      const z2 = wy0 * sx + wz0 * cx;
-      wy0 = y2;
-      wz0 = z2;
-    }
+    // rotate around X (pitch)
+    const cx = Math.cos(wt.rotationX), sx = Math.sin(wt.rotationX);
+    const y2 = wy0 * cx - wz0 * sx;
+    const z2 = wy0 * sx + wz0 * cx;
+    wy0 = y2;
+    wz0 = z2;
+  }
 
-    // 1) Translate world to camera target
-    const wx = wx0 - targetX;
-    const wy = wy0 - targetY;
-    const wz = wz0 - targetZ;
+  // 1) Translate world to camera target
+  const wx = wx0 - targetX;
+  const wy = wy0 - targetY;
+  const wz = wz0 - targetZ;
 
-    // 2) Camera rotate (Yaw then Pitch) — existing logic
-    const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
-    const xz = wx * cosYaw - wz * sinYaw;
-    const zz = wx * sinYaw + wz * cosYaw;
+  // 2) Camera rotate (Yaw then Pitch) — existing logic
+  const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
+  const xz = wx * cosYaw - wz * sinYaw;
+  const zz = wx * sinYaw + wz * cosYaw;
 
-    const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
-    const yz = wy * cosP - zz * sinP;
-    const zz2 = wy * sinP + zz * cosP;
+  const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+  const yz = wy * cosP - zz * sinP;
+  const zz2 = wy * sinP + zz * cosP;
 
-    // 3) Project — existing logic
-    const camZ = distance;
-    const dz   = camZ - zz2;
-    const safeDz = Math.max(0.0001, dz);
-    const focal = 800;
-    const perspective = focal / safeDz;
+  // 3) Project — existing logic
+  const camZ = distance;
+  const dz   = camZ - zz2;
+  const safeDz = Math.max(0.0001, dz);
+  const focal = 800;
+  const perspective = focal / safeDz;
 
-    return {
-      x: xz * perspective + offsetX,
-      y: yz * perspective + offsetY,
-      depth: dz
-    };
+  return {
+    x: xz * perspective + offsetX,
+    y: yz * perspective + offsetY,
+    depth: dz
+  };
   }
 
   setWorldTransform(t: WorldTransform | null) {

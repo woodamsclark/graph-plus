@@ -3,20 +3,14 @@ import { Renderer, GraphData, CameraState, GraphNode, GraphEdge } from '../utili
 import { getSettings } from '../utilities/settingsStore.ts';
 import { CameraManager } from '../CameraManager.ts';
 
-/**
- * Bare-bones renderer:
- * - Delegates all camera math to CameraManager
- * - Draws a flat background, edges, and node circles
- * - Exposes helper methods used by GraphManager / CameraManager
- */
 export function createRenderer( canvas: HTMLCanvasElement, cameraManager: CameraManager): Renderer {
-  const context = canvas.getContext('2d');
-  const settings = getSettings();
+  const context   = canvas.getContext('2d');
+  const settings  = getSettings();
 
   let graph: GraphData | null = null;
   const nodeById = new Map<string, GraphNode>();
 
-  let hoveredNodeId: string | null = null;
+  let hoveredNodeId : string      | null = null;
   let hoverNeighbors: Set<string> | null = null;
 
   function resize(width: number, height: number) {
@@ -171,6 +165,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
 
     context.restore();
   }
+
   // ─────────────────────────────────────────────
   // Helpers used externally
   // ─────────────────────────────────────────────
@@ -188,24 +183,17 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
     // (neighbors are not used visually yet, but kept for future)
   }
 
-  /**
-   * Return a stable radius for hit-testing.
-   * (No hover bump; just the base radius.)
-   */
-  function getNodeRadiusForHit(_node: any): number {
-    return settings.graph.minNodeRadius || 4;
+
+  function setGraph(data: GraphData | null) {
+    graph = data;
+    nodeById.clear();
+
+    if (!data) return;
+
+    for (const node of data.nodes) {
+      nodeById.set(node.id, node);
+    }
   }
-
-function setGraph(data: GraphData | null) {
-  graph = data;
-  nodeById.clear();
-
-  if (!data) return;
-
-  for (const node of data.nodes) {
-    nodeById.set(node.id, node);
-  }
-}
   // ─────────────────────────────────────────────
   // Return object matching the Renderer interface
   // ─────────────────────────────────────────────
@@ -215,7 +203,6 @@ function setGraph(data: GraphData | null) {
   render,
   destroy,
   setHoveredNode,
-  getNodeRadiusForHit,
   setGraph,
 };
 

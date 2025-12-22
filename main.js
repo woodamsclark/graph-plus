@@ -351,9 +351,6 @@ function createRenderer(canvas, cameraManager) {
     hoveredNodeId = nodeId;
     hoverNeighbors = neighbors ?? null;
   }
-  function getNodeRadiusForHit(_node) {
-    return settings.graph.minNodeRadius || 4;
-  }
   function setGraph(data) {
     graph = data;
     nodeById.clear();
@@ -368,7 +365,6 @@ function createRenderer(canvas, cameraManager) {
     render,
     destroy,
     setHoveredNode,
-    getNodeRadiusForHit,
     setGraph
   };
   return renderer;
@@ -787,7 +783,7 @@ var CameraManager = class {
   cameraState;
   //private renderer       : Renderer;
   cameraSnapShot = null;
-  //private worldAnchor    : { screenX: number; screenY: number; screenZ: number }      | null = null;
+  //private worldAnchor     : { screenX: number; screenY: number; screenZ: number }       | null  = null;
   worldAnchor = null;
   screenAnchor = null;
   viewport = { width: 0, height: 0, offsetX: 0, offsetY: 0 };
@@ -799,7 +795,6 @@ var CameraManager = class {
   getState() {
     return { ...this.cameraState };
   }
-  /** Directly overwrite full state (e.g. when loading from saved camera state) */
   setState(next) {
     this.cameraState = { ...next };
   }
@@ -810,7 +805,6 @@ var CameraManager = class {
   updateSettings(settings) {
     this.cameraSettings = { ...settings };
   }
-  /** Reset to initial pose, clearing momentum */
   resetCamera() {
     this.cameraState = { ...getSettings().camera.state };
     this.clearMomentum();
@@ -1009,6 +1003,8 @@ var GraphManager = class {
   app;
   containerEl;
   plugin;
+  canvas = null;
+  appliedCursorCss = "default";
   running = false;
   renderer = null;
   graph = null;
@@ -1023,11 +1019,15 @@ var GraphManager = class {
   openNodeFile = null;
   settingsUnregister = null;
   saveNodePositionsDebounced = null;
-  currentMousePosition = null;
+  mouseScreenPosition = null;
+  hoveredNodeId = null;
   draggedNodeId = null;
+  isPanning = false;
+  isRotating = false;
   dragWorldOffset = null;
   dragDepthFromCamera = 0;
   pinnedNodes = /* @__PURE__ */ new Set();
+  cursorState = "Idle" /* Idle */;
   worldTransform = {
     rotationX: 0,
     rotationY: 0,
@@ -1041,17 +1041,17 @@ var GraphManager = class {
   async init() {
     const settings = getSettings();
     const vaultId = this.app.vault.getName();
-    const canvas = document.createElement("canvas");
-    canvas.style.width = "100%";
-    canvas.style.height = "100%";
-    canvas.tabIndex = 0;
+    this.canvas = document.createElement("canvas");
+    this.canvas.style.width = "100%";
+    this.canvas.style.height = "100%";
+    this.canvas.tabIndex = 0;
     this.cameraManager = new CameraManager(settings.camera.state);
     this.cameraManager.setWorldTransform(null);
-    this.renderer = createRenderer(canvas, this.cameraManager);
+    this.renderer = createRenderer(this.canvas, this.cameraManager);
     const rect = this.containerEl.getBoundingClientRect();
     this.renderer.resize(rect.width, rect.height);
-    this.containerEl.appendChild(canvas);
-    this.inputManager = new InputManager(canvas, {
+    this.containerEl.appendChild(this.canvas);
+    this.inputManager = new InputManager(this.canvas, {
       onOrbitStart: (dx, dy) => this.startOrbit(dx, dy),
       onOrbitMove: (dx, dy) => this.updateOrbit(dx, dy),
       onOrbitEnd: () => this.endOrbit(),
@@ -1059,7 +1059,7 @@ var GraphManager = class {
       onPanMove: (screenX, screenY) => this.updatePan(screenX, screenY),
       onPanEnd: () => this.endPan(),
       onOpenNode: (screenX, screenY) => this.openNode(screenX, screenY),
-      onHover: (screenX, screenY) => this.updateHover(screenX, screenY),
+      onHover: (screenX, screenY) => this.onHover(screenX, screenY),
       onDragStart: (nodeId, screenX, screenY) => this.startDrag(nodeId, screenX, screenY),
       onDragMove: (screenX, screenY) => this.updateDrag(screenX, screenY),
       onDragEnd: () => this.endDrag(),
@@ -1121,11 +1121,12 @@ var GraphManager = class {
     }
     this.adjacency = adjacency;
   }
-  updateHover(screenX, screenY) {
+  // this needs changing
+  onHover(screenX, screenY) {
     if (screenX === -Infinity || screenY === -Infinity) {
-      this.currentMousePosition = null;
+      this.mouseScreenPosition = null;
     } else {
-      this.currentMousePosition = { mouseX: screenX, mouseY: screenY };
+      this.mouseScreenPosition = { mouseX: screenX, mouseY: screenY };
     }
     this.cameraManager?.updateHover(screenX, screenY);
   }
@@ -1193,21 +1194,25 @@ var GraphManager = class {
     this.cameraManager?.updateZoom(screenX, screenY, delta);
   }
   startPan(screenX, screenY) {
+    this.isPanning = true;
     this.cameraManager?.startPan(screenX, screenY);
   }
   updatePan(screenX, screenY) {
     this.cameraManager?.updatePan(screenX, screenY);
   }
   endPan() {
+    this.isPanning = false;
     this.cameraManager?.endPan();
   }
   startOrbit(screenX, screenY) {
+    this.isRotating = true;
     this.cameraManager?.startOrbit(screenX, screenY);
   }
   updateOrbit(screenX, screenY) {
     this.cameraManager?.updateOrbit(screenX, screenY);
   }
   endOrbit() {
+    this.isRotating = false;
     this.cameraManager?.endOrbit();
   }
   openNode(screenX, screenY) {
@@ -1237,6 +1242,8 @@ var GraphManager = class {
     this.lastTime = timestamp;
     if (this.running && this.simulation)
       this.simulation.tick(dt);
+    this.checkForHoveredNode();
+    this.updateCursor();
     try {
       this.updateCameraAnimation(timestamp);
     } catch (e) {
@@ -1245,6 +1252,40 @@ var GraphManager = class {
       this.renderer.render(this.cameraManager.getState());
     this.animationFrame = requestAnimationFrame(this.animationLoop);
   };
+  checkForHoveredNode() {
+    if (!this.mouseScreenPosition) {
+      this.hoveredNodeId = null;
+      return;
+    }
+    const hit = this.nodeClicked(this.mouseScreenPosition.mouseX, this.mouseScreenPosition.mouseY);
+    this.hoveredNodeId = hit?.id ?? null;
+  }
+  updateCursor() {
+    this.updateCursorState();
+    this.applyCursorStyle();
+  }
+  updateCursorState() {
+    if (this.draggedNodeId || this.isPanning || this.isRotating) {
+      this.cursorState = "Dragging" /* Dragging */;
+    } else if (this.hoveredNodeId) {
+      this.cursorState = "Clickable" /* Clickable */;
+    } else {
+      this.cursorState = "Idle" /* Idle */;
+    }
+  }
+  applyCursorStyle() {
+    if (!this.canvas)
+      return;
+    let css = "default";
+    if (this.cursorState === "Clickable" /* Clickable */)
+      css = "pointer";
+    if (this.cursorState === "Dragging" /* Dragging */)
+      css = "grabbing";
+    if (this.appliedCursorCss === css)
+      return;
+    this.appliedCursorCss = css;
+    this.canvas.style.cursor = css;
+  }
   resize(width, height) {
     if (!this.renderer || !this.cameraManager)
       return;
@@ -1262,7 +1303,7 @@ var GraphManager = class {
     if (!this.graph)
       return;
     this.renderer?.setGraph(this.graph);
-    this.simulation = createSimulation(this.graph, this.cameraManager, () => this.currentMousePosition);
+    this.simulation = createSimulation(this.graph, this.cameraManager, () => this.mouseScreenPosition);
     this.buildAdjacencyMap();
     this.startSimulation();
     this.renderer?.render(this.cameraManager.getState());
@@ -1341,13 +1382,12 @@ var GraphManager = class {
       return null;
     let closest = null;
     let closestDist = Infinity;
-    const hitPadding = 6;
-    const scale = this.cameraManager ? this.cameraManager.getState().distance : 1;
+    const hitPadding = 0;
     for (const node of this.graph.nodes) {
       const projected = this.cameraManager?.worldToScreen(node);
       if (!projected)
         continue;
-      const nodeRadius = this.renderer.getNodeRadiusForHit ? this.renderer.getNodeRadiusForHit(node) : 8;
+      const nodeRadius = node.radius;
       const hitR = nodeRadius + hitPadding;
       const dx = screenX - projected.x;
       const dy = screenY - projected.y;

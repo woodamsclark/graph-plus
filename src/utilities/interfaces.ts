@@ -86,7 +86,6 @@ export interface Renderer {
   render(cam: CameraState)                : void;
   destroy()                               : void;
   setHoveredNode(nodeId: string | null)   : void;
-  getNodeRadiusForHit(node: any)          : number;
   setHoveredNode                          : Renderer['setHoveredNode'];
   setGraph(data: GraphData)               : void;
 }
