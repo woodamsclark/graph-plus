@@ -42,6 +42,7 @@ function createNoteNodes(files: TFile[]){
       vx          : 0,
       vy          : 0,
       vz          : 0,
+      type        : 'note',
       inDegree    : 0,
       outDegree   : 0,
       totalDegree : 0,

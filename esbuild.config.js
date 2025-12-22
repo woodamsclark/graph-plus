@@ -1,5 +1,5 @@
 require('esbuild').build({
-  entryPoints: ['main.ts'],
+  entryPoints: ['src/main.ts'],
   bundle: true,
   outfile: 'main.js',
   format: 'cjs',

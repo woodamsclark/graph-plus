@@ -11,7 +11,10 @@
   "devDependencies": {
     "@types/node": "^20.5.1",
     "esbuild": "^0.18.11",
-    "obsidian": "^1.10.3",
+    "fast-glob": "^3.3.3",
+    "obsidian": "^1.11.0",
+    "ts-morph": "^27.0.2",
+    "ts-node": "^10.9.2",
     "typescript": "^5.1.6"
   }
 }

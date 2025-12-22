@@ -1,13 +1,9 @@
 import { App, TFile } from 'obsidian';
 
 export interface GraphSettings {
-  // user defined//updated settings
   minNodeRadius         : number;
   maxNodeRadius         : number;
-  minCenterAlpha        : number;
-  maxCenterAlpha        : number;
-  highlightDepth        : number;  // screen-space label reveal radius (× size)
-  focusSmoothing        : number;
+  // nodeRadiusScaling // global scaling
   nodeColor?            : string;   // optional color overrides (CSS color strings). If unset, theme vars are used.
   nodeColorAlpha        : number;
   tagColor?             : string;
@@ -25,15 +21,13 @@ export interface GraphSettings {
   showTags              : boolean;
   showLabels            : boolean;
   hoverScale            : number;
+  //highlightDepth        : number;  // screen-space label reveal radius (× size)
   centerNoteTitle       : string;
   useCenterNote         : boolean;
   useOutlinkFallback    : boolean;
-  minSphereRadius       : number;
-  maxSphereRadius       : number;
 }
 
 export interface PhysicsSettings {
-  //user defined/updated settings
   repulsionStrength     : number;
   springStrength        : number;
   springLength          : number;
@@ -53,7 +47,6 @@ export interface PhysicsSettings {
 }
 
 export interface CameraSettings {
-  // user defined/updated settings
   momentumScale                     : number;
   dragThreshold                     : number;
   rotateSensitivityX                : number;
@@ -97,13 +90,14 @@ export interface Renderer {
   setHoveredNode                          : Renderer['setHoveredNode'];
   setGraph(data: GraphData)               : void;
 }
-export type GraphNodeType = 'note' | 'tag';
 
 export interface GraphData {
   nodes         : GraphNode[];
   edges         : GraphEdge[];
   centerNode?   : GraphNode | null;
 }
+
+export type GraphNodeType = 'note' | 'tag';
 
 export interface GraphNode {
   id            : string;
@@ -116,7 +110,7 @@ export interface GraphNode {
   vx            : number;
   vy            : number;
   vz            : number;
-  type?         : GraphNodeType;
+  type          : GraphNodeType;
   inDegree      : number;
   outDegree     : number;
   totalDegree   : number;
@@ -138,6 +132,7 @@ export interface Simulation {
   reset()                           : void;
   setPinnedNodes?(ids: Set<string>) : void;
 }
+
 
 export interface InputManagerCallbacks {
     // Camera Control
@@ -176,13 +171,4 @@ export interface WorldTransform {
   rotationX : number; // radians
   rotationY : number;  // radians
   scale     : number; // unitless zoom scalar
-}
-
-// Extend Simulation with mode control (non-breaking if you make it optional)
-export interface Simulation {
-  start()                           : void;
-  stop()                            : void;
-  tick(dt: number)                  : void;
-  reset()                           : void;
-  setPinnedNodes?(ids: Set<string>) : void;
 }

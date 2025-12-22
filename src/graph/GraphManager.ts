@@ -16,7 +16,6 @@ export class GraphManager {
   private containerEl                 : HTMLElement;
   private plugin                      : GraphPlus;
   private running                     : boolean                                     = false;
-  private canvas                      : HTMLCanvasElement                   | null  = null;
   private renderer                    : Renderer                            | null  = null;
   private graph                       : GraphData                           | null  = null;
   private adjacency                   : Map<string, string[]>               | null  = null;
@@ -30,7 +29,11 @@ export class GraphManager {
   private openNodeFile                : ((node: any) => void)               | null  = null;
   private settingsUnregister          : (() => void)                        | null  = null;
   private saveNodePositionsDebounced  : (() => void)                        | null  = null;
-  private currentMousePosition        : { mouseX: number, mouseY: number } | null = null;
+  private currentMousePosition        : { mouseX: number, mouseY: number }  | null  = null;
+  private draggedNodeId               : string                              | null  = null;
+  private dragWorldOffset             : { x: number; y: number; z: number } | null  = null;
+  private dragDepthFromCamera         : number                                      = 0;
+  private pinnedNodes                 : Set<string>                                 = new Set();
 
   private worldTransform: WorldTransform = {
   rotationX: 0,
@@ -151,17 +154,63 @@ export class GraphManager {
   }
 
   public startDrag (nodeId: string, screenX: number, screenY: number) {
-    this.cameraManager?.startDrag(nodeId, screenX, screenY);
+    if (!this.graph || !this.cameraManager) return;
+
+    const node = this.graph.nodes.find(n => n.id === nodeId);
+    if (!node) return;
+
+    // Depth from camera so we can unproject mouse onto the same plane in view-space
+    const projected           = this.cameraManager.worldToScreen(node);
+    this.dragDepthFromCamera  = Math.max(0.0001, projected.depth);
+
+    // Pin while dragging
+    this.draggedNodeId = nodeId;
+    this.pinnedNodes.add(nodeId);
+    try { this.simulation?.setPinnedNodes?.(this.pinnedNodes); } catch {}
+
+    // World-space offset so we don’t snap the node center to the cursor
+    const underMouse = this.cameraManager.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
+    this.dragWorldOffset = {
+      x: node.x - underMouse.x,
+      y: node.y - underMouse.y,
+      z: (node.z || 0) - underMouse.z,
+    };
     return;
   }
  
   public updateDrag (screenX: number, screenY: number) {
-      this.cameraManager?.updateDrag(screenX, screenY);
+    if (!this.graph || !this.cameraManager) return;
+    if (!this.draggedNodeId) return;
+
+    const node = this.graph.nodes.find(n => n.id === this.draggedNodeId);
+    if (!node) return;
+
+    const underMouse = this.cameraManager.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
+    const o = this.dragWorldOffset || { x: 0, y: 0, z: 0 };
+
+    node.x = underMouse.x + o.x;
+    node.y = underMouse.y + o.y;
+    node.z = underMouse.z + o.z;
+
+    // Prevent slingshot on release
+    node.vx = 0; node.vy = 0; node.vz = 0;
+
+    // Immediate feedback
+    try { this.renderer?.render(this.cameraManager.getState()); } catch {}
       return;
   }
 
   public endDrag () {
-      this.cameraManager?.endDrag();
+    if (!this.draggedNodeId) return;
+
+    this.pinnedNodes.delete(this.draggedNodeId);
+    try { this.simulation?.setPinnedNodes?.(this.pinnedNodes); } catch {}
+
+    this.draggedNodeId = null;
+    this.dragWorldOffset = null;
+
+    // Save soon after drag ends
+    try { this.saveNodePositionsDebounced && this.saveNodePositionsDebounced(); } catch {}
       return;
   }
 
@@ -214,23 +263,22 @@ export class GraphManager {
 
 
   private animationLoop = (timestamp: number) => {
-    if (!this.running) return;
+    // Always keep the RAF loop alive; just skip simulation stepping when not running.
     if (!this.lastTime) {
-      this.lastTime       = timestamp;
+      this.lastTime = timestamp;
       this.animationFrame = requestAnimationFrame(this.animationLoop);
       return;
     }
-    let dt                = (timestamp - this.lastTime) / 1000;
-    if (dt > 0.05) dt     = 0.05;
-    this.lastTime         = timestamp;
-    if (this.simulation) this.simulation.tick(dt);
 
-    // update camera animation/following
+    let dt = (timestamp - this.lastTime) / 1000;
+    if (dt > 0.05) dt = 0.05;
+    this.lastTime = timestamp;
+
+    if (this.running && this.simulation) this.simulation.tick(dt);
+
     try { this.updateCameraAnimation(timestamp); } catch (e) {}
     if (this.renderer) this.renderer.render(this.cameraManager!.getState());
 
-    // periodically persist node positions (debounced)
-    //try { if (this.saveNodePositionsDebounced) this.saveNodePositionsDebounced(); } catch (e) {}
     this.animationFrame = requestAnimationFrame(this.animationLoop);
   };
 

@@ -91,41 +91,45 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       return { range, num, reset: rbtn };
     };
 
-    const addNumericSlider = (parent: HTMLElement, opts: {
-  name      : string;
-  desc?     : string;
-  min       : number;
-  max       : number;
-  step?     : number;
-  get       : (s: GraphPlusSettings)            => number;
-  getDefault: (s: GraphPlusSettings)            => number;
-  set       : (s: GraphPlusSettings, v: number) => void;
-  clamp?    : (v: number)                       => number;
-}) => {
-  const current = opts.get(settings);
-  const def     = opts.getDefault(DEFAULT_SETTINGS);
-
-  addSliderSetting(parent, {
-    name : opts.name,
-    desc : opts.desc,
-    value: current,
-    min  : opts.min,
-    max  : opts.max,
-    step : opts.step,
-    resetValue: def,
-    onChange: async (raw) => {
-      if (Number.isNaN(raw)) {
-        // reset to default
-        const dv = opts.clamp ? opts.clamp(def) : def;
-        this.applySettings((s) => { opts.set(s, dv); });
-        return;
+    const addNumericSlider = 
+    (parent: HTMLElement, 
+      opts: {
+        name      : string;
+        desc?     : string;
+        min       : number;
+        max       : number;
+        step?     : number;
+        get       : (s: GraphPlusSettings)            => number;
+        getDefault: (s: GraphPlusSettings)            => number;
+        set       : (s: GraphPlusSettings, v: number) => void;
+        clamp?    : (v: number)                       => number;
       }
-      const v = opts.clamp ? opts.clamp(raw) : raw;
-      this.applySettings((s) => { opts.set(s, v); });
-    },
-  });
-};
+    ) => {
+      const current = opts.get(settings);
+      const def     = opts.getDefault(DEFAULT_SETTINGS);
 
+      addSliderSetting(parent, {
+        name : opts.name,
+        desc : opts.desc,
+        value: current,
+        min  : opts.min,
+        max  : opts.max,
+        step : opts.step,
+        resetValue: def,
+        onChange: async (raw) => {
+          if (Number.isNaN(raw)) {
+            // reset to default
+            const dv = opts.clamp ? opts.clamp(def) : def;
+            this.applySettings((s) => { opts.set(s, dv); });
+            return;
+          }
+          const v = opts.clamp ? opts.clamp(raw) : raw;
+          this.applySettings((s) => { opts.set(s, v); });
+        },
+      });
+    };
+
+// ============================================================================ //
 
     // Minimum node radius (UI in pixels)
     addNumericSlider(containerEl, {
@@ -134,10 +138,10 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       min       : 1,
       max       : 20,
       step      : 1,
-      get       : (s) => s.graph.minNodeRadius,
-      getDefault: (s) => s.graph.minNodeRadius,
-      set       : (s, v) => { s.graph.minNodeRadius = Math.round(v); },
-      clamp     : (v) => Math.max(1, Math.min(20, Math.round(v))),
+      get       : (s)     => s.graph.minNodeRadius,
+      getDefault: (s)     => s.graph.minNodeRadius,
+      set       : (s, v)  => { s.graph.minNodeRadius = Math.round(v); },
+      clamp     : (v)     => Math.max(1, Math.min(20, Math.round(v))),
     });
 
 
@@ -147,124 +151,46 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       min       : 8,
       max       : 80,
       step      : 1,
-      get       : (s) => s.graph.maxNodeRadius,
-      getDefault: (s) => s.graph.maxNodeRadius,
-      set       : (s, v) => { s.graph.maxNodeRadius = Math.round(v); },
-      clamp     : (v) => Math.max(8, Math.min(80, Math.round(v))),
+      get       : (s)     => s.graph.maxNodeRadius,
+      getDefault: (s)     => s.graph.maxNodeRadius,
+      set       : (s, v)  => { s.graph.maxNodeRadius = Math.round(v); },
+      clamp     : (v)     => Math.max(8, Math.min(80, Math.round(v))),
     });
-
-    /*
-    addNumericSlider(containerEl, {
-      name      : 'Minimum center glow opacity',
-      desc      : 'Opacity (0–0.8) at the glow center for the least connected node.',
-      min       : 0,
-      max       : 0.8,
-      step      : 0.01,
-      get       : (s) => s.graph.minCenterAlpha,
-      getDefault: (s) => s.graph.minCenterAlpha,
-      set       : (s, v) => { s.graph.minCenterAlpha = v; },
-      clamp     : (v) => Math.max(0, Math.min(0.8, v)),
-    });
-
 
     addNumericSlider(containerEl, {
-      name: 'Maximum center glow opacity',
-      desc: 'Opacity (0–1) at the glow center for the most connected node.',
-      value: settings.graph.maxCenterAlpha,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      get       : (s) => s.graph.maxCenterAlpha,
-      getDefault: (s) => s.graph.maxCenterAlpha,
-      set       : (s, v) => { s.graph.maxCenterAlpha = v; },
-      clamp     : (v) => Math.max(0, Math.min(1, v)),
-    });
-    */
-
-    addSliderSetting(containerEl, {
-      name: 'Highlight depth',
-      desc: 'Graph distance (in hops) from the hovered node that will be highlighted.',
-      value: settings.graph.highlightDepth,
-      min: 0,
-      max: 5,
-      step: 1,
-      resetValue: DEFAULT_SETTINGS.graph.highlightDepth,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && Number.isInteger(v) && v >= 0) {
-            this.applySettings((s) => { s.graph.highlightDepth = v; });
-        } else if (Number.isNaN(v)) {
-            this.applySettings((s) => { s.graph.highlightDepth = settings.graph.highlightDepth; });
-        }
-      },
-    });
-
-    addSliderSetting(containerEl, {
       name: 'Gravity Radius',
       desc: 'Scales each node\'s screen-space radius for glow/mouse gravity.',
-      value: settings.physics.mouseGravityRadius,
       min: 10,
       max: 30,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.physics.mouseGravityRadius,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v > 0) {
-          this.applySettings((s) => { s.physics.mouseGravityRadius = v; });
-        } else if (Number.isNaN(v)) {
-          this.applySettings((s) => { s.physics.mouseGravityRadius = settings.physics.mouseGravityRadius; });
-        }
-      },
+      get: (s)        => s.physics.mouseGravityRadius,
+      getDefault: (s) => s.physics.mouseGravityRadius,
+      set: (s, v)     => { s.physics.mouseGravityRadius = v; },
+      clamp: (v)      => Math.max(10, Math.min(30, v)),
     });
 
-    addSliderSetting(containerEl, {
+    addNumericSlider(containerEl, {
       name: 'Gravity strength',
       desc: 'Overall strength of the mouse gravity effect.',
-      value: settings.physics.mouseGravityStrength,
       min: 1,
       max: 20,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.physics.mouseGravityStrength,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v > 0) {
-          this.applySettings((s) => { s.physics.mouseGravityStrength = v; });
-        } else if (Number.isNaN(v)) {
-          this.applySettings((s) => { s.physics.mouseGravityStrength = settings.physics.mouseGravityStrength; });
-        }
-      },
+      get: (s)        => s.physics.mouseGravityStrength,
+      getDefault: (s) => s.physics.mouseGravityStrength,
+      set: (s, v)     => { s.physics.mouseGravityStrength = v; },
+      clamp: (v)      => Math.max(1, Math.min(20, v)),
     });
 
-        addSliderSetting(containerEl, {
+    addNumericSlider(containerEl, {
       name: 'Label Radius',
       desc: 'Screen-space label reveal radius (× node size).',
-      value: settings.graph.labelRadius,
       min: 0.5,
       max: 10,
       step: 0.1,
-      resetValue: DEFAULT_SETTINGS.graph.labelRadius,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v > 0) {
-          this.applySettings((s) => { s.graph.labelRadius = v; });
-        } else if (Number.isNaN(v)) {
-          this.applySettings((s) => { s.graph.labelRadius = settings.graph.labelRadius; });
-        }
-      },
-    });
-
-    // Focus / dimming controls
-    addSliderSetting(containerEl, {
-      name: 'Focus smoothing rate',
-      desc: 'Smoothness of focus transitions (0 = very slow, 1 = fast). Internally used as a lerp factor.',
-      value: settings.graph.focusSmoothing,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.graph.focusSmoothing,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          this.applySettings((s) => { s.graph.focusSmoothing = v; });
-        } else if (Number.isNaN(v)) {
-          this.applySettings((s) => { s.graph.focusSmoothing = settings.graph.focusSmoothing; });
-        }
-      },
+      get: (s)        => s.graph.labelRadius,
+      getDefault: (s) => s.graph.labelRadius,
+      set: (s, v)     => { s.graph.labelRadius = v; },
+      clamp: (v)      => Math.max(0.5, Math.min(10, v)),
     });
 
     //// COLORS ////
@@ -487,21 +413,16 @@ export class GraphPlusSettingTab extends PluginSettingTab {
         this.applySettings((s) => { s.graph.useInterfaceFont = v; });
       }));
 
-    addSliderSetting(containerEl, {
+    addNumericSlider(containerEl, {
       name: 'Base label font size',
       desc: 'Base font size for labels in pixels (before camera zoom scaling).',
-      value: settings.graph.labelBaseFontSize,
       min: 6,
       max: 24,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.graph.labelBaseFontSize,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 1 && v <= 72) {
-            this.applySettings((s) => { s.graph.labelBaseFontSize = Math.round(v); });
-        } else if (Number.isNaN(v)) {
-            this.applySettings((s) => { s.graph.labelBaseFontSize = settings.graph.labelBaseFontSize; });
-        }
-      },
+      get: (s)        => s.graph.labelBaseFontSize,
+      getDefault: (s) => s.graph.labelBaseFontSize,
+      set: (s, v)     => { s.graph.labelBaseFontSize = v; },
+      clamp: (v)      => Math.max(6, Math.min(24, v)),
     });
 
     //// settings.physics ////
@@ -512,6 +433,7 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       const ui = Math.sqrt(Math.max(0, internal / 2000));
       return Math.min(1, Math.max(0, ui));
     })();
+    
     addSliderSetting(containerEl, {
       name: 'Repulsion strength',
       desc: 'UI 0–1 (mapped internally). Higher = more node separation.',

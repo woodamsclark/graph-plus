@@ -5,10 +5,6 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
   graph: {
     minNodeRadius      : 3,
     maxNodeRadius      : 20,
-    minCenterAlpha     : 0.1,
-    maxCenterAlpha     : 0.6,
-    highlightDepth     : 1,
-    focusSmoothing     : 0.8,
     nodeColor          : undefined, // use theme
     tagColor           : undefined,
     labelColor         : undefined,
@@ -29,8 +25,6 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
     useCenterNote      : false,
     centerNoteTitle    : '',
     useOutlinkFallback : false,
-    minSphereRadius     : 200,
-    maxSphereRadius     : 200,
   },
 
   physics: {

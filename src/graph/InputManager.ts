@@ -58,8 +58,8 @@ export class InputManager {
         const screenY       = clientY - rect.top;
         const dx            = clientX - this.lastClientX;
         const dy            = clientY - this.lastClientY;
-        this.lastClientX     = clientX;
-        this.lastClientY     = clientY;
+        this.lastClientX    = clientX;
+        this.lastClientY    = clientY;
 
         const dxScr         = screenX - this.downClickX;
         const dyScr         = screenY - this.downClickY;

@@ -16,7 +16,7 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// main.ts
+// src/main.ts
 var main_exports = {};
 __export(main_exports, {
   default: () => GraphPlus
@@ -24,10 +24,10 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian3 = require("obsidian");
 
-// GraphView.ts
+// src/GraphView.ts
 var import_obsidian = require("obsidian");
 
-// utilities/settingsStore.ts
+// src/utilities/settingsStore.ts
 var currentSettings;
 var listeners = /* @__PURE__ */ new Set();
 function initSettings(initial) {
@@ -42,7 +42,7 @@ function updateSettings(mutator) {
     l();
 }
 
-// graph/buildGraph.ts
+// src/graph/buildGraph.ts
 async function buildGraph(app) {
   const settings = getSettings();
   const files = app.vault.getMarkdownFiles();
@@ -74,6 +74,7 @@ function createNoteNodes(files) {
       vx: 0,
       vy: 0,
       vz: 0,
+      type: "note",
       inDegree: 0,
       outDegree: 0,
       totalDegree: 0,
@@ -234,7 +235,7 @@ function pickCenterNode(app, nodes) {
   return chosen;
 }
 
-// graph/renderer.ts
+// src/graph/renderer.ts
 function createRenderer(canvas, cameraManager) {
   const context = canvas.getContext("2d");
   const settings = getSettings();
@@ -373,7 +374,7 @@ function createRenderer(canvas, cameraManager) {
   return renderer;
 }
 
-// graph/simulation.ts
+// src/graph/simulation.ts
 function createSimulation(graph, camera, getMousePos) {
   let centerNode = null;
   if (graph.centerNode) {
@@ -382,10 +383,13 @@ function createSimulation(graph, camera, getMousePos) {
   const nodes = graph.nodes;
   const edges = graph.edges;
   let running = false;
+  let pinnedNodes = /* @__PURE__ */ new Set();
   const nodeById = /* @__PURE__ */ new Map();
   for (const n of nodes)
     nodeById.set(n.id, n);
-  let pinnedNodes = /* @__PURE__ */ new Set();
+  function setPinnedNodes(ids) {
+    pinnedNodes = new Set(ids);
+  }
   function applyMouseGravity() {
     const settings = getSettings();
     if (!settings.physics.mouseGravityEnabled)
@@ -396,28 +400,28 @@ function createSimulation(graph, camera, getMousePos) {
     const { mouseX, mouseY } = mousePos;
     const radius = settings.physics.mouseGravityRadius;
     const strength = settings.physics.mouseGravityStrength;
-    for (const n of nodes) {
-      if (pinnedNodes.has(n.id))
+    for (const node of nodes) {
+      if (pinnedNodes.has(node.id))
         continue;
-      const screenPos = camera.worldToScreen(n);
-      if (screenPos.depth < 0)
+      const nodePos = camera.worldToScreen(node);
+      if (nodePos.depth < 0)
         continue;
-      const dx = mouseX - screenPos.x;
-      const dy = mouseY - screenPos.y;
+      const dx = mouseX - nodePos.x;
+      const dy = mouseY - nodePos.y;
       const distSq = dx * dx + dy * dy;
       if (distSq > radius * radius)
         continue;
-      const targetWorld = camera.screenToWorld(mouseX, mouseY, screenPos.depth);
-      const wx = targetWorld.x - n.x;
-      const wy = targetWorld.y - n.y;
-      const wz = targetWorld.z - n.z;
+      const targetWorld = camera.screenToWorld(mouseX, mouseY, nodePos.depth);
+      const wx = targetWorld.x - node.x;
+      const wy = targetWorld.y - node.y;
+      const wz = targetWorld.z - node.z;
       const dist = Math.sqrt(wx * wx + wy * wy + wz * wz) + 1e-6;
-      const maxBoost = 1 / n.radius;
+      const maxBoost = 1 / node.radius;
       const boost = Math.min(maxBoost, 1 / (dist * dist));
       const k = strength * boost;
-      n.vx += wx * k;
-      n.vy += wy * k;
-      n.vz += wz * k;
+      node.vx += wx * k;
+      node.vy += wy * k;
+      node.vz += wz * k;
     }
   }
   function applyRepulsion(physicsSettings) {
@@ -584,7 +588,6 @@ function createSimulation(graph, camera, getMousePos) {
       n.vy = 0;
     }
   }
-  return { start, stop, tick, reset };
   function isTag(n) {
     return n.type === "tag";
   }
@@ -593,41 +596,6 @@ function createSimulation(graph, camera, getMousePos) {
   }
   function isCenterNode(n) {
     return n === graph.centerNode;
-  }
-  function applySphericalBand(dt) {
-    const settings = getSettings();
-    const cx = settings.physics.worldCenterX;
-    const cy = settings.physics.worldCenterY;
-    const cz = settings.physics.worldCenterZ;
-    const rMin = settings.graph.minSphereRadius;
-    const rMax = settings.graph.maxSphereRadius;
-    const k = 10;
-    const kk = k * (dt * 60);
-    for (const n of nodes) {
-      if (pinnedNodes.has(n.id))
-        continue;
-      const dx = n.x - cx;
-      const dy = n.y - cy;
-      const dz = (n.z || 0) - cz;
-      const r2 = dx * dx + dy * dy + dz * dz;
-      if (r2 < 1e-12) {
-        n.vx += kk;
-        continue;
-      }
-      const r = Math.sqrt(r2);
-      if (r >= rMin && r <= rMax)
-        continue;
-      const invR = 1 / r;
-      const nx = dx * invR;
-      const ny = dy * invR;
-      const nz = dz * invR;
-      const target = r < rMin ? rMin : rMax;
-      const disp = r - target;
-      const f = -kk * disp;
-      n.vx += nx * f;
-      n.vy += ny * f;
-      n.vz = (n.vz || 0) + nz * f;
-    }
   }
   function tick(dt) {
     if (!running)
@@ -645,10 +613,10 @@ function createSimulation(graph, camera, getMousePos) {
     applyDamping();
     integrate(dt);
   }
-  return { start, stop, tick, reset };
+  return { start, stop, tick, reset, setPinnedNodes };
 }
 
-// utilities/debounce.ts
+// src/utilities/debounce.ts
 function debounce(fn, wait = 300, immediate = false) {
   let timeout = null;
   return (...args) => {
@@ -666,7 +634,7 @@ function debounce(fn, wait = 300, immediate = false) {
   };
 }
 
-// graph/InputManager.ts
+// src/graph/InputManager.ts
 var InputManager = class {
   canvas;
   callback;
@@ -809,7 +777,7 @@ var InputManager = class {
   }
 };
 
-// CameraManager.ts
+// src/CameraManager.ts
 var MIN_DISTANCE = 100;
 var MAX_DISTANCE = 5e3;
 var MIN_PITCH = -Math.PI / 2 + 0.05;
@@ -916,6 +884,23 @@ var CameraManager = class {
     const wx = xz * cosY + zz * sinY;
     const wz = -xz * sinY + zz * cosY;
     let world = { x: wx + targetX, y: wy + targetY, z: wz + targetZ };
+    const wt = this.worldTransform;
+    if (wt) {
+      const cx = Math.cos(-wt.rotationX), sx = Math.sin(-wt.rotationX);
+      const y1 = world.y * cx - world.z * sx;
+      const z1 = world.y * sx + world.z * cx;
+      world.y = y1;
+      world.z = z1;
+      const cy = Math.cos(-wt.rotationY), sy = Math.sin(-wt.rotationY);
+      const x2 = world.x * cy - world.z * sy;
+      const z2 = world.x * sy + world.z * cy;
+      world.x = x2;
+      world.z = z2;
+      const s = wt.scale === 0 ? 1 : wt.scale;
+      world.x /= s;
+      world.y /= s;
+      world.z /= s;
+    }
     return world;
   }
   screenToWorld3D(screenX, screenY, depthFromCamera) {
@@ -991,10 +976,8 @@ var CameraManager = class {
   }
   updateHover(screenX, screenY) {
   }
-  /**
-   * Step forward in time for momentum-based smoothing.
-   * dtMs is elapsed milliseconds since last frame.
-   */
+  // Step forward in time for momentum-based smoothing.
+  // dtMs is elapsed milliseconds since last frame.
   step(dtMs) {
     const t = dtMs / 16.67;
     const damping = Math.pow(1 - this.cameraSettings.momentumScale, t);
@@ -1021,13 +1004,12 @@ function clamp(v, min, max) {
   return v < min ? min : v > max ? max : v;
 }
 
-// graph/GraphManager.ts
+// src/graph/GraphManager.ts
 var GraphManager = class {
   app;
   containerEl;
   plugin;
   running = false;
-  canvas = null;
   renderer = null;
   graph = null;
   adjacency = null;
@@ -1042,6 +1024,10 @@ var GraphManager = class {
   settingsUnregister = null;
   saveNodePositionsDebounced = null;
   currentMousePosition = null;
+  draggedNodeId = null;
+  dragWorldOffset = null;
+  dragDepthFromCamera = 0;
+  pinnedNodes = /* @__PURE__ */ new Set();
   worldTransform = {
     rotationX: 0,
     rotationY: 0,
@@ -1144,15 +1130,63 @@ var GraphManager = class {
     this.cameraManager?.updateHover(screenX, screenY);
   }
   startDrag(nodeId, screenX, screenY) {
-    this.cameraManager?.startDrag(nodeId, screenX, screenY);
+    if (!this.graph || !this.cameraManager)
+      return;
+    const node = this.graph.nodes.find((n) => n.id === nodeId);
+    if (!node)
+      return;
+    const projected = this.cameraManager.worldToScreen(node);
+    this.dragDepthFromCamera = Math.max(1e-4, projected.depth);
+    this.draggedNodeId = nodeId;
+    this.pinnedNodes.add(nodeId);
+    try {
+      this.simulation?.setPinnedNodes?.(this.pinnedNodes);
+    } catch {
+    }
+    const underMouse = this.cameraManager.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
+    this.dragWorldOffset = {
+      x: node.x - underMouse.x,
+      y: node.y - underMouse.y,
+      z: (node.z || 0) - underMouse.z
+    };
     return;
   }
   updateDrag(screenX, screenY) {
-    this.cameraManager?.updateDrag(screenX, screenY);
+    if (!this.graph || !this.cameraManager)
+      return;
+    if (!this.draggedNodeId)
+      return;
+    const node = this.graph.nodes.find((n) => n.id === this.draggedNodeId);
+    if (!node)
+      return;
+    const underMouse = this.cameraManager.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
+    const o = this.dragWorldOffset || { x: 0, y: 0, z: 0 };
+    node.x = underMouse.x + o.x;
+    node.y = underMouse.y + o.y;
+    node.z = underMouse.z + o.z;
+    node.vx = 0;
+    node.vy = 0;
+    node.vz = 0;
+    try {
+      this.renderer?.render(this.cameraManager.getState());
+    } catch {
+    }
     return;
   }
   endDrag() {
-    this.cameraManager?.endDrag();
+    if (!this.draggedNodeId)
+      return;
+    this.pinnedNodes.delete(this.draggedNodeId);
+    try {
+      this.simulation?.setPinnedNodes?.(this.pinnedNodes);
+    } catch {
+    }
+    this.draggedNodeId = null;
+    this.dragWorldOffset = null;
+    try {
+      this.saveNodePositionsDebounced && this.saveNodePositionsDebounced();
+    } catch {
+    }
     return;
   }
   updateZoom(screenX, screenY, delta) {
@@ -1192,8 +1226,6 @@ var GraphManager = class {
     this.followedNode = null;
   }
   animationLoop = (timestamp) => {
-    if (!this.running)
-      return;
     if (!this.lastTime) {
       this.lastTime = timestamp;
       this.animationFrame = requestAnimationFrame(this.animationLoop);
@@ -1203,7 +1235,7 @@ var GraphManager = class {
     if (dt > 0.05)
       dt = 0.05;
     this.lastTime = timestamp;
-    if (this.simulation)
+    if (this.running && this.simulation)
       this.simulation.tick(dt);
     try {
       this.updateCameraAnimation(timestamp);
@@ -1356,7 +1388,7 @@ var GraphManager = class {
   }
 };
 
-// GraphView.ts
+// src/GraphView.ts
 var GRAPH_PLUS_TYPE = "graph-plus";
 var GraphView = class extends import_obsidian.ItemView {
   graphManager = null;
@@ -1430,18 +1462,14 @@ var GraphView = class extends import_obsidian.ItemView {
   }
 };
 
-// SettingsTab.ts
+// src/SettingsTab.ts
 var import_obsidian2 = require("obsidian");
 
-// utilities/defaultSettings.ts
+// src/utilities/defaultSettings.ts
 var DEFAULT_SETTINGS = {
   graph: {
     minNodeRadius: 3,
     maxNodeRadius: 20,
-    minCenterAlpha: 0.1,
-    maxCenterAlpha: 0.6,
-    highlightDepth: 1,
-    focusSmoothing: 0.8,
     nodeColor: void 0,
     // use theme
     tagColor: void 0,
@@ -1462,9 +1490,7 @@ var DEFAULT_SETTINGS = {
     hoverScale: 1,
     useCenterNote: false,
     centerNoteTitle: "",
-    useOutlinkFallback: false,
-    minSphereRadius: 200,
-    maxSphereRadius: 200
+    useOutlinkFallback: false
   },
   physics: {
     repulsionStrength: 5e3,
@@ -1510,7 +1536,7 @@ var DEFAULT_SETTINGS = {
   // Record<string, {x:number;y:number;z:number}> or whatever your type is
 };
 
-// SettingsTab.ts
+// src/SettingsTab.ts
 var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
   plugin;
   constructor(app, plugin) {
@@ -1635,105 +1661,44 @@ var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
       },
       clamp: (v) => Math.max(8, Math.min(80, Math.round(v)))
     });
-    addSliderSetting(containerEl, {
-      name: "Highlight depth",
-      desc: "Graph distance (in hops) from the hovered node that will be highlighted.",
-      value: settings.graph.highlightDepth,
-      min: 0,
-      max: 5,
-      step: 1,
-      resetValue: DEFAULT_SETTINGS.graph.highlightDepth,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && Number.isInteger(v) && v >= 0) {
-          this.applySettings((s) => {
-            s.graph.highlightDepth = v;
-          });
-        } else if (Number.isNaN(v)) {
-          this.applySettings((s) => {
-            s.graph.highlightDepth = settings.graph.highlightDepth;
-          });
-        }
-      }
-    });
-    addSliderSetting(containerEl, {
+    addNumericSlider(containerEl, {
       name: "Gravity Radius",
       desc: "Scales each node's screen-space radius for glow/mouse gravity.",
-      value: settings.physics.mouseGravityRadius,
       min: 10,
       max: 30,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.physics.mouseGravityRadius,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v > 0) {
-          this.applySettings((s) => {
-            s.physics.mouseGravityRadius = v;
-          });
-        } else if (Number.isNaN(v)) {
-          this.applySettings((s) => {
-            s.physics.mouseGravityRadius = settings.physics.mouseGravityRadius;
-          });
-        }
-      }
+      get: (s) => s.physics.mouseGravityRadius,
+      getDefault: (s) => s.physics.mouseGravityRadius,
+      set: (s, v) => {
+        s.physics.mouseGravityRadius = v;
+      },
+      clamp: (v) => Math.max(10, Math.min(30, v))
     });
-    addSliderSetting(containerEl, {
+    addNumericSlider(containerEl, {
       name: "Gravity strength",
       desc: "Overall strength of the mouse gravity effect.",
-      value: settings.physics.mouseGravityStrength,
       min: 1,
       max: 20,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.physics.mouseGravityStrength,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v > 0) {
-          this.applySettings((s) => {
-            s.physics.mouseGravityStrength = v;
-          });
-        } else if (Number.isNaN(v)) {
-          this.applySettings((s) => {
-            s.physics.mouseGravityStrength = settings.physics.mouseGravityStrength;
-          });
-        }
-      }
+      get: (s) => s.physics.mouseGravityStrength,
+      getDefault: (s) => s.physics.mouseGravityStrength,
+      set: (s, v) => {
+        s.physics.mouseGravityStrength = v;
+      },
+      clamp: (v) => Math.max(1, Math.min(20, v))
     });
-    addSliderSetting(containerEl, {
+    addNumericSlider(containerEl, {
       name: "Label Radius",
       desc: "Screen-space label reveal radius (\xD7 node size).",
-      value: settings.graph.labelRadius,
       min: 0.5,
       max: 10,
       step: 0.1,
-      resetValue: DEFAULT_SETTINGS.graph.labelRadius,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v > 0) {
-          this.applySettings((s) => {
-            s.graph.labelRadius = v;
-          });
-        } else if (Number.isNaN(v)) {
-          this.applySettings((s) => {
-            s.graph.labelRadius = settings.graph.labelRadius;
-          });
-        }
-      }
-    });
-    addSliderSetting(containerEl, {
-      name: "Focus smoothing rate",
-      desc: "Smoothness of focus transitions (0 = very slow, 1 = fast). Internally used as a lerp factor.",
-      value: settings.graph.focusSmoothing,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.graph.focusSmoothing,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          this.applySettings((s) => {
-            s.graph.focusSmoothing = v;
-          });
-        } else if (Number.isNaN(v)) {
-          this.applySettings((s) => {
-            s.graph.focusSmoothing = settings.graph.focusSmoothing;
-          });
-        }
-      }
+      get: (s) => s.graph.labelRadius,
+      getDefault: (s) => s.graph.labelRadius,
+      set: (s, v) => {
+        s.graph.labelRadius = v;
+      },
+      clamp: (v) => Math.max(0.5, Math.min(10, v))
     });
     containerEl.createEl("h2", { text: "Color Settings" });
     {
@@ -1960,25 +1925,18 @@ var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
         s.graph.useInterfaceFont = v;
       });
     }));
-    addSliderSetting(containerEl, {
+    addNumericSlider(containerEl, {
       name: "Base label font size",
       desc: "Base font size for labels in pixels (before camera zoom scaling).",
-      value: settings.graph.labelBaseFontSize,
       min: 6,
       max: 24,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.graph.labelBaseFontSize,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 1 && v <= 72) {
-          this.applySettings((s) => {
-            s.graph.labelBaseFontSize = Math.round(v);
-          });
-        } else if (Number.isNaN(v)) {
-          this.applySettings((s) => {
-            s.graph.labelBaseFontSize = settings.graph.labelBaseFontSize;
-          });
-        }
-      }
+      get: (s) => s.graph.labelBaseFontSize,
+      getDefault: (s) => s.graph.labelBaseFontSize,
+      set: (s, v) => {
+        s.graph.labelBaseFontSize = v;
+      },
+      clamp: (v) => Math.max(6, Math.min(24, v))
     });
     containerEl.createEl("h2", { text: "Physics Settings" });
     const repulsionUi = (() => {
@@ -2173,7 +2131,7 @@ var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
   }
 };
 
-// main.ts
+// src/main.ts
 var GraphPlus = class extends import_obsidian3.Plugin {
   settings;
   async onload() {

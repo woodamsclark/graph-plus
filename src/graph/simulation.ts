@@ -2,19 +2,22 @@ import { CameraManager } from '../CameraManager.ts';
 import { GraphNode, GraphData, PhysicsSettings, Simulation } from '../utilities/interfaces.ts';
 import { getSettings } from '../utilities/settingsStore.ts';
 
-
 export function createSimulation(graph: GraphData, camera : CameraManager, getMousePos: () => { mouseX: number, mouseY: number } | null) : Simulation{
   // If center not provided, compute bounding-box center from node positions
   let centerNode: GraphNode | null  = null;
   if(graph.centerNode)  {centerNode = graph.centerNode;}
   const nodes                       = graph.nodes;
   const edges                       = graph.edges;
-  let running                       = false;
-
-  const nodeById = new Map<string, GraphNode>();
+  let running                       = false;  
+  let pinnedNodes                   = new Set<string>(); // set of node ids that should be pinned (physics skip)
+  const nodeById                    = new Map<string, GraphNode>();
   for (const n of nodes) nodeById.set(n.id, n);
   
-  let pinnedNodes = new Set<string>(); // set of node ids that should be pinned (physics skip)
+
+  function setPinnedNodes(ids: Set<string>) {
+    // create new Set to avoid external mutations
+    pinnedNodes = new Set(ids);
+  }
 
   function applyMouseGravity() {
     const settings = getSettings();
@@ -234,9 +237,6 @@ export function createSimulation(graph: GraphData, camera : CameraManager, getMo
     }
   }
 
-  return { start, stop, tick, reset };
-
-
   // Type guards
   function isTag(n: GraphNode): boolean {
     return n.type === "tag";
@@ -250,57 +250,6 @@ export function createSimulation(graph: GraphData, camera : CameraManager, getMo
     return n === graph.centerNode;
     //return (n as any).isCenterNode === true;
   }
-
-  function applySphericalBand(dt: number) {
-    const settings = getSettings();
-    const cx = settings.physics.worldCenterX;
-    const cy = settings.physics.worldCenterY;
-    const cz = settings.physics.worldCenterZ;
-
-    // Tune these (later: put into settings)
-    const rMin = settings.graph.minSphereRadius;
-    const rMax = settings.graph.maxSphereRadius;
-    const k    = 10;
-
-    // match your integrator feel
-    const kk = k * (dt * 60);
-
-    for (const n of nodes) {
-      if (pinnedNodes.has(n.id)) continue;
-
-      const dx = n.x - cx;
-      const dy = n.y - cy;
-      const dz = (n.z || 0) - cz;
-
-      const r2 = dx*dx + dy*dy + dz*dz;
-      if (r2 < 1e-12) {
-        // deterministic “kick” so we can normalize next frame
-        n.vx += kk;
-        continue;
-      }
-
-      const r = Math.sqrt(r2);
-
-      // inside band => no constraint force
-      if (r >= rMin && r <= rMax) continue;
-
-      // normalize direction
-      const invR = 1.0 / r;
-      const nx = dx * invR;
-      const ny = dy * invR;
-      const nz = dz * invR;
-
-      // displacement to nearest boundary
-      const target = (r < rMin) ? rMin : rMax;
-      const disp = r - target; // positive if outside max, negative if inside min
-      const f = -kk * disp;    // pull toward boundary
-
-      n.vx += nx * f;
-      n.vy += ny * f;
-      n.vz = (n.vz || 0) + nz * f;
-    }
-  }
-
 
   function tick(dt: number) {
     if (!running) return;
@@ -322,6 +271,6 @@ export function createSimulation(graph: GraphData, camera : CameraManager, getMo
     integrate(dt);
   }
 
-  return { start, stop, tick, reset };
+  return { start, stop, tick, reset, setPinnedNodes };
 
 }
