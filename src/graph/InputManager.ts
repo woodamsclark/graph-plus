@@ -1,5 +1,4 @@
 import { InputManagerCallbacks, PointerMode } from '../shared/interfaces.ts';
-import { getSettings } from '../settings/settingsStore.ts';
 
 // This class manages user input (mouse events) on the graph canvas
 // and reports mouse positions and actions back to the GraphManager via callbacks.
@@ -144,13 +143,13 @@ export class InputManager {
         const screenY = e.clientY - rect.top;
         
         // Report hover position for highlighting AND mouse gravity
-        this.callback.onHover(screenX, screenY);
+        this.callback.onMouseMove(screenX, screenY);
     }
 
     private onMouseLeave = () => {
         // Clear hover state when leaving the canvas
         // This prevents the graph from thinking the mouse is still over it
-        this.callback.onHover(-Infinity, -Infinity); 
+        this.callback.onMouseMove(-Infinity, -Infinity); 
     }
 
     private onWheel = (e: WheelEvent) => {

@@ -22,9 +22,12 @@ __export(main_exports, {
   default: () => GraphPlus
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
 // src/plugin/GraphView.ts
+var import_obsidian2 = require("obsidian");
+
+// src/graph/GraphController.ts
 var import_obsidian = require("obsidian");
 
 // src/settings/settingsStore.ts
@@ -393,7 +396,7 @@ function createSimulation(graph, camera, getMousePos) {
     const mousePos = getMousePos();
     if (!mousePos)
       return;
-    const { mouseX, mouseY } = mousePos;
+    const { x: mouseX, y: mouseY } = mousePos;
     const radius = settings.physics.mouseGravityRadius;
     const strength = settings.physics.mouseGravityStrength;
     for (const node of nodes) {
@@ -612,24 +615,6 @@ function createSimulation(graph, camera, getMousePos) {
   return { start, stop, tick, reset, setPinnedNodes };
 }
 
-// src/shared/debounce.ts
-function debounce(fn, wait = 300, immediate = false) {
-  let timeout = null;
-  return (...args) => {
-    const later = () => {
-      timeout = null;
-      if (!immediate)
-        fn(...args);
-    };
-    const callNow = immediate && timeout === null;
-    if (timeout)
-      window.clearTimeout(timeout);
-    timeout = window.setTimeout(later, wait);
-    if (callNow)
-      fn(...args);
-  };
-}
-
 // src/graph/InputManager.ts
 var InputManager = class {
   canvas;
@@ -754,10 +739,10 @@ var InputManager = class {
     const rect = this.canvas.getBoundingClientRect();
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
-    this.callback.onHover(screenX, screenY);
+    this.callback.onMouseMove(screenX, screenY);
   };
   onMouseLeave = () => {
-    this.callback.onHover(-Infinity, -Infinity);
+    this.callback.onMouseMove(-Infinity, -Infinity);
   };
   onWheel = (e) => {
     e.preventDefault();
@@ -773,12 +758,12 @@ var InputManager = class {
   }
 };
 
-// src/graph/CameraManager.ts
+// src/graph/CameraController.ts
 var MIN_DISTANCE = 100;
 var MAX_DISTANCE = 5e3;
 var MIN_PITCH = -Math.PI / 2 + 0.05;
 var MAX_PITCH = Math.PI / 2 - 0.05;
-var CameraManager = class {
+var CameraController = class {
   cameraSettings;
   cameraState;
   //private renderer       : Renderer;
@@ -998,154 +983,62 @@ function clamp(v, min, max) {
   return v < min ? min : v > max ? max : v;
 }
 
-// src/graph/GraphManager.ts
-var GraphManager = class {
-  app;
-  containerEl;
-  plugin;
-  canvas = null;
-  appliedCursorCss = "default";
-  running = false;
-  renderer = null;
-  graph = null;
-  adjacency = null;
-  simulation = null;
-  animationFrame = null;
-  lastTime = null;
-  previewPollTimer = null;
-  followedNode = null;
-  inputManager = null;
-  cameraManager = null;
-  openNodeFile = null;
-  settingsUnregister = null;
-  saveNodePositionsDebounced = null;
-  mouseScreenPosition = null;
-  hoveredNodeId = null;
-  draggedNodeId = null;
-  isPanning = false;
-  isRotating = false;
+// src/graph/GraphInteractor.ts
+var GraphInteractor = class {
+  constructor(deps) {
+    this.deps = deps;
+    this.state = {
+      mouseScreenPosition: null,
+      hoveredId: null,
+      draggedId: null,
+      followedId: null,
+      isPanning: false,
+      isRotating: false
+    };
+  }
   dragWorldOffset = null;
   dragDepthFromCamera = 0;
   pinnedNodes = /* @__PURE__ */ new Set();
-  cursorState = "Idle" /* Idle */;
-  worldTransform = {
-    rotationX: 0,
-    rotationY: 0,
-    scale: 1
-  };
-  constructor(app, containerEl, plugin) {
-    this.app = app;
-    this.containerEl = containerEl;
-    this.plugin = plugin;
-  }
-  async init() {
-    const settings = getSettings();
-    const vaultId = this.app.vault.getName();
-    this.canvas = document.createElement("canvas");
-    this.canvas.style.width = "100%";
-    this.canvas.style.height = "100%";
-    this.canvas.tabIndex = 0;
-    this.cameraManager = new CameraManager(settings.camera.state);
-    this.cameraManager.setWorldTransform(null);
-    this.renderer = createRenderer(this.canvas, this.cameraManager);
-    const rect = this.containerEl.getBoundingClientRect();
-    this.renderer.resize(rect.width, rect.height);
-    this.containerEl.appendChild(this.canvas);
-    this.inputManager = new InputManager(this.canvas, {
-      onOrbitStart: (dx, dy) => this.startOrbit(dx, dy),
-      onOrbitMove: (dx, dy) => this.updateOrbit(dx, dy),
-      onOrbitEnd: () => this.endOrbit(),
-      onPanStart: (screenX, screenY) => this.startPan(screenX, screenY),
-      onPanMove: (screenX, screenY) => this.updatePan(screenX, screenY),
-      onPanEnd: () => this.endPan(),
-      onOpenNode: (screenX, screenY) => this.openNode(screenX, screenY),
-      onHover: (screenX, screenY) => this.onHover(screenX, screenY),
-      onDragStart: (nodeId, screenX, screenY) => this.startDrag(nodeId, screenX, screenY),
-      onDragMove: (screenX, screenY) => this.updateDrag(screenX, screenY),
-      onDragEnd: () => this.endDrag(),
-      onZoom: (x, y, delta) => this.updateZoom(x, y, delta),
-      onFollowStart: (nodeId) => this.startFollow(nodeId),
-      onFollowEnd: () => this.endFollow(),
-      resetCamera: () => this.resetCamera(),
-      detectClickedNode: (screenX, screenY) => {
-        return this.nodeClicked(screenX, screenY);
-      }
-    });
-    const rawSaved = settings.nodePositions || {};
-    let allSaved = {};
-    let savedPositions = {};
-    if (rawSaved && typeof rawSaved === "object") {
-      if (rawSaved[vaultId] && typeof rawSaved[vaultId] === "object") {
-        allSaved = rawSaved;
-        savedPositions = allSaved[vaultId] || {};
-      } else {
-        const hasPathLikeKeys = Object.keys(rawSaved).some((k) => typeof k === "string" && (k.includes("/") || k.startsWith("tag:") || k.endsWith(".md")));
-        if (hasPathLikeKeys) {
-          savedPositions = rawSaved;
-          allSaved = {};
-          allSaved[vaultId] = Object.assign({}, rawSaved);
-          try {
-            this.plugin.settings.nodePositions = allSaved;
-            try {
-              this.plugin.saveSettings && this.plugin.saveSettings();
-            } catch (e) {
-            }
-          } catch (e) {
-          }
-        } else {
-          allSaved = {};
-          savedPositions = {};
-        }
-      }
+  openNodeFile = null;
+  state;
+  get cursorType() {
+    if (this.state.draggedId || this.state.isPanning || this.state.isRotating) {
+      return "grabbing";
     }
-    this.buildAdjacencyMap();
-    this.refreshGraph();
-    this.resetCamera();
-    this.lastTime = null;
-    this.animationFrame = requestAnimationFrame(this.animationLoop);
-    if (!this.saveNodePositionsDebounced) {
-      this.saveNodePositionsDebounced = debounce(() => this.saveNodePositions(), 2e3, true);
+    if (this.state.hoveredId) {
+      return "pointer";
     }
+    return "default";
   }
-  buildAdjacencyMap() {
-    const adjacency = /* @__PURE__ */ new Map();
-    if (this.graph && this.graph.edges) {
-      for (const e of this.graph.edges) {
-        if (!adjacency.has(e.sourceId))
-          adjacency.set(e.sourceId, []);
-        if (!adjacency.has(e.targetId))
-          adjacency.set(e.targetId, []);
-        adjacency.get(e.sourceId).push(e.targetId);
-        adjacency.get(e.targetId).push(e.sourceId);
-      }
-    }
-    this.adjacency = adjacency;
+  getMouseScreenPosition() {
+    return this.state.mouseScreenPosition;
   }
-  // this needs changing
-  onHover(screenX, screenY) {
+  updateMouse(screenX, screenY) {
     if (screenX === -Infinity || screenY === -Infinity) {
-      this.mouseScreenPosition = null;
+      this.state.mouseScreenPosition = null;
     } else {
-      this.mouseScreenPosition = { mouseX: screenX, mouseY: screenY };
+      this.state.mouseScreenPosition = { x: screenX, y: screenY };
     }
-    this.cameraManager?.updateHover(screenX, screenY);
+    const camera = this.deps.getCamera();
+    if (!camera)
+      return;
+    camera.updateHover(screenX, screenY);
   }
   startDrag(nodeId, screenX, screenY) {
-    if (!this.graph || !this.cameraManager)
+    const graph = this.deps.getGraph();
+    const camera = this.deps.getCamera();
+    if (!graph || !camera)
       return;
-    getSettings().physics.mouseGravityEnabled = false;
-    const node = this.graph.nodes.find((n) => n.id === nodeId);
+    this.deps.setMouseGravityEnabled(false);
+    const node = graph.nodes.find((n) => n.id === nodeId);
     if (!node)
       return;
-    const projected = this.cameraManager.worldToScreen(node);
+    const projected = camera.worldToScreen(node);
     this.dragDepthFromCamera = Math.max(1e-4, projected.depth);
-    this.draggedNodeId = nodeId;
+    this.state.draggedId = nodeId;
     this.pinnedNodes.add(nodeId);
-    try {
-      this.simulation?.setPinnedNodes?.(this.pinnedNodes);
-    } catch {
-    }
-    const underMouse = this.cameraManager.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
+    this.deps.setPinnedNodes(this.pinnedNodes);
+    const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
     this.dragWorldOffset = {
       x: node.x - underMouse.x,
       y: node.y - underMouse.y,
@@ -1154,14 +1047,16 @@ var GraphManager = class {
     return;
   }
   updateDrag(screenX, screenY) {
-    if (!this.graph || !this.cameraManager)
+    const camera = this.deps.getCamera();
+    const graph = this.deps.getGraph();
+    if (!graph || !camera)
       return;
-    if (!this.draggedNodeId)
+    if (!this.state.draggedId)
       return;
-    const node = this.graph.nodes.find((n) => n.id === this.draggedNodeId);
+    const node = graph.nodes.find((n) => n.id === this.state.draggedId);
     if (!node)
       return;
-    const underMouse = this.cameraManager.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
+    const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
     const o = this.dragWorldOffset || { x: 0, y: 0, z: 0 };
     node.x = underMouse.x + o.x;
     node.y = underMouse.y + o.y;
@@ -1169,53 +1064,48 @@ var GraphManager = class {
     node.vx = 0;
     node.vy = 0;
     node.vz = 0;
-    try {
-      this.renderer?.render(this.cameraManager.getState());
-    } catch {
-    }
     return;
   }
   endDrag() {
-    if (!this.draggedNodeId)
+    if (!this.state.draggedId)
       return;
-    this.pinnedNodes.delete(this.draggedNodeId);
-    try {
-      this.simulation?.setPinnedNodes?.(this.pinnedNodes);
-    } catch {
-    }
-    this.draggedNodeId = null;
+    this.pinnedNodes.delete(this.state.draggedId);
+    this.deps.setPinnedNodes(this.pinnedNodes);
+    this.state.draggedId = null;
     this.dragWorldOffset = null;
-    getSettings().physics.mouseGravityEnabled = true;
-    try {
-      this.saveNodePositionsDebounced && this.saveNodePositionsDebounced();
-    } catch {
-    }
+    this.deps.setMouseGravityEnabled(true);
     return;
   }
-  updateZoom(screenX, screenY, delta) {
-    this.cameraManager?.updateZoom(screenX, screenY, delta);
-  }
   startPan(screenX, screenY) {
-    this.isPanning = true;
-    this.cameraManager?.startPan(screenX, screenY);
+    this.state.isPanning = true;
+    this.deps.getCamera()?.startPan(screenX, screenY);
   }
   updatePan(screenX, screenY) {
-    this.cameraManager?.updatePan(screenX, screenY);
+    this.deps.getCamera()?.updatePan(screenX, screenY);
   }
   endPan() {
-    this.isPanning = false;
-    this.cameraManager?.endPan();
+    this.state.isPanning = false;
+    this.deps.getCamera()?.endPan();
   }
   startOrbit(screenX, screenY) {
-    this.isRotating = true;
-    this.cameraManager?.startOrbit(screenX, screenY);
+    this.state.isRotating = true;
+    this.deps.getCamera()?.startOrbit(screenX, screenY);
   }
   updateOrbit(screenX, screenY) {
-    this.cameraManager?.updateOrbit(screenX, screenY);
+    this.deps.getCamera()?.updateOrbit(screenX, screenY);
   }
   endOrbit() {
-    this.isRotating = false;
-    this.cameraManager?.endOrbit();
+    this.state.isRotating = false;
+    this.deps.getCamera()?.endOrbit();
+  }
+  startFollow(nodeId) {
+    this.state.followedId = nodeId;
+  }
+  endFollow() {
+    this.state.followedId = null;
+  }
+  updateZoom(screenX, screenY, delta) {
+    this.deps.getCamera()?.updateZoom(screenX, screenY, delta);
   }
   openNode(screenX, screenY) {
     const node = this.nodeClicked(screenX, screenY);
@@ -1226,167 +1116,16 @@ var GraphManager = class {
   setOnNodeClick(handler) {
     this.openNodeFile = handler;
   }
-  startFollow(nodeId) {
-    this.followedNode = nodeId;
-  }
-  endFollow() {
-    this.followedNode = null;
-  }
-  animationLoop = (timestamp) => {
-    if (!this.lastTime) {
-      this.lastTime = timestamp;
-      this.animationFrame = requestAnimationFrame(this.animationLoop);
-      return;
-    }
-    let dt = (timestamp - this.lastTime) / 1e3;
-    if (dt > 0.05)
-      dt = 0.05;
-    this.lastTime = timestamp;
-    if (this.running && this.simulation)
-      this.simulation.tick(dt);
-    this.checkForHoveredNode();
-    this.updateCursor();
-    try {
-      this.updateCameraAnimation(timestamp);
-    } catch (e) {
-    }
-    if (this.renderer)
-      this.renderer.render(this.cameraManager.getState());
-    this.animationFrame = requestAnimationFrame(this.animationLoop);
-  };
-  checkForHoveredNode() {
-    if (!this.mouseScreenPosition) {
-      this.hoveredNodeId = null;
-      return;
-    }
-    const hit = this.nodeClicked(this.mouseScreenPosition.mouseX, this.mouseScreenPosition.mouseY);
-    this.hoveredNodeId = hit?.id ?? null;
-  }
-  updateCursor() {
-    this.updateCursorState();
-    this.applyCursorStyle();
-  }
-  updateCursorState() {
-    if (this.draggedNodeId || this.isPanning || this.isRotating) {
-      this.cursorState = "Dragging" /* Dragging */;
-    } else if (this.hoveredNodeId) {
-      this.cursorState = "Clickable" /* Clickable */;
-    } else {
-      this.cursorState = "Idle" /* Idle */;
-    }
-  }
-  applyCursorStyle() {
-    if (!this.canvas)
-      return;
-    let css = "default";
-    if (this.cursorState === "Clickable" /* Clickable */)
-      css = "pointer";
-    if (this.cursorState === "Dragging" /* Dragging */)
-      css = "grabbing";
-    if (this.appliedCursorCss === css)
-      return;
-    this.appliedCursorCss = css;
-    this.canvas.style.cursor = css;
-  }
-  resize(width, height) {
-    if (!this.renderer || !this.cameraManager)
-      return;
-    this.renderer.resize(width, height);
-  }
-  resetCamera() {
-    this.cameraManager?.resetCamera();
-  }
-  updateCameraAnimation(now) {
-    return;
-  }
-  async refreshGraph() {
-    this.stopSimulation();
-    this.graph = await buildGraph(this.app);
-    if (!this.graph)
-      return;
-    this.renderer?.setGraph(this.graph);
-    this.simulation = createSimulation(this.graph, this.cameraManager, () => this.mouseScreenPosition);
-    this.buildAdjacencyMap();
-    this.startSimulation();
-    this.renderer?.render(this.cameraManager.getState());
-  }
-  stopSimulation() {
-    if (this.simulation) {
-      try {
-        this.simulation.stop();
-      } catch {
-      }
-      this.simulation = null;
-    }
-  }
-  buildSimulation() {
-  }
-  startSimulation() {
-    if (!this.simulation)
-      return;
-    try {
-      this.simulation.start();
-      this.running = true;
-    } catch {
-    }
-  }
-  filterGraph(graph, showTags = true) {
-    if (showTags)
-      return { nodes: graph.nodes, edges: graph.edges };
-    const tagSet = new Set(graph.nodes.filter((n) => n.type === "tag").map((n) => n.id));
-    const nodes = graph.nodes.filter((n) => !tagSet.has(n.id));
-    const edges = graph.edges.filter((e) => !tagSet.has(e.sourceId) && !tagSet.has(e.targetId));
-    return { nodes, edges };
-  }
-  destroy() {
-    try {
-      this.saveNodePositions();
-    } catch (e) {
-    }
-    try {
-      if (this.previewPollTimer)
-        window.clearInterval(this.previewPollTimer);
-    } catch (e) {
-    }
-    this.previewPollTimer = null;
-    this.renderer?.destroy();
-    this.renderer = null;
-    this.graph = null;
-    if (this.simulation) {
-      try {
-        this.simulation.stop();
-      } catch (e) {
-      }
-      this.simulation = null;
-    }
-    if (this.animationFrame) {
-      try {
-        cancelAnimationFrame(this.animationFrame);
-      } catch (e) {
-      }
-      this.animationFrame = null;
-      this.lastTime = null;
-      this.running = false;
-    }
-    this.openNodeFile = null;
-    if (this.settingsUnregister) {
-      try {
-        this.settingsUnregister();
-      } catch (e) {
-      }
-      this.settingsUnregister = null;
-    }
-    this.inputManager?.destroy();
-    this.inputManager = null;
-  }
   nodeClicked(screenX, screenY) {
-    if (!this.graph || !this.renderer)
+    const graph = this.deps.getGraph();
+    const camera = this.deps.getCamera();
+    if (!graph || !camera)
       return null;
     let closest = null;
     let closestDist = Infinity;
     const hitPadding = 0;
-    for (const node of this.graph.nodes) {
-      const projected = this.cameraManager?.worldToScreen(node);
+    for (const node of graph.nodes) {
+      const projected = camera.worldToScreen(node);
       if (!projected)
         continue;
       const nodeRadius = node.radius;
@@ -1401,26 +1140,98 @@ var GraphManager = class {
     }
     return closest;
   }
-  saveNodePositions() {
-    if (!this.graph)
+  frame() {
+    this.checkIfHovering();
+  }
+  checkIfHovering() {
+    if (!this.state.mouseScreenPosition) {
+      this.state.hoveredId = null;
       return;
+    }
+    const mouse = this.state.mouseScreenPosition;
+    if (!mouse)
+      return null;
+    const hit = this.nodeClicked(mouse.x, mouse.y);
+    this.state.hoveredId = hit?.id ?? null;
+  }
+};
+
+// src/graph/CursorController.ts
+function createCursorController(canvas) {
+  let applied = "default";
+  function apply(css) {
+    if (css === applied)
+      return;
+    applied = css;
+    canvas.style.cursor = css;
+  }
+  function reset() {
+    apply("default");
+  }
+  function grab() {
+    apply("grabbing");
+  }
+  function hover() {
+    apply("pointer");
+  }
+  return {
+    apply,
+    reset
+  };
+}
+
+// src/shared/debounce.ts
+function debounce(fn, wait = 300, immediate = false) {
+  let timeout = null;
+  return (...args) => {
+    const later = () => {
+      timeout = null;
+      if (!immediate)
+        fn(...args);
+    };
+    const callNow = immediate && timeout === null;
+    if (timeout)
+      window.clearTimeout(timeout);
+    timeout = window.setTimeout(later, wait);
+    if (callNow)
+      fn(...args);
+  };
+}
+
+// src/graph/NodePositionStore.ts
+var NodePositionStore = class {
+  deps;
+  saveDebounced;
+  constructor(deps) {
+    this.deps = deps;
+    this.saveDebounced = debounce(() => this.saveNodePositions(), 2e3, true);
+  }
+  saveSoon() {
+    this.saveDebounced();
+  }
+  saveNodePositions() {
     try {
-      const allSaved = getSettings().nodePositions;
-      const vaultId = this.app.vault.getName();
+      const graph = this.deps.getGraph();
+      const app = this.deps.getApp();
+      const vaultId = app.vault.getName();
+      const plugin = this.deps.getPlugin();
+      if (!vaultId || !graph || !app || !plugin)
+        return;
+      const allSaved = plugin.settings.nodePositions || {};
       if (!allSaved[vaultId]) {
         allSaved[vaultId] = {};
       }
       const map = allSaved[vaultId];
-      for (const node of this.graph.nodes) {
+      for (const node of graph.nodes) {
         if (!Number.isFinite(node.x) || !Number.isFinite(node.y))
           continue;
-        if (node.filePath) {
-          map[node.filePath] = { x: node.x, y: node.y };
-        }
+        if (!node.filePath)
+          continue;
+        map[node.filePath] = { x: node.x, y: node.y, z: node.z };
       }
-      this.plugin.settings.nodePositions = allSaved;
+      plugin.settings.nodePositions = allSaved;
       try {
-        this.plugin.saveSettings && this.plugin.saveSettings();
+        plugin.saveSettings && plugin.saveSettings();
       } catch (e) {
         console.error("Failed to save node positions", e);
       }
@@ -1430,54 +1241,196 @@ var GraphManager = class {
   }
 };
 
-// src/plugin/GraphView.ts
-var GRAPH_PLUS_TYPE = "graph-plus";
-var GraphView = class extends import_obsidian.ItemView {
-  graphManager = null;
+// src/graph/GraphController.ts
+var GraphController = class {
+  app;
+  containerEl;
   plugin;
-  scheduleGraphRefresh = null;
-  constructor(leaf, plugin) {
-    super(leaf);
+  running = false;
+  canvas = null;
+  renderer = null;
+  adjacencyMap = null;
+  simulation = null;
+  animationFrame = null;
+  lastTime = null;
+  previewPollTimer = null;
+  inputManager = null;
+  camera = null;
+  settingsUnregister = null;
+  interactor = null;
+  positioner = null;
+  graph = null;
+  cursor = null;
+  nodePositionStore = null;
+  constructor(app, containerEl, plugin) {
+    this.app = app;
+    this.containerEl = containerEl;
     this.plugin = plugin;
+    const settings = getSettings();
+    this.camera = new CameraController(settings.camera.state);
+    this.camera.setWorldTransform(null);
   }
-  getViewType() {
-    return GRAPH_PLUS_TYPE;
-  }
-  getDisplayText() {
-    return "graph+";
-  }
-  getIcon() {
-    return "dot-network";
-  }
-  async onOpen() {
-    this.containerEl.empty();
-    const container = this.containerEl.createDiv({ cls: "graph+" });
-    this.graphManager = new GraphManager(this.app, container, this.plugin);
-    await this.graphManager.init();
-    if (this.graphManager) {
-      this.graphManager.setOnNodeClick((node) => this.openNodeFile(node));
-    }
-    if (!this.scheduleGraphRefresh) {
-      this.scheduleGraphRefresh = debounce(() => {
-        try {
-          this.graphManager?.refreshGraph();
-        } catch (e) {
-          console.error("Greater Graph: refreshGraph error", e);
-        }
-      }, 200, true);
-    }
-    this.registerEvent(this.app.vault.on("create", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
-    this.registerEvent(this.app.vault.on("delete", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
-    this.registerEvent(this.app.vault.on("rename", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
-  }
-  onResize() {
+  async init() {
+    this.canvas = document.createElement("canvas");
+    this.canvas.style.width = "100%";
+    this.canvas.style.height = "100%";
+    this.canvas.tabIndex = 0;
+    const deps = {
+      getGraph: () => this.graph,
+      getCamera: () => this.camera,
+      getApp: () => this.app,
+      getPlugin: () => this.plugin,
+      setPinnedNodes: (ids) => {
+        this.simulation?.setPinnedNodes?.(ids);
+      },
+      setMouseGravityEnabled: (on) => {
+        getSettings().physics.mouseGravityEnabled = on;
+      }
+    };
+    this.interactor = new GraphInteractor(deps);
+    this.positioner = new NodePositionStore(deps);
+    this.nodePositionStore = new NodePositionStore(deps);
+    this.cursor = createCursorController(this.canvas);
+    this.renderer = createRenderer(this.canvas, this.camera);
+    if (!this.canvas || !this.interactor || !this.renderer)
+      return;
+    this.interactor.setOnNodeClick((node) => this.openNodeFile(node));
     const rect = this.containerEl.getBoundingClientRect();
-    this.graphManager?.resize(rect.width, rect.height);
+    this.renderer.resize(rect.width, rect.height);
+    this.containerEl.appendChild(this.canvas);
+    this.inputManager = new InputManager(this.canvas, {
+      onOrbitStart: (dx, dy) => this.interactor.startOrbit(dx, dy),
+      onOrbitMove: (dx, dy) => this.interactor.updateOrbit(dx, dy),
+      onOrbitEnd: () => this.interactor.endOrbit(),
+      onPanStart: (screenX, screenY) => this.interactor.startPan(screenX, screenY),
+      onPanMove: (screenX, screenY) => this.interactor.updatePan(screenX, screenY),
+      onPanEnd: () => this.interactor.endPan(),
+      onOpenNode: (screenX, screenY) => this.interactor.openNode(screenX, screenY),
+      onMouseMove: (screenX, screenY) => this.interactor.updateMouse(screenX, screenY),
+      onDragStart: (nodeId, screenX, screenY) => this.interactor.startDrag(nodeId, screenX, screenY),
+      onDragMove: (screenX, screenY) => this.interactor.updateDrag(screenX, screenY),
+      onDragEnd: () => this.interactor.endDrag(),
+      onZoom: (x, y, delta) => this.interactor.updateZoom(x, y, delta),
+      onFollowStart: (nodeId) => this.interactor.startFollow(nodeId),
+      onFollowEnd: () => this.interactor.endFollow(),
+      resetCamera: () => this.camera.resetCamera(),
+      detectClickedNode: (screenX, screenY) => {
+        return this.interactor.nodeClicked(screenX, screenY);
+      }
+    });
+    this.buildAdjacencyMap();
+    await this.refreshGraph();
+    if (!this.graph)
+      return;
+    this.resetCamera();
+    this.lastTime = null;
+    this.animationFrame = requestAnimationFrame(this.animationLoop);
   }
-  async onClose() {
-    this.graphManager?.destroy();
-    this.graphManager = null;
-    this.containerEl.empty();
+  async refreshGraph() {
+    this.stopSimulation();
+    this.graph = await buildGraph(this.app);
+    const interactor = this.interactor;
+    const renderer = this.renderer;
+    const graph = this.graph;
+    const camera = this.camera;
+    if (!interactor || !renderer || !graph || !camera)
+      return;
+    renderer?.setGraph(graph);
+    this.simulation = createSimulation(graph, camera, () => interactor.getMouseScreenPosition());
+    const simulation = this.simulation;
+    this.buildAdjacencyMap();
+    this.startSimulation();
+    renderer?.render(camera.getState());
+  }
+  animationLoop = (timestamp) => {
+    if (!this.lastTime) {
+      this.lastTime = timestamp;
+      this.animationFrame = requestAnimationFrame(this.animationLoop);
+      return;
+    }
+    let dt = (timestamp - this.lastTime) / 1e3;
+    if (dt > 0.05)
+      dt = 0.05;
+    this.lastTime = timestamp;
+    if (this.running && this.simulation)
+      this.simulation.tick(dt);
+    const cursor = this.cursor;
+    const interactor = this.interactor;
+    const renderer = this.renderer;
+    const camera = this.camera;
+    if (!camera || !cursor || !interactor || !renderer)
+      return;
+    interactor.frame();
+    const cursorType = interactor.cursorType;
+    cursor.apply(cursorType);
+    this.updateCameraAnimation(timestamp);
+    if (renderer)
+      renderer.render(camera.getState());
+    this.animationFrame = requestAnimationFrame(this.animationLoop);
+  };
+  destroy() {
+    this.positioner.saveNodePositions();
+    if (this.previewPollTimer)
+      window.clearInterval(this.previewPollTimer);
+    this.previewPollTimer = null;
+    this.renderer?.destroy();
+    this.renderer = null;
+    this.interactor = null;
+    if (this.simulation) {
+      this.simulation.stop();
+      this.simulation = null;
+    }
+    if (this.animationFrame) {
+      cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = null;
+      this.lastTime = null;
+      this.running = false;
+    }
+    if (this.settingsUnregister) {
+      this.settingsUnregister();
+      this.settingsUnregister = null;
+    }
+    this.inputManager?.destroy();
+    this.inputManager = null;
+  }
+  buildAdjacencyMap() {
+    const adjacency = /* @__PURE__ */ new Map();
+    if (this.graph && this.graph.edges) {
+      for (const e of this.graph.edges) {
+        if (!adjacency.has(e.sourceId))
+          adjacency.set(e.sourceId, []);
+        if (!adjacency.has(e.targetId))
+          adjacency.set(e.targetId, []);
+        adjacency.get(e.sourceId).push(e.targetId);
+        adjacency.get(e.targetId).push(e.sourceId);
+      }
+    }
+    this.adjacencyMap = adjacency;
+  }
+  resize(width, height) {
+    if (!this.renderer || !this.camera)
+      return;
+    this.renderer.resize(width, height);
+  }
+  resetCamera() {
+    this.camera?.resetCamera();
+  }
+  updateCameraAnimation(now) {
+    return;
+  }
+  stopSimulation() {
+    if (this.simulation) {
+      this.simulation.stop();
+      this.simulation = null;
+    }
+  }
+  buildSimulation() {
+  }
+  startSimulation() {
+    if (!this.simulation)
+      return;
+    this.simulation.start();
+    this.running = true;
   }
   async openNodeFile(node) {
     if (!node)
@@ -1502,10 +1455,67 @@ var GraphView = class extends import_obsidian.ItemView {
       console.error("Greater Graph: failed to open file", e);
     }
   }
+  filterGraph(graph, showTags = true) {
+    if (showTags)
+      return { nodes: graph.nodes, edges: graph.edges };
+    const tagSet = new Set(graph.nodes.filter((n) => n.type === "tag").map((n) => n.id));
+    const nodes = graph.nodes.filter((n) => !tagSet.has(n.id));
+    const edges = graph.edges.filter((e) => !tagSet.has(e.sourceId) && !tagSet.has(e.targetId));
+    return { nodes, edges };
+  }
+};
+
+// src/plugin/GraphView.ts
+var GRAPH_PLUS_TYPE = "graph-plus";
+var GraphView = class extends import_obsidian2.ItemView {
+  graph = null;
+  plugin;
+  GraphInteractor = null;
+  scheduleGraphRefresh = null;
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+  }
+  getViewType() {
+    return GRAPH_PLUS_TYPE;
+  }
+  getDisplayText() {
+    return "graph+";
+  }
+  getIcon() {
+    return "dot-network";
+  }
+  async onOpen() {
+    this.containerEl.empty();
+    const container = this.containerEl.createDiv({ cls: "graph+" });
+    this.graph = new GraphController(this.app, container, this.plugin);
+    await this.graph.init();
+    if (!this.scheduleGraphRefresh) {
+      this.scheduleGraphRefresh = debounce(() => {
+        try {
+          this.graph?.refreshGraph();
+        } catch (e) {
+          console.error("Greater Graph: refreshGraph error", e);
+        }
+      }, 200, true);
+    }
+    this.registerEvent(this.app.vault.on("create", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
+    this.registerEvent(this.app.vault.on("delete", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
+    this.registerEvent(this.app.vault.on("rename", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
+  }
+  onResize() {
+    const rect = this.containerEl.getBoundingClientRect();
+    this.graph?.resize(rect.width, rect.height);
+  }
+  async onClose() {
+    this.graph?.destroy();
+    this.graph = null;
+    this.containerEl.empty();
+  }
 };
 
 // src/plugin/SettingsTab.ts
-var import_obsidian2 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 
 // src/settings/defaultSettings.ts
 var DEFAULT_SETTINGS = {
@@ -1579,7 +1589,7 @@ var DEFAULT_SETTINGS = {
 };
 
 // src/plugin/SettingsTab.ts
-var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
+var GraphPlusSettingTab = class extends import_obsidian3.PluginSettingTab {
   plugin;
   constructor(app, plugin) {
     super(app, plugin);
@@ -1591,7 +1601,7 @@ var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
     containerEl.empty();
     containerEl.createEl("h2", { text: "Graph Settings" });
     const addSliderSetting = (parent, opts) => {
-      const s = new import_obsidian2.Setting(parent).setName(opts.name).setDesc(opts.desc || "");
+      const s = new import_obsidian3.Setting(parent).setName(opts.name).setDesc(opts.desc || "");
       const wrap = document.createElement("div");
       wrap.style.display = "flex";
       wrap.style.alignItems = "center";
@@ -1744,7 +1754,7 @@ var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
     });
     containerEl.createEl("h2", { text: "Color Settings" });
     {
-      const s = new import_obsidian2.Setting(containerEl).setName("Node color (override)").setDesc("Optional color to override the theme accent for node fill. Leave unset to use the active theme.");
+      const s = new import_obsidian3.Setting(containerEl).setName("Node color (override)").setDesc("Optional color to override the theme accent for node fill. Leave unset to use the active theme.");
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
@@ -1799,7 +1809,7 @@ var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
       s.controlEl.appendChild(alphaInput);
     }
     {
-      const s = new import_obsidian2.Setting(containerEl).setName("Edge color (override)").setDesc("Optional color to override edge stroke color. Leave unset to use a theme-appropriate color.");
+      const s = new import_obsidian3.Setting(containerEl).setName("Edge color (override)").setDesc("Optional color to override edge stroke color. Leave unset to use a theme-appropriate color.");
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
@@ -1854,7 +1864,7 @@ var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
       s.controlEl.appendChild(edgeAlpha);
     }
     {
-      const s = new import_obsidian2.Setting(containerEl).setName("Tag color (override)").setDesc("Optional color to override tag node color. Leave unset to use the active theme.");
+      const s = new import_obsidian3.Setting(containerEl).setName("Tag color (override)").setDesc("Optional color to override tag node color. Leave unset to use the active theme.");
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
@@ -1909,7 +1919,7 @@ var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
       s.controlEl.appendChild(tagAlpha);
     }
     {
-      const s = new import_obsidian2.Setting(containerEl).setName("Label color (override)").setDesc("Optional color to override the label text color. Leave unset to use the active theme.");
+      const s = new import_obsidian3.Setting(containerEl).setName("Label color (override)").setDesc("Optional color to override the label text color. Leave unset to use the active theme.");
       const colorInput = document.createElement("input");
       colorInput.type = "color";
       try {
@@ -1962,7 +1972,7 @@ var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
       s.controlEl.appendChild(hint);
       s.controlEl.appendChild(labelAlpha);
     }
-    new import_obsidian2.Setting(containerEl).setName("Use interface font for labels").setDesc("When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.").addToggle((t) => t.setValue(Boolean(settings.graph.useInterfaceFont)).onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName("Use interface font for labels").setDesc("When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.").addToggle((t) => t.setValue(Boolean(settings.graph.useInterfaceFont)).onChange(async (v) => {
       this.applySettings((s) => {
         s.graph.useInterfaceFont = v;
       });
@@ -2088,17 +2098,17 @@ var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       }
     });
-    new import_obsidian2.Setting(containerEl).setName("Count duplicate links").setDesc("If enabled, multiple links between the same two files will be counted when computing in/out degrees.").addToggle((t) => t.setValue(Boolean(settings.graph.countDuplicateLinks)).onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName("Count duplicate links").setDesc("If enabled, multiple links between the same two files will be counted when computing in/out degrees.").addToggle((t) => t.setValue(Boolean(settings.graph.countDuplicateLinks)).onChange(async (v) => {
       this.applySettings((s) => {
         s.graph.countDuplicateLinks = Boolean(v);
       });
     }));
-    new import_obsidian2.Setting(containerEl).setName("Double-line mutual links").setDesc("When enabled, mutual links (A \u2194 B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.").addToggle((t) => t.setValue(Boolean(settings.graph.drawDoubleLines)).onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName("Double-line mutual links").setDesc("When enabled, mutual links (A \u2194 B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.").addToggle((t) => t.setValue(Boolean(settings.graph.drawDoubleLines)).onChange(async (v) => {
       this.applySettings((s) => {
         s.graph.drawDoubleLines = Boolean(v);
       });
     }));
-    new import_obsidian2.Setting(containerEl).setName("Show tag nodes").setDesc("Toggle visibility of tag nodes and their edges in the graph.").addToggle((t) => t.setValue(settings.graph.showTags !== false).onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName("Show tag nodes").setDesc("Toggle visibility of tag nodes and their edges in the graph.").addToggle((t) => t.setValue(settings.graph.showTags !== false).onChange(async (v) => {
       this.applySettings((s) => {
         s.graph.showTags = Boolean(v);
       });
@@ -2145,23 +2155,23 @@ var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       }
     });
-    new import_obsidian2.Setting(containerEl).setName("Mouse gravity").setDesc("Enable the mouse gravity well that attracts nearby nodes.").addToggle((t) => t.setValue(Boolean(settings.physics.mouseGravityEnabled !== false)).onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName("Mouse gravity").setDesc("Enable the mouse gravity well that attracts nearby nodes.").addToggle((t) => t.setValue(Boolean(settings.physics.mouseGravityEnabled !== false)).onChange(async (v) => {
       this.applySettings((s) => {
         s.physics.mouseGravityEnabled = Boolean(v);
       });
     }));
     containerEl.createEl("h2", { text: "Center Node" });
-    new import_obsidian2.Setting(containerEl).setName("Use pinned center note").setDesc("Prefer a specific note path as the graph center. Falls back to max in-links if not found.").addToggle((t) => t.setValue(Boolean(settings.graph.useCenterNote)).onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName("Use pinned center note").setDesc("Prefer a specific note path as the graph center. Falls back to max in-links if not found.").addToggle((t) => t.setValue(Boolean(settings.graph.useCenterNote)).onChange(async (v) => {
       this.applySettings((s) => {
         s.graph.useCenterNote = Boolean(v);
       });
     }));
-    new import_obsidian2.Setting(containerEl).setName("Pinned center note path").setDesc('e.g., "Home.md" or "Notes/Home" (vault-relative).').addText((txt) => txt.setPlaceholder("path/to/note").setValue(settings.graph.centerNoteTitle || "").onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName("Pinned center note path").setDesc('e.g., "Home.md" or "Notes/Home" (vault-relative).').addText((txt) => txt.setPlaceholder("path/to/note").setValue(settings.graph.centerNoteTitle || "").onChange(async (v) => {
       this.applySettings((s) => {
         s.graph.centerNoteTitle = (v || "").trim();
       });
     }));
-    new import_obsidian2.Setting(containerEl).setName("Fallback: prefer out-links").setDesc("When picking a center by link count, prefer out-links (out-degree) instead of in-links (in-degree)").addToggle((t) => t.setValue(Boolean(settings.graph.useOutlinkFallback)).onChange(async (v) => {
+    new import_obsidian3.Setting(containerEl).setName("Fallback: prefer out-links").setDesc("When picking a center by link count, prefer out-links (out-degree) instead of in-links (in-degree)").addToggle((t) => t.setValue(Boolean(settings.graph.useOutlinkFallback)).onChange(async (v) => {
       this.applySettings((s) => {
         s.graph.useOutlinkFallback = Boolean(v);
       });
@@ -2174,7 +2184,7 @@ var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
 };
 
 // src/plugin/main.ts
-var GraphPlus = class extends import_obsidian3.Plugin {
+var GraphPlus = class extends import_obsidian4.Plugin {
   settings;
   async onload() {
     initSettings({ ...DEFAULT_SETTINGS });

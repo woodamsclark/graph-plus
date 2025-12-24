@@ -146,7 +146,7 @@ export interface InputManagerCallbacks {
     onFollowEnd         ()                                                : void;
     resetCamera         ()                                                : void;
     // Node Interaction
-    onHover             (screenX: number, screenY: number)                : void;
+    onMouseMove             (screenX: number, screenY: number)                : void;
     onOpenNode          (screenX: number, screenY: number)                : void;
     // Node Dragging 
     onDragStart         (nodeId: string, screenX: number, screenY: number): void;

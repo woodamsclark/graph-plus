@@ -1,14 +1,15 @@
-import { App, ItemView, WorkspaceLeaf, Plugin, TFile, Platform } from 'obsidian';
-import { GraphManager } from '../graph/GraphManager.ts';
+import { ItemView, WorkspaceLeaf, Plugin } from 'obsidian';
+import { GraphController } from '../graph/GraphController.ts';
 import { debounce } from '../shared/debounce.ts';
-import { GraphNode } from '../shared/interfaces.ts';
 import GraphPlus from './main.ts';
+import { GraphInteractor } from '../graph/GraphInteractor.ts';
 
 export const GRAPH_PLUS_TYPE = 'graph-plus';
 
 export class GraphView extends ItemView {
-  private graphManager        : GraphManager | null = null;
+  private graph               : GraphController | null = null;
   private plugin              : GraphPlus;
+  private GraphInteractor     : GraphInteractor | null = null;
   private scheduleGraphRefresh: (() => void) | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: Plugin) {
@@ -31,16 +32,14 @@ export class GraphView extends ItemView {
   async onOpen() {
     this.containerEl.empty();
     const container       = this.containerEl.createDiv({ cls: 'graph+' });
-    this.graphManager     = new GraphManager(this.app, container, this.plugin);
-    await this.graphManager.init();
-    if (this.graphManager) {
-      this.graphManager.setOnNodeClick((node) => this.openNodeFile(node));
-    }
+    this.graph     = new GraphController(this.app, container, this.plugin);
+    await this.graph.init();
+    
     // Debounced refresh to avoid thrashing on vault events
     if (!this.scheduleGraphRefresh) {
       this.scheduleGraphRefresh = debounce(() => {
         try {
-          this.graphManager?.refreshGraph();
+          this.graph?.refreshGraph();
         } catch (e) {
           // eslint-disable-next-line no-console
           console.error('Greater Graph: refreshGraph error', e);
@@ -60,34 +59,13 @@ export class GraphView extends ItemView {
 
   onResize() {
     const rect = this.containerEl.getBoundingClientRect();
-    this.graphManager?.resize(rect.width, rect.height);
+    this.graph?.resize(rect.width, rect.height);
   }
 
   async onClose() {
     // save node positions?
-    this.graphManager?.destroy();
-    this.graphManager = null;
+    this.graph?.destroy();
+    this.graph = null;
     this.containerEl.empty();
-  }
-
-  private async openNodeFile(node: GraphNode): Promise<void> {
-    if (!node) return;
-    const app                     = this.app;
-    let file: TFile | null        = null;
-    if (node.file) file  = node.file as TFile;
-    else if (node.filePath) {
-      const af = app.vault.getAbstractFileByPath(node.filePath);
-      if (af instanceof TFile) file = af;
-    }
-    if (!file) {
-      console.warn('Greater Graph: could not resolve file for node', node);
-      return;
-    }
-    const leaf = app.workspace.getLeaf(false);
-    try {
-      await leaf.openFile(file);
-    } catch (e) {
-      console.error('Greater Graph: failed to open file', e);
-    } 
   }
 }

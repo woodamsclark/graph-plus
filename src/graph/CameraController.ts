@@ -6,7 +6,7 @@ const MAX_DISTANCE = 5000;
 const MIN_PITCH    = -Math.PI / 2 + 0.05;
 const MAX_PITCH    =  Math.PI / 2 - 0.05;
 
-export class CameraManager {
+export class CameraController {
   private cameraSettings  : CameraSettings;
   private cameraState     : CameraState;
   //private renderer       : Renderer;

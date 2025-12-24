@@ -1,8 +1,8 @@
-import { CameraManager } from './CameraManager.ts';
+import { CameraController } from './CameraController.ts';
 import { GraphNode, GraphData, PhysicsSettings, Simulation } from '../shared/interfaces.ts';
 import { getSettings } from '../settings/settingsStore.ts';
 
-export function createSimulation(graph: GraphData, camera : CameraManager, getMousePos: () => { mouseX: number, mouseY: number } | null) : Simulation{
+export function createSimulation(graph: GraphData, camera : CameraController, getMousePos: () => { x: number, y: number } | null) : Simulation{
   // If center not provided, compute bounding-box center from node positions
   let centerNode: GraphNode | null  = null;
   if(graph.centerNode)  {centerNode = graph.centerNode;}
@@ -25,7 +25,7 @@ export function createSimulation(graph: GraphData, camera : CameraManager, getMo
 
     const mousePos = getMousePos(); 
     if (!mousePos) return;
-    const { mouseX: mouseX, mouseY: mouseY } = mousePos;
+    const { x: mouseX, y: mouseY } = mousePos;
 
     // Radius in pixels on screen
     const radius    = settings.physics.mouseGravityRadius; 

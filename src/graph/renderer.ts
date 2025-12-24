@@ -1,9 +1,9 @@
 // renderer.ts
 import { Renderer, GraphData, CameraState, GraphNode, GraphEdge } from '../shared/interfaces.ts';
 import { getSettings } from '../settings/settingsStore.ts';
-import { CameraManager } from './CameraManager.ts';
+import { CameraController } from './CameraController.ts';
 
-export function createRenderer( canvas: HTMLCanvasElement, cameraManager: CameraManager): Renderer {
+export function createRenderer( canvas: HTMLCanvasElement, cameraManager: CameraController): Renderer {
   const context   = canvas.getContext('2d');
   const settings  = getSettings();
 

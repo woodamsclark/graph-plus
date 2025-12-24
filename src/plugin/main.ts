@@ -1,4 +1,4 @@
-import { App, Plugin } from 'obsidian';
+import { Plugin } from 'obsidian';
 import { GraphView, GRAPH_PLUS_TYPE } from './GraphView.ts';
 import { initSettings, getSettings } from '../settings/settingsStore.ts';
 import { GraphPlusSettingTab } from './SettingsTab.ts';
