@@ -1,8 +1,8 @@
 import { App, PluginSettingTab, Setting, TextComponent, ToggleComponent } from 'obsidian';
 import GraphPlus from './main.ts';
-import { getSettings, updateSettings } from './utilities/settingsStore.ts';
-import { GraphPlusSettings } from './utilities/interfaces.ts';
-import { DEFAULT_SETTINGS } from './utilities/defaultSettings.ts';
+import { getSettings, updateSettings } from '../settings/settingsStore.ts';
+import { GraphPlusSettings } from '../shared/interfaces.ts';
+import { DEFAULT_SETTINGS } from '../settings/defaultSettings.ts';
 
 declare module 'obsidian' {
   interface Setting {

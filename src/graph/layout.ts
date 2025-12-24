@@ -1,5 +1,5 @@
-import { GraphData, GraphNode, LayoutMode} from '../utilities/interfaces.ts';
-import { getSettings } from '../utilities/settingsStore.ts';
+import { GraphData, GraphNode } from '../shared/interfaces.ts';
+import { getSettings } from '../settings/settingsStore.ts';
 
 // This is currently unused
 // but likely could be useful for initial graph layout
@@ -166,6 +166,4 @@ export interface Simulation {
   tick(dt: number)                  : void;
   reset()                           : void;
   setPinnedNodes?(ids: Set<string>) : void;
-
-  setLayoutMode?(mode: LayoutMode)  : void;
 }

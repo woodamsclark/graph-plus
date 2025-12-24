@@ -1,6 +1,6 @@
-import { CameraManager } from '../CameraManager.ts';
-import { GraphNode, GraphData, PhysicsSettings, Simulation } from '../utilities/interfaces.ts';
-import { getSettings } from '../utilities/settingsStore.ts';
+import { CameraManager } from './CameraManager.ts';
+import { GraphNode, GraphData, PhysicsSettings, Simulation } from '../shared/interfaces.ts';
+import { getSettings } from '../settings/settingsStore.ts';
 
 export function createSimulation(graph: GraphData, camera : CameraManager, getMousePos: () => { mouseX: number, mouseY: number } | null) : Simulation{
   // If center not provided, compute bounding-box center from node positions

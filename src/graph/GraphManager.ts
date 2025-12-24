@@ -2,12 +2,12 @@ import { App, Plugin, Platform } from 'obsidian';
 import { buildGraph } from './buildGraph.ts';
 import { createRenderer } from './renderer.ts';
 import { createSimulation } from './simulation.ts';
-import { debounce } from '../utilities/debounce.ts';
-import { Renderer, GraphNode, GraphData, Simulation, WorldTransform } from '../utilities/interfaces.ts';
+import { debounce } from '../shared/debounce.ts';
+import { Renderer, GraphNode, GraphData, Simulation, WorldTransform } from '../shared/interfaces.ts';
 import { InputManager } from './InputManager.ts';
-import { getSettings } from '../utilities/settingsStore.ts';
-import { CameraManager } from '../CameraManager.ts';
-import type GraphPlus from '../main.ts';
+import { getSettings } from '../settings/settingsStore.ts';
+import { CameraManager } from './CameraManager.ts';
+import type GraphPlus from '../plugin/main.ts';
 
 enum CursorState {
   Idle = "Idle",
@@ -35,7 +35,6 @@ export class GraphManager {
   private cameraManager               : CameraManager                       | null  = null;
   private openNodeFile                : ((node: any) => void)               | null  = null;
   private settingsUnregister          : (() => void)                        | null  = null;
-  private saveNodePositionsDebounced  : (() => void)                        | null  = null;
   private mouseScreenPosition         : { mouseX: number, mouseY: number }  | null  = null;
   private hoveredNodeId               : string                              | null  = null;
   private draggedNodeId               : string                              | null  = null;
@@ -62,23 +61,22 @@ export class GraphManager {
 
   async init(): Promise<void> {
     const settings                  = getSettings();
-    const vaultId                   = this.app.vault.getName();
     this.canvas                     = document.createElement('canvas');
     this.canvas.style.width         = '100%';
     this.canvas.style.height        = '100%';
     this.canvas.tabIndex            = 0;
 
-    this.cameraManager        = new CameraManager(settings.camera.state);
+    this.cameraManager              = new CameraManager(settings.camera.state);
     this.cameraManager.setWorldTransform(null);
 
-    this.renderer             = createRenderer(this.canvas, this.cameraManager);
+    this.renderer                   = createRenderer(this.canvas, this.cameraManager);
     // (This is critical because CameraManager needs the viewport center to project correctly)
-    const rect                = this.containerEl.getBoundingClientRect();
+    const rect                      = this.containerEl.getBoundingClientRect();
     this.renderer.resize(rect.width, rect.height);
 
     this.containerEl.appendChild(this.canvas);
 
-    this.inputManager         = new InputManager(this.canvas, {
+    this.inputManager                                   = new InputManager(this.canvas, {
       onOrbitStart      : (dx, dy)                    => this.startOrbit(dx, dy),
       onOrbitMove       : (dx, dy)                    => this.updateOrbit(dx, dy),
       onOrbitEnd        : ()                          => this.endOrbit(),
@@ -98,36 +96,8 @@ export class GraphManager {
     });
 
 
-    const rawSaved    : any = settings.nodePositions || {};
-    let allSaved      : Record<string, Record<string, { x: number; y: number }>> = {};
-    let savedPositions: Record<string,                { x: number; y: number }> = {};
-    
-    if (rawSaved && typeof rawSaved === 'object') {
-      if (rawSaved[vaultId] && typeof rawSaved[vaultId] === 'object') {
-        // already per-vault
-        allSaved       = rawSaved as any;
-        savedPositions = allSaved[vaultId] || {};
-      } else {
-        // legacy flat map: treat rawSaved as the vault map and migrate
-        const hasPathLikeKeys = Object.keys(rawSaved).some((k) => typeof k === 'string' && (k.includes('/') || k.startsWith('tag:') || k.endsWith('.md')));
-        if (hasPathLikeKeys) {
-          // use flat map as savedPositions for this session
-          savedPositions = rawSaved as Record<string, { x: number; y: number }>;
-          // also migrate into per-vault shape so future saves are consistent
-          allSaved = {} as any;
-          allSaved[vaultId] = Object.assign({}, rawSaved);
-          try {
-            this.plugin.settings.nodePositions = allSaved;
-            // persist migrated shape (best-effort)
-            try { this.plugin.saveSettings && this.plugin.saveSettings(); } catch (e) {}
-          } catch (e) {}
-        } else {
-          // empty or unexpected shape: treat as empty
-          allSaved = {} as any;
-          savedPositions = {};
-        }
-      }
-    }
+    const rawSaved    : any                                                       = settings.nodePositions || {};
+    let allSaved      : Record<string, Record<string, { x: number; y: number }>>  = {};
 
     this.buildAdjacencyMap();
     this.refreshGraph();
@@ -135,11 +105,6 @@ export class GraphManager {
 
     this.lastTime         = null;
     this.animationFrame   = requestAnimationFrame(this.animationLoop);
-
-    // setup debounced saver for node positions
-    if (!this.saveNodePositionsDebounced) {
-      this.saveNodePositionsDebounced = debounce(() => this.saveNodePositions(), 2000, true);
-    }
   }
 
   private buildAdjacencyMap(){
@@ -169,6 +134,8 @@ export class GraphManager {
 
   public startDrag (nodeId: string, screenX: number, screenY: number) {
     if (!this.graph || !this.cameraManager) return;
+
+    getSettings().physics.mouseGravityEnabled = false;
 
     const node = this.graph.nodes.find(n => n.id === nodeId);
     if (!node) return;
@@ -220,12 +187,11 @@ export class GraphManager {
     this.pinnedNodes.delete(this.draggedNodeId);
     try { this.simulation?.setPinnedNodes?.(this.pinnedNodes); } catch {}
 
-    this.draggedNodeId = null;
-    this.dragWorldOffset = null;
+    this.draggedNodeId                        = null;
+    this.dragWorldOffset                      = null;
+    getSettings().physics.mouseGravityEnabled = true;
 
-    // Save soon after drag ends
-    try { this.saveNodePositionsDebounced && this.saveNodePositionsDebounced(); } catch {}
-      return;
+    return;
   }
 
   public updateZoom (screenX: number, screenY: number, delta: number) {
@@ -398,22 +364,23 @@ export class GraphManager {
     // clear any preview poll timer and lock
     try { if (this.previewPollTimer) window.clearInterval(this.previewPollTimer as number); } catch (e) {}
     this.previewPollTimer         = null;
-    this.renderer?.destroy();
 
-    //if (this.renderer.canvas && this.renderer.canvas.parentElement) this.renderer.canvas.parentElement.removeChild(this.renderer.canvas);
-    //this.renderer.canvas                   = null;
+    this.renderer?.destroy();
     this.renderer                 = null;
     this.graph                    = null;
+    
     if (this.simulation)          { 
       try { this.simulation.stop(); } catch (e) {} 
       this.simulation             = null; 
     }
+
     if (this.animationFrame)      { 
       try { cancelAnimationFrame(this.animationFrame); } catch (e) {} 
       this.animationFrame         = null; 
       this.lastTime               = null; 
       this.running                = false; 
     }
+
     this.openNodeFile             = null;
     if (this.settingsUnregister)  { try { this.settingsUnregister(); } catch (e) {} this.settingsUnregister = null; }
   
@@ -444,22 +411,28 @@ export class GraphManager {
     return closest;
   }
 
+  private saveNodePositionsDebounced(): () => void {
+    return debounce(() => this.saveNodePositions(), 2000, true);
+  } 
+
   private saveNodePositions(): void {
-    // undefined error within here after destroy() called
     if (!this.graph) return;
     try {
       const allSaved        = getSettings().nodePositions;
       const vaultId         = this.app.vault.getName();
+      
       if (!allSaved[vaultId]) {
         allSaved[vaultId]   = {};
       }
-      const map             = allSaved[vaultId];
+
+      const map = allSaved[vaultId];
       for (const node of this.graph.nodes) {
-        if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) continue;
-        if (node.filePath) {
+        if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) 
+          continue;
+        if (node.filePath) 
           map[node.filePath] = { x: node.x, y: node.y };
-        }
       }
+
       this.plugin.settings.nodePositions = allSaved;
       try {
         this.plugin.saveSettings && this.plugin.saveSettings();

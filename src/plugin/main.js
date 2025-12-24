@@ -16,7 +16,7 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// src/plugin/main.ts
+// src/main.ts
 var main_exports = {};
 __export(main_exports, {
   default: () => GraphPlus
@@ -24,10 +24,10 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian3 = require("obsidian");
 
-// src/plugin/GraphView.ts
+// src/GraphView.ts
 var import_obsidian = require("obsidian");
 
-// src/settings/settingsStore.ts
+// src/utilities/settingsStore.ts
 var currentSettings;
 var listeners = /* @__PURE__ */ new Set();
 function initSettings(initial) {
@@ -612,7 +612,7 @@ function createSimulation(graph, camera, getMousePos) {
   return { start, stop, tick, reset, setPinnedNodes };
 }
 
-// src/shared/debounce.ts
+// src/utilities/debounce.ts
 function debounce(fn, wait = 300, immediate = false) {
   let timeout = null;
   return (...args) => {
@@ -773,7 +773,7 @@ var InputManager = class {
   }
 };
 
-// src/graph/CameraManager.ts
+// src/CameraManager.ts
 var MIN_DISTANCE = 100;
 var MAX_DISTANCE = 5e3;
 var MIN_PITCH = -Math.PI / 2 + 0.05;
@@ -1133,7 +1133,6 @@ var GraphManager = class {
   startDrag(nodeId, screenX, screenY) {
     if (!this.graph || !this.cameraManager)
       return;
-    getSettings().physics.mouseGravityEnabled = false;
     const node = this.graph.nodes.find((n) => n.id === nodeId);
     if (!node)
       return;
@@ -1185,7 +1184,6 @@ var GraphManager = class {
     }
     this.draggedNodeId = null;
     this.dragWorldOffset = null;
-    getSettings().physics.mouseGravityEnabled = true;
     try {
       this.saveNodePositionsDebounced && this.saveNodePositionsDebounced();
     } catch {
@@ -1430,7 +1428,7 @@ var GraphManager = class {
   }
 };
 
-// src/plugin/GraphView.ts
+// src/GraphView.ts
 var GRAPH_PLUS_TYPE = "graph-plus";
 var GraphView = class extends import_obsidian.ItemView {
   graphManager = null;
@@ -1504,10 +1502,10 @@ var GraphView = class extends import_obsidian.ItemView {
   }
 };
 
-// src/plugin/SettingsTab.ts
+// src/SettingsTab.ts
 var import_obsidian2 = require("obsidian");
 
-// src/settings/defaultSettings.ts
+// src/utilities/defaultSettings.ts
 var DEFAULT_SETTINGS = {
   graph: {
     minNodeRadius: 3,
@@ -1578,7 +1576,7 @@ var DEFAULT_SETTINGS = {
   // Record<string, {x:number;y:number;z:number}> or whatever your type is
 };
 
-// src/plugin/SettingsTab.ts
+// src/SettingsTab.ts
 var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
   plugin;
   constructor(app, plugin) {
@@ -2173,7 +2171,7 @@ var GraphPlusSettingTab = class extends import_obsidian2.PluginSettingTab {
   }
 };
 
-// src/plugin/main.ts
+// src/main.ts
 var GraphPlus = class extends import_obsidian3.Plugin {
   settings;
   async onload() {

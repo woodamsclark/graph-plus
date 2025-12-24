@@ -1,6 +1,6 @@
 import { App, TFile, CachedMetadata } from 'obsidian';
-import { GraphNode, GraphEdge, GraphData, GraphPlusSettings } from '../utilities/interfaces.ts';
-import { getSettings } from '../utilities/settingsStore.ts';
+import { GraphNode, GraphEdge, GraphData, GraphPlusSettings } from '../shared/interfaces.ts';
+import { getSettings } from '../settings/settingsStore.ts';
 
 interface ResolvedLinks {
   [sourcePath: string]: {

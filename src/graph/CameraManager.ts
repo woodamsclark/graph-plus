@@ -1,5 +1,5 @@
-import type { CameraState, CameraSettings, WorldTransform } from './utilities/interfaces.ts';
-import { getSettings } from './utilities/settingsStore.ts';
+import type { CameraState, CameraSettings, WorldTransform } from '../shared/interfaces.ts';
+import { getSettings } from '../settings/settingsStore.ts';
 
 const MIN_DISTANCE = 100;
 const MAX_DISTANCE = 5000;

@@ -1,9 +1,9 @@
 import { App, Plugin } from 'obsidian';
 import { GraphView, GRAPH_PLUS_TYPE } from './GraphView.ts';
-import { initSettings, getSettings } from './utilities/settingsStore.ts';
+import { initSettings, getSettings } from '../settings/settingsStore.ts';
 import { GraphPlusSettingTab } from './SettingsTab.ts';
-import { DEFAULT_SETTINGS } from './utilities/defaultSettings.ts';
-import { GraphPlusSettings } from './utilities/interfaces.ts';
+import { DEFAULT_SETTINGS } from '../settings/defaultSettings.ts';
+import { GraphPlusSettings } from '../shared/interfaces.ts';
 
 
 export default class GraphPlus extends Plugin {
