@@ -46,34 +46,125 @@ function updateSettings(mutator) {
 }
 
 // src/graph/buildGraph.ts
+var TAG_PREFIX = "tag:";
+function noteIdFromFile(file) {
+  return file.path;
+}
+function tagIdFromName(tagName) {
+  return `${TAG_PREFIX}${tagName}`;
+}
+function normalizeTag(raw) {
+  if (!raw)
+    return null;
+  if (!raw.startsWith("#"))
+    return null;
+  const name = raw.slice(1).trim();
+  return name.length ? name : null;
+}
+function cssSafeJitter(jitter = 50) {
+  return (Math.random() - 0.5) * jitter;
+}
+function addEdgeOnce(edges, edgeSet, sourceId, targetId, linkCount = 1) {
+  const key = `${sourceId}->${targetId}`;
+  if (edgeSet.has(key))
+    return;
+  edges.push({
+    id: key,
+    sourceId,
+    targetId,
+    linkCount,
+    bidirectional: false
+  });
+  edgeSet.add(key);
+}
+function markBidirectionalEdges(edges) {
+  const map = /* @__PURE__ */ new Map();
+  for (const e of edges)
+    map.set(`${e.sourceId}->${e.targetId}`, e);
+  for (const e of edges) {
+    const rev = map.get(`${e.targetId}->${e.sourceId}`);
+    if (rev) {
+      e.bidirectional = true;
+      rev.bidirectional = true;
+    }
+  }
+}
+function computeDegreesAndRadii(nodes, nodeById, edges) {
+  for (const n of nodes) {
+    n.inDegree = 0;
+    n.outDegree = 0;
+    n.totalDegree = 0;
+  }
+  for (const e of edges) {
+    const src = nodeById.get(e.sourceId);
+    const tgt = nodeById.get(e.targetId);
+    if (!src || !tgt)
+      continue;
+    const c = Number(e.linkCount ?? 1) || 1;
+    src.outDegree += c;
+    tgt.inDegree += c;
+  }
+  for (const n of nodes) {
+    n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
+    n.radius = 4 + Math.log2(1 + n.totalDegree);
+  }
+}
+function pickCenterNode(app, nodes) {
+  const settings = getSettings();
+  if (!settings.graph.useCenterNote)
+    return null;
+  const onlyNotes = nodes.filter((n) => n.type === "note");
+  if (!onlyNotes.length)
+    return null;
+  const preferOut = Boolean(settings.graph.useOutlinkFallback);
+  const metric = (n) => (preferOut ? n.outDegree : n.inDegree) || 0;
+  const raw = String(settings.graph.centerNoteTitle || "").trim();
+  if (raw) {
+    try {
+      const mc = app.metadataCache;
+      let dest = null;
+      dest = mc.getFirstLinkpathDest?.(raw, "") ?? null;
+      if (!dest && !raw.endsWith(".md")) {
+        dest = mc.getFirstLinkpathDest?.(raw + ".md", "") ?? null;
+      }
+      if (dest?.path) {
+        const hit = onlyNotes.find((n) => n.filePath === dest.path);
+        if (hit)
+          return hit;
+      }
+      const normB = raw.endsWith(".md") ? raw : raw + ".md";
+      const hit2 = onlyNotes.find((n) => n.filePath === raw || n.filePath === normB);
+      if (hit2)
+        return hit2;
+      const base = raw.endsWith(".md") ? raw.slice(0, -3) : raw;
+      const hit3 = onlyNotes.find((n) => (n.file?.basename ?? n.label) === base);
+      if (hit3)
+        return hit3;
+    } catch {
+    }
+  }
+  let best = onlyNotes[0];
+  for (const n of onlyNotes) {
+    if (metric(n) > metric(best))
+      best = n;
+  }
+  return best ?? null;
+}
 async function buildGraph(app) {
   const settings = getSettings();
   const files = app.vault.getMarkdownFiles();
-  const { nodes, nodeByPath: nodeByID } = createNoteNodes(files);
-  const { edges, edgeSet } = buildNoteEdgesFromResolvedLinks(app, nodeByID);
-  if (settings.graph.showTags !== false) {
-    addTagNodesAndEdges(app, files, nodes, nodeByID, edges, edgeSet);
-  }
-  computeNodeDegrees(nodes, nodeByID, edges);
-  markBidirectionalEdges(edges);
-  const centerNode = pickCenterNode(app, nodes);
-  return { nodes, edges, centerNode };
-}
-function createNoteNodes(files) {
   const nodes = [];
+  const nodeById = /* @__PURE__ */ new Map();
   for (const file of files) {
-    const jitter = 50;
-    const x0 = (Math.random() - 0.5) * jitter;
-    const y0 = (Math.random() - 0.5) * jitter;
-    const z0 = (Math.random() - 0.5) * jitter;
+    const id = noteIdFromFile(file);
     const node = {
-      id: file.path,
+      id,
       filePath: file.path,
       file,
       label: file.basename,
-      x: x0,
-      y: y0,
-      z: z0,
+      x: cssSafeJitter(50),
+      y: cssSafeJitter(50),
+      z: cssSafeJitter(50),
       vx: 0,
       vy: 0,
       vz: 0,
@@ -84,168 +175,81 @@ function createNoteNodes(files) {
       radius: 0
     };
     nodes.push(node);
+    nodeById.set(id, node);
   }
-  const nodeByID = /* @__PURE__ */ new Map();
-  for (const node of nodes)
-    nodeByID.set(node.id, node);
-  return { nodes, nodeByPath: nodeByID };
-}
-function buildNoteEdgesFromResolvedLinks(app, nodeByID) {
-  const settings = getSettings();
-  const resolved = app.metadataCache.resolvedLinks || {};
   const edges = [];
   const edgeSet = /* @__PURE__ */ new Set();
+  const resolved = app.metadataCache.resolvedLinks || {};
   const countDuplicates = Boolean(settings.graph.countDuplicateLinks);
   for (const sourcePath of Object.keys(resolved)) {
     const targets = resolved[sourcePath] || {};
-    for (const targetPath of Object.keys(targets)) {
-      if (!nodeByID.has(sourcePath) || !nodeByID.has(targetPath))
-        continue;
-      const key = `${sourcePath}->${targetPath}`;
-      if (edgeSet.has(key))
-        continue;
-      const rawCount = Number(targets[targetPath] || 1) || 1;
-      const linkCount = countDuplicates ? rawCount : 1;
-      edges.push({
-        id: key,
-        sourceId: sourcePath,
-        targetId: targetPath,
-        linkCount,
-        bidirectional: false
-      });
-      edgeSet.add(key);
-    }
-  }
-  return { edges, edgeSet };
-}
-function computeNodeDegrees(nodes, nodeByID, edges) {
-  for (const edge of edges) {
-    const src = nodeByID.get(edge.sourceId);
-    const tgt = nodeByID.get(edge.targetId);
-    if (!src || !tgt)
+    if (!nodeById.has(sourcePath))
       continue;
-    const c = Number(edge.linkCount || 1) || 1;
-    src.outDegree = (src.outDegree || 0) + c;
-    tgt.inDegree = (tgt.inDegree || 0) + c;
-  }
-  for (const node of nodes) {
-    node.totalDegree = (node.inDegree || 0) + (node.outDegree || 0);
-    node.radius = 4 + Math.log2(1 + node.totalDegree);
-  }
-}
-function markBidirectionalEdges(edges) {
-  const edgeMap = /* @__PURE__ */ new Map();
-  for (const e of edges) {
-    edgeMap.set(`${e.sourceId}->${e.targetId}`, e);
-  }
-  for (const e of edges) {
-    const reverseKey = `${e.targetId}->${e.sourceId}`;
-    if (edgeMap.has(reverseKey)) {
-      e.bidirectional = true;
-      const other = edgeMap.get(reverseKey);
-      other.bidirectional = true;
-    }
-  }
-}
-function addTagNodesAndEdges(app, files, nodes, nodeByPath, edges, edgeSet) {
-  const tagNodeByName = /* @__PURE__ */ new Map();
-  const ensureTagNode = (tagName) => {
-    let node = tagNodeByName.get(tagName);
-    if (node)
-      return node;
-    node = {
-      id: `tag:${tagName}`,
-      label: `#${tagName}`,
-      x: 0,
-      y: 0,
-      z: 0,
-      vx: 0,
-      vy: 0,
-      vz: 0,
-      filePath: `tag:${tagName}`,
-      type: "tag",
-      inDegree: 0,
-      outDegree: 0,
-      totalDegree: 0,
-      radius: 0
-    };
-    nodes.push(node);
-    tagNodeByName.set(tagName, node);
-    nodeByPath.set(node.id, node);
-    return node;
-  };
-}
-function pickCenterNode(app, nodes) {
-  const settings = getSettings();
-  if (!settings.graph.useCenterNote)
-    return null;
-  let centerNode = void 0;
-  if (settings.graph.centerNoteTitle) {
-    centerNode = nodes.find((n) => n.id === settings.graph.centerNoteTitle);
-    if (centerNode !== void 0)
-      return centerNode;
-  }
-  const onlyNotes = nodes.filter((n) => n.type !== "tag");
-  const preferOut = Boolean(settings.graph.useOutlinkFallback);
-  const metric = (n) => preferOut ? n.outDegree || 0 : n.inDegree || 0;
-  const chooseBy = (predicate) => {
-    let best = null;
-    for (const n of onlyNotes) {
-      if (!predicate(n))
+    for (const targetPath of Object.keys(targets)) {
+      if (!nodeById.has(targetPath))
         continue;
-      if (!best || metric(n) > metric(best)) {
-        best = n;
-      }
+      const rawCount = Number(targets[targetPath] ?? 1) || 1;
+      const linkCount = countDuplicates ? rawCount : 1;
+      addEdgeOnce(edges, edgeSet, sourcePath, targetPath, linkCount);
     }
-    return best;
-  };
-  let chosen = null;
-  const raw = String(settings.graph.centerNoteTitle || "").trim();
-  if (raw) {
+  }
+  if (settings.graph.showTags !== false) {
     const mc = app.metadataCache;
-    let resolved = null;
-    try {
-      resolved = mc?.getFirstLinkpathDest?.(raw, "");
-      if (!resolved && !raw.endsWith(".md")) {
-        resolved = mc?.getFirstLinkpathDest?.(raw + ".md", "");
+    const ensureTagNode = (tagName) => {
+      const id = tagIdFromName(tagName);
+      const existing = nodeById.get(id);
+      if (existing)
+        return existing;
+      const n = {
+        id,
+        filePath: id,
+        file: void 0,
+        label: `#${tagName}`,
+        x: 0,
+        y: 0,
+        z: 0,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        type: "tag",
+        inDegree: 0,
+        outDegree: 0,
+        totalDegree: 0,
+        radius: 0
+      };
+      nodes.push(n);
+      nodeById.set(id, n);
+      return n;
+    };
+    for (const file of files) {
+      const noteNodeId = noteIdFromFile(file);
+      if (!nodeById.has(noteNodeId))
+        continue;
+      const cache = mc.getFileCache(file);
+      if (!cache?.tags?.length)
+        continue;
+      for (const entry of cache.tags) {
+        const tagName = normalizeTag(entry.tag);
+        if (!tagName)
+          continue;
+        const tagNode = ensureTagNode(tagName);
+        addEdgeOnce(edges, edgeSet, noteNodeId, tagNode.id, 1);
       }
-    } catch {
-    }
-    if (resolved?.path) {
-      chosen = chooseBy((n) => n.filePath === resolved.path);
-    }
-    if (!chosen) {
-      const normA = raw;
-      const normB = raw.endsWith(".md") ? raw : raw + ".md";
-      chosen = chooseBy((n) => n.filePath === normA || n.filePath === normB);
-    }
-    if (!chosen) {
-      const base = raw.endsWith(".md") ? raw.slice(0, -3) : raw;
-      chosen = chooseBy((n) => {
-        const file = n.file;
-        const bn = file?.basename || n.label;
-        return String(bn) === base;
-      });
     }
   }
-  if (!chosen) {
-    for (const n of onlyNotes) {
-      if (!chosen || metric(n) > metric(chosen)) {
-        chosen = n;
-      }
-    }
-  }
-  return chosen;
+  computeDegreesAndRadii(nodes, nodeById, edges);
+  markBidirectionalEdges(edges);
+  const centerNode = pickCenterNode(app, nodes);
+  return { nodes, edges, centerNode };
 }
 
 // src/graph/renderer.ts
 function createRenderer(canvas, cameraManager) {
   const context = canvas.getContext("2d");
-  const settings = getSettings();
+  let settings = getSettings();
+  let colors = resolveColors();
   let graph = null;
-  const nodeById = /* @__PURE__ */ new Map();
-  let hoveredNodeId = null;
-  let hoverNeighbors = null;
+  let nodeById = /* @__PURE__ */ new Map();
   function resize(width, height) {
     const w = Math.max(1, Math.floor(width));
     const h = Math.max(1, Math.floor(height));
@@ -254,12 +258,14 @@ function createRenderer(canvas, cameraManager) {
     canvas.style.width = "100%";
     canvas.style.height = "100%";
     cameraManager.setViewport(w, h);
-    render(cameraManager.getState());
+    render();
   }
-  function render(_cam) {
+  function render() {
     if (!context)
       return;
-    context.fillStyle = "#202020";
+    settings = getSettings();
+    colors = resolveColors();
+    context.fillStyle = colors.background;
     context.fillRect(0, 0, canvas.width, canvas.height);
     if (!graph)
       return;
@@ -280,10 +286,8 @@ function createRenderer(canvas, cameraManager) {
       return;
     const edges = graph.edges;
     context.save();
-    const edgeColor = settings.graph.edgeColor || "#888888";
-    const edgeAlpha = typeof settings.graph.edgeColorAlpha === "number" ? settings.graph.edgeColorAlpha : 0.3;
-    context.strokeStyle = edgeColor;
-    context.globalAlpha = edgeAlpha;
+    context.strokeStyle = colors.edge;
+    context.globalAlpha = colors.edgeAlpha;
     context.lineWidth = 1;
     context.lineCap = "round";
     for (const edge of edges) {
@@ -309,18 +313,15 @@ function createRenderer(canvas, cameraManager) {
       return;
     const nodes = graph.nodes;
     context.save();
-    const defaultNodeColor = settings.graph.nodeColor || "#66ccff";
-    const tagColor = settings.graph.tagColor || "#8000ff";
+    const nodeColor = colors.node;
+    const tagColor = colors.tag;
     for (const node of nodes) {
       const p = nodeMap.get(node.id);
       if (!p || p.depth < 0)
         continue;
       let radius = node.radius;
-      if (hoveredNodeId && node.id === hoveredNodeId) {
-        radius *= 1.25;
-      }
       const isTag = node.type === "tag";
-      const fillColor = isTag ? tagColor : defaultNodeColor;
+      const fillColor = isTag ? tagColor : nodeColor;
       context.beginPath();
       context.arc(p.x, p.y, radius, 0, Math.PI * 2);
       context.fillStyle = fillColor;
@@ -334,7 +335,7 @@ function createRenderer(canvas, cameraManager) {
       return;
     const nodes = graph.nodes;
     const baseSize = settings.graph.labelBaseFontSize || 12;
-    const labelColor = settings.graph.labelColor || "#dddddd";
+    const labelColor = colors.label;
     context.save();
     context.font = `${baseSize}px sans-serif`;
     context.textAlign = "center";
@@ -350,10 +351,6 @@ function createRenderer(canvas, cameraManager) {
     }
     context.restore();
   }
-  function setHoveredNode(nodeId, neighbors) {
-    hoveredNodeId = nodeId;
-    hoverNeighbors = neighbors ?? null;
-  }
   function setGraph(data) {
     graph = data;
     nodeById.clear();
@@ -362,12 +359,38 @@ function createRenderer(canvas, cameraManager) {
     for (const node of data.nodes) {
       nodeById.set(node.id, node);
     }
+    const counts = data.nodes.reduce(
+      (acc, n) => {
+        acc[n.type] = (acc[n.type] ?? 0) + 1;
+        return acc;
+      },
+      {}
+    );
+    console.log("[GraphPlus] node.type counts:", counts);
+    console.log(
+      "[GraphPlus] first 20 nodes:",
+      data.nodes.slice(0, 20).map((n) => ({ id: n.id, label: n.label, type: n.type }))
+    );
+  }
+  function cssVar(name, fallback) {
+    const v = getComputedStyle(document.body).getPropertyValue(name).trim();
+    return v || fallback;
+  }
+  function resolveColors() {
+    const s = getSettings();
+    return {
+      background: s.graph.backgroundColor ?? cssVar("--background-primary", "#202020"),
+      edge: s.graph.edgeColor ?? cssVar("--text-normal", "#ffffff"),
+      node: s.graph.nodeColor ?? cssVar("--interactive-accent", "#66ccff"),
+      tag: s.graph.tagColor ?? cssVar("--interactive-accent-hover", "#8000ff"),
+      label: s.graph.labelColor ?? cssVar("--text-muted", "#dddddd"),
+      edgeAlpha: typeof s.graph.edgeColorAlpha === "number" ? s.graph.edgeColorAlpha : 0.3
+    };
   }
   const renderer = {
     resize,
     render,
     destroy,
-    setHoveredNode,
     setGraph
   };
   return renderer;
@@ -1340,7 +1363,7 @@ var GraphController = class {
     const simulation = this.simulation;
     this.buildAdjacencyMap();
     this.startSimulation();
-    renderer?.render(camera.getState());
+    renderer?.render();
   }
   animationLoop = (timestamp) => {
     if (!this.lastTime) {
@@ -1365,7 +1388,7 @@ var GraphController = class {
     cursor.apply(cursorType);
     this.updateCameraAnimation(timestamp);
     if (renderer)
-      renderer.render(camera.getState());
+      renderer.render();
     this.animationFrame = requestAnimationFrame(this.animationLoop);
   };
   destroy() {
@@ -1523,18 +1546,18 @@ var DEFAULT_SETTINGS = {
     minNodeRadius: 3,
     maxNodeRadius: 20,
     nodeColor: void 0,
-    // use theme
     tagColor: void 0,
-    labelColor: void 0,
     edgeColor: void 0,
+    backgroundColor: void 0,
     nodeColorAlpha: 0.1,
     tagColorAlpha: 0.1,
+    labelColor: void 0,
+    labelColorAlpha: 1,
     labelBaseFontSize: 24,
     labelFadeRangePx: 8,
-    labelColorAlpha: 1,
     labelRadius: 30,
-    useInterfaceFont: true,
     edgeColorAlpha: 0.1,
+    useInterfaceFont: true,
     countDuplicateLinks: true,
     drawDoubleLines: true,
     showTags: true,

@@ -1,22 +1,23 @@
 // utils/defaultSettings.ts
-import type { GraphPlusSettings } from './interfaces.ts';
+import type { GraphPlusSettings } from '../shared/interfaces.ts';
 
 export const DEFAULT_SETTINGS: GraphPlusSettings = {
   graph: {
     minNodeRadius      : 3,
     maxNodeRadius      : 20,
-    nodeColor          : undefined, // use theme
+    nodeColor          : undefined,
     tagColor           : undefined,
-    labelColor         : undefined,
     edgeColor          : undefined,
+    backgroundColor    : undefined,
     nodeColorAlpha     : 0.1,
     tagColorAlpha      : 0.1,
+    labelColor         : undefined,
+    labelColorAlpha    : 1.0,
     labelBaseFontSize  : 24,
     labelFadeRangePx   : 8,
-    labelColorAlpha    : 1.0,
     labelRadius        : 30,
-    useInterfaceFont   : true,
     edgeColorAlpha     : 0.1,
+    useInterfaceFont   : true,
     countDuplicateLinks: true,
     drawDoubleLines    : true,
     showTags           : true,

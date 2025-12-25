@@ -131,7 +131,7 @@ export class GraphController {
     
     this.buildAdjacencyMap(); // rebuild adjacency map after graph refresh or showTags changes
     this.startSimulation();
-    renderer?.render(camera!.getState());
+    renderer?.render();
   }
 
   private animationLoop = (timestamp: number) => {
@@ -158,7 +158,7 @@ export class GraphController {
     cursor.apply(cursorType);
 
     this.updateCameraAnimation(timestamp); 
-    if (renderer) renderer.render(camera.getState());
+    if (renderer) renderer.render();
 
     this.animationFrame = requestAnimationFrame(this.animationLoop);
   };

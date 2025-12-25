@@ -1,233 +1,255 @@
-import { App, TFile, CachedMetadata } from 'obsidian';
-import { GraphNode, GraphEdge, GraphData, GraphPlusSettings } from '../shared/interfaces.ts';
-import { getSettings } from '../settings/settingsStore.ts';
+import { App, TFile } from "obsidian";
+import type { GraphData, GraphEdge, GraphNode } from "../shared/interfaces.ts";
+import { getSettings } from "../settings/settingsStore.ts";
 
-interface ResolvedLinks {
-  [sourcePath: string]: {
-    [targetPath: string]: number; // number = link count
-  };
+type ResolvedLinks = Record<string, Record<string, number>>;
+
+const NOTE_PREFIX = "";      // note id is file.path
+const TAG_PREFIX  = "tag:";  // tag id is `tag:<tagName>` where tagName excludes '#'
+
+function noteIdFromFile(file: TFile): string {
+  return file.path;
 }
 
-export async function buildGraph(app: App): Promise<GraphData> {
-  const settings = getSettings();
-  const files: TFile[]        = app.vault.getMarkdownFiles();
-  const { nodes, nodeByPath: nodeByID } = createNoteNodes(files);
-  const { edges, edgeSet    } = buildNoteEdgesFromResolvedLinks(app, nodeByID);
-
-  if (settings.graph.showTags !== false) {
-    addTagNodesAndEdges(app, files, nodes, nodeByID, edges, edgeSet);
-  }
-  computeNodeDegrees(nodes, nodeByID, edges);
-  markBidirectionalEdges(edges);
-
-  const centerNode = pickCenterNode(app, nodes);
-  return { nodes, edges, centerNode };
+function tagIdFromName(tagName: string): string {
+  return `${TAG_PREFIX}${tagName}`;
 }
 
-function createNoteNodes(files: TFile[]){
-  const nodes: GraphNode[] = [];
-  for (const file of files) {
-    const jitter = 50; // world units; tweak to taste
-    const x0 = (Math.random() - 0.5) * jitter;
-    const y0 = (Math.random() - 0.5) * jitter;
-    const z0 = (Math.random() - 0.5) * jitter;
-    const node: GraphNode = {
-      id          : file.path,
-      filePath    : file.path,
-      file        : file,
-      label       : file.basename,
-      x           : x0,
-      y           : y0,
-      z           : z0,
-      vx          : 0,
-      vy          : 0,
-      vz          : 0,
-      type        : 'note',
-      inDegree    : 0,
-      outDegree   : 0,
-      totalDegree : 0,
-      radius      : 0,
-    };
-    nodes.push(node);
-  }
-
-  const nodeByID = new Map<string, GraphNode>();
-  for (const node of nodes) nodeByID.set(node.id, node);
-
-  return { nodes, nodeByPath: nodeByID };
+function normalizeTag(raw: string): string | null {
+  // cache.tags uses "#foo" and "#foo/bar"
+  if (!raw) return null;
+  if (!raw.startsWith("#")) return null;
+  const name = raw.slice(1).trim();
+  return name.length ? name : null;
 }
 
-function buildNoteEdgesFromResolvedLinks(app: App, nodeByID: Map<string, GraphNode>): { edges: GraphEdge[]; edgeSet: Set<string> } {
-  const settings                = getSettings();
-  const resolved: ResolvedLinks = (app.metadataCache as any).resolvedLinks || {};
-  const edges: GraphEdge[]      = [];
-  const edgeSet                 = new Set<string>();
-  const countDuplicates         = Boolean(settings.graph.countDuplicateLinks);
-
-  for (const sourcePath of Object.keys(resolved)) {
-    const targets = resolved[sourcePath] || {};
-    for (const targetPath of Object.keys(targets)) {
-      if (!nodeByID.has(sourcePath) || !nodeByID.has(targetPath)) continue;
-
-      const key       = `${sourcePath}->${targetPath}`;
-      if (edgeSet.has(key)) continue;
-
-      const rawCount  = Number(targets[targetPath] || 1) || 1;
-      const linkCount = countDuplicates ? rawCount : 1;
-
-      edges.push({
-        id: key,
-        sourceId: sourcePath,
-        targetId: targetPath,
-        linkCount,
-        bidirectional: false,
-      });
-      edgeSet.add(key);
-    }
-  }
-  return { edges, edgeSet };
+function cssSafeJitter(jitter = 50) {
+  return (Math.random() - 0.5) * jitter;
 }
 
-function computeNodeDegrees(nodes: GraphNode[], nodeByID: Map<string, GraphNode>, edges: GraphEdge[]): void {
-  for (const edge of edges) {
-    const src = nodeByID.get(edge.sourceId);
-    const tgt = nodeByID.get(edge.targetId);
-
-    if (!src || !tgt) continue;
-    const c       = Number(edge.linkCount   || 1) || 1;
-    src.outDegree = (src.outDegree          || 0) + c;
-    tgt.inDegree  = (tgt.inDegree           || 0) + c;
-  }
-
-  for (const node of nodes) { 
-    node.totalDegree  = (node.inDegree || 0) + (node.outDegree || 0); 
-    node.radius       = 4 + Math.log2(1 + node.totalDegree); // base radius formula
-  }
+function addEdgeOnce(
+  edges: GraphEdge[],
+  edgeSet: Set<string>,
+  sourceId: string,
+  targetId: string,
+  linkCount = 1,
+) {
+  const key = `${sourceId}->${targetId}`;
+  if (edgeSet.has(key)) return;
+  edges.push({
+    id: key,
+    sourceId,
+    targetId,
+    linkCount,
+    bidirectional: false,
+  });
+  edgeSet.add(key);
 }
 
-function markBidirectionalEdges(edges: GraphEdge[]): void {
-  const edgeMap = new Map<string, GraphEdge>();
-  for (const e of edges) { edgeMap.set(`${e.sourceId}->${e.targetId}`, e); }
+function markBidirectionalEdges(edges: GraphEdge[]) {
+  const map = new Map<string, GraphEdge>();
+  for (const e of edges) map.set(`${e.sourceId}->${e.targetId}`, e);
+
   for (const e of edges) {
-    const reverseKey = `${e.targetId}->${e.sourceId}`;
-    if (edgeMap.has(reverseKey)) {
-      e.bidirectional     = true;
-      const other         = edgeMap.get(reverseKey)!;
-      other.bidirectional = true;
+    const rev = map.get(`${e.targetId}->${e.sourceId}`);
+    if (rev) {
+      e.bidirectional = true;
+      rev.bidirectional = true;
     }
   }
 }
 
-function addTagNodesAndEdges(
-  app       : App,
-  files     : TFile[],
-  nodes     : GraphNode[],
-  nodeByPath: Map<string, GraphNode>,
-  edges     : GraphEdge[],
-  edgeSet   : Set<string>,
-): void {
-  const tagNodeByName = new Map<string, GraphNode>();
-  const ensureTagNode = (tagName: string): GraphNode => {
-    let node = tagNodeByName.get(tagName);
-    if (node) return node;
+function computeDegreesAndRadii(nodes: GraphNode[], nodeById: Map<string, GraphNode>, edges: GraphEdge[]) {
+  // reset (so rebuilds don't accumulate)
+  for (const n of nodes) {
+    n.inDegree = 0;
+    n.outDegree = 0;
+    n.totalDegree = 0;
+  }
 
-    node = {
-      id          : `tag:${tagName}`,
-      label       : `#${tagName}`,
-      x           : 0,
-      y           : 0,
-      z           : 0,
-      vx          : 0,
-      vy          : 0,
-      vz          : 0,
-      filePath    : `tag:${tagName}`,
-      type        : 'tag',
-      inDegree    : 0,
-      outDegree   : 0,
-      totalDegree : 0,
-      radius      : 0,
-    };
+  for (const e of edges) {
+    const src = nodeById.get(e.sourceId);
+    const tgt = nodeById.get(e.targetId);
+    if (!src || !tgt) continue;
 
-    nodes.push(node);
-    tagNodeByName.set(tagName, node);
-    nodeByPath.set(node.id, node);
+    const c = Number(e.linkCount ?? 1) || 1;
+    src.outDegree += c;
+    tgt.inDegree  += c;
+  }
 
-    return node;
-  };
+  for (const n of nodes) {
+    n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
+    n.radius = 4 + Math.log2(1 + n.totalDegree);
+  }
 }
 
 function pickCenterNode(app: App, nodes: GraphNode[]): GraphNode | null {
   const settings = getSettings();
   if (!settings.graph.useCenterNote) return null;
 
-  let centerNode = undefined;
+  const onlyNotes = nodes.filter(n => n.type === "note");
+  if (!onlyNotes.length) return null;
 
-  // if centerNoteTitle is defined, use it.
-  if (settings.graph.centerNoteTitle) {
-    centerNode = nodes.find((n) => n.id === settings.graph.centerNoteTitle);
-    if (centerNode !== undefined) return centerNode; // if found, return it
+  const preferOut = Boolean(settings.graph.useOutlinkFallback);
+  const metric = (n: GraphNode) => (preferOut ? n.outDegree : n.inDegree) || 0;
+
+  // 1) If centerNoteTitle set, try to resolve it.
+  const raw = String(settings.graph.centerNoteTitle || "").trim();
+  if (raw) {
+    try {
+      const mc = app.metadataCache as any;
+
+      // Try resolving as linkpath
+      let dest: TFile | null = null;
+      dest = mc.getFirstLinkpathDest?.(raw, "") ?? null;
+      if (!dest && !raw.endsWith(".md")) {
+        dest = mc.getFirstLinkpathDest?.(raw + ".md", "") ?? null;
+      }
+
+      if (dest?.path) {
+        const hit = onlyNotes.find(n => n.filePath === dest!.path);
+        if (hit) return hit;
+      }
+
+      // Try direct file path match
+      const normB = raw.endsWith(".md") ? raw : raw + ".md";
+      const hit2 = onlyNotes.find(n => n.filePath === raw || n.filePath === normB);
+      if (hit2) return hit2;
+
+      // Try basename match
+      const base = raw.endsWith(".md") ? raw.slice(0, -3) : raw;
+      const hit3 = onlyNotes.find(n => (n.file?.basename ?? n.label) === base);
+      if (hit3) return hit3;
+    } catch {
+      // fall through to auto-pick
+    }
   }
 
-  // ...else calculate it. settings.graph.useOutlinkFallback as alternative
-  const onlyNotes = nodes.filter((n) => n.type !== 'tag');
-  const preferOut = Boolean(settings.graph.useOutlinkFallback);
-  const metric = (n: GraphNode) => (preferOut ? n.outDegree || 0 : n.inDegree || 0);
+  // 2) Otherwise pick by degree metric
+  let best = onlyNotes[0];
+  for (const n of onlyNotes) {
+    if (metric(n) > metric(best)) best = n;
+  }
+  return best ?? null;
+}
 
-  const chooseBy = (predicate: (n: GraphNode) => boolean): GraphNode | null => {
-    let best: GraphNode | null = null;
-    for (const n of onlyNotes) {
-      if (!predicate(n)) continue;
-      if (!best || metric(n) > metric(best)) {
-        best = n;
-      }
-    }
-    return best;
-  };
+export async function buildGraph(app: App): Promise<GraphData> {
+  const settings = getSettings();
+  const files = app.vault.getMarkdownFiles();
 
-  let chosen: GraphNode | null = null;
-  const raw = String(settings.graph.centerNoteTitle || '').trim();
+  // ─────────────────────────────────────────────
+  // 1) Build NOTE nodes
+  // ─────────────────────────────────────────────
+  const nodes: GraphNode[] = [];
+  const nodeById = new Map<string, GraphNode>();
 
-  if (raw) {
-    const mc = app.metadataCache as unknown as {
-      resolvedLinks: ResolvedLinks;
-      getFirstLinkpathDest(path: string, source: string): TFile | null;
+  for (const file of files) {
+    const id = noteIdFromFile(file);
+
+    const node: GraphNode = {
+      id,
+      filePath: file.path,
+      file,
+      label: file.basename,
+
+      x: cssSafeJitter(50),
+      y: cssSafeJitter(50),
+      z: cssSafeJitter(50),
+      vx: 0, vy: 0, vz: 0,
+
+      type: "note",
+      inDegree: 0,
+      outDegree: 0,
+      totalDegree: 0,
+      radius: 0,
     };
 
-    let resolved: any = null;
+    nodes.push(node);
+    nodeById.set(id, node);
+  }
 
-    try {
-      resolved = mc?.getFirstLinkpathDest?.(raw, '');
-      if (!resolved && !raw.endsWith('.md')) {
-        resolved = mc?.getFirstLinkpathDest?.(raw + '.md', '');
-      }
-    } catch {}
+  // ─────────────────────────────────────────────
+  // 2) Build NOTE ↔ NOTE edges from resolvedLinks
+  // ─────────────────────────────────────────────
+  const edges: GraphEdge[] = [];
+  const edgeSet = new Set<string>();
 
-    if (resolved?.path) {
-      chosen = chooseBy((n) => n.filePath === resolved.path);
-    }
+  const resolved: ResolvedLinks = ((app.metadataCache as any).resolvedLinks || {}) as ResolvedLinks;
+  const countDuplicates = Boolean(settings.graph.countDuplicateLinks);
 
-    if (!chosen) {
-      const normA = raw;
-      const normB = raw.endsWith('.md') ? raw : raw + '.md';
-      chosen = chooseBy((n) => n.filePath === normA || n.filePath === normB);
-    }
+  for (const sourcePath of Object.keys(resolved)) {
+    const targets = resolved[sourcePath] || {};
+    if (!nodeById.has(sourcePath)) continue;
 
-    if (!chosen) {
-      const base    = raw.endsWith('.md') ? raw.slice(0, -3) : raw;
-      chosen        = chooseBy((n) => {
-        const file  = (n as any).file;
-        const bn    = file?.basename || n.label;
-        return String(bn) === base;
-      });
+    for (const targetPath of Object.keys(targets)) {
+      if (!nodeById.has(targetPath)) continue;
+
+      const rawCount = Number(targets[targetPath] ?? 1) || 1;
+      const linkCount = countDuplicates ? rawCount : 1;
+
+      addEdgeOnce(edges, edgeSet, sourcePath, targetPath, linkCount);
     }
   }
 
-  if (!chosen) {
-    for (const n of onlyNotes) {
-      if (!chosen || metric(n) > metric(chosen)) {
-        chosen = n;
+  // ─────────────────────────────────────────────
+  // 3) TAG nodes + NOTE → TAG edges
+  // ─────────────────────────────────────────────
+  if (settings.graph.showTags !== false) {
+    const mc = app.metadataCache;
+
+    const ensureTagNode = (tagName: string): GraphNode => {
+      const id = tagIdFromName(tagName);
+      const existing = nodeById.get(id);
+      if (existing) return existing;
+
+      const n: GraphNode = {
+        id,
+        filePath: id,
+        file: undefined,
+        label: `#${tagName}`,
+
+        x: 0, y: 0, z: 0,
+        vx: 0, vy: 0, vz: 0,
+
+        type: "tag",
+        inDegree: 0,
+        outDegree: 0,
+        totalDegree: 0,
+        radius: 0,
+      };
+
+      nodes.push(n);
+      nodeById.set(id, n);
+      return n;
+    };
+
+    for (const file of files) {
+      const noteNodeId = noteIdFromFile(file);
+      if (!nodeById.has(noteNodeId)) continue;
+
+      const cache = mc.getFileCache(file);
+      if (!cache?.tags?.length) continue;
+
+      for (const entry of cache.tags) {
+        const tagName = normalizeTag(entry.tag);
+        if (!tagName) continue;
+
+        const tagNode = ensureTagNode(tagName);
+        addEdgeOnce(edges, edgeSet, noteNodeId, tagNode.id, 1);
       }
     }
   }
-  return chosen;
+
+  // ─────────────────────────────────────────────
+  // 4) Derived properties
+  // ─────────────────────────────────────────────
+  computeDegreesAndRadii(nodes, nodeById, edges);
+  markBidirectionalEdges(edges);
+
+  // ─────────────────────────────────────────────
+  // 5) Center node (optional)
+  // ─────────────────────────────────────────────
+  const centerNode = pickCenterNode(app, nodes);
+
+  return { nodes, edges, centerNode };
 }

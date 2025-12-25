@@ -12,6 +12,7 @@ export interface GraphSettings {
   edgeColorAlpha        : number;
   labelColor?           : string;
   labelColorAlpha       : number;
+  backgroundColor?      : string;
   labelBaseFontSize     : number;
   labelFadeRangePx      : number;
   labelRadius           : number;
@@ -83,10 +84,8 @@ export interface CameraState {
 
 export interface Renderer {
   resize(width: number, height: number)   : void;
-  render(cam: CameraState)                : void;
+  render()                                : void;
   destroy()                               : void;
-  setHoveredNode(nodeId: string | null)   : void;
-  setHoveredNode                          : Renderer['setHoveredNode'];
   setGraph(data: GraphData)               : void;
 }
 

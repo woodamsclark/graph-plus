@@ -1,17 +1,14 @@
-// renderer.ts
 import { Renderer, GraphData, CameraState, GraphNode, GraphEdge } from '../shared/interfaces.ts';
 import { getSettings } from '../settings/settingsStore.ts';
 import { CameraController } from './CameraController.ts';
 
 export function createRenderer( canvas: HTMLCanvasElement, cameraManager: CameraController): Renderer {
   const context   = canvas.getContext('2d');
-  const settings  = getSettings();
+  let settings    = getSettings();
+  let colors      = resolveColors(); 
 
   let graph: GraphData | null = null;
-  const nodeById = new Map<string, GraphNode>();
-
-  let hoveredNodeId : string      | null = null;
-  let hoverNeighbors: Set<string> | null = null;
+  let nodeById = new Map<string, GraphNode>();
 
   function resize(width: number, height: number) {
     const w = Math.max(1, Math.floor(width));
@@ -26,19 +23,16 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
     cameraManager.setViewport(w, h);
 
     // Render immediately with current camera state
-    render(cameraManager.getState());
+    render();
   }
 
-  /**
-   * Main render function.
-   * Accepts CameraState to match the Renderer interface / GraphManager calls,
-   * but uses CameraManager's internal state for projection.
-   */
-  function render(_cam?: CameraState) {
+  function render() {
     if (!context) return;
 
-    // Background
-    context.fillStyle = '#202020';
+    settings  = getSettings();
+    colors    = resolveColors();
+
+    context.fillStyle = colors.background;
     context.fillRect(0, 0, canvas.width, canvas.height);
 
     if (!graph) return;
@@ -60,10 +54,6 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
     nodeById.clear();
   }
 
-  // ─────────────────────────────────────────────
-  // Drawing helpers (bare minimum)
-  // ─────────────────────────────────────────────
-
   function drawEdges(nodeMap: Map<string, { x: number; y: number; depth: number }>) {
     if (!context || !graph || !graph.edges) return;
 
@@ -71,17 +61,10 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
 
     context.save();
 
-    const edgeColor =
-      settings.graph.edgeColor || '#888888';
-    const edgeAlpha =
-      typeof settings.graph.edgeColorAlpha === 'number'
-        ? settings.graph.edgeColorAlpha
-        : 0.3;
-
-    context.strokeStyle = edgeColor;
-    context.globalAlpha = edgeAlpha;
-    context.lineWidth = 1;
-    context.lineCap = 'round';
+    context.strokeStyle = colors.edge;
+    context.globalAlpha = colors.edgeAlpha;
+    context.lineWidth   = 1;
+    context.lineCap     = 'round';
 
     for (const edge of edges) {
       const src = nodeById.get(edge.sourceId);
@@ -111,23 +94,17 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
 
     context.save();
 
-    const defaultNodeColor = settings.graph.nodeColor || '#66ccff';
-    const tagColor = settings.graph.tagColor || '#8000ff';
+    const nodeColor = colors.node;
+    const tagColor  = colors.tag;
 
     for (const node of nodes) {
-      //const p = cameraManager.worldToScreen(node);
       const p = nodeMap.get(node.id);
       if (!p || p.depth < 0) continue;
 
       let radius = node.radius;
 
-      // Simple hover bump
-      if (hoveredNodeId && node.id === hoveredNodeId) {
-        radius *= 1.25;
-      }
-
       const isTag = node.type === 'tag';
-      const fillColor = isTag ? tagColor : defaultNodeColor;
+      const fillColor = isTag ? tagColor : nodeColor;
 
       context.beginPath();
       context.arc(p.x, p.y, radius, 0, Math.PI * 2);
@@ -144,7 +121,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
 
     const nodes : GraphNode[]= graph.nodes;
     const baseSize = settings.graph.labelBaseFontSize || 12;
-    const labelColor = settings.graph.labelColor || '#dddddd';
+    const labelColor = colors.label;
 
     context.save();
     context.font = `${baseSize}px sans-serif`;
@@ -166,24 +143,6 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
     context.restore();
   }
 
-  // ─────────────────────────────────────────────
-  // Helpers used externally
-  // ─────────────────────────────────────────────
-
-  /**
-   * Called by GraphManager when hover state changes.
-   * We just store it; render() uses a tiny radius bump for hovered node.
-   */
-  function setHoveredNode(
-    nodeId: string | null,
-    neighbors?: Set<string> | null
-  ) {
-    hoveredNodeId = nodeId;
-    hoverNeighbors = neighbors ?? null;
-    // (neighbors are not used visually yet, but kept for future)
-  }
-
-
   function setGraph(data: GraphData | null) {
     graph = data;
     nodeById.clear();
@@ -193,16 +152,46 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
     for (const node of data.nodes) {
       nodeById.set(node.id, node);
     }
+
+  const counts = data.nodes.reduce(
+    (acc, n) => {
+      acc[n.type] = (acc[n.type] ?? 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+
+    console.log("[GraphPlus] node.type counts:", counts);
+    console.log(
+    "[GraphPlus] first 20 nodes:",
+    data.nodes.slice(0, 20).map(n => ({ id: n.id, label: n.label, type: n.type }))
+  );
+
   }
-  // ─────────────────────────────────────────────
-  // Return object matching the Renderer interface
-  // ─────────────────────────────────────────────
+
+  
+  function cssVar(name: string, fallback: string): string {
+  const v = getComputedStyle(document.body).getPropertyValue(name).trim();
+  return v || fallback;
+  }
+
+  function resolveColors() {
+  const s = getSettings(); // IMPORTANT: grab latest settings (don’t rely on the initial const)
+  return {
+    background: s.graph.backgroundColor ?? cssVar('--background-primary', '#202020'),
+    edge      : s.graph.edgeColor       ?? cssVar('--text-normal', '#ffffff'),
+    node      : s.graph.nodeColor       ?? cssVar('--interactive-accent', '#66ccff'),
+    tag       : s.graph.tagColor        ?? cssVar('--interactive-accent-hover', '#8000ff'),
+    label     : s.graph.labelColor      ?? cssVar('--text-muted', '#dddddd'),
+
+    edgeAlpha : typeof s.graph.edgeColorAlpha === 'number' ? s.graph.edgeColorAlpha : 0.3,
+  };
+  }
 
  const renderer: Renderer = {
   resize,
   render,
   destroy,
-  setHoveredNode,
   setGraph,
 };
 
