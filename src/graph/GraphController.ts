@@ -113,27 +113,6 @@ export class GraphController {
     this.animationFrame   = requestAnimationFrame(this.animationLoop);
   }
 
-  public async refreshGraph() {
-    this.stopSimulation();
-
-    // try to load graph from file first
-    this.graph = await buildGraph (this.app);
-    const interactor = this.interactor;
-    const renderer   = this.renderer;
-    const graph      = this.graph;
-    const camera     = this.camera;
-    if (!interactor || !renderer || !graph || !camera) return;
-
-    renderer?.setGraph(graph);
-    
-    this.simulation = createSimulation(graph, camera, () => interactor.getMouseScreenPosition());
-    const simulation = this.simulation;
-    
-    this.buildAdjacencyMap(); // rebuild adjacency map after graph refresh or showTags changes
-    this.startSimulation();
-    renderer?.render();
-  }
-
   private animationLoop = (timestamp: number) => {
     // Always keep the RAF loop alive; just skip simulation stepping when not running.
     if (!this.lastTime) {
@@ -157,39 +136,37 @@ export class GraphController {
     const cursorType = interactor.cursorType;
     cursor.apply(cursorType);
 
-    this.updateCameraAnimation(timestamp); 
-    if (renderer) renderer.render();
+    this.updateCameraAnimation(timestamp); // does nothing rn
+    
+    renderer.setMouseScreenPosition(interactor.getMouseScreenPosition());
+    renderer.render();
 
     this.animationFrame = requestAnimationFrame(this.animationLoop);
   };
 
-  destroy(): void {
-    // persist positions immediately when view is closed
-    this.positioner!.saveNodePositions(); 
-    // clear any preview poll timer and lock
-    if (this.previewPollTimer) window.clearInterval(this.previewPollTimer as number); 
-    this.previewPollTimer         = null;
+  private updateCameraAnimation(now: number) { 
+    return; // smooths camera animations. Revist later
+  }
 
-    this.renderer?.destroy();
-    this.renderer                 = null;
-    this.interactor               = null;
+  public async refreshGraph() {
+    this.stopSimulation();
+
+    // try to load graph from file first
+    this.graph = await buildGraph (this.app);
+    const interactor = this.interactor;
+    const renderer   = this.renderer;
+    const graph      = this.graph;
+    const camera     = this.camera;
+    if (!interactor || !renderer || !graph || !camera) return;
+
+    renderer?.setGraph(graph);
     
-    if (this.simulation)          { 
-      this.simulation.stop();  
-      this.simulation             = null; 
-    }
-
-    if (this.animationFrame)      { 
-      cancelAnimationFrame(this.animationFrame);  
-      this.animationFrame         = null; 
-      this.lastTime               = null; 
-      this.running                = false; 
-    }
-
-    if (this.settingsUnregister)  { this.settingsUnregister();  this.settingsUnregister = null; }
-
-    this.inputManager?.destroy();
-    this.inputManager = null;
+    this.simulation = createSimulation(graph, camera, () => interactor.getMouseScreenPosition());
+    const simulation = this.simulation;
+    
+    this.buildAdjacencyMap(); // rebuild adjacency map after graph refresh or showTags changes
+    this.startSimulation();
+    renderer?.render();
   }
 
   private buildAdjacencyMap(){
@@ -205,17 +182,13 @@ export class GraphController {
     this.adjacencyMap = adjacency;
   }
 
-  resize(width: number, height: number): void {
-    if (!this.renderer || !this.camera) return;
-    this.renderer.resize(width, height);
-  }
-
   public resetCamera() {
     this.camera?.resetCamera();
   }
 
-  private updateCameraAnimation(now: number) { 
-    return; // smooths camera animations. Revist later
+  private startSimulation() {
+    if (!this.simulation) return;
+    this.simulation.start(); this.running = true;
   }
 
   private stopSimulation() {
@@ -224,16 +197,6 @@ export class GraphController {
         this.simulation = null;
     }
   }
-
-  private buildSimulation() {
-    //return createSimulation(this.graph);
-  }
-
-  private startSimulation() {
-    if (!this.simulation) return;
-    this.simulation.start(); this.running = true;
-  }
-
 
   private async openNodeFile(node: GraphNode): Promise<void> {
     if (!node) return;
@@ -264,4 +227,38 @@ export class GraphController {
     const edges   = graph.edges.filter(e => !tagSet.has(e.sourceId) && !tagSet.has(e.targetId));
     return { nodes, edges };
   } 
+
+  resize(width: number, height: number): void {
+    if (!this.renderer || !this.camera) return;
+    this.renderer.resize(width, height);
+  }
+
+  destroy(): void {
+    // persist positions immediately when view is closed
+    this.positioner!.saveNodePositions(); 
+    // clear any preview poll timer and lock
+    if (this.previewPollTimer) window.clearInterval(this.previewPollTimer as number); 
+    this.previewPollTimer         = null;
+
+    this.renderer?.destroy();
+    this.renderer                 = null;
+    this.interactor               = null;
+    
+    if (this.simulation)          { 
+      this.simulation.stop();  
+      this.simulation             = null; 
+    }
+
+    if (this.animationFrame)      { 
+      cancelAnimationFrame(this.animationFrame);  
+      this.animationFrame         = null; 
+      this.lastTime               = null; 
+      this.running                = false; 
+    }
+
+    if (this.settingsUnregister)  { this.settingsUnregister();  this.settingsUnregister = null; }
+
+    this.inputManager?.destroy();
+    this.inputManager = null;
+  }
 }

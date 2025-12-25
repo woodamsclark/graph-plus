@@ -11,9 +11,6 @@ export type InteractionState = {
   isRotating    : boolean;
 };
 
-
-
-
 export class GraphInteractor {
     private dragWorldOffset             : { x: number; y: number; z: number } | null  = null;
     private dragDepthFromCamera         : number                                      = 0;

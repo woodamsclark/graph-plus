@@ -187,9 +187,9 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       min: 0.5,
       max: 10,
       step: 0.1,
-      get: (s)        => s.graph.labelRadius,
-      getDefault: (s) => s.graph.labelRadius,
-      set: (s, v)     => { s.graph.labelRadius = v; },
+      get: (s)        => s.graph.labelRevealRadius,
+      getDefault: (s) => s.graph.labelRevealRadius,
+      set: (s, v)     => { s.graph.labelRevealRadius = v; },
       clamp: (v)      => Math.max(0.5, Math.min(10, v)),
     });
 

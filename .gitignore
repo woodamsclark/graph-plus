@@ -16,3 +16,5 @@ yarn-error.log*
 # OS / editor junk
 .DS_Store
 .env
+
+data.json

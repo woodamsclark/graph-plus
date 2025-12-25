@@ -5,22 +5,20 @@ export interface GraphSettings {
   maxNodeRadius         : number;
   // nodeRadiusScaling // global scaling
   nodeColor?            : string;   // optional color overrides (CSS color strings). If unset, theme vars are used.
-  nodeColorAlpha        : number;
   tagColor?             : string;
-  tagColorAlpha         : number;
   edgeColor?            : string;
-  edgeColorAlpha        : number;
   labelColor?           : string;
-  labelColorAlpha       : number;
-  backgroundColor?      : string;
+  
+  showTags              : boolean;
+  showLabels            : boolean;
+  
   labelBaseFontSize     : number;
-  labelFadeRangePx      : number;
-  labelRadius           : number;
+  labelRevealRadius     : number;
+
+  backgroundColor?      : string;
   useInterfaceFont      : boolean;
   countDuplicateLinks   : boolean;
   drawDoubleLines       : boolean;
-  showTags              : boolean;
-  showLabels            : boolean;
   hoverScale            : number;
   //highlightDepth        : number;  // screen-space label reveal radius (× size)
   centerNoteTitle       : string;
@@ -83,10 +81,11 @@ export interface CameraState {
 }
 
 export interface Renderer {
-  resize(width: number, height: number)   : void;
-  render()                                : void;
-  destroy()                               : void;
-  setGraph(data: GraphData)               : void;
+  resize(width: number, height: number)                       : void;
+  render()                                                    : void;
+  destroy()                                                   : void;
+  setGraph(data: GraphData)                                   : void;
+  setMouseScreenPosition(pos: { x: number; y: number } | null): void;
 }
 
 export interface GraphData {

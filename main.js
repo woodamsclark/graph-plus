@@ -248,18 +248,9 @@ function createRenderer(canvas, cameraManager) {
   const context = canvas.getContext("2d");
   let settings = getSettings();
   let colors = resolveColors();
+  let mousePosition = null;
   let graph = null;
   let nodeById = /* @__PURE__ */ new Map();
-  function resize(width, height) {
-    const w = Math.max(1, Math.floor(width));
-    const h = Math.max(1, Math.floor(height));
-    canvas.width = w;
-    canvas.height = h;
-    canvas.style.width = "100%";
-    canvas.style.height = "100%";
-    cameraManager.setViewport(w, h);
-    render();
-  }
   function render() {
     if (!context)
       return;
@@ -276,6 +267,7 @@ function createRenderer(canvas, cameraManager) {
     }
     drawEdges(nodeMap);
     drawNodes(nodeMap);
+    drawLabelsProximity(nodeMap);
   }
   function destroy() {
     graph = null;
@@ -351,6 +343,39 @@ function createRenderer(canvas, cameraManager) {
     }
     context.restore();
   }
+  function drawLabelsProximity(nodeMap) {
+    if (!context || !graph || !graph.nodes || !mousePosition)
+      return;
+    if (!settings.graph.showLabels)
+      return;
+    const R = settings.graph.labelRevealRadius;
+    const baseAlpha = 1;
+    const sigma = R * 0.5;
+    const inv2Sigma2 = 1 / (2 * sigma * sigma);
+    const baseSize = settings.graph.labelBaseFontSize;
+    const radius = settings.graph.minNodeRadius;
+    context.save();
+    context.font = `${baseSize}px sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "top";
+    context.fillStyle = colors.label;
+    for (const node of graph.nodes) {
+      const p = nodeMap.get(node.id);
+      if (!p || p.depth < 0)
+        continue;
+      const dx = p.x - mousePosition.x;
+      const dy = p.y - mousePosition.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > R * R)
+        continue;
+      const a = baseAlpha * Math.exp(-d2 * inv2Sigma2);
+      if (a < 0.01)
+        continue;
+      context.globalAlpha = a;
+      context.fillText(node.label, p.x, p.y + radius + 4);
+    }
+    context.restore();
+  }
   function setGraph(data) {
     graph = data;
     nodeById.clear();
@@ -384,14 +409,28 @@ function createRenderer(canvas, cameraManager) {
       node: s.graph.nodeColor ?? cssVar("--interactive-accent", "#66ccff"),
       tag: s.graph.tagColor ?? cssVar("--interactive-accent-hover", "#8000ff"),
       label: s.graph.labelColor ?? cssVar("--text-muted", "#dddddd"),
-      edgeAlpha: typeof s.graph.edgeColorAlpha === "number" ? s.graph.edgeColorAlpha : 0.3
+      edgeAlpha: 0.3
     };
+  }
+  function resize(width, height) {
+    const w = Math.max(1, Math.floor(width));
+    const h = Math.max(1, Math.floor(height));
+    canvas.width = w;
+    canvas.height = h;
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    cameraManager.setViewport(w, h);
+    render();
+  }
+  function setMouseScreenPosition(pos) {
+    mousePosition = pos;
   }
   const renderer = {
     resize,
     render,
     destroy,
-    setGraph
+    setGraph,
+    setMouseScreenPosition
   };
   return renderer;
 }
@@ -1349,22 +1388,6 @@ var GraphController = class {
     this.lastTime = null;
     this.animationFrame = requestAnimationFrame(this.animationLoop);
   }
-  async refreshGraph() {
-    this.stopSimulation();
-    this.graph = await buildGraph(this.app);
-    const interactor = this.interactor;
-    const renderer = this.renderer;
-    const graph = this.graph;
-    const camera = this.camera;
-    if (!interactor || !renderer || !graph || !camera)
-      return;
-    renderer?.setGraph(graph);
-    this.simulation = createSimulation(graph, camera, () => interactor.getMouseScreenPosition());
-    const simulation = this.simulation;
-    this.buildAdjacencyMap();
-    this.startSimulation();
-    renderer?.render();
-  }
   animationLoop = (timestamp) => {
     if (!this.lastTime) {
       this.lastTime = timestamp;
@@ -1387,34 +1410,28 @@ var GraphController = class {
     const cursorType = interactor.cursorType;
     cursor.apply(cursorType);
     this.updateCameraAnimation(timestamp);
-    if (renderer)
-      renderer.render();
+    renderer.setMouseScreenPosition(interactor.getMouseScreenPosition());
+    renderer.render();
     this.animationFrame = requestAnimationFrame(this.animationLoop);
   };
-  destroy() {
-    this.positioner.saveNodePositions();
-    if (this.previewPollTimer)
-      window.clearInterval(this.previewPollTimer);
-    this.previewPollTimer = null;
-    this.renderer?.destroy();
-    this.renderer = null;
-    this.interactor = null;
-    if (this.simulation) {
-      this.simulation.stop();
-      this.simulation = null;
-    }
-    if (this.animationFrame) {
-      cancelAnimationFrame(this.animationFrame);
-      this.animationFrame = null;
-      this.lastTime = null;
-      this.running = false;
-    }
-    if (this.settingsUnregister) {
-      this.settingsUnregister();
-      this.settingsUnregister = null;
-    }
-    this.inputManager?.destroy();
-    this.inputManager = null;
+  updateCameraAnimation(now) {
+    return;
+  }
+  async refreshGraph() {
+    this.stopSimulation();
+    this.graph = await buildGraph(this.app);
+    const interactor = this.interactor;
+    const renderer = this.renderer;
+    const graph = this.graph;
+    const camera = this.camera;
+    if (!interactor || !renderer || !graph || !camera)
+      return;
+    renderer?.setGraph(graph);
+    this.simulation = createSimulation(graph, camera, () => interactor.getMouseScreenPosition());
+    const simulation = this.simulation;
+    this.buildAdjacencyMap();
+    this.startSimulation();
+    renderer?.render();
   }
   buildAdjacencyMap() {
     const adjacency = /* @__PURE__ */ new Map();
@@ -1430,30 +1447,20 @@ var GraphController = class {
     }
     this.adjacencyMap = adjacency;
   }
-  resize(width, height) {
-    if (!this.renderer || !this.camera)
-      return;
-    this.renderer.resize(width, height);
-  }
   resetCamera() {
     this.camera?.resetCamera();
-  }
-  updateCameraAnimation(now) {
-    return;
-  }
-  stopSimulation() {
-    if (this.simulation) {
-      this.simulation.stop();
-      this.simulation = null;
-    }
-  }
-  buildSimulation() {
   }
   startSimulation() {
     if (!this.simulation)
       return;
     this.simulation.start();
     this.running = true;
+  }
+  stopSimulation() {
+    if (this.simulation) {
+      this.simulation.stop();
+      this.simulation = null;
+    }
   }
   async openNodeFile(node) {
     if (!node)
@@ -1485,6 +1492,36 @@ var GraphController = class {
     const nodes = graph.nodes.filter((n) => !tagSet.has(n.id));
     const edges = graph.edges.filter((e) => !tagSet.has(e.sourceId) && !tagSet.has(e.targetId));
     return { nodes, edges };
+  }
+  resize(width, height) {
+    if (!this.renderer || !this.camera)
+      return;
+    this.renderer.resize(width, height);
+  }
+  destroy() {
+    this.positioner.saveNodePositions();
+    if (this.previewPollTimer)
+      window.clearInterval(this.previewPollTimer);
+    this.previewPollTimer = null;
+    this.renderer?.destroy();
+    this.renderer = null;
+    this.interactor = null;
+    if (this.simulation) {
+      this.simulation.stop();
+      this.simulation = null;
+    }
+    if (this.animationFrame) {
+      cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = null;
+      this.lastTime = null;
+      this.running = false;
+    }
+    if (this.settingsUnregister) {
+      this.settingsUnregister();
+      this.settingsUnregister = null;
+    }
+    this.inputManager?.destroy();
+    this.inputManager = null;
   }
 };
 
@@ -1549,14 +1586,9 @@ var DEFAULT_SETTINGS = {
     tagColor: void 0,
     edgeColor: void 0,
     backgroundColor: void 0,
-    nodeColorAlpha: 0.1,
-    tagColorAlpha: 0.1,
     labelColor: void 0,
-    labelColorAlpha: 1,
     labelBaseFontSize: 24,
-    labelFadeRangePx: 8,
-    labelRadius: 30,
-    edgeColorAlpha: 0.1,
+    labelRevealRadius: 100,
     useInterfaceFont: true,
     countDuplicateLinks: true,
     drawDoubleLines: true,
@@ -1768,10 +1800,10 @@ var GraphPlusSettingTab = class extends import_obsidian3.PluginSettingTab {
       min: 0.5,
       max: 10,
       step: 0.1,
-      get: (s) => s.graph.labelRadius,
-      getDefault: (s) => s.graph.labelRadius,
+      get: (s) => s.graph.labelRevealRadius,
+      getDefault: (s) => s.graph.labelRevealRadius,
       set: (s, v) => {
-        s.graph.labelRadius = v;
+        s.graph.labelRevealRadius = v;
       },
       clamp: (v) => Math.max(0.5, Math.min(10, v))
     });

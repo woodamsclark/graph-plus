@@ -6,25 +6,9 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
   const context   = canvas.getContext('2d');
   let settings    = getSettings();
   let colors      = resolveColors(); 
-
+  let mousePosition: { x: number; y: number } | null = null;
   let graph: GraphData | null = null;
   let nodeById = new Map<string, GraphNode>();
-
-  function resize(width: number, height: number) {
-    const w = Math.max(1, Math.floor(width));
-    const h = Math.max(1, Math.floor(height));
-
-    canvas.width = w;
-    canvas.height = h;
-    canvas.style.width = '100%';
-    canvas.style.height = '100%';
-
-    // Let CameraManager know the viewport so it can project correctly
-    cameraManager.setViewport(w, h);
-
-    // Render immediately with current camera state
-    render();
-  }
 
   function render() {
     if (!context) return;
@@ -46,6 +30,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
 
     drawEdges(nodeMap);
     drawNodes(nodeMap);
+    drawLabels(nodeMap);
     //drawLabels(nodeMap);
   }
 
@@ -116,32 +101,45 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
     context.restore();
   }
 
-  function drawLabels(nodeMap: Map<string, { x: number; y: number; depth: number }> ) {
-    if (!context || !graph || !graph.nodes) return;
+  function drawLabels(nodeMap: Map<string, { x: number; y: number; depth: number }>) {
+    if (!context || !graph || !graph.nodes || !mousePosition) return;
 
-    const nodes : GraphNode[]= graph.nodes;
-    const baseSize = settings.graph.labelBaseFontSize || 12;
-    const labelColor = colors.label;
+    if (!settings.graph.showLabels) return;
+
+    const R               = settings.graph.labelRevealRadius;
+    const baseAlpha       = 1;
+    const sigma           = (R * 0.5);
+    const inv2Sigma2      = 1 / (2 * sigma * sigma);
+
+    const baseSize        = settings.graph.labelBaseFontSize;
+    const radius          = settings.graph.minNodeRadius;
 
     context.save();
-    context.font = `${baseSize}px sans-serif`;
-    context.textAlign = 'center';
-    context.textBaseline = 'top';
-    context.fillStyle = labelColor;
-    context.globalAlpha = 1;
+    context.font          = `${baseSize}px sans-serif`;
+    context.textAlign     = 'center';
+    context.textBaseline  = 'top';
+    context.fillStyle     = colors.label;
 
-    const radius = settings.graph.minNodeRadius || 4;
-
-    for (const node of nodes) {
-      //const p = cameraManager.worldToScreen(node);
+    for (const node of graph.nodes) {
       const p = nodeMap.get(node.id);
       if (!p || p.depth < 0) continue;
 
-      context.fillText(node.label, p.x, p.y + radius + 4);
-    }
+      const dx = p.x - mousePosition.x;
+      const dy = p.y - mousePosition.y;
+      const d2 = dx*dx + dy*dy;
 
-    context.restore();
+      if (d2 > R*R) continue;
+
+      const a = baseAlpha * Math.exp(-d2 * inv2Sigma2);
+      if (a < 0.01) continue;
+
+      context.globalAlpha = a;
+      context.fillText(node.label, p.x, p.y + radius + 4);
   }
+
+  context.restore();
+}
+
 
   function setGraph(data: GraphData | null) {
     graph = data;
@@ -169,23 +167,42 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
 
   }
 
-  
   function cssVar(name: string, fallback: string): string {
   const v = getComputedStyle(document.body).getPropertyValue(name).trim();
   return v || fallback;
   }
 
   function resolveColors() {
-  const s = getSettings(); // IMPORTANT: grab latest settings (don’t rely on the initial const)
-  return {
-    background: s.graph.backgroundColor ?? cssVar('--background-primary', '#202020'),
-    edge      : s.graph.edgeColor       ?? cssVar('--text-normal', '#ffffff'),
-    node      : s.graph.nodeColor       ?? cssVar('--interactive-accent', '#66ccff'),
-    tag       : s.graph.tagColor        ?? cssVar('--interactive-accent-hover', '#8000ff'),
-    label     : s.graph.labelColor      ?? cssVar('--text-muted', '#dddddd'),
+    const s = getSettings(); // IMPORTANT: grab latest settings (don’t rely on the initial const)
+    return {
+      background: s.graph.backgroundColor ?? cssVar('--background-primary'      , '#202020'),
+      edge      : s.graph.edgeColor       ?? cssVar('--text-normal'             , '#ffffff'),
+      node      : s.graph.nodeColor       ?? cssVar('--interactive-accent'      , '#66ccff'),
+      tag       : s.graph.tagColor        ?? cssVar('--interactive-accent-hover', '#8000ff'),
+      label     : s.graph.labelColor      ?? cssVar('--text-muted'              , '#dddddd'),
 
-    edgeAlpha : typeof s.graph.edgeColorAlpha === 'number' ? s.graph.edgeColorAlpha : 0.3,
-  };
+      edgeAlpha : 0.3
+    };
+  }
+
+  function resize(width: number, height: number) {
+    const w = Math.max(1, Math.floor(width));
+    const h = Math.max(1, Math.floor(height));
+
+    canvas.width = w;
+    canvas.height = h;
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+
+    // Let CameraManager know the viewport so it can project correctly
+    cameraManager.setViewport(w, h);
+
+    // Render immediately with current camera state
+    render();
+  }
+  
+  function setMouseScreenPosition(pos: { x: number; y: number } | null) {
+    mousePosition = pos;
   }
 
  const renderer: Renderer = {
@@ -193,6 +210,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
   render,
   destroy,
   setGraph,
+  setMouseScreenPosition,
 };
 
 return renderer;
