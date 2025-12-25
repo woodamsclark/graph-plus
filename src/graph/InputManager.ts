@@ -1,15 +1,13 @@
 import { InputManagerCallbacks, PointerMode } from '../shared/interfaces.ts';
 
-// This class manages user input (mouse events) on the graph canvas
-// and reports mouse positions and actions back to the GraphManager via callbacks.
 export class InputManager {
     private canvas              : HTMLCanvasElement;
     private callback            : InputManagerCallbacks;
     private draggedNodeId       : string | null     = null;
-    private lastClientX         : number            = 0;        // ((Client Space))
-    private lastClientY         : number            = 0;        // ((Client Space))
-    private downClickX          : number            = 0;        // [[Canvas Space]
-    private downClickY          : number            = 0;        // [[Canvas Space]
+    private lastClientX         : number            = 0;        // (( Client Space ))
+    private lastClientY         : number            = 0;        // (( Client Space ))
+    private downClickX          : number            = 0;        // [[ Canvas Space ]]
+    private downClickY          : number            = 0;        // [[ Canvas Space ]]
     private dragThreshold       : number            = 5;        // Drag starts after 5 pixels of movement
     private pointerMode         : PointerMode       = PointerMode.Idle;
 

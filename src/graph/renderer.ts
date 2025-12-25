@@ -1,6 +1,7 @@
 import { Renderer, GraphData, CameraState, GraphNode, GraphEdge } from '../shared/interfaces.ts';
 import { getSettings } from '../settings/settingsStore.ts';
 import { CameraController } from './CameraController.ts';
+import { off } from 'process';
 
 type FontSlot = "text" | "interface" | "mono";
 
@@ -132,12 +133,12 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
     const baseAlpha       = 1;
     const sigma           = (R * 0.5);
     const inv2Sigma2      = 1 / (2 * sigma * sigma);
+    const offsetY         = 10;
 
-    const baseSize        = settings.graph.labelBaseFontSize;
-    const radius          = settings.graph.minNodeRadius;
+    const fontSize        = settings.graph.labelFontSize;
 
     context.save();
-    context.font          = `${baseSize}px ${theme.fonts.interface}`;
+    context.font          = `${fontSize}px ${theme.fonts.interface}`;
     context.textAlign     = 'center';
     context.textBaseline  = 'top';
     context.fillStyle     = colors.label;
@@ -156,7 +157,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
       if (a < 0.01) continue;
 
       context.globalAlpha = a;
-      context.fillText(node.label, p.x, p.y + radius + 4);
+      context.fillText(node.label, p.x, p.y + node.radius + offsetY);
   }
 
   context.restore();

@@ -332,10 +332,10 @@ function createRenderer(canvas, cameraManager) {
     const baseAlpha = 1;
     const sigma = R * 0.5;
     const inv2Sigma2 = 1 / (2 * sigma * sigma);
-    const baseSize = settings.graph.labelBaseFontSize;
-    const radius = settings.graph.minNodeRadius;
+    const offsetY = 10;
+    const fontSize = settings.graph.labelFontSize;
     context.save();
-    context.font = `${baseSize}px ${theme.fonts.interface}`;
+    context.font = `${fontSize}px ${theme.fonts.interface}`;
     context.textAlign = "center";
     context.textBaseline = "top";
     context.fillStyle = colors.label;
@@ -352,7 +352,7 @@ function createRenderer(canvas, cameraManager) {
       if (a < 0.01)
         continue;
       context.globalAlpha = a;
-      context.fillText(node.label, p.x, p.y + radius + 4);
+      context.fillText(node.label, p.x, p.y + node.radius + offsetY);
     }
     context.restore();
   }
@@ -1586,7 +1586,7 @@ var DEFAULT_SETTINGS = {
     edgeColor: void 0,
     backgroundColor: void 0,
     labelColor: void 0,
-    labelBaseFontSize: 12,
+    labelFontSize: 12,
     labelRevealRadius: 100,
     useInterfaceFont: true,
     countDuplicateLinks: true,
@@ -2037,10 +2037,10 @@ var GraphPlusSettingTab = class extends import_obsidian3.PluginSettingTab {
       min: 6,
       max: 24,
       step: 1,
-      get: (s) => s.graph.labelBaseFontSize,
-      getDefault: (s) => s.graph.labelBaseFontSize,
+      get: (s) => s.graph.labelFontSize,
+      getDefault: (s) => s.graph.labelFontSize,
       set: (s, v) => {
-        s.graph.labelBaseFontSize = v;
+        s.graph.labelFontSize = v;
       },
       clamp: (v) => Math.max(6, Math.min(24, v))
     });

@@ -11,7 +11,7 @@ export interface GraphSettings {
   showTags              : boolean;
   showLabels            : boolean;
   
-  labelBaseFontSize     : number;
+  labelFontSize     : number;
   labelRevealRadius     : number;
   labelColor?           : string; 
 

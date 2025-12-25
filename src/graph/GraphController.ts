@@ -13,12 +13,12 @@ import { NodePositionStore } from "./NodePositionStore";
 
 
 export type GraphDependencies = {
-  getGraph                  : ()                    => GraphData        | null;
-  getCamera                 : ()                    => CameraController    | null;
-  getApp                    : ()                    => App;
-  getPlugin                 : ()                    => GraphPlus         | null;
-  setPinnedNodes            : (ids  : Set<string>)  => void;
-  setMouseGravityEnabled    : (on   : boolean)      => void;
+  getGraph            : ()                    => GraphData        | null;
+  getCamera           : ()                    => CameraController | null;
+  getApp              : ()                    => App;
+  getPlugin           : ()                    => GraphPlus        | null;
+  setPinnedNodes      : (ids  : Set<string>)  => void;
+  enableMouseGravity  : (on   : boolean)      => void;
 };
 
 // This class manages interactions between the graph data, simulation, and renderer.
@@ -68,7 +68,7 @@ export class GraphController {
       getApp                : ()    => this.app,
       getPlugin             : ()    => this.plugin,
       setPinnedNodes        : (ids) => { this.simulation?.setPinnedNodes?.(ids); },
-      setMouseGravityEnabled: (on)  => { getSettings().physics.mouseGravityEnabled = on;} ,
+      enableMouseGravity    : (on)  => { getSettings().physics.mouseGravityEnabled = on;} ,
     };
 
     this.interactor           = new GraphInteractor(deps);

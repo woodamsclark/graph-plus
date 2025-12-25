@@ -419,9 +419,9 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       min: 6,
       max: 24,
       step: 1,
-      get: (s)        => s.graph.labelBaseFontSize,
-      getDefault: (s) => s.graph.labelBaseFontSize,
-      set: (s, v)     => { s.graph.labelBaseFontSize = v; },
+      get: (s)        => s.graph.labelFontSize,
+      getDefault: (s) => s.graph.labelFontSize,
+      set: (s, v)     => { s.graph.labelFontSize = v; },
       clamp: (v)      => Math.max(6, Math.min(24, v)),
     });
 

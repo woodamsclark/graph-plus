@@ -13,9 +13,9 @@ export type InteractionState = {
 
 export class GraphInteractor {
     private dragWorldOffset             : { x: number; y: number; z: number } | null  = null;
+    private openNodeFile                : ((node: any) => void)               | null  = null;
     private dragDepthFromCamera         : number                                      = 0;
     private pinnedNodes                 : Set<string>                                 = new Set();
-    private openNodeFile                : ((node: any) => void)               | null  = null;
     private state                       : InteractionState;
 
     constructor(private deps: GraphDependencies) {
@@ -52,11 +52,6 @@ export class GraphInteractor {
         } else {
             this.state.mouseScreenPosition = { x: screenX, y: screenY };
         }
-    
-        // Also tell the camera manager for any hover effects (highlighting)
-        const camera = this.deps.getCamera();
-        if (!camera) return;
-        camera.updateHover(screenX, screenY);
     }
 
 
@@ -65,7 +60,7 @@ export class GraphInteractor {
         const camera = this.deps.getCamera();
         if (!graph || !camera) return;
 
-        this.deps.setMouseGravityEnabled(false);
+        this.deps.enableMouseGravity(false);
 
         const node = graph.nodes.find(n => n.id === nodeId);
         if (!node) return;
@@ -116,10 +111,9 @@ export class GraphInteractor {
         this.pinnedNodes.delete(this.state.draggedId);
         this.deps.setPinnedNodes(this.pinnedNodes);
 
-        this.state.draggedId                        = null;
-        this.dragWorldOffset                      = null;
-        this.deps.setMouseGravityEnabled(true);
-        //deps.setMouseGravityEnabled(false);
+        this.state.draggedId = null;
+        this.dragWorldOffset = null;
+        this.deps.enableMouseGravity(true);
 
         return;
     }
@@ -217,10 +211,13 @@ export class GraphInteractor {
         }
 
         const mouse = this.state.mouseScreenPosition;
-        if(!mouse) return null;
+        if(!mouse) return;
         
         const hit = this.nodeClicked(mouse.x, mouse.y);
         this.state.hoveredId = hit?.id ?? null;
     }
 
+    public get hoveredNodeId() : string | null {
+        return this.state.hoveredId;
+    }
 }
