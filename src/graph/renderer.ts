@@ -2,19 +2,41 @@ import { Renderer, GraphData, CameraState, GraphNode, GraphEdge } from '../share
 import { getSettings } from '../settings/settingsStore.ts';
 import { CameraController } from './CameraController.ts';
 
+type FontSlot = "text" | "interface" | "mono";
+
+type ThemeFonts = {
+  text      : string;
+  interface : string;
+  mono      : string;
+};
+
+type ThemeColors = {
+  node      : string;
+  tag       : string;
+  edge      : string;
+  label     : string;
+  background: string;
+};
+
+type ThemeSnapshot = {
+  fonts : ThemeFonts ;
+  colors: ThemeColors;
+};
+
 export function createRenderer( canvas: HTMLCanvasElement, cameraManager: CameraController): Renderer {
-  const context   = canvas.getContext('2d');
-  let settings    = getSettings();
-  let colors      = resolveColors(); 
-  let mousePosition: { x: number; y: number } | null = null;
-  let graph: GraphData | null = null;
-  let nodeById = new Map<string, GraphNode>();
+  const context                                       = canvas.getContext('2d');
+  let settings                                        = getSettings();
+  let colors                                          = readColors(); 
+  let mousePosition: { x: number; y: number } | null  = null;
+  let graph         : GraphData               | null  = null;
+  let nodeById                                        = new Map<string, GraphNode>();
+  let theme         : ThemeSnapshot                   = buildThemeSnapshot();
 
   function render() {
     if (!context) return;
 
     settings  = getSettings();
-    colors    = resolveColors();
+    colors    = readColors();
 
     context.fillStyle = colors.background;
     context.fillRect(0, 0, canvas.width, canvas.height);
@@ -115,7 +137,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
     const radius          = settings.graph.minNodeRadius;
 
     context.save();
-    context.font          = `${baseSize}px sans-serif`;
+    context.font          = `${baseSize}px ${theme.fonts.interface}`;
     context.textAlign     = 'center';
     context.textBaseline  = 'top';
     context.fillStyle     = colors.label;
@@ -138,8 +160,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
   }
 
   context.restore();
-}
-
+  }
 
   function setGraph(data: GraphData | null) {
     graph = data;
@@ -167,19 +188,37 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
 
   }
 
-  function cssVar(name: string, fallback: string): string {
-  const v = getComputedStyle(document.body).getPropertyValue(name).trim();
-  return v || fallback;
+  function buildThemeSnapshot(): ThemeSnapshot {
+    return {
+      fonts : readFonts(),
+      colors: readColors(),
+    };
   }
 
-  function resolveColors() {
+  function refreshTheme() {
+    theme = buildThemeSnapshot();
+  }
+
+  function cssVar(name: string): string {
+    return getComputedStyle(document.body).getPropertyValue(name).trim();
+  }
+
+  function readFonts(): ThemeFonts {
+    return {
+      text      : cssVar("--font-text")       || "sans-serif",
+      interface : cssVar("--font-interface")  || "sans-serif",
+      mono      : cssVar("--font-monospace")  || "monospace",
+    };
+  }
+
+  function readColors() {
     const s = getSettings(); // IMPORTANT: grab latest settings (don’t rely on the initial const)
     return {
-      background: s.graph.backgroundColor ?? cssVar('--background-primary'      , '#202020'),
-      edge      : s.graph.edgeColor       ?? cssVar('--text-normal'             , '#ffffff'),
-      node      : s.graph.nodeColor       ?? cssVar('--interactive-accent'      , '#66ccff'),
-      tag       : s.graph.tagColor        ?? cssVar('--interactive-accent-hover', '#8000ff'),
-      label     : s.graph.labelColor      ?? cssVar('--text-muted'              , '#dddddd'),
+      background: s.graph.backgroundColor ?? cssVar('--background-primary'      ),
+      edge      : s.graph.edgeColor       ?? cssVar('--text-normal'             ),
+      node      : s.graph.nodeColor       ?? cssVar('--interactive-accent'      ),
+      tag       : s.graph.tagColor        ?? cssVar('--interactive-accent-hover'),
+      label     : s.graph.labelColor      ?? cssVar('--text-muted'              ),
 
       edgeAlpha : 0.3
     };
@@ -210,6 +249,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
   render,
   destroy,
   setGraph,
+  refreshTheme,
   setMouseScreenPosition,
 };
 

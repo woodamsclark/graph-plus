@@ -247,15 +247,16 @@ async function buildGraph(app) {
 function createRenderer(canvas, cameraManager) {
   const context = canvas.getContext("2d");
   let settings = getSettings();
-  let colors = resolveColors();
+  let colors = readColors();
   let mousePosition = null;
   let graph = null;
   let nodeById = /* @__PURE__ */ new Map();
+  let theme = buildThemeSnapshot();
   function render() {
     if (!context)
       return;
     settings = getSettings();
-    colors = resolveColors();
+    colors = readColors();
     context.fillStyle = colors.background;
     context.fillRect(0, 0, canvas.width, canvas.height);
     if (!graph)
@@ -267,7 +268,7 @@ function createRenderer(canvas, cameraManager) {
     }
     drawEdges(nodeMap);
     drawNodes(nodeMap);
-    drawLabelsProximity(nodeMap);
+    drawLabels(nodeMap);
   }
   function destroy() {
     graph = null;
@@ -323,27 +324,6 @@ function createRenderer(canvas, cameraManager) {
     context.restore();
   }
   function drawLabels(nodeMap) {
-    if (!context || !graph || !graph.nodes)
-      return;
-    const nodes = graph.nodes;
-    const baseSize = settings.graph.labelBaseFontSize || 12;
-    const labelColor = colors.label;
-    context.save();
-    context.font = `${baseSize}px sans-serif`;
-    context.textAlign = "center";
-    context.textBaseline = "top";
-    context.fillStyle = labelColor;
-    context.globalAlpha = 1;
-    const radius = settings.graph.minNodeRadius || 4;
-    for (const node of nodes) {
-      const p = nodeMap.get(node.id);
-      if (!p || p.depth < 0)
-        continue;
-      context.fillText(node.label, p.x, p.y + radius + 4);
-    }
-    context.restore();
-  }
-  function drawLabelsProximity(nodeMap) {
     if (!context || !graph || !graph.nodes || !mousePosition)
       return;
     if (!settings.graph.showLabels)
@@ -355,7 +335,7 @@ function createRenderer(canvas, cameraManager) {
     const baseSize = settings.graph.labelBaseFontSize;
     const radius = settings.graph.minNodeRadius;
     context.save();
-    context.font = `${baseSize}px sans-serif`;
+    context.font = `${baseSize}px ${theme.fonts.interface}`;
     context.textAlign = "center";
     context.textBaseline = "top";
     context.fillStyle = colors.label;
@@ -397,18 +377,33 @@ function createRenderer(canvas, cameraManager) {
       data.nodes.slice(0, 20).map((n) => ({ id: n.id, label: n.label, type: n.type }))
     );
   }
-  function cssVar(name, fallback) {
-    const v = getComputedStyle(document.body).getPropertyValue(name).trim();
-    return v || fallback;
+  function buildThemeSnapshot() {
+    return {
+      fonts: readFonts(),
+      colors: readColors()
+    };
   }
-  function resolveColors() {
+  function refreshTheme() {
+    theme = buildThemeSnapshot();
+  }
+  function cssVar(name) {
+    return getComputedStyle(document.body).getPropertyValue(name).trim();
+  }
+  function readFonts() {
+    return {
+      text: cssVar("--font-text") || "sans-serif",
+      interface: cssVar("--font-interface") || "sans-serif",
+      mono: cssVar("--font-monospace") || "monospace"
+    };
+  }
+  function readColors() {
     const s = getSettings();
     return {
-      background: s.graph.backgroundColor ?? cssVar("--background-primary", "#202020"),
-      edge: s.graph.edgeColor ?? cssVar("--text-normal", "#ffffff"),
-      node: s.graph.nodeColor ?? cssVar("--interactive-accent", "#66ccff"),
-      tag: s.graph.tagColor ?? cssVar("--interactive-accent-hover", "#8000ff"),
-      label: s.graph.labelColor ?? cssVar("--text-muted", "#dddddd"),
+      background: s.graph.backgroundColor ?? cssVar("--background-primary"),
+      edge: s.graph.edgeColor ?? cssVar("--text-normal"),
+      node: s.graph.nodeColor ?? cssVar("--interactive-accent"),
+      tag: s.graph.tagColor ?? cssVar("--interactive-accent-hover"),
+      label: s.graph.labelColor ?? cssVar("--text-muted"),
       edgeAlpha: 0.3
     };
   }
@@ -430,6 +425,7 @@ function createRenderer(canvas, cameraManager) {
     render,
     destroy,
     setGraph,
+    refreshTheme,
     setMouseScreenPosition
   };
   return renderer;
@@ -1493,6 +1489,9 @@ var GraphController = class {
     const edges = graph.edges.filter((e) => !tagSet.has(e.sourceId) && !tagSet.has(e.targetId));
     return { nodes, edges };
   }
+  refreshTheme() {
+    this.renderer?.refreshTheme();
+  }
   resize(width, height) {
     if (!this.renderer || !this.camera)
       return;
@@ -1550,18 +1549,18 @@ var GraphView = class extends import_obsidian2.ItemView {
     const container = this.containerEl.createDiv({ cls: "graph+" });
     this.graph = new GraphController(this.app, container, this.plugin);
     await this.graph.init();
-    if (!this.scheduleGraphRefresh) {
+    if (!this.scheduleGraphRefresh)
       this.scheduleGraphRefresh = debounce(() => {
-        try {
-          this.graph?.refreshGraph();
-        } catch (e) {
-          console.error("Greater Graph: refreshGraph error", e);
-        }
+        this.graph?.refreshGraph();
       }, 200, true);
-    }
     this.registerEvent(this.app.vault.on("create", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
     this.registerEvent(this.app.vault.on("delete", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
     this.registerEvent(this.app.vault.on("rename", () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
+    this.registerEvent(
+      this.app.workspace.on("css-change", () => {
+        this.graph?.refreshTheme();
+      })
+    );
   }
   onResize() {
     const rect = this.containerEl.getBoundingClientRect();
@@ -1587,7 +1586,7 @@ var DEFAULT_SETTINGS = {
     edgeColor: void 0,
     backgroundColor: void 0,
     labelColor: void 0,
-    labelBaseFontSize: 24,
+    labelBaseFontSize: 12,
     labelRevealRadius: 100,
     useInterfaceFont: true,
     countDuplicateLinks: true,

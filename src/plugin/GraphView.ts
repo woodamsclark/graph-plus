@@ -36,16 +36,8 @@ export class GraphView extends ItemView {
     await this.graph.init();
     
     // Debounced refresh to avoid thrashing on vault events
-    if (!this.scheduleGraphRefresh) {
-      this.scheduleGraphRefresh = debounce(() => {
-        try {
-          this.graph?.refreshGraph();
-        } catch (e) {
-          // eslint-disable-next-line no-console
-          console.error('Greater Graph: refreshGraph error', e);
-        }
-      }, 200, true);
-    }
+    if (!this.scheduleGraphRefresh)
+      this.scheduleGraphRefresh = debounce(() => { this.graph?.refreshGraph(); }, 200, true);
 
     // Register only structural vault listeners so the view updates on file changes,
     // not on every keystroke/content metadata parse.
@@ -55,6 +47,11 @@ export class GraphView extends ItemView {
     this.registerEvent(this.app.vault.on('rename', () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
     // Note: We intentionally do NOT rebuild on metadataCache 'changed' to avoid refreshes
     // while typing. Optional incremental updates can hook into metadata changes separately.
+    this.registerEvent(
+      this.app.workspace.on("css-change", () => {
+        this.graph?.refreshTheme();  // rebuild snapshot of obsidian css themes in renderer
+      })
+    );
   }
 
   onResize() {

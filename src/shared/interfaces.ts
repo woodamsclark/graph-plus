@@ -7,13 +7,13 @@ export interface GraphSettings {
   nodeColor?            : string;   // optional color overrides (CSS color strings). If unset, theme vars are used.
   tagColor?             : string;
   edgeColor?            : string;
-  labelColor?           : string;
   
   showTags              : boolean;
   showLabels            : boolean;
   
   labelBaseFontSize     : number;
   labelRevealRadius     : number;
+  labelColor?           : string; 
 
   backgroundColor?      : string;
   useInterfaceFont      : boolean;
@@ -46,13 +46,13 @@ export interface PhysicsSettings {
 }
 
 export interface CameraSettings {
-  momentumScale                     : number;
-  dragThreshold                     : number;
-  rotateSensitivityX                : number;
-  rotateSensitivityY                : number;
-  zoomSensitivity                   : number;
-  cameraAnimDuration                : number;
-  state                             : CameraState;
+  momentumScale         : number;
+  dragThreshold         : number;
+  rotateSensitivityX    : number;
+  rotateSensitivityY    : number;
+  zoomSensitivity       : number;
+  cameraAnimDuration    : number;
+  state                 : CameraState;
 }
 
 export interface GraphPlusSettings {
@@ -86,6 +86,7 @@ export interface Renderer {
   destroy()                                                   : void;
   setGraph(data: GraphData)                                   : void;
   setMouseScreenPosition(pos: { x: number; y: number } | null): void;
+  refreshTheme()                                              : void;
 }
 
 export interface GraphData {

@@ -104,7 +104,6 @@ export class GraphController {
       detectClickedNode : (screenX, screenY)          => { return this.interactor!.nodeClicked(screenX, screenY); },
     });
 
-
     this.buildAdjacencyMap();
     await this.refreshGraph(); if (!this.graph) return;
     this.resetCamera();
@@ -227,6 +226,10 @@ export class GraphController {
     const edges   = graph.edges.filter(e => !tagSet.has(e.sourceId) && !tagSet.has(e.targetId));
     return { nodes, edges };
   } 
+
+  public refreshTheme(): void {
+    this.renderer?.refreshTheme();
+  }
 
   resize(width: number, height: number): void {
     if (!this.renderer || !this.camera) return;
