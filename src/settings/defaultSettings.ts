@@ -64,6 +64,4 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
       zoomVel  : 0,
     },
   },
-
-  nodePositions: {}, // Record<string, {x:number;y:number;z:number}> or whatever your type is
 };

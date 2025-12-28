@@ -20,6 +20,16 @@ export type GraphDependencies = {
   enableMouseGravity  : (on   : boolean)      => void;
 };
 
+type PluginLike = {
+  loadData: () => Promise<any>;
+  saveData: (data: any) => Promise<void>;
+};
+type GraphStoreDeps = {
+  getApp: () => App;
+  getPlugin: () => PluginLike | null;
+};
+
+
 // This class manages interactions between the graph data, simulation, and renderer.
 export class GraphController {
   private app                 : App;
@@ -37,7 +47,7 @@ export class GraphController {
   private camera              : CameraController                          | null  = null;
   private settingsUnregister  : (() => void)                              | null  = null;
   private interactor          : GraphInteractor                           | null  = null;
-  private store               : GraphStore                         | null  = null;
+  private graphStore          : GraphStore                                | null  = null;
   private graph               : GraphData                                 | null  = null;
   private cursor              : ReturnType<typeof createCursorController> | null  = null;
   private lastPreviewId       : string                                    | null  = null;
@@ -61,8 +71,7 @@ export class GraphController {
     this.canvas.style.height  = '100%';
     this.canvas.tabIndex      = 0;
 
-
-    const deps: GraphDependencies = {
+    const graphDeps: GraphDependencies = {
       getGraph              : ()    => this.graph,
       getCamera             : ()    => this.camera,
       getApp                : ()    => this.app,
@@ -71,12 +80,19 @@ export class GraphController {
       enableMouseGravity    : (on)  => { getSettings().physics.mouseGravityEnabled = on;} ,
     };
 
-    this.interactor           = new GraphInteractor(deps);
-    this.store                = new GraphStore(deps);
+    const storeDeps: GraphStoreDeps = {
+      getApp  : () => this.app,
+      getPlugin: () => this.plugin,
+    };
+
+    this.interactor           = new GraphInteractor(graphDeps);
+    this.graphStore           = new GraphStore(storeDeps);
     this.cursor               = createCursorController(this.canvas!);
     this.renderer             = createRenderer(this.canvas, this.camera!);    
     
-    if (!this.canvas || !this.interactor || !this.renderer) return;
+    if (!this.canvas || !this.interactor || !this.renderer || !this.graphStore || !this.renderer) return;
+
+    await this.graphStore.init();
     
     this.interactor.setOnNodeClick((node) => this.openNodeFile(node));
 
@@ -113,10 +129,9 @@ export class GraphController {
 
   public async refreshGraph() {
     this.stopSimulation();
-    if (!this.store) return;
+    if (!this.graphStore) return;
 
-    // try to load graph from file first
-    this.graph        = await this.store.loadGraph (this.app);
+    this.graph        = this.graphStore.get();
     const interactor  = this.interactor;
     const renderer    = this.renderer;
     const graph       = this.graph;
@@ -132,6 +147,23 @@ export class GraphController {
     this.startSimulation();
     renderer?.render();
   }
+
+  public async rebuildGraph(): Promise<void> {
+    if (!this.graphStore || !this.renderer || !this.interactor || !this.camera) return;
+
+    this.stopSimulation();
+    this.simulation = null;
+
+    await this.graphStore.rebuild();
+    this.graph = this.graphStore.get();
+    if (!this.graph) return;
+
+    this.renderer.setGraph(this.graph);
+
+    this.simulation = createSimulation(this.graph, this.camera, () => this.interactor!.getMouseScreenPosition());
+    this.startSimulation();
+}
+
 
   private animationLoop = (timestamp: number) => {
     // Always keep the RAF loop alive; just skip simulation stepping when not running.
@@ -239,7 +271,7 @@ export class GraphController {
 
   destroy(): void {
     // persist positions immediately when view is closed
-    this.store?.saveGraph(); 
+    this.graphStore?.save(); 
     // clear any preview poll timer and lock
     if (this.previewPollTimer) window.clearInterval(this.previewPollTimer as number); 
     this.previewPollTimer         = null;

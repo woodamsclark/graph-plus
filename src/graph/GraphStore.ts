@@ -1,284 +1,254 @@
-import { App, TFile } from 'obsidian';
-import { GraphNode, GraphEdge, GraphData, GraphPlusSettings } from '../shared/interfaces.ts';
-import { debounce } from '../shared/debounce.ts';
-import { GraphDependencies } from './GraphController.ts';
-import { getSettings } from '../settings/settingsStore.ts';
+import { App, TFile } from "obsidian";
+import { GraphData, GraphNode, GraphEdge } from "../shared/interfaces.ts";
+import { getSettings } from "../settings/settingsStore.ts";
+
+type PluginLike = {
+  loadData: () => Promise<any>;
+  saveData: (data: any) => Promise<void>;
+};
+
+type GraphStoreDeps = {
+  getApp: () => App;
+  getPlugin: () => PluginLike | null;
+};
+
+type PersistedGraphState = {
+  version: number;
+  vaultId: string;
+  nodePositions: Record<string, { x: number; y: number; z: number }>;
+};
 
 interface ResolvedLinks {
-  [sourcePath: string]: {
-    [targetPath: string]: number; // number = link count
-  };
+  [sourcePath: string]: { [targetPath: string]: number };
 }
 
 export class GraphStore {
-    private deps            : GraphDependencies;
-    private saveDebounced   : () => void;
+  private deps: GraphStoreDeps;
 
-    constructor(deps: GraphDependencies) {
-        this.deps           = deps;
-        this.saveDebounced  = debounce(() => this.saveGraph(), 2000, true);
+  private graph         : GraphData             | null = null;
+  private cachedState   : PersistedGraphState   | null = null;
+
+  constructor(deps: GraphStoreDeps) {
+    this.deps = deps;
+  }
+
+  /** Load-or-generate once and keep it as the single graph instance */
+  public async init(): Promise<GraphData> {
+    if (this.graph) return this.graph;
+
+    const app = this.deps.getApp();
+
+    const state = await this.loadState(app);
+    const g = this.generateGraph(app);
+
+    if (state) this.applyPositions(g, state);
+    this.decorateGraph(g, app);
+
+    this.graph = g;
+    return g;
+  }
+
+  public get(): GraphData | null {
+    return this.graph;
+  }
+
+  public async save(): Promise<void> {
+    if (!this.graph) return;
+
+    const app = this.deps.getApp();
+    const state = this.extractState(this.graph, app);
+
+    await this.saveState(state);
+    this.cachedState = state;
+  }
+
+  public async rebuild(): Promise<GraphData> {
+    this.graph = null;
+    return await this.init();
+  }
+
+  public invalidate(): void {
+    this.graph = null;
+    // keep cachedState; it remains valid
+  }
+
+
+  // -----------------------
+  // Persistence (data.json)
+  // -----------------------
+
+  private async loadState(app: App): Promise<PersistedGraphState | null> {
+    if (this.cachedState) return this.cachedState;
+
+    const plugin = this.deps.getPlugin();
+    if (!plugin) return null;
+
+    const raw = await plugin.loadData().catch(() => null);
+    if (!raw) return null;
+
+    const vaultId = app.vault.getName();
+    const state = raw?.graphStateByVault?.[vaultId] ?? null;
+
+    this.cachedState = state;
+    return state;
+  }
+
+  private async saveState(state: PersistedGraphState): Promise<void> {
+    const plugin = this.deps.getPlugin();
+    if (!plugin) return;
+
+    const raw = await plugin.loadData().catch(() => ({}));
+    const next = raw ?? {};
+    next.graphStateByVault ??= {};
+    next.graphStateByVault[state.vaultId] = state;
+
+    await plugin.saveData(next);
+  }
+
+  private extractState(graph: GraphData, app: App): PersistedGraphState {
+    const vaultId = app.vault.getName();
+    const nodePositions: PersistedGraphState["nodePositions"] = {};
+
+    for (const n of graph.nodes) {
+      if (!n.filePath) continue;
+      if (!Number.isFinite(n.x) || !Number.isFinite(n.y) || !Number.isFinite(n.z)) continue;
+      nodePositions[n.filePath] = { x: n.x, y: n.y, z: n.z };
     }
 
-    public async loadGraph(app: App): Promise<GraphData> {
-        const settings = getSettings();
+    return { version: 1, vaultId, nodePositions };
+  }
 
-        let graph = this.loadGraphFromSave()
-        let nodes: GraphNode[] = [];
-        if (graph)
-            nodes = graph.nodes;
-        else
-            nodes = this.generateFileNodes(app);
-        
-        const nodeByID = new Map<string, GraphNode>();
-        for (const node of nodes) nodeByID.set(node.id, node);
+  private applyPositions(graph: GraphData, state: PersistedGraphState): void {
+    const pos = state.nodePositions || {};
+    for (const n of graph.nodes) {
+      if (!n.filePath) continue;
+      const p = pos[n.filePath];
+      if (!p) continue;
+      n.x = p.x; n.y = p.y; n.z = p.z;
+      n.vx = 0; n.vy = 0; n.vz = 0; // avoid load “explosions”
+    }
+  }
 
-        const { edges, edgeSet } = this.buildNoteEdgesFromResolvedLinks(app, nodeByID);
+  // -----------------------
+  // Generation (topology)
+  // -----------------------
 
-        if (settings.graph.showTags !== false)
-            this.addTagNodesAndEdges(nodes, nodeByID);
-        
-        this.computeNodeDegrees(nodes, nodeByID, edges);
-        this.markBidirectionalEdges(edges);
+  private generateGraph(app: App): GraphData {
+    const nodes = this.createNoteNodes(app);
+    const nodeById = new Map(nodes.map(n => [n.id, n] as const));
+    const edges = this.createEdgesFromResolvedLinks(app, nodeById);
 
-        const centerNode = this.pickCenterNode(app, nodes);
-        return { nodes, edges, centerNode };
+    return { nodes, edges, centerNode: null };
+  }
+
+  private createNoteNodes(app: App): GraphNode[] {
+    const files: TFile[] = app.vault.getMarkdownFiles();
+    const nodes: GraphNode[] = [];
+
+    for (const file of files) {
+      const jitter = 50;
+      nodes.push({
+        id: file.path,
+        filePath: file.path,
+        file,
+        label: file.basename,
+        x: (Math.random() - 0.5) * jitter,
+        y: (Math.random() - 0.5) * jitter,
+        z: (Math.random() - 0.5) * jitter,
+        vx: 0, vy: 0, vz: 0,
+        type: "note",
+        inDegree: 0, outDegree: 0, totalDegree: 0,
+        radius: 0,
+      });
     }
 
-    generateFileNodes(app: App): GraphNode[]{
-        const files: TFile[]     = app.vault.getMarkdownFiles();
-        const nodes: GraphNode[] = [];
-        for (const file of files) {
-            const jitter = 50; // world units; tweak to taste
-            const x0 = (Math.random() - 0.5) * jitter;
-            const y0 = (Math.random() - 0.5) * jitter;
-            const z0 = (Math.random() - 0.5) * jitter;
-            const node: GraphNode = {
-                id          : file.path,
-                filePath    : file.path,
-                file        : file,
-                label       : file.basename,
-                x           : x0,
-                y           : y0,
-                z           : z0,
-                vx          : 0,
-                vy          : 0,
-                vz          : 0,
-                type        : 'note',
-                inDegree    : 0,
-                outDegree   : 0,
-                totalDegree : 0,
-                radius      : 0,
-            };
-            nodes.push(node);
-        }
+    return nodes;
+  }
 
-        return nodes;
-    }
-    
-    buildNoteEdgesFromResolvedLinks(app: App, nodeByID: Map<string, GraphNode>): { edges: GraphEdge[]; edgeSet: Set<string> } {
-        const settings                  = getSettings();
-        const resolved  : ResolvedLinks = (app.metadataCache as any).resolvedLinks || {};
-        const edges     : GraphEdge[]   = [];
-        const edgeSet                   = new Set<string>();
-        const countDuplicates           = Boolean(settings.graph.countDuplicateLinks);
+  private createEdgesFromResolvedLinks(app: App, nodeById: Map<string, GraphNode>): GraphEdge[] {
+    const settings = getSettings();
+    const resolved: ResolvedLinks = (app.metadataCache as any).resolvedLinks || {};
+    const edges: GraphEdge[] = [];
+    const edgeSet = new Set<string>();
+    const countDuplicates = Boolean(settings.graph.countDuplicateLinks);
 
-        for (const sourcePath of Object.keys(resolved)) {
-            const targets = resolved[sourcePath] || {};
-            for (const targetPath of Object.keys(targets)) {
-                if (!nodeByID.has(sourcePath) || !nodeByID.has(targetPath)) continue;
+    for (const sourcePath of Object.keys(resolved)) {
+      const targets = resolved[sourcePath] || {};
+      for (const targetPath of Object.keys(targets)) {
+        if (!nodeById.has(sourcePath) || !nodeById.has(targetPath)) continue;
 
-                const key       = `${sourcePath}->${targetPath}`;
-                if (edgeSet.has(key)) continue;
+        const key = `${sourcePath}->${targetPath}`;
+        if (edgeSet.has(key)) continue;
 
-                const rawCount  = Number(targets[targetPath] || 1) || 1;
-                const linkCount = countDuplicates ? rawCount : 1;
+        const rawCount  = Number(targets[targetPath] || 1) || 1;
+        const linkCount = countDuplicates ? rawCount : 1;
 
-                edges.push({
-                    id: key,
-                    sourceId: sourcePath,
-                    targetId: targetPath,
-                    linkCount,
-                    bidirectional: false,
-                });
-                edgeSet.add(key);
-            }
-        }
-        return { edges, edgeSet };
-    }
-    
-    computeNodeDegrees(nodes: GraphNode[], nodeByID: Map<string, GraphNode>, edges: GraphEdge[]): void {
-        for (const edge of edges) {
-        const src = nodeByID.get(edge.sourceId);
-        const tgt = nodeByID.get(edge.targetId);
+        edges.push({
+          id: key,
+          sourceId: sourcePath,
+          targetId: targetPath,
+          linkCount,
+          bidirectional: false,
+        });
 
-        if (!src || !tgt) continue;
-        const c       = Number(edge.linkCount   || 1) || 1;
-        src.outDegree = (src.outDegree          || 0) + c;
-        tgt.inDegree  = (tgt.inDegree           || 0) + c;
-        }
-
-        for (const node of nodes) { 
-        node.totalDegree  = (node.inDegree || 0) + (node.outDegree || 0); 
-        node.radius       = 4 + Math.log2(1 + node.totalDegree); // base radius formula
-        }
-    }
-    
-    markBidirectionalEdges(edges: GraphEdge[]): void {
-        const edgeMap = new Map<string, GraphEdge>();
-        for (const e of edges) { edgeMap.set(`${e.sourceId}->${e.targetId}`, e); }
-        for (const e of edges) {
-        const reverseKey = `${e.targetId}->${e.sourceId}`;
-        if (edgeMap.has(reverseKey)) {
-            e.bidirectional     = true;
-            const other         = edgeMap.get(reverseKey)!;
-            other.bidirectional = true;
-        }
-        }
-    }
-    
-    addTagNodesAndEdges(nodes: GraphNode[], nodeByPath: Map<string, GraphNode>): void {
-        const tagNodeByName = new Map<string, GraphNode>();
-        const ensureTagNode = (tagName: string): GraphNode => {
-        let node = tagNodeByName.get(tagName);
-        if (node) return node;
-
-        node = {
-            id          : `tag:${tagName}`,
-            label       : `#${tagName}`,
-            x           : 0,
-            y           : 0,
-            z           : 0,
-            vx          : 0,
-            vy          : 0,
-            vz          : 0,
-            filePath    : `tag:${tagName}`,
-            type        : 'tag',
-            inDegree    : 0,
-            outDegree   : 0,
-            totalDegree : 0,
-            radius      : 0,
-        };
-
-        nodes.push(node);
-        tagNodeByName.set(tagName, node);
-        nodeByPath.set(node.id, node);
-
-        return node;
-        };
-    }
-    
-    pickCenterNode(app: App, nodes: GraphNode[]): GraphNode | null {
-        const settings = getSettings();
-        if (!settings.graph.useCenterNote) return null;
-
-        let centerNode = undefined;
-    
-        // if centerNoteTitle is defined, use it.
-        if (settings.graph.centerNoteTitle) {
-        centerNode = nodes.find((n) => n.id === settings.graph.centerNoteTitle);
-        if (centerNode !== undefined) return centerNode; // if found, return it
-        }
-
-        // ...else calculate it. settings.graph.useOutlinkFallback as alternative
-        const onlyNotes = nodes.filter((n) => n.type !== 'tag');
-        const preferOut = Boolean(settings.graph.useOutlinkFallback);
-        const metric = (n: GraphNode) => (preferOut ? n.outDegree || 0 : n.inDegree || 0);
-
-        const chooseBy = (predicate: (n: GraphNode) => boolean): GraphNode | null => {
-        let best: GraphNode | null = null;
-        for (const n of onlyNotes) {
-            if (!predicate(n)) continue;
-            if (!best || metric(n) > metric(best)) {
-            best = n;
-            }
-        }
-        return best;
-        };
-
-        let chosen: GraphNode | null = null;
-        const raw = String(settings.graph.centerNoteTitle || '').trim();
-
-        if (raw) {
-        const mc = app.metadataCache as unknown as {
-            resolvedLinks: ResolvedLinks;
-            getFirstLinkpathDest(path: string, source: string): TFile | null;
-        };
-
-        let resolved: any = null;
-
-        try {
-            resolved = mc?.getFirstLinkpathDest?.(raw, '');
-            if (!resolved && !raw.endsWith('.md')) {
-            resolved = mc?.getFirstLinkpathDest?.(raw + '.md', '');
-            }
-        } catch {}
-
-        if (resolved?.path) {
-            chosen = chooseBy((n) => n.filePath === resolved.path);
-        }
-
-        if (!chosen) {
-            const normA = raw;
-            const normB = raw.endsWith('.md') ? raw : raw + '.md';
-            chosen = chooseBy((n) => n.filePath === normA || n.filePath === normB);
-        }
-
-        if (!chosen) {
-            const base    = raw.endsWith('.md') ? raw.slice(0, -3) : raw;
-            chosen        = chooseBy((n) => {
-            const file  = (n as any).file;
-            const bn    = file?.basename || n.label;
-            return String(bn) === base;
-            });
-        }
-        }
-
-        if (!chosen) {
-        for (const n of onlyNotes) {
-            if (!chosen || metric(n) > metric(chosen)) {
-            chosen = n;
-            }
-        }
-        }
-        return chosen;
+        edgeSet.add(key);
+      }
     }
 
-    public saveSoon(): void {
-        this.saveDebounced();
-    } 
+    return edges;
+  }
 
-    public saveGraph(): void {
-        try {
-            const graph     = this.deps.getGraph();
-            
-            const app       = this.deps.getApp();
-            const vaultId   = app.vault.getName();
-            const plugin    = this.deps.getPlugin();
+  // -----------------------
+  // Decorations (settings)
+  // -----------------------
 
-            if (!vaultId || !graph || !app || !plugin) return;
+  private decorateGraph(graph: GraphData, app: App): void {
+    const settings = getSettings();
 
-            const allSaved  = plugin.settings.nodePositions || {};            
-
-            if (!allSaved[vaultId]) {
-                allSaved[vaultId]   = {};
-            }
-
-            const map = allSaved[vaultId];
-
-            for (const node of graph.nodes) {
-                if (!Number.isFinite(node.x) || !Number.isFinite(node.y))   continue;
-                if (!node.filePath)                                         continue;
-
-                map[node.filePath] = { x: node.x, y: node.y, z: node.z };
-            }
-
-            plugin.settings.nodePositions = allSaved;
-            try { plugin.saveSettings && plugin.saveSettings(); } 
-            catch (e) { console.error('Failed to save node positions', e); }
-        } catch (e) { console.error('Greater Graph: saveNodePositions error', e); }
+    if (settings.graph.showTags !== false) {
+      // keep isolated: addTagNodesAndEdges(graph, app)
+      // (you can port your existing method here)
     }
 
-    public loadGraphFromSave():  GraphData | null {
-        return null;
+    this.computeDegreesAndRadius(graph);
+    this.markBidirectional(graph.edges);
+
+    graph.centerNode = this.pickCenterNode(app, graph.nodes);
+  }
+
+  private computeDegreesAndRadius(graph: GraphData): void {
+    const nodeById = new Map(graph.nodes.map(n => [n.id, n] as const));
+
+    for (const e of graph.edges) {
+      const src = nodeById.get(e.sourceId);
+      const tgt = nodeById.get(e.targetId);
+      if (!src || !tgt) continue;
+
+      const c = Number(e.linkCount || 1) || 1;
+      src.outDegree = (src.outDegree || 0) + c;
+      tgt.inDegree  = (tgt.inDegree  || 0) + c;
+    }
+
+    for (const n of graph.nodes) {
+      n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
+      n.radius = 4 + Math.log2(1 + n.totalDegree);
+    }
+  }
+
+  private markBidirectional(edges: GraphEdge[]): void {
+    const m = new Map<string, GraphEdge>();
+    for (const e of edges) m.set(`${e.sourceId}->${e.targetId}`, e);
+
+    for (const e of edges) {
+      const rev = m.get(`${e.targetId}->${e.sourceId}`);
+      if (rev) {
+        e.bidirectional = true;
+        rev.bidirectional = true;
+      }
+    }
+  }
+
+  private pickCenterNode(app: App, nodes: GraphNode[]): GraphNode | null {
+    return null;
     }
 }

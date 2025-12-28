@@ -221,23 +221,6 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       rb.style.border               = 'none'; 
       rb.style.background           = 'transparent'; 
       rb.style.cursor               = 'pointer';
-      const alphaInput              = document.createElement('input');
-      alphaInput.type               = 'number'; 
-      alphaInput.min                = '0.1'; 
-      alphaInput.max                = '1'; 
-      alphaInput.step               = '0.01';
-      alphaInput.value              = String(settings.graph.nodeColorAlpha);
-      alphaInput.style.width        = '68px'; 
-      alphaInput.style.marginLeft   = '8px';
-      alphaInput.addEventListener('change', async (e) => {
-        const v = Number((e.target as HTMLInputElement).value);
-        this.applySettings((s) => { s.graph.nodeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : settings.graph.nodeColorAlpha; });
-      });
-      rb.addEventListener('click', async () => { 
-        this.applySettings((s) => { s.graph.nodeColor = undefined; s.graph.nodeColorAlpha = settings.graph.nodeColorAlpha; });
-        colorInput.value                = '#000000'; 
-        alphaInput.value                = String(settings.graph.nodeColorAlpha); 
-    });
       s.controlEl.appendChild(rb);
       const hint                = document.createElement('span'); 
       hint.textContent          = '(alpha)'; 
@@ -245,7 +228,6 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       hint.style.marginRight    = '6px';
       s.controlEl.appendChild(hint);
       s.controlEl.appendChild(colorInput);
-      s.controlEl.appendChild(alphaInput);
     }
 
     {
@@ -273,24 +255,6 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       rb.style.border               = 'none'; 
       rb.style.background           = 'transparent'; 
       rb.style.cursor               = 'pointer';
-      const edgeAlpha               = document.createElement('input');
-      edgeAlpha.type                = 'number'; 
-      edgeAlpha.min                 = '0.1'; 
-      edgeAlpha.max                 = '1'; 
-      edgeAlpha.step                = '0.01';
-      edgeAlpha.value               = String(settings.graph.edgeColorAlpha);
-      edgeAlpha.style.width         = '68px'; 
-      edgeAlpha.style.marginLeft    = '8px';
-      edgeAlpha.addEventListener('change', async (e) => {
-        const v = Number((e.target as HTMLInputElement).value);
-        this.applySettings((s) => { s.graph.edgeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : settings.graph.edgeColorAlpha; });
-      });
-
-      rb.addEventListener('click', async () => { 
-        this.applySettings((s) => { s.graph.edgeColor = undefined; s.graph.edgeColorAlpha = settings.graph.edgeColorAlpha; });  
-        colorInput.value = '#000000'; 
-        edgeAlpha.value = String(settings.graph.edgeColorAlpha); 
-      });
       s.controlEl.appendChild(rb);
       s.controlEl.appendChild(colorInput);
       const hint                = document.createElement('span'); 
@@ -298,7 +262,6 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       hint.style.marginLeft     = '8px'; 
       hint.style.marginRight    = '6px';
       s.controlEl.appendChild(hint);
-      s.controlEl.appendChild(edgeAlpha);
     }
 
     // Tag color (override)
@@ -327,25 +290,6 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       rb.style.border           = 'none'; 
       rb.style.background       = 'transparent'; 
       rb.style.cursor           = 'pointer';
-      const tagAlpha            = document.createElement('input'); 
-      tagAlpha.type             = 'number'; 
-      tagAlpha.min              = '0.1'; 
-      tagAlpha.max              = '1'; 
-      tagAlpha.step             = '0.01';
-      tagAlpha.value            = String(settings.graph.tagColorAlpha);
-      tagAlpha.style.width      = '68px'; 
-      tagAlpha.style.marginLeft = '8px';
-      tagAlpha.addEventListener('change', async (e) => {
-        const v = Number((e.target as HTMLInputElement).value);
-        this.applySettings((s) => { s.graph.tagColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : settings.graph.tagColorAlpha; });
-      });
-
-      rb.addEventListener('click', async () => {
-        this.applySettings((s) => { s.graph.tagColor = undefined; s.graph.tagColorAlpha = settings.graph.tagColorAlpha; });
-        await this.plugin.saveSettings(); 
-        colorInput.value                = '#000000'; 
-        tagAlpha.value                  = String(settings.graph.tagColorAlpha); 
-    });
       s.controlEl.appendChild(rb);
       s.controlEl.appendChild(colorInput);
       const hint                = document.createElement('span'); 
@@ -353,7 +297,6 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       hint.style.marginLeft     = '8px'; 
       hint.style.marginRight    = '6px';
       s.controlEl.appendChild(hint);
-      s.controlEl.appendChild(tagAlpha);
     }
 
     {
@@ -380,22 +323,6 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       rb.style.border                   ='none'; 
       rb.style.background               ='transparent'; 
       rb.style.cursor                   ='pointer';
-      const labelAlpha                  = document.createElement('input');
-      labelAlpha.type                   = 'number'; 
-      labelAlpha.min                    = '0'; 
-      labelAlpha.max                    = '1'; 
-      labelAlpha.step                   = '0.01';
-      labelAlpha.value                  = String(settings.graph.labelColorAlpha);
-      labelAlpha.style.width            = '68px'; 
-      labelAlpha.style.marginLeft       = '8px';
-      labelAlpha.addEventListener('change', async (e) => {
-        const v = Number((e.target as HTMLInputElement).value);
-        this.applySettings((s) => { s.graph.labelColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : settings.graph.labelColorAlpha; });
-      });
-      rb.addEventListener('click', async () => {
-        this.applySettings((s) => { s.graph.labelColor = undefined; s.graph.labelColorAlpha = settings.graph.labelColorAlpha; });
-        colorInput.value = '#000000'; 
-        labelAlpha.value = String(settings.graph.labelColorAlpha); });
       s.controlEl.appendChild(rb);
       s.controlEl.appendChild(colorInput);
       const hint = document.createElement('span'); 
@@ -403,7 +330,6 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       hint.style.marginLeft     = '8px'; 
       hint.style.marginRight    = '6px';
       s.controlEl.appendChild(hint);
-      s.controlEl.appendChild(labelAlpha);
     }
 
     new Setting(containerEl)

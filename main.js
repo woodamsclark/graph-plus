@@ -52,20 +52,9 @@ function createRenderer(canvas, camera) {
   let colors = readColors();
   let mousePosition = null;
   let graph = null;
-  const nodeById = /* @__PURE__ */ new Map();
-  let hoveredNodeId = null;
-  let hoverNeighbors = null;
-  function resize(width, height) {
-    const w = Math.max(1, Math.floor(width));
-    const h = Math.max(1, Math.floor(height));
-    canvas.width = w;
-    canvas.height = h;
-    canvas.style.width = "100%";
-    canvas.style.height = "100%";
-    camera.setViewport(w, h);
-    render(camera.getState());
-  }
-  function render(_cam) {
+  let nodeById = /* @__PURE__ */ new Map();
+  let theme = buildThemeSnapshot();
+  function render() {
     if (!context)
       return;
     settings = getSettings();
@@ -227,7 +216,7 @@ function createRenderer(canvas, camera) {
     canvas.height = h;
     canvas.style.width = "100%";
     canvas.style.height = "100%";
-    cameraManager.setViewport(w, h);
+    camera.setViewport(w, h);
     render();
   }
   function setMouseScreenPosition(pos) {
@@ -492,13 +481,13 @@ var InputManager = class {
   callback;
   draggedNodeId = null;
   lastClientX = 0;
-  // ((Client Space))
+  // (( Client Space ))
   lastClientY = 0;
-  // ((Client Space))
+  // (( Client Space ))
   downClickX = 0;
-  // [[Canvas Space]
+  // [[ Canvas Space ]]
   downClickY = 0;
-  // [[Canvas Space]
+  // [[ Canvas Space ]]
   dragThreshold = 5;
   // Drag starts after 5 pixels of movement
   pointerMode = 0 /* Idle */;
@@ -890,17 +879,13 @@ var GraphInteractor = class {
     } else {
       this.state.mouseScreenPosition = { x: screenX, y: screenY };
     }
-    const camera = this.deps.getCamera();
-    if (!camera)
-      return;
-    camera.updateHover(screenX, screenY);
   }
   startDrag(nodeId, screenX, screenY) {
     const graph = this.deps.getGraph();
     const camera = this.deps.getCamera();
     if (!graph || !camera)
       return;
-    this.deps.setMouseGravityEnabled(false);
+    this.deps.enableMouseGravity(false);
     const node = graph.nodes.find((n) => n.id === nodeId);
     if (!node)
       return;
@@ -944,7 +929,7 @@ var GraphInteractor = class {
     this.deps.setPinnedNodes(this.pinnedNodes);
     this.state.draggedId = null;
     this.dragWorldOffset = null;
-    this.deps.setMouseGravityEnabled(true);
+    this.deps.enableMouseGravity(true);
     return;
   }
   startPan(screenX, screenY) {
@@ -1021,9 +1006,12 @@ var GraphInteractor = class {
     }
     const mouse = this.state.mouseScreenPosition;
     if (!mouse)
-      return null;
+      return;
     const hit = this.nodeClicked(mouse.x, mouse.y);
     this.state.hoveredId = hit?.id ?? null;
+  }
+  get hoveredNodeId() {
+    return this.state.hoveredId;
   }
 };
 
@@ -1045,67 +1033,122 @@ function createCursorController(canvas) {
   };
 }
 
-// src/shared/debounce.ts
-function debounce(fn, wait = 300, immediate = false) {
-  let timeout = null;
-  return (...args) => {
-    const later = () => {
-      timeout = null;
-      if (!immediate)
-        fn(...args);
-    };
-    const callNow = immediate && timeout === null;
-    if (timeout)
-      window.clearTimeout(timeout);
-    timeout = window.setTimeout(later, wait);
-    if (callNow)
-      fn(...args);
-  };
-}
-
 // src/graph/GraphStore.ts
 var GraphStore = class {
   deps;
-  saveDebounced;
+  graph = null;
+  cachedState = null;
   constructor(deps) {
     this.deps = deps;
-    this.saveDebounced = debounce(() => this.saveGraph(), 2e3, true);
   }
-  async loadGraph(app) {
-    const settings = getSettings();
-    let graph = this.loadGraphFromSave();
-    let nodes = [];
-    if (graph)
-      nodes = graph.nodes;
-    else
-      nodes = this.generateFileNodes(app);
-    const nodeByID = /* @__PURE__ */ new Map();
-    for (const node of nodes)
-      nodeByID.set(node.id, node);
-    const { edges, edgeSet } = this.buildNoteEdgesFromResolvedLinks(app, nodeByID);
-    if (settings.graph.showTags !== false)
-      this.addTagNodesAndEdges(nodes, nodeByID);
-    this.computeNodeDegrees(nodes, nodeByID, edges);
-    this.markBidirectionalEdges(edges);
-    const centerNode = this.pickCenterNode(app, nodes);
-    return { nodes, edges, centerNode };
+  /** Load-or-generate once and keep it as the single graph instance */
+  async init() {
+    if (this.graph)
+      return this.graph;
+    const app = this.deps.getApp();
+    const state = await this.loadState(app);
+    const g = this.generateGraph(app);
+    if (state)
+      this.applyPositions(g, state);
+    this.decorateGraph(g, app);
+    this.graph = g;
+    return g;
   }
-  generateFileNodes(app) {
+  get() {
+    return this.graph;
+  }
+  async save() {
+    if (!this.graph)
+      return;
+    const app = this.deps.getApp();
+    const state = this.extractState(this.graph, app);
+    await this.saveState(state);
+    this.cachedState = state;
+  }
+  async rebuild() {
+    this.graph = null;
+    return await this.init();
+  }
+  invalidate() {
+    this.graph = null;
+  }
+  // -----------------------
+  // Persistence (data.json)
+  // -----------------------
+  async loadState(app) {
+    if (this.cachedState)
+      return this.cachedState;
+    const plugin = this.deps.getPlugin();
+    if (!plugin)
+      return null;
+    const raw = await plugin.loadData().catch(() => null);
+    if (!raw)
+      return null;
+    const vaultId = app.vault.getName();
+    const state = raw?.graphStateByVault?.[vaultId] ?? null;
+    this.cachedState = state;
+    return state;
+  }
+  async saveState(state) {
+    const plugin = this.deps.getPlugin();
+    if (!plugin)
+      return;
+    const raw = await plugin.loadData().catch(() => ({}));
+    const next = raw ?? {};
+    next.graphStateByVault ??= {};
+    next.graphStateByVault[state.vaultId] = state;
+    await plugin.saveData(next);
+  }
+  extractState(graph, app) {
+    const vaultId = app.vault.getName();
+    const nodePositions = {};
+    for (const n of graph.nodes) {
+      if (!n.filePath)
+        continue;
+      if (!Number.isFinite(n.x) || !Number.isFinite(n.y) || !Number.isFinite(n.z))
+        continue;
+      nodePositions[n.filePath] = { x: n.x, y: n.y, z: n.z };
+    }
+    return { version: 1, vaultId, nodePositions };
+  }
+  applyPositions(graph, state) {
+    const pos = state.nodePositions || {};
+    for (const n of graph.nodes) {
+      if (!n.filePath)
+        continue;
+      const p = pos[n.filePath];
+      if (!p)
+        continue;
+      n.x = p.x;
+      n.y = p.y;
+      n.z = p.z;
+      n.vx = 0;
+      n.vy = 0;
+      n.vz = 0;
+    }
+  }
+  // -----------------------
+  // Generation (topology)
+  // -----------------------
+  generateGraph(app) {
+    const nodes = this.createNoteNodes(app);
+    const nodeById = new Map(nodes.map((n) => [n.id, n]));
+    const edges = this.createEdgesFromResolvedLinks(app, nodeById);
+    return { nodes, edges, centerNode: null };
+  }
+  createNoteNodes(app) {
     const files = app.vault.getMarkdownFiles();
     const nodes = [];
     for (const file of files) {
       const jitter = 50;
-      const x0 = (Math.random() - 0.5) * jitter;
-      const y0 = (Math.random() - 0.5) * jitter;
-      const z0 = (Math.random() - 0.5) * jitter;
-      const node = {
+      nodes.push({
         id: file.path,
         filePath: file.path,
         file,
         label: file.basename,
-        x: x0,
-        y: y0,
-        z: z0,
+        x: (Math.random() - 0.5) * jitter,
+        y: (Math.random() - 0.5) * jitter,
+        z: (Math.random() - 0.5) * jitter,
         vx: 0,
         vy: 0,
         vz: 0,
@@ -1114,12 +1157,11 @@ var GraphStore = class {
         outDegree: 0,
         totalDegree: 0,
         radius: 0
-      };
-      nodes.push(node);
+      });
     }
     return nodes;
   }
-  buildNoteEdgesFromResolvedLinks(app, nodeByID) {
+  createEdgesFromResolvedLinks(app, nodeById) {
     const settings = getSettings();
     const resolved = app.metadataCache.resolvedLinks || {};
     const edges = [];
@@ -1128,7 +1170,7 @@ var GraphStore = class {
     for (const sourcePath of Object.keys(resolved)) {
       const targets = resolved[sourcePath] || {};
       for (const targetPath of Object.keys(targets)) {
-        if (!nodeByID.has(sourcePath) || !nodeByID.has(targetPath))
+        if (!nodeById.has(sourcePath) || !nodeById.has(targetPath))
           continue;
         const key = `${sourcePath}->${targetPath}`;
         if (edgeSet.has(key))
@@ -1145,161 +1187,48 @@ var GraphStore = class {
         edgeSet.add(key);
       }
     }
-    return { edges, edgeSet };
+    return edges;
   }
-  computeNodeDegrees(nodes, nodeByID, edges) {
-    for (const edge of edges) {
-      const src = nodeByID.get(edge.sourceId);
-      const tgt = nodeByID.get(edge.targetId);
+  // -----------------------
+  // Decorations (settings)
+  // -----------------------
+  decorateGraph(graph, app) {
+    const settings = getSettings();
+    if (settings.graph.showTags !== false) {
+    }
+    this.computeDegreesAndRadius(graph);
+    this.markBidirectional(graph.edges);
+    graph.centerNode = this.pickCenterNode(app, graph.nodes);
+  }
+  computeDegreesAndRadius(graph) {
+    const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
+    for (const e of graph.edges) {
+      const src = nodeById.get(e.sourceId);
+      const tgt = nodeById.get(e.targetId);
       if (!src || !tgt)
         continue;
-      const c = Number(edge.linkCount || 1) || 1;
+      const c = Number(e.linkCount || 1) || 1;
       src.outDegree = (src.outDegree || 0) + c;
       tgt.inDegree = (tgt.inDegree || 0) + c;
     }
-    for (const node of nodes) {
-      node.totalDegree = (node.inDegree || 0) + (node.outDegree || 0);
-      node.radius = 4 + Math.log2(1 + node.totalDegree);
+    for (const n of graph.nodes) {
+      n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
+      n.radius = 4 + Math.log2(1 + n.totalDegree);
     }
   }
-  markBidirectionalEdges(edges) {
-    const edgeMap = /* @__PURE__ */ new Map();
+  markBidirectional(edges) {
+    const m = /* @__PURE__ */ new Map();
+    for (const e of edges)
+      m.set(`${e.sourceId}->${e.targetId}`, e);
     for (const e of edges) {
-      edgeMap.set(`${e.sourceId}->${e.targetId}`, e);
-    }
-    for (const e of edges) {
-      const reverseKey = `${e.targetId}->${e.sourceId}`;
-      if (edgeMap.has(reverseKey)) {
+      const rev = m.get(`${e.targetId}->${e.sourceId}`);
+      if (rev) {
         e.bidirectional = true;
-        const other = edgeMap.get(reverseKey);
-        other.bidirectional = true;
+        rev.bidirectional = true;
       }
     }
-  }
-  addTagNodesAndEdges(nodes, nodeByPath) {
-    const tagNodeByName = /* @__PURE__ */ new Map();
-    const ensureTagNode = (tagName) => {
-      let node = tagNodeByName.get(tagName);
-      if (node)
-        return node;
-      node = {
-        id: `tag:${tagName}`,
-        label: `#${tagName}`,
-        x: 0,
-        y: 0,
-        z: 0,
-        vx: 0,
-        vy: 0,
-        vz: 0,
-        filePath: `tag:${tagName}`,
-        type: "tag",
-        inDegree: 0,
-        outDegree: 0,
-        totalDegree: 0,
-        radius: 0
-      };
-      nodes.push(node);
-      tagNodeByName.set(tagName, node);
-      nodeByPath.set(node.id, node);
-      return node;
-    };
   }
   pickCenterNode(app, nodes) {
-    const settings = getSettings();
-    if (!settings.graph.useCenterNote)
-      return null;
-    let centerNode = void 0;
-    if (settings.graph.centerNoteTitle) {
-      centerNode = nodes.find((n) => n.id === settings.graph.centerNoteTitle);
-      if (centerNode !== void 0)
-        return centerNode;
-    }
-    const onlyNotes = nodes.filter((n) => n.type !== "tag");
-    const preferOut = Boolean(settings.graph.useOutlinkFallback);
-    const metric = (n) => preferOut ? n.outDegree || 0 : n.inDegree || 0;
-    const chooseBy = (predicate) => {
-      let best = null;
-      for (const n of onlyNotes) {
-        if (!predicate(n))
-          continue;
-        if (!best || metric(n) > metric(best)) {
-          best = n;
-        }
-      }
-      return best;
-    };
-    let chosen = null;
-    const raw = String(settings.graph.centerNoteTitle || "").trim();
-    if (raw) {
-      const mc = app.metadataCache;
-      let resolved = null;
-      try {
-        resolved = mc?.getFirstLinkpathDest?.(raw, "");
-        if (!resolved && !raw.endsWith(".md")) {
-          resolved = mc?.getFirstLinkpathDest?.(raw + ".md", "");
-        }
-      } catch {
-      }
-      if (resolved?.path) {
-        chosen = chooseBy((n) => n.filePath === resolved.path);
-      }
-      if (!chosen) {
-        const normA = raw;
-        const normB = raw.endsWith(".md") ? raw : raw + ".md";
-        chosen = chooseBy((n) => n.filePath === normA || n.filePath === normB);
-      }
-      if (!chosen) {
-        const base = raw.endsWith(".md") ? raw.slice(0, -3) : raw;
-        chosen = chooseBy((n) => {
-          const file = n.file;
-          const bn = file?.basename || n.label;
-          return String(bn) === base;
-        });
-      }
-    }
-    if (!chosen) {
-      for (const n of onlyNotes) {
-        if (!chosen || metric(n) > metric(chosen)) {
-          chosen = n;
-        }
-      }
-    }
-    return chosen;
-  }
-  saveSoon() {
-    this.saveDebounced();
-  }
-  saveGraph() {
-    try {
-      const graph = this.deps.getGraph();
-      const app = this.deps.getApp();
-      const vaultId = app.vault.getName();
-      const plugin = this.deps.getPlugin();
-      if (!vaultId || !graph || !app || !plugin)
-        return;
-      const allSaved = plugin.settings.nodePositions || {};
-      if (!allSaved[vaultId]) {
-        allSaved[vaultId] = {};
-      }
-      const map = allSaved[vaultId];
-      for (const node of graph.nodes) {
-        if (!Number.isFinite(node.x) || !Number.isFinite(node.y))
-          continue;
-        if (!node.filePath)
-          continue;
-        map[node.filePath] = { x: node.x, y: node.y, z: node.z };
-      }
-      plugin.settings.nodePositions = allSaved;
-      try {
-        plugin.saveSettings && plugin.saveSettings();
-      } catch (e) {
-        console.error("Failed to save node positions", e);
-      }
-    } catch (e) {
-      console.error("Greater Graph: saveNodePositions error", e);
-    }
-  }
-  loadGraphFromSave() {
     return null;
   }
 };
@@ -1321,12 +1250,11 @@ var GraphController = class {
   camera = null;
   settingsUnregister = null;
   interactor = null;
-  store = null;
+  graphStore = null;
   graph = null;
   cursor = null;
   lastPreviewId = null;
   hoverAnchor = null;
-  hoverPreview = null;
   constructor(app, containerEl, plugin) {
     this.app = app;
     this.containerEl = containerEl;
@@ -1340,7 +1268,7 @@ var GraphController = class {
     this.canvas.style.width = "100%";
     this.canvas.style.height = "100%";
     this.canvas.tabIndex = 0;
-    const deps = {
+    const graphDeps = {
       getGraph: () => this.graph,
       getCamera: () => this.camera,
       getApp: () => this.app,
@@ -1348,16 +1276,21 @@ var GraphController = class {
       setPinnedNodes: (ids) => {
         this.simulation?.setPinnedNodes?.(ids);
       },
-      setMouseGravityEnabled: (on) => {
+      enableMouseGravity: (on) => {
         getSettings().physics.mouseGravityEnabled = on;
       }
     };
-    this.interactor = new GraphInteractor(deps);
-    this.store = new GraphStore(deps);
+    const storeDeps = {
+      getApp: () => this.app,
+      getPlugin: () => this.plugin
+    };
+    this.interactor = new GraphInteractor(graphDeps);
+    this.graphStore = new GraphStore(storeDeps);
     this.cursor = createCursorController(this.canvas);
     this.renderer = createRenderer(this.canvas, this.camera);
-    if (!this.canvas || !this.interactor || !this.renderer)
+    if (!this.canvas || !this.interactor || !this.renderer || !this.graphStore || !this.renderer)
       return;
+    await this.graphStore.init();
     this.interactor.setOnNodeClick((node) => this.openNodeFile(node));
     const rect = this.containerEl.getBoundingClientRect();
     this.renderer.resize(rect.width, rect.height);
@@ -1392,9 +1325,9 @@ var GraphController = class {
   }
   async refreshGraph() {
     this.stopSimulation();
-    if (!this.store)
+    if (!this.graphStore)
       return;
-    this.graph = await this.store.loadGraph(this.app);
+    this.graph = this.graphStore.get();
     const interactor = this.interactor;
     const renderer = this.renderer;
     const graph = this.graph;
@@ -1406,10 +1339,7 @@ var GraphController = class {
     const simulation = this.simulation;
     this.buildAdjacencyMap();
     this.startSimulation();
-    renderer?.render(camera.getState());
-  }
-  resetCamera() {
-    this.camera?.resetCamera();
+    renderer?.render();
   }
   animationLoop = (timestamp) => {
     if (!this.lastTime) {
@@ -1439,22 +1369,6 @@ var GraphController = class {
   };
   updateCameraAnimation(now) {
     return;
-  }
-  async refreshGraph() {
-    this.stopSimulation();
-    this.graph = await buildGraph(this.app);
-    const interactor = this.interactor;
-    const renderer = this.renderer;
-    const graph = this.graph;
-    const camera = this.camera;
-    if (!interactor || !renderer || !graph || !camera)
-      return;
-    renderer?.setGraph(graph);
-    this.simulation = createSimulation(graph, camera, () => interactor.getMouseScreenPosition());
-    const simulation = this.simulation;
-    this.buildAdjacencyMap();
-    this.startSimulation();
-    renderer?.render();
   }
   buildAdjacencyMap() {
     const adjacency = /* @__PURE__ */ new Map();
@@ -1525,7 +1439,7 @@ var GraphController = class {
     this.renderer.resize(width, height);
   }
   destroy() {
-    this.store?.saveGraph();
+    this.graphStore?.save();
     if (this.previewPollTimer)
       window.clearInterval(this.previewPollTimer);
     this.previewPollTimer = null;
@@ -1550,6 +1464,24 @@ var GraphController = class {
     this.inputManager = null;
   }
 };
+
+// src/shared/debounce.ts
+function debounce(fn, wait = 300, immediate = false) {
+  let timeout = null;
+  return (...args) => {
+    const later = () => {
+      timeout = null;
+      if (!immediate)
+        fn(...args);
+    };
+    const callNow = immediate && timeout === null;
+    if (timeout)
+      window.clearTimeout(timeout);
+    timeout = window.setTimeout(later, wait);
+    if (callNow)
+      fn(...args);
+  };
+}
 
 // src/plugin/GraphView.ts
 var GRAPH_PLUS_TYPE = "graph-plus";
@@ -1663,9 +1595,7 @@ var DEFAULT_SETTINGS = {
       panVelY: 0,
       zoomVel: 0
     }
-  },
-  nodePositions: {}
-  // Record<string, {x:number;y:number;z:number}> or whatever your type is
+  }
 };
 
 // src/plugin/SettingsTab.ts
@@ -1857,28 +1787,6 @@ var GraphPlusSettingTab = class extends import_obsidian3.PluginSettingTab {
       rb.style.border = "none";
       rb.style.background = "transparent";
       rb.style.cursor = "pointer";
-      const alphaInput = document.createElement("input");
-      alphaInput.type = "number";
-      alphaInput.min = "0.1";
-      alphaInput.max = "1";
-      alphaInput.step = "0.01";
-      alphaInput.value = String(settings.graph.nodeColorAlpha);
-      alphaInput.style.width = "68px";
-      alphaInput.style.marginLeft = "8px";
-      alphaInput.addEventListener("change", async (e) => {
-        const v = Number(e.target.value);
-        this.applySettings((s2) => {
-          s2.graph.nodeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : settings.graph.nodeColorAlpha;
-        });
-      });
-      rb.addEventListener("click", async () => {
-        this.applySettings((s2) => {
-          s2.graph.nodeColor = void 0;
-          s2.graph.nodeColorAlpha = settings.graph.nodeColorAlpha;
-        });
-        colorInput.value = "#000000";
-        alphaInput.value = String(settings.graph.nodeColorAlpha);
-      });
       s.controlEl.appendChild(rb);
       const hint = document.createElement("span");
       hint.textContent = "(alpha)";
@@ -1886,7 +1794,6 @@ var GraphPlusSettingTab = class extends import_obsidian3.PluginSettingTab {
       hint.style.marginRight = "6px";
       s.controlEl.appendChild(hint);
       s.controlEl.appendChild(colorInput);
-      s.controlEl.appendChild(alphaInput);
     }
     {
       const s = new import_obsidian3.Setting(containerEl).setName("Edge color (override)").setDesc("Optional color to override edge stroke color. Leave unset to use a theme-appropriate color.");
@@ -1912,28 +1819,6 @@ var GraphPlusSettingTab = class extends import_obsidian3.PluginSettingTab {
       rb.style.border = "none";
       rb.style.background = "transparent";
       rb.style.cursor = "pointer";
-      const edgeAlpha = document.createElement("input");
-      edgeAlpha.type = "number";
-      edgeAlpha.min = "0.1";
-      edgeAlpha.max = "1";
-      edgeAlpha.step = "0.01";
-      edgeAlpha.value = String(settings.graph.edgeColorAlpha);
-      edgeAlpha.style.width = "68px";
-      edgeAlpha.style.marginLeft = "8px";
-      edgeAlpha.addEventListener("change", async (e) => {
-        const v = Number(e.target.value);
-        this.applySettings((s2) => {
-          s2.graph.edgeColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : settings.graph.edgeColorAlpha;
-        });
-      });
-      rb.addEventListener("click", async () => {
-        this.applySettings((s2) => {
-          s2.graph.edgeColor = void 0;
-          s2.graph.edgeColorAlpha = settings.graph.edgeColorAlpha;
-        });
-        colorInput.value = "#000000";
-        edgeAlpha.value = String(settings.graph.edgeColorAlpha);
-      });
       s.controlEl.appendChild(rb);
       s.controlEl.appendChild(colorInput);
       const hint = document.createElement("span");
@@ -1941,7 +1826,6 @@ var GraphPlusSettingTab = class extends import_obsidian3.PluginSettingTab {
       hint.style.marginLeft = "8px";
       hint.style.marginRight = "6px";
       s.controlEl.appendChild(hint);
-      s.controlEl.appendChild(edgeAlpha);
     }
     {
       const s = new import_obsidian3.Setting(containerEl).setName("Tag color (override)").setDesc("Optional color to override tag node color. Leave unset to use the active theme.");
@@ -1966,29 +1850,6 @@ var GraphPlusSettingTab = class extends import_obsidian3.PluginSettingTab {
       rb.style.border = "none";
       rb.style.background = "transparent";
       rb.style.cursor = "pointer";
-      const tagAlpha = document.createElement("input");
-      tagAlpha.type = "number";
-      tagAlpha.min = "0.1";
-      tagAlpha.max = "1";
-      tagAlpha.step = "0.01";
-      tagAlpha.value = String(settings.graph.tagColorAlpha);
-      tagAlpha.style.width = "68px";
-      tagAlpha.style.marginLeft = "8px";
-      tagAlpha.addEventListener("change", async (e) => {
-        const v = Number(e.target.value);
-        this.applySettings((s2) => {
-          s2.graph.tagColorAlpha = Number.isFinite(v) ? Math.max(0.1, Math.min(1, v)) : settings.graph.tagColorAlpha;
-        });
-      });
-      rb.addEventListener("click", async () => {
-        this.applySettings((s2) => {
-          s2.graph.tagColor = void 0;
-          s2.graph.tagColorAlpha = settings.graph.tagColorAlpha;
-        });
-        await this.plugin.saveSettings();
-        colorInput.value = "#000000";
-        tagAlpha.value = String(settings.graph.tagColorAlpha);
-      });
       s.controlEl.appendChild(rb);
       s.controlEl.appendChild(colorInput);
       const hint = document.createElement("span");
@@ -1996,7 +1857,6 @@ var GraphPlusSettingTab = class extends import_obsidian3.PluginSettingTab {
       hint.style.marginLeft = "8px";
       hint.style.marginRight = "6px";
       s.controlEl.appendChild(hint);
-      s.controlEl.appendChild(tagAlpha);
     }
     {
       const s = new import_obsidian3.Setting(containerEl).setName("Label color (override)").setDesc("Optional color to override the label text color. Leave unset to use the active theme.");
@@ -2021,28 +1881,6 @@ var GraphPlusSettingTab = class extends import_obsidian3.PluginSettingTab {
       rb.style.border = "none";
       rb.style.background = "transparent";
       rb.style.cursor = "pointer";
-      const labelAlpha = document.createElement("input");
-      labelAlpha.type = "number";
-      labelAlpha.min = "0";
-      labelAlpha.max = "1";
-      labelAlpha.step = "0.01";
-      labelAlpha.value = String(settings.graph.labelColorAlpha);
-      labelAlpha.style.width = "68px";
-      labelAlpha.style.marginLeft = "8px";
-      labelAlpha.addEventListener("change", async (e) => {
-        const v = Number(e.target.value);
-        this.applySettings((s2) => {
-          s2.graph.labelColorAlpha = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : settings.graph.labelColorAlpha;
-        });
-      });
-      rb.addEventListener("click", async () => {
-        this.applySettings((s2) => {
-          s2.graph.labelColor = void 0;
-          s2.graph.labelColorAlpha = settings.graph.labelColorAlpha;
-        });
-        colorInput.value = "#000000";
-        labelAlpha.value = String(settings.graph.labelColorAlpha);
-      });
       s.controlEl.appendChild(rb);
       s.controlEl.appendChild(colorInput);
       const hint = document.createElement("span");
@@ -2050,7 +1888,6 @@ var GraphPlusSettingTab = class extends import_obsidian3.PluginSettingTab {
       hint.style.marginLeft = "8px";
       hint.style.marginRight = "6px";
       s.controlEl.appendChild(hint);
-      s.controlEl.appendChild(labelAlpha);
     }
     new import_obsidian3.Setting(containerEl).setName("Use interface font for labels").setDesc("When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.").addToggle((t) => t.setValue(Boolean(settings.graph.useInterfaceFont)).onChange(async (v) => {
       this.applySettings((s) => {

@@ -59,7 +59,6 @@ export interface GraphPlusSettings {
   graph                 : GraphSettings;
   physics               : PhysicsSettings;
   camera                : CameraSettings;
-  nodePositions         : Record<string, Record<string, { x: number; y: number; z?: number }>>;
 }
 
 export interface CameraState {
