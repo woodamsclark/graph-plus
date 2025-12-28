@@ -45,214 +45,27 @@ function updateSettings(mutator) {
     l();
 }
 
-// src/graph/buildGraph.ts
-var TAG_PREFIX = "tag:";
-function noteIdFromFile(file) {
-  return file.path;
-}
-function tagIdFromName(tagName) {
-  return `${TAG_PREFIX}${tagName}`;
-}
-function normalizeTag(raw) {
-  if (!raw)
-    return null;
-  if (!raw.startsWith("#"))
-    return null;
-  const name = raw.slice(1).trim();
-  return name.length ? name : null;
-}
-function cssSafeJitter(jitter = 50) {
-  return (Math.random() - 0.5) * jitter;
-}
-function addEdgeOnce(edges, edgeSet, sourceId, targetId, linkCount = 1) {
-  const key = `${sourceId}->${targetId}`;
-  if (edgeSet.has(key))
-    return;
-  edges.push({
-    id: key,
-    sourceId,
-    targetId,
-    linkCount,
-    bidirectional: false
-  });
-  edgeSet.add(key);
-}
-function markBidirectionalEdges(edges) {
-  const map = /* @__PURE__ */ new Map();
-  for (const e of edges)
-    map.set(`${e.sourceId}->${e.targetId}`, e);
-  for (const e of edges) {
-    const rev = map.get(`${e.targetId}->${e.sourceId}`);
-    if (rev) {
-      e.bidirectional = true;
-      rev.bidirectional = true;
-    }
-  }
-}
-function computeDegreesAndRadii(nodes, nodeById, edges) {
-  for (const n of nodes) {
-    n.inDegree = 0;
-    n.outDegree = 0;
-    n.totalDegree = 0;
-  }
-  for (const e of edges) {
-    const src = nodeById.get(e.sourceId);
-    const tgt = nodeById.get(e.targetId);
-    if (!src || !tgt)
-      continue;
-    const c = Number(e.linkCount ?? 1) || 1;
-    src.outDegree += c;
-    tgt.inDegree += c;
-  }
-  for (const n of nodes) {
-    n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
-    n.radius = 4 + Math.log2(1 + n.totalDegree);
-  }
-}
-function pickCenterNode(app, nodes) {
-  const settings = getSettings();
-  if (!settings.graph.useCenterNote)
-    return null;
-  const onlyNotes = nodes.filter((n) => n.type === "note");
-  if (!onlyNotes.length)
-    return null;
-  const preferOut = Boolean(settings.graph.useOutlinkFallback);
-  const metric = (n) => (preferOut ? n.outDegree : n.inDegree) || 0;
-  const raw = String(settings.graph.centerNoteTitle || "").trim();
-  if (raw) {
-    try {
-      const mc = app.metadataCache;
-      let dest = null;
-      dest = mc.getFirstLinkpathDest?.(raw, "") ?? null;
-      if (!dest && !raw.endsWith(".md")) {
-        dest = mc.getFirstLinkpathDest?.(raw + ".md", "") ?? null;
-      }
-      if (dest?.path) {
-        const hit = onlyNotes.find((n) => n.filePath === dest.path);
-        if (hit)
-          return hit;
-      }
-      const normB = raw.endsWith(".md") ? raw : raw + ".md";
-      const hit2 = onlyNotes.find((n) => n.filePath === raw || n.filePath === normB);
-      if (hit2)
-        return hit2;
-      const base = raw.endsWith(".md") ? raw.slice(0, -3) : raw;
-      const hit3 = onlyNotes.find((n) => (n.file?.basename ?? n.label) === base);
-      if (hit3)
-        return hit3;
-    } catch {
-    }
-  }
-  let best = onlyNotes[0];
-  for (const n of onlyNotes) {
-    if (metric(n) > metric(best))
-      best = n;
-  }
-  return best ?? null;
-}
-async function buildGraph(app) {
-  const settings = getSettings();
-  const files = app.vault.getMarkdownFiles();
-  const nodes = [];
-  const nodeById = /* @__PURE__ */ new Map();
-  for (const file of files) {
-    const id = noteIdFromFile(file);
-    const node = {
-      id,
-      filePath: file.path,
-      file,
-      label: file.basename,
-      x: cssSafeJitter(50),
-      y: cssSafeJitter(50),
-      z: cssSafeJitter(50),
-      vx: 0,
-      vy: 0,
-      vz: 0,
-      type: "note",
-      inDegree: 0,
-      outDegree: 0,
-      totalDegree: 0,
-      radius: 0
-    };
-    nodes.push(node);
-    nodeById.set(id, node);
-  }
-  const edges = [];
-  const edgeSet = /* @__PURE__ */ new Set();
-  const resolved = app.metadataCache.resolvedLinks || {};
-  const countDuplicates = Boolean(settings.graph.countDuplicateLinks);
-  for (const sourcePath of Object.keys(resolved)) {
-    const targets = resolved[sourcePath] || {};
-    if (!nodeById.has(sourcePath))
-      continue;
-    for (const targetPath of Object.keys(targets)) {
-      if (!nodeById.has(targetPath))
-        continue;
-      const rawCount = Number(targets[targetPath] ?? 1) || 1;
-      const linkCount = countDuplicates ? rawCount : 1;
-      addEdgeOnce(edges, edgeSet, sourcePath, targetPath, linkCount);
-    }
-  }
-  if (settings.graph.showTags !== false) {
-    const mc = app.metadataCache;
-    const ensureTagNode = (tagName) => {
-      const id = tagIdFromName(tagName);
-      const existing = nodeById.get(id);
-      if (existing)
-        return existing;
-      const n = {
-        id,
-        filePath: id,
-        file: void 0,
-        label: `#${tagName}`,
-        x: 0,
-        y: 0,
-        z: 0,
-        vx: 0,
-        vy: 0,
-        vz: 0,
-        type: "tag",
-        inDegree: 0,
-        outDegree: 0,
-        totalDegree: 0,
-        radius: 0
-      };
-      nodes.push(n);
-      nodeById.set(id, n);
-      return n;
-    };
-    for (const file of files) {
-      const noteNodeId = noteIdFromFile(file);
-      if (!nodeById.has(noteNodeId))
-        continue;
-      const cache = mc.getFileCache(file);
-      if (!cache?.tags?.length)
-        continue;
-      for (const entry of cache.tags) {
-        const tagName = normalizeTag(entry.tag);
-        if (!tagName)
-          continue;
-        const tagNode = ensureTagNode(tagName);
-        addEdgeOnce(edges, edgeSet, noteNodeId, tagNode.id, 1);
-      }
-    }
-  }
-  computeDegreesAndRadii(nodes, nodeById, edges);
-  markBidirectionalEdges(edges);
-  const centerNode = pickCenterNode(app, nodes);
-  return { nodes, edges, centerNode };
-}
-
 // src/graph/renderer.ts
-function createRenderer(canvas, cameraManager) {
+function createRenderer(canvas, camera) {
   const context = canvas.getContext("2d");
   let settings = getSettings();
   let colors = readColors();
   let mousePosition = null;
   let graph = null;
-  let nodeById = /* @__PURE__ */ new Map();
-  let theme = buildThemeSnapshot();
-  function render() {
+  const nodeById = /* @__PURE__ */ new Map();
+  let hoveredNodeId = null;
+  let hoverNeighbors = null;
+  function resize(width, height) {
+    const w = Math.max(1, Math.floor(width));
+    const h = Math.max(1, Math.floor(height));
+    canvas.width = w;
+    canvas.height = h;
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    camera.setViewport(w, h);
+    render(camera.getState());
+  }
+  function render(_cam) {
     if (!context)
       return;
     settings = getSettings();
@@ -263,7 +76,7 @@ function createRenderer(canvas, cameraManager) {
       return;
     const nodeMap = /* @__PURE__ */ new Map();
     for (const node of graph.nodes) {
-      const p = cameraManager.worldToScreen(node);
+      const p = camera.worldToScreen(node);
       nodeMap.set(node.id, p);
     }
     drawEdges(nodeMap);
@@ -1226,12 +1039,6 @@ function createCursorController(canvas) {
   function reset() {
     apply("default");
   }
-  function grab() {
-    apply("grabbing");
-  }
-  function hover() {
-    apply("pointer");
-  }
   return {
     apply,
     reset
@@ -1256,18 +1063,213 @@ function debounce(fn, wait = 300, immediate = false) {
   };
 }
 
-// src/graph/NodePositionStore.ts
-var NodePositionStore = class {
+// src/graph/GraphStore.ts
+var GraphStore = class {
   deps;
   saveDebounced;
   constructor(deps) {
     this.deps = deps;
-    this.saveDebounced = debounce(() => this.saveNodePositions(), 2e3, true);
+    this.saveDebounced = debounce(() => this.saveGraph(), 2e3, true);
+  }
+  async loadGraph(app) {
+    const settings = getSettings();
+    let graph = this.loadGraphFromSave();
+    let nodes = [];
+    if (graph)
+      nodes = graph.nodes;
+    else
+      nodes = this.generateFileNodes(app);
+    const nodeByID = /* @__PURE__ */ new Map();
+    for (const node of nodes)
+      nodeByID.set(node.id, node);
+    const { edges, edgeSet } = this.buildNoteEdgesFromResolvedLinks(app, nodeByID);
+    if (settings.graph.showTags !== false)
+      this.addTagNodesAndEdges(nodes, nodeByID);
+    this.computeNodeDegrees(nodes, nodeByID, edges);
+    this.markBidirectionalEdges(edges);
+    const centerNode = this.pickCenterNode(app, nodes);
+    return { nodes, edges, centerNode };
+  }
+  generateFileNodes(app) {
+    const files = app.vault.getMarkdownFiles();
+    const nodes = [];
+    for (const file of files) {
+      const jitter = 50;
+      const x0 = (Math.random() - 0.5) * jitter;
+      const y0 = (Math.random() - 0.5) * jitter;
+      const z0 = (Math.random() - 0.5) * jitter;
+      const node = {
+        id: file.path,
+        filePath: file.path,
+        file,
+        label: file.basename,
+        x: x0,
+        y: y0,
+        z: z0,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        type: "note",
+        inDegree: 0,
+        outDegree: 0,
+        totalDegree: 0,
+        radius: 0
+      };
+      nodes.push(node);
+    }
+    return nodes;
+  }
+  buildNoteEdgesFromResolvedLinks(app, nodeByID) {
+    const settings = getSettings();
+    const resolved = app.metadataCache.resolvedLinks || {};
+    const edges = [];
+    const edgeSet = /* @__PURE__ */ new Set();
+    const countDuplicates = Boolean(settings.graph.countDuplicateLinks);
+    for (const sourcePath of Object.keys(resolved)) {
+      const targets = resolved[sourcePath] || {};
+      for (const targetPath of Object.keys(targets)) {
+        if (!nodeByID.has(sourcePath) || !nodeByID.has(targetPath))
+          continue;
+        const key = `${sourcePath}->${targetPath}`;
+        if (edgeSet.has(key))
+          continue;
+        const rawCount = Number(targets[targetPath] || 1) || 1;
+        const linkCount = countDuplicates ? rawCount : 1;
+        edges.push({
+          id: key,
+          sourceId: sourcePath,
+          targetId: targetPath,
+          linkCount,
+          bidirectional: false
+        });
+        edgeSet.add(key);
+      }
+    }
+    return { edges, edgeSet };
+  }
+  computeNodeDegrees(nodes, nodeByID, edges) {
+    for (const edge of edges) {
+      const src = nodeByID.get(edge.sourceId);
+      const tgt = nodeByID.get(edge.targetId);
+      if (!src || !tgt)
+        continue;
+      const c = Number(edge.linkCount || 1) || 1;
+      src.outDegree = (src.outDegree || 0) + c;
+      tgt.inDegree = (tgt.inDegree || 0) + c;
+    }
+    for (const node of nodes) {
+      node.totalDegree = (node.inDegree || 0) + (node.outDegree || 0);
+      node.radius = 4 + Math.log2(1 + node.totalDegree);
+    }
+  }
+  markBidirectionalEdges(edges) {
+    const edgeMap = /* @__PURE__ */ new Map();
+    for (const e of edges) {
+      edgeMap.set(`${e.sourceId}->${e.targetId}`, e);
+    }
+    for (const e of edges) {
+      const reverseKey = `${e.targetId}->${e.sourceId}`;
+      if (edgeMap.has(reverseKey)) {
+        e.bidirectional = true;
+        const other = edgeMap.get(reverseKey);
+        other.bidirectional = true;
+      }
+    }
+  }
+  addTagNodesAndEdges(nodes, nodeByPath) {
+    const tagNodeByName = /* @__PURE__ */ new Map();
+    const ensureTagNode = (tagName) => {
+      let node = tagNodeByName.get(tagName);
+      if (node)
+        return node;
+      node = {
+        id: `tag:${tagName}`,
+        label: `#${tagName}`,
+        x: 0,
+        y: 0,
+        z: 0,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        filePath: `tag:${tagName}`,
+        type: "tag",
+        inDegree: 0,
+        outDegree: 0,
+        totalDegree: 0,
+        radius: 0
+      };
+      nodes.push(node);
+      tagNodeByName.set(tagName, node);
+      nodeByPath.set(node.id, node);
+      return node;
+    };
+  }
+  pickCenterNode(app, nodes) {
+    const settings = getSettings();
+    if (!settings.graph.useCenterNote)
+      return null;
+    let centerNode = void 0;
+    if (settings.graph.centerNoteTitle) {
+      centerNode = nodes.find((n) => n.id === settings.graph.centerNoteTitle);
+      if (centerNode !== void 0)
+        return centerNode;
+    }
+    const onlyNotes = nodes.filter((n) => n.type !== "tag");
+    const preferOut = Boolean(settings.graph.useOutlinkFallback);
+    const metric = (n) => preferOut ? n.outDegree || 0 : n.inDegree || 0;
+    const chooseBy = (predicate) => {
+      let best = null;
+      for (const n of onlyNotes) {
+        if (!predicate(n))
+          continue;
+        if (!best || metric(n) > metric(best)) {
+          best = n;
+        }
+      }
+      return best;
+    };
+    let chosen = null;
+    const raw = String(settings.graph.centerNoteTitle || "").trim();
+    if (raw) {
+      const mc = app.metadataCache;
+      let resolved = null;
+      try {
+        resolved = mc?.getFirstLinkpathDest?.(raw, "");
+        if (!resolved && !raw.endsWith(".md")) {
+          resolved = mc?.getFirstLinkpathDest?.(raw + ".md", "");
+        }
+      } catch {
+      }
+      if (resolved?.path) {
+        chosen = chooseBy((n) => n.filePath === resolved.path);
+      }
+      if (!chosen) {
+        const normA = raw;
+        const normB = raw.endsWith(".md") ? raw : raw + ".md";
+        chosen = chooseBy((n) => n.filePath === normA || n.filePath === normB);
+      }
+      if (!chosen) {
+        const base = raw.endsWith(".md") ? raw.slice(0, -3) : raw;
+        chosen = chooseBy((n) => {
+          const file = n.file;
+          const bn = file?.basename || n.label;
+          return String(bn) === base;
+        });
+      }
+    }
+    if (!chosen) {
+      for (const n of onlyNotes) {
+        if (!chosen || metric(n) > metric(chosen)) {
+          chosen = n;
+        }
+      }
+    }
+    return chosen;
   }
   saveSoon() {
     this.saveDebounced();
   }
-  saveNodePositions() {
+  saveGraph() {
     try {
       const graph = this.deps.getGraph();
       const app = this.deps.getApp();
@@ -1297,6 +1299,9 @@ var NodePositionStore = class {
       console.error("Greater Graph: saveNodePositions error", e);
     }
   }
+  loadGraphFromSave() {
+    return null;
+  }
 };
 
 // src/graph/GraphController.ts
@@ -1316,10 +1321,12 @@ var GraphController = class {
   camera = null;
   settingsUnregister = null;
   interactor = null;
-  positioner = null;
+  store = null;
   graph = null;
   cursor = null;
-  nodePositionStore = null;
+  lastPreviewId = null;
+  hoverAnchor = null;
+  hoverPreview = null;
   constructor(app, containerEl, plugin) {
     this.app = app;
     this.containerEl = containerEl;
@@ -1346,8 +1353,7 @@ var GraphController = class {
       }
     };
     this.interactor = new GraphInteractor(deps);
-    this.positioner = new NodePositionStore(deps);
-    this.nodePositionStore = new NodePositionStore(deps);
+    this.store = new GraphStore(deps);
     this.cursor = createCursorController(this.canvas);
     this.renderer = createRenderer(this.canvas, this.camera);
     if (!this.canvas || !this.interactor || !this.renderer)
@@ -1383,6 +1389,27 @@ var GraphController = class {
     this.resetCamera();
     this.lastTime = null;
     this.animationFrame = requestAnimationFrame(this.animationLoop);
+  }
+  async refreshGraph() {
+    this.stopSimulation();
+    if (!this.store)
+      return;
+    this.graph = await this.store.loadGraph(this.app);
+    const interactor = this.interactor;
+    const renderer = this.renderer;
+    const graph = this.graph;
+    const camera = this.camera;
+    if (!interactor || !renderer || !graph || !camera)
+      return;
+    renderer?.setGraph(graph);
+    this.simulation = createSimulation(graph, camera, () => interactor.getMouseScreenPosition());
+    const simulation = this.simulation;
+    this.buildAdjacencyMap();
+    this.startSimulation();
+    renderer?.render(camera.getState());
+  }
+  resetCamera() {
+    this.camera?.resetCamera();
   }
   animationLoop = (timestamp) => {
     if (!this.lastTime) {
@@ -1498,7 +1525,7 @@ var GraphController = class {
     this.renderer.resize(width, height);
   }
   destroy() {
-    this.positioner.saveNodePositions();
+    this.store?.saveGraph();
     if (this.previewPollTimer)
       window.clearInterval(this.previewPollTimer);
     this.previewPollTimer = null;
@@ -1529,20 +1556,10 @@ var GRAPH_PLUS_TYPE = "graph-plus";
 var GraphView = class extends import_obsidian2.ItemView {
   graph = null;
   plugin;
-  GraphInteractor = null;
   scheduleGraphRefresh = null;
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
-  }
-  getViewType() {
-    return GRAPH_PLUS_TYPE;
-  }
-  getDisplayText() {
-    return "graph+";
-  }
-  getIcon() {
-    return "dot-network";
   }
   async onOpen() {
     this.containerEl.empty();
@@ -1570,6 +1587,15 @@ var GraphView = class extends import_obsidian2.ItemView {
     this.graph?.destroy();
     this.graph = null;
     this.containerEl.empty();
+  }
+  getViewType() {
+    return GRAPH_PLUS_TYPE;
+  }
+  getDisplayText() {
+    return "graph+";
+  }
+  getIcon() {
+    return "dot-network";
   }
 };
 

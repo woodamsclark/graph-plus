@@ -24,7 +24,7 @@ type ThemeSnapshot = {
   colors: ThemeColors;
 };
 
-export function createRenderer( canvas: HTMLCanvasElement, cameraManager: CameraController): Renderer {
+export function createRenderer( canvas: HTMLCanvasElement, camera: CameraController): Renderer {
   const context                                       = canvas.getContext('2d');
   let settings                                        = getSettings();
   let colors                                          = readColors(); 
@@ -46,10 +46,9 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
 
     const nodeMap = new Map<string, { x: number; y: number; depth: number }>();
     for (const node of graph.nodes) {
-      const p = cameraManager.worldToScreen(node);
+      const p = camera.worldToScreen(node);
       nodeMap.set(node.id, p);
     }
-
 
     drawEdges(nodeMap);
     drawNodes(nodeMap);
@@ -235,7 +234,7 @@ export function createRenderer( canvas: HTMLCanvasElement, cameraManager: Camera
     canvas.style.height = '100%';
 
     // Let CameraManager know the viewport so it can project correctly
-    cameraManager.setViewport(w, h);
+    camera.setViewport(w, h);
 
     // Render immediately with current camera state
     render();

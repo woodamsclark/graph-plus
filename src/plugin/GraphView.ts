@@ -9,7 +9,6 @@ export const GRAPH_PLUS_TYPE = 'graph-plus';
 export class GraphView extends ItemView {
   private graph               : GraphController | null = null;
   private plugin              : GraphPlus;
-  private GraphInteractor     : GraphInteractor | null = null;
   private scheduleGraphRefresh: (() => void) | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: Plugin) {
@@ -17,22 +16,10 @@ export class GraphView extends ItemView {
     this.plugin = plugin as GraphPlus;
   }
 
-  getViewType(): string {
-    return GRAPH_PLUS_TYPE;
-  }
-
-  getDisplayText(): string {
-    return 'graph+';
-  }
-
-  getIcon(): string {
-    return 'dot-network';
-  }
-
   async onOpen() {
     this.containerEl.empty();
-    const container       = this.containerEl.createDiv({ cls: 'graph+' });
-    this.graph     = new GraphController(this.app, container, this.plugin);
+    const container = this.containerEl.createDiv({ cls: 'graph+' });
+    this.graph      = new GraphController(this.app, container, this.plugin);
     await this.graph.init();
     
     // Debounced refresh to avoid thrashing on vault events
@@ -64,5 +51,17 @@ export class GraphView extends ItemView {
     this.graph?.destroy();
     this.graph = null;
     this.containerEl.empty();
+  }
+
+  getViewType(): string {
+    return GRAPH_PLUS_TYPE;
+  }
+
+  getDisplayText(): string {
+    return 'graph+';
+  }
+
+  getIcon(): string {
+    return 'dot-network';
   }
 }

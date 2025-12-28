@@ -1,7 +1,7 @@
 export type CursorCss = "default" | "pointer" | "grabbing";
 
 export function createCursorController(canvas: HTMLCanvasElement) {
-  let applied       : CursorCss         = "default";
+  let applied: CursorCss = "default";
 
   function apply(css: CursorCss) {
     if (css === applied) return;
@@ -12,14 +12,6 @@ export function createCursorController(canvas: HTMLCanvasElement) {
 
   function reset() {
     apply("default");
-  }
-
-  function grab(){
-    apply("grabbing");
-  }
-
-  function hover(){
-    apply("pointer");
   }
 
   return {

@@ -12,14 +12,13 @@ export type InteractionState = {
 };
 
 export class GraphInteractor {
-    private dragWorldOffset             : { x: number; y: number; z: number } | null  = null;
-    private openNodeFile                : ((node: any) => void)               | null  = null;
-    private dragDepthFromCamera         : number                                      = 0;
-    private pinnedNodes                 : Set<string>                                 = new Set();
-    private state                       : InteractionState;
+    private dragWorldOffset     : { x: number; y: number; z: number } | null    = null;
+    private dragDepthFromCamera : number                                        = 0;
+    private pinnedNodes         : Set<string>                                   = new Set();
+    private openNodeFile        : ((node: any) => void)               | null    = null;
+    private state               : InteractionState;
 
     constructor(private deps: GraphDependencies) {
-
         this.state  = {
             mouseScreenPosition   : null,
             hoveredId     : null,

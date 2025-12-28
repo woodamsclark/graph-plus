@@ -1,5 +1,4 @@
 import { App, Plugin, TFile } from 'obsidian'; 
-import { buildGraph } from './buildGraph.ts';
 import { createRenderer } from './renderer.ts';
 import { createSimulation } from './simulation.ts';
 import { Renderer, GraphNode, GraphData, Simulation, WorldTransform } from '../shared/interfaces.ts';
@@ -9,7 +8,7 @@ import { CameraController } from './CameraController.ts';
 import type GraphPlus from '../plugin/main.ts';
 import { GraphInteractor } from './GraphInteractor.ts';
 import { createCursorController } from "./CursorController";
-import { NodePositionStore } from "./NodePositionStore";
+import { GraphStore } from "./GraphStore.ts";
 
 
 export type GraphDependencies = {
@@ -38,10 +37,11 @@ export class GraphController {
   private camera              : CameraController                          | null  = null;
   private settingsUnregister  : (() => void)                              | null  = null;
   private interactor          : GraphInteractor                           | null  = null;
-  private positioner          : NodePositionStore                         | null  = null;
+  private store               : GraphStore                         | null  = null;
   private graph               : GraphData                                 | null  = null;
   private cursor              : ReturnType<typeof createCursorController> | null  = null;
-  private nodePositionStore   : NodePositionStore                         | null  = null;
+  private lastPreviewId       : string                                    | null  = null;
+  private hoverAnchor         : HTMLAnchorElement                         | null  = null;
 
   constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
     this.app                = app;
@@ -72,8 +72,7 @@ export class GraphController {
     };
 
     this.interactor           = new GraphInteractor(deps);
-    this.positioner           = new NodePositionStore(deps);
-    this.nodePositionStore    = new NodePositionStore(deps);
+    this.store                = new GraphStore(deps);
     this.cursor               = createCursorController(this.canvas!);
     this.renderer             = createRenderer(this.canvas, this.camera!);    
     
@@ -112,6 +111,28 @@ export class GraphController {
     this.animationFrame   = requestAnimationFrame(this.animationLoop);
   }
 
+  public async refreshGraph() {
+    this.stopSimulation();
+    if (!this.store) return;
+
+    // try to load graph from file first
+    this.graph        = await this.store.loadGraph (this.app);
+    const interactor  = this.interactor;
+    const renderer    = this.renderer;
+    const graph       = this.graph;
+    const camera      = this.camera;
+    if (!interactor || !renderer || !graph || !camera) return;
+
+    renderer?.setGraph(graph);
+
+    this.simulation   = createSimulation(graph, camera, () => interactor.getMouseScreenPosition());
+    const simulation  = this.simulation;
+    
+    this.buildAdjacencyMap(); // rebuild adjacency map after graph refresh or showTags changes
+    this.startSimulation();
+    renderer?.render();
+  }
+
   private animationLoop = (timestamp: number) => {
     // Always keep the RAF loop alive; just skip simulation stepping when not running.
     if (!this.lastTime) {
@@ -147,26 +168,6 @@ export class GraphController {
     return; // smooths camera animations. Revist later
   }
 
-  public async refreshGraph() {
-    this.stopSimulation();
-
-    // try to load graph from file first
-    this.graph = await buildGraph (this.app);
-    const interactor = this.interactor;
-    const renderer   = this.renderer;
-    const graph      = this.graph;
-    const camera     = this.camera;
-    if (!interactor || !renderer || !graph || !camera) return;
-
-    renderer?.setGraph(graph);
-    
-    this.simulation = createSimulation(graph, camera, () => interactor.getMouseScreenPosition());
-    const simulation = this.simulation;
-    
-    this.buildAdjacencyMap(); // rebuild adjacency map after graph refresh or showTags changes
-    this.startSimulation();
-    renderer?.render();
-  }
 
   private buildAdjacencyMap(){
     const adjacency = new Map<string, string[]>();
@@ -238,7 +239,7 @@ export class GraphController {
 
   destroy(): void {
     // persist positions immediately when view is closed
-    this.positioner!.saveNodePositions(); 
+    this.store?.saveGraph(); 
     // clear any preview poll timer and lock
     if (this.previewPollTimer) window.clearInterval(this.previewPollTimer as number); 
     this.previewPollTimer         = null;
