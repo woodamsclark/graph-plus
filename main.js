@@ -1125,9 +1125,14 @@ var GraphStore = class {
   // Generation (topology)
   // -----------------------
   generateGraph(app) {
+    const settings = getSettings();
     const nodes = this.createNodes(app);
     const nodeById = new Map(nodes.map((n) => [n.id, n]));
-    const edges = this.createEdgesFromResolvedLinks(app, nodeById);
+    const edges = [];
+    edges.push(...this.createNoteEdges(app, nodeById));
+    if (settings.graph.showTags) {
+      edges.push(...this.createTagEdges(app, nodeById));
+    }
     return { nodes, edges, centerNode: null };
   }
   createNodes(app) {
@@ -1164,13 +1169,24 @@ var GraphStore = class {
     return nodes;
   }
   createTagNodes(app) {
+    const tags = /* @__PURE__ */ new Set();
     const tagMap = app.metadataCache.getTags?.();
-    if (!tagMap)
-      return [];
+    if (tagMap) {
+      for (const rawTag of Object.keys(tagMap)) {
+        const clean = rawTag.startsWith("#") ? rawTag.slice(1) : rawTag;
+        if (clean)
+          tags.add(clean);
+      }
+    }
+    for (const file of app.vault.getMarkdownFiles()) {
+      for (const cleanTag of this.extractTagsFromFile(file, app)) {
+        if (cleanTag)
+          tags.add(cleanTag);
+      }
+    }
     const jitter = 50;
     const nodes = [];
-    for (const rawTag of Object.keys(tagMap)) {
-      const cleanTag = rawTag.startsWith("#") ? rawTag.slice(1) : rawTag;
+    for (const cleanTag of tags) {
       nodes.push({
         id: `tag:${cleanTag}`,
         label: `#${cleanTag}`,
@@ -1189,7 +1205,7 @@ var GraphStore = class {
     }
     return nodes;
   }
-  createEdgesFromResolvedLinks(app, nodeById) {
+  createNoteEdges(app, nodeById) {
     const settings = getSettings();
     const resolved = app.metadataCache.resolvedLinks || {};
     const edges = [];
@@ -1217,12 +1233,40 @@ var GraphStore = class {
     }
     return edges;
   }
+  createTagEdges(app, nodeById) {
+    const edges = [];
+    const edgeSet = /* @__PURE__ */ new Set();
+    const files = app.vault.getMarkdownFiles();
+    for (const file of files) {
+      const srcId = file.path;
+      if (!nodeById.has(srcId))
+        continue;
+      const tags = this.extractTagsFromFile(file, app);
+      for (const cleanTag of tags) {
+        const tagId = `tag:${cleanTag}`;
+        if (!nodeById.has(tagId))
+          continue;
+        const id = `${srcId}->${tagId}`;
+        if (edgeSet.has(id))
+          continue;
+        edges.push({
+          id,
+          sourceId: srcId,
+          targetId: tagId,
+          linkCount: 1,
+          bidirectional: false
+        });
+        edgeSet.add(id);
+      }
+    }
+    return edges;
+  }
   // -----------------------
   // Decorations (settings)
   // -----------------------
   decorateGraph(graph, app) {
     const settings = getSettings();
-    if (settings.graph.showTags !== false) {
+    if (settings.graph.showTags == true) {
     }
     this.computeDegreesAndRadius(graph);
     this.markBidirectional(graph.edges);
@@ -1258,6 +1302,40 @@ var GraphStore = class {
   }
   pickCenterNode(app, nodes) {
     return null;
+  }
+  extractTagsFromFile(file, app) {
+    const cache = app.metadataCache.getFileCache(file);
+    if (!cache)
+      return [];
+    const tags = /* @__PURE__ */ new Set();
+    for (const t of cache.tags ?? []) {
+      const raw = t?.tag;
+      if (typeof raw === "string") {
+        const clean = raw.startsWith("#") ? raw.slice(1) : raw;
+        if (clean)
+          tags.add(clean);
+      }
+    }
+    const fm = cache.frontmatter;
+    if (fm) {
+      const raw = fm.tags ?? fm.tag;
+      if (typeof raw === "string") {
+        for (const part of raw.split(",")) {
+          const clean = part.trim();
+          if (clean)
+            tags.add(clean.startsWith("#") ? clean.slice(1) : clean);
+        }
+      } else if (Array.isArray(raw)) {
+        for (const v of raw) {
+          if (typeof v === "string") {
+            const clean = v.trim();
+            if (clean)
+              tags.add(clean.startsWith("#") ? clean.slice(1) : clean);
+          }
+        }
+      }
+    }
+    return [...tags];
   }
 };
 
