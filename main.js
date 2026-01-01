@@ -208,13 +208,18 @@ function createRenderer(canvas, camera) {
     };
   }
   function resize(width, height) {
-    const w = Math.max(1, Math.floor(width));
-    const h = Math.max(1, Math.floor(height));
-    canvas.width = w;
-    canvas.height = h;
-    canvas.style.width = "100%";
-    canvas.style.height = "100%";
-    camera.setViewport(w, h);
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = Math.max(1, Math.floor(width));
+    const cssH = Math.max(1, Math.floor(height));
+    canvas.width = Math.floor(cssW * dpr);
+    canvas.height = Math.floor(cssH * dpr);
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    camera.setViewport(cssW, cssH);
     render();
   }
   function setMouseScreenPosition(pos) {
