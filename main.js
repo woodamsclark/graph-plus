@@ -1173,7 +1173,7 @@ var GraphStore = class {
     const tagMap = app.metadataCache.getTags?.();
     if (tagMap) {
       for (const rawTag of Object.keys(tagMap)) {
-        const clean = rawTag.startsWith("#") ? rawTag.slice(1) : rawTag;
+        const clean = rawTag.startsWith("#") ? rawTag.slice(1).toLowerCase() : rawTag.toLowerCase();
         if (clean)
           tags.add(clean);
       }
@@ -1265,15 +1265,18 @@ var GraphStore = class {
   // Decorations (settings)
   // -----------------------
   decorateGraph(graph, app) {
-    const settings = getSettings();
-    if (settings.graph.showTags == true) {
-    }
     this.computeDegreesAndRadius(graph);
     this.markBidirectional(graph.edges);
     graph.centerNode = this.pickCenterNode(app, graph.nodes);
   }
   computeDegreesAndRadius(graph) {
     const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
+    for (const n of graph.nodes) {
+      n.inDegree = 0;
+      n.outDegree = 0;
+      n.totalDegree = 0;
+      n.radius = 0;
+    }
     for (const e of graph.edges) {
       const src = nodeById.get(e.sourceId);
       const tgt = nodeById.get(e.targetId);
@@ -1320,7 +1323,7 @@ var GraphStore = class {
     if (fm) {
       const raw = fm.tags ?? fm.tag;
       if (typeof raw === "string") {
-        for (const part of raw.split(",")) {
+        for (const part of raw.split(/[,\s]+/)) {
           const clean = part.trim();
           if (clean)
             tags.add(clean.startsWith("#") ? clean.slice(1) : clean);

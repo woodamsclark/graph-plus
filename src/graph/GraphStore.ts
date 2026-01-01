@@ -2,6 +2,9 @@ import { App, TFile } from "obsidian";
 import { GraphData, GraphNode, GraphEdge } from "../shared/interfaces.ts";
 import { getSettings } from "../settings/settingsStore.ts";
 
+// Performance note to fix later: we scan all files twice.
+// Once to build tag nodes, once again to build tag edges.
+
 type DataStoragePlugin = {
     loadData: () => Promise<any>;
     saveData: (data: any) => Promise<void>;
@@ -183,7 +186,7 @@ export class GraphStore {
         const tagMap = (app.metadataCache as any).getTags?.() as Record<string, number> | undefined;
         if (tagMap) {
             for (const rawTag of Object.keys(tagMap)) {
-                const clean = rawTag.startsWith("#") ? rawTag.slice(1) : rawTag;
+                const clean = rawTag.startsWith("#") ? rawTag.slice(1).toLowerCase() : rawTag.toLowerCase();
                 if (clean) tags.add(clean);
             }
         }
@@ -289,12 +292,6 @@ export class GraphStore {
     // -----------------------
 
     private decorateGraph(graph: GraphData, app: App): void {
-        const settings = getSettings();
-
-        if (settings.graph.showTags == true) {
-            // keep isolated: addTagNodesAndEdges(graph, app)
-            // (you can port your existing method here)
-        }
 
         this.computeDegreesAndRadius(graph);
         this.markBidirectional(graph.edges);
@@ -304,6 +301,14 @@ export class GraphStore {
 
     private computeDegreesAndRadius(graph: GraphData): void {
         const nodeById = new Map(graph.nodes.map(n => [n.id, n] as const));
+
+        // Reset first (prevents double-count if re-run)
+        for (const n of graph.nodes) {
+            n.inDegree = 0;
+            n.outDegree = 0;
+            n.totalDegree = 0;
+            n.radius = 0;
+        }
 
         for (const e of graph.edges) {
             const src = nodeById.get(e.sourceId);
@@ -357,9 +362,9 @@ export class GraphStore {
         const fm = cache.frontmatter;
         if (fm) {
             const raw = (fm as any).tags ?? (fm as any).tag;
-
+            
             if (typeof raw === "string") {
-                for (const part of raw.split(",")) {
+                for (const part of raw.split(/[,\s]+/)) {
                     const clean = part.trim();
                     if (clean) tags.add(clean.startsWith("#") ? clean.slice(1) : clean);
                 }
