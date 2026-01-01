@@ -49,24 +49,22 @@ function updateSettings(mutator) {
 function createRenderer(canvas, camera) {
   const context = canvas.getContext("2d");
   let settings = getSettings();
-  let colors = readColors();
   let mousePosition = null;
   let graph = null;
   let nodeById = /* @__PURE__ */ new Map();
   let theme = buildThemeSnapshot();
+  const nodeMap = /* @__PURE__ */ new Map();
   function render() {
     if (!context)
       return;
     settings = getSettings();
-    colors = readColors();
-    context.fillStyle = colors.background;
+    context.fillStyle = theme.colors.background;
     context.fillRect(0, 0, canvas.width, canvas.height);
     if (!graph)
       return;
-    const nodeMap = /* @__PURE__ */ new Map();
+    nodeMap.clear();
     for (const node of graph.nodes) {
-      const p = camera.worldToScreen(node);
-      nodeMap.set(node.id, p);
+      nodeMap.set(node.id, camera.worldToScreen(node));
     }
     drawEdges(nodeMap);
     drawNodes(nodeMap);
@@ -76,13 +74,13 @@ function createRenderer(canvas, camera) {
     graph = null;
     nodeById.clear();
   }
-  function drawEdges(nodeMap) {
+  function drawEdges(nodeMap2) {
     if (!context || !graph || !graph.edges)
       return;
     const edges = graph.edges;
     context.save();
-    context.strokeStyle = colors.edge;
-    context.globalAlpha = colors.edgeAlpha;
+    context.strokeStyle = theme.colors.edge;
+    context.globalAlpha = theme.colors.edgeAlpha;
     context.lineWidth = 1;
     context.lineCap = "round";
     for (const edge of edges) {
@@ -90,8 +88,8 @@ function createRenderer(canvas, camera) {
       const tgt = nodeById.get(edge.targetId);
       if (!src || !tgt)
         continue;
-      const p1 = nodeMap.get(edge.sourceId);
-      const p2 = nodeMap.get(edge.targetId);
+      const p1 = nodeMap2.get(edge.sourceId);
+      const p2 = nodeMap2.get(edge.targetId);
       if (!p1 || !p2)
         continue;
       if (p1.depth < 0 || p2.depth < 0)
@@ -103,15 +101,15 @@ function createRenderer(canvas, camera) {
     }
     context.restore();
   }
-  function drawNodes(nodeMap) {
+  function drawNodes(nodeMap2) {
     if (!context || !graph || !graph.nodes)
       return;
     const nodes = graph.nodes;
     context.save();
-    const nodeColor = colors.node;
-    const tagColor = colors.tag;
+    const nodeColor = theme.colors.node;
+    const tagColor = theme.colors.tag;
     for (const node of nodes) {
-      const p = nodeMap.get(node.id);
+      const p = nodeMap2.get(node.id);
       if (!p || p.depth < 0)
         continue;
       let radius = node.radius;
@@ -125,7 +123,7 @@ function createRenderer(canvas, camera) {
     }
     context.restore();
   }
-  function drawLabels(nodeMap) {
+  function drawLabels(nodeMap2) {
     if (!context || !graph || !graph.nodes || !mousePosition)
       return;
     if (!settings.graph.showLabels)
@@ -140,9 +138,9 @@ function createRenderer(canvas, camera) {
     context.font = `${fontSize}px ${theme.fonts.interface}`;
     context.textAlign = "center";
     context.textBaseline = "top";
-    context.fillStyle = colors.label;
+    context.fillStyle = theme.colors.label;
     for (const node of graph.nodes) {
-      const p = nodeMap.get(node.id);
+      const p = nodeMap2.get(node.id);
       if (!p || p.depth < 0)
         continue;
       const dx = p.x - mousePosition.x;
@@ -246,19 +244,164 @@ function createSimulation(graph, camera, getMousePos) {
   const nodeById = /* @__PURE__ */ new Map();
   for (const n of nodes)
     nodeById.set(n.id, n);
+  function makeOctNode(cx, cy, cz, h) {
+    return {
+      cx,
+      cy,
+      cz,
+      h,
+      mass: 0,
+      comX: 0,
+      comY: 0,
+      comZ: 0,
+      body: null,
+      children: null
+    };
+  }
+  function childIndex(cell, x, y, z) {
+    let idx = 0;
+    if (x >= cell.cx)
+      idx |= 1;
+    if (y >= cell.cy)
+      idx |= 2;
+    if (z >= cell.cz)
+      idx |= 4;
+    return idx;
+  }
+  function ensureChildren(cell) {
+    if (!cell.children)
+      cell.children = new Array(8).fill(null);
+  }
+  function getOrCreateChild(cell, idx) {
+    ensureChildren(cell);
+    let child = cell.children[idx];
+    if (child)
+      return child;
+    const h2 = cell.h * 0.5;
+    const ox = idx & 1 ? h2 : -h2;
+    const oy = idx & 2 ? h2 : -h2;
+    const oz = idx & 4 ? h2 : -h2;
+    child = makeOctNode(cell.cx + ox, cell.cy + oy, cell.cz + oz, h2);
+    cell.children[idx] = child;
+    return child;
+  }
+  function buildOctree(bodies) {
+    if (!bodies.length)
+      return null;
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (const n of bodies) {
+      if (n.x < minX)
+        minX = n.x;
+      if (n.y < minY)
+        minY = n.y;
+      if (n.z < minZ)
+        minZ = n.z;
+      if (n.x > maxX)
+        maxX = n.x;
+      if (n.y > maxY)
+        maxY = n.y;
+      if (n.z > maxZ)
+        maxZ = n.z;
+    }
+    const cx = (minX + maxX) * 0.5;
+    const cy = (minY + maxY) * 0.5;
+    const cz = (minZ + maxZ) * 0.5;
+    const dx = maxX - minX;
+    const dy = maxY - minY;
+    const dz = maxZ - minZ;
+    const h = Math.max(dx, dy, dz) * 0.5 + 1e-3;
+    const root = makeOctNode(cx, cy, cz, h);
+    for (const b of bodies) {
+      insertBody(root, b);
+    }
+    return root;
+  }
+  function insertBody(cell, body) {
+    const m0 = cell.mass;
+    const m1 = m0 + 1;
+    cell.comX = (cell.comX * m0 + body.x) / m1;
+    cell.comY = (cell.comY * m0 + body.y) / m1;
+    cell.comZ = (cell.comZ * m0 + body.z) / m1;
+    cell.mass = m1;
+    if (!cell.children && cell.body === null) {
+      cell.body = body;
+      return;
+    }
+    if (!cell.children && cell.body !== null) {
+      const existing = cell.body;
+      cell.body = null;
+      ensureChildren(cell);
+      insertIntoChild(cell, existing);
+      insertIntoChild(cell, body);
+      return;
+    }
+    insertIntoChild(cell, body);
+  }
+  function insertIntoChild(cell, body) {
+    const idx = childIndex(cell, body.x, body.y, body.z);
+    const child = getOrCreateChild(cell, idx);
+    insertBody(child, body);
+  }
+  function applyRepulsionBarnesHut(physicsSettings, root) {
+    const strength = physicsSettings.repulsionStrength;
+    const minDist = 40;
+    const minDistSq = minDist * minDist;
+    const theta = 0.8;
+    const thetaSq = theta * theta;
+    const eps = 1e-3;
+    for (const a of nodes) {
+      if (pinnedNodes.has(a.id))
+        continue;
+      accumulateBH(a, root, strength, thetaSq, minDistSq, eps);
+    }
+  }
+  function accumulateBH(a, cell, strength, thetaSq, minDistSq, eps) {
+    if (cell.mass === 0)
+      return;
+    if (!cell.children && cell.body === a)
+      return;
+    const dx = a.x - cell.comX;
+    const dy = a.y - cell.comY;
+    const dz = (a.z || 0) - (cell.comZ || 0);
+    const distSqRaw = dx * dx + dy * dy + dz * dz + eps;
+    const size = cell.h * 2;
+    const sizeSq = size * size;
+    const isFarEnough = !cell.children || sizeSq / distSqRaw < thetaSq;
+    if (isFarEnough) {
+      const distSq = Math.max(distSqRaw, minDistSq);
+      const dist = Math.sqrt(distSqRaw);
+      const safeDist = dist > 0 ? dist : 1e-3;
+      const force = strength * cell.mass / distSq;
+      const fx = dx / safeDist * force;
+      const fy = dy / safeDist * force;
+      const fz = dz / safeDist * force;
+      a.vx = (a.vx || 0) + fx;
+      a.vy = (a.vy || 0) + fy;
+      a.vz = (a.vz || 0) + fz;
+      return;
+    }
+    const kids = cell.children;
+    if (!kids)
+      return;
+    for (let i = 0; i < 8; i++) {
+      const c = kids[i];
+      if (c)
+        accumulateBH(a, c, strength, thetaSq, minDistSq, eps);
+    }
+  }
   function setPinnedNodes(ids) {
     pinnedNodes = new Set(ids);
   }
-  function applyMouseGravity() {
-    const settings = getSettings();
-    if (!settings.physics.mouseGravityEnabled)
+  function applyMouseGravity(physicsSettings) {
+    if (!physicsSettings.mouseGravityEnabled)
       return;
     const mousePos = getMousePos();
     if (!mousePos)
       return;
     const { x: mouseX, y: mouseY } = mousePos;
-    const radius = settings.physics.mouseGravityRadius;
-    const strength = settings.physics.mouseGravityStrength;
+    const radius = physicsSettings.mouseGravityRadius;
+    const strength = physicsSettings.mouseGravityStrength;
     for (const node of nodes) {
       if (pinnedNodes.has(node.id))
         continue;
@@ -344,38 +487,36 @@ function createSimulation(graph, camera, getMousePos) {
       }
     }
   }
-  function applyCentering() {
-    const settings = getSettings();
-    if (settings.physics.centerPull <= 0)
+  function applyCentering(physicsSettings) {
+    if (physicsSettings.centerPull <= 0)
       return;
-    const cx = settings.physics.worldCenterX;
-    const cy = settings.physics.worldCenterY;
-    const cz = settings.physics.worldCenterZ;
+    const cx = physicsSettings.worldCenterX;
+    const cy = physicsSettings.worldCenterY;
+    const cz = physicsSettings.worldCenterZ;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
       const dx = cx - n.x;
       const dy = cy - n.y;
       const dz = cz - n.z;
-      n.vx = (n.vx || 0) + dx * settings.physics.centerPull;
-      n.vy = (n.vy || 0) + dy * settings.physics.centerPull;
-      n.vz = (n.vz || 0) + dz * settings.physics.centerPull;
+      n.vx = (n.vx || 0) + dx * physicsSettings.centerPull;
+      n.vy = (n.vy || 0) + dy * physicsSettings.centerPull;
+      n.vz = (n.vz || 0) + dz * physicsSettings.centerPull;
     }
     if (centerNode) {
-      const dx = settings.physics.worldCenterX - centerNode.x;
-      const dy = settings.physics.worldCenterY - centerNode.y;
-      const dz = settings.physics.worldCenterZ - centerNode.z;
-      centerNode.vx = (centerNode.vx || 0) + dx * settings.physics.centerPull * 0.5;
-      centerNode.vy = (centerNode.vy || 0) + dy * settings.physics.centerPull * 0.5;
-      centerNode.vz = (centerNode.vz || 0) + dz * settings.physics.centerPull * 0.5;
+      const dx = physicsSettings.worldCenterX - centerNode.x;
+      const dy = physicsSettings.worldCenterY - centerNode.y;
+      const dz = physicsSettings.worldCenterZ - centerNode.z;
+      centerNode.vx = (centerNode.vx || 0) + dx * physicsSettings.centerPull * 0.5;
+      centerNode.vy = (centerNode.vy || 0) + dy * physicsSettings.centerPull * 0.5;
+      centerNode.vz = (centerNode.vz || 0) + dz * physicsSettings.centerPull * 0.5;
     }
   }
-  function applyDamping() {
-    const settings = getSettings();
+  function applyDamping(physicsSettings) {
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
-      const d = Math.max(0, Math.min(1, settings.physics.damping));
+      const d = Math.max(0, Math.min(1, physicsSettings.damping));
       n.vx = (n.vx ?? 0) * (1 - d);
       n.vy = (n.vy ?? 0) * (1 - d);
       n.vz = (n.vz ?? 0) * (1 - d);
@@ -387,14 +528,13 @@ function createSimulation(graph, camera, getMousePos) {
         n.vz = 0;
     }
   }
-  function applyPlaneConstraints() {
-    const settings = getSettings();
-    const noteK = settings.physics.notePlaneStiffness;
-    const tagK = settings.physics.tagPlaneStiffness;
+  function applyPlaneConstraints(physicsSettings) {
+    const noteK = physicsSettings.notePlaneStiffness;
+    const tagK = physicsSettings.tagPlaneStiffness;
     if (noteK === 0 && tagK === 0)
       return;
-    const targetZ = settings.physics.worldCenterZ;
-    const targetX = settings.physics.worldCenterX;
+    const targetZ = physicsSettings.worldCenterZ;
+    const targetX = physicsSettings.worldCenterX;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
@@ -407,11 +547,10 @@ function createSimulation(graph, camera, getMousePos) {
       }
     }
   }
-  function applyCenterNodeLock() {
-    const settings = getSettings();
-    const cx = settings.physics.worldCenterX;
-    const cy = settings.physics.worldCenterY;
-    const cz = settings.physics.worldCenterZ;
+  function applyCenterNodeLock(physicsSettings) {
+    const cx = physicsSettings.worldCenterX;
+    const cy = physicsSettings.worldCenterY;
+    const cz = physicsSettings.worldCenterZ;
     for (const n of nodes) {
       if (isCenterNode(n)) {
         n.x = cx;
@@ -463,13 +602,16 @@ function createSimulation(graph, camera, getMousePos) {
       return;
     const settings = getSettings();
     const physicsSettings = settings.physics;
-    applyRepulsion(physicsSettings);
+    const root = buildOctree(nodes);
+    if (!root)
+      return;
+    applyRepulsionBarnesHut(physicsSettings, root);
     applySprings(physicsSettings);
-    applyMouseGravity();
-    applyCentering();
-    applyPlaneConstraints();
-    applyCenterNodeLock();
-    applyDamping();
+    applyMouseGravity(physicsSettings);
+    applyCentering(physicsSettings);
+    applyPlaneConstraints(physicsSettings);
+    applyCenterNodeLock(physicsSettings);
+    applyDamping(physicsSettings);
     integrate(dt);
   }
   return { start, stop, tick, reset, setPinnedNodes };
@@ -1173,9 +1315,7 @@ var GraphStore = class {
     const tagMap = app.metadataCache.getTags?.();
     if (tagMap) {
       for (const rawTag of Object.keys(tagMap)) {
-        const clean = rawTag.startsWith("#") ? rawTag.slice(1).toLowerCase() : rawTag.toLowerCase();
-        if (clean)
-          tags.add(clean);
+        tags.add(this.normalizeTag(rawTag));
       }
     }
     for (const file of app.vault.getMarkdownFiles()) {
@@ -1312,33 +1452,33 @@ var GraphStore = class {
       return [];
     const tags = /* @__PURE__ */ new Set();
     for (const t of cache.tags ?? []) {
-      const raw = t?.tag;
-      if (typeof raw === "string") {
-        const clean = raw.startsWith("#") ? raw.slice(1) : raw;
-        if (clean)
-          tags.add(clean);
+      const rawTag = t?.tag;
+      if (typeof rawTag === "string") {
+        tags.add(this.normalizeTag(rawTag));
       }
     }
     const fm = cache.frontmatter;
     if (fm) {
-      const raw = fm.tags ?? fm.tag;
-      if (typeof raw === "string") {
-        for (const part of raw.split(/[,\s]+/)) {
-          const clean = part.trim();
-          if (clean)
-            tags.add(clean.startsWith("#") ? clean.slice(1) : clean);
+      const rawTag = fm.tags ?? fm.tag;
+      if (typeof rawTag === "string") {
+        for (const part of rawTag.split(/[,\s]+/)) {
+          if (!part)
+            continue;
+          tags.add(this.normalizeTag(part));
         }
-      } else if (Array.isArray(raw)) {
-        for (const v of raw) {
+      } else if (Array.isArray(rawTag)) {
+        for (const v of rawTag) {
           if (typeof v === "string") {
-            const clean = v.trim();
-            if (clean)
-              tags.add(clean.startsWith("#") ? clean.slice(1) : clean);
+            tags.add(this.normalizeTag(v));
           }
         }
       }
     }
     return [...tags];
+  }
+  normalizeTag(tag) {
+    const t = tag.trim();
+    return (t.startsWith("#") ? t.slice(1) : t).trim().toLowerCase();
   }
 };
 
@@ -1405,8 +1545,8 @@ var GraphController = class {
     this.renderer.resize(rect.width, rect.height);
     this.containerEl.appendChild(this.canvas);
     this.inputManager = new InputManager(this.canvas, {
-      onOrbitStart: (dx, dy) => this.interactor.startOrbit(dx, dy),
-      onOrbitMove: (dx, dy) => this.interactor.updateOrbit(dx, dy),
+      onOrbitStart: (screenX, screenY) => this.interactor.startOrbit(screenX, screenY),
+      onOrbitMove: (screenX, screenY) => this.interactor.updateOrbit(screenX, screenY),
       onOrbitEnd: () => this.interactor.endOrbit(),
       onPanStart: (screenX, screenY) => this.interactor.startPan(screenX, screenY),
       onPanMove: (screenX, screenY) => this.interactor.updatePan(screenX, screenY),

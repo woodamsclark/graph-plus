@@ -101,8 +101,8 @@ export class GraphController {
     this.containerEl.appendChild(this.canvas);
 
     this.inputManager                                   = new InputManager(this.canvas, {
-      onOrbitStart      : (dx, dy)                    => this.interactor!.startOrbit(dx, dy),
-      onOrbitMove       : (dx, dy)                    => this.interactor!.updateOrbit(dx, dy),
+      onOrbitStart      : (screenX, screenY)          => this.interactor!.startOrbit(screenX, screenY),
+      onOrbitMove       : (screenX, screenY)          => this.interactor!.updateOrbit(screenX, screenY),
       onOrbitEnd        : ()                          => this.interactor!.endOrbit(),
       onPanStart        : (screenX, screenY)          => this.interactor!.startPan(screenX, screenY),
       onPanMove         : (screenX, screenY)          => this.interactor!.updatePan(screenX, screenY),

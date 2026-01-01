@@ -133,11 +133,11 @@ export interface Simulation {
 
 export interface InputManagerCallbacks {
     // Camera Control
-    onOrbitStart        (dx: number, dy: number)                          : void;
-    onOrbitMove         (dx: number, dy: number)                          : void;
+    onOrbitStart        (screenX: number, screenY: number)                : void;
+    onOrbitMove         (screenX: number, screenY: number)                : void;
     onOrbitEnd          ()                                                : void;
     onPanStart          (screenX: number, screenY: number)                : void;
-    onPanMove           (dx: number, dy: number)                          : void;
+    onPanMove           (screenX: number, screenY: number)                : void;
     onPanEnd            ()                                                : void;
     onZoom              (screenX: number, screenY: number, delta: number) : void;
     onFollowStart       (nodeId: string)                                  : void;

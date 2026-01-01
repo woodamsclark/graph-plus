@@ -186,8 +186,7 @@ export class GraphStore {
         const tagMap = (app.metadataCache as any).getTags?.() as Record<string, number> | undefined;
         if (tagMap) {
             for (const rawTag of Object.keys(tagMap)) {
-                const clean = rawTag.startsWith("#") ? rawTag.slice(1).toLowerCase() : rawTag.toLowerCase();
-                if (clean) tags.add(clean);
+                tags.add(this.normalizeTag(rawTag));
             }
         }
 
@@ -351,32 +350,35 @@ export class GraphStore {
 
         // Inline tags (well-typed)
         for (const t of cache.tags ?? []) {
-            const raw = t?.tag;
-            if (typeof raw === "string") {
-                const clean = raw.startsWith("#") ? raw.slice(1) : raw;
-                if (clean) tags.add(clean);
+            const rawTag = t?.tag;
+            if (typeof rawTag === "string") {
+                tags.add(this.normalizeTag(rawTag));
             }
         }
 
         // Frontmatter (weakly typed → we guard)
         const fm = cache.frontmatter;
         if (fm) {
-            const raw = (fm as any).tags ?? (fm as any).tag;
+            const rawTag = (fm as any).tags ?? (fm as any).tag;
             
-            if (typeof raw === "string") {
-                for (const part of raw.split(/[,\s]+/)) {
-                    const clean = part.trim();
-                    if (clean) tags.add(clean.startsWith("#") ? clean.slice(1) : clean);
+            if (typeof rawTag === "string") {
+                for (const part of rawTag.split(/[,\s]+/)) {
+                    if (!part) continue;
+                    tags.add(this.normalizeTag(part));
                 }
-            } else if (Array.isArray(raw)) {
-                for (const v of raw) {
+            } else if (Array.isArray(rawTag)) { // frontMatter tag is an array
+                for (const v of rawTag) {
                     if (typeof v === "string") {
-                        const clean = v.trim();
-                        if (clean) tags.add(clean.startsWith("#") ? clean.slice(1) : clean);
+                        tags.add(this.normalizeTag(v));
                     }
                 }
             }
         }
         return [...tags];
     }
+
+    private normalizeTag(tag: string): string {
+        const t = tag.trim();
+        return (t.startsWith("#") ? t.slice(1) : t).trim().toLowerCase();
+        }
 }

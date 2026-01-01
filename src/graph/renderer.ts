@@ -1,7 +1,6 @@
 import { Renderer, GraphData, CameraState, GraphNode, GraphEdge } from '../shared/interfaces.ts';
 import { getSettings } from '../settings/settingsStore.ts';
 import { CameraController } from './CameraController.ts';
-import { off } from 'process';
 
 type FontSlot = "text" | "interface" | "mono";
 
@@ -17,6 +16,7 @@ type ThemeColors = {
   edge      : string;
   label     : string;
   background: string;
+  edgeAlpha : number;
 };
 
 type ThemeSnapshot = {
@@ -27,33 +27,31 @@ type ThemeSnapshot = {
 export function createRenderer( canvas: HTMLCanvasElement, camera: CameraController): Renderer {
   const context                                       = canvas.getContext('2d');
   let settings                                        = getSettings();
-  let colors                                          = readColors(); 
-  let mousePosition: { x: number; y: number } | null  = null;
+  let mousePosition : { x: number; y: number } | null = null;
   let graph         : GraphData               | null  = null;
   let nodeById                                        = new Map<string, GraphNode>();
   let theme         : ThemeSnapshot                   = buildThemeSnapshot();
+  const nodeMap = new Map<string, { x: number; y: number; depth: number }>();
+
 
   function render() {
     if (!context) return;
 
     settings  = getSettings();
-    colors    = readColors();
 
-    context.fillStyle = colors.background;
+    context.fillStyle = theme.colors.background;
     context.fillRect(0, 0, canvas.width, canvas.height);
 
     if (!graph) return;
 
-    const nodeMap = new Map<string, { x: number; y: number; depth: number }>();
+    nodeMap.clear();
     for (const node of graph.nodes) {
-      const p = camera.worldToScreen(node);
-      nodeMap.set(node.id, p);
+      nodeMap.set(node.id, camera.worldToScreen(node));
     }
 
     drawEdges(nodeMap);
     drawNodes(nodeMap);
     drawLabels(nodeMap);
-    //drawLabels(nodeMap);
   }
 
   function destroy() {
@@ -68,8 +66,8 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
 
     context.save();
 
-    context.strokeStyle = colors.edge;
-    context.globalAlpha = colors.edgeAlpha;
+    context.strokeStyle = theme.colors.edge;
+    context.globalAlpha = theme.colors.edgeAlpha;
     context.lineWidth   = 1;
     context.lineCap     = 'round';
 
@@ -101,8 +99,8 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
 
     context.save();
 
-    const nodeColor = colors.node;
-    const tagColor  = colors.tag;
+    const nodeColor = theme.colors.node;
+    const tagColor  = theme.colors.tag;
 
     for (const node of nodes) {
       const p = nodeMap.get(node.id);
@@ -140,7 +138,7 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     context.font          = `${fontSize}px ${theme.fonts.interface}`;
     context.textAlign     = 'center';
     context.textBaseline  = 'top';
-    context.fillStyle     = colors.label;
+    context.fillStyle     = theme.colors.label;
 
     for (const node of graph.nodes) {
       const p = nodeMap.get(node.id);
@@ -220,7 +218,7 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
       tag       : s.graph.tagColor        ?? cssVar('--interactive-accent-hover'),
       label     : s.graph.labelColor      ?? cssVar('--text-muted'              ),
 
-      edgeAlpha : 0.3
+      edgeAlpha : 0.3,
     };
   }
 
