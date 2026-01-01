@@ -1047,12 +1047,12 @@ var GraphStore = class {
       return this.graph;
     const app = this.deps.getApp();
     const state = await this.loadState(app);
-    const g = this.generateGraph(app);
+    const graph = this.generateGraph(app);
     if (state)
-      this.applyPositions(g, state);
-    this.decorateGraph(g, app);
-    this.graph = g;
-    return g;
+      this.applyPositions(graph, state);
+    this.decorateGraph(graph, app);
+    this.graph = graph;
+    return graph;
   }
   get() {
     return this.graph;
@@ -1072,9 +1072,7 @@ var GraphStore = class {
   invalidate() {
     this.graph = null;
   }
-  // -----------------------
   // Persistence (data.json)
-  // -----------------------
   async loadState(app) {
     if (this.cachedState)
       return this.cachedState;
@@ -1103,20 +1101,16 @@ var GraphStore = class {
     const vaultId = app.vault.getName();
     const nodePositions = {};
     for (const n of graph.nodes) {
-      if (!n.filePath)
-        continue;
       if (!Number.isFinite(n.x) || !Number.isFinite(n.y) || !Number.isFinite(n.z))
         continue;
-      nodePositions[n.filePath] = { x: n.x, y: n.y, z: n.z };
+      nodePositions[n.id] = { x: n.x, y: n.y, z: n.z };
     }
     return { version: 1, vaultId, nodePositions };
   }
   applyPositions(graph, state) {
     const pos = state.nodePositions || {};
     for (const n of graph.nodes) {
-      if (!n.filePath)
-        continue;
-      const p = pos[n.filePath];
+      const p = pos[n.id];
       if (!p)
         continue;
       n.x = p.x;
@@ -1131,10 +1125,18 @@ var GraphStore = class {
   // Generation (topology)
   // -----------------------
   generateGraph(app) {
-    const nodes = this.createNoteNodes(app);
+    const nodes = this.createNodes(app);
     const nodeById = new Map(nodes.map((n) => [n.id, n]));
     const edges = this.createEdgesFromResolvedLinks(app, nodeById);
     return { nodes, edges, centerNode: null };
+  }
+  createNodes(app) {
+    const settings = getSettings();
+    let nodes = [];
+    if (settings.graph.showTags)
+      nodes = this.createTagNodes(app);
+    nodes = nodes.concat(this.createNoteNodes(app));
+    return nodes;
   }
   createNoteNodes(app) {
     const files = app.vault.getMarkdownFiles();
@@ -1153,6 +1155,32 @@ var GraphStore = class {
         vy: 0,
         vz: 0,
         type: "note",
+        inDegree: 0,
+        outDegree: 0,
+        totalDegree: 0,
+        radius: 0
+      });
+    }
+    return nodes;
+  }
+  createTagNodes(app) {
+    const tagMap = app.metadataCache.getTags?.();
+    if (!tagMap)
+      return [];
+    const jitter = 50;
+    const nodes = [];
+    for (const rawTag of Object.keys(tagMap)) {
+      const cleanTag = rawTag.startsWith("#") ? rawTag.slice(1) : rawTag;
+      nodes.push({
+        id: `tag:${cleanTag}`,
+        label: `#${cleanTag}`,
+        x: (Math.random() - 0.5) * jitter,
+        y: (Math.random() - 0.5) * jitter,
+        z: (Math.random() - 0.5) * jitter,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        type: "tag",
         inDegree: 0,
         outDegree: 0,
         totalDegree: 0,
@@ -1340,6 +1368,19 @@ var GraphController = class {
     this.buildAdjacencyMap();
     this.startSimulation();
     renderer?.render();
+  }
+  async rebuildGraph() {
+    if (!this.graphStore || !this.renderer || !this.interactor || !this.camera)
+      return;
+    this.stopSimulation();
+    this.simulation = null;
+    await this.graphStore.rebuild();
+    this.graph = this.graphStore.get();
+    if (!this.graph)
+      return;
+    this.renderer.setGraph(this.graph);
+    this.simulation = createSimulation(this.graph, this.camera, () => this.interactor.getMouseScreenPosition());
+    this.startSimulation();
   }
   animationLoop = (timestamp) => {
     if (!this.lastTime) {

@@ -1,7 +1,7 @@
 import { App, Plugin, TFile } from 'obsidian'; 
 import { createRenderer } from './renderer.ts';
 import { createSimulation } from './simulation.ts';
-import { Renderer, GraphNode, GraphData, Simulation, WorldTransform } from '../shared/interfaces.ts';
+import { Renderer, GraphNode, GraphData, Simulation } from '../shared/interfaces.ts';
 import { InputManager } from './InputManager.ts';
 import { getSettings } from '../settings/settingsStore.ts';
 import { CameraController } from './CameraController.ts';
@@ -20,13 +20,13 @@ export type GraphDependencies = {
   enableMouseGravity  : (on   : boolean)      => void;
 };
 
-type PluginLike = {
+type DataStoragePlugin = {
   loadData: () => Promise<any>;
   saveData: (data: any) => Promise<void>;
 };
 type GraphStoreDeps = {
   getApp: () => App;
-  getPlugin: () => PluginLike | null;
+  getPlugin: () => DataStoragePlugin | null;
 };
 
 

@@ -102,7 +102,7 @@ export interface GraphNode {
   x             : number;
   y             : number;
   z             : number;
-  filePath      : string;
+  filePath?     : string;
   file?         : TFile;
   vx            : number;
   vy            : number;

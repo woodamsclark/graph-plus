@@ -2,14 +2,14 @@ import { App, TFile } from "obsidian";
 import { GraphData, GraphNode, GraphEdge } from "../shared/interfaces.ts";
 import { getSettings } from "../settings/settingsStore.ts";
 
-type PluginLike = {
+type DataStoragePlugin = {
   loadData: () => Promise<any>;
   saveData: (data: any) => Promise<void>;
 };
 
 type GraphStoreDeps = {
   getApp: () => App;
-  getPlugin: () => PluginLike | null;
+  getPlugin: () => DataStoragePlugin | null;
 };
 
 type PersistedGraphState = {
@@ -36,16 +36,15 @@ export class GraphStore {
   public async init(): Promise<GraphData> {
     if (this.graph) return this.graph;
 
-    const app = this.deps.getApp();
-
+    const app   =       this.deps.getApp();
     const state = await this.loadState(app);
-    const g = this.generateGraph(app);
+    const graph =       this.generateGraph(app);
 
-    if (state) this.applyPositions(g, state);
-    this.decorateGraph(g, app);
+    if (state) this.applyPositions(graph, state);
+    this.decorateGraph(graph, app);
 
-    this.graph = g;
-    return g;
+    this.graph = graph;
+    return graph;
   }
 
   public get(): GraphData | null {
@@ -72,22 +71,19 @@ export class GraphStore {
     // keep cachedState; it remains valid
   }
 
-
-  // -----------------------
   // Persistence (data.json)
-  // -----------------------
 
   private async loadState(app: App): Promise<PersistedGraphState | null> {
     if (this.cachedState) return this.cachedState;
 
-    const plugin = this.deps.getPlugin();
+    const plugin    = this.deps.getPlugin();
     if (!plugin) return null;
 
-    const raw = await plugin.loadData().catch(() => null);
+    const raw       = await plugin.loadData().catch(() => null);
     if (!raw) return null;
 
-    const vaultId = app.vault.getName();
-    const state = raw?.graphStateByVault?.[vaultId] ?? null;
+    const vaultId   = app.vault.getName();
+    const state     = raw?.graphStateByVault?.[vaultId] ?? null;
 
     this.cachedState = state;
     return state;
@@ -110,9 +106,8 @@ export class GraphStore {
     const nodePositions: PersistedGraphState["nodePositions"] = {};
 
     for (const n of graph.nodes) {
-      if (!n.filePath) continue;
       if (!Number.isFinite(n.x) || !Number.isFinite(n.y) || !Number.isFinite(n.z)) continue;
-      nodePositions[n.filePath] = { x: n.x, y: n.y, z: n.z };
+      nodePositions[n.id] = { x: n.x, y: n.y, z: n.z };
     }
 
     return { version: 1, vaultId, nodePositions };
@@ -121,8 +116,7 @@ export class GraphStore {
   private applyPositions(graph: GraphData, state: PersistedGraphState): void {
     const pos = state.nodePositions || {};
     for (const n of graph.nodes) {
-      if (!n.filePath) continue;
-      const p = pos[n.filePath];
+      const p = pos[n.id];
       if (!p) continue;
       n.x = p.x; n.y = p.y; n.z = p.z;
       n.vx = 0; n.vy = 0; n.vz = 0; // avoid load “explosions”
@@ -134,11 +128,22 @@ export class GraphStore {
   // -----------------------
 
   private generateGraph(app: App): GraphData {
-    const nodes = this.createNoteNodes(app);
-    const nodeById = new Map(nodes.map(n => [n.id, n] as const));
-    const edges = this.createEdgesFromResolvedLinks(app, nodeById);
+    const nodes     = this.createNodes(app);
+    const nodeById  = new Map(nodes.map(n => [n.id, n] as const));
+    const edges     = this.createEdgesFromResolvedLinks(app, nodeById);
 
     return { nodes, edges, centerNode: null };
+  }
+
+  private createNodes(app: App): GraphNode[] {
+    const settings = getSettings();
+
+    let nodes: GraphNode[] = [];
+    if (settings.graph.showTags)
+      nodes= this.createTagNodes(app);
+    nodes = nodes.concat(this.createNoteNodes(app));
+
+    return nodes;
   }
 
   private createNoteNodes(app: App): GraphNode[] {
@@ -158,6 +163,36 @@ export class GraphStore {
         vx: 0, vy: 0, vz: 0,
         type: "note",
         inDegree: 0, outDegree: 0, totalDegree: 0,
+        radius: 0,
+      });
+    }
+
+    return nodes;
+  }
+
+  private createTagNodes(app: App): GraphNode[] {
+    // getTags isn't exposed, apparently, so we have to access it via (metadataCache as any)
+    const tagMap = (app.metadataCache as any).getTags?.() as Record<string, number> | undefined;
+    if (!tagMap) return [];
+
+    const jitter = 50;
+    const nodes: GraphNode[] = [];
+
+    for (const rawTag of Object.keys(tagMap)) {
+      const cleanTag = rawTag.startsWith("#") ? rawTag.slice(1) : rawTag;
+      nodes.push({
+        id: `tag:${cleanTag}`,
+        label: `#${cleanTag}`,
+        x: (Math.random() - 0.5) * jitter,
+        y: (Math.random() - 0.5) * jitter,
+        z: (Math.random() - 0.5) * jitter,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        type: "tag",
+        inDegree: 0,
+        outDegree: 0,
+        totalDegree: 0,
         radius: 0,
       });
     }
@@ -205,7 +240,7 @@ export class GraphStore {
   private decorateGraph(graph: GraphData, app: App): void {
     const settings = getSettings();
 
-    if (settings.graph.showTags !== false) {
+    if (settings.graph.showTags == true) {
       // keep isolated: addTagNodesAndEdges(graph, app)
       // (you can port your existing method here)
     }
