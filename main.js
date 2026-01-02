@@ -768,16 +768,30 @@ var InputManager = class {
       120
     );
     this.attachListeners();
+    this.attachDebugTouchLogging(canvas);
   }
   state = { kind: "idle" };
   pointers = new PointerTracker();
   gesture;
   wheel;
-  /*    private getScreenFromClient = (clientX: number, clientY: number): ScreenPt => {
-          const rect = this.canvas.getBoundingClientRect();
-          return { x: clientX - rect.left, y: clientY - rect.top };
-      };
-  */
+  attachDebugTouchLogging(canvas) {
+    const log = (name) => (e) => {
+      console.log(name, e);
+    };
+    for (const n of [
+      "pointerdown",
+      "pointermove",
+      "pointerup",
+      "pointercancel",
+      "touchstart",
+      "touchmove",
+      "touchend",
+      "touchcancel",
+      "contextmenu"
+    ]) {
+      canvas.addEventListener(n, log(n), { passive: false });
+    }
+  }
   getScreenFromClient = (clientX, clientY) => {
     const rect = this.canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
@@ -858,8 +872,8 @@ var InputManager = class {
       const distDelta = g.dist - this.state.lastDist;
       const pinchThreshold = 2;
       if (Math.abs(distDelta) >= pinchThreshold) {
-        const dir = distDelta > 0 ? -1 : 1;
-        this.callback.onZoom(g.centroid.x, g.centroid.y, dir);
+        const direction = distDelta > 0 ? -1 : 1;
+        this.callback.onZoom(g.centroid.x, g.centroid.y, direction);
       }
       const dTheta = wrapAngleDelta(g.angle - this.state.lastAngle);
       const twistThreshold = 0.04;
@@ -979,9 +993,7 @@ var InputManager = class {
   onPointerLeave = () => {
     this.callback.onMouseMove(-Infinity, -Infinity);
   };
-  // -----------------------------
   // Wheel (mouse wheel + trackpad)
-  // -----------------------------
   onWheel = (e) => {
     e.preventDefault();
     this.wheel.handle(e);

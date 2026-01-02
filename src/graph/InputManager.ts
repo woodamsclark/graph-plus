@@ -83,11 +83,6 @@ export class InputManager {
         this.attachListeners();
     }
 
-/*    private getScreenFromClient = (clientX: number, clientY: number): ScreenPt => {
-        const rect = this.canvas.getBoundingClientRect();
-        return { x: clientX - rect.left, y: clientY - rect.top };
-    };
-*/
     private getScreenFromClient = (clientX: number, clientY: number): ScreenPt => {
         const rect  = this.canvas.getBoundingClientRect();
         const dpr   = window.devicePixelRatio || 1;
@@ -198,8 +193,8 @@ export class InputManager {
             const distDelta = g.dist - this.state.lastDist;
             const pinchThreshold = 2;
             if (Math.abs(distDelta) >= pinchThreshold) {
-            const dir = distDelta > 0 ? -1 : 1;
-            this.callback.onZoom(g.centroid.x, g.centroid.y, dir);
+            const direction = distDelta > 0 ? -1 : 1;
+            this.callback.onZoom(g.centroid.x, g.centroid.y, direction);
             }
 
             // Twist orbit
@@ -338,9 +333,7 @@ export class InputManager {
         this.callback.onMouseMove(-Infinity, -Infinity);
     };
 
-    // -----------------------------
     // Wheel (mouse wheel + trackpad)
-    // -----------------------------
     private onWheel = (e: WheelEvent) => {
         e.preventDefault();
         this.wheel.handle(e);
