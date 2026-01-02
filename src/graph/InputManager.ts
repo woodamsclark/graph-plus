@@ -83,9 +83,28 @@ export class InputManager {
         this.attachListeners();
     }
 
-    private getScreenFromClient = (clientX: number, clientY: number): ScreenPt => {
+/*    private getScreenFromClient = (clientX: number, clientY: number): ScreenPt => {
         const rect = this.canvas.getBoundingClientRect();
-        return { x: screenX - rect.left, y: screenY - rect.top };
+        return { x: clientX - rect.left, y: clientY - rect.top };
+    };
+*/
+    private getScreenFromClient = (clientX: number, clientY: number): ScreenPt => {
+        const rect  = this.canvas.getBoundingClientRect();
+        const dpr   = window.devicePixelRatio || 1;
+
+        // The renderer scales the context by DPR, so the "logical" coordinate system
+        // has a width of (physical_width / dpr).
+        const logicalWidth  = this.canvas.width / dpr;
+        const logicalHeight = this.canvas.height / dpr;
+
+        // Calculate scale factors to map visual pixels (rect) to logical pixels (camera/context)
+        const scaleX = logicalWidth / rect.width;
+        const scaleY = logicalHeight / rect.height;
+
+        return {
+            x: (clientX - rect.left) * scaleX,
+            y: (clientY - rect.top) * scaleY
+        };
     };
 
 
@@ -231,15 +250,15 @@ export class InputManager {
             }
 
             case 'drag-node':
-            this.callback.onDragMove(screen.x, screen.y);
+                this.callback.onDragMove(screen.x, screen.y);
             return;
 
             case 'pan':
-            this.callback.onPanMove(screen.x, screen.y);
+                this.callback.onPanMove(screen.x, screen.y);
             return;
 
             case 'orbit':
-            this.callback.onOrbitMove(screen.x, screen.y);
+                this.callback.onOrbitMove(screen.x, screen.y);
             return;
 
             default:

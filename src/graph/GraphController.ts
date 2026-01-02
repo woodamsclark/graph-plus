@@ -98,6 +98,10 @@ export class GraphController {
     this.renderer.resize(rect.width, rect.height);
     this.containerEl.appendChild(this.canvas);
 
+
+    
+
+
     this.inputManager                                   = new InputManager(this.canvas, {
       onOrbitStart      : (screenX, screenY)          => this.interactor!.startOrbit(screenX, screenY),
       onOrbitMove       : (screenX, screenY)          => this.interactor!.updateOrbit(screenX, screenY),

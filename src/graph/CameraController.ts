@@ -9,14 +9,14 @@ const MAX_PITCH    =  Math.PI / 2 - 0.05;
 export class CameraController {
   private cameraSettings  : CameraSettings;
   private cameraState     : CameraState;
-  //private renderer       : Renderer;
   private cameraSnapShot  : CameraState                                                 | null  = null;
-//private worldAnchor     : { screenX: number; screenY: number; screenZ: number }       | null  = null;
   private worldAnchor     : { x: number; y: number; z: number }                         | null  = null;
   private screenAnchor    : { screenX: number; screenY: number                  }       | null  = null;
-  private viewport: { width  : number; height : number; offsetX: number; offsetY: number }      = { width: 0, height: 0, offsetX: 0, offsetY: 0 };
-
+  private viewport        : { width  : number; height : number; offsetX: number; offsetY: number }      = { width: 0, height: 0, offsetX: 0, offsetY: 0 };
   private worldTransform: WorldTransform | null = null;
+
+  // Camera/worldToScreen outputs in viewport space
+  // Mouse/touch must be converted into viewport space
 
   constructor(initialState: CameraState) {
     this.cameraState     = { ...initialState };

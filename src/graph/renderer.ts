@@ -32,6 +32,10 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
   let nodeById                                        = new Map<string, GraphNode>();
   let theme         : ThemeSnapshot                   = buildThemeSnapshot();
   const nodeMap = new Map<string, { x: number; y: number; depth: number }>();
+  
+  let cssW = 1;
+  let cssH = 1;
+  let dpr  = 1;
 
 
   function render() {
@@ -40,7 +44,9 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     settings  = getSettings();
 
     context.fillStyle = theme.colors.background;
-    context.fillRect(0, 0, canvas.width, canvas.height);
+    //context.fillRect(0, 0, canvas.width, canvas.height);
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    context.fillRect(0, 0, cssW, cssH); // ✅ NOT canvas.width/height
 
     if (!graph) return;
 
@@ -222,42 +228,31 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     };
   }
 
-  /*function resize(width: number, height: number) {
-    const w = Math.max(1, Math.floor(width));
-    const h = Math.max(1, Math.floor(height));
-
-    canvas.width = w;
-    canvas.height = h;
-    canvas.style.width = '100%';
-    canvas.style.height = '100%';
-
-    // Let CameraManager know the viewport so it can project correctly
-    camera.setViewport(w, h);
-
-    // Render immediately with current camera state
-    render();
-  }*/
-
   function resize(width: number, height: number) {
-  const dpr = window.devicePixelRatio || 1;
+    dpr = window.devicePixelRatio || 1;
 
-  const cssW = Math.max(1, Math.floor(width));
-  const cssH = Math.max(1, Math.floor(height));
+    // FIX: Do not floor the CSS dimensions. Keep full float precision.
+    // This ensures the canvas matches the container size exactly (e.g. 390.5px)
+    cssW = Math.max(1, width);
+    cssH = Math.max(1, height);
 
-  canvas.width  = Math.floor(cssW * dpr);
-  canvas.height = Math.floor(cssH * dpr);
+    // Scale the internal backing store by DPR (integer pixels)
+    canvas.width  = Math.floor(cssW * dpr);
+    canvas.height = Math.floor(cssH * dpr);
 
-  canvas.style.width  = `${cssW}px`;
-  canvas.style.height = `${cssH}px`;
+    // Force the visual style to match the input float dimensions
+    canvas.style.width  = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
 
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    // Update camera viewport with the exact float dimensions so the center point is correct
+    camera.setViewport(cssW, cssH);
+    render();
   }
-
-  camera.setViewport(cssW, cssH);
-  render();
-}
   
   function setMouseScreenPosition(pos: { x: number; y: number } | null) {
     mousePosition = pos;

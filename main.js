@@ -54,12 +54,16 @@ function createRenderer(canvas, camera) {
   let nodeById = /* @__PURE__ */ new Map();
   let theme = buildThemeSnapshot();
   const nodeMap = /* @__PURE__ */ new Map();
+  let cssW = 1;
+  let cssH = 1;
+  let dpr = 1;
   function render() {
     if (!context)
       return;
     settings = getSettings();
     context.fillStyle = theme.colors.background;
-    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    context.fillRect(0, 0, cssW, cssH);
     if (!graph)
       return;
     nodeMap.clear();
@@ -208,9 +212,9 @@ function createRenderer(canvas, camera) {
     };
   }
   function resize(width, height) {
-    const dpr = window.devicePixelRatio || 1;
-    const cssW = Math.max(1, Math.floor(width));
-    const cssH = Math.max(1, Math.floor(height));
+    dpr = window.devicePixelRatio || 1;
+    cssW = Math.max(1, width);
+    cssH = Math.max(1, height);
     canvas.width = Math.floor(cssW * dpr);
     canvas.height = Math.floor(cssH * dpr);
     canvas.style.width = `${cssW}px`;
@@ -769,9 +773,22 @@ var InputManager = class {
   pointers = new PointerTracker();
   gesture;
   wheel;
+  /*    private getScreenFromClient = (clientX: number, clientY: number): ScreenPt => {
+          const rect = this.canvas.getBoundingClientRect();
+          return { x: clientX - rect.left, y: clientY - rect.top };
+      };
+  */
   getScreenFromClient = (clientX, clientY) => {
     const rect = this.canvas.getBoundingClientRect();
-    return { x: screenX - rect.left, y: screenY - rect.top };
+    const dpr = window.devicePixelRatio || 1;
+    const logicalWidth = this.canvas.width / dpr;
+    const logicalHeight = this.canvas.height / dpr;
+    const scaleX = logicalWidth / rect.width;
+    const scaleY = logicalHeight / rect.height;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY
+    };
   };
   attachListeners() {
     this.canvas.addEventListener("pointerdown", this.onPointerDown, { passive: false });
@@ -1006,13 +1023,13 @@ var MAX_PITCH = Math.PI / 2 - 0.05;
 var CameraController = class {
   cameraSettings;
   cameraState;
-  //private renderer       : Renderer;
   cameraSnapShot = null;
-  //private worldAnchor     : { screenX: number; screenY: number; screenZ: number }       | null  = null;
   worldAnchor = null;
   screenAnchor = null;
   viewport = { width: 0, height: 0, offsetX: 0, offsetY: 0 };
   worldTransform = null;
+  // Camera/worldToScreen outputs in viewport space
+  // Mouse/touch must be converted into viewport space
   constructor(initialState) {
     this.cameraState = { ...initialState };
     this.cameraSettings = getSettings().camera;
@@ -1086,12 +1103,12 @@ var CameraController = class {
     this.viewport.offsetY = height / 2;
   }
   // Unprojects screen coords to world coords on a plane at camera-distance (for panning)
-  screenToWorld(screenX2, screenY2, dz) {
+  screenToWorld(screenX, screenY, dz) {
     const { yaw, pitch, distance: camZ, targetX, targetY, targetZ } = this.cameraState;
     const { offsetX, offsetY } = this.viewport;
     const focal = 800;
-    const px = screenX2 - offsetX;
-    const py = screenY2 - offsetY;
+    const px = screenX - offsetX;
+    const py = screenY - offsetY;
     const perspective = focal / dz;
     const xz = px / perspective;
     const yz = py / perspective;
@@ -1122,12 +1139,12 @@ var CameraController = class {
     }
     return world;
   }
-  screenToWorld3D(screenX2, screenY2, depthFromCamera) {
-    return this.screenToWorld(screenX2, screenY2, depthFromCamera);
+  screenToWorld3D(screenX, screenY, depthFromCamera) {
+    return this.screenToWorld(screenX, screenY, depthFromCamera);
   }
-  screenToWorld2D(screenX2, screenY2) {
+  screenToWorld2D(screenX, screenY) {
     const cam = this.cameraState;
-    const world = this.screenToWorld(screenX2, screenY2, cam.distance);
+    const world = this.screenToWorld(screenX, screenY, cam.distance);
     return { x: world.x, y: world.y };
   }
   clearMomentum() {
@@ -1137,38 +1154,38 @@ var CameraController = class {
     this.cameraState.panVelY = 0;
     this.cameraState.zoomVel = 0;
   }
-  startPan(screenX2, screenY2) {
+  startPan(screenX, screenY) {
     const cam = this.cameraState;
-    this.screenAnchor = { screenX: screenX2, screenY: screenY2 };
-    this.worldAnchor = this.screenToWorld(screenX2, screenY2, cam.distance);
+    this.screenAnchor = { screenX, screenY };
+    this.worldAnchor = this.screenToWorld(screenX, screenY, cam.distance);
   }
-  updatePan(screenX2, screenY2) {
+  updatePan(screenX, screenY) {
     if (!this.worldAnchor)
       return;
     const cam = this.cameraState;
-    const current = this.screenToWorld(screenX2, screenY2, cam.distance);
+    const current = this.screenToWorld(screenX, screenY, cam.distance);
     const dx = current.x - this.worldAnchor.x;
     const dy = current.y - this.worldAnchor.y;
     const dz = current.z - this.worldAnchor.z;
     cam.targetX -= dx;
     cam.targetY -= dy;
     cam.targetZ -= dz;
-    this.worldAnchor = this.screenToWorld(screenX2, screenY2, cam.distance);
+    this.worldAnchor = this.screenToWorld(screenX, screenY, cam.distance);
   }
   endPan() {
     this.screenAnchor = null;
     this.worldAnchor = null;
   }
-  startOrbit(screenX2, screenY2) {
-    this.screenAnchor = { screenX: screenX2, screenY: screenY2 };
+  startOrbit(screenX, screenY) {
+    this.screenAnchor = { screenX, screenY };
     this.cameraSnapShot = { ...this.cameraState };
   }
-  updateOrbit(screenX2, screenY2) {
+  updateOrbit(screenX, screenY) {
     const rotateSensitivityX = this.cameraSettings.rotateSensitivityX;
     const rotateSensitivityY = this.cameraSettings.rotateSensitivityY;
     const zoomSensitivity = this.cameraSettings.zoomSensitivity;
-    const dx = screenX2 - this.screenAnchor.screenX;
-    const dy = screenY2 - this.screenAnchor.screenY;
+    const dx = screenX - this.screenAnchor.screenX;
+    const dy = screenY - this.screenAnchor.screenY;
     let yaw = this.cameraSnapShot.yaw - dx * rotateSensitivityX;
     let pitch = this.cameraSnapShot.pitch - dy * rotateSensitivityY;
     const maxPitch = Math.PI / 2;
@@ -1184,16 +1201,16 @@ var CameraController = class {
     this.screenAnchor = null;
     this.cameraSnapShot = null;
   }
-  startDrag(nodeId, screenX2, screenY2) {
+  startDrag(nodeId, screenX, screenY) {
   }
-  updateDrag(screenX2, screenY2) {
+  updateDrag(screenX, screenY) {
   }
   endDrag() {
   }
-  updateZoom(screenX2, screenY2, delta) {
+  updateZoom(screenX, screenY, delta) {
     this.cameraState.distance += delta * this.cameraSettings.zoomSensitivity;
   }
-  updateHover(screenX2, screenY2) {
+  updateHover(screenX, screenY) {
   }
   // Step forward in time for momentum-based smoothing.
   // dtMs is elapsed milliseconds since last frame.
@@ -1253,14 +1270,14 @@ var GraphInteractor = class {
   getMouseScreenPosition() {
     return this.state.mouseScreenPosition;
   }
-  updateMouse(screenX2, screenY2) {
-    if (screenX2 === -Infinity || screenY2 === -Infinity) {
+  updateMouse(screenX, screenY) {
+    if (screenX === -Infinity || screenY === -Infinity) {
       this.state.mouseScreenPosition = null;
     } else {
-      this.state.mouseScreenPosition = { x: screenX2, y: screenY2 };
+      this.state.mouseScreenPosition = { x: screenX, y: screenY };
     }
   }
-  startDrag(nodeId, screenX2, screenY2) {
+  startDrag(nodeId, screenX, screenY) {
     this.endFollow();
     const graph = this.deps.getGraph();
     const camera = this.deps.getCamera();
@@ -1275,7 +1292,7 @@ var GraphInteractor = class {
     this.state.draggedId = nodeId;
     this.pinnedNodes.add(nodeId);
     this.deps.setPinnedNodes(this.pinnedNodes);
-    const underMouse = camera.screenToWorld(screenX2, screenY2, this.dragDepthFromCamera);
+    const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
     this.dragWorldOffset = {
       x: node.x - underMouse.x,
       y: node.y - underMouse.y,
@@ -1283,7 +1300,7 @@ var GraphInteractor = class {
     };
     return;
   }
-  updateDrag(screenX2, screenY2) {
+  updateDrag(screenX, screenY) {
     const camera = this.deps.getCamera();
     const graph = this.deps.getGraph();
     if (!graph || !camera)
@@ -1293,7 +1310,7 @@ var GraphInteractor = class {
     const node = graph.nodes.find((n) => n.id === this.state.draggedId);
     if (!node)
       return;
-    const underMouse = camera.screenToWorld(screenX2, screenY2, this.dragDepthFromCamera);
+    const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
     const o = this.dragWorldOffset || { x: 0, y: 0, z: 0 };
     node.x = underMouse.x + o.x;
     node.y = underMouse.y + o.y;
@@ -1313,24 +1330,24 @@ var GraphInteractor = class {
     this.deps.enableMouseGravity(true);
     return;
   }
-  startPan(screenX2, screenY2) {
+  startPan(screenX, screenY) {
     this.endFollow();
     this.state.isPanning = true;
-    this.deps.getCamera()?.startPan(screenX2, screenY2);
+    this.deps.getCamera()?.startPan(screenX, screenY);
   }
-  updatePan(screenX2, screenY2) {
-    this.deps.getCamera()?.updatePan(screenX2, screenY2);
+  updatePan(screenX, screenY) {
+    this.deps.getCamera()?.updatePan(screenX, screenY);
   }
   endPan() {
     this.state.isPanning = false;
     this.deps.getCamera()?.endPan();
   }
-  startOrbit(screenX2, screenY2) {
+  startOrbit(screenX, screenY) {
     this.state.isRotating = true;
-    this.deps.getCamera()?.startOrbit(screenX2, screenY2);
+    this.deps.getCamera()?.startOrbit(screenX, screenY);
   }
-  updateOrbit(screenX2, screenY2) {
-    this.deps.getCamera()?.updateOrbit(screenX2, screenY2);
+  updateOrbit(screenX, screenY) {
+    this.deps.getCamera()?.updateOrbit(screenX, screenY);
   }
   endOrbit() {
     this.state.isRotating = false;
@@ -1362,11 +1379,11 @@ var GraphInteractor = class {
   endFollow() {
     this.state.followedId = null;
   }
-  updateZoom(screenX2, screenY2, delta) {
-    this.deps.getCamera()?.updateZoom(screenX2, screenY2, delta);
+  updateZoom(screenX, screenY, delta) {
+    this.deps.getCamera()?.updateZoom(screenX, screenY, delta);
   }
-  openNode(screenX2, screenY2) {
-    const node = this.nodeClicked(screenX2, screenY2);
+  openNode(screenX, screenY) {
+    const node = this.nodeClicked(screenX, screenY);
     if (node && this.openNodeFile) {
       this.openNodeFile(node);
     }
@@ -1374,7 +1391,7 @@ var GraphInteractor = class {
   setOnNodeClick(handler) {
     this.openNodeFile = handler;
   }
-  nodeClicked(screenX2, screenY2) {
+  nodeClicked(screenX, screenY) {
     const graph = this.deps.getGraph();
     const camera = this.deps.getCamera();
     if (!graph || !camera)
@@ -1388,8 +1405,8 @@ var GraphInteractor = class {
         continue;
       const nodeRadius = node.radius;
       const hitR = nodeRadius + hitPadding;
-      const dx = screenX2 - projected.x;
-      const dy = screenY2 - projected.y;
+      const dx = screenX - projected.x;
+      const dy = screenY - projected.y;
       const distSq2 = dx * dx + dy * dy;
       if (distSq2 <= hitR * hitR && distSq2 < closestDist) {
         closestDist = distSq2;
@@ -1825,23 +1842,23 @@ var GraphController = class {
     this.renderer.resize(rect.width, rect.height);
     this.containerEl.appendChild(this.canvas);
     this.inputManager = new InputManager(this.canvas, {
-      onOrbitStart: (screenX2, screenY2) => this.interactor.startOrbit(screenX2, screenY2),
-      onOrbitMove: (screenX2, screenY2) => this.interactor.updateOrbit(screenX2, screenY2),
+      onOrbitStart: (screenX, screenY) => this.interactor.startOrbit(screenX, screenY),
+      onOrbitMove: (screenX, screenY) => this.interactor.updateOrbit(screenX, screenY),
       onOrbitEnd: () => this.interactor.endOrbit(),
-      onPanStart: (screenX2, screenY2) => this.interactor.startPan(screenX2, screenY2),
-      onPanMove: (screenX2, screenY2) => this.interactor.updatePan(screenX2, screenY2),
+      onPanStart: (screenX, screenY) => this.interactor.startPan(screenX, screenY),
+      onPanMove: (screenX, screenY) => this.interactor.updatePan(screenX, screenY),
       onPanEnd: () => this.interactor.endPan(),
-      onOpenNode: (screenX2, screenY2) => this.interactor.openNode(screenX2, screenY2),
-      onMouseMove: (screenX2, screenY2) => this.interactor.updateMouse(screenX2, screenY2),
-      onDragStart: (nodeId, screenX2, screenY2) => this.interactor.startDrag(nodeId, screenX2, screenY2),
-      onDragMove: (screenX2, screenY2) => this.interactor.updateDrag(screenX2, screenY2),
+      onOpenNode: (screenX, screenY) => this.interactor.openNode(screenX, screenY),
+      onMouseMove: (screenX, screenY) => this.interactor.updateMouse(screenX, screenY),
+      onDragStart: (nodeId, screenX, screenY) => this.interactor.startDrag(nodeId, screenX, screenY),
+      onDragMove: (screenX, screenY) => this.interactor.updateDrag(screenX, screenY),
       onDragEnd: () => this.interactor.endDrag(),
       onZoom: (x, y, delta) => this.interactor.updateZoom(x, y, delta),
       onFollowStart: (nodeId) => this.interactor.startFollow(nodeId),
       onFollowEnd: () => this.interactor.endFollow(),
       resetCamera: () => this.camera.resetCamera(),
-      detectClickedNode: (screenX2, screenY2) => {
-        return this.interactor.nodeClicked(screenX2, screenY2);
+      detectClickedNode: (screenX, screenY) => {
+        return this.interactor.nodeClicked(screenX, screenY);
       }
     });
     this.buildAdjacencyMap();
