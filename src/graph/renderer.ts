@@ -218,7 +218,7 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
       tag       : s.graph.tagColor        ?? cssVar('--interactive-accent-hover'),
       label     : s.graph.labelColor      ?? cssVar('--text-muted'              ),
 
-      edgeAlpha : 0.3,
+      edgeAlpha : 0.03,
     };
   }
 

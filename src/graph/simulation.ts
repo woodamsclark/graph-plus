@@ -353,14 +353,14 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
       n.vy = (n.vy || 0) + dy * physicsSettings.centerPull;
       n.vz = (n.vz || 0) + dz * physicsSettings.centerPull;
     }
-    if (centerNode) {
+/*    if (centerNode) {
       const dx = physicsSettings.worldCenterX - centerNode.x;
       const dy = physicsSettings.worldCenterY - centerNode.y;
       const dz = physicsSettings.worldCenterZ - centerNode.z;
       centerNode.vx = (centerNode.vx || 0) + dx * physicsSettings.centerPull * 0.5;
       centerNode.vy = (centerNode.vy || 0) + dy * physicsSettings.centerPull * 0.5;
       centerNode.vz = (centerNode.vz || 0) + dz * physicsSettings.centerPull * 0.5;
-    }
+    }*/
   }
 
   function applyDamping(physicsSettings: PhysicsSettings) {
@@ -469,7 +469,7 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
 
     applyCentering(physicsSettings);
     applyPlaneConstraints(physicsSettings);
-    applyCenterNodeLock(physicsSettings);
+    //applyCenterNodeLock(physicsSettings);
 
     applyDamping(physicsSettings);
     integrate(dt);

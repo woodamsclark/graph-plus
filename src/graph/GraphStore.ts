@@ -156,23 +156,27 @@ export class GraphStore {
     }
 
     private createNoteNodes(app: App): GraphNode[] {
-        const files: TFile[] = app.vault.getMarkdownFiles();
-        const nodes: GraphNode[] = [];
+        const files: TFile[]        = app.vault.getMarkdownFiles();
+        const nodes: GraphNode[]    = [];
 
         for (const file of files) {
             const jitter = 50;
             nodes.push({
-                id: file.path,
-                filePath: file.path,
-                file,
-                label: file.basename,
-                x: (Math.random() - 0.5) * jitter,
-                y: (Math.random() - 0.5) * jitter,
-                z: (Math.random() - 0.5) * jitter,
-                vx: 0, vy: 0, vz: 0,
-                type: "note",
-                inDegree: 0, outDegree: 0, totalDegree: 0,
-                radius: 0,
+                id          : file.path,
+                filePath    : file.path,
+                file        : file,
+                label       : file.basename,
+                x           : (Math.random() - 0.5) * jitter,
+                y           : (Math.random() - 0.5) * jitter,
+                z           : (Math.random() - 0.5) * jitter,
+                vx          : 0,
+                vy          : 0,
+                vz          : 0,
+                type        : "note",
+                inDegree    : 0,
+                outDegree   : 0,
+                totalDegree : 0,
+                radius      : 0,
             });
         }
 
@@ -299,6 +303,7 @@ export class GraphStore {
     }
 
     private computeDegreesAndRadius(graph: GraphData): void {
+        const settings = getSettings();
         const nodeById = new Map(graph.nodes.map(n => [n.id, n] as const));
 
         // Reset first (prevents double-count if re-run)
@@ -321,7 +326,7 @@ export class GraphStore {
 
         for (const n of graph.nodes) {
             n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
-            n.radius = 4 + Math.log2(1 + n.totalDegree);
+            n.radius =  Math.min( Math.max(settings.graph.minNodeRadius + Math.log2(1 + n.totalDegree), settings.graph.minNodeRadius), settings.graph.maxNodeRadius );
         }
     }
 
@@ -339,8 +344,33 @@ export class GraphStore {
     }
 
     private pickCenterNode(app: App, nodes: GraphNode[]): GraphNode | null {
-        return null;
+        const s = getSettings().graph;
+
+        // 1) Explicit center note by title (basename)
+        if (s.useCenterNote && s.centerNoteTitle?.trim()) {
+            const wanted = s.centerNoteTitle.trim().toLowerCase();
+            const match = nodes.find(n =>
+            n.type === "note" && n.label.toLowerCase() === wanted
+            );
+            if (match) return match;
+        }
+
+        // 2) Fallback: highest-degree note
+        let best: GraphNode | null = null;
+        let bestDeg = -1;
+
+        for (const n of nodes) {
+            if (n.type !== "note") continue;
+            const deg = n.totalDegree ?? 0;
+            if (deg > bestDeg) {
+            bestDeg = deg;
+            best = n;
+            }
+        }
+
+        return best;
     }
+
 
     private extractTagsFromFile(file: TFile, app: App): string[] {
         const cache = app.metadataCache.getFileCache(file);

@@ -10,7 +10,7 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
     edgeColor          : undefined,
     backgroundColor    : undefined,
     labelColor         : undefined,
-    labelFontSize  : 12,
+    labelFontSize      : 12,
     labelRevealRadius  : 100,
     useInterfaceFont   : true,
     countDuplicateLinks: true,
@@ -45,7 +45,7 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
     dragThreshold     : 4,
     rotateSensitivityX: 0.005,
     rotateSensitivityY: 0.005,
-    zoomSensitivity   : 5,
+    zoomSensitivity   : 35,
     cameraAnimDuration: 300,
     state: {
       yaw     : 0,

@@ -94,7 +94,7 @@ export interface GraphData {
   centerNode?   : GraphNode | null;
 }
 
-export type GraphNodeType = 'note' | 'tag';
+export type GraphNodeType = 'note' | 'tag' | 'canvas'; // canvas nodes is a future feature 01-01-2026
 
 export interface GraphNode {
   id            : string;

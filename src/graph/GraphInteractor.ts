@@ -55,6 +55,7 @@ export class GraphInteractor {
 
 
     public startDrag (nodeId: string, screenX: number, screenY: number) {
+        this.endFollow();
         const graph = this.deps.getGraph();
         const camera = this.deps.getCamera();
         if (!graph || !camera) return;
@@ -119,6 +120,7 @@ export class GraphInteractor {
 
 
     public startPan (screenX: number, screenY: number) {
+        this.endFollow();
         this.state.isPanning = true;
         this.deps.getCamera()?.startPan(screenX, screenY);
     } 
@@ -150,6 +152,31 @@ export class GraphInteractor {
 
     public startFollow(nodeId: string) {
         this.state.followedId = nodeId;
+        this.updateFollow();
+    }
+
+
+    private updateFollow(): void {
+        const id = this.state.followedId;
+        if (!id) return;
+
+        const graph  = this.deps.getGraph();
+        const camera = this.deps.getCamera();
+        if (!graph || !camera) return;
+
+        const node = graph.nodes.find(n => n.id === id);
+        if (!node) {
+            // Node no longer exists (rebuild, filter, etc.)
+            this.state.followedId = null;
+            return;
+        }
+
+        // Keep camera target glued to the node
+        camera.patchState({
+            targetX: node.x,
+            targetY: node.y,
+            targetZ: node.z,
+        });
     }
 
     public endFollow() {
@@ -200,6 +227,7 @@ export class GraphInteractor {
     }
 
     public frame(){ // called each frame
+        this.updateFollow();
         this.checkIfHovering(); // prepares cursor
     }
 

@@ -204,7 +204,7 @@ function createRenderer(canvas, camera) {
       node: s.graph.nodeColor ?? cssVar("--interactive-accent"),
       tag: s.graph.tagColor ?? cssVar("--interactive-accent-hover"),
       label: s.graph.labelColor ?? cssVar("--text-muted"),
-      edgeAlpha: 0.3
+      edgeAlpha: 0.03
     };
   }
   function resize(width, height) {
@@ -508,14 +508,6 @@ function createSimulation(graph, camera, getMousePos) {
       n.vy = (n.vy || 0) + dy * physicsSettings.centerPull;
       n.vz = (n.vz || 0) + dz * physicsSettings.centerPull;
     }
-    if (centerNode) {
-      const dx = physicsSettings.worldCenterX - centerNode.x;
-      const dy = physicsSettings.worldCenterY - centerNode.y;
-      const dz = physicsSettings.worldCenterZ - centerNode.z;
-      centerNode.vx = (centerNode.vx || 0) + dx * physicsSettings.centerPull * 0.5;
-      centerNode.vy = (centerNode.vy || 0) + dy * physicsSettings.centerPull * 0.5;
-      centerNode.vz = (centerNode.vz || 0) + dz * physicsSettings.centerPull * 0.5;
-    }
   }
   function applyDamping(physicsSettings) {
     for (const n of nodes) {
@@ -615,7 +607,6 @@ function createSimulation(graph, camera, getMousePos) {
     applyMouseGravity(physicsSettings);
     applyCentering(physicsSettings);
     applyPlaneConstraints(physicsSettings);
-    applyCenterNodeLock(physicsSettings);
     applyDamping(physicsSettings);
     integrate(dt);
   }
@@ -1028,6 +1019,7 @@ var GraphInteractor = class {
     }
   }
   startDrag(nodeId, screenX, screenY) {
+    this.endFollow();
     const graph = this.deps.getGraph();
     const camera = this.deps.getCamera();
     if (!graph || !camera)
@@ -1080,6 +1072,7 @@ var GraphInteractor = class {
     return;
   }
   startPan(screenX, screenY) {
+    this.endFollow();
     this.state.isPanning = true;
     this.deps.getCamera()?.startPan(screenX, screenY);
   }
@@ -1103,6 +1096,26 @@ var GraphInteractor = class {
   }
   startFollow(nodeId) {
     this.state.followedId = nodeId;
+    this.updateFollow();
+  }
+  updateFollow() {
+    const id = this.state.followedId;
+    if (!id)
+      return;
+    const graph = this.deps.getGraph();
+    const camera = this.deps.getCamera();
+    if (!graph || !camera)
+      return;
+    const node = graph.nodes.find((n) => n.id === id);
+    if (!node) {
+      this.state.followedId = null;
+      return;
+    }
+    camera.patchState({
+      targetX: node.x,
+      targetY: node.y,
+      targetZ: node.z
+    });
   }
   endFollow() {
     this.state.followedId = null;
@@ -1144,6 +1157,7 @@ var GraphInteractor = class {
     return closest;
   }
   frame() {
+    this.updateFollow();
     this.checkIfHovering();
   }
   checkIfHovering() {
@@ -1415,6 +1429,7 @@ var GraphStore = class {
     graph.centerNode = this.pickCenterNode(app, graph.nodes);
   }
   computeDegreesAndRadius(graph) {
+    const settings = getSettings();
     const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
     for (const n of graph.nodes) {
       n.inDegree = 0;
@@ -1433,7 +1448,7 @@ var GraphStore = class {
     }
     for (const n of graph.nodes) {
       n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
-      n.radius = 4 + Math.log2(1 + n.totalDegree);
+      n.radius = Math.min(Math.max(settings.graph.minNodeRadius + Math.log2(1 + n.totalDegree), settings.graph.minNodeRadius), settings.graph.maxNodeRadius);
     }
   }
   markBidirectional(edges) {
@@ -1449,7 +1464,27 @@ var GraphStore = class {
     }
   }
   pickCenterNode(app, nodes) {
-    return null;
+    const s = getSettings().graph;
+    if (s.useCenterNote && s.centerNoteTitle?.trim()) {
+      const wanted = s.centerNoteTitle.trim().toLowerCase();
+      const match = nodes.find(
+        (n) => n.type === "note" && n.label.toLowerCase() === wanted
+      );
+      if (match)
+        return match;
+    }
+    let best = null;
+    let bestDeg = -1;
+    for (const n of nodes) {
+      if (n.type !== "note")
+        continue;
+      const deg = n.totalDegree ?? 0;
+      if (deg > bestDeg) {
+        bestDeg = deg;
+        best = n;
+      }
+    }
+    return best;
   }
   extractTagsFromFile(file, app) {
     const cache = app.metadataCache.getFileCache(file);
@@ -1499,7 +1534,6 @@ var GraphController = class {
   simulation = null;
   animationFrame = null;
   lastTime = null;
-  previewPollTimer = null;
   inputManager = null;
   camera = null;
   settingsUnregister = null;
@@ -1507,7 +1541,6 @@ var GraphController = class {
   graphStore = null;
   graph = null;
   cursor = null;
-  lastPreviewId = null;
   hoverAnchor = null;
   constructor(app, containerEl, plugin) {
     this.app = app;
@@ -1651,8 +1684,34 @@ var GraphController = class {
     }
     this.adjacencyMap = adjacency;
   }
+  focusNode(nodeId) {
+    const graph = this.graph;
+    const cam = this.camera;
+    if (!graph || !cam)
+      return;
+    const n = graph.nodes.find((x) => x.id === nodeId);
+    if (!n)
+      return;
+    cam.patchState({
+      targetX: n.x,
+      targetY: n.y,
+      targetZ: n.z
+    });
+  }
   resetCamera() {
     this.camera?.resetCamera();
+    const graph = this.graph;
+    const cam = this.camera;
+    if (!graph || !cam)
+      return;
+    const cn = graph.centerNode;
+    if (!cn)
+      return;
+    cam.patchState({
+      targetX: cn.x,
+      targetY: cn.y,
+      targetZ: cn.z
+    });
   }
   startSimulation() {
     if (!this.simulation)
@@ -1707,9 +1766,6 @@ var GraphController = class {
   }
   destroy() {
     this.graphStore?.save();
-    if (this.previewPollTimer)
-      window.clearInterval(this.previewPollTimer);
-    this.previewPollTimer = null;
     this.renderer?.destroy();
     this.renderer = null;
     this.interactor = null;
@@ -1844,7 +1900,7 @@ var DEFAULT_SETTINGS = {
     dragThreshold: 4,
     rotateSensitivityX: 5e-3,
     rotateSensitivityY: 5e-3,
-    zoomSensitivity: 5,
+    zoomSensitivity: 35,
     cameraAnimDuration: 300,
     state: {
       yaw: 0,

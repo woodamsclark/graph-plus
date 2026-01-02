@@ -42,7 +42,6 @@ export class GraphController {
   private simulation?         : Simulation                                | null  = null;
   private animationFrame      : number                                    | null  = null;
   private lastTime            : number                                    | null  = null;
-  private previewPollTimer    : number                                    | null  = null;
   private inputManager        : InputManager                              | null  = null;
   private camera              : CameraController                          | null  = null;
   private settingsUnregister  : (() => void)                              | null  = null;
@@ -50,7 +49,6 @@ export class GraphController {
   private graphStore          : GraphStore                                | null  = null;
   private graph               : GraphData                                 | null  = null;
   private cursor              : ReturnType<typeof createCursorController> | null  = null;
-  private lastPreviewId       : string                                    | null  = null;
   private hoverAnchor         : HTMLAnchorElement                         | null  = null;
 
   constructor(app: App, containerEl: HTMLElement, plugin: Plugin) {
@@ -119,7 +117,7 @@ export class GraphController {
       detectClickedNode : (screenX, screenY)          => { return this.interactor!.nodeClicked(screenX, screenY); },
     });
 
-    this.buildAdjacencyMap();
+    this.buildAdjacencyMap(); // currently dead code
     await this.refreshGraph(); if (!this.graph) return;
     this.resetCamera();
 
@@ -143,7 +141,7 @@ export class GraphController {
     this.simulation   = createSimulation(graph, camera, () => interactor.getMouseScreenPosition());
     const simulation  = this.simulation;
     
-    this.buildAdjacencyMap(); // rebuild adjacency map after graph refresh or showTags changes
+    this.buildAdjacencyMap(); // rebuild adjacency map after graph refresh or showTags changes // currently dead code
     this.startSimulation();
     renderer?.render();
   }
@@ -196,12 +194,13 @@ export class GraphController {
     this.animationFrame = requestAnimationFrame(this.animationLoop);
   };
 
+  
   private updateCameraAnimation(now: number) { 
     return; // smooths camera animations. Revist later
   }
 
 
-  private buildAdjacencyMap(){
+  private buildAdjacencyMap(){ // currently dead code
     const adjacency = new Map<string, string[]>();
     if (this.graph && this.graph.edges) {
       for (const e of this.graph.edges) {
@@ -214,8 +213,37 @@ export class GraphController {
     this.adjacencyMap = adjacency;
   }
 
+  public focusNode(nodeId: string) {
+    const graph = this.graph;
+    const cam   = this.camera;
+    if (!graph || !cam) return;
+
+    const n = graph.nodes.find(x => x.id === nodeId);
+    if (!n) return;
+
+    cam.patchState({
+      targetX: n.x,
+      targetY: n.y,
+      targetZ: n.z,
+    });
+  }
+
+
   public resetCamera() {
     this.camera?.resetCamera();
+
+    const graph = this.graph;
+    const cam   = this.camera;
+    if (!graph || !cam) return;
+
+    const cn = graph.centerNode;
+    if (!cn) return;
+
+    cam.patchState({
+      targetX: cn.x,
+      targetY: cn.y,
+      targetZ: cn.z,
+    });
   }
 
   private startSimulation() {
@@ -272,9 +300,6 @@ export class GraphController {
   destroy(): void {
     // persist positions immediately when view is closed
     this.graphStore?.save(); 
-    // clear any preview poll timer and lock
-    if (this.previewPollTimer) window.clearInterval(this.previewPollTimer as number); 
-    this.previewPollTimer         = null;
 
     this.renderer?.destroy();
     this.renderer                 = null;
