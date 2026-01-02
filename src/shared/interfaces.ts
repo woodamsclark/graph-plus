@@ -21,9 +21,6 @@ export interface GraphSettings {
   drawDoubleLines       : boolean;
   hoverScale            : number;
   //highlightDepth        : number;  // screen-space label reveal radius (× size)
-  centerNoteTitle       : string;
-  useCenterNote         : boolean;
-  useOutlinkFallback    : boolean;
 }
 
 export interface PhysicsSettings {
@@ -91,7 +88,6 @@ export interface Renderer {
 export interface GraphData {
   nodes         : GraphNode[];
   edges         : GraphEdge[];
-  centerNode?   : GraphNode | null;
 }
 
 export type GraphNodeType = 'note' | 'tag' | 'canvas'; // canvas nodes is a future feature 01-01-2026

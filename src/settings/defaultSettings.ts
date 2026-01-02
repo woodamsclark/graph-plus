@@ -18,9 +18,6 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
     showTags           : true,
     showLabels         : true,
     hoverScale         : 1.0,
-    useCenterNote      : false,
-    centerNoteTitle    : '',
-    useOutlinkFallback : false,
   },
 
   physics: {

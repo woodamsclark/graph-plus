@@ -141,7 +141,7 @@ export class GraphStore {
             edges.push(...this.createTagEdges(app, nodeById));
         }
 
-        return { nodes, edges, centerNode: null };
+        return { nodes, edges };
     }
 
     private createNodes(app: App): GraphNode[] {
@@ -298,8 +298,6 @@ export class GraphStore {
 
         this.computeDegreesAndRadius(graph);
         this.markBidirectional(graph.edges);
-
-        graph.centerNode = this.pickCenterNode(app, graph.nodes);
     }
 
     private computeDegreesAndRadius(graph: GraphData): void {
@@ -326,7 +324,7 @@ export class GraphStore {
 
         for (const n of graph.nodes) {
             n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
-            n.radius =  Math.min( Math.max(settings.graph.minNodeRadius + Math.log2(1 + n.totalDegree), settings.graph.minNodeRadius), settings.graph.maxNodeRadius );
+            n.radius =  Math.min( Math.max(settings.graph.minNodeRadius +  0.1*n.totalDegree, settings.graph.minNodeRadius), settings.graph.maxNodeRadius );
         }
     }
 
@@ -341,34 +339,6 @@ export class GraphStore {
                 rev.bidirectional = true;
             }
         }
-    }
-
-    private pickCenterNode(app: App, nodes: GraphNode[]): GraphNode | null {
-        const s = getSettings().graph;
-
-        // 1) Explicit center note by title (basename)
-        if (s.useCenterNote && s.centerNoteTitle?.trim()) {
-            const wanted = s.centerNoteTitle.trim().toLowerCase();
-            const match = nodes.find(n =>
-            n.type === "note" && n.label.toLowerCase() === wanted
-            );
-            if (match) return match;
-        }
-
-        // 2) Fallback: highest-degree note
-        let best: GraphNode | null = null;
-        let bestDeg = -1;
-
-        for (const n of nodes) {
-            if (n.type !== "note") continue;
-            const deg = n.totalDegree ?? 0;
-            if (deg > bestDeg) {
-            bestDeg = deg;
-            best = n;
-            }
-        }
-
-        return best;
     }
 
 

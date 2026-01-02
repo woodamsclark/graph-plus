@@ -513,38 +513,6 @@ export class GraphPlusSettingTab extends PluginSettingTab {
           .onChange(async (v: any) => {
             this.applySettings((s) => { (s.physics as any).mouseGravityEnabled = Boolean(v); });
           }));
-
-      
-
-    // Center Node settings
-    containerEl.createEl('h2', { text: 'Center Node' });
-    new Setting(containerEl)
-      .setName('Use pinned center note')
-      .setDesc('Prefer a specific note path as the graph center. Falls back to max in-links if not found.')
-      .addToggle((t: ToggleComponent) => t
-        .setValue(Boolean(settings.graph.useCenterNote))
-        .onChange(async (v: boolean) => {
-          this.applySettings((s) => { s.graph.useCenterNote = Boolean(v); });
-        }));
-
-    new Setting(containerEl)
-      .setName('Pinned center note path')
-      .setDesc('e.g., "Home.md" or "Notes/Home" (vault-relative).')
-      .addText((txt: TextComponent) => txt
-        .setPlaceholder('path/to/note')
-        .setValue(settings.graph.centerNoteTitle || '')
-        .onChange(async (v: string) => {
-            this.applySettings((s) => { s.graph.centerNoteTitle = (v || '').trim(); });
-        }));
-
-    new Setting(containerEl)
-      .setName('Fallback: prefer out-links')
-      .setDesc('When picking a center by link count, prefer out-links (out-degree) instead of in-links (in-degree)')
-      .addToggle((t: ToggleComponent) => t
-        .setValue(Boolean(settings.graph.useOutlinkFallback))
-        .onChange(async (v: boolean) => {
-            this.applySettings((s) => { s.graph.useOutlinkFallback = Boolean(v); });
-        }));
   }
   async applySettings(mutator: (s: GraphPlusSettings) => void) {
     updateSettings(mutator);

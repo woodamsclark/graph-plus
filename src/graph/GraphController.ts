@@ -235,15 +235,6 @@ export class GraphController {
     const graph = this.graph;
     const cam   = this.camera;
     if (!graph || !cam) return;
-
-    const cn = graph.centerNode;
-    if (!cn) return;
-
-    cam.patchState({
-      targetX: cn.x,
-      targetY: cn.y,
-      targetZ: cn.z,
-    });
   }
 
   private startSimulation() {

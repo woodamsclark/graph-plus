@@ -4,8 +4,6 @@ import { getSettings } from '../settings/settingsStore.ts';
 
 export function createSimulation(graph: GraphData, camera : CameraController, getMousePos: () => { x: number, y: number } | null) : Simulation{
   // If center not provided, compute bounding-box center from node positions
-  let centerNode: GraphNode | null  = null;
-  if(graph.centerNode)  {centerNode = graph.centerNode;}
   const nodes                       = graph.nodes;
   const edges                       = graph.edges;
   let running                       = false;  
@@ -353,14 +351,6 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
       n.vy = (n.vy || 0) + dy * physicsSettings.centerPull;
       n.vz = (n.vz || 0) + dz * physicsSettings.centerPull;
     }
-/*    if (centerNode) {
-      const dx = physicsSettings.worldCenterX - centerNode.x;
-      const dy = physicsSettings.worldCenterY - centerNode.y;
-      const dz = physicsSettings.worldCenterZ - centerNode.z;
-      centerNode.vx = (centerNode.vx || 0) + dx * physicsSettings.centerPull * 0.5;
-      centerNode.vy = (centerNode.vy || 0) + dy * physicsSettings.centerPull * 0.5;
-      centerNode.vz = (centerNode.vz || 0) + dz * physicsSettings.centerPull * 0.5;
-    }*/
   }
 
   function applyDamping(physicsSettings: PhysicsSettings) {
@@ -391,18 +381,6 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
       } else if (isTag(n) && tagK > 0) {
         const dx = (targetX) - (n.x || 0);
         n.vx = (n.vx || 0) + dx * tagK;
-      }
-    }
-  }
-
-  function applyCenterNodeLock(physicsSettings: PhysicsSettings) {
-    const cx = physicsSettings.worldCenterX;
-    const cy = physicsSettings.worldCenterY;
-    const cz = physicsSettings.worldCenterZ;
-    for (const n of nodes) {
-      if (isCenterNode(n)) {
-        n.x = cx; n.y = cy; n.z = cz;
-        n.vx = 0; n.vy = 0; n.vz = 0;
       }
     }
   }
@@ -444,11 +422,6 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
     return n.type === "note";
   }
 
-  function isCenterNode(n: GraphNode): n is GraphNode & { isCenterNode: true } {
-    return n === graph.centerNode;
-    //return (n as any).isCenterNode === true;
-  }
-
   function tick(dt: number) {
     if (!running) return;
     if (!nodes.length) return;
@@ -469,7 +442,6 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
 
     applyCentering(physicsSettings);
     applyPlaneConstraints(physicsSettings);
-    //applyCenterNodeLock(physicsSettings);
 
     applyDamping(physicsSettings);
     integrate(dt);

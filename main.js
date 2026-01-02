@@ -238,10 +238,6 @@ function createRenderer(canvas, camera) {
 
 // src/graph/simulation.ts
 function createSimulation(graph, camera, getMousePos) {
-  let centerNode = null;
-  if (graph.centerNode) {
-    centerNode = graph.centerNode;
-  }
   const nodes = graph.nodes;
   const edges = graph.edges;
   let running = false;
@@ -544,21 +540,6 @@ function createSimulation(graph, camera, getMousePos) {
       }
     }
   }
-  function applyCenterNodeLock(physicsSettings) {
-    const cx = physicsSettings.worldCenterX;
-    const cy = physicsSettings.worldCenterY;
-    const cz = physicsSettings.worldCenterZ;
-    for (const n of nodes) {
-      if (isCenterNode(n)) {
-        n.x = cx;
-        n.y = cy;
-        n.z = cz;
-        n.vx = 0;
-        n.vy = 0;
-        n.vz = 0;
-      }
-    }
-  }
   function integrate(dt) {
     const scale = dt * 60;
     for (const n of nodes) {
@@ -588,9 +569,6 @@ function createSimulation(graph, camera, getMousePos) {
   }
   function isNote(n) {
     return n.type === "note";
-  }
-  function isCenterNode(n) {
-    return n === graph.centerNode;
   }
   function tick(dt) {
     if (!running)
@@ -1294,7 +1272,7 @@ var GraphStore = class {
     if (settings.graph.showTags) {
       edges.push(...this.createTagEdges(app, nodeById));
     }
-    return { nodes, edges, centerNode: null };
+    return { nodes, edges };
   }
   createNodes(app) {
     const settings = getSettings();
@@ -1426,7 +1404,6 @@ var GraphStore = class {
   decorateGraph(graph, app) {
     this.computeDegreesAndRadius(graph);
     this.markBidirectional(graph.edges);
-    graph.centerNode = this.pickCenterNode(app, graph.nodes);
   }
   computeDegreesAndRadius(graph) {
     const settings = getSettings();
@@ -1448,7 +1425,7 @@ var GraphStore = class {
     }
     for (const n of graph.nodes) {
       n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
-      n.radius = Math.min(Math.max(settings.graph.minNodeRadius + Math.log2(1 + n.totalDegree), settings.graph.minNodeRadius), settings.graph.maxNodeRadius);
+      n.radius = Math.min(Math.max(settings.graph.minNodeRadius + 0.1 * n.totalDegree, settings.graph.minNodeRadius), settings.graph.maxNodeRadius);
     }
   }
   markBidirectional(edges) {
@@ -1462,29 +1439,6 @@ var GraphStore = class {
         rev.bidirectional = true;
       }
     }
-  }
-  pickCenterNode(app, nodes) {
-    const s = getSettings().graph;
-    if (s.useCenterNote && s.centerNoteTitle?.trim()) {
-      const wanted = s.centerNoteTitle.trim().toLowerCase();
-      const match = nodes.find(
-        (n) => n.type === "note" && n.label.toLowerCase() === wanted
-      );
-      if (match)
-        return match;
-    }
-    let best = null;
-    let bestDeg = -1;
-    for (const n of nodes) {
-      if (n.type !== "note")
-        continue;
-      const deg = n.totalDegree ?? 0;
-      if (deg > bestDeg) {
-        bestDeg = deg;
-        best = n;
-      }
-    }
-    return best;
   }
   extractTagsFromFile(file, app) {
     const cache = app.metadataCache.getFileCache(file);
@@ -1704,14 +1658,6 @@ var GraphController = class {
     const cam = this.camera;
     if (!graph || !cam)
       return;
-    const cn = graph.centerNode;
-    if (!cn)
-      return;
-    cam.patchState({
-      targetX: cn.x,
-      targetY: cn.y,
-      targetZ: cn.z
-    });
   }
   startSimulation() {
     if (!this.simulation)
@@ -1874,10 +1820,7 @@ var DEFAULT_SETTINGS = {
     drawDoubleLines: true,
     showTags: true,
     showLabels: true,
-    hoverScale: 1,
-    useCenterNote: false,
-    centerNoteTitle: "",
-    useOutlinkFallback: false
+    hoverScale: 1
   },
   physics: {
     repulsionStrength: 5e3,
@@ -2398,22 +2341,6 @@ var GraphPlusSettingTab = class extends import_obsidian3.PluginSettingTab {
     new import_obsidian3.Setting(containerEl).setName("Mouse gravity").setDesc("Enable the mouse gravity well that attracts nearby nodes.").addToggle((t) => t.setValue(Boolean(settings.physics.mouseGravityEnabled !== false)).onChange(async (v) => {
       this.applySettings((s) => {
         s.physics.mouseGravityEnabled = Boolean(v);
-      });
-    }));
-    containerEl.createEl("h2", { text: "Center Node" });
-    new import_obsidian3.Setting(containerEl).setName("Use pinned center note").setDesc("Prefer a specific note path as the graph center. Falls back to max in-links if not found.").addToggle((t) => t.setValue(Boolean(settings.graph.useCenterNote)).onChange(async (v) => {
-      this.applySettings((s) => {
-        s.graph.useCenterNote = Boolean(v);
-      });
-    }));
-    new import_obsidian3.Setting(containerEl).setName("Pinned center note path").setDesc('e.g., "Home.md" or "Notes/Home" (vault-relative).').addText((txt) => txt.setPlaceholder("path/to/note").setValue(settings.graph.centerNoteTitle || "").onChange(async (v) => {
-      this.applySettings((s) => {
-        s.graph.centerNoteTitle = (v || "").trim();
-      });
-    }));
-    new import_obsidian3.Setting(containerEl).setName("Fallback: prefer out-links").setDesc("When picking a center by link count, prefer out-links (out-degree) instead of in-links (in-degree)").addToggle((t) => t.setValue(Boolean(settings.graph.useOutlinkFallback)).onChange(async (v) => {
-      this.applySettings((s) => {
-        s.graph.useOutlinkFallback = Boolean(v);
       });
     }));
   }
