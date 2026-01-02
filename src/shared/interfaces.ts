@@ -131,29 +131,6 @@ export interface Simulation {
 }
 
 
-export interface InputManagerCallbacks {
-    // Camera Control
-    onOrbitStart        (screenX: number, screenY: number)                : void;
-    onOrbitMove         (screenX: number, screenY: number)                : void;
-    onOrbitEnd          ()                                                : void;
-    onPanStart          (screenX: number, screenY: number)                : void;
-    onPanMove           (screenX: number, screenY: number)                : void;
-    onPanEnd            ()                                                : void;
-    onZoom              (screenX: number, screenY: number, delta: number) : void;
-    onFollowStart       (nodeId: string)                                  : void;
-    onFollowEnd         ()                                                : void;
-    resetCamera         ()                                                : void;
-    // Node Interaction
-    onMouseMove             (screenX: number, screenY: number)                : void;
-    onOpenNode          (screenX: number, screenY: number)                : void;
-    // Node Dragging 
-    onDragStart         (nodeId: string, screenX: number, screenY: number): void;
-    onDragMove          (screenX: number, screenY: number)                : void;
-    onDragEnd           (): void;
-    // Utility
-    detectClickedNode   (screenX: number, screenY: number)                : { id: string, filePath?: string, label: string } | null;
-}
-
 export enum PointerMode {
   Idle,
   Hover,

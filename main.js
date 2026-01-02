@@ -627,43 +627,188 @@ var InputManager = class {
   downClickY = 0;
   // [[ Canvas Space ]]
   dragThreshold = 5;
-  // Drag starts after 5 pixels of movement
   pointerMode = 0 /* Idle */;
+  pointers = /* @__PURE__ */ new Map();
+  wheelGestureMode = null;
+  wheelGestureEndTimer = null;
+  wheelPanning = false;
+  wheelPanX = 0;
+  wheelPanY = 0;
+  wheelPanEndTimer = null;
+  gesture = {
+    active: false,
+    startCentroidX: 0,
+    startCentroidY: 0,
+    lastCentroidX: 0,
+    lastCentroidY: 0,
+    startDist: 0,
+    lastDist: 0,
+    startAngle: 0,
+    lastAngle: 0,
+    panStarted: false,
+    orbitStarted: false
+  };
   constructor(canvas, callbacks) {
     this.canvas = canvas;
     this.callback = callbacks;
+    this.canvas.style.touchAction = "none";
     this.attachListeners();
   }
   attachListeners() {
-    this.canvas.addEventListener("mousedown", this.onMouseDown);
-    this.canvas.addEventListener("wheel", this.onWheel);
-    this.canvas.addEventListener("mousemove", this.onMouseMove);
-    this.canvas.addEventListener("mouseleave", this.onMouseLeave);
-    document.addEventListener("mousemove", this.onGlobalMouseMove);
-    document.addEventListener("mouseup", this.onGlobalMouseUp);
+    this.canvas.addEventListener("pointerdown", this.onPointerDown, { passive: false });
+    this.canvas.addEventListener("pointermove", this.onPointerMove, { passive: false });
+    this.canvas.addEventListener("pointerup", this.onPointerUp, { passive: false });
+    this.canvas.addEventListener("pointercancel", this.onPointerCancel, { passive: false });
+    this.canvas.addEventListener("pointerleave", this.onPointerLeave, { passive: false });
+    this.canvas.addEventListener("wheel", this.onWheel, { passive: false });
+    this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   }
-  onMouseDown = (e) => {
-    const canvas = this.canvas.getBoundingClientRect();
-    this.downClickX = e.clientX - canvas.left;
-    this.downClickY = e.clientY - canvas.top;
+  // -----------------------------
+  // Helpers
+  // -----------------------------
+  getScreenXYFromClient(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+    return { screenX: clientX - rect.left, screenY: clientY - rect.top };
+  }
+  setPointerRecord(e) {
+    const pointerType = e.pointerType === "touch" || e.pointerType === "pen" || e.pointerType === "mouse" ? e.pointerType : "mouse";
+    const existing = this.pointers.get(e.pointerId);
+    const record = existing ?? {
+      id: e.pointerId,
+      pointerType,
+      clientX: e.clientX,
+      clientY: e.clientY,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      buttons: e.buttons,
+      button: e.button
+    };
+    record.clientX = e.clientX;
+    record.clientY = e.clientY;
+    record.buttons = e.buttons;
+    record.button = e.button;
+    this.pointers.set(e.pointerId, record);
+  }
+  getTwoPointers() {
+    if (this.pointers.size !== 2)
+      return null;
+    const arr = Array.from(this.pointers.values());
+    return [arr[0], arr[1]];
+  }
+  computeGestureFromTwoPointers() {
+    const pair = this.getTwoPointers();
+    if (!pair)
+      return null;
+    const [a, b] = pair;
+    const A = this.getScreenXYFromClient(a.clientX, a.clientY);
+    const B = this.getScreenXYFromClient(b.clientX, b.clientY);
+    const centroidX = (A.screenX + B.screenX) * 0.5;
+    const centroidY = (A.screenY + B.screenY) * 0.5;
+    const dx = B.screenX - A.screenX;
+    const dy = B.screenY - A.screenY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx);
+    return { centroidX, centroidY, dist, angle };
+  }
+  wrapAngleDelta(d) {
+    if (d > Math.PI)
+      d -= 2 * Math.PI;
+    if (d < -Math.PI)
+      d += 2 * Math.PI;
+    return d;
+  }
+  // -----------------------------
+  // Pointer events
+  // -----------------------------
+  onPointerDown = (e) => {
+    e.preventDefault();
+    this.canvas.setPointerCapture(e.pointerId);
+    this.setPointerRecord(e);
+    const { screenX, screenY } = this.getScreenXYFromClient(e.clientX, e.clientY);
+    this.callback.onMouseMove(screenX, screenY);
+    if (this.pointers.size === 2) {
+      if (this.pointerMode === 4 /* DragNode */)
+        this.callback.onDragEnd();
+      if (this.pointerMode === 5 /* Pan */)
+        this.callback.onPanEnd();
+      if (this.pointerMode === 6 /* Orbit */)
+        this.callback.onOrbitEnd();
+      this.pointerMode = 0 /* Idle */;
+      this.draggedNodeId = null;
+      const g = this.computeGestureFromTwoPointers();
+      if (!g)
+        return;
+      this.gesture.active = true;
+      this.gesture.startCentroidX = g.centroidX;
+      this.gesture.startCentroidY = g.centroidY;
+      this.gesture.lastCentroidX = g.centroidX;
+      this.gesture.lastCentroidY = g.centroidY;
+      this.gesture.startDist = g.dist;
+      this.gesture.lastDist = g.dist;
+      this.gesture.startAngle = g.angle;
+      this.gesture.lastAngle = g.angle;
+      this.gesture.panStarted = false;
+      this.gesture.orbitStarted = false;
+      return;
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    this.downClickX = e.clientX - rect.left;
+    this.downClickY = e.clientY - rect.top;
     this.lastClientX = e.clientX;
     this.lastClientY = e.clientY;
+    const isMouse = e.pointerType === "mouse";
     const isLeft = e.button === 0;
-    const isMiddle = e.button === 1;
     const isRight = e.button === 2;
     this.draggedNodeId = this.callback.detectClickedNode(this.downClickX, this.downClickY)?.id || null;
-    if (isLeft && e.ctrlKey || isLeft && e.metaKey || isRight) {
+    if (isMouse && (isLeft && (e.ctrlKey || e.metaKey) || isRight)) {
       this.pointerMode = 3 /* RightClick */;
       return;
     }
     this.pointerMode = 2 /* Click */;
   };
-  onGlobalMouseMove = (e) => {
+  onPointerMove = (e) => {
+    this.setPointerRecord(e);
+    const { screenX, screenY } = this.getScreenXYFromClient(e.clientX, e.clientY);
+    this.callback.onMouseMove(screenX, screenY);
+    if (this.gesture.active && this.pointers.size === 2) {
+      e.preventDefault();
+      const g = this.computeGestureFromTwoPointers();
+      if (!g)
+        return;
+      const dxC = g.centroidX - this.gesture.lastCentroidX;
+      const dyC = g.centroidY - this.gesture.lastCentroidY;
+      const movedCentroidSq = dxC * dxC + dyC * dyC;
+      const thresholdSq2 = this.dragThreshold * this.dragThreshold;
+      if (!this.gesture.panStarted && movedCentroidSq > thresholdSq2) {
+        this.gesture.panStarted = true;
+        this.callback.onPanStart(g.centroidX, g.centroidY);
+      }
+      if (this.gesture.panStarted) {
+        this.callback.onPanMove(g.centroidX, g.centroidY);
+      }
+      const distDelta = g.dist - this.gesture.lastDist;
+      const pinchThreshold = 2;
+      if (Math.abs(distDelta) >= pinchThreshold) {
+        const dir = distDelta > 0 ? -1 : 1;
+        this.callback.onZoom(g.centroidX, g.centroidY, dir);
+      }
+      const dTheta = this.wrapAngleDelta(g.angle - this.gesture.lastAngle);
+      const twistThreshold = 0.04;
+      if (!this.gesture.orbitStarted && Math.abs(dTheta) > twistThreshold) {
+        this.gesture.orbitStarted = true;
+        this.callback.onOrbitStart(g.centroidX, g.centroidY);
+      }
+      if (this.gesture.orbitStarted) {
+        this.callback.onOrbitMove(g.centroidX, g.centroidY);
+      }
+      this.gesture.lastCentroidX = g.centroidX;
+      this.gesture.lastCentroidY = g.centroidY;
+      this.gesture.lastDist = g.dist;
+      this.gesture.lastAngle = g.angle;
+      return;
+    }
     const clientX = e.clientX;
     const clientY = e.clientY;
-    const rect = this.canvas.getBoundingClientRect();
-    const screenX = clientX - rect.left;
-    const screenY = clientY - rect.top;
     const dx = clientX - this.lastClientX;
     const dy = clientY - this.lastClientY;
     this.lastClientX = clientX;
@@ -704,10 +849,37 @@ var InputManager = class {
         return;
     }
   };
-  onGlobalMouseUp = (e) => {
-    const rect = this.canvas.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
+  onPointerUp = (e) => {
+    e.preventDefault();
+    try {
+      this.canvas.releasePointerCapture(e.pointerId);
+    } catch {
+    }
+    const { screenX, screenY } = this.getScreenXYFromClient(e.clientX, e.clientY);
+    const wasTwoPointer = this.gesture.active;
+    this.pointers.delete(e.pointerId);
+    if (wasTwoPointer && this.pointers.size < 2) {
+      if (this.gesture.panStarted)
+        this.callback.onPanEnd();
+      if (this.gesture.orbitStarted)
+        this.callback.onOrbitEnd();
+      this.gesture.active = false;
+      this.gesture.panStarted = false;
+      this.gesture.orbitStarted = false;
+      const remaining = Array.from(this.pointers.values())[0];
+      if (remaining) {
+        remaining.startClientX = remaining.clientX;
+        remaining.startClientY = remaining.clientY;
+        this.lastClientX = remaining.clientX;
+        this.lastClientY = remaining.clientY;
+        const pxy = this.getScreenXYFromClient(remaining.clientX, remaining.clientY);
+        this.downClickX = pxy.screenX;
+        this.downClickY = pxy.screenY;
+      }
+      this.pointerMode = 0 /* Idle */;
+      this.draggedNodeId = null;
+      return;
+    }
     switch (this.pointerMode) {
       case 4 /* DragNode */:
         this.callback.onDragEnd();
@@ -732,27 +904,75 @@ var InputManager = class {
     this.pointerMode = 0 /* Idle */;
     this.draggedNodeId = null;
   };
-  // local canvas mouse move for hover state
-  onMouseMove = (e) => {
-    const rect = this.canvas.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
-    this.callback.onMouseMove(screenX, screenY);
+  onPointerCancel = (e) => {
+    e.preventDefault();
+    this.pointers.delete(e.pointerId);
+    if (this.pointerMode === 4 /* DragNode */)
+      this.callback.onDragEnd();
+    if (this.pointerMode === 5 /* Pan */)
+      this.callback.onPanEnd();
+    if (this.pointerMode === 6 /* Orbit */)
+      this.callback.onOrbitEnd();
+    if (this.gesture.active) {
+      if (this.gesture.panStarted)
+        this.callback.onPanEnd();
+      if (this.gesture.orbitStarted)
+        this.callback.onOrbitEnd();
+    }
+    this.gesture.active = false;
+    this.gesture.panStarted = false;
+    this.gesture.orbitStarted = false;
+    this.pointerMode = 0 /* Idle */;
+    this.draggedNodeId = null;
   };
-  onMouseLeave = () => {
+  onPointerLeave = () => {
     this.callback.onMouseMove(-Infinity, -Infinity);
   };
+  // -----------------------------
+  // Wheel (mouse wheel + trackpad)
+  // -----------------------------
   onWheel = (e) => {
     e.preventDefault();
-    this.callback.onZoom(e.offsetX, e.offsetY, Math.sign(e.deltaY));
+    const x = e.offsetX;
+    const y = e.offsetY;
+    if (this.wheelGestureMode == null) {
+      this.wheelGestureMode = e.ctrlKey || e.metaKey ? "zoom" : "pan";
+      if (this.wheelGestureMode === "pan") {
+        this.wheelPanning = true;
+        this.wheelPanX = x;
+        this.wheelPanY = y;
+        this.callback.onPanStart(this.wheelPanX, this.wheelPanY);
+      }
+    }
+    if (this.wheelGestureMode === "zoom") {
+      this.callback.onZoom(x, y, Math.sign(e.deltaY));
+    } else {
+      this.wheelPanX -= e.deltaX;
+      this.wheelPanY -= e.deltaY;
+      this.callback.onPanMove(this.wheelPanX, this.wheelPanY);
+    }
+    if (this.wheelGestureEndTimer != null)
+      window.clearTimeout(this.wheelGestureEndTimer);
+    this.wheelGestureEndTimer = window.setTimeout(() => {
+      if (this.wheelGestureMode === "pan" && this.wheelPanning) {
+        this.callback.onPanEnd();
+      }
+      this.wheelPanning = false;
+      this.wheelGestureMode = null;
+      this.wheelGestureEndTimer = null;
+    }, 120);
   };
   destroy() {
-    this.canvas.removeEventListener("mousemove", this.onMouseMove);
-    this.canvas.removeEventListener("mousedown", this.onMouseDown);
+    this.canvas.removeEventListener("pointerdown", this.onPointerDown);
+    this.canvas.removeEventListener("pointermove", this.onPointerMove);
+    this.canvas.removeEventListener("pointerup", this.onPointerUp);
+    this.canvas.removeEventListener("pointercancel", this.onPointerCancel);
+    this.canvas.removeEventListener("pointerleave", this.onPointerLeave);
     this.canvas.removeEventListener("wheel", this.onWheel);
-    this.canvas.removeEventListener("mouseleave", this.onMouseLeave);
-    document.removeEventListener("mousemove", this.onGlobalMouseMove);
-    document.removeEventListener("mouseup", this.onGlobalMouseUp);
+    if (this.wheelPanEndTimer != null) {
+      window.clearTimeout(this.wheelPanEndTimer);
+      this.wheelPanEndTimer = null;
+    }
   }
 };
 
