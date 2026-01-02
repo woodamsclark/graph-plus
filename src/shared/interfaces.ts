@@ -130,19 +130,11 @@ export interface Simulation {
   setPinnedNodes?(ids: Set<string>) : void;
 }
 
-
-export enum PointerMode {
-  Idle,
-  Hover,
-  Click,
-  RightClick,
-  DragNode,
-  Pan,
-  Orbit,
-}
-
 export interface WorldTransform {
   rotationX : number; // radians
   rotationY : number;  // radians
   scale     : number; // unitless zoom scalar
 }
+
+export type ScreenPt = { x: number; y: number };
+export type ClientPt = { x: number; y: number };

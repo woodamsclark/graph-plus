@@ -1,4 +1,33 @@
-import { PointerMode } from '../shared/interfaces.ts';
+import { ScreenPt, ClientPt } from '../shared/interfaces.ts';
+import { TwoFingerGesture } from './TwoFingerGesture.ts';
+import { WheelGestureSession } from './WheelGestureSession.ts';
+import { PointerTracker } from './PointerTracker.ts';
+import { distSq } from '../shared/distSq.ts';
+import { wrapAngleDelta } from '../shared/wrapAngleDelta.ts';
+
+type InputState =
+  | { kind: 'idle' }
+  | {
+      kind: 'press';
+      downClient: ClientPt;
+      downScreen: ScreenPt;
+      lastClient: ClientPt;
+      clickedNodeId: string | null;
+      pointerId: number;
+      rightClickIntent: boolean; // “would orbit/follow/reset if released”
+    }
+  | { kind: 'drag-node'; nodeId: string; lastClient: ClientPt }
+  | { kind: 'pan'; lastClient: ClientPt }
+  | { kind: 'orbit'; lastClient: ClientPt }
+  | {
+      kind: 'touch-gesture';
+      lastCentroid: ScreenPt;
+      lastDist: number;
+      lastAngle: number;
+      panStarted: boolean;
+      orbitStarted: boolean;
+    };
+
 
 export interface InputManagerCallbacks {
     // Camera Control
@@ -32,80 +61,33 @@ export interface InputManagerCallbacks {
     ): { id: string; filePath?: string; label: string } | null;
 }
 
-type ActivePointer = {
-    id: number;
-    pointerType: 'mouse' | 'touch' | 'pen';
-    clientX: number;
-    clientY: number;
-    startClientX: number;
-    startClientY: number;
-    buttons: number;
-    button: number;
-};
-
-type GestureState = {
-    active: boolean;
-    startCentroidX: number;
-    startCentroidY: number;
-    lastCentroidX: number;
-    lastCentroidY: number;
-    startDist: number;
-    lastDist: number;
-    startAngle: number;
-    lastAngle: number;
-    panStarted: boolean;
-    orbitStarted: boolean;
-};
-
 export class InputManager {
-    private canvas: HTMLCanvasElement;
-    private callback: InputManagerCallbacks;
+    private state: InputState = { kind: 'idle' };
+    private pointers = new PointerTracker();
+    private gesture: TwoFingerGesture;
+    private wheel: WheelGestureSession;
 
-    private draggedNodeId: string | null = null;
-
-    private lastClientX: number = 0; // (( Client Space ))
-    private lastClientY: number = 0; // (( Client Space ))
-
-    private downClickX: number = 0; // [[ Canvas Space ]]
-    private downClickY: number = 0; // [[ Canvas Space ]]
-
-    private dragThreshold: number = 5;
-    private pointerMode: PointerMode = PointerMode.Idle;
-
-    private pointers = new Map<number, ActivePointer>();
-        
-
-    private wheelGestureMode: 'pan' | 'zoom' | null = null;
-    private wheelGestureEndTimer: number | null = null;
-    private wheelPanning: boolean = false;
-    private wheelPanX: number = 0;
-    private wheelPanY: number = 0;
-    private wheelPanEndTimer: number | null = null;
-
-    private gesture: GestureState = {
-        active: false,
-        startCentroidX: 0,
-        startCentroidY: 0,
-        lastCentroidX: 0,
-        lastCentroidY: 0,
-        startDist: 0,
-        lastDist: 0,
-        startAngle: 0,
-        lastAngle: 0,
-        panStarted: false,
-        orbitStarted: false,
-    };
-
-    constructor(canvas: HTMLCanvasElement, callbacks: InputManagerCallbacks) {
-        this.canvas = canvas;
-        this.callback = callbacks;
-
-        // Critical: allow us to handle touch gestures ourselves.
-        // Without this, browser may scroll/zoom the page instead.
+    constructor(private canvas: HTMLCanvasElement, private callback: InputManagerCallbacks) {
         this.canvas.style.touchAction = 'none';
+
+        this.gesture = new TwoFingerGesture(this.getScreenFromClient, 5);
+
+        this.wheel = new WheelGestureSession(
+            (x, y) => this.callback.onPanStart(x, y),
+            (x, y) => this.callback.onPanMove(x, y),
+            () => this.callback.onPanEnd(),
+            (x, y, d) => this.callback.onZoom(x, y, d),
+            120,
+        );
 
         this.attachListeners();
     }
+
+    private getScreenFromClient = (clientX: number, clientY: number): ScreenPt => {
+        const rect = this.canvas.getBoundingClientRect();
+        return { x: screenX - rect.left, y: screenY - rect.top };
+    };
+
 
     private attachListeners() {
         // Pointer events unify mouse/touch/pen.
@@ -123,346 +105,214 @@ export class InputManager {
     }
 
     // -----------------------------
-    // Helpers
-    // -----------------------------
-
-    private getScreenXYFromClient(clientX: number, clientY: number) {
-        const rect = this.canvas.getBoundingClientRect();
-        return { screenX: clientX - rect.left, screenY: clientY - rect.top };
-    }
-
-    private setPointerRecord(e: PointerEvent) {
-        const pointerType =
-        (e.pointerType === 'touch' || e.pointerType === 'pen' || e.pointerType === 'mouse'
-            ? e.pointerType
-            : 'mouse') as ActivePointer['pointerType'];
-
-        const existing = this.pointers.get(e.pointerId);
-
-        const record: ActivePointer = existing ?? {
-        id: e.pointerId,
-        pointerType,
-        clientX: e.clientX,
-        clientY: e.clientY,
-        startClientX: e.clientX,
-        startClientY: e.clientY,
-        buttons: e.buttons,
-        button: e.button,
-        };
-
-        record.clientX = e.clientX;
-        record.clientY = e.clientY;
-        record.buttons = e.buttons;
-        record.button = e.button;
-
-        this.pointers.set(e.pointerId, record);
-    }
-
-    private getTwoPointers(): [ActivePointer, ActivePointer] | null {
-        if (this.pointers.size !== 2) return null;
-        const arr = Array.from(this.pointers.values());
-        return [arr[0], arr[1]];
-    }
-
-    private computeGestureFromTwoPointers() {
-        const pair = this.getTwoPointers();
-        if (!pair) return null;
-
-        const [a, b] = pair;
-        const A = this.getScreenXYFromClient(a.clientX, a.clientY);
-        const B = this.getScreenXYFromClient(b.clientX, b.clientY);
-
-        const centroidX = (A.screenX + B.screenX) * 0.5;
-        const centroidY = (A.screenY + B.screenY) * 0.5;
-
-        const dx = B.screenX - A.screenX;
-        const dy = B.screenY - A.screenY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const angle = Math.atan2(dy, dx);
-
-        return { centroidX, centroidY, dist, angle };
-    }
-
-    private wrapAngleDelta(d: number) {
-        if (d > Math.PI) d -= 2 * Math.PI;
-        if (d < -Math.PI) d += 2 * Math.PI;
-        return d;
-    }
-
-    // -----------------------------
     // Pointer events
     // -----------------------------
 
     private onPointerDown = (e: PointerEvent) => {
         e.preventDefault();
-
-        // Capture means we keep receiving move/up even if pointer leaves canvas
         this.canvas.setPointerCapture(e.pointerId);
+        this.pointers.upsert(e);
 
-        this.setPointerRecord(e);
+        const eScreen = this.getScreenFromClient(e.clientX, e.clientY);
+        this.callback.onMouseMove(eScreen.x, eScreen.y);
 
-        // Hover reporting (useful even for touch/pen, won't hurt)
-        const { screenX, screenY } = this.getScreenXYFromClient(e.clientX, e.clientY);
-        this.callback.onMouseMove(screenX, screenY);
+        // If 2 pointers → enter touch gesture state (and end any single-pointer mode cleanly)
+        if (this.pointers.size() === 2) {
+            this.endSinglePointerIfNeeded();
+            const pair = this.pointers.two();
+            if (!pair) return;
+            const g = this.gesture.read(pair);
 
-        // If we now have 2 pointers, start a gesture immediately
-        if (this.pointers.size === 2) {
-        // Cancel any single-pointer mode cleanly
-        if (this.pointerMode === PointerMode.DragNode) this.callback.onDragEnd();
-        if (this.pointerMode === PointerMode.Pan) this.callback.onPanEnd();
-        if (this.pointerMode === PointerMode.Orbit) this.callback.onOrbitEnd();
-
-        this.pointerMode = PointerMode.Idle;
-        this.draggedNodeId = null;
-
-        const g = this.computeGestureFromTwoPointers();
-        if (!g) return;
-
-        this.gesture.active = true;
-        this.gesture.startCentroidX = g.centroidX;
-        this.gesture.startCentroidY = g.centroidY;
-        this.gesture.lastCentroidX = g.centroidX;
-        this.gesture.lastCentroidY = g.centroidY;
-        this.gesture.startDist = g.dist;
-        this.gesture.lastDist = g.dist;
-        this.gesture.startAngle = g.angle;
-        this.gesture.lastAngle = g.angle;
-        this.gesture.panStarted = false;
-        this.gesture.orbitStarted = false;
-        return;
+            this.state = {
+            kind: 'touch-gesture',
+            lastCentroid: g.centroid,
+            lastDist: g.dist,
+            lastAngle: g.angle,
+            panStarted: false,
+            orbitStarted: false,
+            };
+            return;
         }
 
-        // Single-pointer setup
-        const rect = this.canvas.getBoundingClientRect();
-        this.downClickX = e.clientX - rect.left;
-        this.downClickY = e.clientY - rect.top;
-
-        this.lastClientX = e.clientX;
-        this.lastClientY = e.clientY;
-
+        // Single pointer press
         const isMouse = e.pointerType === 'mouse';
         const isLeft = e.button === 0;
         const isRight = e.button === 2;
+        const rightClickIntent = isMouse && ((isLeft && (e.ctrlKey || e.metaKey)) || isRight);
 
-        this.draggedNodeId = this.callback.detectClickedNode(this.downClickX, this.downClickY)?.id || null;
+        const clickedNodeId = this.callback.detectClickedNode(eScreen.x, eScreen.y)?.id ?? null;
 
-        // Preserve your right-click / ctrl-meta behavior, but only for mouse/pen-like contexts.
-        // Touch has no right button; touch orbit handled by 2-finger twist below.
-        if (isMouse && ((isLeft && (e.ctrlKey || e.metaKey)) || isRight)) {
-        this.pointerMode = PointerMode.RightClick;
-        return;
-        }
-
-        // Touch/pen/mouse primary = click -> maybe drag
-        this.pointerMode = PointerMode.Click;
+        this.state = {
+            kind: 'press',
+            downClient: { x: e.clientX, y: e.clientY },
+            downScreen: eScreen,
+            lastClient: { x: e.clientX, y: e.clientY },
+            clickedNodeId,
+            pointerId: e.pointerId,
+            rightClickIntent,
+        };
     };
+
 
     private onPointerMove = (e: PointerEvent) => {
-        this.setPointerRecord(e);
+        this.pointers.upsert(e);
 
-        // Always update hover position relative to canvas (your highlighting + gravity)
-        const { screenX, screenY } = this.getScreenXYFromClient(e.clientX, e.clientY);
-        this.callback.onMouseMove(screenX, screenY);
+        const screen = this.getScreenFromClient(e.clientX, e.clientY);
+        this.callback.onMouseMove(screen.x, screen.y);
 
-        // Two-pointer gesture path
-        if (this.gesture.active && this.pointers.size === 2) {
-        e.preventDefault();
+        // 2-finger gesture
+        if (this.state.kind === 'touch-gesture' && this.pointers.size() === 2) {
+            e.preventDefault();
+            const pair = this.pointers.two();
+            if (!pair) return;
 
-        const g = this.computeGestureFromTwoPointers();
-        if (!g) return;
+            const g = this.gesture.read(pair);
 
-        const dxC = g.centroidX - this.gesture.lastCentroidX;
-        const dyC = g.centroidY - this.gesture.lastCentroidY;
-        const movedCentroidSq = dxC * dxC + dyC * dyC;
+            // Pan start/move
+            if (!this.state.panStarted && this.gesture.shouldStartPan(this.state.lastCentroid, g.centroid)) {
+            this.state.panStarted = true;
+            this.callback.onPanStart(g.centroid.x, g.centroid.y);
+            }
+            if (this.state.panStarted) this.callback.onPanMove(g.centroid.x, g.centroid.y);
 
-        // Pan: start once movement exceeds threshold
-        const thresholdSq = this.dragThreshold * this.dragThreshold;
-        if (!this.gesture.panStarted && movedCentroidSq > thresholdSq) {
-            this.gesture.panStarted = true;
-            this.callback.onPanStart(g.centroidX, g.centroidY);
-        }
-        if (this.gesture.panStarted) {
-            this.callback.onPanMove(g.centroidX, g.centroidY);
-        }
+            // Pinch zoom
+            const distDelta = g.dist - this.state.lastDist;
+            const pinchThreshold = 2;
+            if (Math.abs(distDelta) >= pinchThreshold) {
+            const dir = distDelta > 0 ? -1 : 1;
+            this.callback.onZoom(g.centroid.x, g.centroid.y, dir);
+            }
 
-        // Pinch zoom: convert dist change into +/- zoom steps
-        // Your zoom callback expects delta sign. We'll emit discrete steps.
-        const distDelta = g.dist - this.gesture.lastDist;
-        const pinchThreshold = 2; // px; tune
-        if (Math.abs(distDelta) >= pinchThreshold) {
-            const dir = distDelta > 0 ? -1 : 1; // expanding fingers usually means zoom IN; your sign might be inverted
-            this.callback.onZoom(g.centroidX, g.centroidY, dir);
-        }
+            // Twist orbit
+            const dTheta = wrapAngleDelta(g.angle - this.state.lastAngle);
+            const twistThreshold = 0.04;
+            if (!this.state.orbitStarted && Math.abs(dTheta) > twistThreshold) {
+            this.state.orbitStarted = true;
+            this.callback.onOrbitStart(g.centroid.x, g.centroid.y);
+            }
+            if (this.state.orbitStarted) this.callback.onOrbitMove(g.centroid.x, g.centroid.y);
 
-        // Optional: two-finger twist -> orbit
-        const dTheta = this.wrapAngleDelta(g.angle - this.gesture.lastAngle);
-        const twistThreshold = 0.04; // radians; tune
-        if (!this.gesture.orbitStarted && Math.abs(dTheta) > twistThreshold) {
-            this.gesture.orbitStarted = true;
-            this.callback.onOrbitStart(g.centroidX, g.centroidY);
-        }
-        if (this.gesture.orbitStarted) {
-            // We don't have a “rotate by delta” callback; your orbit uses positions.
-            // Feeding centroid works well: the camera controller can interpret movement.
-            this.callback.onOrbitMove(g.centroidX, g.centroidY);
-        }
-
-        this.gesture.lastCentroidX = g.centroidX;
-        this.gesture.lastCentroidY = g.centroidY;
-        this.gesture.lastDist = g.dist;
-        this.gesture.lastAngle = g.angle;
-        return;
-        }
-
-        // Single-pointer path (basically your old onGlobalMouseMove logic, but capture makes it local)
-        const clientX = e.clientX;
-        const clientY = e.clientY;
-
-        const dx = clientX - this.lastClientX;
-        const dy = clientY - this.lastClientY;
-        this.lastClientX = clientX;
-        this.lastClientY = clientY;
-
-        const dxScr = screenX - this.downClickX;
-        const dyScr = screenY - this.downClickY;
-        const distSq = dxScr * dxScr + dyScr * dyScr;
-        const thresholdSq = this.dragThreshold * this.dragThreshold;
-
-        switch (this.pointerMode) {
-        case PointerMode.Idle:
-        case PointerMode.Hover:
+            this.state.lastCentroid = g.centroid;
+            this.state.lastDist = g.dist;
+            this.state.lastAngle = g.angle;
             return;
+        }
 
-        case PointerMode.Click:
-            if (distSq > thresholdSq) {
-            if (this.draggedNodeId != null) {
-                this.pointerMode = PointerMode.DragNode;
-                this.callback.onDragStart(this.draggedNodeId, screenX, screenY);
+        // Single-pointer modes
+        switch (this.state.kind) {
+            case 'press': {
+            const thresholdSq = 5 * 5;
+            const movedSq = distSq(screen, this.state.downScreen);
+
+            const last = this.state.lastClient;
+            this.state.lastClient = { x: e.clientX, y: e.clientY };
+
+            if (movedSq <= thresholdSq) return;
+
+            if (this.state.rightClickIntent) {
+                // transition to orbit (after threshold)
+                this.callback.onOrbitStart(screen.x, screen.y);
+                this.state = { kind: 'orbit', lastClient: { x: e.clientX, y: e.clientY } };
+                return;
+            }
+
+            if (this.state.clickedNodeId) {
+                this.callback.onDragStart(this.state.clickedNodeId, screen.x, screen.y);
+                this.state = {
+                    kind: 'drag-node',
+                    nodeId: this.state.clickedNodeId,
+                    lastClient: { x: e.clientX, y: e.clientY },
+                };
             } else {
-                this.pointerMode = PointerMode.Pan;
-                this.callback.onPanStart(screenX, screenY);
-            }
-            }
-            return;
-
-        case PointerMode.DragNode:
-            this.callback.onDragMove(screenX, screenY);
-            return;
-
-        case PointerMode.Pan:
-            this.callback.onPanMove(screenX, screenY);
-            return;
-
-        case PointerMode.RightClick:
-            if (distSq > thresholdSq) {
-            this.pointerMode = PointerMode.Orbit;
-            this.callback.onOrbitStart(screenX, screenY);
+                this.callback.onPanStart(screen.x, screen.y);
+                this.state = { kind: 'pan', lastClient: { x: e.clientX, y: e.clientY } };
             }
             return;
+            }
 
-        case PointerMode.Orbit:
-            this.callback.onOrbitMove(screenX, screenY);
+            case 'drag-node':
+            this.callback.onDragMove(screen.x, screen.y);
+            return;
+
+            case 'pan':
+            this.callback.onPanMove(screen.x, screen.y);
+            return;
+
+            case 'orbit':
+            this.callback.onOrbitMove(screen.x, screen.y);
+            return;
+
+            default:
             return;
         }
     };
+
 
     private onPointerUp = (e: PointerEvent) => {
         e.preventDefault();
+        try { this.canvas.releasePointerCapture(e.pointerId); } catch {}
 
-        // Release capture
-        try {
-        this.canvas.releasePointerCapture(e.pointerId);
-        } catch {
-        // ignore (can throw if not captured)
-        }
+        const screen = this.getScreenFromClient(e.clientX, e.clientY);
 
-        const { screenX, screenY } = this.getScreenXYFromClient(e.clientX, e.clientY);
-
-        const wasTwoPointer = this.gesture.active;
-
-        // Remove pointer from map first
         this.pointers.delete(e.pointerId);
 
-        // End gesture if we dropped below 2 pointers
-        if (wasTwoPointer && this.pointers.size < 2) {
-        if (this.gesture.panStarted) this.callback.onPanEnd();
-        if (this.gesture.orbitStarted) this.callback.onOrbitEnd();
-
-        this.gesture.active = false;
-        this.gesture.panStarted = false;
-        this.gesture.orbitStarted = false;
-
-        // Re-baseline remaining pointer so single-finger continuing doesn't jump
-        const remaining = Array.from(this.pointers.values())[0];
-        if (remaining) {
-            remaining.startClientX = remaining.clientX;
-            remaining.startClientY = remaining.clientY;
-            this.lastClientX = remaining.clientX;
-            this.lastClientY = remaining.clientY;
-
-            const pxy = this.getScreenXYFromClient(remaining.clientX, remaining.clientY);
-            this.downClickX = pxy.screenX;
-            this.downClickY = pxy.screenY;
-        }
-
-        this.pointerMode = PointerMode.Idle;
-        this.draggedNodeId = null;
+    if (this.state.kind === 'touch-gesture' && this.pointers.size() < 2) {
+        if (this.state.panStarted) this.callback.onPanEnd();
+        if (this.state.orbitStarted) this.callback.onOrbitEnd();
+        this.state = { kind: 'idle' };
+        this.rebaselineRemainingPointerForContinuity();
         return;
-        }
+    }
 
-        // Single-pointer finalize (your old onGlobalMouseUp)
-        switch (this.pointerMode) {
-        case PointerMode.DragNode:
+        switch (this.state.kind) {
+            case 'drag-node':
             this.callback.onDragEnd();
             break;
-
-        case PointerMode.Pan:
+            case 'pan':
             this.callback.onPanEnd();
             break;
-
-        case PointerMode.Orbit:
+            case 'orbit':
             this.callback.onOrbitEnd();
             break;
-
-        case PointerMode.Click:
-            this.callback.onOpenNode(screenX, screenY);
-            break;
-
-        case PointerMode.RightClick:
-            if (this.draggedNodeId != null) {
-            this.callback.onFollowStart(this.draggedNodeId);
+            case 'press':
+            if (this.state.rightClickIntent) {
+                if (this.state.clickedNodeId) this.callback.onFollowStart(this.state.clickedNodeId);
+                else this.callback.resetCamera();
             } else {
-            this.callback.resetCamera();
+                this.callback.onOpenNode(screen.x, screen.y);
             }
             break;
         }
 
-        this.pointerMode = PointerMode.Idle;
-        this.draggedNodeId = null;
+        this.state = { kind: 'idle' };
     };
+
 
     private onPointerCancel = (e: PointerEvent) => {
         e.preventDefault();
-
         this.pointers.delete(e.pointerId);
 
-        // Cancel any active modes cleanly
-        if (this.pointerMode === PointerMode.DragNode) this.callback.onDragEnd();
-        if (this.pointerMode === PointerMode.Pan) this.callback.onPanEnd();
-        if (this.pointerMode === PointerMode.Orbit) this.callback.onOrbitEnd();
-
-        if (this.gesture.active) {
-        if (this.gesture.panStarted) this.callback.onPanEnd();
-        if (this.gesture.orbitStarted) this.callback.onOrbitEnd();
+        // end any active state
+        switch (this.state.kind) {
+            case 'drag-node':
+            this.callback.onDragEnd();
+            break;
+            case 'pan':
+            this.callback.onPanEnd();
+            break;
+            case 'orbit':
+            this.callback.onOrbitEnd();
+            break;
+            case 'touch-gesture':
+            if (this.state.panStarted) this.callback.onPanEnd();
+            if (this.state.orbitStarted) this.callback.onOrbitEnd();
+            break;
         }
 
-        this.gesture.active = false;
-        this.gesture.panStarted = false;
-        this.gesture.orbitStarted = false;
-
-        this.pointerMode = PointerMode.Idle;
-        this.draggedNodeId = null;
+        this.wheel.cancel();     // important: end any wheel pan session
+        this.state = { kind: 'idle' };
     };
+
 
     private onPointerLeave = () => {
         // Clear hover state when leaving the canvas
@@ -474,53 +324,23 @@ export class InputManager {
     // -----------------------------
     private onWheel = (e: WheelEvent) => {
         e.preventDefault();
-
-        const x = e.offsetX;
-        const y = e.offsetY;
-
-        // (1) Start / continue a wheel gesture session
-        // If this is the first wheel event of a gesture, decide mode ONCE.
-        if (this.wheelGestureMode == null) {
-            // Decide mode based on modifiers at gesture START only
-            this.wheelGestureMode = (e.ctrlKey || e.metaKey) ? 'zoom' : 'pan';
-
-            // If we’re entering pan mode, start a pan session
-            if (this.wheelGestureMode === 'pan') {
-            this.wheelPanning = true;
-            this.wheelPanX = x;
-            this.wheelPanY = y;
-            this.callback.onPanStart(this.wheelPanX, this.wheelPanY);
-            }
-        }
-
-        // (2) Execute locked mode
-        if (this.wheelGestureMode === 'zoom') {
-            // Zoom uses the current pointer position
-            this.callback.onZoom(x, y, Math.sign(e.deltaY));
-        } else {
-            // Pan: move a virtual cursor by wheel deltas
-            // If direction feels backwards, flip signs.
-            this.wheelPanX -= e.deltaX;
-            this.wheelPanY -= e.deltaY;
-
-            this.callback.onPanMove(this.wheelPanX, this.wheelPanY);
-        }
-
-        // (3) End gesture after inactivity; only then allow mode changes
-        if (this.wheelGestureEndTimer != null) window.clearTimeout(this.wheelGestureEndTimer);
-        this.wheelGestureEndTimer = window.setTimeout(() => {
-            if (this.wheelGestureMode === 'pan' && this.wheelPanning) {
-            this.callback.onPanEnd();
-            }
-
-            this.wheelPanning = false;
-            this.wheelGestureMode = null;
-
-            this.wheelGestureEndTimer = null;
-        }, 120);
+        this.wheel.handle(e);
     };
 
+    private endSinglePointerIfNeeded() {
+        switch (this.state.kind) {
+            case 'drag-node': this.callback.onDragEnd(); break;
+            case 'pan': this.callback.onPanEnd(); break;
+            case 'orbit': this.callback.onOrbitEnd(); break;
+        }
+        this.state = { kind: 'idle' };
+    }
 
+    private rebaselineRemainingPointerForContinuity() {
+        const remaining = this.pointers.first();
+        if (!remaining) return;
+        // you can optionally set lastClient/downScreen here if you want continuation behavior
+    }
 
     public destroy() {
         this.canvas.removeEventListener('pointerdown', this.onPointerDown as any);
@@ -529,9 +349,5 @@ export class InputManager {
         this.canvas.removeEventListener('pointercancel', this.onPointerCancel as any);
         this.canvas.removeEventListener('pointerleave', this.onPointerLeave as any);
         this.canvas.removeEventListener('wheel', this.onWheel as any);
-        if (this.wheelPanEndTimer != null) {
-            window.clearTimeout(this.wheelPanEndTimer);
-            this.wheelPanEndTimer = null;
-        }
     }
 }

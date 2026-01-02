@@ -374,10 +374,10 @@ function createSimulation(graph, camera, getMousePos) {
     const sizeSq = size * size;
     const isFarEnough = !cell.children || sizeSq / distSqRaw < thetaSq;
     if (isFarEnough) {
-      const distSq = Math.max(distSqRaw, minDistSq);
+      const distSq2 = Math.max(distSqRaw, minDistSq);
       const dist = Math.sqrt(distSqRaw);
       const safeDist = dist > 0 ? dist : 1e-3;
-      const force = strength * cell.mass / distSq;
+      const force = strength * cell.mass / distSq2;
       const fx = dx / safeDist * force;
       const fy = dy / safeDist * force;
       const fz = dz / safeDist * force;
@@ -415,8 +415,8 @@ function createSimulation(graph, camera, getMousePos) {
         continue;
       const dx = mouseX - nodePos.x;
       const dy = mouseY - nodePos.y;
-      const distSq = dx * dx + dy * dy;
-      if (distSq > radius * radius)
+      const distSq2 = dx * dx + dy * dy;
+      if (distSq2 > radius * radius)
         continue;
       const targetWorld = camera.screenToWorld(mouseX, mouseY, nodePos.depth);
       const wx = targetWorld.x - node.x;
@@ -440,10 +440,10 @@ function createSimulation(graph, camera, getMousePos) {
         let dx = a.x - b.x;
         let dy = a.y - b.y;
         let dz = (a.z || 0) - (b.z || 0);
-        let distSq = dx * dx + dy * dy + dz * dz;
-        if (distSq === 0)
-          distSq = 1e-4;
-        const dist = Math.sqrt(distSq);
+        let distSq2 = dx * dx + dy * dy + dz * dz;
+        if (distSq2 === 0)
+          distSq2 = 1e-4;
+        const dist = Math.sqrt(distSq2);
         const minDist = 40;
         const effectiveDist = Math.max(dist, minDist);
         const force = physicsSettings.repulsionStrength / (effectiveDist * effectiveDist);
@@ -613,64 +613,89 @@ function createSimulation(graph, camera, getMousePos) {
   return { start, stop, tick, reset, setPinnedNodes };
 }
 
-// src/graph/InputManager.ts
-var InputManager = class {
-  canvas;
-  callback;
-  draggedNodeId = null;
-  lastClientX = 0;
-  // (( Client Space ))
-  lastClientY = 0;
-  // (( Client Space ))
-  downClickX = 0;
-  // [[ Canvas Space ]]
-  downClickY = 0;
-  // [[ Canvas Space ]]
-  dragThreshold = 5;
-  pointerMode = 0 /* Idle */;
+// src/shared/distSq.ts
+function distSq(a, b) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return dx * dx + dy * dy;
+}
+
+// src/graph/TwoFingerGesture.ts
+var TwoFingerGesture = class {
+  constructor(getScreen, dragThresholdPx) {
+    this.getScreen = getScreen;
+    this.dragThresholdPx = dragThresholdPx;
+  }
+  read(pair) {
+    const [a, b] = pair;
+    const A = this.getScreen(a.clientX, a.clientY);
+    const B = this.getScreen(b.clientX, b.clientY);
+    const centroid = { x: (A.x + B.x) * 0.5, y: (A.y + B.y) * 0.5 };
+    const dx = B.x - A.x;
+    const dy = B.y - A.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx);
+    return { centroid, dist, angle };
+  }
+  shouldStartPan(prevCentroid, nextCentroid) {
+    const thresholdSq = this.dragThresholdPx * this.dragThresholdPx;
+    return distSq(prevCentroid, nextCentroid) > thresholdSq;
+  }
+};
+
+// src/graph/WheelGestureSession.ts
+var WheelGestureSession = class {
+  constructor(onPanStart, onPanMove, onPanEnd, onZoom, endDelayMs = 120) {
+    this.onPanStart = onPanStart;
+    this.onPanMove = onPanMove;
+    this.onPanEnd = onPanEnd;
+    this.onZoom = onZoom;
+    this.endDelayMs = endDelayMs;
+  }
+  mode = null;
+  timer = null;
+  panPos = { x: 0, y: 0 };
+  panning = false;
+  handle(e) {
+    const x = e.offsetX;
+    const y = e.offsetY;
+    if (this.mode == null) {
+      this.mode = e.ctrlKey || e.metaKey ? "zoom" : "pan";
+      if (this.mode === "pan") {
+        this.panning = true;
+        this.panPos = { x, y };
+        this.onPanStart(x, y);
+      }
+    }
+    if (this.mode === "zoom") {
+      this.onZoom(x, y, Math.sign(e.deltaY));
+    } else {
+      this.panPos.x -= e.deltaX;
+      this.panPos.y -= e.deltaY;
+      this.onPanMove(this.panPos.x, this.panPos.y);
+    }
+    if (this.timer != null)
+      window.clearTimeout(this.timer);
+    this.timer = window.setTimeout(() => this.end(), this.endDelayMs);
+  }
+  cancel() {
+    this.end();
+  }
+  end() {
+    if (this.mode === "pan" && this.panning)
+      this.onPanEnd();
+    this.mode = null;
+    this.panning = false;
+    if (this.timer != null)
+      window.clearTimeout(this.timer);
+    this.timer = null;
+  }
+};
+
+// src/graph/PointerTracker.ts
+var PointerTracker = class {
   pointers = /* @__PURE__ */ new Map();
-  wheelGestureMode = null;
-  wheelGestureEndTimer = null;
-  wheelPanning = false;
-  wheelPanX = 0;
-  wheelPanY = 0;
-  wheelPanEndTimer = null;
-  gesture = {
-    active: false,
-    startCentroidX: 0,
-    startCentroidY: 0,
-    lastCentroidX: 0,
-    lastCentroidY: 0,
-    startDist: 0,
-    lastDist: 0,
-    startAngle: 0,
-    lastAngle: 0,
-    panStarted: false,
-    orbitStarted: false
-  };
-  constructor(canvas, callbacks) {
-    this.canvas = canvas;
-    this.callback = callbacks;
-    this.canvas.style.touchAction = "none";
-    this.attachListeners();
-  }
-  attachListeners() {
-    this.canvas.addEventListener("pointerdown", this.onPointerDown, { passive: false });
-    this.canvas.addEventListener("pointermove", this.onPointerMove, { passive: false });
-    this.canvas.addEventListener("pointerup", this.onPointerUp, { passive: false });
-    this.canvas.addEventListener("pointercancel", this.onPointerCancel, { passive: false });
-    this.canvas.addEventListener("pointerleave", this.onPointerLeave, { passive: false });
-    this.canvas.addEventListener("wheel", this.onWheel, { passive: false });
-    this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-  }
-  // -----------------------------
-  // Helpers
-  // -----------------------------
-  getScreenXYFromClient(clientX, clientY) {
-    const rect = this.canvas.getBoundingClientRect();
-    return { screenX: clientX - rect.left, screenY: clientY - rect.top };
-  }
-  setPointerRecord(e) {
+  upsert(e) {
     const pointerType = e.pointerType === "touch" || e.pointerType === "pen" || e.pointerType === "mouse" ? e.pointerType : "mouse";
     const existing = this.pointers.get(e.pointerId);
     const record = existing ?? {
@@ -689,33 +714,73 @@ var InputManager = class {
     record.button = e.button;
     this.pointers.set(e.pointerId, record);
   }
-  getTwoPointers() {
+  delete(pointerId) {
+    this.pointers.delete(pointerId);
+  }
+  size() {
+    return this.pointers.size;
+  }
+  values() {
+    return Array.from(this.pointers.values());
+  }
+  two() {
     if (this.pointers.size !== 2)
       return null;
     const arr = Array.from(this.pointers.values());
     return [arr[0], arr[1]];
   }
-  computeGestureFromTwoPointers() {
-    const pair = this.getTwoPointers();
-    if (!pair)
-      return null;
-    const [a, b] = pair;
-    const A = this.getScreenXYFromClient(a.clientX, a.clientY);
-    const B = this.getScreenXYFromClient(b.clientX, b.clientY);
-    const centroidX = (A.screenX + B.screenX) * 0.5;
-    const centroidY = (A.screenY + B.screenY) * 0.5;
-    const dx = B.screenX - A.screenX;
-    const dy = B.screenY - A.screenY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const angle = Math.atan2(dy, dx);
-    return { centroidX, centroidY, dist, angle };
+  first() {
+    return this.values()[0] ?? null;
   }
-  wrapAngleDelta(d) {
-    if (d > Math.PI)
-      d -= 2 * Math.PI;
-    if (d < -Math.PI)
-      d += 2 * Math.PI;
-    return d;
+  get(id) {
+    return this.pointers.get(id);
+  }
+  set(id, pointer) {
+    this.pointers.set(id, pointer);
+  }
+};
+
+// src/shared/wrapAngleDelta.ts
+function wrapAngleDelta(d) {
+  if (d > Math.PI)
+    d -= 2 * Math.PI;
+  if (d < -Math.PI)
+    d += 2 * Math.PI;
+  return d;
+}
+
+// src/graph/InputManager.ts
+var InputManager = class {
+  constructor(canvas, callback) {
+    this.canvas = canvas;
+    this.callback = callback;
+    this.canvas.style.touchAction = "none";
+    this.gesture = new TwoFingerGesture(this.getScreenFromClient, 5);
+    this.wheel = new WheelGestureSession(
+      (x, y) => this.callback.onPanStart(x, y),
+      (x, y) => this.callback.onPanMove(x, y),
+      () => this.callback.onPanEnd(),
+      (x, y, d) => this.callback.onZoom(x, y, d),
+      120
+    );
+    this.attachListeners();
+  }
+  state = { kind: "idle" };
+  pointers = new PointerTracker();
+  gesture;
+  wheel;
+  getScreenFromClient = (clientX, clientY) => {
+    const rect = this.canvas.getBoundingClientRect();
+    return { x: screenX - rect.left, y: screenY - rect.top };
+  };
+  attachListeners() {
+    this.canvas.addEventListener("pointerdown", this.onPointerDown, { passive: false });
+    this.canvas.addEventListener("pointermove", this.onPointerMove, { passive: false });
+    this.canvas.addEventListener("pointerup", this.onPointerUp, { passive: false });
+    this.canvas.addEventListener("pointercancel", this.onPointerCancel, { passive: false });
+    this.canvas.addEventListener("pointerleave", this.onPointerLeave, { passive: false });
+    this.canvas.addEventListener("wheel", this.onWheel, { passive: false });
+    this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   }
   // -----------------------------
   // Pointer events
@@ -723,129 +788,111 @@ var InputManager = class {
   onPointerDown = (e) => {
     e.preventDefault();
     this.canvas.setPointerCapture(e.pointerId);
-    this.setPointerRecord(e);
-    const { screenX, screenY } = this.getScreenXYFromClient(e.clientX, e.clientY);
-    this.callback.onMouseMove(screenX, screenY);
-    if (this.pointers.size === 2) {
-      if (this.pointerMode === 4 /* DragNode */)
-        this.callback.onDragEnd();
-      if (this.pointerMode === 5 /* Pan */)
-        this.callback.onPanEnd();
-      if (this.pointerMode === 6 /* Orbit */)
-        this.callback.onOrbitEnd();
-      this.pointerMode = 0 /* Idle */;
-      this.draggedNodeId = null;
-      const g = this.computeGestureFromTwoPointers();
-      if (!g)
+    this.pointers.upsert(e);
+    const eScreen = this.getScreenFromClient(e.clientX, e.clientY);
+    this.callback.onMouseMove(eScreen.x, eScreen.y);
+    if (this.pointers.size() === 2) {
+      this.endSinglePointerIfNeeded();
+      const pair = this.pointers.two();
+      if (!pair)
         return;
-      this.gesture.active = true;
-      this.gesture.startCentroidX = g.centroidX;
-      this.gesture.startCentroidY = g.centroidY;
-      this.gesture.lastCentroidX = g.centroidX;
-      this.gesture.lastCentroidY = g.centroidY;
-      this.gesture.startDist = g.dist;
-      this.gesture.lastDist = g.dist;
-      this.gesture.startAngle = g.angle;
-      this.gesture.lastAngle = g.angle;
-      this.gesture.panStarted = false;
-      this.gesture.orbitStarted = false;
+      const g = this.gesture.read(pair);
+      this.state = {
+        kind: "touch-gesture",
+        lastCentroid: g.centroid,
+        lastDist: g.dist,
+        lastAngle: g.angle,
+        panStarted: false,
+        orbitStarted: false
+      };
       return;
     }
-    const rect = this.canvas.getBoundingClientRect();
-    this.downClickX = e.clientX - rect.left;
-    this.downClickY = e.clientY - rect.top;
-    this.lastClientX = e.clientX;
-    this.lastClientY = e.clientY;
     const isMouse = e.pointerType === "mouse";
     const isLeft = e.button === 0;
     const isRight = e.button === 2;
-    this.draggedNodeId = this.callback.detectClickedNode(this.downClickX, this.downClickY)?.id || null;
-    if (isMouse && (isLeft && (e.ctrlKey || e.metaKey) || isRight)) {
-      this.pointerMode = 3 /* RightClick */;
-      return;
-    }
-    this.pointerMode = 2 /* Click */;
+    const rightClickIntent = isMouse && (isLeft && (e.ctrlKey || e.metaKey) || isRight);
+    const clickedNodeId = this.callback.detectClickedNode(eScreen.x, eScreen.y)?.id ?? null;
+    this.state = {
+      kind: "press",
+      downClient: { x: e.clientX, y: e.clientY },
+      downScreen: eScreen,
+      lastClient: { x: e.clientX, y: e.clientY },
+      clickedNodeId,
+      pointerId: e.pointerId,
+      rightClickIntent
+    };
   };
   onPointerMove = (e) => {
-    this.setPointerRecord(e);
-    const { screenX, screenY } = this.getScreenXYFromClient(e.clientX, e.clientY);
-    this.callback.onMouseMove(screenX, screenY);
-    if (this.gesture.active && this.pointers.size === 2) {
+    this.pointers.upsert(e);
+    const screen = this.getScreenFromClient(e.clientX, e.clientY);
+    this.callback.onMouseMove(screen.x, screen.y);
+    if (this.state.kind === "touch-gesture" && this.pointers.size() === 2) {
       e.preventDefault();
-      const g = this.computeGestureFromTwoPointers();
-      if (!g)
+      const pair = this.pointers.two();
+      if (!pair)
         return;
-      const dxC = g.centroidX - this.gesture.lastCentroidX;
-      const dyC = g.centroidY - this.gesture.lastCentroidY;
-      const movedCentroidSq = dxC * dxC + dyC * dyC;
-      const thresholdSq2 = this.dragThreshold * this.dragThreshold;
-      if (!this.gesture.panStarted && movedCentroidSq > thresholdSq2) {
-        this.gesture.panStarted = true;
-        this.callback.onPanStart(g.centroidX, g.centroidY);
+      const g = this.gesture.read(pair);
+      if (!this.state.panStarted && this.gesture.shouldStartPan(this.state.lastCentroid, g.centroid)) {
+        this.state.panStarted = true;
+        this.callback.onPanStart(g.centroid.x, g.centroid.y);
       }
-      if (this.gesture.panStarted) {
-        this.callback.onPanMove(g.centroidX, g.centroidY);
-      }
-      const distDelta = g.dist - this.gesture.lastDist;
+      if (this.state.panStarted)
+        this.callback.onPanMove(g.centroid.x, g.centroid.y);
+      const distDelta = g.dist - this.state.lastDist;
       const pinchThreshold = 2;
       if (Math.abs(distDelta) >= pinchThreshold) {
         const dir = distDelta > 0 ? -1 : 1;
-        this.callback.onZoom(g.centroidX, g.centroidY, dir);
+        this.callback.onZoom(g.centroid.x, g.centroid.y, dir);
       }
-      const dTheta = this.wrapAngleDelta(g.angle - this.gesture.lastAngle);
+      const dTheta = wrapAngleDelta(g.angle - this.state.lastAngle);
       const twistThreshold = 0.04;
-      if (!this.gesture.orbitStarted && Math.abs(dTheta) > twistThreshold) {
-        this.gesture.orbitStarted = true;
-        this.callback.onOrbitStart(g.centroidX, g.centroidY);
+      if (!this.state.orbitStarted && Math.abs(dTheta) > twistThreshold) {
+        this.state.orbitStarted = true;
+        this.callback.onOrbitStart(g.centroid.x, g.centroid.y);
       }
-      if (this.gesture.orbitStarted) {
-        this.callback.onOrbitMove(g.centroidX, g.centroidY);
-      }
-      this.gesture.lastCentroidX = g.centroidX;
-      this.gesture.lastCentroidY = g.centroidY;
-      this.gesture.lastDist = g.dist;
-      this.gesture.lastAngle = g.angle;
+      if (this.state.orbitStarted)
+        this.callback.onOrbitMove(g.centroid.x, g.centroid.y);
+      this.state.lastCentroid = g.centroid;
+      this.state.lastDist = g.dist;
+      this.state.lastAngle = g.angle;
       return;
     }
-    const clientX = e.clientX;
-    const clientY = e.clientY;
-    const dx = clientX - this.lastClientX;
-    const dy = clientY - this.lastClientY;
-    this.lastClientX = clientX;
-    this.lastClientY = clientY;
-    const dxScr = screenX - this.downClickX;
-    const dyScr = screenY - this.downClickY;
-    const distSq = dxScr * dxScr + dyScr * dyScr;
-    const thresholdSq = this.dragThreshold * this.dragThreshold;
-    switch (this.pointerMode) {
-      case 0 /* Idle */:
-      case 1 /* Hover */:
-        return;
-      case 2 /* Click */:
-        if (distSq > thresholdSq) {
-          if (this.draggedNodeId != null) {
-            this.pointerMode = 4 /* DragNode */;
-            this.callback.onDragStart(this.draggedNodeId, screenX, screenY);
-          } else {
-            this.pointerMode = 5 /* Pan */;
-            this.callback.onPanStart(screenX, screenY);
-          }
+    switch (this.state.kind) {
+      case "press": {
+        const thresholdSq = 5 * 5;
+        const movedSq = distSq(screen, this.state.downScreen);
+        const last = this.state.lastClient;
+        this.state.lastClient = { x: e.clientX, y: e.clientY };
+        if (movedSq <= thresholdSq)
+          return;
+        if (this.state.rightClickIntent) {
+          this.callback.onOrbitStart(screen.x, screen.y);
+          this.state = { kind: "orbit", lastClient: { x: e.clientX, y: e.clientY } };
+          return;
+        }
+        if (this.state.clickedNodeId) {
+          this.callback.onDragStart(this.state.clickedNodeId, screen.x, screen.y);
+          this.state = {
+            kind: "drag-node",
+            nodeId: this.state.clickedNodeId,
+            lastClient: { x: e.clientX, y: e.clientY }
+          };
+        } else {
+          this.callback.onPanStart(screen.x, screen.y);
+          this.state = { kind: "pan", lastClient: { x: e.clientX, y: e.clientY } };
         }
         return;
-      case 4 /* DragNode */:
-        this.callback.onDragMove(screenX, screenY);
+      }
+      case "drag-node":
+        this.callback.onDragMove(screen.x, screen.y);
         return;
-      case 5 /* Pan */:
-        this.callback.onPanMove(screenX, screenY);
+      case "pan":
+        this.callback.onPanMove(screen.x, screen.y);
         return;
-      case 3 /* RightClick */:
-        if (distSq > thresholdSq) {
-          this.pointerMode = 6 /* Orbit */;
-          this.callback.onOrbitStart(screenX, screenY);
-        }
+      case "orbit":
+        this.callback.onOrbitMove(screen.x, screen.y);
         return;
-      case 6 /* Orbit */:
-        this.callback.onOrbitMove(screenX, screenY);
+      default:
         return;
     }
   };
@@ -855,75 +902,62 @@ var InputManager = class {
       this.canvas.releasePointerCapture(e.pointerId);
     } catch {
     }
-    const { screenX, screenY } = this.getScreenXYFromClient(e.clientX, e.clientY);
-    const wasTwoPointer = this.gesture.active;
+    const screen = this.getScreenFromClient(e.clientX, e.clientY);
     this.pointers.delete(e.pointerId);
-    if (wasTwoPointer && this.pointers.size < 2) {
-      if (this.gesture.panStarted)
+    if (this.state.kind === "touch-gesture" && this.pointers.size() < 2) {
+      if (this.state.panStarted)
         this.callback.onPanEnd();
-      if (this.gesture.orbitStarted)
+      if (this.state.orbitStarted)
         this.callback.onOrbitEnd();
-      this.gesture.active = false;
-      this.gesture.panStarted = false;
-      this.gesture.orbitStarted = false;
-      const remaining = Array.from(this.pointers.values())[0];
-      if (remaining) {
-        remaining.startClientX = remaining.clientX;
-        remaining.startClientY = remaining.clientY;
-        this.lastClientX = remaining.clientX;
-        this.lastClientY = remaining.clientY;
-        const pxy = this.getScreenXYFromClient(remaining.clientX, remaining.clientY);
-        this.downClickX = pxy.screenX;
-        this.downClickY = pxy.screenY;
-      }
-      this.pointerMode = 0 /* Idle */;
-      this.draggedNodeId = null;
+      this.state = { kind: "idle" };
+      this.rebaselineRemainingPointerForContinuity();
       return;
     }
-    switch (this.pointerMode) {
-      case 4 /* DragNode */:
+    switch (this.state.kind) {
+      case "drag-node":
         this.callback.onDragEnd();
         break;
-      case 5 /* Pan */:
+      case "pan":
         this.callback.onPanEnd();
         break;
-      case 6 /* Orbit */:
+      case "orbit":
         this.callback.onOrbitEnd();
         break;
-      case 2 /* Click */:
-        this.callback.onOpenNode(screenX, screenY);
-        break;
-      case 3 /* RightClick */:
-        if (this.draggedNodeId != null) {
-          this.callback.onFollowStart(this.draggedNodeId);
+      case "press":
+        if (this.state.rightClickIntent) {
+          if (this.state.clickedNodeId)
+            this.callback.onFollowStart(this.state.clickedNodeId);
+          else
+            this.callback.resetCamera();
         } else {
-          this.callback.resetCamera();
+          this.callback.onOpenNode(screen.x, screen.y);
         }
         break;
     }
-    this.pointerMode = 0 /* Idle */;
-    this.draggedNodeId = null;
+    this.state = { kind: "idle" };
   };
   onPointerCancel = (e) => {
     e.preventDefault();
     this.pointers.delete(e.pointerId);
-    if (this.pointerMode === 4 /* DragNode */)
-      this.callback.onDragEnd();
-    if (this.pointerMode === 5 /* Pan */)
-      this.callback.onPanEnd();
-    if (this.pointerMode === 6 /* Orbit */)
-      this.callback.onOrbitEnd();
-    if (this.gesture.active) {
-      if (this.gesture.panStarted)
+    switch (this.state.kind) {
+      case "drag-node":
+        this.callback.onDragEnd();
+        break;
+      case "pan":
         this.callback.onPanEnd();
-      if (this.gesture.orbitStarted)
+        break;
+      case "orbit":
         this.callback.onOrbitEnd();
+        break;
+      case "touch-gesture":
+        if (this.state.panStarted)
+          this.callback.onPanEnd();
+        if (this.state.orbitStarted)
+          this.callback.onOrbitEnd();
+        break;
     }
-    this.gesture.active = false;
-    this.gesture.panStarted = false;
-    this.gesture.orbitStarted = false;
-    this.pointerMode = 0 /* Idle */;
-    this.draggedNodeId = null;
+    this.wheel.cancel();
+    this.state = { kind: "idle" };
   };
   onPointerLeave = () => {
     this.callback.onMouseMove(-Infinity, -Infinity);
@@ -933,35 +967,27 @@ var InputManager = class {
   // -----------------------------
   onWheel = (e) => {
     e.preventDefault();
-    const x = e.offsetX;
-    const y = e.offsetY;
-    if (this.wheelGestureMode == null) {
-      this.wheelGestureMode = e.ctrlKey || e.metaKey ? "zoom" : "pan";
-      if (this.wheelGestureMode === "pan") {
-        this.wheelPanning = true;
-        this.wheelPanX = x;
-        this.wheelPanY = y;
-        this.callback.onPanStart(this.wheelPanX, this.wheelPanY);
-      }
-    }
-    if (this.wheelGestureMode === "zoom") {
-      this.callback.onZoom(x, y, Math.sign(e.deltaY));
-    } else {
-      this.wheelPanX -= e.deltaX;
-      this.wheelPanY -= e.deltaY;
-      this.callback.onPanMove(this.wheelPanX, this.wheelPanY);
-    }
-    if (this.wheelGestureEndTimer != null)
-      window.clearTimeout(this.wheelGestureEndTimer);
-    this.wheelGestureEndTimer = window.setTimeout(() => {
-      if (this.wheelGestureMode === "pan" && this.wheelPanning) {
-        this.callback.onPanEnd();
-      }
-      this.wheelPanning = false;
-      this.wheelGestureMode = null;
-      this.wheelGestureEndTimer = null;
-    }, 120);
+    this.wheel.handle(e);
   };
+  endSinglePointerIfNeeded() {
+    switch (this.state.kind) {
+      case "drag-node":
+        this.callback.onDragEnd();
+        break;
+      case "pan":
+        this.callback.onPanEnd();
+        break;
+      case "orbit":
+        this.callback.onOrbitEnd();
+        break;
+    }
+    this.state = { kind: "idle" };
+  }
+  rebaselineRemainingPointerForContinuity() {
+    const remaining = this.pointers.first();
+    if (!remaining)
+      return;
+  }
   destroy() {
     this.canvas.removeEventListener("pointerdown", this.onPointerDown);
     this.canvas.removeEventListener("pointermove", this.onPointerMove);
@@ -969,10 +995,6 @@ var InputManager = class {
     this.canvas.removeEventListener("pointercancel", this.onPointerCancel);
     this.canvas.removeEventListener("pointerleave", this.onPointerLeave);
     this.canvas.removeEventListener("wheel", this.onWheel);
-    if (this.wheelPanEndTimer != null) {
-      window.clearTimeout(this.wheelPanEndTimer);
-      this.wheelPanEndTimer = null;
-    }
   }
 };
 
@@ -1064,12 +1086,12 @@ var CameraController = class {
     this.viewport.offsetY = height / 2;
   }
   // Unprojects screen coords to world coords on a plane at camera-distance (for panning)
-  screenToWorld(screenX, screenY, dz) {
+  screenToWorld(screenX2, screenY2, dz) {
     const { yaw, pitch, distance: camZ, targetX, targetY, targetZ } = this.cameraState;
     const { offsetX, offsetY } = this.viewport;
     const focal = 800;
-    const px = screenX - offsetX;
-    const py = screenY - offsetY;
+    const px = screenX2 - offsetX;
+    const py = screenY2 - offsetY;
     const perspective = focal / dz;
     const xz = px / perspective;
     const yz = py / perspective;
@@ -1100,12 +1122,12 @@ var CameraController = class {
     }
     return world;
   }
-  screenToWorld3D(screenX, screenY, depthFromCamera) {
-    return this.screenToWorld(screenX, screenY, depthFromCamera);
+  screenToWorld3D(screenX2, screenY2, depthFromCamera) {
+    return this.screenToWorld(screenX2, screenY2, depthFromCamera);
   }
-  screenToWorld2D(screenX, screenY) {
+  screenToWorld2D(screenX2, screenY2) {
     const cam = this.cameraState;
-    const world = this.screenToWorld(screenX, screenY, cam.distance);
+    const world = this.screenToWorld(screenX2, screenY2, cam.distance);
     return { x: world.x, y: world.y };
   }
   clearMomentum() {
@@ -1115,38 +1137,38 @@ var CameraController = class {
     this.cameraState.panVelY = 0;
     this.cameraState.zoomVel = 0;
   }
-  startPan(screenX, screenY) {
+  startPan(screenX2, screenY2) {
     const cam = this.cameraState;
-    this.screenAnchor = { screenX, screenY };
-    this.worldAnchor = this.screenToWorld(screenX, screenY, cam.distance);
+    this.screenAnchor = { screenX: screenX2, screenY: screenY2 };
+    this.worldAnchor = this.screenToWorld(screenX2, screenY2, cam.distance);
   }
-  updatePan(screenX, screenY) {
+  updatePan(screenX2, screenY2) {
     if (!this.worldAnchor)
       return;
     const cam = this.cameraState;
-    const current = this.screenToWorld(screenX, screenY, cam.distance);
+    const current = this.screenToWorld(screenX2, screenY2, cam.distance);
     const dx = current.x - this.worldAnchor.x;
     const dy = current.y - this.worldAnchor.y;
     const dz = current.z - this.worldAnchor.z;
     cam.targetX -= dx;
     cam.targetY -= dy;
     cam.targetZ -= dz;
-    this.worldAnchor = this.screenToWorld(screenX, screenY, cam.distance);
+    this.worldAnchor = this.screenToWorld(screenX2, screenY2, cam.distance);
   }
   endPan() {
     this.screenAnchor = null;
     this.worldAnchor = null;
   }
-  startOrbit(screenX, screenY) {
-    this.screenAnchor = { screenX, screenY };
+  startOrbit(screenX2, screenY2) {
+    this.screenAnchor = { screenX: screenX2, screenY: screenY2 };
     this.cameraSnapShot = { ...this.cameraState };
   }
-  updateOrbit(screenX, screenY) {
+  updateOrbit(screenX2, screenY2) {
     const rotateSensitivityX = this.cameraSettings.rotateSensitivityX;
     const rotateSensitivityY = this.cameraSettings.rotateSensitivityY;
     const zoomSensitivity = this.cameraSettings.zoomSensitivity;
-    const dx = screenX - this.screenAnchor.screenX;
-    const dy = screenY - this.screenAnchor.screenY;
+    const dx = screenX2 - this.screenAnchor.screenX;
+    const dy = screenY2 - this.screenAnchor.screenY;
     let yaw = this.cameraSnapShot.yaw - dx * rotateSensitivityX;
     let pitch = this.cameraSnapShot.pitch - dy * rotateSensitivityY;
     const maxPitch = Math.PI / 2;
@@ -1162,16 +1184,16 @@ var CameraController = class {
     this.screenAnchor = null;
     this.cameraSnapShot = null;
   }
-  startDrag(nodeId, screenX, screenY) {
+  startDrag(nodeId, screenX2, screenY2) {
   }
-  updateDrag(screenX, screenY) {
+  updateDrag(screenX2, screenY2) {
   }
   endDrag() {
   }
-  updateZoom(screenX, screenY, delta) {
+  updateZoom(screenX2, screenY2, delta) {
     this.cameraState.distance += delta * this.cameraSettings.zoomSensitivity;
   }
-  updateHover(screenX, screenY) {
+  updateHover(screenX2, screenY2) {
   }
   // Step forward in time for momentum-based smoothing.
   // dtMs is elapsed milliseconds since last frame.
@@ -1231,14 +1253,14 @@ var GraphInteractor = class {
   getMouseScreenPosition() {
     return this.state.mouseScreenPosition;
   }
-  updateMouse(screenX, screenY) {
-    if (screenX === -Infinity || screenY === -Infinity) {
+  updateMouse(screenX2, screenY2) {
+    if (screenX2 === -Infinity || screenY2 === -Infinity) {
       this.state.mouseScreenPosition = null;
     } else {
-      this.state.mouseScreenPosition = { x: screenX, y: screenY };
+      this.state.mouseScreenPosition = { x: screenX2, y: screenY2 };
     }
   }
-  startDrag(nodeId, screenX, screenY) {
+  startDrag(nodeId, screenX2, screenY2) {
     this.endFollow();
     const graph = this.deps.getGraph();
     const camera = this.deps.getCamera();
@@ -1253,7 +1275,7 @@ var GraphInteractor = class {
     this.state.draggedId = nodeId;
     this.pinnedNodes.add(nodeId);
     this.deps.setPinnedNodes(this.pinnedNodes);
-    const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
+    const underMouse = camera.screenToWorld(screenX2, screenY2, this.dragDepthFromCamera);
     this.dragWorldOffset = {
       x: node.x - underMouse.x,
       y: node.y - underMouse.y,
@@ -1261,7 +1283,7 @@ var GraphInteractor = class {
     };
     return;
   }
-  updateDrag(screenX, screenY) {
+  updateDrag(screenX2, screenY2) {
     const camera = this.deps.getCamera();
     const graph = this.deps.getGraph();
     if (!graph || !camera)
@@ -1271,7 +1293,7 @@ var GraphInteractor = class {
     const node = graph.nodes.find((n) => n.id === this.state.draggedId);
     if (!node)
       return;
-    const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
+    const underMouse = camera.screenToWorld(screenX2, screenY2, this.dragDepthFromCamera);
     const o = this.dragWorldOffset || { x: 0, y: 0, z: 0 };
     node.x = underMouse.x + o.x;
     node.y = underMouse.y + o.y;
@@ -1291,24 +1313,24 @@ var GraphInteractor = class {
     this.deps.enableMouseGravity(true);
     return;
   }
-  startPan(screenX, screenY) {
+  startPan(screenX2, screenY2) {
     this.endFollow();
     this.state.isPanning = true;
-    this.deps.getCamera()?.startPan(screenX, screenY);
+    this.deps.getCamera()?.startPan(screenX2, screenY2);
   }
-  updatePan(screenX, screenY) {
-    this.deps.getCamera()?.updatePan(screenX, screenY);
+  updatePan(screenX2, screenY2) {
+    this.deps.getCamera()?.updatePan(screenX2, screenY2);
   }
   endPan() {
     this.state.isPanning = false;
     this.deps.getCamera()?.endPan();
   }
-  startOrbit(screenX, screenY) {
+  startOrbit(screenX2, screenY2) {
     this.state.isRotating = true;
-    this.deps.getCamera()?.startOrbit(screenX, screenY);
+    this.deps.getCamera()?.startOrbit(screenX2, screenY2);
   }
-  updateOrbit(screenX, screenY) {
-    this.deps.getCamera()?.updateOrbit(screenX, screenY);
+  updateOrbit(screenX2, screenY2) {
+    this.deps.getCamera()?.updateOrbit(screenX2, screenY2);
   }
   endOrbit() {
     this.state.isRotating = false;
@@ -1340,11 +1362,11 @@ var GraphInteractor = class {
   endFollow() {
     this.state.followedId = null;
   }
-  updateZoom(screenX, screenY, delta) {
-    this.deps.getCamera()?.updateZoom(screenX, screenY, delta);
+  updateZoom(screenX2, screenY2, delta) {
+    this.deps.getCamera()?.updateZoom(screenX2, screenY2, delta);
   }
-  openNode(screenX, screenY) {
-    const node = this.nodeClicked(screenX, screenY);
+  openNode(screenX2, screenY2) {
+    const node = this.nodeClicked(screenX2, screenY2);
     if (node && this.openNodeFile) {
       this.openNodeFile(node);
     }
@@ -1352,7 +1374,7 @@ var GraphInteractor = class {
   setOnNodeClick(handler) {
     this.openNodeFile = handler;
   }
-  nodeClicked(screenX, screenY) {
+  nodeClicked(screenX2, screenY2) {
     const graph = this.deps.getGraph();
     const camera = this.deps.getCamera();
     if (!graph || !camera)
@@ -1366,11 +1388,11 @@ var GraphInteractor = class {
         continue;
       const nodeRadius = node.radius;
       const hitR = nodeRadius + hitPadding;
-      const dx = screenX - projected.x;
-      const dy = screenY - projected.y;
-      const distSq = dx * dx + dy * dy;
-      if (distSq <= hitR * hitR && distSq < closestDist) {
-        closestDist = distSq;
+      const dx = screenX2 - projected.x;
+      const dy = screenY2 - projected.y;
+      const distSq2 = dx * dx + dy * dy;
+      if (distSq2 <= hitR * hitR && distSq2 < closestDist) {
+        closestDist = distSq2;
         closest = node;
       }
     }
@@ -1803,23 +1825,23 @@ var GraphController = class {
     this.renderer.resize(rect.width, rect.height);
     this.containerEl.appendChild(this.canvas);
     this.inputManager = new InputManager(this.canvas, {
-      onOrbitStart: (screenX, screenY) => this.interactor.startOrbit(screenX, screenY),
-      onOrbitMove: (screenX, screenY) => this.interactor.updateOrbit(screenX, screenY),
+      onOrbitStart: (screenX2, screenY2) => this.interactor.startOrbit(screenX2, screenY2),
+      onOrbitMove: (screenX2, screenY2) => this.interactor.updateOrbit(screenX2, screenY2),
       onOrbitEnd: () => this.interactor.endOrbit(),
-      onPanStart: (screenX, screenY) => this.interactor.startPan(screenX, screenY),
-      onPanMove: (screenX, screenY) => this.interactor.updatePan(screenX, screenY),
+      onPanStart: (screenX2, screenY2) => this.interactor.startPan(screenX2, screenY2),
+      onPanMove: (screenX2, screenY2) => this.interactor.updatePan(screenX2, screenY2),
       onPanEnd: () => this.interactor.endPan(),
-      onOpenNode: (screenX, screenY) => this.interactor.openNode(screenX, screenY),
-      onMouseMove: (screenX, screenY) => this.interactor.updateMouse(screenX, screenY),
-      onDragStart: (nodeId, screenX, screenY) => this.interactor.startDrag(nodeId, screenX, screenY),
-      onDragMove: (screenX, screenY) => this.interactor.updateDrag(screenX, screenY),
+      onOpenNode: (screenX2, screenY2) => this.interactor.openNode(screenX2, screenY2),
+      onMouseMove: (screenX2, screenY2) => this.interactor.updateMouse(screenX2, screenY2),
+      onDragStart: (nodeId, screenX2, screenY2) => this.interactor.startDrag(nodeId, screenX2, screenY2),
+      onDragMove: (screenX2, screenY2) => this.interactor.updateDrag(screenX2, screenY2),
       onDragEnd: () => this.interactor.endDrag(),
       onZoom: (x, y, delta) => this.interactor.updateZoom(x, y, delta),
       onFollowStart: (nodeId) => this.interactor.startFollow(nodeId),
       onFollowEnd: () => this.interactor.endFollow(),
       resetCamera: () => this.camera.resetCamera(),
-      detectClickedNode: (screenX, screenY) => {
-        return this.interactor.nodeClicked(screenX, screenY);
+      detectClickedNode: (screenX2, screenY2) => {
+        return this.interactor.nodeClicked(screenX2, screenY2);
       }
     });
     this.buildAdjacencyMap();
