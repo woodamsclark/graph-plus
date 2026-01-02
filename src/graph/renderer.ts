@@ -28,10 +28,11 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
   const context                                       = canvas.getContext('2d');
   let settings                                        = getSettings();
   let mousePosition : { x: number; y: number } | null = null;
-  let graph         : GraphData               | null  = null;
-  let nodeById                                        = new Map<string, GraphNode>();
+  let graph         : GraphData                | null = null;
+  let worldNodes                                        = new Map<string, GraphNode>();
   let theme         : ThemeSnapshot                   = buildThemeSnapshot();
   const nodeMap = new Map<string, { x: number; y: number; depth: number }>();
+  let followedNodeId : string | null = null;
 
 
   function render() {
@@ -56,7 +57,7 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
 
   function destroy() {
     graph = null;
-    nodeById.clear();
+    worldNodes.clear();
   }
 
   function drawEdges(nodeMap: Map<string, { x: number; y: number; depth: number }>) {
@@ -72,8 +73,8 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     context.lineCap     = 'round';
 
     for (const edge of edges) {
-      const src = nodeById.get(edge.sourceId);
-      const tgt = nodeById.get(edge.targetId);
+      const src = worldNodes.get(edge.sourceId);
+      const tgt = worldNodes.get(edge.targetId);
       if (!src || !tgt) continue;
 
       const p1 = nodeMap.get(edge.sourceId);
@@ -121,7 +122,7 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     context.restore();
   }
 
-  function drawLabels(nodeMap: Map<string, { x: number; y: number; depth: number }>) {
+  function drawLabels(projectedNodes: Map<string, { x: number; y: number; depth: number }>) {
     if (!context || !graph || !graph.nodes || !mousePosition) return;
 
     if (!settings.graph.showLabels) return;
@@ -141,7 +142,7 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     context.fillStyle     = theme.colors.label;
 
     for (const node of graph.nodes) {
-      const p = nodeMap.get(node.id);
+      const p = projectedNodes.get(node.id);
       if (!p || p.depth < 0) continue;
 
       const dx = p.x - mousePosition.x;
@@ -155,19 +156,33 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
 
       context.globalAlpha = a;
       context.fillText(node.label, p.x, p.y + node.radius + offsetY);
-  }
+    }
+    if (followedNodeId) {
+      const pFollow = projectedNodes.get(followedNodeId);
+      if (pFollow && pFollow.depth >= 0) {
 
-  context.restore();
+        context.globalAlpha = 1.0;
+        const followedNode = worldNodes.get(followedNodeId);
+        const r = followedNode?.radius ?? 0;
+
+        context.fillText(
+          followedNode?.label ?? "",
+          pFollow.x,
+          pFollow.y + r + offsetY
+        );
+      }
+    }
+    context.restore();
   }
 
   function setGraph(data: GraphData | null) {
     graph = data;
-    nodeById.clear();
+    worldNodes.clear();
 
     if (!data) return;
 
     for (const node of data.nodes) {
-      nodeById.set(node.id, node);
+      worldNodes.set(node.id, node);
     }
 
   const counts = data.nodes.reduce(
@@ -176,12 +191,6 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
       return acc;
     },
     {} as Record<string, number>
-  );
-
-    console.log("[GraphPlus] node.type counts:", counts);
-    console.log(
-    "[GraphPlus] first 20 nodes:",
-    data.nodes.slice(0, 20).map(n => ({ id: n.id, label: n.label, type: n.type }))
   );
 
   }
@@ -263,6 +272,10 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     mousePosition = pos;
   }
 
+  function setFollowedNode(id: string | null) {
+    followedNodeId = id;
+  }
+
  const renderer: Renderer = {
   resize,
   render,
@@ -270,6 +283,7 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
   setGraph,
   refreshTheme,
   setMouseScreenPosition,
+  setFollowedNode,
 };
 
 return renderer;

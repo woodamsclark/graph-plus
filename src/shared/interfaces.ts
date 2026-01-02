@@ -82,6 +82,7 @@ export interface Renderer {
   destroy()                                                   : void;
   setGraph(data: GraphData)                                   : void;
   setMouseScreenPosition(pos: { x: number; y: number } | null): void;
+  setFollowedNode(node: string | null)               : void;
   refreshTheme()                                              : void;
 }
 

@@ -41,7 +41,7 @@ export class GraphInteractor {
         return "default";
     }
 
-    public getMouseScreenPosition() {
+    public get mouseScreenPosition() {
         return this.state.mouseScreenPosition;
     }
 
@@ -246,5 +246,9 @@ export class GraphInteractor {
 
     public get hoveredNodeId() : string | null {
         return this.state.hoveredId;
+    }
+
+    public get followedNodeId() : string | null {
+        return this.state.followedId;
     }
 }

@@ -54,6 +54,7 @@ function createRenderer(canvas, camera) {
   let nodeById = /* @__PURE__ */ new Map();
   let theme = buildThemeSnapshot();
   const nodeMap = /* @__PURE__ */ new Map();
+  let followedNodeId = null;
   function render() {
     if (!context)
       return;
@@ -154,6 +155,19 @@ function createRenderer(canvas, camera) {
       context.globalAlpha = a;
       context.fillText(node.label, p.x, p.y + node.radius + offsetY);
     }
+    if (followedNodeId) {
+      const pFollow = nodeMap2.get(followedNodeId);
+      if (pFollow && pFollow.depth >= 0) {
+        context.globalAlpha = 1;
+        const followedNode = nodeById.get(followedNodeId);
+        const r = followedNode?.radius ?? 0;
+        context.fillText(
+          followedNode?.label ?? "",
+          pFollow.x,
+          pFollow.y + r + offsetY
+        );
+      }
+    }
     context.restore();
   }
   function setGraph(data) {
@@ -170,11 +184,6 @@ function createRenderer(canvas, camera) {
         return acc;
       },
       {}
-    );
-    console.log("[GraphPlus] node.type counts:", counts);
-    console.log(
-      "[GraphPlus] first 20 nodes:",
-      data.nodes.slice(0, 20).map((n) => ({ id: n.id, label: n.label, type: n.type }))
     );
   }
   function buildThemeSnapshot() {
@@ -225,13 +234,17 @@ function createRenderer(canvas, camera) {
   function setMouseScreenPosition(pos) {
     mousePosition = pos;
   }
+  function setFollowedNode(id) {
+    followedNodeId = id;
+  }
   const renderer = {
     resize,
     render,
     destroy,
     setGraph,
     refreshTheme,
-    setMouseScreenPosition
+    setMouseScreenPosition,
+    setFollowedNode
   };
   return renderer;
 }
@@ -986,7 +999,7 @@ var GraphInteractor = class {
     }
     return "default";
   }
-  getMouseScreenPosition() {
+  get mouseScreenPosition() {
     return this.state.mouseScreenPosition;
   }
   updateMouse(screenX, screenY) {
@@ -1151,6 +1164,9 @@ var GraphInteractor = class {
   }
   get hoveredNodeId() {
     return this.state.hoveredId;
+  }
+  get followedNodeId() {
+    return this.state.followedId;
   }
 };
 
@@ -1576,7 +1592,7 @@ var GraphController = class {
     if (!interactor || !renderer || !graph || !camera)
       return;
     renderer?.setGraph(graph);
-    this.simulation = createSimulation(graph, camera, () => interactor.getMouseScreenPosition());
+    this.simulation = createSimulation(graph, camera, () => interactor.mouseScreenPosition);
     const simulation = this.simulation;
     this.buildAdjacencyMap();
     this.startSimulation();
@@ -1592,7 +1608,7 @@ var GraphController = class {
     if (!this.graph)
       return;
     this.renderer.setGraph(this.graph);
-    this.simulation = createSimulation(this.graph, this.camera, () => this.interactor.getMouseScreenPosition());
+    this.simulation = createSimulation(this.graph, this.camera, () => this.interactor.mouseScreenPosition);
     this.startSimulation();
   }
   animationLoop = (timestamp) => {
@@ -1617,7 +1633,8 @@ var GraphController = class {
     const cursorType = interactor.cursorType;
     cursor.apply(cursorType);
     this.updateCameraAnimation(timestamp);
-    renderer.setMouseScreenPosition(interactor.getMouseScreenPosition());
+    renderer.setMouseScreenPosition(interactor.mouseScreenPosition);
+    renderer.setFollowedNode(interactor.followedNodeId);
     renderer.render();
     this.animationFrame = requestAnimationFrame(this.animationLoop);
   };

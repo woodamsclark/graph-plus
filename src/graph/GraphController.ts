@@ -138,7 +138,7 @@ export class GraphController {
 
     renderer?.setGraph(graph);
 
-    this.simulation   = createSimulation(graph, camera, () => interactor.getMouseScreenPosition());
+    this.simulation   = createSimulation(graph, camera, () => interactor.mouseScreenPosition);
     const simulation  = this.simulation;
     
     this.buildAdjacencyMap(); // rebuild adjacency map after graph refresh or showTags changes // currently dead code
@@ -158,7 +158,7 @@ export class GraphController {
 
     this.renderer.setGraph(this.graph);
 
-    this.simulation = createSimulation(this.graph, this.camera, () => this.interactor!.getMouseScreenPosition());
+    this.simulation = createSimulation(this.graph, this.camera, () => this.interactor!.mouseScreenPosition);
     this.startSimulation();
 }
 
@@ -188,7 +188,8 @@ export class GraphController {
 
     this.updateCameraAnimation(timestamp); // does nothing rn
     
-    renderer.setMouseScreenPosition(interactor.getMouseScreenPosition());
+    renderer.setMouseScreenPosition(interactor.mouseScreenPosition);
+    renderer.setFollowedNode(interactor.followedNodeId);
     renderer.render();
 
     this.animationFrame = requestAnimationFrame(this.animationLoop);
