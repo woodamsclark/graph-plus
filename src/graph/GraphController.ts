@@ -240,13 +240,11 @@ export class GraphController {
     const cam   = this.camera;
     if (!graph || !cam) return;
 
-    const cn = graph.centerNode;
-    if (!cn) return;
 
     cam.patchState({
-      targetX: cn.location.x,
-      targetY: cn.location.y,
-      targetZ: cn.location.z,
+      targetX: 0,
+      targetY: 0,
+      targetZ: 0,
     });
   }
 

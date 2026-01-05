@@ -91,7 +91,6 @@ export interface Renderer {
 export interface GraphData {
   nodes         : GraphNode[];
   edges         : GraphEdge[];
-  centerNode?   : GraphNode | null;
 }
 
 export type GraphNodeType = 'note' | 'tag' | 'canvas'; // canvas nodes is a future feature 01-01-2026
@@ -109,7 +108,7 @@ export interface GraphNode {
   outLinks      : number;
   totalLinks    : number;
   radius        : number; 
-  anima?        : number;
+  anima         : number;
   file?         : TFile;
 }
 

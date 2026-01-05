@@ -9,8 +9,6 @@ export function createSimulation(
   getGravityCenter: () => ScreenPt | null
 ) : Simulation{
   // If center not provided, compute bounding-box center from node positions
-  let centerNode: GraphNode | null  = null;
-  if(graph.centerNode)  {centerNode = graph.centerNode;}
   const nodes                       = graph.nodes;
   const edges                       = graph.edges;
   let running                       = false;  
@@ -344,7 +342,7 @@ export function createSimulation(
     }
   }
 
-  function applyCentering(physicsSettings: PhysicsSettings) {
+  function applyCenteringForce(physicsSettings: PhysicsSettings) {
     if (physicsSettings.centerPull <= 0) return;
     const cx = physicsSettings.worldCenterX;
     const cy = physicsSettings.worldCenterY;
@@ -358,14 +356,6 @@ export function createSimulation(
       n.velocity.vy = (n.velocity.vy || 0) + dy * physicsSettings.centerPull;
       n.velocity.vz = (n.velocity.vz || 0) + dz * physicsSettings.centerPull;
     }
-/*    if (centerNode) {
-      const dx = physicsSettings.worldCenterX - centerNode.location.x;
-      const dy = physicsSettings.worldCenterY - centerNode.location.y;
-      const dz = physicsSettings.worldCenterZ - centerNode.location.z;
-      centerNode.velocity.vx = (centerNode.velocity.vx || 0) + dx * physicsSettings.centerPull * 0.5;
-      centerNode.velocity.vy = (centerNode.velocity.vy || 0) + dy * physicsSettings.centerPull * 0.5;
-      centerNode.velocity.vz = (centerNode.velocity.vz || 0) + dz * physicsSettings.centerPull * 0.5;
-    }*/
   }
 
   function applyDamping(physicsSettings: PhysicsSettings) {
@@ -396,18 +386,6 @@ export function createSimulation(
       } else if (isTag(n) && tagK > 0) {
         const dx = (targetX) - (n.location.x || 0);
         n.velocity.vx = (n.velocity.vx || 0) + dx * tagK;
-      }
-    }
-  }
-
-  function applyCenterNodeLock(physicsSettings: PhysicsSettings) {
-    const cx = physicsSettings.worldCenterX;
-    const cy = physicsSettings.worldCenterY;
-    const cz = physicsSettings.worldCenterZ;
-    for (const n of nodes) {
-      if (isCenterNode(n)) {
-        n.location.x = cx; n.location.y = cy; n.location.z = cz;
-        n.velocity.vx = 0; n.velocity.vy = 0; n.velocity.vz = 0;
       }
     }
   }
@@ -449,11 +427,6 @@ export function createSimulation(
     return n.type === "note";
   }
 
-  function isCenterNode(n: GraphNode): n is GraphNode & { isCenterNode: true } {
-    return n === graph.centerNode;
-    //return (n as any).isCenterNode === true;
-  }
-
   function tick(dt: number) {
     if (!running) return;
     if (!nodes.length) return;
@@ -472,9 +445,8 @@ export function createSimulation(
     applySprings(physicsSettings);
     applyMouseGravity(physicsSettings);
 
-    applyCentering(physicsSettings);
+    applyCenteringForce(physicsSettings);
     applyPlaneConstraints(physicsSettings);
-    //applyCenterNodeLock(physicsSettings);
 
     applyDamping(physicsSettings);
     integrate(dt);

@@ -141,7 +141,7 @@ export class GraphStore {
             edges.push(...this.createTagEdges(app, nodeById));
         }
 
-        return { nodes, edges, centerNode: null };
+        return { nodes, edges };
     }
 
     private createNodes(app: App): GraphNode[] {
@@ -175,12 +175,12 @@ export class GraphStore {
                     vz : 0,
                 },
                 type        : "note",
-                inLinks    : 0,
-                outLinks   : 0,
-                totalLinks : 0,
-                radius      : 0,
+                inLinks     : 0,
+                outLinks    : 0,
+                totalLinks  : 0,
+                radius      : 1,
                 file        : file,
-                anima       : 0,
+                anima       : 1, 
             });
         }
 
@@ -221,9 +221,10 @@ export class GraphStore {
                 velocity: { 
                     vx: 0, vy: 0, vz: 0 
                 },
-                type: "tag",
-                inLinks: 0, outLinks: 0, totalLinks: 0,
-                radius: 0,
+                type    : "tag",
+                inLinks : 0, outLinks: 0, totalLinks: 0,
+                anima   : 1,
+                radius  : 1,
             });
         }
 
@@ -303,14 +304,11 @@ export class GraphStore {
     // -----------------------
 
     private decorateGraph(graph: GraphData, app: App): void {
-
-        this.computeDegreesAndRadius(graph);
+        this.computeLinksAndRadius(graph);
         this.markBidirectional(graph.edges);
-
-        graph.centerNode = this.pickCenterNode(app, graph.nodes);
     }
 
-    private computeDegreesAndRadius(graph: GraphData): void {
+    private computeLinksAndRadius(graph: GraphData): void {
         const settings = getSettings();
         const nodeById = new Map(graph.nodes.map(n => [n.id, n] as const));
 
@@ -319,7 +317,6 @@ export class GraphStore {
             n.inLinks = 0;
             n.outLinks = 0;
             n.totalLinks = 0;
-            n.radius = 0;
         }
 
         for (const e of graph.edges) {
@@ -350,35 +347,6 @@ export class GraphStore {
             }
         }
     }
-
-    private pickCenterNode(app: App, nodes: GraphNode[]): GraphNode | null {
-        const s = getSettings().graph;
-
-        // 1) Explicit center note by title (basename)
-        if (s.useCenterNote && s.centerNoteTitle?.trim()) {
-            const wanted = s.centerNoteTitle.trim().toLowerCase();
-            const match = nodes.find(n =>
-            n.type === "note" && n.label.toLowerCase() === wanted
-            );
-            if (match) return match;
-        }
-
-        // 2) Fallback: highest-degree note
-        let best: GraphNode | null = null;
-        let bestDeg = -1;
-
-        for (const n of nodes) {
-            if (n.type !== "note") continue;
-            const deg = n.totalLinks ?? 0;
-            if (deg > bestDeg) {
-            bestDeg = deg;
-            best = n;
-            }
-        }
-
-        return best;
-    }
-
 
     private extractTagsFromFile(file: TFile, app: App): string[] {
         const cache = app.metadataCache.getFileCache(file);

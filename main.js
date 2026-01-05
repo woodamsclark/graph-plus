@@ -237,10 +237,6 @@ function createRenderer(canvas, camera) {
 
 // src/graph/simulation.ts
 function createSimulation(graph, camera, getGravityCenter) {
-  let centerNode = null;
-  if (graph.centerNode) {
-    centerNode = graph.centerNode;
-  }
   const nodes = graph.nodes;
   const edges = graph.edges;
   let running = false;
@@ -491,7 +487,7 @@ function createSimulation(graph, camera, getGravityCenter) {
       }
     }
   }
-  function applyCentering(physicsSettings) {
+  function applyCenteringForce(physicsSettings) {
     if (physicsSettings.centerPull <= 0)
       return;
     const cx = physicsSettings.worldCenterX;
@@ -543,21 +539,6 @@ function createSimulation(graph, camera, getGravityCenter) {
       }
     }
   }
-  function applyCenterNodeLock(physicsSettings) {
-    const cx = physicsSettings.worldCenterX;
-    const cy = physicsSettings.worldCenterY;
-    const cz = physicsSettings.worldCenterZ;
-    for (const n of nodes) {
-      if (isCenterNode(n)) {
-        n.location.x = cx;
-        n.location.y = cy;
-        n.location.z = cz;
-        n.velocity.vx = 0;
-        n.velocity.vy = 0;
-        n.velocity.vz = 0;
-      }
-    }
-  }
   function integrate(dt) {
     const scale = dt * 60;
     for (const n of nodes) {
@@ -588,9 +569,6 @@ function createSimulation(graph, camera, getGravityCenter) {
   function isNote(n) {
     return n.type === "note";
   }
-  function isCenterNode(n) {
-    return n === graph.centerNode;
-  }
   function tick(dt) {
     if (!running)
       return;
@@ -604,7 +582,7 @@ function createSimulation(graph, camera, getGravityCenter) {
     applyRepulsionBarnesHut(physicsSettings, root);
     applySprings(physicsSettings);
     applyMouseGravity(physicsSettings);
-    applyCentering(physicsSettings);
+    applyCenteringForce(physicsSettings);
     applyPlaneConstraints(physicsSettings);
     applyDamping(physicsSettings);
     integrate(dt);
@@ -1541,7 +1519,7 @@ var GraphStore = class {
     if (settings.graph.showTags) {
       edges.push(...this.createTagEdges(app, nodeById));
     }
-    return { nodes, edges, centerNode: null };
+    return { nodes, edges };
   }
   createNodes(app) {
     const settings = getSettings();
@@ -1573,9 +1551,9 @@ var GraphStore = class {
         inLinks: 0,
         outLinks: 0,
         totalLinks: 0,
-        radius: 0,
+        radius: 1,
         file,
-        anima: 0
+        anima: 1
       });
     }
     return nodes;
@@ -1614,7 +1592,8 @@ var GraphStore = class {
         inLinks: 0,
         outLinks: 0,
         totalLinks: 0,
-        radius: 0
+        anima: 1,
+        radius: 1
       });
     }
     return nodes;
@@ -1679,18 +1658,16 @@ var GraphStore = class {
   // Decorations (settings)
   // -----------------------
   decorateGraph(graph, app) {
-    this.computeDegreesAndRadius(graph);
+    this.computeLinksAndRadius(graph);
     this.markBidirectional(graph.edges);
-    graph.centerNode = this.pickCenterNode(app, graph.nodes);
   }
-  computeDegreesAndRadius(graph) {
+  computeLinksAndRadius(graph) {
     const settings = getSettings();
     const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
     for (const n of graph.nodes) {
       n.inLinks = 0;
       n.outLinks = 0;
       n.totalLinks = 0;
-      n.radius = 0;
     }
     for (const e of graph.edges) {
       const src = nodeById.get(e.sourceId);
@@ -1717,29 +1694,6 @@ var GraphStore = class {
         rev.bidirectional = true;
       }
     }
-  }
-  pickCenterNode(app, nodes) {
-    const s = getSettings().graph;
-    if (s.useCenterNote && s.centerNoteTitle?.trim()) {
-      const wanted = s.centerNoteTitle.trim().toLowerCase();
-      const match = nodes.find(
-        (n) => n.type === "note" && n.label.toLowerCase() === wanted
-      );
-      if (match)
-        return match;
-    }
-    let best = null;
-    let bestDeg = -1;
-    for (const n of nodes) {
-      if (n.type !== "note")
-        continue;
-      const deg = n.totalLinks ?? 0;
-      if (deg > bestDeg) {
-        bestDeg = deg;
-        best = n;
-      }
-    }
-    return best;
   }
   extractTagsFromFile(file, app) {
     const cache = app.metadataCache.getFileCache(file);
@@ -1959,13 +1913,10 @@ var GraphController = class {
     const cam = this.camera;
     if (!graph || !cam)
       return;
-    const cn = graph.centerNode;
-    if (!cn)
-      return;
     cam.patchState({
-      targetX: cn.location.x,
-      targetY: cn.location.y,
-      targetZ: cn.location.z
+      targetX: 0,
+      targetY: 0,
+      targetZ: 0
     });
   }
   startSimulation() {
