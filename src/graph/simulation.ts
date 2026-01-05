@@ -1,8 +1,13 @@
 import { CameraController } from './CameraController.ts';
 import { GraphNode, GraphData, PhysicsSettings, Simulation } from '../shared/interfaces.ts';
 import { getSettings } from '../settings/settingsStore.ts';
+import type { ScreenPt } from "../shared/interfaces.ts";
 
-export function createSimulation(graph: GraphData, camera : CameraController, getMousePos: () => { x: number, y: number } | null) : Simulation{
+export function createSimulation(
+  graph: GraphData, 
+  camera : CameraController, 
+  getGravityCenter: () => ScreenPt | null
+) : Simulation{
   // If center not provided, compute bounding-box center from node positions
   const nodes                       = graph.nodes;
   const edges                       = graph.edges;
@@ -73,13 +78,13 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
 
   for (const n of bodies) {
     // If you ever allow NaN positions, guard here.
-    if (n.x < minX) minX = n.x;
-    if (n.y < minY) minY = n.y;
-    if (n.z < minZ) minZ = n.z;
+    if (n.location.x < minX) minX = n.location.x;
+    if (n.location.y < minY) minY = n.location.y;
+    if (n.location.z < minZ) minZ = n.location.z;
 
-    if (n.x > maxX) maxX = n.x;
-    if (n.y > maxY) maxY = n.y;
-    if (n.z > maxZ) maxZ = n.z;
+    if (n.location.x > maxX) maxX = n.location.x;
+    if (n.location.y > maxY) maxY = n.location.y;
+    if (n.location.z > maxZ) maxZ = n.location.z;
   }
 
   const cx = (minX + maxX) * 0.5;
@@ -107,9 +112,9 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
     const m0 = cell.mass;
     const m1 = m0 + 1;
 
-    cell.comX = (cell.comX * m0 + body.x) / m1;
-    cell.comY = (cell.comY * m0 + body.y) / m1;
-    cell.comZ = (cell.comZ * m0 + body.z) / m1;
+    cell.comX = (cell.comX * m0 + body.location.x) / m1;
+    cell.comY = (cell.comY * m0 + body.location.y) / m1;
+    cell.comZ = (cell.comZ * m0 + body.location.z) / m1;
     cell.mass = m1;
 
     // If empty leaf: store body
@@ -135,7 +140,7 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
   }
 
   function insertIntoChild(cell: OctNode, body: GraphNode): void {
-    const idx = childIndex(cell, body.x, body.y, body.z);
+    const idx = childIndex(cell, body.location.x, body.location.y, body.location.z);
     const child = getOrCreateChild(cell, idx);
     insertBody(child, body);
   }
@@ -171,9 +176,9 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
     // If leaf with exactly this body, skip self
     if (!cell.children && cell.body === a) return;
 
-    const dx = a.x - cell.comX;
-    const dy = a.y - cell.comY;
-    const dz = (a.z || 0) - (cell.comZ || 0);
+    const dx = a.location.x - cell.comX;
+    const dy = a.location.y - cell.comY;
+    const dz = (a.location.z || 0) - (cell.comZ || 0);
 
     const distSqRaw = dx * dx + dy * dy + dz * dz + eps;
 
@@ -196,9 +201,9 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
       const fy = (dy / safeDist) * force;
       const fz = (dz / safeDist) * force;
 
-      a.vx = (a.vx || 0) + fx;
-      a.vy = (a.vy || 0) + fy;
-      a.vz = (a.vz || 0) + fz;
+      a.velocity.vx = (a.velocity.vx || 0) + fx;
+      a.velocity.vy = (a.velocity.vy || 0) + fy;
+      a.velocity.vz = (a.velocity.vz || 0) + fz;
       return;
     }
 
@@ -223,7 +228,7 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
   function applyMouseGravity(physicsSettings: PhysicsSettings) {
     if (!physicsSettings.mouseGravityEnabled) return;
 
-    const mousePos = getMousePos(); 
+    const mousePos = getGravityCenter(); 
     if (!mousePos) return;
     const { x: mouseX, y: mouseY } = mousePos;
 
@@ -255,9 +260,9 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
         const targetWorld = camera.screenToWorld(mouseX, mouseY, nodePos.depth);
 
         // 4. Calculate Vector in World Space
-        const wx = targetWorld.x - node.x;
-        const wy = targetWorld.y - node.y;
-        const wz = targetWorld.z - node.z;
+        const wx = targetWorld.x - node.location.x;
+        const wy = targetWorld.y - node.location.y;
+        const wz = targetWorld.z - node.location.z;
 
         // 5. Apply Force
         const dist = Math.sqrt(wx*wx + wy*wy + wz*wz) + 1e-6;
@@ -269,9 +274,9 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
         // effective strength
         const k = strength * boost;
 
-        node.vx += wx * k;
-        node.vy += wy * k;
-        node.vz += wz * k;
+        node.velocity.vx += wx * k;
+        node.velocity.vy += wy * k;
+        node.velocity.vz += wz * k;
 
     }
   }
@@ -282,9 +287,9 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
       const a = nodes[i];
       for (let j = i + 1; j < N; j++) {
         const b = nodes[j];
-        let dx = a.x - b.x;
-        let dy = a.y - b.y;
-        let dz = (a.z || 0) - (b.z || 0);
+        let dx = a.location.x - b.location.x;
+        let dy = a.location.y - b.location.y;
+        let dz = (a.location.z || 0) - (b.location.z || 0);
         let distSq = dx * dx + dy * dy + dz * dz;
         if (distSq === 0) distSq = 0.0001;
         const dist = Math.sqrt(distSq);
@@ -296,14 +301,14 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
         const fy = (dy / dist) * force;
         const fz = (dz / dist) * force;
         if (!pinnedNodes.has(a.id)) {
-          a.vx = (a.vx || 0) + fx;
-          a.vy = (a.vy || 0) + fy;
-          a.vz = (a.vz || 0) + fz;
+          a.velocity.vx = (a.velocity.vx || 0) + fx;
+          a.velocity.vy = (a.velocity.vy || 0) + fy;
+          a.velocity.vz = (a.velocity.vz || 0) + fz;
         }
         if (!pinnedNodes.has(b.id)) {
-          b.vx = (b.vx || 0) - fx;
-          b.vy = (b.vy || 0) - fy;
-          b.vz = (b.vz || 0) - fz;
+          b.velocity.vx = (b.velocity.vx || 0) - fx;
+          b.velocity.vy = (b.velocity.vy || 0) - fy;
+          b.velocity.vz = (b.velocity.vz || 0) - fz;
         }
       }
     }
@@ -315,9 +320,9 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
       const a = nodeById.get(e.sourceId);
       const b = nodeById.get(e.targetId);
       if (!a || !b) continue;
-      const dx = (b.x - a.x);
-      const dy = (b.y - a.y);
-      const dz = ((b.z || 0) - (a.z || 0));
+      const dx = (b.location.x - a.location.x);
+      const dy = (b.location.y - a.location.y);
+      const dz = ((b.location.z || 0) - (a.location.z || 0));
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.0001;
       const displacement = dist - (physicsSettings.springLength || 0);
       const f = (physicsSettings.springStrength || 0) * Math.tanh(displacement / 50);
@@ -325,31 +330,31 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
       const fy = (dy / dist) * f;
       const fz = (dz / dist) * f;
       if (!pinnedNodes.has(a.id)) {
-        a.vx = (a.vx || 0) + fx;
-        a.vy = (a.vy || 0) + fy;
-        a.vz = (a.vz || 0) + fz;
+        a.velocity.vx = (a.velocity.vx || 0) + fx;
+        a.velocity.vy = (a.velocity.vy || 0) + fy;
+        a.velocity.vz = (a.velocity.vz || 0) + fz;
       }
       if (!pinnedNodes.has(b.id)) {
-        b.vx = (b.vx || 0) - fx;
-        b.vy = (b.vy || 0) - fy;
-        b.vz = (b.vz || 0) - fz;
+        b.velocity.vx = (b.velocity.vx || 0) - fx;
+        b.velocity.vy = (b.velocity.vy || 0) - fy;
+        b.velocity.vz = (b.velocity.vz || 0) - fz;
       }
     }
   }
 
-  function applyCentering(physicsSettings: PhysicsSettings) {
+  function applyCenteringForce(physicsSettings: PhysicsSettings) {
     if (physicsSettings.centerPull <= 0) return;
     const cx = physicsSettings.worldCenterX;
     const cy = physicsSettings.worldCenterY;
     const cz = physicsSettings.worldCenterZ;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
-      const dx = (cx - n.x);
-      const dy = (cy - n.y);
-      const dz = (cz - n.z);
-      n.vx = (n.vx || 0) + dx * physicsSettings.centerPull;
-      n.vy = (n.vy || 0) + dy * physicsSettings.centerPull;
-      n.vz = (n.vz || 0) + dz * physicsSettings.centerPull;
+      const dx = (cx - n.location.x);
+      const dy = (cy - n.location.y);
+      const dz = (cz - n.location.z);
+      n.velocity.vx = (n.velocity.vx || 0) + dx * physicsSettings.centerPull;
+      n.velocity.vy = (n.velocity.vy || 0) + dy * physicsSettings.centerPull;
+      n.velocity.vz = (n.velocity.vz || 0) + dz * physicsSettings.centerPull;
     }
   }
 
@@ -357,12 +362,12 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
         const d = Math.max(0, Math.min(1, physicsSettings.damping));
-        n.vx = (n.vx ?? 0) * (1 - d);
-        n.vy = (n.vy ?? 0) * (1 - d);
-        n.vz = (n.vz ?? 0) * (1 - d);
-      if (Math.abs(n.vx) < 0.001) n.vx = 0;
-      if (Math.abs(n.vy) < 0.001) n.vy = 0;
-      if (Math.abs(n.vz) < 0.001) n.vz = 0;
+        n.velocity.vx = (n.velocity.vx ?? 0) * (1 - d);
+        n.velocity.vy = (n.velocity.vy ?? 0) * (1 - d);
+        n.velocity.vz = (n.velocity.vz ?? 0) * (1 - d);
+      if (Math.abs(n.velocity.vx) < 0.001) n.velocity.vx = 0;
+      if (Math.abs(n.velocity.vy) < 0.001) n.velocity.vy = 0;
+      if (Math.abs(n.velocity.vz) < 0.001) n.velocity.vz = 0;
     }
   }
 
@@ -376,11 +381,11 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
       if (isNote(n) && noteK > 0) {
-        const dz = targetZ - n.z;
-        n.vz = (n.vz || 0) + dz * noteK;
+        const dz = targetZ - n.location.z;
+        n.velocity.vz = (n.velocity.vz || 0) + dz * noteK;
       } else if (isTag(n) && tagK > 0) {
-        const dx = (targetX) - (n.x || 0);
-        n.vx = (n.vx || 0) + dx * tagK;
+        const dx = (targetX) - (n.location.x || 0);
+        n.velocity.vx = (n.velocity.vx || 0) + dx * tagK;
       }
     }
   }
@@ -389,12 +394,12 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
     const scale = dt * 60;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
-      n.x += (n.vx || 0) * scale;
-      n.y += (n.vy || 0) * scale;
-      n.z = (n.z || 0) + (n.vz || 0) * scale;
+      n.location.x += (n.velocity.vx || 0) * scale;
+      n.location.y += (n.velocity.vy || 0) * scale;
+      n.location.z = (n.location.z || 0) + (n.velocity.vz || 0) * scale;
       // optional gentle hard clamp epsilon
-      //if (isNote(n) && Math.abs(n.z) < 0.0001) n.z = 0;
-      if (isTag(n) && Math.abs(n.x) < 0.0001) n.x = 0;
+      //if (isNote(n) && Math.abs(n.location.z) < 0.0001) n.location.z = 0;
+      if (isTag(n) && Math.abs(n.location.x) < 0.0001) n.location.x = 0;
     }
   }
 
@@ -408,8 +413,8 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
 
   function reset() {
     for (const n of nodes) {
-      n.vx = 0;
-      n.vy = 0;
+      n.velocity.vx = 0;
+      n.velocity.vy = 0;
     }
   }
 
@@ -440,7 +445,7 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
     applySprings(physicsSettings);
     applyMouseGravity(physicsSettings);
 
-    applyCentering(physicsSettings);
+    applyCenteringForce(physicsSettings);
     applyPlaneConstraints(physicsSettings);
 
     applyDamping(physicsSettings);

@@ -98,6 +98,10 @@ export class GraphController {
     this.renderer.resize(rect.width, rect.height);
     this.containerEl.appendChild(this.canvas);
 
+
+    
+
+
     this.inputManager                                   = new InputManager(this.canvas, {
       onOrbitStart      : (screenX, screenY)          => this.interactor!.startOrbit(screenX, screenY),
       onOrbitMove       : (screenX, screenY)          => this.interactor!.updateOrbit(screenX, screenY),
@@ -106,7 +110,7 @@ export class GraphController {
       onPanMove         : (screenX, screenY)          => this.interactor!.updatePan(screenX, screenY),
       onPanEnd          : ()                          => this.interactor!.endPan(),
       onOpenNode        : (screenX, screenY)          => this.interactor!.openNode(screenX, screenY),
-      onMouseMove       : (screenX, screenY)          => this.interactor!.updateMouse(screenX, screenY),
+      onMouseMove       : (screenX, screenY)          => this.interactor!.updateGravityCenter(screenX, screenY),
       onDragStart       : (nodeId, screenX, screenY)  => this.interactor!.startDrag(nodeId, screenX, screenY),
       onDragMove        : (screenX, screenY)          => this.interactor!.updateDrag(screenX, screenY),
       onDragEnd         : ()                          => this.interactor!.endDrag(),
@@ -138,7 +142,7 @@ export class GraphController {
 
     renderer?.setGraph(graph);
 
-    this.simulation   = createSimulation(graph, camera, () => interactor.mouseScreenPosition);
+    this.simulation   = createSimulation(graph, camera, () => interactor.getGravityCenter());
     const simulation  = this.simulation;
     
     this.buildAdjacencyMap(); // rebuild adjacency map after graph refresh or showTags changes // currently dead code
@@ -158,7 +162,7 @@ export class GraphController {
 
     this.renderer.setGraph(this.graph);
 
-    this.simulation = createSimulation(this.graph, this.camera, () => this.interactor!.mouseScreenPosition);
+    this.simulation = createSimulation(this.graph, this.camera, () => this.interactor!.getMouseScreenPosition());
     this.startSimulation();
 }
 
@@ -188,8 +192,7 @@ export class GraphController {
 
     this.updateCameraAnimation(timestamp); // does nothing rn
     
-    renderer.setMouseScreenPosition(interactor.mouseScreenPosition);
-    renderer.setFollowedNode(interactor.followedNodeId);
+    renderer.setMouseScreenPosition(interactor.getMouseScreenPosition());
     renderer.render();
 
     this.animationFrame = requestAnimationFrame(this.animationLoop);
@@ -223,9 +226,9 @@ export class GraphController {
     if (!n) return;
 
     cam.patchState({
-      targetX: n.x,
-      targetY: n.y,
-      targetZ: n.z,
+      targetX: n.location.x,
+      targetY: n.location.y,
+      targetZ: n.location.z,
     });
   }
 
@@ -236,6 +239,15 @@ export class GraphController {
     const graph = this.graph;
     const cam   = this.camera;
     if (!graph || !cam) return;
+
+    const cn = graph.centerNode;
+    if (!cn) return;
+
+    cam.patchState({
+      targetX: cn.x,
+      targetY: cn.y,
+      targetZ: cn.z,
+    });
   }
 
   private startSimulation() {
@@ -255,8 +267,8 @@ export class GraphController {
     const app                     = this.app;
     let file: TFile | null        = null;
     if (node.file) file  = node.file as TFile;
-    else if (node.filePath) {
-      const af = app.vault.getAbstractFileByPath(node.filePath);
+    else if (node.id) {
+      const af = app.vault.getAbstractFileByPath(node.id);
       if (af instanceof TFile) file = af;
     }
     if (!file) {

@@ -9,10 +9,7 @@
   width: 100%;
   height: 100%;
   display: block;
-}
-
-/* Match Obsidian pane background so canvas doesn't look out of place */
-.greater-graph-view canvas {
+  touch-action: none;
   background-color: var(--background-primary);
 }
 

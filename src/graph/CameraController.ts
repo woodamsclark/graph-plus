@@ -1,4 +1,5 @@
 import type { CameraState, CameraSettings, WorldTransform } from '../shared/interfaces.ts';
+import type { GraphNode } from '../shared/interfaces.ts';
 import { getSettings } from '../settings/settingsStore.ts';
 
 const MIN_DISTANCE = 100;
@@ -9,14 +10,14 @@ const MAX_PITCH    =  Math.PI / 2 - 0.05;
 export class CameraController {
   private cameraSettings  : CameraSettings;
   private cameraState     : CameraState;
-  //private renderer       : Renderer;
   private cameraSnapShot  : CameraState                                                 | null  = null;
-//private worldAnchor     : { screenX: number; screenY: number; screenZ: number }       | null  = null;
   private worldAnchor     : { x: number; y: number; z: number }                         | null  = null;
   private screenAnchor    : { screenX: number; screenY: number                  }       | null  = null;
-  private viewport: { width  : number; height : number; offsetX: number; offsetY: number }      = { width: 0, height: 0, offsetX: 0, offsetY: 0 };
-
+  private viewport        : { width  : number; height : number; offsetX: number; offsetY: number }      = { width: 0, height: 0, offsetX: 0, offsetY: 0 };
   private worldTransform: WorldTransform | null = null;
+
+  // Camera/worldToScreen outputs in viewport space
+  // Mouse/touch must be converted into viewport space
 
   constructor(initialState: CameraState) {
     this.cameraState     = { ...initialState };
@@ -46,14 +47,14 @@ export class CameraController {
     this.clearMomentum();
   }
 
-  worldToScreen(node: { x: number; y: number; z: number }): { x: number; y: number; depth: number } {
+  worldToScreen(node: GraphNode): { x: number; y: number; depth: number } {
   const { yaw, pitch, distance, targetX, targetY, targetZ } = this.cameraState;
   const { offsetX, offsetY } = this.viewport;
 
   // Read raw world coords
-  let wx0 = (node.x || 0);
-  let wy0 = (node.y || 0);
-  let wz0 = (node.z || 0);
+  let wx0 = (node.location.x || 0);
+  let wy0 = (node.location.y || 0);
+  let wz0 = (node.location.z || 0);
 
   // Apply "Turntable World" transform BEFORE camera target/rotation/projection
   // (camera stays “still”; world rotates/scales)

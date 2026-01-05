@@ -1,166 +1,365 @@
-import { InputManagerCallbacks, PointerMode } from '../shared/interfaces.ts';
+import { ScreenPt, ClientPt } from '../shared/interfaces.ts';
+import { TwoFingerGesture } from './TwoFingerGesture.ts';
+import { WheelGestureSession } from './WheelGestureSession.ts';
+import { PointerTracker } from './PointerTracker.ts';
+import { distSq } from '../shared/distSq.ts';
+import { wrapAngleDelta } from '../shared/wrapAngleDelta.ts';
+
+type InputState =
+  | { kind: 'idle' }
+  | {
+      kind: 'press';
+      downClient: ClientPt;
+      downScreen: ScreenPt;
+      lastClient: ClientPt;
+      clickedNodeId: string | null;
+      pointerId: number;
+      rightClickIntent: boolean; // “would orbit/follow/reset if released”
+    }
+  | { kind: 'drag-node'; nodeId: string; lastClient: ClientPt }
+  | { kind: 'pan'; lastClient: ClientPt }
+  | { kind: 'orbit'; lastClient: ClientPt }
+  | {
+      kind: 'touch-gesture';
+      lastCentroid: ScreenPt;
+      lastDist: number;
+      lastAngle: number;
+      panStarted: boolean;
+      orbitStarted: boolean;
+    };
+
+
+export interface InputManagerCallbacks {
+    // Camera Control
+    onOrbitStart(screenX: number, screenY: number): void;
+    onOrbitMove(screenX: number, screenY: number): void;
+    onOrbitEnd(): void;
+
+    onPanStart(screenX: number, screenY: number): void;
+    onPanMove(screenX: number, screenY: number): void;
+    onPanEnd(): void;
+
+    onZoom(screenX: number, screenY: number, delta: number): void;
+
+    onFollowStart(nodeId: string): void;
+    onFollowEnd(): void;
+    resetCamera(): void;
+
+    // Node Interaction
+    onMouseMove(screenX: number, screenY: number): void;
+    onOpenNode(screenX: number, screenY: number): void;
+
+    // Node Dragging
+    onDragStart(nodeId: string, screenX: number, screenY: number): void;
+    onDragMove(screenX: number, screenY: number): void;
+    onDragEnd(): void;
+
+    // Utility
+    detectClickedNode(
+        screenX: number,
+        screenY: number,
+    ): { id: string; label: string } | null;
+}
 
 export class InputManager {
-    private canvas              : HTMLCanvasElement;
-    private callback            : InputManagerCallbacks;
-    private draggedNodeId       : string | null     = null;
-    private lastClientX         : number            = 0;        // (( Client Space ))
-    private lastClientY         : number            = 0;        // (( Client Space ))
-    private downClickX          : number            = 0;        // [[ Canvas Space ]]
-    private downClickY          : number            = 0;        // [[ Canvas Space ]]
-    private dragThreshold       : number            = 5;        // Drag starts after 5 pixels of movement
-    private pointerMode         : PointerMode       = PointerMode.Idle;
+    private state: InputState = { kind: 'idle' };
+    private pointers = new PointerTracker();
+    private gesture: TwoFingerGesture;
+    private wheel: WheelGestureSession;
 
-    constructor(canvas: HTMLCanvasElement, callbacks: InputManagerCallbacks) {
-        this.canvas   = canvas;
-        this.callback = callbacks;
+    constructor(private canvas: HTMLCanvasElement, private callback: InputManagerCallbacks) {
+        this.canvas.style.touchAction = 'none';
+
+        this.gesture = new TwoFingerGesture(this.getScreenFromClient, 5);
+
+        this.wheel = new WheelGestureSession(
+            (x, y) => this.callback.onPanStart(x, y),
+            (x, y) => this.callback.onPanMove(x, y),
+            () => this.callback.onPanEnd(),
+            (x, y, d) => this.callback.onZoom(x, y, d),
+            120,
+        );
+
         this.attachListeners();
     }
 
+    private getScreenFromClient = (clientX: number, clientY: number): ScreenPt => {
+        const rect  = this.canvas.getBoundingClientRect();
+        const dpr   = window.devicePixelRatio || 1;
+
+        // The renderer scales the context by DPR, so the "logical" coordinate system
+        // has a width of (physical_width / dpr).
+        const logicalWidth  = this.canvas.width / dpr;
+        const logicalHeight = this.canvas.height / dpr;
+
+        // Calculate scale factors to map visual pixels (rect) to logical pixels (camera/context)
+        const scaleX = logicalWidth / rect.width;
+        const scaleY = logicalHeight / rect.height;
+
+        return {
+            x: (clientX - rect.left) * scaleX,
+            y: (clientY - rect.top) * scaleY
+        };
+    };
+
+
     private attachListeners() {
-        // Use document listeners for mousemove/mouseup to allow dragging outside the canvas
-        this.canvas.addEventListener('mousedown'    ,   this.onMouseDown        );
-        this.canvas.addEventListener('wheel'        ,   this.onWheel            );
-        this.canvas.addEventListener('mousemove'    ,   this.onMouseMove        ); // For hover state
-        this.canvas.addEventListener('mouseleave'   ,   this.onMouseLeave       ); 
-        document.addEventListener   ('mousemove'    ,   this.onGlobalMouseMove  ); // For drag/orbit
-        document.addEventListener   ('mouseup'      ,   this.onGlobalMouseUp    ); // For drag/orbit end
+        // Pointer events unify mouse/touch/pen.
+        this.canvas.addEventListener('pointerdown', this.onPointerDown, { passive: false });
+        this.canvas.addEventListener('pointermove', this.onPointerMove, { passive: false });
+        this.canvas.addEventListener('pointerup', this.onPointerUp, { passive: false });
+        this.canvas.addEventListener('pointercancel', this.onPointerCancel, { passive: false });
+        this.canvas.addEventListener('pointerleave', this.onPointerLeave, { passive: false });
+
+        // Keep wheel: mouse wheel + trackpad scroll + (often) trackpad pinch (ctrlKey on macOS)
+        this.canvas.addEventListener('wheel', this.onWheel, { passive: false });
+
+        // If you use right-click, kill the browser context menu on the canvas.
+        this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     }
 
-    private onMouseDown = (e: MouseEvent) => {
-        const canvas        = this.canvas.getBoundingClientRect();
-        this.downClickX     = e.clientX - canvas.left;
-        this.downClickY     = e.clientY - canvas.top;
-        this.lastClientX    = e.clientX;
-        this.lastClientY    = e.clientY;
-        const isLeft        = e.button === 0;
-        const isMiddle      = e.button === 1;
-        const isRight       = e.button === 2;
-        this.draggedNodeId  = this.callback.detectClickedNode(this.downClickX, this.downClickY)?.id || null;
+    // -----------------------------
+    // Pointer events
+    // -----------------------------
 
-        // Right Click + drag = Orbit, Right Click no drag = zoom-follow
-        if ((isLeft && e.ctrlKey) || (isLeft && e.metaKey) || isRight) {
-            this.pointerMode = PointerMode.RightClick;
+    private onPointerDown = (e: PointerEvent) => {
+        e.preventDefault();
+        this.canvas.setPointerCapture(e.pointerId);
+        this.pointers.upsert(e);
+
+        const eScreen = this.getScreenFromClient(e.clientX, e.clientY);
+        this.callback.onMouseMove(eScreen.x, eScreen.y);
+
+        // If 2 pointers → enter touch gesture state (and end any single-pointer mode cleanly)
+        if (this.pointers.size() === 2) {
+            this.endSinglePointerIfNeeded();
+            const pair = this.pointers.two();
+            if (!pair) return;
+            const g = this.gesture.read(pair);
+
+            this.state = {
+            kind: 'touch-gesture',
+            lastCentroid: g.centroid,
+            lastDist: g.dist,
+            lastAngle: g.angle,
+            panStarted: false,
+            orbitStarted: false,
+            };
             return;
         }
 
-        // Left click: either clicking on a node or empty space
-        this.pointerMode = PointerMode.Click;
+        // Single pointer press
+        const isMouse = e.pointerType === 'mouse';
+        const isLeft = e.button === 0;
+        const isRight = e.button === 2;
+        const rightClickIntent = isMouse && ((isLeft && (e.ctrlKey || e.metaKey)) || isRight);
+
+        const clickedNodeId = this.callback.detectClickedNode(eScreen.x, eScreen.y)?.id ?? null;
+
+        this.state = {
+            kind: 'press',
+            downClient: { x: e.clientX, y: e.clientY },
+            downScreen: eScreen,
+            lastClient: { x: e.clientX, y: e.clientY },
+            clickedNodeId,
+            pointerId: e.pointerId,
+            rightClickIntent,
+        };
     };
-  
-    private onGlobalMouseMove = (e: MouseEvent) => {
-        const clientX       = e.clientX;
-        const clientY       = e.clientY;
-        const rect          = this.canvas.getBoundingClientRect();
-        const screenX       = clientX - rect.left;
-        const screenY       = clientY - rect.top;
-        const dx            = clientX - this.lastClientX;
-        const dy            = clientY - this.lastClientY;
-        this.lastClientX    = clientX;
-        this.lastClientY    = clientY;
 
-        const dxScr         = screenX - this.downClickX;
-        const dyScr         = screenY - this.downClickY;
-        const distSq        = dxScr*dxScr + dyScr*dyScr;
-        const thresholdSq   = this.dragThreshold*this.dragThreshold;
 
-        switch (this.pointerMode) {
-            case PointerMode.Idle:
-            case PointerMode.Hover:
-            // Do nothing here. Hover updates happen in canvas mousemove.
-            return;
-            // ------------------------------------------------------
-            case PointerMode.Click:
-            // Check for threshold exceed → promote to DragNode or Pan
-            if (distSq > thresholdSq) {
-                if (this.draggedNodeId != null) {
-                this.pointerMode        = PointerMode.DragNode;
-                this.callback.onDragStart(this.draggedNodeId, screenX, screenY);
-                } else {
-                this.pointerMode        = PointerMode.Pan;
-                this.callback.onPanStart(screenX, screenY);
-                }
+    private onPointerMove = (e: PointerEvent) => {
+        this.pointers.upsert(e);
+
+        const screen = this.getScreenFromClient(e.clientX, e.clientY);
+        this.callback.onMouseMove(screen.x, screen.y);
+
+        // 2-finger gesture
+        if (this.state.kind === 'touch-gesture' && this.pointers.size() === 2) {
+            e.preventDefault();
+            const pair = this.pointers.two();
+            if (!pair) return;
+
+            const g = this.gesture.read(pair);
+
+            // Pan start/move
+            if (!this.state.panStarted && this.gesture.shouldStartPan(this.state.lastCentroid, g.centroid)) {
+            this.state.panStarted = true;
+            this.callback.onPanStart(g.centroid.x, g.centroid.y);
             }
-            return;// ------------------------------------------------------
-            case PointerMode.DragNode:
-                this.callback.onDragMove(screenX, screenY);
+            if (this.state.panStarted) this.callback.onPanMove(g.centroid.x, g.centroid.y);
+
+            // Pinch zoom
+            const distDelta = g.dist - this.state.lastDist;
+            const pinchThreshold = 2;
+            if (Math.abs(distDelta) >= pinchThreshold) {
+            const direction = distDelta > 0 ? -1 : 1;
+            this.callback.onZoom(g.centroid.x, g.centroid.y, direction);
+            }
+
+            // Twist orbit
+            const dTheta = wrapAngleDelta(g.angle - this.state.lastAngle);
+            const twistThreshold = 0.04;
+            if (!this.state.orbitStarted && Math.abs(dTheta) > twistThreshold) {
+            this.state.orbitStarted = true;
+            this.callback.onOrbitStart(g.centroid.x, g.centroid.y);
+            }
+            if (this.state.orbitStarted) this.callback.onOrbitMove(g.centroid.x, g.centroid.y);
+
+            this.state.lastCentroid = g.centroid;
+            this.state.lastDist = g.dist;
+            this.state.lastAngle = g.angle;
             return;
-            // ------------------------------------------------------
-            case PointerMode.Pan:
-                this.callback.onPanMove(screenX, screenY);
+        }
+
+        // Single-pointer modes
+        switch (this.state.kind) {
+            case 'press': {
+            const thresholdSq = 5 * 5;
+            const movedSq = distSq(screen, this.state.downScreen);
+
+            const last = this.state.lastClient;
+            this.state.lastClient = { x: e.clientX, y: e.clientY };
+
+            if (movedSq <= thresholdSq) return;
+
+            if (this.state.rightClickIntent) {
+                // transition to orbit (after threshold)
+                this.callback.onOrbitStart(screen.x, screen.y);
+                this.state = { kind: 'orbit', lastClient: { x: e.clientX, y: e.clientY } };
+                return;
+            }
+
+            if (this.state.clickedNodeId) {
+                this.callback.onDragStart(this.state.clickedNodeId, screen.x, screen.y);
+                this.state = {
+                    kind: 'drag-node',
+                    nodeId: this.state.clickedNodeId,
+                    lastClient: { x: e.clientX, y: e.clientY },
+                };
+            } else {
+                this.callback.onPanStart(screen.x, screen.y);
+                this.state = { kind: 'pan', lastClient: { x: e.clientX, y: e.clientY } };
+            }
             return;
-            // ------------------------------------------------------
-            case PointerMode.RightClick:
-                // Check for threshold exceed → promote to DragNode or Pan
-                if (distSq > thresholdSq) {
-                    this.pointerMode = PointerMode.Orbit;
-                    this.callback.onOrbitStart(screenX, screenY);
-                } // else on mouse up, we zoom-follow the node
+            }
+
+            case 'drag-node':
+                this.callback.onDragMove(screen.x, screen.y);
             return;
-            case PointerMode.Orbit:
-                this.callback.onOrbitMove(screenX, screenY);
+
+            case 'pan':
+                this.callback.onPanMove(screen.x, screen.y);
+            return;
+
+            case 'orbit':
+                this.callback.onOrbitMove(screen.x, screen.y);
+            return;
+
+            default:
             return;
         }
     };
 
-    private onGlobalMouseUp = (e: MouseEvent) => {
-        const rect    = this.canvas.getBoundingClientRect();
-        const screenX = e.clientX - rect.left;
-        const screenY = e.clientY - rect.top;
-        switch (this.pointerMode) {
-            case PointerMode.DragNode:
-                this.callback.onDragEnd();
-                break;
-            case PointerMode.Pan:
-                this.callback.onPanEnd();
-                break;
-            case PointerMode.Orbit:
-                this.callback.onOrbitEnd();
-                break;
-            case PointerMode.Click:
-                this.callback.onOpenNode(screenX, screenY);
-                break;
-            case PointerMode.RightClick:
-                if (this.draggedNodeId != null) {
-                    this.callback.onFollowStart(this.draggedNodeId!);
-                } else { // empty space click
-                    // reset camera to center
-                    this.callback.resetCamera();
-                }
-                break;
-        }
 
-    this.pointerMode    = PointerMode.Idle;
-    this.draggedNodeId  = null;
-    };
+    private onPointerUp = (e: PointerEvent) => {
+        e.preventDefault();
+        try { this.canvas.releasePointerCapture(e.pointerId); } catch {}
 
-    // local canvas mouse move for hover state
-    private onMouseMove = (e: MouseEvent) => {
-        const rect = this.canvas.getBoundingClientRect();
-        const screenX = e.clientX - rect.left;
-        const screenY = e.clientY - rect.top;
-        
-        // Report hover position for highlighting AND mouse gravity
-        this.callback.onMouseMove(screenX, screenY);
+        const screen = this.getScreenFromClient(e.clientX, e.clientY);
+
+        this.pointers.delete(e.pointerId);
+
+    if (this.state.kind === 'touch-gesture' && this.pointers.size() < 2) {
+        if (this.state.panStarted) this.callback.onPanEnd();
+        if (this.state.orbitStarted) this.callback.onOrbitEnd();
+        this.state = { kind: 'idle' };
+        this.rebaselineRemainingPointerForContinuity();
+        return;
     }
 
-    private onMouseLeave = () => {
+        switch (this.state.kind) {
+            case 'drag-node':
+            this.callback.onDragEnd();
+            break;
+            case 'pan':
+            this.callback.onPanEnd();
+            break;
+            case 'orbit':
+            this.callback.onOrbitEnd();
+            break;
+            case 'press':
+            if (this.state.rightClickIntent) {
+                if (this.state.clickedNodeId) this.callback.onFollowStart(this.state.clickedNodeId);
+                else this.callback.resetCamera();
+            } else {
+                this.callback.onOpenNode(screen.x, screen.y);
+            }
+            break;
+        }
+
+        this.state = { kind: 'idle' };
+    };
+
+
+    private onPointerCancel = (e: PointerEvent) => {
+        e.preventDefault();
+        this.pointers.delete(e.pointerId);
+
+        // end any active state
+        switch (this.state.kind) {
+            case 'drag-node':
+            this.callback.onDragEnd();
+            break;
+            case 'pan':
+            this.callback.onPanEnd();
+            break;
+            case 'orbit':
+            this.callback.onOrbitEnd();
+            break;
+            case 'touch-gesture':
+            if (this.state.panStarted) this.callback.onPanEnd();
+            if (this.state.orbitStarted) this.callback.onOrbitEnd();
+            break;
+        }
+
+        this.wheel.cancel();     // important: end any wheel pan session
+        this.state = { kind: 'idle' };
+    };
+
+
+    private onPointerLeave = () => {
         // Clear hover state when leaving the canvas
-        // This prevents the graph from thinking the mouse is still over it
-        this.callback.onMouseMove(-Infinity, -Infinity); 
-    }
+        this.callback.onMouseMove(-Infinity, -Infinity);
+    };
 
+    // Wheel (mouse wheel + trackpad)
     private onWheel = (e: WheelEvent) => {
         e.preventDefault();
-        this.callback.onZoom(e.offsetX, e.offsetY, Math.sign(e.deltaY));
+        this.wheel.handle(e);
+    };
+
+    private endSinglePointerIfNeeded() {
+        switch (this.state.kind) {
+            case 'drag-node': this.callback.onDragEnd(); break;
+            case 'pan': this.callback.onPanEnd(); break;
+            case 'orbit': this.callback.onOrbitEnd(); break;
+        }
+        this.state = { kind: 'idle' };
+    }
+
+    private rebaselineRemainingPointerForContinuity() {
+        const remaining = this.pointers.first();
+        if (!remaining) return;
+        // you can optionally set lastClient/downScreen here if you want continuation behavior
     }
 
     public destroy() {
-        this.canvas.removeEventListener('mousemove' ,   this.onMouseMove        );
-        this.canvas.removeEventListener('mousedown' ,   this.onMouseDown        );
-        this.canvas.removeEventListener('wheel'     ,   this.onWheel            );
-        this.canvas.removeEventListener('mouseleave',   this.onMouseLeave       );
-        document.removeEventListener   ('mousemove' ,   this.onGlobalMouseMove  );
-        document.removeEventListener   ('mouseup'   ,   this.onGlobalMouseUp    );
+        this.canvas.removeEventListener('pointerdown', this.onPointerDown as any);
+        this.canvas.removeEventListener('pointermove', this.onPointerMove as any);
+        this.canvas.removeEventListener('pointerup', this.onPointerUp as any);
+        this.canvas.removeEventListener('pointercancel', this.onPointerCancel as any);
+        this.canvas.removeEventListener('pointerleave', this.onPointerLeave as any);
+        this.canvas.removeEventListener('wheel', this.onWheel as any);
     }
 }

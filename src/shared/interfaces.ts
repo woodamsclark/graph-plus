@@ -93,22 +93,21 @@ export interface GraphData {
 
 export type GraphNodeType = 'note' | 'tag' | 'canvas'; // canvas nodes is a future feature 01-01-2026
 
+type location = { x: number; y: number; z: number };
+type velocity = { vx: number; vy: number; vz: number };
+
 export interface GraphNode {
   id            : string;
   label         : string;
-  x             : number;
-  y             : number;
-  z             : number;
-  filePath?     : string;
-  file?         : TFile;
-  vx            : number;
-  vy            : number;
-  vz            : number;
+  location      : location;
+  velocity      : velocity;
   type          : GraphNodeType;
-  inDegree      : number;
-  outDegree     : number;
-  totalDegree   : number;
+  inLinks       : number;
+  outLinks      : number;
+  totalLinks    : number;
   radius        : number; 
+  anima         : number;
+  file?         : TFile;
 }
 
 export interface GraphEdge {
@@ -127,42 +126,11 @@ export interface Simulation {
   setPinnedNodes?(ids: Set<string>) : void;
 }
 
-
-export interface InputManagerCallbacks {
-    // Camera Control
-    onOrbitStart        (screenX: number, screenY: number)                : void;
-    onOrbitMove         (screenX: number, screenY: number)                : void;
-    onOrbitEnd          ()                                                : void;
-    onPanStart          (screenX: number, screenY: number)                : void;
-    onPanMove           (screenX: number, screenY: number)                : void;
-    onPanEnd            ()                                                : void;
-    onZoom              (screenX: number, screenY: number, delta: number) : void;
-    onFollowStart       (nodeId: string)                                  : void;
-    onFollowEnd         ()                                                : void;
-    resetCamera         ()                                                : void;
-    // Node Interaction
-    onMouseMove             (screenX: number, screenY: number)                : void;
-    onOpenNode          (screenX: number, screenY: number)                : void;
-    // Node Dragging 
-    onDragStart         (nodeId: string, screenX: number, screenY: number): void;
-    onDragMove          (screenX: number, screenY: number)                : void;
-    onDragEnd           (): void;
-    // Utility
-    detectClickedNode   (screenX: number, screenY: number)                : { id: string, filePath?: string, label: string } | null;
-}
-
-export enum PointerMode {
-  Idle,
-  Hover,
-  Click,
-  RightClick,
-  DragNode,
-  Pan,
-  Orbit,
-}
-
 export interface WorldTransform {
   rotationX : number; // radians
   rotationY : number;  // radians
   scale     : number; // unitless zoom scalar
 }
+
+export type ScreenPt = { x: number; y: number };
+export type ClientPt = { x: number; y: number };
