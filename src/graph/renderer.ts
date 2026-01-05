@@ -184,12 +184,6 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     {} as Record<string, number>
   );
 
-    console.log("[GraphPlus] node.type counts:", counts);
-    console.log(
-    "[GraphPlus] first 20 nodes:",
-    data.nodes.slice(0, 20).map(n => ({ id: n.id, label: n.label, type: n.type }))
-  );
-
   }
 
   function buildThemeSnapshot(): ThemeSnapshot {

@@ -1,6 +1,7 @@
 import { GraphNode, GraphData } from '../shared/interfaces.ts';
 import { GraphDependencies } from './GraphController.ts';
 import { CursorCss } from './CursorController.ts';
+import type { ScreenPt } from "../shared/interfaces.ts";
 
 export type InteractionState = {
   mouseScreenPosition   : {x:number,y:number}   | null;
@@ -41,11 +42,11 @@ export class GraphInteractor {
         return "default";
     }
 
-    public getMouseScreenPosition() {
+    public getGravityCenter():ScreenPt | null {
         return this.state.mouseScreenPosition;
     }
 
-    public updateMouse (screenX: number, screenY: number) {
+    public updateGravityCenter (screenX: number, screenY: number) {
         if (screenX === -Infinity || screenY === -Infinity) {
             this.state.mouseScreenPosition = null; // off screen
         } else {
@@ -77,9 +78,9 @@ export class GraphInteractor {
         // World-space offset so we don’t snap the node center to the cursor
         const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
         this.dragWorldOffset = {
-        x: node.x - underMouse.x,
-        y: node.y - underMouse.y,
-        z: (node.z || 0) - underMouse.z,
+        x: node.location.x - underMouse.x,
+        y: node.location.y - underMouse.y,
+        z: (node.location.z || 0) - underMouse.z,
         };
         return;
     }
@@ -96,12 +97,12 @@ export class GraphInteractor {
         const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
         const o = this.dragWorldOffset || { x: 0, y: 0, z: 0 };
 
-        node.x = underMouse.x + o.x;
-        node.y = underMouse.y + o.y;
-        node.z = underMouse.z + o.z;
+        node.location.x = underMouse.x + o.x;
+        node.location.y = underMouse.y + o.y;
+        node.location.z = underMouse.z + o.z;
 
         // Prevent slingshot on release
-        node.vx = 0; node.vy = 0; node.vz = 0;
+        node.velocity.vx = 0; node.velocity.vy = 0; node.velocity.vz = 0;
         return;
     }
 
@@ -173,9 +174,9 @@ export class GraphInteractor {
 
         // Keep camera target glued to the node
         camera.patchState({
-            targetX: node.x,
-            targetY: node.y,
-            targetZ: node.z,
+            targetX: node.location.x,
+            targetY: node.location.y,
+            targetZ: node.location.z,
         });
     }
 

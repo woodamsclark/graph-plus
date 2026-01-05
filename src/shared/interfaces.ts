@@ -96,22 +96,21 @@ export interface GraphData {
 
 export type GraphNodeType = 'note' | 'tag' | 'canvas'; // canvas nodes is a future feature 01-01-2026
 
+type location = { x: number; y: number; z: number };
+type velocity = { vx: number; vy: number; vz: number };
+
 export interface GraphNode {
   id            : string;
   label         : string;
-  x             : number;
-  y             : number;
-  z             : number;
-  filePath?     : string;
-  file?         : TFile;
-  vx            : number;
-  vy            : number;
-  vz            : number;
+  location      : location;
+  velocity      : velocity;
   type          : GraphNodeType;
-  inDegree      : number;
-  outDegree     : number;
-  totalDegree   : number;
+  inLinks       : number;
+  outLinks      : number;
+  totalLinks    : number;
   radius        : number; 
+  anima?        : number;
+  file?         : TFile;
 }
 
 export interface GraphEdge {

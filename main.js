@@ -175,11 +175,6 @@ function createRenderer(canvas, camera) {
       },
       {}
     );
-    console.log("[GraphPlus] node.type counts:", counts);
-    console.log(
-      "[GraphPlus] first 20 nodes:",
-      data.nodes.slice(0, 20).map((n) => ({ id: n.id, label: n.label, type: n.type }))
-    );
   }
   function buildThemeSnapshot() {
     return {
@@ -241,7 +236,7 @@ function createRenderer(canvas, camera) {
 }
 
 // src/graph/simulation.ts
-function createSimulation(graph, camera, getMousePos) {
+function createSimulation(graph, camera, getGravityCenter) {
   let centerNode = null;
   if (graph.centerNode) {
     centerNode = graph.centerNode;
@@ -300,18 +295,18 @@ function createSimulation(graph, camera, getMousePos) {
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
     for (const n of bodies) {
-      if (n.x < minX)
-        minX = n.x;
-      if (n.y < minY)
-        minY = n.y;
-      if (n.z < minZ)
-        minZ = n.z;
-      if (n.x > maxX)
-        maxX = n.x;
-      if (n.y > maxY)
-        maxY = n.y;
-      if (n.z > maxZ)
-        maxZ = n.z;
+      if (n.location.x < minX)
+        minX = n.location.x;
+      if (n.location.y < minY)
+        minY = n.location.y;
+      if (n.location.z < minZ)
+        minZ = n.location.z;
+      if (n.location.x > maxX)
+        maxX = n.location.x;
+      if (n.location.y > maxY)
+        maxY = n.location.y;
+      if (n.location.z > maxZ)
+        maxZ = n.location.z;
     }
     const cx = (minX + maxX) * 0.5;
     const cy = (minY + maxY) * 0.5;
@@ -329,9 +324,9 @@ function createSimulation(graph, camera, getMousePos) {
   function insertBody(cell, body) {
     const m0 = cell.mass;
     const m1 = m0 + 1;
-    cell.comX = (cell.comX * m0 + body.x) / m1;
-    cell.comY = (cell.comY * m0 + body.y) / m1;
-    cell.comZ = (cell.comZ * m0 + body.z) / m1;
+    cell.comX = (cell.comX * m0 + body.location.x) / m1;
+    cell.comY = (cell.comY * m0 + body.location.y) / m1;
+    cell.comZ = (cell.comZ * m0 + body.location.z) / m1;
     cell.mass = m1;
     if (!cell.children && cell.body === null) {
       cell.body = body;
@@ -348,7 +343,7 @@ function createSimulation(graph, camera, getMousePos) {
     insertIntoChild(cell, body);
   }
   function insertIntoChild(cell, body) {
-    const idx = childIndex(cell, body.x, body.y, body.z);
+    const idx = childIndex(cell, body.location.x, body.location.y, body.location.z);
     const child = getOrCreateChild(cell, idx);
     insertBody(child, body);
   }
@@ -370,9 +365,9 @@ function createSimulation(graph, camera, getMousePos) {
       return;
     if (!cell.children && cell.body === a)
       return;
-    const dx = a.x - cell.comX;
-    const dy = a.y - cell.comY;
-    const dz = (a.z || 0) - (cell.comZ || 0);
+    const dx = a.location.x - cell.comX;
+    const dy = a.location.y - cell.comY;
+    const dz = (a.location.z || 0) - (cell.comZ || 0);
     const distSqRaw = dx * dx + dy * dy + dz * dz + eps;
     const size = cell.h * 2;
     const sizeSq = size * size;
@@ -385,9 +380,9 @@ function createSimulation(graph, camera, getMousePos) {
       const fx = dx / safeDist * force;
       const fy = dy / safeDist * force;
       const fz = dz / safeDist * force;
-      a.vx = (a.vx || 0) + fx;
-      a.vy = (a.vy || 0) + fy;
-      a.vz = (a.vz || 0) + fz;
+      a.velocity.vx = (a.velocity.vx || 0) + fx;
+      a.velocity.vy = (a.velocity.vy || 0) + fy;
+      a.velocity.vz = (a.velocity.vz || 0) + fz;
       return;
     }
     const kids = cell.children;
@@ -405,7 +400,7 @@ function createSimulation(graph, camera, getMousePos) {
   function applyMouseGravity(physicsSettings) {
     if (!physicsSettings.mouseGravityEnabled)
       return;
-    const mousePos = getMousePos();
+    const mousePos = getGravityCenter();
     if (!mousePos)
       return;
     const { x: mouseX, y: mouseY } = mousePos;
@@ -423,16 +418,16 @@ function createSimulation(graph, camera, getMousePos) {
       if (distSq2 > radius * radius)
         continue;
       const targetWorld = camera.screenToWorld(mouseX, mouseY, nodePos.depth);
-      const wx = targetWorld.x - node.x;
-      const wy = targetWorld.y - node.y;
-      const wz = targetWorld.z - node.z;
+      const wx = targetWorld.x - node.location.x;
+      const wy = targetWorld.y - node.location.y;
+      const wz = targetWorld.z - node.location.z;
       const dist = Math.sqrt(wx * wx + wy * wy + wz * wz) + 1e-6;
       const maxBoost = 1 / node.radius;
       const boost = Math.min(maxBoost, 1 / (dist * dist));
       const k = strength * boost;
-      node.vx += wx * k;
-      node.vy += wy * k;
-      node.vz += wz * k;
+      node.velocity.vx += wx * k;
+      node.velocity.vy += wy * k;
+      node.velocity.vz += wz * k;
     }
   }
   function applyRepulsion(physicsSettings) {
@@ -441,9 +436,9 @@ function createSimulation(graph, camera, getMousePos) {
       const a = nodes[i];
       for (let j = i + 1; j < N; j++) {
         const b = nodes[j];
-        let dx = a.x - b.x;
-        let dy = a.y - b.y;
-        let dz = (a.z || 0) - (b.z || 0);
+        let dx = a.location.x - b.location.x;
+        let dy = a.location.y - b.location.y;
+        let dz = (a.location.z || 0) - (b.location.z || 0);
         let distSq2 = dx * dx + dy * dy + dz * dz;
         if (distSq2 === 0)
           distSq2 = 1e-4;
@@ -455,14 +450,14 @@ function createSimulation(graph, camera, getMousePos) {
         const fy = dy / dist * force;
         const fz = dz / dist * force;
         if (!pinnedNodes.has(a.id)) {
-          a.vx = (a.vx || 0) + fx;
-          a.vy = (a.vy || 0) + fy;
-          a.vz = (a.vz || 0) + fz;
+          a.velocity.vx = (a.velocity.vx || 0) + fx;
+          a.velocity.vy = (a.velocity.vy || 0) + fy;
+          a.velocity.vz = (a.velocity.vz || 0) + fz;
         }
         if (!pinnedNodes.has(b.id)) {
-          b.vx = (b.vx || 0) - fx;
-          b.vy = (b.vy || 0) - fy;
-          b.vz = (b.vz || 0) - fz;
+          b.velocity.vx = (b.velocity.vx || 0) - fx;
+          b.velocity.vy = (b.velocity.vy || 0) - fy;
+          b.velocity.vz = (b.velocity.vz || 0) - fz;
         }
       }
     }
@@ -475,9 +470,9 @@ function createSimulation(graph, camera, getMousePos) {
       const b = nodeById.get(e.targetId);
       if (!a || !b)
         continue;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const dz = (b.z || 0) - (a.z || 0);
+      const dx = b.location.x - a.location.x;
+      const dy = b.location.y - a.location.y;
+      const dz = (b.location.z || 0) - (a.location.z || 0);
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-4;
       const displacement = dist - (physicsSettings.springLength || 0);
       const f = (physicsSettings.springStrength || 0) * Math.tanh(displacement / 50);
@@ -485,14 +480,14 @@ function createSimulation(graph, camera, getMousePos) {
       const fy = dy / dist * f;
       const fz = dz / dist * f;
       if (!pinnedNodes.has(a.id)) {
-        a.vx = (a.vx || 0) + fx;
-        a.vy = (a.vy || 0) + fy;
-        a.vz = (a.vz || 0) + fz;
+        a.velocity.vx = (a.velocity.vx || 0) + fx;
+        a.velocity.vy = (a.velocity.vy || 0) + fy;
+        a.velocity.vz = (a.velocity.vz || 0) + fz;
       }
       if (!pinnedNodes.has(b.id)) {
-        b.vx = (b.vx || 0) - fx;
-        b.vy = (b.vy || 0) - fy;
-        b.vz = (b.vz || 0) - fz;
+        b.velocity.vx = (b.velocity.vx || 0) - fx;
+        b.velocity.vy = (b.velocity.vy || 0) - fy;
+        b.velocity.vz = (b.velocity.vz || 0) - fz;
       }
     }
   }
@@ -505,12 +500,12 @@ function createSimulation(graph, camera, getMousePos) {
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
-      const dx = cx - n.x;
-      const dy = cy - n.y;
-      const dz = cz - n.z;
-      n.vx = (n.vx || 0) + dx * physicsSettings.centerPull;
-      n.vy = (n.vy || 0) + dy * physicsSettings.centerPull;
-      n.vz = (n.vz || 0) + dz * physicsSettings.centerPull;
+      const dx = cx - n.location.x;
+      const dy = cy - n.location.y;
+      const dz = cz - n.location.z;
+      n.velocity.vx = (n.velocity.vx || 0) + dx * physicsSettings.centerPull;
+      n.velocity.vy = (n.velocity.vy || 0) + dy * physicsSettings.centerPull;
+      n.velocity.vz = (n.velocity.vz || 0) + dz * physicsSettings.centerPull;
     }
   }
   function applyDamping(physicsSettings) {
@@ -518,15 +513,15 @@ function createSimulation(graph, camera, getMousePos) {
       if (pinnedNodes.has(n.id))
         continue;
       const d = Math.max(0, Math.min(1, physicsSettings.damping));
-      n.vx = (n.vx ?? 0) * (1 - d);
-      n.vy = (n.vy ?? 0) * (1 - d);
-      n.vz = (n.vz ?? 0) * (1 - d);
-      if (Math.abs(n.vx) < 1e-3)
-        n.vx = 0;
-      if (Math.abs(n.vy) < 1e-3)
-        n.vy = 0;
-      if (Math.abs(n.vz) < 1e-3)
-        n.vz = 0;
+      n.velocity.vx = (n.velocity.vx ?? 0) * (1 - d);
+      n.velocity.vy = (n.velocity.vy ?? 0) * (1 - d);
+      n.velocity.vz = (n.velocity.vz ?? 0) * (1 - d);
+      if (Math.abs(n.velocity.vx) < 1e-3)
+        n.velocity.vx = 0;
+      if (Math.abs(n.velocity.vy) < 1e-3)
+        n.velocity.vy = 0;
+      if (Math.abs(n.velocity.vz) < 1e-3)
+        n.velocity.vz = 0;
     }
   }
   function applyPlaneConstraints(physicsSettings) {
@@ -540,11 +535,11 @@ function createSimulation(graph, camera, getMousePos) {
       if (pinnedNodes.has(n.id))
         continue;
       if (isNote(n) && noteK > 0) {
-        const dz = targetZ - n.z;
-        n.vz = (n.vz || 0) + dz * noteK;
+        const dz = targetZ - n.location.z;
+        n.velocity.vz = (n.velocity.vz || 0) + dz * noteK;
       } else if (isTag(n) && tagK > 0) {
-        const dx = targetX - (n.x || 0);
-        n.vx = (n.vx || 0) + dx * tagK;
+        const dx = targetX - (n.location.x || 0);
+        n.velocity.vx = (n.velocity.vx || 0) + dx * tagK;
       }
     }
   }
@@ -554,12 +549,12 @@ function createSimulation(graph, camera, getMousePos) {
     const cz = physicsSettings.worldCenterZ;
     for (const n of nodes) {
       if (isCenterNode(n)) {
-        n.x = cx;
-        n.y = cy;
-        n.z = cz;
-        n.vx = 0;
-        n.vy = 0;
-        n.vz = 0;
+        n.location.x = cx;
+        n.location.y = cy;
+        n.location.z = cz;
+        n.velocity.vx = 0;
+        n.velocity.vy = 0;
+        n.velocity.vz = 0;
       }
     }
   }
@@ -568,11 +563,11 @@ function createSimulation(graph, camera, getMousePos) {
     for (const n of nodes) {
       if (pinnedNodes.has(n.id))
         continue;
-      n.x += (n.vx || 0) * scale;
-      n.y += (n.vy || 0) * scale;
-      n.z = (n.z || 0) + (n.vz || 0) * scale;
-      if (isTag(n) && Math.abs(n.x) < 1e-4)
-        n.x = 0;
+      n.location.x += (n.velocity.vx || 0) * scale;
+      n.location.y += (n.velocity.vy || 0) * scale;
+      n.location.z = (n.location.z || 0) + (n.velocity.vz || 0) * scale;
+      if (isTag(n) && Math.abs(n.location.x) < 1e-4)
+        n.location.x = 0;
     }
   }
   function start() {
@@ -583,8 +578,8 @@ function createSimulation(graph, camera, getMousePos) {
   }
   function reset() {
     for (const n of nodes) {
-      n.vx = 0;
-      n.vy = 0;
+      n.velocity.vx = 0;
+      n.velocity.vy = 0;
     }
   }
   function isTag(n) {
@@ -768,30 +763,11 @@ var InputManager = class {
       120
     );
     this.attachListeners();
-    this.attachDebugTouchLogging(canvas);
   }
   state = { kind: "idle" };
   pointers = new PointerTracker();
   gesture;
   wheel;
-  attachDebugTouchLogging(canvas) {
-    const log = (name) => (e) => {
-      console.log(name, e);
-    };
-    for (const n of [
-      "pointerdown",
-      "pointermove",
-      "pointerup",
-      "pointercancel",
-      "touchstart",
-      "touchmove",
-      "touchend",
-      "touchcancel",
-      "contextmenu"
-    ]) {
-      canvas.addEventListener(n, log(n), { passive: false });
-    }
-  }
   getScreenFromClient = (clientX, clientY) => {
     const rect = this.canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
@@ -1066,9 +1042,9 @@ var CameraController = class {
   worldToScreen(node) {
     const { yaw, pitch, distance, targetX, targetY, targetZ } = this.cameraState;
     const { offsetX, offsetY } = this.viewport;
-    let wx0 = node.x || 0;
-    let wy0 = node.y || 0;
-    let wz0 = node.z || 0;
+    let wx0 = node.location.x || 0;
+    let wy0 = node.location.y || 0;
+    let wz0 = node.location.z || 0;
     const wt = this.worldTransform;
     if (wt) {
       wx0 *= wt.scale;
@@ -1279,10 +1255,10 @@ var GraphInteractor = class {
     }
     return "default";
   }
-  getMouseScreenPosition() {
+  getGravityCenter() {
     return this.state.mouseScreenPosition;
   }
-  updateMouse(screenX, screenY) {
+  updateGravityCenter(screenX, screenY) {
     if (screenX === -Infinity || screenY === -Infinity) {
       this.state.mouseScreenPosition = null;
     } else {
@@ -1306,9 +1282,9 @@ var GraphInteractor = class {
     this.deps.setPinnedNodes(this.pinnedNodes);
     const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
     this.dragWorldOffset = {
-      x: node.x - underMouse.x,
-      y: node.y - underMouse.y,
-      z: (node.z || 0) - underMouse.z
+      x: node.location.x - underMouse.x,
+      y: node.location.y - underMouse.y,
+      z: (node.location.z || 0) - underMouse.z
     };
     return;
   }
@@ -1324,12 +1300,12 @@ var GraphInteractor = class {
       return;
     const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
     const o = this.dragWorldOffset || { x: 0, y: 0, z: 0 };
-    node.x = underMouse.x + o.x;
-    node.y = underMouse.y + o.y;
-    node.z = underMouse.z + o.z;
-    node.vx = 0;
-    node.vy = 0;
-    node.vz = 0;
+    node.location.x = underMouse.x + o.x;
+    node.location.y = underMouse.y + o.y;
+    node.location.z = underMouse.z + o.z;
+    node.velocity.vx = 0;
+    node.velocity.vy = 0;
+    node.velocity.vz = 0;
     return;
   }
   endDrag() {
@@ -1383,9 +1359,9 @@ var GraphInteractor = class {
       return;
     }
     camera.patchState({
-      targetX: node.x,
-      targetY: node.y,
-      targetZ: node.z
+      targetX: node.location.x,
+      targetY: node.location.y,
+      targetZ: node.location.z
     });
   }
   endFollow() {
@@ -1533,9 +1509,9 @@ var GraphStore = class {
     const vaultId = app.vault.getName();
     const nodePositions = {};
     for (const n of graph.nodes) {
-      if (!Number.isFinite(n.x) || !Number.isFinite(n.y) || !Number.isFinite(n.z))
+      if (!Number.isFinite(n.location.x) || !Number.isFinite(n.location.y) || !Number.isFinite(n.location.z))
         continue;
-      nodePositions[n.id] = { x: n.x, y: n.y, z: n.z };
+      nodePositions[n.id] = { x: n.location.x, y: n.location.y, z: n.location.z };
     }
     return { version: 1, vaultId, nodePositions };
   }
@@ -1545,12 +1521,12 @@ var GraphStore = class {
       const p = pos[n.id];
       if (!p)
         continue;
-      n.x = p.x;
-      n.y = p.y;
-      n.z = p.z;
-      n.vx = 0;
-      n.vy = 0;
-      n.vz = 0;
+      n.location.x = p.x;
+      n.location.y = p.y;
+      n.location.z = p.z;
+      n.velocity.vx = 0;
+      n.velocity.vy = 0;
+      n.velocity.vz = 0;
     }
   }
   // -----------------------
@@ -1582,20 +1558,24 @@ var GraphStore = class {
       const jitter = 50;
       nodes.push({
         id: file.path,
-        filePath: file.path,
-        file,
         label: file.basename,
-        x: (Math.random() - 0.5) * jitter,
-        y: (Math.random() - 0.5) * jitter,
-        z: (Math.random() - 0.5) * jitter,
-        vx: 0,
-        vy: 0,
-        vz: 0,
+        location: {
+          x: (Math.random() - 0.5) * jitter,
+          y: (Math.random() - 0.5) * jitter,
+          z: (Math.random() - 0.5) * jitter
+        },
+        velocity: {
+          vx: 0,
+          vy: 0,
+          vz: 0
+        },
         type: "note",
-        inDegree: 0,
-        outDegree: 0,
-        totalDegree: 0,
-        radius: 0
+        inLinks: 0,
+        outLinks: 0,
+        totalLinks: 0,
+        radius: 0,
+        file,
+        anima: 0
       });
     }
     return nodes;
@@ -1620,16 +1600,20 @@ var GraphStore = class {
       nodes.push({
         id: `tag:${cleanTag}`,
         label: `#${cleanTag}`,
-        x: (Math.random() - 0.5) * jitter,
-        y: (Math.random() - 0.5) * jitter,
-        z: (Math.random() - 0.5) * jitter,
-        vx: 0,
-        vy: 0,
-        vz: 0,
+        location: {
+          x: (Math.random() - 0.5) * jitter,
+          y: (Math.random() - 0.5) * jitter,
+          z: (Math.random() - 0.5) * jitter
+        },
+        velocity: {
+          vx: 0,
+          vy: 0,
+          vz: 0
+        },
         type: "tag",
-        inDegree: 0,
-        outDegree: 0,
-        totalDegree: 0,
+        inLinks: 0,
+        outLinks: 0,
+        totalLinks: 0,
         radius: 0
       });
     }
@@ -1703,9 +1687,9 @@ var GraphStore = class {
     const settings = getSettings();
     const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
     for (const n of graph.nodes) {
-      n.inDegree = 0;
-      n.outDegree = 0;
-      n.totalDegree = 0;
+      n.inLinks = 0;
+      n.outLinks = 0;
+      n.totalLinks = 0;
       n.radius = 0;
     }
     for (const e of graph.edges) {
@@ -1714,12 +1698,12 @@ var GraphStore = class {
       if (!src || !tgt)
         continue;
       const c = Number(e.linkCount || 1) || 1;
-      src.outDegree = (src.outDegree || 0) + c;
-      tgt.inDegree = (tgt.inDegree || 0) + c;
+      src.outLinks = (src.outLinks || 0) + c;
+      tgt.inLinks = (tgt.inLinks || 0) + c;
     }
     for (const n of graph.nodes) {
-      n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
-      n.radius = Math.min(Math.max(settings.graph.minNodeRadius + Math.log2(1 + n.totalDegree), settings.graph.minNodeRadius), settings.graph.maxNodeRadius);
+      n.totalLinks = (n.inLinks || 0) + (n.outLinks || 0);
+      n.radius = Math.min(Math.max(settings.graph.minNodeRadius + Math.log2(1 + n.totalLinks), settings.graph.minNodeRadius), settings.graph.maxNodeRadius);
     }
   }
   markBidirectional(edges) {
@@ -1749,7 +1733,7 @@ var GraphStore = class {
     for (const n of nodes) {
       if (n.type !== "note")
         continue;
-      const deg = n.totalDegree ?? 0;
+      const deg = n.totalLinks ?? 0;
       if (deg > bestDeg) {
         bestDeg = deg;
         best = n;
@@ -1861,7 +1845,7 @@ var GraphController = class {
       onPanMove: (screenX, screenY) => this.interactor.updatePan(screenX, screenY),
       onPanEnd: () => this.interactor.endPan(),
       onOpenNode: (screenX, screenY) => this.interactor.openNode(screenX, screenY),
-      onMouseMove: (screenX, screenY) => this.interactor.updateMouse(screenX, screenY),
+      onMouseMove: (screenX, screenY) => this.interactor.updateGravityCenter(screenX, screenY),
       onDragStart: (nodeId, screenX, screenY) => this.interactor.startDrag(nodeId, screenX, screenY),
       onDragMove: (screenX, screenY) => this.interactor.updateDrag(screenX, screenY),
       onDragEnd: () => this.interactor.endDrag(),
@@ -1893,7 +1877,7 @@ var GraphController = class {
     if (!interactor || !renderer || !graph || !camera)
       return;
     renderer?.setGraph(graph);
-    this.simulation = createSimulation(graph, camera, () => interactor.getMouseScreenPosition());
+    this.simulation = createSimulation(graph, camera, () => interactor.getGravityCenter());
     const simulation = this.simulation;
     this.buildAdjacencyMap();
     this.startSimulation();
@@ -1909,7 +1893,7 @@ var GraphController = class {
     if (!this.graph)
       return;
     this.renderer.setGraph(this.graph);
-    this.simulation = createSimulation(this.graph, this.camera, () => this.interactor.getMouseScreenPosition());
+    this.simulation = createSimulation(this.graph, this.camera, () => this.interactor.getGravityCenter());
     this.startSimulation();
   }
   animationLoop = (timestamp) => {
@@ -1934,7 +1918,7 @@ var GraphController = class {
     const cursorType = interactor.cursorType;
     cursor.apply(cursorType);
     this.updateCameraAnimation(timestamp);
-    renderer.setMouseScreenPosition(interactor.getMouseScreenPosition());
+    renderer.setMouseScreenPosition(interactor.getGravityCenter());
     renderer.render();
     this.animationFrame = requestAnimationFrame(this.animationLoop);
   };
@@ -1964,9 +1948,9 @@ var GraphController = class {
     if (!n)
       return;
     cam.patchState({
-      targetX: n.x,
-      targetY: n.y,
-      targetZ: n.z
+      targetX: n.location.x,
+      targetY: n.location.y,
+      targetZ: n.location.z
     });
   }
   resetCamera() {
@@ -1979,9 +1963,9 @@ var GraphController = class {
     if (!cn)
       return;
     cam.patchState({
-      targetX: cn.x,
-      targetY: cn.y,
-      targetZ: cn.z
+      targetX: cn.location.x,
+      targetY: cn.location.y,
+      targetZ: cn.location.z
     });
   }
   startSimulation() {
@@ -2003,8 +1987,8 @@ var GraphController = class {
     let file = null;
     if (node.file)
       file = node.file;
-    else if (node.filePath) {
-      const af = app.vault.getAbstractFileByPath(node.filePath);
+    else if (node.id) {
+      const af = app.vault.getAbstractFileByPath(node.id);
       if (af instanceof import_obsidian.TFile)
         file = af;
     }

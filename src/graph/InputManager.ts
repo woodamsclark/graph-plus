@@ -58,7 +58,7 @@ export interface InputManagerCallbacks {
     detectClickedNode(
         screenX: number,
         screenY: number,
-    ): { id: string; filePath?: string; label: string } | null;
+    ): { id: string; label: string } | null;
 }
 
 export class InputManager {

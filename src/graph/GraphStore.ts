@@ -108,8 +108,8 @@ export class GraphStore {
         const nodePositions: PersistedGraphState["nodePositions"] = {};
 
         for (const n of graph.nodes) {
-            if (!Number.isFinite(n.x) || !Number.isFinite(n.y) || !Number.isFinite(n.z)) continue;
-            nodePositions[n.id] = { x: n.x, y: n.y, z: n.z };
+            if (!Number.isFinite(n.location.x) || !Number.isFinite(n.location.y) || !Number.isFinite(n.location.z)) continue;
+            nodePositions[n.id] = { x: n.location.x, y: n.location.y, z: n.location.z };
         }
 
         return { version: 1, vaultId, nodePositions };
@@ -120,8 +120,8 @@ export class GraphStore {
         for (const n of graph.nodes) {
             const p = pos[n.id];
             if (!p) continue;
-            n.x = p.x; n.y = p.y; n.z = p.z;
-            n.vx = 0; n.vy = 0; n.vz = 0; // avoid load “explosions”
+            n.location.x = p.x; n.location.y = p.y; n.location.z = p.z;
+            n.velocity.vx = 0; n.velocity.vy = 0; n.velocity.vz = 0; // avoid load “explosions”
         }
     }
 
@@ -163,20 +163,24 @@ export class GraphStore {
             const jitter = 50;
             nodes.push({
                 id          : file.path,
-                filePath    : file.path,
-                file        : file,
                 label       : file.basename,
-                x           : (Math.random() - 0.5) * jitter,
-                y           : (Math.random() - 0.5) * jitter,
-                z           : (Math.random() - 0.5) * jitter,
-                vx          : 0,
-                vy          : 0,
-                vz          : 0,
+                location    : { 
+                    x : (Math.random() - 0.5) * jitter,
+                    y : (Math.random() - 0.5) * jitter,
+                    z : (Math.random() - 0.5) * jitter, 
+                },
+                velocity    : {
+                    vx : 0,
+                    vy : 0,
+                    vz : 0,
+                },
                 type        : "note",
-                inDegree    : 0,
-                outDegree   : 0,
-                totalDegree : 0,
+                inLinks    : 0,
+                outLinks   : 0,
+                totalLinks : 0,
                 radius      : 0,
+                file        : file,
+                anima       : 0,
             });
         }
 
@@ -209,12 +213,16 @@ export class GraphStore {
             nodes.push({
                 id: `tag:${cleanTag}`,
                 label: `#${cleanTag}`,
-                x: (Math.random() - 0.5) * jitter,
-                y: (Math.random() - 0.5) * jitter,
-                z: (Math.random() - 0.5) * jitter,
-                vx: 0, vy: 0, vz: 0,
+                location: { 
+                    x: (Math.random() - 0.5) * jitter,
+                    y: (Math.random() - 0.5) * jitter,
+                    z: (Math.random() - 0.5) * jitter, 
+                },
+                velocity: { 
+                    vx: 0, vy: 0, vz: 0 
+                },
                 type: "tag",
-                inDegree: 0, outDegree: 0, totalDegree: 0,
+                inLinks: 0, outLinks: 0, totalLinks: 0,
                 radius: 0,
             });
         }
@@ -308,9 +316,9 @@ export class GraphStore {
 
         // Reset first (prevents double-count if re-run)
         for (const n of graph.nodes) {
-            n.inDegree = 0;
-            n.outDegree = 0;
-            n.totalDegree = 0;
+            n.inLinks = 0;
+            n.outLinks = 0;
+            n.totalLinks = 0;
             n.radius = 0;
         }
 
@@ -320,13 +328,13 @@ export class GraphStore {
             if (!src || !tgt) continue;
 
             const c = Number(e.linkCount || 1) || 1;
-            src.outDegree = (src.outDegree || 0) + c;
-            tgt.inDegree = (tgt.inDegree || 0) + c;
+            src.outLinks = (src.outLinks || 0) + c;
+            tgt.inLinks = (tgt.inLinks || 0) + c;
         }
 
         for (const n of graph.nodes) {
-            n.totalDegree = (n.inDegree || 0) + (n.outDegree || 0);
-            n.radius =  Math.min( Math.max(settings.graph.minNodeRadius + Math.log2(1 + n.totalDegree), settings.graph.minNodeRadius), settings.graph.maxNodeRadius );
+            n.totalLinks = (n.inLinks || 0) + (n.outLinks || 0);
+            n.radius =  Math.min( Math.max(settings.graph.minNodeRadius + Math.log2(1 + n.totalLinks), settings.graph.minNodeRadius), settings.graph.maxNodeRadius );
         }
     }
 
@@ -361,7 +369,7 @@ export class GraphStore {
 
         for (const n of nodes) {
             if (n.type !== "note") continue;
-            const deg = n.totalDegree ?? 0;
+            const deg = n.totalLinks ?? 0;
             if (deg > bestDeg) {
             bestDeg = deg;
             best = n;
