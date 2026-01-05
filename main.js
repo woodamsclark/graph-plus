@@ -51,9 +51,10 @@ function createRenderer(canvas, camera) {
   let settings = getSettings();
   let mousePosition = null;
   let graph = null;
-  let nodeById = /* @__PURE__ */ new Map();
+  let worldNodes = /* @__PURE__ */ new Map();
   let theme = buildThemeSnapshot();
   const nodeMap = /* @__PURE__ */ new Map();
+  let followedNodeId = null;
   let cssW = 1;
   let cssH = 1;
   let dpr = 1;
@@ -76,7 +77,7 @@ function createRenderer(canvas, camera) {
   }
   function destroy() {
     graph = null;
-    nodeById.clear();
+    worldNodes.clear();
   }
   function drawEdges(nodeMap2) {
     if (!context || !graph || !graph.edges)
@@ -88,8 +89,8 @@ function createRenderer(canvas, camera) {
     context.lineWidth = 1;
     context.lineCap = "round";
     for (const edge of edges) {
-      const src = nodeById.get(edge.sourceId);
-      const tgt = nodeById.get(edge.targetId);
+      const src = worldNodes.get(edge.sourceId);
+      const tgt = worldNodes.get(edge.targetId);
       if (!src || !tgt)
         continue;
       const p1 = nodeMap2.get(edge.sourceId);
@@ -127,7 +128,7 @@ function createRenderer(canvas, camera) {
     }
     context.restore();
   }
-  function drawLabels(nodeMap2) {
+  function drawLabels(projectedNodes) {
     if (!context || !graph || !graph.nodes || !mousePosition)
       return;
     if (!settings.graph.showLabels)
@@ -144,7 +145,7 @@ function createRenderer(canvas, camera) {
     context.textBaseline = "top";
     context.fillStyle = theme.colors.label;
     for (const node of graph.nodes) {
-      const p = nodeMap2.get(node.id);
+      const p = projectedNodes.get(node.id);
       if (!p || p.depth < 0)
         continue;
       const dx = p.x - mousePosition.x;
@@ -159,10 +160,10 @@ function createRenderer(canvas, camera) {
       context.fillText(node.label, p.x, p.y + node.radius + offsetY);
     }
     if (followedNodeId) {
-      const pFollow = nodeMap2.get(followedNodeId);
+      const pFollow = projectedNodes.get(followedNodeId);
       if (pFollow && pFollow.depth >= 0) {
         context.globalAlpha = 1;
-        const followedNode = nodeById.get(followedNodeId);
+        const followedNode = worldNodes.get(followedNodeId);
         const r = followedNode?.radius ?? 0;
         context.fillText(
           followedNode?.label ?? "",
@@ -175,11 +176,11 @@ function createRenderer(canvas, camera) {
   }
   function setGraph(data) {
     graph = data;
-    nodeById.clear();
+    worldNodes.clear();
     if (!data)
       return;
     for (const node of data.nodes) {
-      nodeById.set(node.id, node);
+      worldNodes.set(node.id, node);
     }
     const counts = data.nodes.reduce(
       (acc, n) => {

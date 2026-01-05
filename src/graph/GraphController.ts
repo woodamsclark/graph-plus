@@ -162,7 +162,7 @@ export class GraphController {
 
     this.renderer.setGraph(this.graph);
 
-    this.simulation = createSimulation(this.graph, this.camera, () => this.interactor!.getMouseScreenPosition());
+    this.simulation = createSimulation(this.graph, this.camera, () => this.interactor!.getGravityCenter());
     this.startSimulation();
 }
 
@@ -192,7 +192,7 @@ export class GraphController {
 
     this.updateCameraAnimation(timestamp); // does nothing rn
     
-    renderer.setMouseScreenPosition(interactor.getMouseScreenPosition());
+    renderer.setMouseScreenPosition(interactor.getGravityCenter());
     renderer.render();
 
     this.animationFrame = requestAnimationFrame(this.animationLoop);
@@ -240,13 +240,10 @@ export class GraphController {
     const cam   = this.camera;
     if (!graph || !cam) return;
 
-    const cn = graph.centerNode;
-    if (!cn) return;
-
     cam.patchState({
-      targetX: cn.x,
-      targetY: cn.y,
-      targetZ: cn.z,
+      targetX: 0,
+      targetY: 0,
+      targetZ: 0,
     });
   }
 

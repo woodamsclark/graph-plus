@@ -32,6 +32,7 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
   let worldNodes                                        = new Map<string, GraphNode>();
   let theme         : ThemeSnapshot                   = buildThemeSnapshot();
   const nodeMap = new Map<string, { x: number; y: number; depth: number }>();
+  let followedNodeId  : string | null = null;
   
   let cssW = 1;
   let cssH = 1;
