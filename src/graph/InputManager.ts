@@ -16,6 +16,7 @@ type InputState =
       clickedNodeId: string | null;
       pointerId: number;
       rightClickIntent: boolean; // “would rotate/follow/reset if released”
+      longPressFired: boolean;
     }
   | { kind: 'drag-node'; nodeId: string; lastClient: ClientPt }
   | { kind: 'pan'; lastClient: ClientPt }
@@ -68,6 +69,16 @@ export class InputManager {
     private gesture : TwoFingerGesture;
     private wheel   : WheelGestureSession;
     settings                        = getSettings();
+    private longPressTimer: number | null = null;
+    private longPressPointerId: number | null = null;
+
+    private clearLongPress() {
+        if (this.longPressTimer !== null) {
+        window.clearTimeout(this.longPressTimer);
+        this.longPressTimer = null;
+        }
+        this.longPressPointerId = null;
+    }
 
     constructor(private canvas: HTMLCanvasElement, private callback: InputManagerCallbacks) {
         this.canvas.style.touchAction = 'none';
@@ -105,6 +116,33 @@ export class InputManager {
         };
     };
 
+    private startLongPress(e: PointerEvent) {
+        this.clearLongPress();
+
+        const longPressMs = this.settings?.camera?.longPressMs;
+
+        this.longPressPointerId = e.pointerId;
+        this.longPressTimer = window.setTimeout(() => {
+        // Only trigger if we’re still in a single-pointer press with same pointer
+        if (
+            this.state.kind === 'press' &&
+            this.state.pointerId === e.pointerId &&
+            this.pointers.size() === 1 &&
+            !this.state.rightClickIntent
+        ) {
+            // mark + treat as “right click intent”
+            this.state.rightClickIntent = true;
+            this.state.longPressFired   = true;
+
+            // ✅ IMMEDIATE focus/reset
+            if (this.state.clickedNodeId) this.callback.onFollowStart(this.state.clickedNodeId);
+            else this.callback.resetCamera();
+
+            // optional haptic (works on some devices)
+            // navigator.vibrate?.(10);
+        }
+        }, longPressMs);
+    }
 
     private attachListeners() {
         // Pointer events unify mouse/touch/pen.
@@ -129,10 +167,11 @@ export class InputManager {
         this.pointers.upsert(e);
 
         const eScreen = this.getScreenFromClient(e.clientX, e.clientY);
-        this.callback.onMouseMove(eScreen.x, eScreen.y);
+        //this.callback.onMouseMove(eScreen.x, eScreen.y);
 
         // If 2 pointers → enter touch gesture state (and end any single-pointer mode cleanly)
         if (this.pointers.size() === 2) {
+            this.clearLongPress();
             this.endSinglePointerIfNeeded();
             const pair = this.pointers.two();
             if (!pair) return;
@@ -143,7 +182,6 @@ export class InputManager {
                 lastCentroid: gesture.centroid,
                 lastDist: gesture.dist,
                 lastAngle: gesture.angle,
-//                panStarted: false,
                 rotateStarted: false,
             };
             return;
@@ -155,7 +193,9 @@ export class InputManager {
         const isRight = e.button === 2;
         const rightClickIntent = isMouse && ((isLeft && (e.ctrlKey || e.metaKey)) || isRight);
 
+        this.callback.onMouseMove(eScreen.x, eScreen.y);
         const clickedNodeId = this.callback.detectClickedNode(eScreen.x, eScreen.y)?.id ?? null;
+            
 
         this.state = {
             kind: 'press',
@@ -165,7 +205,12 @@ export class InputManager {
             clickedNodeId,
             pointerId: e.pointerId,
             rightClickIntent,
+            longPressFired: false,
         };
+        
+        if (!isMouse && (e.pointerType === 'touch' || e.pointerType === 'pen')) {
+          this.startLongPress(e);
+        }
     };
 
 
@@ -173,7 +218,7 @@ export class InputManager {
         this.pointers.upsert(e);
 
         const screen = this.getScreenFromClient(e.clientX, e.clientY);
-        this.callback.onMouseMove(screen.x, screen.y);
+        //this.callback.onMouseMove(screen.x, screen.y);
 
         // 2-finger gesture
         if (this.state.kind === 'touch-gesture' && this.pointers.size() === 2) {
@@ -214,6 +259,7 @@ export class InputManager {
         }
 
         // Single-pointer modes
+        this.callback.onMouseMove(screen.x, screen.y);
         switch (this.state.kind) {
             case 'press': {
                 const threshhold = this.settings.camera.dragThreshold;
@@ -224,6 +270,7 @@ export class InputManager {
                 this.state.lastClient = { x: e.clientX, y: e.clientY };
 
                 if (movedSq <= threshholdSq) return;
+                this.clearLongPress();
 
                 if (this.state.rightClickIntent) {
                     // transition to rotate (after threshold)
@@ -266,6 +313,7 @@ export class InputManager {
 
     private onPointerUp = (e: PointerEvent) => {
         e.preventDefault();
+        this.clearLongPress();
         try { this.canvas.releasePointerCapture(e.pointerId); } catch {}
 
         const screen = this.getScreenFromClient(e.clientX, e.clientY);
@@ -291,21 +339,24 @@ export class InputManager {
             this.callback.onRotateEnd();
             break;
             case 'press':
-            if (this.state.rightClickIntent) {
-                if (this.state.clickedNodeId) this.callback.onFollowStart(this.state.clickedNodeId);
-                else this.callback.resetCamera();
-            } else {
-                this.callback.onOpenNode(screen.x, screen.y);
-            }
-            break;
+                 if (this.state.longPressFired) {
+                    break;
+                }
+                if (this.state.rightClickIntent) {
+                    if (this.state.clickedNodeId) this.callback.onFollowStart(this.state.clickedNodeId);
+                    else this.callback.resetCamera();
+                } else {
+                    this.callback.onOpenNode(screen.x, screen.y);
+                }
+                break;
         }
-
         this.state = { kind: 'idle' };
     };
 
 
     private onPointerCancel = (e: PointerEvent) => {
         e.preventDefault();
+        this.clearLongPress();
         this.pointers.delete(e.pointerId);
 
         // end any active state

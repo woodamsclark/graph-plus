@@ -324,8 +324,8 @@ export function createSimulation(
       const dy = (b.location.y - a.location.y);
       const dz = ((b.location.z || 0) - (a.location.z || 0));
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.0001;
-      const displacement = dist - (physicsSettings.springLength || 0);
-      const f = (physicsSettings.springStrength || 0) * Math.tanh(displacement / 50);
+      const displacement = dist - (physicsSettings.edgeLength || 0);
+      const f = (physicsSettings.edgeStrength || 0) * Math.tanh(displacement / 50);
       const fx = (dx / dist) * f;
       const fy = (dy / dist) * f;
       const fz = (dz / dist) * f;

@@ -766,6 +766,15 @@ var InputManager = class {
   gesture;
   wheel;
   settings = getSettings();
+  longPressTimer = null;
+  longPressPointerId = null;
+  clearLongPress() {
+    if (this.longPressTimer !== null) {
+      window.clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
+    this.longPressPointerId = null;
+  }
   getScreenFromClient = (clientX, clientY) => {
     const rect = this.canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
@@ -778,6 +787,21 @@ var InputManager = class {
       y: (clientY - rect.top) * scaleY
     };
   };
+  startLongPress(e) {
+    this.clearLongPress();
+    const longPressMs = this.settings?.camera?.longPressMs;
+    this.longPressPointerId = e.pointerId;
+    this.longPressTimer = window.setTimeout(() => {
+      if (this.state.kind === "press" && this.state.pointerId === e.pointerId && this.pointers.size() === 1 && !this.state.rightClickIntent) {
+        this.state.rightClickIntent = true;
+        this.state.longPressFired = true;
+        if (this.state.clickedNodeId)
+          this.callback.onFollowStart(this.state.clickedNodeId);
+        else
+          this.callback.resetCamera();
+      }
+    }, longPressMs);
+  }
   attachListeners() {
     this.canvas.addEventListener("pointerdown", this.onPointerDown, { passive: false });
     this.canvas.addEventListener("pointermove", this.onPointerMove, { passive: false });
@@ -793,8 +817,8 @@ var InputManager = class {
     this.canvas.setPointerCapture(e.pointerId);
     this.pointers.upsert(e);
     const eScreen = this.getScreenFromClient(e.clientX, e.clientY);
-    this.callback.onMouseMove(eScreen.x, eScreen.y);
     if (this.pointers.size() === 2) {
+      this.clearLongPress();
       this.endSinglePointerIfNeeded();
       const pair = this.pointers.two();
       if (!pair)
@@ -805,7 +829,6 @@ var InputManager = class {
         lastCentroid: gesture.centroid,
         lastDist: gesture.dist,
         lastAngle: gesture.angle,
-        //                panStarted: false,
         rotateStarted: false
       };
       return;
@@ -814,6 +837,7 @@ var InputManager = class {
     const isLeft = e.button === 0;
     const isRight = e.button === 2;
     const rightClickIntent = isMouse && (isLeft && (e.ctrlKey || e.metaKey) || isRight);
+    this.callback.onMouseMove(eScreen.x, eScreen.y);
     const clickedNodeId = this.callback.detectClickedNode(eScreen.x, eScreen.y)?.id ?? null;
     this.state = {
       kind: "press",
@@ -822,13 +846,16 @@ var InputManager = class {
       lastClient: { x: e.clientX, y: e.clientY },
       clickedNodeId,
       pointerId: e.pointerId,
-      rightClickIntent
+      rightClickIntent,
+      longPressFired: false
     };
+    if (!isMouse && (e.pointerType === "touch" || e.pointerType === "pen")) {
+      this.startLongPress(e);
+    }
   };
   onPointerMove = (e) => {
     this.pointers.upsert(e);
     const screen = this.getScreenFromClient(e.clientX, e.clientY);
-    this.callback.onMouseMove(screen.x, screen.y);
     if (this.state.kind === "touch-gesture" && this.pointers.size() === 2) {
       e.preventDefault();
       const pair = this.pointers.two();
@@ -854,6 +881,7 @@ var InputManager = class {
       this.state.lastAngle = gesture.angle;
       return;
     }
+    this.callback.onMouseMove(screen.x, screen.y);
     switch (this.state.kind) {
       case "press": {
         const threshhold = this.settings.camera.dragThreshold;
@@ -863,6 +891,7 @@ var InputManager = class {
         this.state.lastClient = { x: e.clientX, y: e.clientY };
         if (movedSq <= threshholdSq)
           return;
+        this.clearLongPress();
         if (this.state.rightClickIntent) {
           this.callback.onRotateStart(screen.x, screen.y);
           this.state = { kind: "rotate", lastClient: { x: e.clientX, y: e.clientY } };
@@ -896,6 +925,7 @@ var InputManager = class {
   };
   onPointerUp = (e) => {
     e.preventDefault();
+    this.clearLongPress();
     try {
       this.canvas.releasePointerCapture(e.pointerId);
     } catch {
@@ -920,6 +950,9 @@ var InputManager = class {
         this.callback.onRotateEnd();
         break;
       case "press":
+        if (this.state.longPressFired) {
+          break;
+        }
         if (this.state.rightClickIntent) {
           if (this.state.clickedNodeId)
             this.callback.onFollowStart(this.state.clickedNodeId);
@@ -934,6 +967,7 @@ var InputManager = class {
   };
   onPointerCancel = (e) => {
     e.preventDefault();
+    this.clearLongPress();
     this.pointers.delete(e.pointerId);
     switch (this.state.kind) {
       case "drag-node":
@@ -2113,6 +2147,7 @@ var DEFAULT_SETTINGS = {
   camera: {
     momentumScale: 0.12,
     dragThreshold: 4,
+    longPressMs: 750,
     rotateSensitivityX: 5e-3,
     rotateSensitivityY: 5e-3,
     zoomSensitivity: 35,

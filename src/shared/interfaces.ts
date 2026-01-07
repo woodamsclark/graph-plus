@@ -25,8 +25,8 @@ export interface GraphSettings {
 
 export interface PhysicsSettings {
   repulsionStrength     : number;
-  springStrength        : number;
-  springLength          : number;
+  edgeStrength        : number;
+  edgeLength          : number;
   centerPull            : number;
   damping               : number;
   notePlaneStiffness    : number;
@@ -45,6 +45,7 @@ export interface PhysicsSettings {
 export interface CameraSettings {
   momentumScale         : number;
   dragThreshold         : number;
+  longPressMs           : number;
   rotateSensitivityX    : number;
   rotateSensitivityY    : number;
   zoomSensitivity       : number;

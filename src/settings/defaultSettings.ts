@@ -22,8 +22,8 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
 
   physics: {
     repulsionStrength   : 5000,
-    springStrength      : 1,
-    springLength        : 100,
+    edgeStrength        : 1,
+    edgeLength          : 100,
     centerPull          : 0.001,
     damping             : 0.7,
     notePlaneStiffness  : 0,
@@ -40,6 +40,7 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
   camera: {
     momentumScale     : 0.12,
     dragThreshold     : 4,
+    longPressMs       : 750,
     rotateSensitivityX: 0.005,
     rotateSensitivityY: 0.005,
     zoomSensitivity   : 35,

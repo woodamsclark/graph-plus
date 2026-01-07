@@ -377,7 +377,7 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       },
     });
 
-    const springUi = Math.min(1, Math.max(0, (settings.physics.springStrength) / 0.5));
+    const springUi = Math.min(1, Math.max(0, (settings.physics.edgeStrength) / 0.5));
     addSliderSetting(containerEl, {
       name: 'Spring strength',
       desc: 'UI 0–1 mapped to internal spring constant (higher = stiffer).',
@@ -388,9 +388,9 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       resetValue: springUi,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-            this.applySettings((s) => { s.physics.springStrength = v * 0.5; });
+            this.applySettings((s) => { s.physics.edgeStrength = v * 0.5; });
         } else if (Number.isNaN(v)) {
-            this.applySettings((s) => { s.physics.springStrength = settings.physics!.springStrength; });
+            this.applySettings((s) => { s.physics.edgeStrength = settings.physics!.edgeStrength; });
         }
       },
     });
@@ -398,16 +398,16 @@ export class GraphPlusSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Spring length',
       desc: 'Preferred length (px) for edge springs.',
-      value: settings.physics.springLength,
+      value: settings.physics.edgeLength,
       min: 20,
       max: 400,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.physics!.springLength,
+      resetValue: DEFAULT_SETTINGS.physics!.edgeLength,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0) {
-            this.applySettings((s) => { s.physics.springLength = v; });
+            this.applySettings((s) => { s.physics.edgeLength = v; });
         } else if (Number.isNaN(v)) {
-            this.applySettings((s) => { s.physics.springLength = settings.physics!.springLength; });
+            this.applySettings((s) => { s.physics.edgeLength = settings.physics!.edgeLength; });
         }
       },
     });
