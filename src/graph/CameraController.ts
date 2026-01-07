@@ -47,66 +47,85 @@ export class CameraController {
     this.clearMomentum();
   }
 
-  worldToScreen(node: GraphNode): { x: number; y: number; depth: number } {
-  const { yaw, pitch, distance, targetX, targetY, targetZ } = this.cameraState;
-  const { offsetX, offsetY } = this.viewport;
+  worldToScreen(node: GraphNode): { x: number; y: number; depth: number; scale: number } {
+    const {
+      yaw,
+      pitch,
+      distance: cameraDistance,
+      targetX,
+      targetY,
+      targetZ,
+    } = this.cameraState;
 
-  // Read raw world coords
-  let wx0 = (node.location.x || 0);
-  let wy0 = (node.location.y || 0);
-  let wz0 = (node.location.z || 0);
+    const { offsetX: viewportCenterX, offsetY: viewportCenterY } = this.viewport;
 
-  // Apply "Turntable World" transform BEFORE camera target/rotation/projection
-  // (camera stays “still”; world rotates/scales)
-  const wt = this.worldTransform;
-  if (wt) {
-    // scale
-    wx0 *= wt.scale;
-    wy0 *= wt.scale;
-    wz0 *= wt.scale;
+    // 0) Start in world space
+    let worldX = node.location.x ?? 0;
+    let worldY = node.location.y ?? 0;
+    let worldZ = node.location.z ?? 0;
 
-    // rotate around Y (yaw)
-    const cy = Math.cos(wt.rotationY), sy = Math.sin(wt.rotationY);
-    const x1 = wx0 * cy - wz0 * sy;
-    const z1 = wx0 * sy + wz0 * cy;
-    wx0 = x1;
-    wz0 = z1;
+    // Optional "turntable world" transform (world moves, camera stays put)
+    const worldXform = this.worldTransform;
+    if (worldXform) {
+      // scale world
+      worldX *= worldXform.scale;
+      worldY *= worldXform.scale;
+      worldZ *= worldXform.scale;
 
-    // rotate around X (pitch)
-    const cx = Math.cos(wt.rotationX), sx = Math.sin(wt.rotationX);
-    const y2 = wy0 * cx - wz0 * sx;
-    const z2 = wy0 * sx + wz0 * cx;
-    wy0 = y2;
-    wz0 = z2;
+      // rotate world around Y (world yaw)
+      {
+        const cosY = Math.cos(worldXform.rotationY);
+        const sinY = Math.sin(worldXform.rotationY);
+        const rotatedX = worldX * cosY - worldZ * sinY;
+        const rotatedZ = worldX * sinY + worldZ * cosY;
+        worldX = rotatedX;
+        worldZ = rotatedZ;
+      }
+
+      // rotate world around X (world pitch)
+      {
+        const cosX = Math.cos(worldXform.rotationX);
+        const sinX = Math.sin(worldXform.rotationX);
+        const rotatedY = worldY * cosX - worldZ * sinX;
+        const rotatedZ = worldY * sinX + worldZ * cosX;
+        worldY = rotatedY;
+        worldZ = rotatedZ;
+      }
+    }
+
+    // 1) Move into camera-target-relative space (world relative to camera target)
+    const relX = worldX - targetX;
+    const relY = worldY - targetY;
+    const relZ = worldZ - targetZ;
+
+    // 2) Rotate into camera view space (apply camera yaw then pitch)
+    const cosYaw = Math.cos(yaw);
+    const sinYaw = Math.sin(yaw);
+    const viewX = relX * cosYaw - relZ * sinYaw;
+    const viewZ_afterYaw = relX * sinYaw + relZ * cosYaw;
+
+    const cosPitch = Math.cos(pitch);
+    const sinPitch = Math.sin(pitch);
+    const viewY = relY * cosPitch - viewZ_afterYaw * sinPitch;
+    const viewZ = relY * sinPitch + viewZ_afterYaw * cosPitch;
+
+    // 3) Perspective projection
+    // "depthToCameraPlane" is how far in front of the camera the point is (in view space)
+    const depthToCameraPlane  = cameraDistance - viewZ;
+    const depthForDivide      = Math.max(0.0001, depthToCameraPlane); // Avoid divide-by-zero
+    const focalLengthPx       = this.cameraSettings.focalLengthPx;
+
+    // Pixels-per-world-unit at this depth
+    const pixelsPerWorldUnit  = focalLengthPx / depthForDivide;
+
+    return {
+      x: viewX * pixelsPerWorldUnit + viewportCenterX,
+      y: viewY * pixelsPerWorldUnit + viewportCenterY,
+      depth: depthToCameraPlane,
+      scale: pixelsPerWorldUnit,
+    };
   }
 
-  // 1) Translate world to camera target
-  const wx = wx0 - targetX;
-  const wy = wy0 - targetY;
-  const wz = wz0 - targetZ;
-
-  // 2) Camera rotate (Yaw then Pitch) — existing logic
-  const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
-  const xz = wx * cosYaw - wz * sinYaw;
-  const zz = wx * sinYaw + wz * cosYaw;
-
-  const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
-  const yz = wy * cosP - zz * sinP;
-  const zz2 = wy * sinP + zz * cosP;
-
-  // 3) Project — existing logic
-  const camZ = distance;
-  const dz   = camZ - zz2;
-  const safeDz = Math.max(0.0001, dz);
-  const focal = 800;
-  const perspective = focal / safeDz;
-
-  return {
-    x: xz * perspective + offsetX,
-    y: yz * perspective + offsetY,
-    depth: dz
-  };
-  }
 
   setWorldTransform(t: WorldTransform | null) {
     this.worldTransform = t;
@@ -124,7 +143,7 @@ export class CameraController {
     const { yaw, pitch, distance: camZ, targetX, targetY, targetZ } = this.cameraState;
     const { offsetX, offsetY } = this.viewport;
 
-    const focal       = 800;
+    const focal       = this.cameraSettings.focalLengthPx;
     const px          = screenX - offsetX;
     const py          = screenY - offsetY;
 

@@ -45,6 +45,7 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
     rotateSensitivityY: 0.005,
     zoomSensitivity   : 35,
     cameraAnimDuration: 300,
+    focalLengthPx      : 800,
     state: {
       yaw     : 0,
       pitch   : 0,

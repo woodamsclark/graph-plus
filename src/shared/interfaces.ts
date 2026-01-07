@@ -50,6 +50,7 @@ export interface CameraSettings {
   rotateSensitivityY    : number;
   zoomSensitivity       : number;
   cameraAnimDuration    : number;
+  focalLengthPx           : number;
   state                 : CameraState;
 }
 

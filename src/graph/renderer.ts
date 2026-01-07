@@ -29,11 +29,10 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
   let settings                                        = getSettings();
   let mousePosition : { x: number; y: number } | null = null;
   let graph         : GraphData                | null = null;
-  let worldNodes                                        = new Map<string, GraphNode>();
+  let worldNodes                                      = new Map<string, GraphNode>();
   let theme         : ThemeSnapshot                   = buildThemeSnapshot();
-  const nodeMap = new Map<string, { x: number; y: number; depth: number }>();
-  let followedNodeId  : string | null = null;
-  
+  let nodeMap = new Map<string, { x: number; y: number; depth: number; scale: number }>();
+  let followedNodeId: string | null = null;
   let cssW = 1;
   let cssH = 1;
   let dpr  = 1;
@@ -47,7 +46,7 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     context.fillStyle = theme.colors.background;
     //context.fillRect(0, 0, canvas.width, canvas.height);
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
-    context.fillRect(0, 0, cssW, cssH); // ✅ NOT canvas.width/height
+    context.fillRect(0, 0, cssW, cssH);
 
     if (!graph) return;
 
@@ -66,7 +65,7 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     worldNodes.clear();
   }
 
-  function drawEdges(nodeMap: Map<string, { x: number; y: number; depth: number }>) {
+  function drawEdges(nodeMap: Map<string, { x: number; y: number; depth: number; scale: number }>) {
     if (!context || !graph || !graph.edges) return;
 
     const edges: GraphEdge[] = graph.edges;
@@ -99,7 +98,7 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     context.restore();
   }
 
-  function drawNodes(nodeMap: Map<string, { x: number; y: number; depth: number }>) {
+  function drawNodes(nodeMap: Map<string, { x: number; y: number; depth: number; scale: number }>) {
     if (!context || !graph || !graph.nodes) return;
 
     const nodes: GraphNode[] = graph.nodes;
@@ -113,13 +112,15 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
       const p = nodeMap.get(node.id);
       if (!p || p.depth < 0) continue;
 
-      let radius = node.radius;
+      const radiusPx = node.radius * p.scale;
+      // optional: soft clamp
+      // const radiusPx = clamp(node.radiusWorld * p.scale, MIN_PX, MAX_PX);
 
       const isTag = node.type === 'tag';
       const fillColor = isTag ? tagColor : nodeColor;
 
       context.beginPath();
-      context.arc(p.x, p.y, radius, 0, Math.PI * 2);
+      context.arc(p.x, p.y, radiusPx, 0, Math.PI * 2);
       context.fillStyle = fillColor;
       context.globalAlpha = 1;
       context.fill();
