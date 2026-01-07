@@ -18,3 +18,6 @@ yarn-error.log*
 .env
 
 data.json
+
+# Compiled JavaScript files
+main.js
