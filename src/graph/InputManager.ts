@@ -4,36 +4,37 @@ import { WheelGestureSession } from './WheelGestureSession.ts';
 import { PointerTracker } from './PointerTracker.ts';
 import { distSq } from '../shared/distSq.ts';
 import { wrapAngleDelta } from '../shared/wrapAngleDelta.ts';
+import { getSettings } from '../settings/settingsStore.ts';
 
 type InputState =
   | { kind: 'idle' }
-  | {
+  | { // waiting to see if press turns into drag/pan/rotate
       kind: 'press';
       downClient: ClientPt;
       downScreen: ScreenPt;
       lastClient: ClientPt;
       clickedNodeId: string | null;
       pointerId: number;
-      rightClickIntent: boolean; // “would orbit/follow/reset if released”
+      rightClickIntent: boolean; // “would rotate/follow/reset if released”
     }
   | { kind: 'drag-node'; nodeId: string; lastClient: ClientPt }
   | { kind: 'pan'; lastClient: ClientPt }
-  | { kind: 'orbit'; lastClient: ClientPt }
-  | {
+  | { kind: 'rotate'; lastClient: ClientPt }
+  | { // multi-touch gesture
       kind: 'touch-gesture';
       lastCentroid: ScreenPt;
       lastDist: number;
       lastAngle: number;
-      panStarted: boolean;
-      orbitStarted: boolean;
+//      panStarted: boolean;
+      rotateStarted: boolean;
     };
 
 
 export interface InputManagerCallbacks {
     // Camera Control
-    onOrbitStart(screenX: number, screenY: number): void;
-    onOrbitMove(screenX: number, screenY: number): void;
-    onOrbitEnd(): void;
+    onRotateStart(screenX: number, screenY: number): void;
+    onRotateMove(screenX: number, screenY: number): void;
+    onRotateEnd(): void;
 
     onPanStart(screenX: number, screenY: number): void;
     onPanMove(screenX: number, screenY: number): void;
@@ -62,10 +63,11 @@ export interface InputManagerCallbacks {
 }
 
 export class InputManager {
-    private state: InputState = { kind: 'idle' };
-    private pointers = new PointerTracker();
-    private gesture: TwoFingerGesture;
-    private wheel: WheelGestureSession;
+    private state   : InputState    = { kind: 'idle' };
+    private pointers                = new PointerTracker();
+    private gesture : TwoFingerGesture;
+    private wheel   : WheelGestureSession;
+    settings                        = getSettings();
 
     constructor(private canvas: HTMLCanvasElement, private callback: InputManagerCallbacks) {
         this.canvas.style.touchAction = 'none';
@@ -81,6 +83,7 @@ export class InputManager {
         );
 
         this.attachListeners();
+        this.settings = getSettings();
     }
 
     private getScreenFromClient = (clientX: number, clientY: number): ScreenPt => {
@@ -118,9 +121,7 @@ export class InputManager {
         this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     }
 
-    // -----------------------------
-    // Pointer events
-    // -----------------------------
+    // ------------ Pointer events -----------------
 
     private onPointerDown = (e: PointerEvent) => {
         e.preventDefault();
@@ -135,15 +136,15 @@ export class InputManager {
             this.endSinglePointerIfNeeded();
             const pair = this.pointers.two();
             if (!pair) return;
-            const g = this.gesture.read(pair);
+            const gesture = this.gesture.read(pair);
 
             this.state = {
-            kind: 'touch-gesture',
-            lastCentroid: g.centroid,
-            lastDist: g.dist,
-            lastAngle: g.angle,
-            panStarted: false,
-            orbitStarted: false,
+                kind: 'touch-gesture',
+                lastCentroid: gesture.centroid,
+                lastDist: gesture.dist,
+                lastAngle: gesture.angle,
+//                panStarted: false,
+                rotateStarted: false,
             };
             return;
         }
@@ -180,68 +181,69 @@ export class InputManager {
             const pair = this.pointers.two();
             if (!pair) return;
 
-            const g = this.gesture.read(pair);
+            const gesture = this.gesture.read(pair);
 
             // Pan start/move
-            if (!this.state.panStarted && this.gesture.shouldStartPan(this.state.lastCentroid, g.centroid)) {
-            this.state.panStarted = true;
-            this.callback.onPanStart(g.centroid.x, g.centroid.y);
+/*            if (!this.state.panStarted && this.gesture.shouldStartPan(this.state.lastCentroid, gesture.centroid)) {
+                this.state.panStarted = true;
+                this.callback.onPanStart(gesture.centroid.x, gesture.centroid.y);
             }
-            if (this.state.panStarted) this.callback.onPanMove(g.centroid.x, g.centroid.y);
-
+            if (this.state.panStarted) this.callback.onPanMove(gesture.centroid.x, gesture.centroid.y);
+*/
             // Pinch zoom
-            const distDelta = g.dist - this.state.lastDist;
+            const distDelta = gesture.dist - this.state.lastDist;
             const pinchThreshold = 2;
             if (Math.abs(distDelta) >= pinchThreshold) {
             const direction = distDelta > 0 ? -1 : 1;
-            this.callback.onZoom(g.centroid.x, g.centroid.y, direction);
+            this.callback.onZoom(gesture.centroid.x, gesture.centroid.y, direction);
             }
 
-            // Twist orbit
-            const dTheta = wrapAngleDelta(g.angle - this.state.lastAngle);
-            const twistThreshold = 0.04;
-            if (!this.state.orbitStarted && Math.abs(dTheta) > twistThreshold) {
-            this.state.orbitStarted = true;
-            this.callback.onOrbitStart(g.centroid.x, g.centroid.y);
+            // Twist rotate
+            const dTheta = wrapAngleDelta(gesture.angle - this.state.lastAngle);
+            const rotateThreshhold = 0.00;
+            if (!this.state.rotateStarted && Math.abs(dTheta) > rotateThreshhold) {
+                this.state.rotateStarted = true;
+                this.callback.onRotateStart(gesture.centroid.x, gesture.centroid.y);
             }
-            if (this.state.orbitStarted) this.callback.onOrbitMove(g.centroid.x, g.centroid.y);
+            if (this.state.rotateStarted) this.callback.onRotateMove(gesture.centroid.x, gesture.centroid.y);
 
-            this.state.lastCentroid = g.centroid;
-            this.state.lastDist = g.dist;
-            this.state.lastAngle = g.angle;
+            this.state.lastCentroid = gesture.centroid;
+            this.state.lastDist     = gesture.dist;
+            this.state.lastAngle    = gesture.angle;
             return;
         }
 
         // Single-pointer modes
         switch (this.state.kind) {
             case 'press': {
-            const thresholdSq = 5 * 5;
-            const movedSq = distSq(screen, this.state.downScreen);
+                const threshhold = this.settings.camera.dragThreshold;
+                const threshholdSq = threshhold * threshhold;
+                const movedSq = distSq(screen, this.state.downScreen);
 
-            const last = this.state.lastClient;
-            this.state.lastClient = { x: e.clientX, y: e.clientY };
+                const last = this.state.lastClient;
+                this.state.lastClient = { x: e.clientX, y: e.clientY };
 
-            if (movedSq <= thresholdSq) return;
+                if (movedSq <= threshholdSq) return;
 
-            if (this.state.rightClickIntent) {
-                // transition to orbit (after threshold)
-                this.callback.onOrbitStart(screen.x, screen.y);
-                this.state = { kind: 'orbit', lastClient: { x: e.clientX, y: e.clientY } };
+                if (this.state.rightClickIntent) {
+                    // transition to rotate (after threshold)
+                    this.callback.onRotateStart(screen.x, screen.y);
+                    this.state = { kind: 'rotate', lastClient: { x: e.clientX, y: e.clientY } };
+                    return;
+                }
+
+                if (this.state.clickedNodeId) {
+                    this.callback.onDragStart(this.state.clickedNodeId, screen.x, screen.y);
+                    this.state = {
+                        kind: 'drag-node',
+                        nodeId: this.state.clickedNodeId,
+                        lastClient: { x: e.clientX, y: e.clientY },
+                    };
+                } else {
+                    this.callback.onPanStart(screen.x, screen.y);
+                    this.state = { kind: 'pan', lastClient: { x: e.clientX, y: e.clientY } };
+                }
                 return;
-            }
-
-            if (this.state.clickedNodeId) {
-                this.callback.onDragStart(this.state.clickedNodeId, screen.x, screen.y);
-                this.state = {
-                    kind: 'drag-node',
-                    nodeId: this.state.clickedNodeId,
-                    lastClient: { x: e.clientX, y: e.clientY },
-                };
-            } else {
-                this.callback.onPanStart(screen.x, screen.y);
-                this.state = { kind: 'pan', lastClient: { x: e.clientX, y: e.clientY } };
-            }
-            return;
             }
 
             case 'drag-node':
@@ -252,8 +254,8 @@ export class InputManager {
                 this.callback.onPanMove(screen.x, screen.y);
             return;
 
-            case 'orbit':
-                this.callback.onOrbitMove(screen.x, screen.y);
+            case 'rotate':
+                this.callback.onRotateMove(screen.x, screen.y);
             return;
 
             default:
@@ -271,8 +273,8 @@ export class InputManager {
         this.pointers.delete(e.pointerId);
 
     if (this.state.kind === 'touch-gesture' && this.pointers.size() < 2) {
-        if (this.state.panStarted) this.callback.onPanEnd();
-        if (this.state.orbitStarted) this.callback.onOrbitEnd();
+//        if (this.state.panStarted) this.callback.onPanEnd();
+        if (this.state.rotateStarted) this.callback.onRotateEnd();
         this.state = { kind: 'idle' };
         this.rebaselineRemainingPointerForContinuity();
         return;
@@ -285,8 +287,8 @@ export class InputManager {
             case 'pan':
             this.callback.onPanEnd();
             break;
-            case 'orbit':
-            this.callback.onOrbitEnd();
+            case 'rotate':
+            this.callback.onRotateEnd();
             break;
             case 'press':
             if (this.state.rightClickIntent) {
@@ -309,18 +311,18 @@ export class InputManager {
         // end any active state
         switch (this.state.kind) {
             case 'drag-node':
-            this.callback.onDragEnd();
-            break;
+                this.callback.onDragEnd();
+                break;
             case 'pan':
-            this.callback.onPanEnd();
-            break;
-            case 'orbit':
-            this.callback.onOrbitEnd();
-            break;
+                this.callback.onPanEnd();
+                break;
+                case 'rotate':
+                this.callback.onRotateEnd();
+                break;
             case 'touch-gesture':
-            if (this.state.panStarted) this.callback.onPanEnd();
-            if (this.state.orbitStarted) this.callback.onOrbitEnd();
-            break;
+ //               if (this.state.panStarted) this.callback.onPanEnd();
+                if (this.state.rotateStarted) this.callback.onRotateEnd();
+                break;
         }
 
         this.wheel.cancel();     // important: end any wheel pan session
@@ -343,7 +345,7 @@ export class InputManager {
         switch (this.state.kind) {
             case 'drag-node': this.callback.onDragEnd(); break;
             case 'pan': this.callback.onPanEnd(); break;
-            case 'orbit': this.callback.onOrbitEnd(); break;
+            case 'rotate': this.callback.onRotateEnd(); break;
         }
         this.state = { kind: 'idle' };
     }

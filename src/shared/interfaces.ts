@@ -11,7 +11,7 @@ export interface GraphSettings {
   showTags              : boolean;
   showLabels            : boolean;
   
-  labelFontSize     : number;
+  labelFontSize         : number;
   labelRevealRadius     : number;
   labelColor?           : string; 
 
@@ -68,8 +68,8 @@ export interface CameraState {
   offsetX               : number;
   offsetY               : number;
   offsetZ               : number;
-  orbitVelX             : number;
-  orbitVelY             : number;
+  rotateVelX             : number;
+  rotateVelY             : number;
   panVelX               : number;
   panVelY               : number;
   zoomVel               : number;

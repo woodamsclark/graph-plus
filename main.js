@@ -759,11 +759,13 @@ var InputManager = class {
       120
     );
     this.attachListeners();
+    this.settings = getSettings();
   }
   state = { kind: "idle" };
   pointers = new PointerTracker();
   gesture;
   wheel;
+  settings = getSettings();
   getScreenFromClient = (clientX, clientY) => {
     const rect = this.canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
@@ -785,9 +787,7 @@ var InputManager = class {
     this.canvas.addEventListener("wheel", this.onWheel, { passive: false });
     this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   }
-  // -----------------------------
-  // Pointer events
-  // -----------------------------
+  // ------------ Pointer events -----------------
   onPointerDown = (e) => {
     e.preventDefault();
     this.canvas.setPointerCapture(e.pointerId);
@@ -799,14 +799,14 @@ var InputManager = class {
       const pair = this.pointers.two();
       if (!pair)
         return;
-      const g = this.gesture.read(pair);
+      const gesture = this.gesture.read(pair);
       this.state = {
         kind: "touch-gesture",
-        lastCentroid: g.centroid,
-        lastDist: g.dist,
-        lastAngle: g.angle,
-        panStarted: false,
-        orbitStarted: false
+        lastCentroid: gesture.centroid,
+        lastDist: gesture.dist,
+        lastAngle: gesture.angle,
+        //                panStarted: false,
+        rotateStarted: false
       };
       return;
     }
@@ -834,43 +834,38 @@ var InputManager = class {
       const pair = this.pointers.two();
       if (!pair)
         return;
-      const g = this.gesture.read(pair);
-      if (!this.state.panStarted && this.gesture.shouldStartPan(this.state.lastCentroid, g.centroid)) {
-        this.state.panStarted = true;
-        this.callback.onPanStart(g.centroid.x, g.centroid.y);
-      }
-      if (this.state.panStarted)
-        this.callback.onPanMove(g.centroid.x, g.centroid.y);
-      const distDelta = g.dist - this.state.lastDist;
+      const gesture = this.gesture.read(pair);
+      const distDelta = gesture.dist - this.state.lastDist;
       const pinchThreshold = 2;
       if (Math.abs(distDelta) >= pinchThreshold) {
         const direction = distDelta > 0 ? -1 : 1;
-        this.callback.onZoom(g.centroid.x, g.centroid.y, direction);
+        this.callback.onZoom(gesture.centroid.x, gesture.centroid.y, direction);
       }
-      const dTheta = wrapAngleDelta(g.angle - this.state.lastAngle);
-      const twistThreshold = 0.04;
-      if (!this.state.orbitStarted && Math.abs(dTheta) > twistThreshold) {
-        this.state.orbitStarted = true;
-        this.callback.onOrbitStart(g.centroid.x, g.centroid.y);
+      const dTheta = wrapAngleDelta(gesture.angle - this.state.lastAngle);
+      const rotateThreshhold = 0;
+      if (!this.state.rotateStarted && Math.abs(dTheta) > rotateThreshhold) {
+        this.state.rotateStarted = true;
+        this.callback.onRotateStart(gesture.centroid.x, gesture.centroid.y);
       }
-      if (this.state.orbitStarted)
-        this.callback.onOrbitMove(g.centroid.x, g.centroid.y);
-      this.state.lastCentroid = g.centroid;
-      this.state.lastDist = g.dist;
-      this.state.lastAngle = g.angle;
+      if (this.state.rotateStarted)
+        this.callback.onRotateMove(gesture.centroid.x, gesture.centroid.y);
+      this.state.lastCentroid = gesture.centroid;
+      this.state.lastDist = gesture.dist;
+      this.state.lastAngle = gesture.angle;
       return;
     }
     switch (this.state.kind) {
       case "press": {
-        const thresholdSq = 5 * 5;
+        const threshhold = this.settings.camera.dragThreshold;
+        const threshholdSq = threshhold * threshhold;
         const movedSq = distSq(screen, this.state.downScreen);
         const last = this.state.lastClient;
         this.state.lastClient = { x: e.clientX, y: e.clientY };
-        if (movedSq <= thresholdSq)
+        if (movedSq <= threshholdSq)
           return;
         if (this.state.rightClickIntent) {
-          this.callback.onOrbitStart(screen.x, screen.y);
-          this.state = { kind: "orbit", lastClient: { x: e.clientX, y: e.clientY } };
+          this.callback.onRotateStart(screen.x, screen.y);
+          this.state = { kind: "rotate", lastClient: { x: e.clientX, y: e.clientY } };
           return;
         }
         if (this.state.clickedNodeId) {
@@ -892,8 +887,8 @@ var InputManager = class {
       case "pan":
         this.callback.onPanMove(screen.x, screen.y);
         return;
-      case "orbit":
-        this.callback.onOrbitMove(screen.x, screen.y);
+      case "rotate":
+        this.callback.onRotateMove(screen.x, screen.y);
         return;
       default:
         return;
@@ -908,10 +903,8 @@ var InputManager = class {
     const screen = this.getScreenFromClient(e.clientX, e.clientY);
     this.pointers.delete(e.pointerId);
     if (this.state.kind === "touch-gesture" && this.pointers.size() < 2) {
-      if (this.state.panStarted)
-        this.callback.onPanEnd();
-      if (this.state.orbitStarted)
-        this.callback.onOrbitEnd();
+      if (this.state.rotateStarted)
+        this.callback.onRotateEnd();
       this.state = { kind: "idle" };
       this.rebaselineRemainingPointerForContinuity();
       return;
@@ -923,8 +916,8 @@ var InputManager = class {
       case "pan":
         this.callback.onPanEnd();
         break;
-      case "orbit":
-        this.callback.onOrbitEnd();
+      case "rotate":
+        this.callback.onRotateEnd();
         break;
       case "press":
         if (this.state.rightClickIntent) {
@@ -949,14 +942,12 @@ var InputManager = class {
       case "pan":
         this.callback.onPanEnd();
         break;
-      case "orbit":
-        this.callback.onOrbitEnd();
+      case "rotate":
+        this.callback.onRotateEnd();
         break;
       case "touch-gesture":
-        if (this.state.panStarted)
-          this.callback.onPanEnd();
-        if (this.state.orbitStarted)
-          this.callback.onOrbitEnd();
+        if (this.state.rotateStarted)
+          this.callback.onRotateEnd();
         break;
     }
     this.wheel.cancel();
@@ -978,8 +969,8 @@ var InputManager = class {
       case "pan":
         this.callback.onPanEnd();
         break;
-      case "orbit":
-        this.callback.onOrbitEnd();
+      case "rotate":
+        this.callback.onRotateEnd();
         break;
     }
     this.state = { kind: "idle" };
@@ -1132,8 +1123,8 @@ var CameraController = class {
     return { x: world.x, y: world.y };
   }
   clearMomentum() {
-    this.cameraState.orbitVelX = 0;
-    this.cameraState.orbitVelY = 0;
+    this.cameraState.rotateVelX = 0;
+    this.cameraState.rotateVelY = 0;
     this.cameraState.panVelX = 0;
     this.cameraState.panVelY = 0;
     this.cameraState.zoomVel = 0;
@@ -1160,11 +1151,11 @@ var CameraController = class {
     this.screenAnchor = null;
     this.worldAnchor = null;
   }
-  startOrbit(screenX, screenY) {
+  startRotate(screenX, screenY) {
     this.screenAnchor = { screenX, screenY };
     this.cameraSnapShot = { ...this.cameraState };
   }
-  updateOrbit(screenX, screenY) {
+  updateRotate(screenX, screenY) {
     const rotateSensitivityX = this.cameraSettings.rotateSensitivityX;
     const rotateSensitivityY = this.cameraSettings.rotateSensitivityY;
     const zoomSensitivity = this.cameraSettings.zoomSensitivity;
@@ -1181,7 +1172,7 @@ var CameraController = class {
     this.cameraState.yaw = yaw;
     this.cameraState.pitch = pitch;
   }
-  endOrbit() {
+  endRotate() {
     this.screenAnchor = null;
     this.cameraSnapShot = null;
   }
@@ -1201,12 +1192,12 @@ var CameraController = class {
   step(dtMs) {
     const t = dtMs / 16.67;
     const damping = Math.pow(1 - this.cameraSettings.momentumScale, t);
-    if (Math.abs(this.cameraState.orbitVelX) > 1e-4 || Math.abs(this.cameraState.orbitVelY) > 1e-4) {
-      this.cameraState.yaw += this.cameraState.orbitVelX;
-      this.cameraState.pitch += this.cameraState.orbitVelY;
+    if (Math.abs(this.cameraState.rotateVelX) > 1e-4 || Math.abs(this.cameraState.rotateVelY) > 1e-4) {
+      this.cameraState.yaw += this.cameraState.rotateVelX;
+      this.cameraState.pitch += this.cameraState.rotateVelY;
       this.cameraState.pitch = clamp(this.cameraState.pitch, MIN_PITCH, MAX_PITCH);
-      this.cameraState.orbitVelX *= damping;
-      this.cameraState.orbitVelY *= damping;
+      this.cameraState.rotateVelX *= damping;
+      this.cameraState.rotateVelY *= damping;
     }
     if (Math.abs(this.cameraState.panVelX) > 1e-4 || Math.abs(this.cameraState.panVelY) > 1e-4) {
       this.cameraState.targetX += this.cameraState.panVelX;
@@ -1326,16 +1317,16 @@ var GraphInteractor = class {
     this.state.isPanning = false;
     this.deps.getCamera()?.endPan();
   }
-  startOrbit(screenX, screenY) {
+  startRotate(screenX, screenY) {
     this.state.isRotating = true;
-    this.deps.getCamera()?.startOrbit(screenX, screenY);
+    this.deps.getCamera()?.startRotate(screenX, screenY);
   }
-  updateOrbit(screenX, screenY) {
-    this.deps.getCamera()?.updateOrbit(screenX, screenY);
+  updateRotate(screenX, screenY) {
+    this.deps.getCamera()?.updateRotate(screenX, screenY);
   }
-  endOrbit() {
+  endRotate() {
     this.state.isRotating = false;
-    this.deps.getCamera()?.endOrbit();
+    this.deps.getCamera()?.endRotate();
   }
   startFollow(nodeId) {
     this.state.followedId = nodeId;
@@ -1813,9 +1804,9 @@ var GraphController = class {
     this.renderer.resize(rect.width, rect.height);
     this.containerEl.appendChild(this.canvas);
     this.inputManager = new InputManager(this.canvas, {
-      onOrbitStart: (screenX, screenY) => this.interactor.startOrbit(screenX, screenY),
-      onOrbitMove: (screenX, screenY) => this.interactor.updateOrbit(screenX, screenY),
-      onOrbitEnd: () => this.interactor.endOrbit(),
+      onRotateStart: (screenX, screenY) => this.interactor.startRotate(screenX, screenY),
+      onRotateMove: (screenX, screenY) => this.interactor.updateRotate(screenX, screenY),
+      onRotateEnd: () => this.interactor.endRotate(),
       onPanStart: (screenX, screenY) => this.interactor.startPan(screenX, screenY),
       onPanMove: (screenX, screenY) => this.interactor.updatePan(screenX, screenY),
       onPanEnd: () => this.interactor.endPan(),
@@ -2136,8 +2127,8 @@ var DEFAULT_SETTINGS = {
       offsetX: 0,
       offsetY: 0,
       offsetZ: 0,
-      orbitVelX: 0,
-      orbitVelY: 0,
+      rotateVelX: 0,
+      rotateVelY: 0,
       panVelX: 0,
       panVelY: 0,
       zoomVel: 0

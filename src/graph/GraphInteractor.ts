@@ -136,18 +136,18 @@ export class GraphInteractor {
     }
 
 
-    public startOrbit (screenX: number, screenY: number) {
+    public startRotate (screenX: number, screenY: number) {
         this.state.isRotating = true;
-        this.deps.getCamera()?.startOrbit(screenX, screenY);
+        this.deps.getCamera()?.startRotate(screenX, screenY);
     }
 
-    public updateOrbit (screenX: number, screenY: number) {
-        this.deps.getCamera()?.updateOrbit(screenX, screenY);
+    public updateRotate (screenX: number, screenY: number) {
+        this.deps.getCamera()?.updateRotate(screenX, screenY);
     }
 
-    public endOrbit () {
+    public endRotate () {
         this.state.isRotating = false;
-        this.deps.getCamera()?.endOrbit();
+        this.deps.getCamera()?.endRotate();
     }
 
 

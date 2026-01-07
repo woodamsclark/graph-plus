@@ -103,9 +103,9 @@ export class GraphController {
 
 
     this.inputManager                                   = new InputManager(this.canvas, {
-      onOrbitStart      : (screenX, screenY)          => this.interactor!.startOrbit(screenX, screenY),
-      onOrbitMove       : (screenX, screenY)          => this.interactor!.updateOrbit(screenX, screenY),
-      onOrbitEnd        : ()                          => this.interactor!.endOrbit(),
+      onRotateStart      : (screenX, screenY)          => this.interactor!.startRotate(screenX, screenY),
+      onRotateMove       : (screenX, screenY)          => this.interactor!.updateRotate(screenX, screenY),
+      onRotateEnd        : ()                          => this.interactor!.endRotate(),
       onPanStart        : (screenX, screenY)          => this.interactor!.startPan(screenX, screenY),
       onPanMove         : (screenX, screenY)          => this.interactor!.updatePan(screenX, screenY),
       onPanEnd          : ()                          => this.interactor!.endPan(),
