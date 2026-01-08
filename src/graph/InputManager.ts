@@ -57,7 +57,7 @@ export interface InputManagerCallbacks {
     onDragEnd(): void;
 
     // Utility
-    detectClickedNode(
+    getClickedNode(
         screenX: number,
         screenY: number,
     ): { id: string; label: string } | null;
@@ -194,7 +194,7 @@ export class InputManager {
         const rightClickIntent = isMouse && ((isLeft && (e.ctrlKey || e.metaKey)) || isRight);
 
         this.callback.onMouseMove(eScreen.x, eScreen.y);
-        const clickedNodeId = this.callback.detectClickedNode(eScreen.x, eScreen.y)?.id ?? null;
+        const clickedNodeId = this.callback.getClickedNode(eScreen.x, eScreen.y)?.id ?? null;
             
 
         this.state = {

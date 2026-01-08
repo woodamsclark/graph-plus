@@ -118,7 +118,7 @@ export class GraphController {
       onFollowStart     : (nodeId)                    => this.interactor!.startFollow(nodeId),
       onFollowEnd       : ()                          => this.interactor!.endFollow(),
       resetCamera       : ()                          => this.camera!.resetCamera(),
-      detectClickedNode : (screenX, screenY)          => { return this.interactor!.nodeClicked(screenX, screenY); },
+      getClickedNode : (screenX, screenY)          => { return this.interactor!.getClickedNode(screenX, screenY); },
     });
 
     this.buildAdjacencyMap(); // currently dead code

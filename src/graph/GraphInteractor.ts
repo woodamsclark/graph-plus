@@ -191,7 +191,7 @@ export class GraphInteractor {
 
 
     public openNode (screenX: number, screenY: number) {
-        const node = this.nodeClicked(screenX, screenY);
+        const node = this.getClickedNode(screenX, screenY);
         if (node && this.openNodeFile) { 
         this.openNodeFile(node); 
         }
@@ -201,31 +201,41 @@ export class GraphInteractor {
         this.openNodeFile = handler; 
     }
 
-    public nodeClicked(screenX: number, screenY: number) {
-        const graph     = this.deps.getGraph();
-        const camera    = this.deps.getCamera()
-        if ( !graph || !camera)  return null;
+    private doesIntersectNode(worldX: number, worldY: number, node: GraphNode): boolean {
+        const dx = worldX - (node.location.x ?? 0);
+        const dy = worldY - (node.location.y ?? 0);
+        const r  = node.radius; // world units
 
-        let closest: GraphNode | null    = null;
-        let closestDist     = Infinity;
-        const hitPadding    = 0; // extra padding for easier clicking
-        //const scale         = this.deps.getCamera() ? this.deps.getCamera().getState().distance : 1;
+        return (dx * dx + dy * dy) <= (r * r);
+    }
+
+    public getClickedNode(screenX: number, screenY: number): GraphNode | null {
+        const graph  = this.deps.getGraph();
+        const camera = this.deps.getCamera();
+        if (!graph || !camera) return null;
+
+        let best: GraphNode | null = null;
+        let bestDistSq = Infinity;
 
         for (const node of graph.nodes) {
-            const projected         = camera.worldToScreen(node);
-            if (!projected) continue;
-            const nodeRadius        = node.radius;
-            const hitR              = nodeRadius /** Math.max(0.0001, scale)*/ + hitPadding;
-            const dx                = screenX - projected.x; 
-            const dy                = screenY - projected.y; 
-            const distSq            = dx*dx + dy*dy;
-                if (distSq <= hitR*hitR && distSq < closestDist) { 
-                    closestDist     = distSq;
-                    closest         = node;
-                }
+            const p = camera.worldToScreen(node); // {x,y,depth,scale}
+
+            const dx = screenX - p.x;
+            const dy = screenY - p.y;
+            const distSq = dx * dx + dy * dy;
+
+            const rWorld = node.radius;
+            const rPx = rWorld * p.scale;
+
+            if (distSq <= rPx * rPx && distSq < bestDistSq) {
+            bestDistSq = distSq;
+            best = node;
+            }
         }
-        return closest;
+
+    return best;
     }
+
 
     public frame(){ // called each frame
         this.updateFollow();
@@ -241,7 +251,7 @@ export class GraphInteractor {
         const mouse = this.state.mouseScreenPosition;
         if(!mouse) return;
         
-        const hit = this.nodeClicked(mouse.x, mouse.y);
+        const hit = this.getClickedNode(mouse.x, mouse.y);
         this.state.hoveredId = hit?.id ?? null;
     }
 

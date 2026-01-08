@@ -262,7 +262,6 @@ export class GraphStore {
                 edgeSet.add(key);
             }
         }
-
         return edges;
     }
 
