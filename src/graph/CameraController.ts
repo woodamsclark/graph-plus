@@ -2,10 +2,7 @@ import type { CameraState, CameraSettings, WorldTransform } from '../shared/inte
 import type { GraphNode } from '../shared/interfaces.ts';
 import { getSettings } from '../settings/settingsStore.ts';
 
-const MIN_DISTANCE = 100;
-const MAX_DISTANCE = 5000;
-const MIN_PITCH    = -Math.PI / 2 + 0.05;
-const MAX_PITCH    =  Math.PI / 2 - 0.05;
+
 
 export class CameraController {
   private cameraSettings  : CameraSettings;
@@ -279,6 +276,7 @@ export class CameraController {
 
   updateZoom(screenX: number, screenY: number, delta: number) {
     this.cameraState.distance += delta * this.cameraSettings.zoomSensitivity;
+    this.cameraState.distance = clamp(this.cameraState.distance, this.cameraSettings.min_distance, this.cameraSettings.max_distance);
   }
 
   updateHover(screenX: number, screenY: number) {
@@ -294,7 +292,7 @@ export class CameraController {
     if (Math.abs(this.cameraState.rotateVelX) > 1e-4 || Math.abs(this.cameraState.rotateVelY) > 1e-4) {
       this.cameraState.yaw          += this.cameraState.rotateVelX;
       this.cameraState.pitch        += this.cameraState.rotateVelY;
-      this.cameraState.pitch         = clamp(this.cameraState.pitch, MIN_PITCH, MAX_PITCH);
+      this.cameraState.pitch         = clamp(this.cameraState.pitch, this.cameraSettings.min_pitch, this.cameraSettings.max_pitch);
       this.cameraState.rotateVelX    *= damping;
       this.cameraState.rotateVelY    *= damping;
     }
@@ -309,7 +307,7 @@ export class CameraController {
 
     // zoom momentum
     if (Math.abs(this.cameraState.zoomVel) > 1e-4) {
-      this.cameraState.distance     = clamp(this.cameraState.distance + this.cameraState.zoomVel, MIN_DISTANCE, MAX_DISTANCE);
+      this.cameraState.distance     = clamp(this.cameraState.distance + this.cameraState.zoomVel, this.cameraSettings.min_distance, this.cameraSettings.max_distance);
       this.cameraState.zoomVel     *= damping;
     }
   }
