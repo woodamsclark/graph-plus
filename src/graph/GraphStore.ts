@@ -135,11 +135,13 @@ export class GraphStore {
         const nodeById = new Map(nodes.map(n => [n.id, n] as const));
 
         const edges: GraphEdge[] = [];
-        edges.push(...this.createNoteEdges(app, nodeById));
+        edges.push(...this.createNoteToNoteEdges(app, nodeById));
 
         if (settings.graph.showTags) {
-            edges.push(...this.createTagEdges(app, nodeById));
+            edges.push(...this.createNoteToTagEdges(app, nodeById));       // note -> tag
+            edges.push(...this.createTagHierarchyEdges(app, nodeById));  // tag -> tag
         }
+
 
         return { nodes, edges };
     }
@@ -190,22 +192,20 @@ export class GraphStore {
     private createTagNodes(app: App): GraphNode[] {
         const tags = new Set<string>();
 
-        // 1) Prefer Obsidian’s global tag index if it exists
         const tagMap = (app.metadataCache as any).getTags?.() as Record<string, number> | undefined;
         if (tagMap) {
             for (const rawTag of Object.keys(tagMap)) {
-                tags.add(this.normalizeTag(rawTag));
+                const clean = this.normalizeTag(rawTag);
+                if (clean) this.addTagWithAncestors(tags, clean);
             }
         }
 
-        // 2) Also scan files to catch anything missing (frontmatter-only, etc.)
         for (const file of app.vault.getMarkdownFiles()) {
             for (const cleanTag of this.extractTagsFromFile(file, app)) {
-                if (cleanTag) tags.add(cleanTag);
+                if (cleanTag) this.addTagWithAncestors(tags, cleanTag);
             }
         }
 
-        // 3) Build nodes
         const jitter = 50;
         const nodes: GraphNode[] = [];
 
@@ -213,18 +213,18 @@ export class GraphStore {
             nodes.push({
                 id: `tag:${cleanTag}`,
                 label: `#${cleanTag}`,
-                location: { 
+                location: {
                     x: (Math.random() - 0.5) * jitter,
                     y: (Math.random() - 0.5) * jitter,
-                    z: (Math.random() - 0.5) * jitter, 
+                    z: (Math.random() - 0.5) * jitter,
                 },
-                velocity: { 
-                    vx: 0, vy: 0, vz: 0 
-                },
-                type    : "tag",
-                inLinks : 0, outLinks: 0, totalLinks: 0,
-                anima   : 1,
-                radius  : 10,
+                velocity: { vx: 0, vy: 0, vz: 0 },
+                type: "tag",
+                inLinks: 0,
+                outLinks: 0,
+                totalLinks: 0,
+                anima: 1,
+                radius: 10,
             });
         }
 
@@ -232,7 +232,28 @@ export class GraphStore {
     }
 
 
-    private createNoteEdges(app: App, nodeById: Map<string, GraphNode>): GraphEdge[] {
+    private getTagHierarchy(tag: string): string[] {
+        // "a/b/c" => ["a", "a/b", "a/b/c"]
+        const parts = tag.split("/").map(p => p.trim()).filter(Boolean);
+        const out: string[] = [];
+        let cur = "";
+        for (const p of parts) {
+            cur = cur ? `${cur}/${p}` : p;
+            out.push(cur);
+        }
+        return out;
+    }
+
+    private addTagWithAncestors(tags: Set<string>, cleanTag: string) {
+        for (const t of this.getTagHierarchy(cleanTag)) {
+            tags.add(t);
+        }
+    }
+
+    // does this only create note => note edges
+    // or also note => tag edges?
+    // if so, rename to createNodeEdges
+    private createNoteToNoteEdges(app: App, nodeById: Map<string, GraphNode>): GraphEdge[] {
         const settings = getSettings();
 
         const resolved: ResolvedLinks = (app.metadataCache as any).resolvedLinks || {};
@@ -265,7 +286,8 @@ export class GraphStore {
         return edges;
     }
 
-    private createTagEdges(app: App, nodeById: Map<string, GraphNode>): GraphEdge[] {
+    // modify this to create tag=>tag edges?
+    private createNoteToTagEdges(app: App, nodeById: Map<string, GraphNode>): GraphEdge[] {
         const edges : GraphEdge[]   = [];
         const edgeSet               = new Set<string>(); // only for tag edges; ids are unique anyway
         const files                 = app.vault.getMarkdownFiles();
@@ -297,6 +319,58 @@ export class GraphStore {
 
         return edges;
     }
+
+    private createTagHierarchyEdges(app: App, nodeById: Map<string, GraphNode>): GraphEdge[] {
+        const edges: GraphEdge[] = [];
+        const edgeSet = new Set<string>();
+
+        // Reconstruct the same tag universe you used for nodes.
+        // If you want to avoid scanning twice later, you can refactor to build tags once and reuse.
+        const tags = new Set<string>();
+
+        const tagMap = (app.metadataCache as any).getTags?.() as Record<string, number> | undefined;
+        if (tagMap) {
+            for (const rawTag of Object.keys(tagMap)) {
+                const clean = this.normalizeTag(rawTag);
+                if (clean) this.addTagWithAncestors(tags, clean);
+            }
+        }
+
+        for (const file of app.vault.getMarkdownFiles()) {
+            for (const cleanTag of this.extractTagsFromFile(file, app)) {
+                if (cleanTag) this.addTagWithAncestors(tags, cleanTag);
+            }
+        }
+
+        // For each tag, add edges parent -> child
+        for (const t of tags) {
+            const chain = this.getTagHierarchy(t); // ["a","a/b","a/b/c"]
+            for (let i = 1; i < chain.length; i++) {
+                const parent = chain[i - 1];
+                const child  = chain[i];
+
+                const parentId = `tag:${parent}`;
+                const childId  = `tag:${child}`;
+                if (!nodeById.has(parentId) || !nodeById.has(childId)) continue;
+
+                const id = `${parentId}->${childId}`;
+                if (edgeSet.has(id)) continue;
+
+                edges.push({
+                    id,
+                    sourceId: parentId,
+                    targetId: childId,
+                    linkCount: 1,
+                    bidirectional: false,
+                });
+
+                edgeSet.add(id);
+            }
+        }
+
+        return edges;
+    }
+
 
     // -----------------------
     // Decorations (settings)
@@ -385,5 +459,5 @@ export class GraphStore {
     private normalizeTag(tag: string): string {
         const t = tag.trim();
         return (t.startsWith("#") ? t.slice(1) : t).trim().toLowerCase();
-        }
+    }
 }
