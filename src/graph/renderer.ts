@@ -108,13 +108,22 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     const nodeColor = theme.colors.node;
     const tagColor  = theme.colors.tag;
 
+    // Build sortable list (node + depth)
+    const sortable: { node: GraphNode; depth: number }[] = [];
     for (const node of nodes) {
+      const p = nodeMap.get(node.id);
+      if (!p) continue;
+      sortable.push({ node, depth: p.depth });
+    }
+
+    // Draw far -> near (near on top)
+    sortable.sort((a, b) => b.depth - a.depth);
+
+    for (const { node } of sortable) {
       const p = nodeMap.get(node.id);
       if (!p || p.depth < 0) continue;
 
       const radiusPx = node.radius * p.scale;
-      // optional: soft clamp
-      // const radiusPx = clamp(node.radiusWorld * p.scale, MIN_PX, MAX_PX);
 
       const isTag = node.type === 'tag';
       const fillColor = isTag ? tagColor : nodeColor;
@@ -128,6 +137,7 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
 
     context.restore();
   }
+
 
   function drawLabels(projectedNodes: Map<string, { x: number; y: number; depth: number }>) {
     if (!context || !graph || !graph.nodes || !mousePosition) return;
