@@ -178,7 +178,7 @@ export class GraphStore {
                 inLinks     : 0,
                 outLinks    : 0,
                 totalLinks  : 0,
-                radius      : 1,
+                radius      : 10,
                 file        : file,
                 anima       : 1, 
             });
@@ -224,7 +224,7 @@ export class GraphStore {
                 type    : "tag",
                 inLinks : 0, outLinks: 0, totalLinks: 0,
                 anima   : 1,
-                radius  : 1,
+                radius  : 10,
             });
         }
 

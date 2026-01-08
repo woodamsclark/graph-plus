@@ -98,6 +98,58 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     context.restore();
   }
 
+  /* Perspective based edges. Keep for later experimentation.
+    function drawEdges(nodeMap: Map<string, { x: number; y: number; depth: number; scale: number }>) {
+    if (!context || !graph || !graph.edges) return;
+
+    context.save();
+    context.strokeStyle = theme.colors.edge;
+    context.lineCap = 'round';
+
+    // TUNABLES
+    const baseAlpha = theme.colors.edgeAlpha; // e.g. 0.03
+    const minAlpha  = 0.008;                  // <= keep *some* ink in the distance
+    const maxAlpha  = 0.08;
+
+    const nearDepth = 50;                     // depth where edges are strongest
+    const farDepth  = 800;                    // depth where edges are weakest
+
+    const baseWidth = 1.0;
+    const minWidth  = 0.75;                   // <= don't go below this
+    const maxWidth  = 2.5;
+
+    for (const edge of graph.edges) {
+      const p1 = nodeMap.get(edge.sourceId);
+      const p2 = nodeMap.get(edge.targetId);
+      if (!p1 || !p2) continue;
+
+      // cull behind camera
+      if (p1.depth < 0 || p2.depth < 0) continue;
+
+      const avgDepth = (p1.depth + p2.depth) * 0.5;
+
+      // depth fade factor: 1 near, 0 far
+      const t = clamp((farDepth - avgDepth) / (farDepth - nearDepth), 0, 1);
+
+      // Keep alpha from hitting 0
+      const a = clamp(baseAlpha * t, minAlpha, maxAlpha);
+      context.globalAlpha = a;
+
+      // Thickness: you can keep constant, or lightly scale with zoom
+      const avgScale = (p1.scale + p2.scale) * 0.5;
+      const w = clamp(baseWidth * avgScale, minWidth, maxWidth);
+      context.lineWidth = w;
+
+      context.beginPath();
+      context.moveTo(p1.x, p1.y);
+      context.lineTo(p2.x, p2.y);
+      context.stroke();
+    }
+
+    context.restore();
+  }*/
+
+
   function drawNodes(nodeMap: Map<string, { x: number; y: number; depth: number; scale: number }>) {
     if (!context || !graph || !graph.nodes) return;
 
