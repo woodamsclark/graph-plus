@@ -16,7 +16,7 @@ export class GraphInteractor {
     private dragWorldOffset     : { x: number; y: number; z: number } | null    = null;
     private dragDepthFromCamera : number                                        = 0;
     private pinnedNodes         : Set<string>                                   = new Set();
-    private openNodeFile        : ((node: any) => void)               | null    = null;
+    private openNodeFile        : ((node: GraphNode) => void)               | null    = null;
     private state               : InteractionState;
 
     constructor(private deps: GraphDependencies) {
@@ -190,14 +190,43 @@ export class GraphInteractor {
     }
 
 
-    public openNode (screenX: number, screenY: number) {
+    public openNode(screenX: number, screenY: number) {
         const node = this.getClickedNode(screenX, screenY);
-        if (node && this.openNodeFile) { 
-        this.openNodeFile(node); 
+        if (!node) return;
+
+        if (node.type.toLowerCase() === "tag") {
+            void this.openTagSearch(node.id);
+            return;
+        }
+        if (node.type.toLowerCase() === "note") {
+            if (this.openNodeFile) {
+                this.openNodeFile(node);
+            }
         }
     }
 
-    public setOnNodeClick(handler: (node: any) => void): void {
+    private async openTagSearch(tagID: string) {
+        const app = this.deps.getApp();
+        if (!app) return;
+
+        const query = `tag:#${tagID}`;
+
+        const leaf =
+            app.workspace.getLeavesOfType("search")[0] ??
+            app.workspace.getRightLeaf(false);
+
+        if (!leaf) return;
+
+        await leaf.setViewState(
+            { type: "search", active: true, state: { query } },
+            { focus: true }
+        );
+
+        app.workspace.revealLeaf(leaf);
+    }
+
+
+    public setOnNodeClick(handler: (node: GraphNode) => void): void {
         this.openNodeFile = handler; 
     }
 

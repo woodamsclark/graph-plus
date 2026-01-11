@@ -211,7 +211,7 @@ export class GraphStore {
 
         for (const cleanTag of tags) {
             nodes.push({
-                id: `tag:${cleanTag}`,
+                id: cleanTag,
                 label: `#${cleanTag}`,
                 location: {
                     x: (Math.random() - 0.5) * jitter,
@@ -299,7 +299,7 @@ export class GraphStore {
             const tags = this.extractTagsFromFile(file, app);
 
             for (const cleanTag of tags) {
-                const tagId = `tag:${cleanTag}`;
+                const tagId = cleanTag;
                 if (!nodeById.has(tagId)) continue;
 
                 const id = `${srcId}->${tagId}`;
@@ -349,8 +349,8 @@ export class GraphStore {
                 const parent = chain[i - 1];
                 const child  = chain[i];
 
-                const parentId = `tag:${parent}`;
-                const childId  = `tag:${child}`;
+                const parentId = parent;
+                const childId  = child;
                 if (!nodeById.has(parentId) || !nodeById.has(childId)) continue;
 
                 const id = `${parentId}->${childId}`;
@@ -457,7 +457,18 @@ export class GraphStore {
     }
 
     private normalizeTag(tag: string): string {
-        const t = tag.trim();
-        return (t.startsWith("#") ? t.slice(1) : t).trim().toLowerCase();
+        let t = tag.trim().toLowerCase();
+
+        // strip Obsidian search-style prefix
+        if (t.startsWith("tag:")) {
+            t = t.slice(4);
+        }
+
+        // strip leading #
+        if (t.startsWith("#")) {
+            t = t.slice(1);
+        }
+
+        return t.trim();
     }
 }
