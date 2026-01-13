@@ -90,16 +90,13 @@ export class GraphController {
     
     if (!this.canvas || !this.interactor || !this.renderer || !this.graphStore || !this.renderer) return;
 
-    await this.graphStore.init();
+    await this.rebuildGraph();
     
     this.interactor.setOnNodeClick((node) => this.openNodeFile(node));
 
     const rect                = this.containerEl.getBoundingClientRect(); // (This is critical because CameraManager needs the viewport center to project correctly)
     this.renderer.resize(rect.width, rect.height);
     this.containerEl.appendChild(this.canvas);
-
-
-    
 
 
     this.inputManager                                   = new InputManager(this.canvas, {
@@ -122,14 +119,13 @@ export class GraphController {
     });
 
     this.buildAdjacencyMap(); // currently dead code
-    await this.refreshGraph(); if (!this.graph) return;
     this.resetCamera();
 
     this.lastTime         = null;
     this.animationFrame   = requestAnimationFrame(this.animationLoop);
   }
 
-  public async refreshGraph() {
+  public refreshGraph() {
     this.stopSimulation();
     if (!this.graphStore) return;
 
@@ -154,16 +150,16 @@ export class GraphController {
     if (!this.graphStore || !this.renderer || !this.interactor || !this.camera) return;
 
     this.stopSimulation();
-    this.simulation = null;
 
     await this.graphStore.rebuild();
-    this.graph = this.graphStore.get();
-    if (!this.graph) return;
+    this.refreshGraph();
+    //this.graph = this.graphStore.get();
+    //if (!this.graph) return;
 
-    this.renderer.setGraph(this.graph);
+    //this.renderer.setGraph(this.graph);
 
-    this.simulation = createSimulation(this.graph, this.camera, () => this.interactor!.getGravityCenter());
-    this.startSimulation();
+    //this.simulation = createSimulation(this.graph, this.camera, () => this.interactor!.getGravityCenter());
+    //this.startSimulation();
 }
 
 
@@ -249,13 +245,15 @@ export class GraphController {
 
   private startSimulation() {
     if (!this.simulation) return;
-    this.simulation.start(); this.running = true;
+    this.simulation.start(); 
+    this.running = true;
   }
 
   private stopSimulation() {
     if (this.simulation) {
         this.simulation.stop();
-        this.simulation = null;
+      //  this.simulation = null;
+        this.running    = false;
     }
   }
 

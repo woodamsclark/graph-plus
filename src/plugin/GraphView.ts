@@ -7,9 +7,9 @@ import { GraphInteractor } from '../graph/GraphInteractor.ts';
 export const GRAPH_PLUS_TYPE = 'graph-plus';
 
 export class GraphView extends ItemView {
-  private graph               : GraphController | null = null;
+  private graphController               : GraphController | null = null;
   private plugin              : GraphPlus;
-  private scheduleGraphRefresh: (() => void) | null = null;
+  private scheduleGraphRebuild: (() => void) | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: Plugin) {
     super(leaf);
@@ -18,38 +18,41 @@ export class GraphView extends ItemView {
 
   async onOpen() {
     this.containerEl.empty();
-    const container = this.containerEl.createDiv({ cls: 'graph+' });
-    this.graph      = new GraphController(this.app, container, this.plugin);
-    await this.graph.init();
+    const container       = this.containerEl.createDiv({ cls: 'graph+' });
+    this.graphController  = new GraphController(this.app, container, this.plugin);
+    await this.graphController.init();
     
     // Debounced refresh to avoid thrashing on vault events
-    if (!this.scheduleGraphRefresh)
-      this.scheduleGraphRefresh = debounce(() => { this.graph?.refreshGraph(); }, 200, true);
+    if (!this.scheduleGraphRebuild)
+      this.scheduleGraphRebuild = debounce(() => { void this.graphController?.rebuildGraph(); }, 200, false); // void instead of await
+
+    
 
     // Register only structural vault listeners so the view updates on file changes,
     // not on every keystroke/content metadata parse.
     // Use this.registerEvent so Obsidian will unregister them when the view closes
-    this.registerEvent(this.app.vault.on('create', () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
-    this.registerEvent(this.app.vault.on('delete', () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
-    this.registerEvent(this.app.vault.on('rename', () => this.scheduleGraphRefresh && this.scheduleGraphRefresh()));
+    this.registerEvent(this.app.vault.on('create', () => this.scheduleGraphRebuild?.()));
+    this.registerEvent(this.app.vault.on('delete', () => this.scheduleGraphRebuild?.()));
+    this.registerEvent(this.app.vault.on('rename', () => this.scheduleGraphRebuild?.()));
+
     // Note: We intentionally do NOT rebuild on metadataCache 'changed' to avoid refreshes
     // while typing. Optional incremental updates can hook into metadata changes separately.
     this.registerEvent(
       this.app.workspace.on("css-change", () => {
-        this.graph?.refreshTheme();  // rebuild snapshot of obsidian css themes in renderer
+        this.graphController?.refreshTheme();  // rebuild snapshot of obsidian css themes in renderer
       })
     );
   }
 
   onResize() {
     const rect = this.containerEl.getBoundingClientRect();
-    this.graph?.resize(rect.width, rect.height);
+    this.graphController?.resize(rect.width, rect.height);
   }
 
   async onClose() {
     // save node positions?
-    this.graph?.destroy();
-    this.graph = null;
+    this.graphController?.destroy();
+    this.graphController = null;
     this.containerEl.empty();
   }
 

@@ -34,10 +34,7 @@ export class GraphStore {
         this.deps = deps;
     }
 
-    /** Load-or-generate once and keep it as the single graph instance */
-    public async init(): Promise<GraphData> {
-        if (this.graph) return this.graph;
-
+    private async buildGraph() {
         const app = this.deps.getApp();
         const state = await this.loadState(app);
         const graph = this.generateGraph(app);
@@ -46,7 +43,6 @@ export class GraphStore {
         this.decorateGraph(graph, app);
 
         this.graph = graph;
-        return graph;
     }
 
     public get(): GraphData | null {
@@ -63,9 +59,15 @@ export class GraphStore {
         this.cachedState = state;
     }
 
-    public async rebuild(): Promise<GraphData> {
-        this.graph = null;
-        return await this.init();
+    public async rebuild() {
+        // capture current layout into cachedState
+        if (this.graph) {
+            const app = this.deps.getApp();
+            this.cachedState = this.extractState(this.graph, app);
+        }
+
+        this.invalidate()
+        await this.buildGraph();
     }
 
     public invalidate(): void {
