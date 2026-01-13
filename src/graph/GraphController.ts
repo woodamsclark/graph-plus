@@ -153,13 +153,6 @@ export class GraphController {
 
     await this.graphStore.rebuild();
     this.refreshGraph();
-    //this.graph = this.graphStore.get();
-    //if (!this.graph) return;
-
-    //this.renderer.setGraph(this.graph);
-
-    //this.simulation = createSimulation(this.graph, this.camera, () => this.interactor!.getGravityCenter());
-    //this.startSimulation();
 }
 
 
@@ -277,15 +270,6 @@ export class GraphController {
       console.error('Greater Graph: failed to open file', e);
     } 
   }
-
-  private filterGraph(graph: GraphData, showTags = true) {
-    if (showTags) return { nodes: graph.nodes, edges: graph.edges };
-
-    const tagSet  = new Set(graph.nodes.filter(n => n.type === "tag").map(n => n.id));
-    const nodes   = graph.nodes.filter(n => !tagSet.has(n.id));
-    const edges   = graph.edges.filter(e => !tagSet.has(e.sourceId) && !tagSet.has(e.targetId));
-    return { nodes, edges };
-  } 
 
   public refreshTheme(): void {
     this.renderer?.refreshTheme();

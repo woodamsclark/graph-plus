@@ -75,8 +75,6 @@ export class GraphStore {
         // keep cachedState; it remains valid
     }
 
-    // Persistence (data.json)
-
     private async loadState(app: App): Promise<PersistedGraphState | null> {
         if (this.cachedState) return this.cachedState;
 
@@ -127,10 +125,6 @@ export class GraphStore {
         }
     }
 
-    // -----------------------
-    // Generation (topology)
-    // -----------------------
-
     private generateGraph(app: App): GraphData {
         const settings = getSettings();
         const nodes    = this.createNodes(app); // notes + tags
@@ -141,7 +135,7 @@ export class GraphStore {
 
         if (settings.graph.showTags) {
             edges.push(...this.createNoteToTagEdges(app, nodeById));       // note -> tag
-            edges.push(...this.createTagHierarchyEdges(app, nodeById));  // tag -> tag
+            edges.push(...this.createTagToTagEdges(app, nodeById));  // tag -> tag
         }
 
 
@@ -197,14 +191,14 @@ export class GraphStore {
         const tagMap = (app.metadataCache as any).getTags?.() as Record<string, number> | undefined;
         if (tagMap) {
             for (const rawTag of Object.keys(tagMap)) {
-                const clean = this.normalizeTag(rawTag);
-                if (clean) this.addTagWithAncestors(tags, clean);
+                const clean = this.normalizeTagName(rawTag);
+                if (clean) this.addTagPathToSet(tags, clean);
             }
         }
 
         for (const file of app.vault.getMarkdownFiles()) {
             for (const cleanTag of this.extractTagsFromFile(file, app)) {
-                if (cleanTag) this.addTagWithAncestors(tags, cleanTag);
+                if (cleanTag) this.addTagPathToSet(tags, cleanTag);
             }
         }
 
@@ -233,8 +227,7 @@ export class GraphStore {
         return nodes;
     }
 
-
-    private getTagHierarchy(tag: string): string[] {
+    private expandTagPath(tag: string): string[] {
         // "a/b/c" => ["a", "a/b", "a/b/c"]
         const parts = tag.split("/").map(p => p.trim()).filter(Boolean);
         const out: string[] = [];
@@ -246,8 +239,8 @@ export class GraphStore {
         return out;
     }
 
-    private addTagWithAncestors(tags: Set<string>, cleanTag: string) {
-        for (const t of this.getTagHierarchy(cleanTag)) {
+    private addTagPathToSet(tags: Set<string>, cleanTag: string) {
+        for (const t of this.expandTagPath(cleanTag)) {
             tags.add(t);
         }
     }
@@ -322,7 +315,7 @@ export class GraphStore {
         return edges;
     }
 
-    private createTagHierarchyEdges(app: App, nodeById: Map<string, GraphNode>): GraphEdge[] {
+    private createTagToTagEdges(app: App, nodeById: Map<string, GraphNode>): GraphEdge[] {
         const edges: GraphEdge[] = [];
         const edgeSet = new Set<string>();
 
@@ -333,20 +326,20 @@ export class GraphStore {
         const tagMap = (app.metadataCache as any).getTags?.() as Record<string, number> | undefined;
         if (tagMap) {
             for (const rawTag of Object.keys(tagMap)) {
-                const clean = this.normalizeTag(rawTag);
-                if (clean) this.addTagWithAncestors(tags, clean);
+                const clean = this.normalizeTagName(rawTag);
+                if (clean) this.addTagPathToSet(tags, clean);
             }
         }
 
         for (const file of app.vault.getMarkdownFiles()) {
             for (const cleanTag of this.extractTagsFromFile(file, app)) {
-                if (cleanTag) this.addTagWithAncestors(tags, cleanTag);
+                if (cleanTag) this.addTagPathToSet(tags, cleanTag);
             }
         }
 
         // For each tag, add edges parent -> child
         for (const t of tags) {
-            const chain = this.getTagHierarchy(t); // ["a","a/b","a/b/c"]
+            const chain = this.expandTagPath(t); // ["a","a/b","a/b/c"]
             for (let i = 1; i < chain.length; i++) {
                 const parent = chain[i - 1];
                 const child  = chain[i];
@@ -373,11 +366,6 @@ export class GraphStore {
         return edges;
     }
 
-
-    // -----------------------
-    // Decorations (settings)
-    // -----------------------
-
     private decorateGraph(graph: GraphData, app: App): void {
         this.computeLinksAndRadius(graph);
         this.markBidirectional(graph.edges);
@@ -388,25 +376,24 @@ export class GraphStore {
         const nodeById = new Map(graph.nodes.map(n => [n.id, n] as const));
 
         // Reset first (prevents double-count if re-run)
-        for (const n of graph.nodes) {
-            n.inLinks = 0;
-            n.outLinks = 0;
-            n.totalLinks = 0;
+        for (const node of graph.nodes) {
+            node.inLinks    = 0;
+            node.outLinks   = 0;
+            node.totalLinks = 0;
         }
 
-        for (const e of graph.edges) {
-            const src = nodeById.get(e.sourceId);
-            const tgt = nodeById.get(e.targetId);
+        for (const edge of graph.edges) {
+            const src = nodeById.get(edge.sourceId);
+            const tgt = nodeById.get(edge.targetId);
             if (!src || !tgt) continue;
 
-            const c = Number(e.linkCount || 1) || 1;
-            src.outLinks = (src.outLinks || 0) + c;
-            tgt.inLinks = (tgt.inLinks || 0) + c;
+            src.outLinks    += 1;
+            tgt.inLinks     += 1;
         }
 
-        for (const n of graph.nodes) {
-            n.totalLinks = (n.inLinks || 0) + (n.outLinks || 0);
-            n.radius =  Math.min( Math.max(settings.graph.minNodeRadius + Math.log2(1 + n.totalLinks), settings.graph.minNodeRadius), settings.graph.maxNodeRadius );
+        for (const node of graph.nodes) {
+            node.totalLinks = node.inLinks + node.outLinks;
+            node.radius = Math.min( Math.max(settings.graph.minNodeRadius + Math.log2(1 + node.totalLinks), settings.graph.minNodeRadius), settings.graph.maxNodeRadius );
         }
     }
 
@@ -433,7 +420,7 @@ export class GraphStore {
         for (const t of cache.tags ?? []) {
             const rawTag = t?.tag;
             if (typeof rawTag === "string") {
-                tags.add(this.normalizeTag(rawTag));
+                tags.add(this.normalizeTagName(rawTag));
             }
         }
 
@@ -445,12 +432,12 @@ export class GraphStore {
             if (typeof rawTag === "string") {
                 for (const part of rawTag.split(/[,\s]+/)) {
                     if (!part) continue;
-                    tags.add(this.normalizeTag(part));
+                    tags.add(this.normalizeTagName(part));
                 }
             } else if (Array.isArray(rawTag)) { // frontMatter tag is an array
                 for (const v of rawTag) {
                     if (typeof v === "string") {
-                        tags.add(this.normalizeTag(v));
+                        tags.add(this.normalizeTagName(v));
                     }
                 }
             }
@@ -458,7 +445,7 @@ export class GraphStore {
         return [...tags];
     }
 
-    private normalizeTag(tag: string): string {
+    private normalizeTagName(tag: string): string {
         let t = tag.trim().toLowerCase();
 
         // strip Obsidian search-style prefix
