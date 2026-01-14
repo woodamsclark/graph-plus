@@ -23,7 +23,7 @@ type PersistedGraphState = {
 
 interface ResolvedLinks {
     [sourcePath: string]: { [targetPath: string]: number };
-}
+};
 
 export class GraphStore {
     private deps: GraphStoreDeps;

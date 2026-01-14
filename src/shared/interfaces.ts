@@ -99,8 +99,31 @@ export interface GraphData {
 
 export type GraphNodeType = 'note' | 'tag' | 'canvas'; // canvas nodes is a future feature 01-01-2026
 
-type location = { x: number; y: number; z: number };
-type velocity = { vx: number; vy: number; vz: number };
+type location = { x     : number;  y        : number;       z : number  };
+type velocity = { vx    : number;  vy       : number;       vz: number  };
+type anima    = { level : number,  capacity : number }; // pressure = level / threshold
+type gate     = {
+    state           : "open" | "closed",
+    // open if dp > threshold
+    // close if dp < threshold * hysteresis
+    threshold   : number,  // delta pressure needed to open; edge.strength * edge.length; modulated by strain
+    hysteresis  : number,  // 0...0.2; some fraction 
+    // Open: flow = conductance * dp
+    // Closed: backflow = leak * dp
+    // live_threshold = edge.strength * edge.length * (1 + strain) // calculated live, since strain is deviation fron length
+  }
+
+
+  // kP = edge.thickness / edge.length;
+  // kD = something you tune
+  // dpRate = (dp - prevDp) / dt;
+  // flow = kP * dp + kD * dpRate
+
+  // strain = dp / (distance(edge.src, edge.tgt) - edge.length) / edge.length;
+  // stress = strain * edge.strength
+
+
+  // dp = (src.anima.level / anima.threshold) - (tgt.anima.level / anima.threshold
 
 export interface GraphNode {
   id            : string;
@@ -108,11 +131,9 @@ export interface GraphNode {
   location      : location;
   velocity      : velocity;
   type          : GraphNodeType;
-  inLinks       : number;
-  outLinks      : number;
-  totalLinks    : number;
-  radius        : number; 
-  anima         : number;
+  linkMap       : Record<string, number>; // targetNodeId => link count
+  radius        : number;
+  anima         : anima;
   file?         : TFile;
 }
 
@@ -122,6 +143,12 @@ export interface GraphEdge {
   targetId      : string;
   linkCount?    : number;
   bidirectional?: boolean;
+  length        : number; // to replace settings.physics edge length; preferred resting length
+  strength      : number; // to replace settings.physics edge strength, though this is probably the same for all edges
+  thickness     : number;
+  //kP            : number; // defined runtime
+  //kD            : number; // defined runtime
+  gate          : gate;
 }
 
 export interface Simulation {
