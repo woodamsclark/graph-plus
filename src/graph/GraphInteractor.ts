@@ -1,4 +1,4 @@
-import { GraphNode, GraphData } from '../shared/interfaces.ts';
+import { Node, GraphData } from '../shared/interfaces.ts';
 import { GraphDependencies } from './GraphController.ts';
 import { CursorCss } from './CursorController.ts';
 import type { ScreenPt } from "../shared/interfaces.ts";
@@ -16,7 +16,7 @@ export class GraphInteractor {
     private dragWorldOffset     : { x: number; y: number; z: number } | null    = null;
     private dragDepthFromCamera : number                                        = 0;
     private pinnedNodes         : Set<string>                                   = new Set();
-    private openNodeFile        : ((node: GraphNode) => void)               | null    = null;
+    private openNodeFile        : ((node: Node) => void)               | null    = null;
     private state               : InteractionState;
 
     constructor(private deps: GraphDependencies) {
@@ -226,11 +226,11 @@ export class GraphInteractor {
     }
 
 
-    public setOnNodeClick(handler: (node: GraphNode) => void): void {
+    public setOnNodeClick(handler: (node: Node) => void): void {
         this.openNodeFile = handler; 
     }
 
-    private doesIntersectNode(worldX: number, worldY: number, node: GraphNode): boolean {
+    private doesIntersectNode(worldX: number, worldY: number, node: Node): boolean {
         const dx = worldX - (node.location.x ?? 0);
         const dy = worldY - (node.location.y ?? 0);
         const r  = node.radius; // world units
@@ -238,12 +238,12 @@ export class GraphInteractor {
         return (dx * dx + dy * dy) <= (r * r);
     }
 
-    public getClickedNode(screenX: number, screenY: number): GraphNode | null {
+    public getClickedNode(screenX: number, screenY: number): Node | null {
         const graph  = this.deps.getGraph();
         const camera = this.deps.getCamera();
         if (!graph || !camera) return null;
 
-        let best: GraphNode | null = null;
+        let best: Node | null = null;
         let bestDistSq = Infinity;
 
         for (const node of graph.nodes) {

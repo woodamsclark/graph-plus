@@ -1,4 +1,4 @@
-import { Renderer, GraphData, CameraState, GraphNode, GraphEdge } from '../shared/interfaces.ts';
+import { Renderer, GraphData, CameraState, Node, Link } from '../shared/interfaces.ts';
 import { getSettings } from '../settings/settingsStore.ts';
 import { CameraController } from './CameraController.ts';
 
@@ -13,10 +13,10 @@ type ThemeFonts = {
 type ThemeColors = {
   node      : string;
   tag       : string;
-  edge      : string;
+  link      : string;
   label     : string;
   background: string;
-  edgeAlpha : number;
+  linkAlpha : number;
 };
 
 type ThemeSnapshot = {
@@ -29,7 +29,7 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
   let settings                                        = getSettings();
   let mousePosition : { x: number; y: number } | null = null;
   let graph         : GraphData                | null = null;
-  let worldNodes                                      = new Map<string, GraphNode>();
+  let worldNodes                                      = new Map<string, Node>();
   let theme         : ThemeSnapshot                   = buildThemeSnapshot();
   let nodeMap = new Map<string, { x: number; y: number; depth: number; scale: number }>();
   let followedNodeId: string | null = null;
@@ -55,7 +55,7 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
       nodeMap.set(node.id, camera.worldToScreen(node));
     }
 
-    drawEdges(nodeMap);
+    drawLinks(nodeMap);
     drawNodes(nodeMap);
     drawLabels(nodeMap);
   }
@@ -65,25 +65,25 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     worldNodes.clear();
   }
 
-  function drawEdges(nodeMap: Map<string, { x: number; y: number; depth: number; scale: number }>) {
-    if (!context || !graph || !graph.edges) return;
+  function drawLinks(nodeMap: Map<string, { x: number; y: number; depth: number; scale: number }>) {
+    if (!context || !graph || !graph.links) return;
 
-    const edges: GraphEdge[] = graph.edges;
+    const links: Link[] = graph.links;
 
     context.save();
 
-    context.strokeStyle = theme.colors.edge;
-    context.globalAlpha = theme.colors.edgeAlpha;
+    context.strokeStyle = theme.colors.link;
+    context.globalAlpha = theme.colors.linkAlpha;
     context.lineWidth   = 1;
     context.lineCap     = 'round';
 
-    for (const edge of edges) {
-      const src = worldNodes.get(edge.sourceId);
-      const tgt = worldNodes.get(edge.targetId);
+    for (const link of links) {
+      const src = worldNodes.get(link.sourceId);
+      const tgt = worldNodes.get(link.targetId);
       if (!src || !tgt) continue;
 
-      const p1 = nodeMap.get(edge.sourceId);
-      const p2 = nodeMap.get(edge.targetId);
+      const p1 = nodeMap.get(link.sourceId);
+      const p2 = nodeMap.get(link.targetId);
 
       if (!p1 || !p2) continue;
       // Simple "behind camera" cull
@@ -98,62 +98,10 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     context.restore();
   }
 
-  /* Perspective based edges. Keep for later experimentation.
-    function drawEdges(nodeMap: Map<string, { x: number; y: number; depth: number; scale: number }>) {
-    if (!context || !graph || !graph.edges) return;
-
-    context.save();
-    context.strokeStyle = theme.colors.edge;
-    context.lineCap = 'round';
-
-    // TUNABLES
-    const baseAlpha = theme.colors.edgeAlpha; // e.g. 0.03
-    const minAlpha  = 0.008;                  // <= keep *some* ink in the distance
-    const maxAlpha  = 0.08;
-
-    const nearDepth = 50;                     // depth where edges are strongest
-    const farDepth  = 800;                    // depth where edges are weakest
-
-    const baseWidth = 1.0;
-    const minWidth  = 0.75;                   // <= don't go below this
-    const maxWidth  = 2.5;
-
-    for (const edge of graph.edges) {
-      const p1 = nodeMap.get(edge.sourceId);
-      const p2 = nodeMap.get(edge.targetId);
-      if (!p1 || !p2) continue;
-
-      // cull behind camera
-      if (p1.depth < 0 || p2.depth < 0) continue;
-
-      const avgDepth = (p1.depth + p2.depth) * 0.5;
-
-      // depth fade factor: 1 near, 0 far
-      const t = clamp((farDepth - avgDepth) / (farDepth - nearDepth), 0, 1);
-
-      // Keep alpha from hitting 0
-      const a = clamp(baseAlpha * t, minAlpha, maxAlpha);
-      context.globalAlpha = a;
-
-      // Thickness: you can keep constant, or lightly scale with zoom
-      const avgScale = (p1.scale + p2.scale) * 0.5;
-      const w = clamp(baseWidth * avgScale, minWidth, maxWidth);
-      context.lineWidth = w;
-
-      context.beginPath();
-      context.moveTo(p1.x, p1.y);
-      context.lineTo(p2.x, p2.y);
-      context.stroke();
-    }
-
-    context.restore();
-  }*/
-
-
   function drawNodes(nodeMap: Map<string, { x: number; y: number; depth: number; scale: number }>) {
     if (!context || !graph || !graph.nodes) return;
 
-    const nodes: GraphNode[] = graph.nodes;
+    const nodes: Node[] = graph.nodes;
 
     context.save();
 
@@ -161,7 +109,7 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     const tagColor  = theme.colors.tag;
 
     // Build sortable list (node + depth)
-    const sortable: { node: GraphNode; depth: number }[] = [];
+    const sortable: { node: Node; depth: number }[] = [];
     for (const node of nodes) {
       const p = nodeMap.get(node.id);
       if (!p) continue;
@@ -291,12 +239,12 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
     const s = getSettings(); // IMPORTANT: grab latest settings (don’t rely on the initial const)
     return {
       background: s.graph.backgroundColor ?? cssVar('--background-primary'      ),
-      edge      : s.graph.edgeColor       ?? cssVar('--text-normal'             ),
+      link      : s.graph.edgeColor       ?? cssVar('--text-normal'             ),
       node      : s.graph.nodeColor       ?? cssVar('--interactive-accent'      ),
       tag       : s.graph.tagColor        ?? cssVar('--interactive-accent-hover'),
       label     : s.graph.labelColor      ?? cssVar('--text-muted'              ),
 
-      edgeAlpha : 0.03,
+      linkAlpha : 0.03,
     };
   }
 
