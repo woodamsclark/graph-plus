@@ -39,7 +39,8 @@ export class GraphStore {
         const graph = this.generateGraph(app);
 
         if (state) this.applyPositions(graph, state);
-        this.decorateGraph(graph, app);
+        this.computeAdjacency(graph);
+        this.computeNodeRadius(graph);
 
         this.graph = graph;
     }
@@ -150,7 +151,7 @@ export class GraphStore {
         }
 
         const links = this.buildLinksFromEdges(allEdges.call(this), nodeById);
-        return { nodes, links };
+        return { nodes, links, linksOut: {}, linksIn: {} };
     }
 
     private collectTagsAndNoteTagEdges(app: App): { tags: Set<string>; edges: WeightedEdge[] } {
@@ -238,7 +239,6 @@ export class GraphStore {
                     vz : 0,
                 },
                 type        : "note",
-                links       : {},
                 radius      : 10,
                 file        : file,
                 anima       : { level: 100, capacity: 100 }, 
@@ -264,7 +264,6 @@ export class GraphStore {
                 },
                 velocity: { vx: 0, vy: 0, vz: 0 },
                 type: "tag",
-                links: {},
                 anima: { level: 100, capacity: 100 },
                 radius: 10,
             });
@@ -326,22 +325,39 @@ export class GraphStore {
         };
     }
 
-    private decorateGraph(graph: GraphData, app: App): void {
-        this.computeLinksAndRadius(graph);
-        this.markBidirectional(graph.links);
-    }
-
-    private computeLinksAndRadius(graph: GraphData): void {
-        for (const node of graph.nodes) node.links = {};
-
-        const nodeById = new Map(graph.nodes.map(n => [n.id, n] as const));
+    private computeAdjacency(graph: GraphData): void {
+        const out: Record<string, Record<string, number>> = {};
+        const inn: Record<string, Record<string, number>> = {};
 
         for (const link of graph.links) {
-            const src = nodeById.get(link.sourceId);
-            const tgt = nodeById.get(link.targetId);
-            if (!src || !tgt) continue;
+            const s = link.sourceId;
+            const t = link.targetId;
+            const w = link.thickness;
 
-            src.links[link.targetId] = (src.links[link.targetId] || 0) + link.thickness;
+            (out[s] ??= {});
+            out[s][t] = (out[s][t] || 0) + w;
+
+            (inn[t] ??= {});
+            inn[t][s] = (inn[t][s] || 0) + w;
+        }
+
+        graph.linksOut = out;
+        graph.linksIn = inn;
+    }
+
+    private computeNodeRadius(graph: GraphData): void {
+        const minR = getSettings().graph.minNodeRadius;
+        const maxR = getSettings().graph.maxNodeRadius;
+
+        for (const node of graph.nodes) {
+            const incoming = graph.linksIn[node.id];
+            const count = incoming
+                ? Object.values(incoming).reduce((a, b) => a + b, 0)
+                : 0;
+
+            // example curve; tune later
+            const r = minR + Math.sqrt(count) * 2;
+            node.radius = Math.min(maxR, r);
         }
     }
 
