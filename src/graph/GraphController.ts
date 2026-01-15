@@ -1,7 +1,7 @@
 import { App, Plugin, TFile } from 'obsidian'; 
 import { createRenderer } from './renderer.ts';
 import { createSimulation } from './simulation.ts';
-import { Renderer, GraphNode, GraphData, Simulation } from '../shared/interfaces.ts';
+import { Renderer, Node, GraphData, Simulation } from '../shared/interfaces.ts';
 import { InputManager } from './InputManager.ts';
 import { getSettings } from '../settings/settingsStore.ts';
 import { CameraController } from './CameraController.ts';
@@ -195,8 +195,8 @@ export class GraphController {
 
   private buildAdjacencyMap(){ // currently dead code
     const adjacency = new Map<string, string[]>();
-    if (this.graph && this.graph.edges) {
-      for (const e of this.graph.edges) {
+    if (this.graph && this.graph.links) {
+      for (const e of this.graph.links) {
         if (!adjacency.has(e.sourceId)) adjacency.set(e.sourceId, []);
         if (!adjacency.has(e.targetId)) adjacency.set(e.targetId, []);
         adjacency.get(e.sourceId)!.push(e.targetId);
@@ -250,7 +250,7 @@ export class GraphController {
     }
   }
 
-  private async openNodeFile(node: GraphNode): Promise<void> {
+  private async openNodeFile(node: Node): Promise<void> {
     if (!node) return;
     const app                     = this.app;
     let file: TFile | null        = null;

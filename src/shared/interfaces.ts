@@ -93,8 +93,8 @@ export interface Renderer {
 }
 
 export interface GraphData {
-  nodes         : GraphNode[];
-  edges         : GraphEdge[];
+  nodes         : Node[];
+  links         : Link[];
 }
 
 export type GraphNodeType = 'note' | 'tag' | 'canvas'; // canvas nodes is a future feature 01-01-2026
@@ -125,23 +125,22 @@ type gate     = {
 
   // dp = (src.anima.level / anima.threshold) - (tgt.anima.level / anima.threshold
 
-export interface GraphNode {
+export interface Node {
   id            : string;
   label         : string;
   location      : location;
   velocity      : velocity;
   type          : GraphNodeType;
-  linkMap       : Record<string, number>; // targetNodeId => link count
+  links         : Record<string, number>; // targetNodeId => link count
   radius        : number;
   anima         : anima;
   file?         : TFile;
 }
 
-export interface GraphEdge {
-  id?           : string;
+export interface Link {
+  id            : string;
   sourceId      : string;
   targetId      : string;
-  linkCount?    : number;
   bidirectional?: boolean;
   length        : number; // to replace settings.physics edge length; preferred resting length
   strength      : number; // to replace settings.physics edge strength, though this is probably the same for all edges

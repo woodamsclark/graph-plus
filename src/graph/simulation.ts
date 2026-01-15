@@ -1,5 +1,5 @@
 import { CameraController } from './CameraController.ts';
-import { GraphNode, GraphData, PhysicsSettings, Simulation } from '../shared/interfaces.ts';
+import { Node, GraphData, PhysicsSettings, Simulation } from '../shared/interfaces.ts';
 import { getSettings } from '../settings/settingsStore.ts';
 import type { ScreenPt } from "../shared/interfaces.ts";
 
@@ -10,10 +10,10 @@ export function createSimulation(
 ) : Simulation{
   // If center not provided, compute bounding-box center from node positions
   const nodes                       = graph.nodes;
-  const edges                       = graph.edges;
+  const links                       = graph.links;
   let running                       = false;  
   let pinnedNodes                   = new Set<string>(); // set of node ids that should be pinned (physics skip)
-  const nodeById                    = new Map<string, GraphNode>();
+  const nodeById                    = new Map<string, Node>();
   for (const n of nodes) nodeById.set(n.id, n);
   
 
@@ -26,7 +26,7 @@ export function createSimulation(
     mass: number;                       // number of bodies (or weighted)
     comX: number; comY: number; comZ: number; // center of mass
 
-    body: GraphNode | null;             // if leaf with single body
+    body: Node | null;             // if leaf with single body
     children: (OctNode | null)[] | null; // length 8 when subdivided
   };
 
@@ -69,7 +69,7 @@ export function createSimulation(
   }
 
 
-  function buildOctree(bodies: GraphNode[]): OctNode | null {
+  function buildOctree(bodies: Node[]): OctNode | null {
   if (!bodies.length) return null;
 
   // bounds
@@ -107,7 +107,7 @@ export function createSimulation(
   return root;
   }
 
-  function insertBody(cell: OctNode, body: GraphNode): void {
+  function insertBody(cell: OctNode, body: Node): void {
     // update aggregate (mass + center of mass)
     const m0 = cell.mass;
     const m1 = m0 + 1;
@@ -139,7 +139,7 @@ export function createSimulation(
     insertIntoChild(cell, body);
   }
 
-  function insertIntoChild(cell: OctNode, body: GraphNode): void {
+  function insertIntoChild(cell: OctNode, body: Node): void {
     const idx = childIndex(cell, body.location.x, body.location.y, body.location.z);
     const child = getOrCreateChild(cell, idx);
     insertBody(child, body);
@@ -164,7 +164,7 @@ export function createSimulation(
   }
 
   function accumulateBH(
-    a: GraphNode,
+    a: Node,
     cell: OctNode,
     strength: number,
     thetaSq: number,
@@ -315,8 +315,8 @@ export function createSimulation(
   }
 
   function applySprings(physicsSettings: PhysicsSettings) {
-    if (!edges) return;
-    for (const e of edges) {
+    if (!links) return;
+    for (const e of links) {
       const a = nodeById.get(e.sourceId);
       const b = nodeById.get(e.targetId);
       if (!a || !b) continue;
@@ -419,11 +419,11 @@ export function createSimulation(
   }
 
   // Type guards
-  function isTag(n: GraphNode): boolean {
+  function isTag(n: Node): boolean {
     return n.type === "tag";
   }
 
-  function isNote(n: GraphNode): boolean {
+  function isNote(n: Node): boolean {
     return n.type === "note";
   }
 

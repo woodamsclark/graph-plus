@@ -1,5 +1,5 @@
 import type { CameraState, CameraSettings, WorldTransform } from '../shared/interfaces.ts';
-import type { GraphNode } from '../shared/interfaces.ts';
+import type { Node } from '../shared/interfaces.ts';
 import { getSettings } from '../settings/settingsStore.ts';
 
 
@@ -44,7 +44,7 @@ export class CameraController {
     this.clearMomentum();
   }
 
-  worldToScreen(node: GraphNode): { x: number; y: number; depth: number; scale: number } {
+  worldToScreen(node: Node): { x: number; y: number; depth: number; scale: number } {
     const {
       yaw,
       pitch,

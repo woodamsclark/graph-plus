@@ -1,9 +1,8 @@
 import { App, TFile } from "obsidian";
-import { GraphData, GraphNode, GraphEdge } from "../shared/interfaces.ts";
+import { GraphData, Node, Link } from "../shared/interfaces.ts";
 import { getSettings } from "../settings/settingsStore.ts";
 
-// Performance note to fix later: we scan all files twice.
-// Once to build tag nodes, once again to build tag edges.
+type WeightedEdge = { sourceId: string; targetId: string; weight: number };
 
 type DataStoragePlugin = {
     loadData: () => Promise<any>;
@@ -127,35 +126,101 @@ export class GraphStore {
 
     private generateGraph(app: App): GraphData {
         const settings = getSettings();
-        const nodes    = this.createNodes(app); // notes + tags
-        const nodeById = new Map(nodes.map(n => [n.id, n] as const));
+        const showTags = settings.graph.showTags;
 
-        const edges: GraphEdge[] = [];
-        edges.push(...this.createNoteToNoteEdges(app, nodeById));
+        let tags = new Set<string>();
+        let noteTagEdges: WeightedEdge[] = [];
 
-        if (settings.graph.showTags) {
-            edges.push(...this.createNoteToTagEdges(app, nodeById));       // note -> tag
-            edges.push(...this.createTagToTagEdges(app, nodeById));  // tag -> tag
+        if (showTags) {
+            const collected = this.collectTagsAndNoteTagEdges(app);
+            tags = collected.tags;
+            noteTagEdges = collected.edges;
         }
 
+        const nodes = this.createNodes(app, tags, settings.graph.showTags);
+        const nodeById = new Map(nodes.map(n => [n.id, n] as const));
 
-        return { nodes, edges };
+        function* allEdges(this: GraphStore): IterableIterator<WeightedEdge> {
+            yield* this.noteNoteEdges(app);
+
+            if (!showTags) return;
+
+            yield* noteTagEdges;
+            yield* this.tagTagEdges(tags);
+        }
+
+        const links = this.buildLinksFromEdges(allEdges.call(this), nodeById);
+        return { nodes, links };
     }
 
-    private createNodes(app: App): GraphNode[] {
-        const settings = getSettings();
+    private collectTagsAndNoteTagEdges(app: App): { tags: Set<string>; edges: WeightedEdge[] } {
+        const tags = new Set<string>();
+        const edges: WeightedEdge[] = [];
 
-        let nodes: GraphNode[] = [];
-        if (settings.graph.showTags)
-            nodes = this.createTagNodes(app);
+        // include metadataCache.getTags() too (optional)
+        // it may be possible that getTags() captures tags that files do not, creating orphan tags
+        const tagMap = (app.metadataCache as any).getTags?.() as Record<string, number> | undefined;
+        if (tagMap) {
+            for (const rawTag of Object.keys(tagMap)) {
+                const clean = this.normalizeTagName(rawTag);
+                if (clean) this.addTagPathToSet(tags, clean);
+            }
+        }
+
+        for (const file of app.vault.getMarkdownFiles()) {
+            const sourceId = file.path;
+
+            for (const cleanTag of this.extractTagsFromFile(file, app)) {
+                if (!cleanTag) continue;
+
+                this.addTagPathToSet(tags, cleanTag);               // for tag nodes + hierarchy
+                edges.push({ sourceId, targetId: cleanTag, weight: 1 }); // note -> tag
+            }
+        }
+
+        return { tags, edges };
+    }
+
+    private createNodes(app: App, tags: Set<string>, showTags:boolean): Node[] {
+
+        let nodes: Node[] = [];
+        if (showTags)
+            nodes = this.createTagNodes(tags);
         nodes = nodes.concat(this.createNoteNodes(app));
 
         return nodes;
     }
 
-    private createNoteNodes(app: App): GraphNode[] {
+    private *noteNoteEdges(app: App): IterableIterator<WeightedEdge> {
+        const settings = getSettings();
+        const resolvedLinks: ResolvedLinks = (app.metadataCache as any).resolvedLinks || {};
+        const countDuplicates = Boolean(settings.graph.countDuplicateLinks);
+
+        for (const sourcePath of Object.keys(resolvedLinks)) {
+            const targets = resolvedLinks[sourcePath] || {};
+            for (const targetPath of Object.keys(targets)) {
+                const rawCount = Number(targets[targetPath]) || 1;
+                yield {
+                    sourceId: sourcePath,
+                    targetId: targetPath,
+                    weight  : countDuplicates ? rawCount : 1,
+                };
+            }
+        }
+    }
+
+    private *tagTagEdges(tags: Set<string>): IterableIterator<WeightedEdge> {
+        for (const t of tags) {
+            const chain = this.expandTagPath(t); // ["a","a/b","a/b/c"]
+            for (let i = 1; i < chain.length; i++) {
+                yield { sourceId: chain[i - 1], targetId: chain[i], weight: 1 };
+            }
+        }
+    }
+
+    private createNoteNodes(app: App): Node[] {
         const files: TFile[]        = app.vault.getMarkdownFiles();
-        const nodes: GraphNode[]    = [];
+        const nodes: Node[]    = [];
 
         for (const file of files) {
             const jitter = 50;
@@ -173,37 +238,20 @@ export class GraphStore {
                     vz : 0,
                 },
                 type        : "note",
-                inLinks     : 0,
-                outLinks    : 0,
-                totalLinks  : 0,
+                links       : {},
                 radius      : 10,
                 file        : file,
-                anima       : 1, 
+                anima       : { level: 100, capacity: 100 }, 
             });
         }
 
         return nodes;
     }
 
-    private createTagNodes(app: App): GraphNode[] {
-        const tags = new Set<string>();
-
-        const tagMap = (app.metadataCache as any).getTags?.() as Record<string, number> | undefined;
-        if (tagMap) {
-            for (const rawTag of Object.keys(tagMap)) {
-                const clean = this.normalizeTagName(rawTag);
-                if (clean) this.addTagPathToSet(tags, clean);
-            }
-        }
-
-        for (const file of app.vault.getMarkdownFiles()) {
-            for (const cleanTag of this.extractTagsFromFile(file, app)) {
-                if (cleanTag) this.addTagPathToSet(tags, cleanTag);
-            }
-        }
+    private createTagNodes(tags: Set<string>): Node[] {
 
         const jitter = 50;
-        const nodes: GraphNode[] = [];
+        const nodes: Node[] = [];
 
         for (const cleanTag of tags) {
             nodes.push({
@@ -216,10 +264,8 @@ export class GraphStore {
                 },
                 velocity: { vx: 0, vy: 0, vz: 0 },
                 type: "tag",
-                inLinks: 0,
-                outLinks: 0,
-                totalLinks: 0,
-                anima: 1,
+                links: {},
+                anima: { level: 100, capacity: 100 },
                 radius: 10,
             });
         }
@@ -245,166 +291,68 @@ export class GraphStore {
         }
     }
 
-    // does this only create note => note edges
-    // or also note => tag edges?
-    // if so, rename to createNodeEdges
-    private createNoteToNoteEdges(app: App, nodeById: Map<string, GraphNode>): GraphEdge[] {
+    private buildLinksFromEdges(edges: Iterable<WeightedEdge>, nodeById: Map<string, Node>): Link[] {
+        const byId = new Map<string, Link>();
+
+        for (const e of edges) {
+            if (!nodeById.has(e.sourceId) || !nodeById.has(e.targetId)) continue;
+
+            const thickness = Number.isFinite(e.weight) && e.weight > 0 ? e.weight : 1;
+            const id = `${e.sourceId}->${e.targetId}`;
+
+            const existing = byId.get(id);
+            if (existing) {
+                existing.thickness += thickness;
+                continue;
+            }
+
+            const link = this.createLink(e.sourceId, e.targetId, thickness);
+            byId.set(id, link);
+        }
+
+        return [...byId.values()];
+    }
+
+    private createLink(sourceId: string, targetId: string, thickness: number): Link {
         const settings = getSettings();
-
-        const resolved: ResolvedLinks = (app.metadataCache as any).resolvedLinks || {};
-        const edges: GraphEdge[] = [];
-        const edgeSet = new Set<string>();
-        const countDuplicates = Boolean(settings.graph.countDuplicateLinks);
-
-        for (const sourcePath of Object.keys(resolved)) {
-            const targets = resolved[sourcePath] || {};
-            for (const targetPath of Object.keys(targets)) {
-                if (!nodeById.has(sourcePath) || !nodeById.has(targetPath)) continue;
-
-                const key = `${sourcePath}->${targetPath}`;
-                if (edgeSet.has(key)) continue;
-
-                const rawCount = Number(targets[targetPath] || 1) || 1;
-                const linkCount = countDuplicates ? rawCount : 1;
-
-                edges.push({
-                    id: key,
-                    sourceId: sourcePath,
-                    targetId: targetPath,
-                    linkCount,
-                    bidirectional: false,
-                });
-
-                edgeSet.add(key);
-            }
-        }
-        return edges;
-    }
-
-    // modify this to create tag=>tag edges?
-    private createNoteToTagEdges(app: App, nodeById: Map<string, GraphNode>): GraphEdge[] {
-        const edges : GraphEdge[]   = [];
-        const edgeSet               = new Set<string>(); // only for tag edges; ids are unique anyway
-        const files                 = app.vault.getMarkdownFiles();
-
-        for (const file of files) {
-            const srcId = file.path;
-            if (!nodeById.has(srcId)) continue;
-
-            const tags = this.extractTagsFromFile(file, app);
-
-            for (const cleanTag of tags) {
-                const tagId = cleanTag;
-                if (!nodeById.has(tagId)) continue;
-
-                const id = `${srcId}->${tagId}`;
-                if (edgeSet.has(id)) continue;
-
-                edges.push({
-                    id,
-                    sourceId: srcId,
-                    targetId: tagId,
-                    linkCount: 1,
-                    bidirectional: false,
-                });
-
-                edgeSet.add(id);
-            }
-        }
-
-        return edges;
-    }
-
-    private createTagToTagEdges(app: App, nodeById: Map<string, GraphNode>): GraphEdge[] {
-        const edges: GraphEdge[] = [];
-        const edgeSet = new Set<string>();
-
-        // Reconstruct the same tag universe you used for nodes.
-        // If you want to avoid scanning twice later, you can refactor to build tags once and reuse.
-        const tags = new Set<string>();
-
-        const tagMap = (app.metadataCache as any).getTags?.() as Record<string, number> | undefined;
-        if (tagMap) {
-            for (const rawTag of Object.keys(tagMap)) {
-                const clean = this.normalizeTagName(rawTag);
-                if (clean) this.addTagPathToSet(tags, clean);
-            }
-        }
-
-        for (const file of app.vault.getMarkdownFiles()) {
-            for (const cleanTag of this.extractTagsFromFile(file, app)) {
-                if (cleanTag) this.addTagPathToSet(tags, cleanTag);
-            }
-        }
-
-        // For each tag, add edges parent -> child
-        for (const t of tags) {
-            const chain = this.expandTagPath(t); // ["a","a/b","a/b/c"]
-            for (let i = 1; i < chain.length; i++) {
-                const parent = chain[i - 1];
-                const child  = chain[i];
-
-                const parentId = parent;
-                const childId  = child;
-                if (!nodeById.has(parentId) || !nodeById.has(childId)) continue;
-
-                const id = `${parentId}->${childId}`;
-                if (edgeSet.has(id)) continue;
-
-                edges.push({
-                    id,
-                    sourceId: parentId,
-                    targetId: childId,
-                    linkCount: 1,
-                    bidirectional: false,
-                });
-
-                edgeSet.add(id);
-            }
-        }
-
-        return edges;
+        return {
+            id          : `${sourceId}->${targetId}`,
+            sourceId    : sourceId,
+            targetId    : targetId,
+            length      : settings.physics.edgeLength,
+            strength    : settings.physics.edgeStrength,
+            thickness   : thickness,
+            gate        : {state: "closed", threshold: 0, hysteresis: 0, },
+        };
     }
 
     private decorateGraph(graph: GraphData, app: App): void {
         this.computeLinksAndRadius(graph);
-        this.markBidirectional(graph.edges);
+        this.markBidirectional(graph.links);
     }
 
     private computeLinksAndRadius(graph: GraphData): void {
-        const settings = getSettings();
+        for (const node of graph.nodes) node.links = {};
+
         const nodeById = new Map(graph.nodes.map(n => [n.id, n] as const));
 
-        // Reset first (prevents double-count if re-run)
-        for (const node of graph.nodes) {
-            node.inLinks    = 0;
-            node.outLinks   = 0;
-            node.totalLinks = 0;
-        }
-
-        for (const edge of graph.edges) {
-            const src = nodeById.get(edge.sourceId);
-            const tgt = nodeById.get(edge.targetId);
+        for (const link of graph.links) {
+            const src = nodeById.get(link.sourceId);
+            const tgt = nodeById.get(link.targetId);
             if (!src || !tgt) continue;
 
-            src.outLinks    += 1;
-            tgt.inLinks     += 1;
-        }
-
-        for (const node of graph.nodes) {
-            node.totalLinks = node.inLinks + node.outLinks;
-            node.radius = Math.min( Math.max(settings.graph.minNodeRadius + Math.log2(1 + node.totalLinks), settings.graph.minNodeRadius), settings.graph.maxNodeRadius );
+            src.links[link.targetId] = (src.links[link.targetId] || 0) + link.thickness;
         }
     }
 
-    private markBidirectional(edges: GraphEdge[]): void {
-        const m = new Map<string, GraphEdge>();
-        for (const e of edges) m.set(`${e.sourceId}->${e.targetId}`, e);
+    private markBidirectional(links: Link[]): void {
+        const byId = new Map<string, Link>();
+        for (const link of links) byId.set(`${link.sourceId}->${link.targetId}`, link);
 
-        for (const e of edges) {
-            const rev = m.get(`${e.targetId}->${e.sourceId}`);
+        for (const link of links) {
+            const rev = byId.get(`${link.targetId}->${link.sourceId}`);
             if (rev) {
-                e.bidirectional = true;
+                link.bidirectional = true;
                 rev.bidirectional = true;
             }
         }
