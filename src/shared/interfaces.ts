@@ -95,9 +95,11 @@ export interface Renderer {
 export interface GraphData {
   nodes         : Node[];
   links         : Link[];
+  linksOut: Record<string, Record<string, number>>;
+  linksIn: Record<string, Record<string, number>>;
 }
 
-export type GraphNodeType = 'note' | 'tag' | 'canvas'; // canvas nodes is a future feature 01-01-2026
+export type NodeType = 'note' | 'tag' | 'canvas'; // canvas nodes is a future feature 01-01-2026
 
 type location = { x     : number;  y        : number;       z : number  };
 type velocity = { vx    : number;  vy       : number;       vz: number  };
@@ -130,8 +132,7 @@ export interface Node {
   label         : string;
   location      : location;
   velocity      : velocity;
-  type          : GraphNodeType;
-  links         : Record<string, number>; // targetNodeId => link count
+  type          : NodeType;
   radius        : number;
   anima         : anima;
   file?         : TFile;
