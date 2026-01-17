@@ -1,6 +1,6 @@
 import { App, TFile } from "obsidian";
-import { GraphData, Node, Link } from "../shared/interfaces.ts";
-import { getSettings } from "../settings/settingsStore.ts";
+import { GraphData, Node, Link } from "../../shared/interfaces.ts";
+import { getSettings } from "../../settings/settingsStore.ts";
 
 type WeightedEdge = { sourceId: string; targetId: string; weight: number };
 

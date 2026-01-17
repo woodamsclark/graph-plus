@@ -1,4 +1,4 @@
-import { ScreenPt, ClientPt } from '../shared/interfaces.ts';
+import { ScreenPt, ClientPt } from '../../../../shared/interfaces.ts';
 type WheelMode = 'pan' | 'zoom';
 
 

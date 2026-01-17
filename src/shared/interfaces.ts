@@ -86,34 +86,28 @@ export interface Renderer {
   resize(width: number, height: number)                       : void;
   render()                                                    : void;
   destroy()                                                   : void;
-  setGraph(data: GraphData)                                   : void;
+  setGraph: (graph: GraphData | null) => void;
   setMouseScreenPosition(pos: { x: number; y: number } | null): void;
   setFollowedNode(node: string | null)               : void;
   refreshTheme()                                              : void;
 }
 
 export interface GraphData {
-  nodes         : Node[];
-  links         : Link[];
-  linksOut: Record<string, Record<string, number>>;
-  linksIn: Record<string, Record<string, number>>;
+  nodes     : Node[];
+  links     : Link[];
+  linksOut  : Record<string, Record<string, number>>;
+  linksIn   : Record<string, Record<string, number>>;
+  // linksOut[nodeId][targetId] = count of links from nodeId to targetId
+  // linksOut[nodeId] = { targetId: count, ... }
+  // linksIn[nodeId][sourceId]  = count of links from sourceId to nodeId
+  // linksIn[nodeId]  = { sourceId: count, ... }
 }
 
 export type NodeType = 'note' | 'tag' | 'canvas'; // canvas nodes is a future feature 01-01-2026
 
 type location = { x     : number;  y        : number;       z : number  };
 type velocity = { vx    : number;  vy       : number;       vz: number  };
-type anima    = { level : number,  capacity : number }; // pressure = level / threshold
-type gate     = {
-    state           : "open" | "closed",
-    // open if dp > threshold
-    // close if dp < threshold * hysteresis
-    threshold   : number,  // delta pressure needed to open; edge.strength * edge.length; modulated by strain
-    hysteresis  : number,  // 0...0.2; some fraction 
-    // Open: flow = conductance * dp
-    // Closed: backflow = leak * dp
-    // live_threshold = edge.strength * edge.length * (1 + strain) // calculated live, since strain is deviation fron length
-  }
+
 
 
   // kP = edge.thickness / edge.length;
@@ -167,3 +161,20 @@ export interface WorldTransform {
 
 export type ScreenPt = { x: number; y: number };
 export type ClientPt = { x: number; y: number };
+
+
+type anima    = { level : number,  capacity : number }; // pressure = level / threshold
+type gate     = {
+    state           : "open" | "closed",
+    // open if dp > threshold
+    // close if dp < threshold * hysteresis
+    threshold   : number,  // delta pressure needed to open; edge.strength * edge.length; modulated by strain
+    hysteresis  : number,  // 0...0.2; some fraction 
+    // Open: flow = conductance * dp
+    // Closed: backflow = leak * dp
+    // live_threshold = edge.strength * edge.length * (1 + strain) // calculated live, since strain is deviation fron length
+  }
+
+export interface Tickable {
+  tick(dt: number, nowMs: number): void;
+}
