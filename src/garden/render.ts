@@ -1,6 +1,7 @@
 import { Renderer, GraphData, CameraState, Node, Link } from '../shared/interfaces.ts';
 import { getSettings } from '../settings/settingsStore.ts';
-import { CameraController } from './CameraController.ts';
+import { CameraController } from './graph/CameraController.ts';
+
 
 type FontSlot = "text" | "interface" | "mono";
 
@@ -139,78 +140,44 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
   }
 
 
-  function drawLabels(projectedNodes: Map<string, { x: number; y: number; depth: number }>) {
-    if (!context || !graph || !graph.nodes || !mousePosition) return;
+ function drawLabels(nodeMap: Map<string, { x: number; y: number; depth: number }>) {
+  if (!context || !graph || !graph.nodes) return;
+  if (!settings.graph.showLabels) return;
 
-    if (!settings.graph.showLabels) return;
+  const offsetY  = 10;
+  const fontSize = settings.graph.labelFontSize;
 
-    const R               = settings.graph.labelRevealRadius;
-    const baseAlpha       = 1;
-    const sigma           = (R * 0.5);
-    const inv2Sigma2      = 1 / (2 * sigma * sigma);
-    const offsetY         = 10;
+  context.save();
+  context.font         = `${fontSize}px ${theme.fonts.interface}`;
+  context.textAlign    = "center";
+  context.textBaseline = "top";
+  context.fillStyle    = theme.colors.label;
 
-    const fontSize        = settings.graph.labelFontSize;
+  for (const node of graph.nodes) {
+    const p = nodeMap.get(node.id);
+    if (!p || p.depth < 0) continue;
 
-    context.save();
-    context.font          = `${fontSize}px ${theme.fonts.interface}`;
-    context.textAlign     = 'center';
-    context.textBaseline  = 'top';
-    context.fillStyle     = theme.colors.label;
-
-    for (const node of graph.nodes) {
-      const p = projectedNodes.get(node.id);
-      if (!p || p.depth < 0) continue;
-
-      const dx = p.x - mousePosition.x;
-      const dy = p.y - mousePosition.y;
-      const d2 = dx*dx + dy*dy;
-
-      if (d2 > R*R) continue;
-
-      const a = baseAlpha * Math.exp(-d2 * inv2Sigma2);
-      if (a < 0.01) continue;
-
-      context.globalAlpha = a;
+    if (node.anima.level > node.anima.capacity){
+      context.globalAlpha = 1;
       context.fillText(node.label, p.x, p.y + node.radius + offsetY);
     }
-    if (followedNodeId) {
-      const pFollow = projectedNodes.get(followedNodeId);
-      if (pFollow && pFollow.depth >= 0) {
-
-        context.globalAlpha = 1.0;
-        const followedNode = worldNodes.get(followedNodeId);
-        const r = followedNode?.radius ?? 0;
-
-        context.fillText(
-          followedNode?.label ?? "",
-          pFollow.x,
-          pFollow.y + r + offsetY
-        );
-      }
-    }
-    context.restore();
   }
 
-  function setGraph(data: GraphData | null) {
-    graph = data;
-    worldNodes.clear();
+  context.restore();
+}
 
-    if (!data) return;
 
-    for (const node of data.nodes) {
-      worldNodes.set(node.id, node);
-    }
+  function setGraph(g: GraphData | null) {
+  graph = g;                 // ✅ critical: assign the closure variable
 
-  const counts = data.nodes.reduce(
-    (acc, n) => {
-      acc[n.type] = (acc[n.type] ?? 0) + 1;
-      return acc;
-    },
-    {} as Record<string, number>
-  );
+  worldNodes.clear();
+  if (!graph) return;
 
+  for (const node of graph.nodes) {
+    worldNodes.set(node.id, node);
   }
+}
+
 
   function buildThemeSnapshot(): ThemeSnapshot {
     return {
@@ -290,7 +257,7 @@ export function createRenderer( canvas: HTMLCanvasElement, camera: CameraControl
   refreshTheme,
   setMouseScreenPosition,
   setFollowedNode,
-};
+  };
 
 return renderer;
 }

@@ -1,8 +1,6 @@
-import type { CameraState, CameraSettings, WorldTransform } from '../shared/interfaces.ts';
-import type { Node } from '../shared/interfaces.ts';
-import { getSettings } from '../settings/settingsStore.ts';
-
-
+import type { CameraState, CameraSettings, WorldTransform } from '../../shared/interfaces.ts';
+import type { Node } from '../../shared/interfaces.ts';
+import { getSettings } from '../../settings/settingsStore.ts';
 
 export class CameraController {
   private cameraSettings  : CameraSettings;
@@ -19,7 +17,6 @@ export class CameraController {
   constructor(initialState: CameraState) {
     this.cameraState     = { ...initialState };
     this.cameraSettings  = getSettings().camera;
-    //this.renderer        = renderer;
   }
 
   getState(): CameraState {

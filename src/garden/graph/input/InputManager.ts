@@ -1,10 +1,10 @@
-import { ScreenPt, ClientPt } from '../shared/interfaces.ts';
-import { TwoFingerGesture } from './TwoFingerGesture.ts';
-import { WheelGestureSession } from './WheelGestureSession.ts';
-import { PointerTracker } from './PointerTracker.ts';
-import { distSq } from '../shared/distSq.ts';
-import { wrapAngleDelta } from '../shared/wrapAngleDelta.ts';
-import { getSettings } from '../settings/settingsStore.ts';
+import { ScreenPt, ClientPt } from '../../../shared/interfaces.ts';
+import { TwoFingerGesture } from './gestures/TwoFingerGesture.ts';
+import { WheelGestureSession } from './gestures/WheelGestureSession.ts';
+import { PointerTracker } from './gestures/PointerTracker.ts';
+import { distSq } from '../../../shared/distSq.ts';
+import { wrapAngleDelta } from '../../../shared/wrapAngleDelta.ts';
+import { getSettings } from '../../../settings/settingsStore.ts';
 
 type InputState =
   | { kind: 'idle' }

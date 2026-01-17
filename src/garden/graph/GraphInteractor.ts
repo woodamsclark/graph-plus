@@ -1,7 +1,7 @@
-import { Node, GraphData } from '../shared/interfaces.ts';
-import { GraphDependencies } from './GraphController.ts';
-import { CursorCss } from './CursorController.ts';
-import type { ScreenPt } from "../shared/interfaces.ts";
+import { Node, GraphData } from '../../shared/interfaces.ts';
+import { GraphDependencies } from './GraphDirector.ts';
+import { CursorCss } from './input/CursorController.ts';
+import type { ScreenPt } from "../../shared/interfaces.ts";
 
 export type InteractionState = {
   mouseScreenPosition   : {x:number,y:number}   | null;
@@ -155,7 +155,6 @@ export class GraphInteractor {
         this.state.followedId = nodeId;
         this.updateFollow();
     }
-
 
     private updateFollow(): void {
         const id = this.state.followedId;

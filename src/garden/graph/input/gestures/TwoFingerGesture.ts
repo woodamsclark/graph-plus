@@ -1,6 +1,6 @@
-import { ScreenPt, ClientPt } from '../shared/interfaces.ts';
+import { ScreenPt, ClientPt } from '../../../../shared/interfaces.ts';
 import { ActivePointer } from './PointerTracker.ts';
-import { distSq } from '../shared/distSq.ts';
+import { distSq } from '../../../../shared/distSq.ts';
 
 type TwoFingerReading = { centroid: ScreenPt; dist: number; angle: number };
 

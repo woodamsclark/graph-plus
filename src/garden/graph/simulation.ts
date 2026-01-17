@@ -1,23 +1,16 @@
 import { CameraController } from './CameraController.ts';
-import { Node, GraphData, PhysicsSettings, Simulation } from '../shared/interfaces.ts';
-import { getSettings } from '../settings/settingsStore.ts';
-import type { ScreenPt } from "../shared/interfaces.ts";
+import { Node, GraphData, PhysicsSettings, Simulation } from '../../shared/interfaces.ts';
+import { getSettings } from '../../settings/settingsStore.ts';
+import type { ScreenPt } from "../../shared/interfaces.ts";
 
-export function createSimulation(
-  graph: GraphData, 
-  camera : CameraController, 
-  getGravityCenter: () => ScreenPt | null
-) : Simulation{
+export function createSimulation(graph: GraphData, camera : CameraController, getGravityCenter: () => ScreenPt | null) : Simulation{
   // If center not provided, compute bounding-box center from node positions
-  const nodes                       = graph.nodes;
-  const links                       = graph.links;
-  let running                       = false;  
-  let pinnedNodes                   = new Set<string>(); // set of node ids that should be pinned (physics skip)
-  const nodeById                    = new Map<string, Node>();
+  const nodes     = graph.nodes;
+  const links     = graph.links;
+  let running     = false;  
+  let pinnedNodes = new Set<string>(); // set of node ids that should be pinned (physics skip)
+  const nodeById  = new Map<string, Node>();
   for (const n of nodes) nodeById.set(n.id, n);
-  
-
-  ///////
 
   type OctNode = {
     cx: number; cy: number; cz: number; // cube center
