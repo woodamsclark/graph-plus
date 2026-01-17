@@ -1,6 +1,6 @@
 export type FrameTick = (dt: number, nowMs: number) => void;
 
-export class time {
+export class Time {
   private rafId : number | null = null;
   private lastMs: number | null = null;
 

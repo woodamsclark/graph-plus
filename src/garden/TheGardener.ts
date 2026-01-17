@@ -3,11 +3,12 @@ import { GraphDirector } from "./graph/GraphDirector.ts";
 import { AnimaDirector } from "./anima/AnimaDirector.ts";
 import { createRenderer } from "./render.ts";
 import { createCursorController } from "./graph/input/CursorController.ts";
-import { time } from "./time.ts";
+import { Time } from "./Time.ts";
+import { Space } from "./Space.ts";
 import type { Renderer } from "../shared/interfaces.ts";
 
 export class TheGardener {
-  private time = new time({ maxDtSeconds: 0.05 });
+  private time = new Time({ maxDtSeconds: 0.05 });
   private unregs: Array<() => void> = [];
 
   private canvas: HTMLCanvasElement | null = null;
@@ -16,8 +17,11 @@ export class TheGardener {
   private graph: GraphDirector | null = null;
   private anima: AnimaDirector | null = null;
   private renderer: Renderer | null = null;
+  private space: Space;
 
-  constructor(private deps: { app: App; plugin: Plugin; containerEl: HTMLElement }) {}
+  constructor(private deps: { app: App; plugin: Plugin; containerEl: HTMLElement }) {
+    this.space = new Space({ maxDtSeconds: 0.05 });
+  }
 
   async open(): Promise<void> {
     // Stage
@@ -46,11 +50,12 @@ export class TheGardener {
     this.syncRendererGraph();
 
     // Order is important
-    this.unregs.push(this.time.register("graph",  (dt, now) => this.graph?.tick(dt, now)));
-    this.unregs.push(this.time.register("anima",  (dt, now) => this.anima?.tick(dt, now)));
-    this.unregs.push(this.time.register("render", ()        => this.renderFrame()));
-
-    this.time.start();
+    this.space.register("graph", this.graph);
+    this.space.register("anima", this.anima);
+    this.space.register("render", {
+      tick: () => this.renderFrame()
+    });
+    this.space.start() // space owns time
   }
 
   private syncRendererGraph(): void {
@@ -87,7 +92,7 @@ export class TheGardener {
   }
 
   async close(): Promise<void> {
-    this.time.stop();
+    this.space.stop();
     for (const u of this.unregs) u();
     this.unregs = [];
 
