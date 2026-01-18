@@ -1,4 +1,4 @@
-import { CameraController } from '../../../systems/render/CameraController.ts';
+import { CameraController } from '../../eve/CameraController.ts';
 import { Node, GraphData, PhysicsSettings, Simulation } from '../../adam/interfaces.ts';
 import { getSettings } from '../../../obsidian/settings/settingsStore.ts';
 import type { ScreenPt } from "../../adam/interfaces.ts";
