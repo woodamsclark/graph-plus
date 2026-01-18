@@ -30,12 +30,12 @@ export class GraphDirector implements Tickable {
   private app: App;
   private plugin: GraphPlus;
 
-  private simulation: Simulation | null = null;
   private inputManager: InputManager | null = null;
   private camera: CameraController | null = null;
   private interactor: GraphInteractor | null = null;
   private graphStore: GraphStore | null = null;
   private graph: GraphData | null = null;
+  private onPinnedNodesChanged: ((ids: Set<string>) => void) | null = null;
 
   constructor(app: App, plugin: Plugin) {
     this.app = app;
@@ -56,7 +56,7 @@ export class GraphDirector implements Tickable {
       getCamera: () => this.camera,
       getApp: () => this.app,
       getPlugin: () => this.plugin,
-      setPinnedNodes: (ids) => { this.simulation?.setPinnedNodes?.(ids); },
+      setPinnedNodes: (ids) => { this.onPinnedNodesChanged?.(ids); },
       enableMouseGravity: (on) => { getSettings().physics.mouseGravityEnabled = on; },
     };
 
@@ -103,39 +103,25 @@ export class GraphDirector implements Tickable {
     this.resetCamera();
   }
 
-  public async rebuildGraph(): Promise<void> {
-    if (!this.graphStore || !this.interactor || !this.camera) return;
-
-    this.stopSimulation();
-    await this.graphStore.rebuild();
-    this.refreshGraph(); // rebuild sim from latest graph
+  public setOnPinnedNodesChanged(fn: (ids: Set<string>) => void) {
+    this.onPinnedNodesChanged = fn;
   }
 
-  public refreshGraph(): void {
-    this.stopSimulation();
-    if (!this.graphStore || !this.interactor || !this.camera) return;
-
+  public async rebuildGraph(): Promise<void> {
+    if (!this.graphStore) return;
+    await this.graphStore.rebuild();
     this.graph = this.graphStore.get();
-    if (!this.graph) return;
+  }
 
-    this.simulation = createSimulation(this.graph, this.camera, () => this.interactor!.getGravityCenter());
-    this.startSimulation();
+
+  public refreshGraph(): void {
+    if (!this.graphStore) return;
+    this.graph = this.graphStore.get();
   }
 
   public tick(dt: number, nowMs: number): void {
     // 1) interaction update
     this.interactor?.frame();
-
-    // 2) physics
-    this.simulation?.tick(dt);
-  }
-
-  private startSimulation(): void {
-    this.simulation?.start();
-  }
-
-  private stopSimulation(): void {
-    if (this.simulation) this.simulation.stop();
   }
 
   public focusNode(nodeId: string): void {
@@ -179,8 +165,6 @@ export class GraphDirector implements Tickable {
 
   destroy(): void {
     this.graphStore?.save();
-    this.stopSimulation();
-    this.simulation = null;
 
     this.inputManager?.destroy();
     this.inputManager = null;

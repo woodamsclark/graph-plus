@@ -6,6 +6,7 @@ import { createCursorController } from "./graph/input/CursorController.ts";
 import { Time } from "./Time.ts";
 import { Space } from "./Space.ts";
 import type { Renderer } from "../shared/interfaces.ts";
+import { Physics } from "../space/physics/Physics.ts";
 
 export class TheGardener {
   private time = new Time({ maxDtSeconds: 0.05 });
@@ -18,6 +19,7 @@ export class TheGardener {
   private anima: AnimaDirector | null = null;
   private renderer: Renderer | null = null;
   private space: Space;
+  private physics: Physics | null = null;
 
   constructor(private deps: { app: App; plugin: Plugin; containerEl: HTMLElement }) {
     this.space = new Space({ maxDtSeconds: 0.05 });
@@ -44,17 +46,32 @@ export class TheGardener {
     this.renderer = createRenderer(this.canvas, camera);
     this.cursor   = createCursorController(this.canvas);
 
+    const interactor = this.graph.getInteractor();
+    if (!interactor) return;
+
+    this.physics = new Physics({
+      getGraph: () => this.graph?.getGraph() ?? null,
+      getCamera: () => this.graph?.getCamera() ?? null,
+      getInteraction: () => interactor.getState(),
+    });
+
+    this.physics.rebuild();
+
+    this.graph.setOnPinnedNodesChanged((ids) => {
+      this.physics?.setPinnedNodes(ids); // you'd add this method
+    });
+
     // Initial sizing + bind graph
     const rect = this.deps.containerEl.getBoundingClientRect();
     this.renderer.resize(rect.width, rect.height);
     this.syncRendererGraph();
 
     // Order is important
-    this.space.register("graph", this.graph);
+    this.space.register("graph", this.graph); // graph.tick -> interactor.frame only
+    this.space.register("physics", { tick: (dt:number) => this.physics?.tick(dt) } as any);
     this.space.register("anima", this.anima);
-    this.space.register("render", {
-      tick: () => this.renderFrame()
-    });
+    this.space.register("render", { tick: () => this.renderFrame() } as any);
+
     this.space.start() // space owns time
   }
 
@@ -84,10 +101,13 @@ export class TheGardener {
     this.renderer?.resize(w, h);
   }
 
-  async rebuildGraph(): Promise<void> {
+  public async rebuildGraph(): Promise<void> {
     await this.graph?.rebuildGraph();
-    this.syncRendererGraph();
+
+    this.renderer?.setGraph(this.graph?.getGraph() ?? null);
+    this.physics?.rebuild();
   }
+
 
   refreshTheme(): void {
     this.renderer?.refreshTheme();
