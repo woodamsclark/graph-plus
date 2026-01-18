@@ -1,5 +1,5 @@
 require('esbuild').build({
-  entryPoints: ['src/plugin/main.ts'],
+  entryPoints: ['src/obsidian/main.ts'],
   bundle: true,
   outfile: 'main.js',
   format: 'cjs',
