@@ -1,7 +1,5 @@
-import type { Node, GraphData } from "../adam/interfaces.ts";
-import type { CursorCss } from "./interacts/input/cursor_selector.ts";
-import type { ScreenPt } from "../adam/interfaces.ts";
-import type { InteractionState } from "../adam/InteractionState.ts";
+import type { Node, GraphData, InteractionState, ScreenPt} from "../grammar/interfaces.ts";
+import type { CursorCss } from "./interaction/input/cursor_selector.ts";
 import type { CameraController } from "./CameraController.ts"; // adjust path to your CameraController
 
 export type GraphInteractorDeps = {

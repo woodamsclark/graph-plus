@@ -1,4 +1,4 @@
-import { InputEvent } from "../../../grammar/InputEvents.js";
+import { InputEvent } from "../../../grammar/interfaces.js";
 
 
 export class InputBuffer {
