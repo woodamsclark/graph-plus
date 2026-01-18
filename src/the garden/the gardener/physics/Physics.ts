@@ -1,7 +1,7 @@
 import { createSimulation } from "./simulation.ts";
-import type { GraphData, Simulation } from "../../the garden/adam/interfaces.ts";
-import type { CameraController } from "../render/CameraController.ts";
-import type { InteractionState } from "../../the garden/adam/InteractionState.ts";
+import type { GraphData, Simulation } from "../../adam/interfaces.ts";
+import type { CameraController } from "../../../systems/render/CameraController.ts";
+import type { InteractionState } from "../../adam/InteractionState.ts";
 
 export class Physics {
   private sim: Simulation | null = null;

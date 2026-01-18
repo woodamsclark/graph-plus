@@ -1,5 +1,5 @@
 import type { Node, GraphData, Tickable } from "../../adam/interfaces.ts";
-import type { CameraController } from "../CameraController.ts"; // adjust path to wherever CameraController lives
+import type { CameraController } from "../../eve/CameraController.ts"; // adjust path to wherever CameraController lives
 import type { CursorCss } from "./input/cursor_selector.ts";   // adjust path
 import type { InteractionState } from "../../adam/InteractionState.ts";
 

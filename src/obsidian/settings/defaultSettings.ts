@@ -1,5 +1,5 @@
 // utils/defaultSettings.ts
-import type { GraphPlusSettings } from '../shared/interfaces.ts';
+import type { GraphPlusSettings } from '../../the garden/adam/interfaces.ts';
 
 export const DEFAULT_SETTINGS: GraphPlusSettings = {
   graph: {
