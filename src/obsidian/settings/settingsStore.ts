@@ -1,4 +1,4 @@
-import type { GraphPlusSettings } from '../shared/interfaces';
+import type { GraphPlusSettings } from '../../the garden/adam/interfaces';
 
 let currentSettings: GraphPlusSettings;
 const listeners = new Set<() => void>();

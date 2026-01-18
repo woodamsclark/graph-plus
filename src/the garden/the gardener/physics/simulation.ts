@@ -1,7 +1,7 @@
-import { CameraController } from '../render/CameraController.ts';
-import { Node, GraphData, PhysicsSettings, Simulation } from '../../the garden/adam/interfaces.ts';
-import { getSettings } from '../../obsidian/settings/settingsStore.ts';
-import type { ScreenPt } from "../../the garden/adam/interfaces.ts";
+import { CameraController } from '../../../systems/render/CameraController.ts';
+import { Node, GraphData, PhysicsSettings, Simulation } from '../../adam/interfaces.ts';
+import { getSettings } from '../../../obsidian/settings/settingsStore.ts';
+import type { ScreenPt } from "../../adam/interfaces.ts";
 
 export function createSimulation(graph: GraphData, camera : CameraController, getGravityCenter: () => ScreenPt | null) : Simulation{
   // If center not provided, compute bounding-box center from node positions

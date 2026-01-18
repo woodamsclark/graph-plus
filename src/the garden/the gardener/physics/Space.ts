@@ -1,5 +1,5 @@
 // world/Space.ts
-import type { Tickable } from "../../the garden/adam/interfaces.ts";
+import type { Tickable } from "../../adam/interfaces.ts";
 import { Time } from "./Time.ts";
 
 export class Space {

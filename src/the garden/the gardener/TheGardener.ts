@@ -1,10 +1,10 @@
 import { App, Plugin } from "obsidian";
 import { AnimaDirector } from "../eve/AnimaDirector.ts";
-import { createRenderer } from "../../systems/render/render.ts";
+import { createRenderer } from "./render/render.ts";
 import { cursor_selector } from "../eve/interacts/input/cursor_selector.ts";
-import { Space } from "../../systems/physics/Space.ts";
+import { Space } from "./physics/Space.ts";
 import type { Renderer } from "../adam/interfaces.ts";
-import { Physics } from "../../systems/physics/Physics.ts";
+import { Physics } from "./physics/Physics.ts";
 import { InteractionSystem } from "../eve/interacts/InteractionSystem.ts";
 import { getSettings } from "../../obsidian/settings/settingsStore.ts";
 import { ObsidianNavigator } from "../../obsidian/ObsidianNavigator.ts";
