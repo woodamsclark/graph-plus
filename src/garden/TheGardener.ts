@@ -72,9 +72,11 @@ export class TheGardener {
     const interactor = graph.getInteractor();
     if (!interactor) return;
 
-    renderer.setFollowedNode(interactor.followedNodeId);
+    const s = interactor.getState();
+
+    renderer.setFollowedNode(s.followedNodeId);
     cursor.apply(interactor.cursorType);
-    renderer.setMouseScreenPosition(interactor.getGravityCenter());
+    renderer.setMouseScreenPosition(s.gravityCenter);
     renderer.render();
   }
 
