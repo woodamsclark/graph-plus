@@ -21,7 +21,7 @@ export class TheGardener {
   private input: InputManager | null = null;
 
   private navigator: ObsidianNavigator;
-  private source: ObsidianGraphSource;
+  private graphSource: ObsidianGraphSource;
 
   private graphState: GraphState = new GraphState();
 
@@ -37,7 +37,7 @@ export class TheGardener {
     this.navigator = new ObsidianNavigator(deps.app);
 
     // NOTE: this casts plugin to the data storage interface expected by GraphStore/GraphSource
-    this.source = new ObsidianGraphSource({
+    this.graphSource = new ObsidianGraphSource({
       getApp: () => this.deps.app,
       getPlugin: () => this.deps.plugin as any,
     });
@@ -156,7 +156,7 @@ export class TheGardener {
   }
 
   public async rebuildGraph(): Promise<void> {
-    const graph = await this.source.rebuild();
+    const graph = await this.graphSource.rebuild();
     this.graphState.set(graph);
 
     this.renderer?.setGraph(graph);
