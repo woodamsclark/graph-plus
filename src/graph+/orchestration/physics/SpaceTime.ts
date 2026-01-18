@@ -9,6 +9,8 @@ type Entry = {
   tick: TickFn;
 };
 
+// this class starts time and calls registered tickable systems each frame
+// it is provides space for time dependent systems to run in a coordinated fashion
 export class SpaceTime {
   private time: Time;
   private entries: Entry[] = [];
@@ -18,12 +20,9 @@ export class SpaceTime {
     this.time = new Time(opts);
   }
 
+  // register systems to be ticked each frame
   register(id: string,  tickable: Tickable, priority = 0): void {
-    const tick: TickFn =
-      typeof tickable === "function"
-        ? tickable
-        : (dt, now) => tickable.tick(dt, now);
-
+    const tick: TickFn = (dt, now) => tickable.tick(dt, now);
     this.entries.push({ id, priority, tick });
     this.entries.sort((a, b) => a.priority - b.priority);
 
