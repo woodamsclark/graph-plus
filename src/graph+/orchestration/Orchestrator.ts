@@ -13,6 +13,7 @@ import { GraphState } from "../grammar/GraphState.ts";
 import { ObsidianGraphSource } from "../../obsidian/ObsidianGraphSource.ts";
 import { CameraController } from "../systems/CameraController.ts";
 
+
 export class Orchestrator {
   private spaceTime: SpaceTime;
 
@@ -66,32 +67,10 @@ export class Orchestrator {
     this.interactor = new InteractionSystem({
       getGraph: () => this.graphState.get(),
       getCamera: () => this.camera,
+      getCanvas: () => this.canvas!
     });
-
-    this.input = new InputManager(this.canvas, {
-      onRotateStart: (x, y) => this.interactor!.startRotate(x, y),
-      onRotateMove:  (x, y) => this.interactor!.updateRotate(x, y),
-      onRotateEnd:   ()     => this.interactor!.endRotate(),
-
-      onPanStart:    (x, y) => this.interactor!.startPan(x, y),
-      onPanMove:     (x, y) => this.interactor!.updatePan(x, y),
-      onPanEnd:      ()     => this.interactor!.endPan(),
-
-      onOpenNode:    (x, y) => this.interactor!.openNode(x, y),
-      onMouseMove:   (x, y) => this.interactor!.updateGravityCenter(x, y),
-
-      onDragStart:   (id, x, y) => this.interactor!.startDrag(id, x, y),
-      onDragMove:    (x, y)     => this.interactor!.updateDrag(x, y),
-      onDragEnd:     ()         => this.interactor!.endDrag(),
-
-      onZoom:        (x, y, d)  => this.interactor!.updateZoom(x, y, d),
-      onFollowStart: (id)       => this.interactor!.startFollow(id),
-      onFollowEnd:   ()         => this.interactor!.endFollow(),
-
-      resetCamera:   ()         => this.camera!.resetCamera(),
-
-      getClickedNode:(x, y)     => this.interactor!.getClickedNodeIdLabel(x, y),
-    });
+    
+    
 
     // Physics (world-owned)
     this.physics = new Physics({
@@ -169,9 +148,6 @@ export class Orchestrator {
   async close(): Promise<void> {
     this.spaceTime.stop();
 
-    this.input?.destroy();
-    this.input = null;
-
     this.physics?.destroy?.();
     this.physics = null;
 
@@ -179,6 +155,7 @@ export class Orchestrator {
     this.renderer = null;
 
     this.cursor = null;
+    this.interactor?.destroy();
     this.interactor = null;
     this.anima = null;
 

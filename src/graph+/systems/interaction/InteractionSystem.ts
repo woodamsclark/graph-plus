@@ -2,6 +2,9 @@ import type { Node, GraphData, Tickable } from "../../grammar/interfaces.ts";
 import type { CameraController } from "../CameraController.ts"; // adjust path to wherever CameraController lives
 import type { CursorCss } from "./input/cursor_selector.ts";   // adjust path
 import type { InteractionState } from "../../grammar/InteractionState.ts";
+import { InputEvent } from "../../grammar/InputEvents.js";
+import { InputManager } from "../../systems/interaction/input/InputManager.ts";
+import { InputBuffer } from "../../systems/interaction/input/InputBuffer.ts";
 
 export type InteractionEvent =
   | { type: "OPEN_NODE_REQUESTED"; node: Node }
@@ -11,6 +14,7 @@ export type InteractionEvent =
 export type InteractionDeps = {
   getGraph: () => GraphData | null;
   getCamera: () => CameraController | null;
+  getCanvas: () => HTMLCanvasElement;
 };
 
 export class InteractionSystem implements Tickable {
@@ -21,15 +25,114 @@ export class InteractionSystem implements Tickable {
   private events: InteractionEvent[] = [];
 
   private state: InteractionState = {
-    gravityCenter: null,
-    hoveredNodeId: null,
+    gravityCenter : null,
+    hoveredNodeId : null,
     followedNodeId: null,
-    draggedNodeId: null,
-    isPanning: false,
-    isRotating: false,
+    draggedNodeId : null,
+    isPanning     : false,
+    isRotating    : false,
   };
+  private input: InputManager;
+  private inputBuffer: InputBuffer;
 
-  constructor(private deps: InteractionDeps) {}
+
+  constructor(private deps: InteractionDeps) {
+    this.inputBuffer = new InputBuffer();
+
+    this.input = new InputManager(deps.getCanvas(), {
+      onRotateStart: (x, y) => this.inputBuffer.push({ type: "ROTATE_START", x, y }),
+      onRotateMove:  (x, y) => this.inputBuffer.push({ type: "ROTATE_MOVE", x, y }),
+      onRotateEnd:   ()     => this.inputBuffer.push({ type: "ROTATE_END" }),
+
+      onPanStart:    (x, y) => this.inputBuffer.push({ type: "PAN_START", x, y }),
+      onPanMove:     (x, y) => this.inputBuffer.push({ type: "PAN_MOVE", x, y }),
+      onPanEnd:      ()     => this.inputBuffer.push({ type: "PAN_END" }),
+
+      onOpenNode:    (x, y) => this.inputBuffer.push({ type: "OPEN_NODE", x, y }),
+      onMouseMove:   (x, y) => this.inputBuffer.push({ type: "MOUSE_MOVE", x, y }),
+
+      onDragStart:   (id, x, y) => this.inputBuffer.push({ type: "DRAG_START", nodeId: id, x, y }),
+      onDragMove:    (x, y)     => this.inputBuffer.push({ type: "DRAG_MOVE", x, y }),
+      onDragEnd:     ()         => this.inputBuffer.push({ type: "DRAG_END" }),
+
+      // IMPORTANT: use delta field name consistently
+      onZoom:        (x, y, d)  => this.inputBuffer.push({ type: "ZOOM", x, y, delta: d }),
+
+      onFollowStart: (id)       => this.inputBuffer.push({ type: "FOLLOW_START", nodeId: id }),
+      onFollowEnd:   ()         => this.inputBuffer.push({ type: "FOLLOW_END" }),
+
+      resetCamera:   ()         => this.inputBuffer.push({ type: "RESET_CAMERA" }),
+
+      getClickedNode:(x, y)     => this.getClickedNodeIdLabel(x, y),
+    });
+
+  }
+
+  public ingest(events: InputEvent[]): void {
+    for (const e of events) {
+      switch (e.type) {
+        case "MOUSE_MOVE":
+          this.updateGravityCenter(e.x, e.y);
+          break;
+
+        case "OPEN_NODE":
+          this.openNode(e.x, e.y);
+          break;
+
+        case "DRAG_START":
+          this.startDrag(e.nodeId, e.x, e.y);
+          break;
+
+        case "DRAG_MOVE":
+          this.updateDrag(e.x, e.y);
+          break;
+
+        case "DRAG_END":
+          this.endDrag();
+          break;
+
+        case "PAN_START":
+          this.startPan(e.x, e.y);
+          break;
+
+        case "PAN_MOVE":
+          this.updatePan(e.x, e.y);
+          break;
+
+        case "PAN_END":
+          this.endPan();
+          break;
+
+        case "ROTATE_START":
+          this.startRotate(e.x, e.y);
+          break;
+
+        case "ROTATE_MOVE":
+          this.updateRotate(e.x, e.y);
+          break;
+
+        case "ROTATE_END":
+          this.endRotate();
+          break;
+
+        case "ZOOM":
+          this.updateZoom(e.x, e.y, e.delta);
+          break;
+
+        case "FOLLOW_START":
+          this.startFollow(e.nodeId);
+          break;
+
+        case "FOLLOW_END":
+          this.endFollow();
+          break;
+
+        case "RESET_CAMERA":
+          this.deps.getCamera()?.resetCamera();
+          break;
+      }
+    }
+  }
 
   // --- Outputs ---------------------------------------------------------------
 
@@ -185,9 +288,16 @@ export class InteractionSystem implements Tickable {
 
   // --- Tick / per-frame ------------------------------------------------------
   public tick(_dt: number, _nowMs: number): void {
+    // 1) consume raw input events for this frame
+    const batch = this.inputBuffer.drain();
+    this.ingest(batch);
+
+    // 2) per-frame derived behavior
     this.updateFollow();
     this.checkIfHovering();
+
   }
+
 
   // --- Internals -------------------------------------------------------------
 
@@ -253,5 +363,9 @@ export class InteractionSystem implements Tickable {
     }
 
     return best;
+  }
+  public destroy(): void {
+    this.input.destroy();
+    // optional: this.inputBuffer.clear();
   }
 }
