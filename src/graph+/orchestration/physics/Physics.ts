@@ -1,21 +1,21 @@
 import { createSimulation } from "./simulation.ts";
-import type { GraphData, Simulation } from "../../adam/interfaces.ts";
-import type { CameraController } from "../../eve/CameraController.ts";
-import type { InteractionState } from "../../adam/InteractionState.ts";
+import type { GraphData, Simulation } from "../../grammar/interfaces.ts";
+import type { CameraController } from "../../systems/CameraController.ts";
+import type { InteractionState } from "../../grammar/InteractionState.ts";
 
 export class Physics {
   private sim: Simulation | null = null;
 
   constructor(private deps: {
-    getGraph: () => GraphData | null;
-    getCamera: () => CameraController | null;
+    getGraph:       () => GraphData         | null;
+    getCamera:      () => CameraController  | null;
     getInteraction: () => InteractionState;
   }) {}
 
   /** Call whenever the graph changes (rebuild/filter/etc.) */
   public rebuild(): void {
     this.stop();
-    const graph = this.deps.getGraph();
+    const graph  = this.deps.getGraph();
     const camera = this.deps.getCamera();
     if (!graph || !camera) {
       this.sim = null;

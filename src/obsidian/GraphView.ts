@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, Plugin } from 'obsidian';
 import GraphPlus from './main.ts';
-import { TheGardener } from '../the garden/the gardener/TheGardener.ts';
+import { Orchestrator } from '../graph+/orchestration/Orchestrator.ts';
 
 
 export const GRAPH_PLUS_TYPE = 'graph-plus';
@@ -9,7 +9,7 @@ export class GraphView extends ItemView {
   private plugin              : GraphPlus;
   private scheduleGraphRebuild: (() => void) | null = null;
   private unregisters: Array<() => void> = [];
-  private garden: TheGardener | null = null;
+  private garden: Orchestrator | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: Plugin) {
     super(leaf);
@@ -20,7 +20,7 @@ export class GraphView extends ItemView {
     this.containerEl.empty();
     const container       = this.containerEl.createDiv({ cls: 'graph+' });
 
-    this.garden = new TheGardener({ app: this.app, plugin: this.plugin, containerEl: container });
+    this.garden = new Orchestrator({ app: this.app, plugin: this.plugin, containerEl: container });
     await this.garden.open();
   }
 

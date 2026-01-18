@@ -1,20 +1,20 @@
 import { App, Plugin } from "obsidian";
-import { AnimaDirector } from "../eve/AnimaDirector.ts";
+import { AnimaDirector } from "../systems/AnimaDirector.ts";
 import { createRenderer } from "./render/render.ts";
-import { cursor_selector } from "../eve/interacts/input/cursor_selector.ts";
-import { Space } from "./physics/Space.ts";
-import type { Renderer } from "../adam/interfaces.ts";
+import { cursor_selector } from "../systems/interaction/input/cursor_selector.ts";
+import { SpaceTime } from "./physics/SpaceTime.ts";
+import type { Renderer } from "../grammar/interfaces.ts";
 import { Physics } from "./physics/Physics.ts";
-import { InteractionSystem } from "../eve/interacts/InteractionSystem.ts";
+import { InteractionSystem } from "../systems/interaction/InteractionSystem.ts";
 import { getSettings } from "../../obsidian/settings/settingsStore.ts";
 import { ObsidianNavigator } from "../../obsidian/ObsidianNavigator.ts";
-import { InputManager } from "../eve/interacts/input/InputManager.ts";
-import { GraphState } from "../adam/GraphState.ts";
+import { InputManager } from "../systems/interaction/input/InputManager.ts";
+import { GraphState } from "../grammar/GraphState.ts";
 import { ObsidianGraphSource } from "../../obsidian/ObsidianGraphSource.ts";
-import { CameraController } from "../eve/CameraController.ts";
+import { CameraController } from "../systems/CameraController.ts";
 
-export class TheGardener {
-  private space: Space;
+export class Orchestrator {
+  private spaceTime: SpaceTime;
 
   private canvas: HTMLCanvasElement | null = null;
   private cursor: ReturnType<typeof cursor_selector> | null = null;
@@ -33,7 +33,7 @@ export class TheGardener {
   private camera: CameraController | null = null;
 
   constructor(private deps: { app: App; plugin: Plugin; containerEl: HTMLElement }) {
-    this.space = new Space({ maxDtSeconds: 0.05 });
+    this.spaceTime = new SpaceTime({ maxDtSeconds: 0.05 });
     this.navigator = new ObsidianNavigator(deps.app);
 
     // NOTE: this casts plugin to the data storage interface expected by GraphStore/GraphSource
@@ -68,7 +68,6 @@ export class TheGardener {
       getCamera: () => this.camera,
     });
 
-    // Input adapter (world edge)
     this.input = new InputManager(this.canvas, {
       onRotateStart: (x, y) => this.interactor!.startRotate(x, y),
       onRotateMove:  (x, y) => this.interactor!.updateRotate(x, y),
@@ -105,17 +104,17 @@ export class TheGardener {
     const rect = this.deps.containerEl.getBoundingClientRect();
     this.renderer?.resize(rect.width, rect.height);
 
-    // ✅ IMPORTANT: build graph once before starting the loop
+    // IMPORTANT: build graph once before starting the loop
     await this.rebuildGraph();
 
     // Tick order
-    this.space.register("interaction", this.interactor);
-    this.space.register("events", { tick: () => this.drainInteractionEvents() } as any);
-    this.space.register("physics", { tick: (dt: number) => this.physics?.tick(dt) } as any);
-    this.space.register("anima", this.anima);
-    this.space.register("render", { tick: () => this.renderFrame() } as any);
+    this.spaceTime.register("interaction", this.interactor, 10);
+    this.spaceTime.register("events", {tick: () => this.drainInteractionEvents()}, 20);
+    this.spaceTime.register("physics", this.physics, 30);
+    this.spaceTime.register("anima", this.anima, 40);
+    this.spaceTime.register("render", {tick: () => this.renderFrame()},100);
 
-    this.space.start();
+    this.spaceTime.start();
   }
 
   private drainInteractionEvents(): void {
@@ -138,9 +137,9 @@ export class TheGardener {
   }
 
   private renderFrame(): void {
-    const renderer = this.renderer;
-    const cursor = this.cursor;
-    const interactor = this.interactor;
+    const renderer    = this.renderer;
+    const cursor      = this.cursor;
+    const interactor  = this.interactor;
     if (!renderer || !cursor || !interactor) return;
 
     const s = interactor.getState();
@@ -168,7 +167,7 @@ export class TheGardener {
   }
 
   async close(): Promise<void> {
-    this.space.stop();
+    this.spaceTime.stop();
 
     this.input?.destroy();
     this.input = null;

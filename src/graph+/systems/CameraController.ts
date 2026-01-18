@@ -1,5 +1,5 @@
-import type { CameraState, CameraSettings, WorldTransform } from '../../the garden/adam/interfaces.ts';
-import type { Node } from '../../the garden/adam/interfaces.ts';
+import type { CameraState, CameraSettings, WorldTransform } from '../grammar/interfaces.ts';
+import type { Node } from '../grammar/interfaces.ts';
 import { getSettings } from '../../obsidian/settings/settingsStore.ts';
 
 export class CameraController {

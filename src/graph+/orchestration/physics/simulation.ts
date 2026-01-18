@@ -1,7 +1,7 @@
-import { CameraController } from '../../eve/CameraController.ts';
-import { Node, GraphData, PhysicsSettings, Simulation } from '../../adam/interfaces.ts';
+import { CameraController } from '../../systems/CameraController.ts';
+import { Node, GraphData, PhysicsSettings, Simulation } from '../../grammar/interfaces.ts';
 import { getSettings } from '../../../obsidian/settings/settingsStore.ts';
-import type { ScreenPt } from "../../adam/interfaces.ts";
+import type { ScreenPt } from "../../grammar/interfaces.ts";
 
 export function createSimulation(graph: GraphData, camera : CameraController, getGravityCenter: () => ScreenPt | null) : Simulation{
   // If center not provided, compute bounding-box center from node positions

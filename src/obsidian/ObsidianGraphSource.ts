@@ -1,6 +1,6 @@
 import type { App } from "obsidian";
-import { GraphStore } from "../the garden/adam/GraphStore.ts";
-import type { GraphData } from "../the garden/adam/interfaces.ts";
+import { GraphStore } from "../graph+/grammar/GraphStore.ts";
+import type { GraphData } from "../graph+/grammar/interfaces.ts";
 
 type DataStoragePlugin = {
   loadData: () => Promise<any>;

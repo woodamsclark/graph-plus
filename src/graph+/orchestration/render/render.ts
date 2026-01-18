@@ -1,6 +1,6 @@
-import { Renderer, GraphData, Node, Link } from '../../adam/interfaces.ts';
+import { Renderer, GraphData, Node, Link } from '../../grammar/interfaces.ts';
 import { getSettings } from '../../../obsidian/settings/settingsStore.ts';
-import { CameraController } from '../../eve/CameraController.ts';
+import { CameraController } from '../../systems/CameraController.ts';
 
 
 type FontSlot = "text" | "interface" | "mono";
