@@ -4,7 +4,6 @@ export type InteractionState = {
   gravityCenter: Vec2 | null;
   hoveredNodeId: string | null;
   followedNodeId: string | null;
-  draggedId: string | null;
   draggedNodeId: string | null;
   isPanning: boolean;
   isRotating: boolean;

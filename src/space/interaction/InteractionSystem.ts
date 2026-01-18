@@ -1,54 +1,71 @@
-import type { Node } from "../../shared/interfaces.ts";
-import type { GraphDependencies } from "./GraphDirector.ts";
-import type { CursorCss } from "./input/CursorController.ts";
+import type { Node, GraphData, Tickable } from "../../shared/interfaces.ts";
+import type { CameraController } from "../../garden/graph/CameraController.ts"; // adjust path to wherever CameraController lives
+import type { CursorCss } from "../../garden/graph/input/CursorController.ts";   // adjust path
 import type { ScreenPt } from "../../shared/interfaces.ts";
-import type { InteractionState } from "../../space/interaction/InteractionState.ts";
+import type { InteractionState } from "./InteractionState.ts";
 
+export type InteractorEvent =
+  | { type: "OPEN_NODE_REQUESTED"; node: Node }
+  | { type: "PINNED_SET"; ids: Set<string> }
+  | { type: "MOUSE_GRAVITY_SET"; on: boolean };
 
+export type InteractorDeps = {
+  getGraph: () => GraphData | null;
+  getCamera: () => CameraController | null;
+};
 
-export class GraphInteractor {
+export class InteractorSystem implements Tickable {
   private dragWorldOffset: { x: number; y: number; z: number } | null = null;
-  private dragDepthFromCamera: number = 0;
+  private dragDepthFromCamera = 0;
 
   private pinnedNodes: Set<string> = new Set();
-  private openNodeFile: ((node: Node) => void) | null = null;
+  private events: InteractorEvent[] = [];
 
-  // Single source of truth for interaction output
   private state: InteractionState = {
-    gravityCenter   : null,
-    hoveredNodeId   : null,
-    followedNodeId  : null,
-    draggedNodeId   : null,
-    isPanning       : false,
-    isRotating      : false,
+    gravityCenter: null,
+    hoveredNodeId: null,
+    followedNodeId: null,
+    draggedNodeId: null,
+    isPanning: false,
+    isRotating: false,
   };
 
-  constructor(private deps: GraphDependencies) {}
+  constructor(private deps: InteractorDeps) {}
+
+  // --- Outputs ---------------------------------------------------------------
 
   public getState(): Readonly<InteractionState> {
     return this.state;
   }
 
+  /** Derived presentation detail (not stored in state) */
   public get cursorType(): CursorCss {
     if (this.state.draggedNodeId || this.state.isPanning || this.state.isRotating) return "grabbing";
     if (this.state.hoveredNodeId) return "pointer";
     return "default";
   }
 
-  // Back-compat (keep for now; later you can delete these and read getState())
-  public getGravityCenter(): ScreenPt | null {
-    return this.state.gravityCenter;
+  /** Gardener drains these and routes to adapters/systems */
+  public drainEvents(): InteractorEvent[] {
+    const out = this.events;
+    this.events = [];
+    return out;
   }
-  public get hoveredNodeId(): string | null {
-    return this.state.hoveredNodeId;
+
+  private emit(e: InteractorEvent): void {
+    this.events.push(e);
   }
-  public get followedNodeId(): string | null {
-    return this.state.followedNodeId;
+
+  private emitPinned(): void {
+    // new Set so downstream can’t mutate our internal Set by reference
+    this.emit({ type: "PINNED_SET", ids: new Set(this.pinnedNodes) });
   }
+
+  // --- Input entry points (called by InputManager) ---------------------------
 
   public updateGravityCenter(screenX: number, screenY: number) {
     if (screenX === -Infinity || screenY === -Infinity) {
-      this.state.gravityCenter = null; // off screen
+      this.state.gravityCenter = null;
     } else {
       this.state.gravityCenter = { x: screenX, y: screenY };
     }
@@ -61,7 +78,8 @@ export class GraphInteractor {
     const camera = this.deps.getCamera();
     if (!graph || !camera) return;
 
-    this.deps.enableMouseGravity(false);
+    // mouse gravity off while dragging
+    this.emit({ type: "MOUSE_GRAVITY_SET", on: false });
 
     const node = graph.nodes.find(n => n.id === nodeId);
     if (!node) return;
@@ -71,7 +89,7 @@ export class GraphInteractor {
 
     this.state.draggedNodeId = nodeId;
     this.pinnedNodes.add(nodeId);
-    this.deps.setPinnedNodes(this.pinnedNodes);
+    this.emitPinned();
 
     const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
     this.dragWorldOffset = {
@@ -107,12 +125,13 @@ export class GraphInteractor {
     if (!draggedId) return;
 
     this.pinnedNodes.delete(draggedId);
-    this.deps.setPinnedNodes(this.pinnedNodes);
+    this.emitPinned();
 
     this.state.draggedNodeId = null;
     this.dragWorldOffset = null;
 
-    this.deps.enableMouseGravity(true);
+    // mouse gravity back on after drag
+    this.emit({ type: "MOUSE_GRAVITY_SET", on: true });
   }
 
   public startPan(screenX: number, screenY: number) {
@@ -149,6 +168,31 @@ export class GraphInteractor {
     this.updateFollow();
   }
 
+  public endFollow() {
+    this.state.followedNodeId = null;
+  }
+
+  public updateZoom(screenX: number, screenY: number, delta: number) {
+    this.deps.getCamera()?.updateZoom(screenX, screenY, delta);
+  }
+
+  public openNode(screenX: number, screenY: number) {
+    const node = this.getClickedNode(screenX, screenY);
+    if (!node) return;
+
+    // No Obsidian calls here. Emit intent.
+    this.emit({ type: "OPEN_NODE_REQUESTED", node });
+  }
+
+  // --- Tick / per-frame ------------------------------------------------------
+
+  public tick(_dt: number, _nowMs: number): void {
+    this.updateFollow();
+    this.checkIfHovering();
+  }
+
+  // --- Internals -------------------------------------------------------------
+
   private updateFollow(): void {
     const id = this.state.followedNodeId;
     if (!id) return;
@@ -170,52 +214,24 @@ export class GraphInteractor {
     });
   }
 
-  public endFollow() {
-    this.state.followedNodeId = null;
-  }
-
-  public updateZoom(screenX: number, screenY: number, delta: number) {
-    this.deps.getCamera()?.updateZoom(screenX, screenY, delta);
-  }
-
-  public openNode(screenX: number, screenY: number) {
-    const node = this.getClickedNode(screenX, screenY);
-    if (!node) return;
-
-    if (node.type.toLowerCase() === "tag") {
-      void this.openTagSearch(node.id);
+  private checkIfHovering() {
+    const mouse = this.state.gravityCenter;
+    if (!mouse) {
+      this.state.hoveredNodeId = null;
       return;
     }
 
-    if (node.type.toLowerCase() === "note") {
-      this.openNodeFile?.(node);
-    }
+    const hit = this.getClickedNode(mouse.x, mouse.y);
+    this.state.hoveredNodeId = hit?.id ?? null;
+  }
+  
+  public getClickedNodeIdLabel(screenX: number, screenY: number): { id: string; label: string } | null {
+    const node = this.getClickedNode(screenX, screenY);
+    if (!node) return null;
+    return { id: node.id, label: node.label };
   }
 
-  private async openTagSearch(tagID: string) {
-    const app = this.deps.getApp();
-    if (!app) return;
-
-    const query = `tag:#${tagID}`;
-    const leaf =
-      app.workspace.getLeavesOfType("search")[0] ??
-      app.workspace.getRightLeaf(false);
-
-    if (!leaf) return;
-
-    await leaf.setViewState(
-      { type: "search", active: true, state: { query } },
-      { focus: true }
-    );
-
-    app.workspace.revealLeaf(leaf);
-  }
-
-  public setOnNodeClick(handler: (node: Node) => void): void {
-    this.openNodeFile = handler;
-  }
-
-  public getClickedNode(screenX: number, screenY: number): Node | null {
+  private getClickedNode(screenX: number, screenY: number): Node | null {
     const graph = this.deps.getGraph();
     const camera = this.deps.getCamera();
     if (!graph || !camera) return null;
@@ -239,22 +255,5 @@ export class GraphInteractor {
     }
 
     return best;
-  }
-
-  /** Called each frame by whoever owns Time */
-  public frame() {
-    this.updateFollow();
-    this.checkIfHovering();
-  }
-
-  private checkIfHovering() {
-    const mouse = this.state.gravityCenter;
-    if (!mouse) {
-      this.state.hoveredNodeId = null;
-      return;
-    }
-
-    const hit = this.getClickedNode(mouse.x, mouse.y);
-    this.state.hoveredNodeId = hit?.id ?? null;
   }
 }
