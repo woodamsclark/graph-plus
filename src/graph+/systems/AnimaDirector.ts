@@ -1,5 +1,4 @@
 import type { GraphData, Tickable } from "../grammar/interfaces.ts";
-import { App } from "obsidian";
 
 export class AnimaDirector implements Tickable {
 

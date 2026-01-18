@@ -1,15 +1,9 @@
-import type { Node, GraphData, Tickable } from "../../grammar/interfaces.ts";
+import type { Node, GraphData, Tickable, InteractionSystem, InteractionEvent, InteractionState, InputEvent } from "../../grammar/interfaces.ts";
 import type { CameraController } from "../CameraController.ts"; // adjust path to wherever CameraController lives
 import type { CursorCss } from "./input/cursor_selector.ts";   // adjust path
-import type { InteractionState } from "../../grammar/InteractionState.ts";
-import { InputEvent } from "../../grammar/InputEvents.js";
 import { InputManager } from "../../systems/interaction/input/InputManager.ts";
 import { InputBuffer } from "../../systems/interaction/input/InputBuffer.ts";
 
-export type InteractionEvent =
-  | { type: "OPEN_NODE_REQUESTED"; node: Node }
-  | { type: "PINNED_SET"; ids: Set<string> }
-  | { type: "MOUSE_GRAVITY_SET"; on: boolean };
 
 export type InteractionDeps = {
   getGraph: () => GraphData | null;
@@ -17,7 +11,7 @@ export type InteractionDeps = {
   getCanvas: () => HTMLCanvasElement;
 };
 
-export class InteractionSystem implements Tickable {
+export class Interaction implements InteractionSystem {
   private dragWorldOffset: { x: number; y: number; z: number } | null = null;
   private dragDepthFromCamera = 0;
 
@@ -134,24 +128,24 @@ export class InteractionSystem implements Tickable {
     }
   }
 
-  // --- Outputs ---------------------------------------------------------------
-
-  public getState(): Readonly<InteractionState> {
-    return this.state;
+   /** Orchestrator drains these and routes to adapters/systems */
+  public drainEvents(): InteractionEvent[] {
+    const out = this.events;
+    this.events = [];
+    return out;
   }
 
-  /** Derived presentation detail (not stored in state) */
-  public get cursorType(): CursorCss {
+  // Derived presentation detail (not stored in state)
+  getCursorType(): CursorCss {
     if (this.state.draggedNodeId || this.state.isPanning || this.state.isRotating) return "grabbing";
     if (this.state.hoveredNodeId) return "pointer";
     return "default";
   }
 
-  /** Orchestrator drains these and routes to adapters/systems */
-  public drainEvents(): InteractionEvent[] {
-    const out = this.events;
-    this.events = [];
-    return out;
+  // --- Outputs ---------------------------------------------------------------
+
+  public getState(): Readonly<InteractionState> {
+    return this.state;
   }
 
   private emit(e: InteractionEvent): void {
@@ -297,7 +291,6 @@ export class InteractionSystem implements Tickable {
     this.checkIfHovering();
 
   }
-
 
   // --- Internals -------------------------------------------------------------
 

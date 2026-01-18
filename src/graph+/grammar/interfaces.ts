@@ -82,16 +82,6 @@ export interface CameraState {
   worldAnchorPoint?     : { x: number; y: number; z: number } | null;
 }
 
-export interface Renderer {
-  resize(width: number, height: number)                       : void;
-  render()                                                    : void;
-  destroy()                                                   : void;
-  setGraph: (graph: GraphData | null) => void;
-  setMouseScreenPosition(pos: { x: number; y: number } | null): void;
-  setFollowedNode(node: string | null)               : void;
-  refreshTheme()                                              : void;
-}
-
 export interface GraphData {
   nodes     : Node[];
   links     : Link[];
@@ -101,6 +91,12 @@ export interface GraphData {
   // linksOut[nodeId] = { targetId: count, ... }
   // linksIn[nodeId][sourceId]  = count of links from sourceId to nodeId
   // linksIn[nodeId]  = { sourceId: count, ... }
+}
+
+export class GraphState {
+  private graph: GraphData | null = null;
+  get(): GraphData | null { return this.graph; }
+  set(graph: GraphData | null) { this.graph = graph; }
 }
 
 export type NodeType = 'note' | 'tag' | 'canvas'; // canvas nodes is a future feature 01-01-2026
@@ -175,6 +171,73 @@ type gate     = {
     // live_threshold = edge.strength * edge.length * (1 + strain) // calculated live, since strain is deviation fron length
   }
 
+// --- Tickable Interface ------------------------------------------------------
+
 export interface Tickable {
+  tick(dt: number, nowMs: number): void;
+}
+
+/*export type WorldState = {
+  graph: GraphData | null;
+  camera: CameraController;
+  interaction: InteractionState;
+};*/
+
+
+// --- Interaction State & Events ----------------------------------------------
+
+export type Vec2 = { x: number; y: number };
+
+export type InteractionState = {
+  gravityCenter: Vec2 | null;
+  hoveredNodeId: string | null;
+  followedNodeId: string | null;
+  draggedNodeId: string | null;
+  isPanning: boolean;
+  isRotating: boolean;
+};
+
+export type InteractionEvent =
+  | { type: "OPEN_NODE_REQUESTED"; node: Node }
+  | { type: "PINNED_SET"; ids: Set<string> }
+  | { type: "MOUSE_GRAVITY_SET"; on: boolean };
+
+
+export interface InteractionSystem extends Tickable {
+  getState(): Readonly<InteractionState>;
+  ingest(events: InputEvent[]): void;        // optional if you drain internally
+  drainEvents(): InteractionEvent[];
+  // optional: cursorType if you want renderer/cursor to query it
+  getCursorType(): string;
+}
+
+export type InputEvent =
+  | { type: "MOUSE_MOVE"; x: number; y: number }
+  | { type: "DRAG_START"; nodeId: string; x: number; y: number }
+  | { type: "DRAG_MOVE"; x: number; y: number }
+  | { type: "DRAG_END" }
+  | { type: "PAN_START"; x: number; y: number }
+  | { type: "PAN_MOVE"; x: number; y: number }
+  | { type: "PAN_END" }
+  | { type: "ROTATE_START"; x: number; y: number }
+  | { type: "ROTATE_MOVE"; x: number; y: number }
+  | { type: "ROTATE_END" }
+  | { type: "ZOOM"; x: number; y: number; delta: number }
+  | { type: "OPEN_NODE"; x: number; y: number }
+  | { type: "FOLLOW_START"; nodeId: string }
+  | { type: "FOLLOW_END" }
+  | { type: "RESET_CAMERA" };
+
+
+// --- Renderer System ---------------------------------------------------------
+
+export interface RendererSystem extends Tickable{
+  resize(width: number, height: number)                       : void;
+  render()                                                    : void;
+  destroy()                                                   : void;
+  setGraph: (graph: GraphData | null) => void;
+  setMouseScreenPosition(pos: { x: number; y: number } | null): void;
+  setFollowedNode(node: string | null)               : void;
+  refreshTheme()                                              : void;
   tick(dt: number, nowMs: number): void;
 }

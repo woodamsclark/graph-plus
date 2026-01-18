@@ -1,15 +1,13 @@
 import { App, Plugin } from "obsidian";
 import { AnimaDirector } from "../systems/AnimaDirector.ts";
-import { createRenderer } from "./render/render.ts";
+import { Renderer } from "./render/Renderer.ts";
 import { cursor_selector } from "../systems/interaction/input/cursor_selector.ts";
 import { SpaceTime } from "./physics/SpaceTime.ts";
-import type { Renderer } from "../grammar/interfaces.ts";
 import { Physics } from "./physics/Physics.ts";
-import { InteractionSystem } from "../systems/interaction/InteractionSystem.ts";
+import { Interaction } from "../systems/interaction/InteractionSystem.ts";
 import { getSettings } from "../../obsidian/settings/settingsStore.ts";
 import { ObsidianNavigator } from "../../obsidian/ObsidianNavigator.ts";
-import { InputManager } from "../systems/interaction/input/InputManager.ts";
-import { GraphState } from "../grammar/GraphState.ts";
+import { GraphState } from "../grammar/interfaces.ts";
 import { ObsidianGraphSource } from "../../obsidian/ObsidianGraphSource.ts";
 import { CameraController } from "../systems/CameraController.ts";
 
@@ -19,7 +17,6 @@ export class Orchestrator {
 
   private canvas: HTMLCanvasElement | null = null;
   private cursor: ReturnType<typeof cursor_selector> | null = null;
-  private input: InputManager | null = null;
 
   private navigator: ObsidianNavigator;
   private graphSource: ObsidianGraphSource;
@@ -30,7 +27,7 @@ export class Orchestrator {
   private renderer: Renderer | null = null;
 
   private physics: Physics | null = null;
-  private interactor: InteractionSystem | null = null;
+  private interactor: Interaction | null = null;
   private camera: CameraController | null = null;
 
   constructor(private deps: { app: App; plugin: Plugin; containerEl: HTMLElement }) {
@@ -60,17 +57,16 @@ export class Orchestrator {
     this.camera.setWorldTransform(null);
 
     // Renderer (world-owned)
-    this.renderer = createRenderer(this.canvas, this.camera);
+    this.renderer = new Renderer(this.canvas, this.camera);
     this.cursor = cursor_selector(this.canvas);
+    if (!this.renderer) return;
 
     // Interactor (world-owned)
-    this.interactor = new InteractionSystem({
+    this.interactor = new Interaction({
       getGraph: () => this.graphState.get(),
       getCamera: () => this.camera,
       getCanvas: () => this.canvas!
     });
-    
-    
 
     // Physics (world-owned)
     this.physics = new Physics({
@@ -81,17 +77,17 @@ export class Orchestrator {
 
     // Initial sizing
     const rect = this.deps.containerEl.getBoundingClientRect();
-    this.renderer?.resize(rect.width, rect.height);
+    this.renderer.resize(rect.width, rect.height);
 
     // IMPORTANT: build graph once before starting the loop
     await this.rebuildGraph();
 
-    // Tick order
+    // register systems
     this.spaceTime.register("interaction", this.interactor, 10);
     this.spaceTime.register("events", {tick: () => this.drainInteractionEvents()}, 20);
     this.spaceTime.register("physics", this.physics, 30);
     this.spaceTime.register("anima", this.anima, 40);
-    this.spaceTime.register("render", {tick: () => this.renderFrame()},100);
+    this.spaceTime.register("render", this.renderer, 100);
 
     this.spaceTime.start();
   }
@@ -124,7 +120,7 @@ export class Orchestrator {
     const s = interactor.getState();
 
     renderer.setFollowedNode(s.followedNodeId);
-    cursor.apply(interactor.cursorType);
+    cursor.apply(interactor.getCursorType());
     renderer.setMouseScreenPosition(s.gravityCenter);
     renderer.render();
   }
