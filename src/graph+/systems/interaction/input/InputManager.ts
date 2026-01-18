@@ -1,4 +1,4 @@
-import { ScreenPt, ClientPt } from '../../../adam/interfaces.ts';
+import { ScreenPt, ClientPt } from '../../../grammar/interfaces.ts';
 import { TwoFingerGesture } from './gestures/TwoFingerGesture.ts';
 import { WheelGestureSession } from './gestures/WheelGestureSession.ts';
 import { PointerTracker } from './gestures/PointerTracker.ts';

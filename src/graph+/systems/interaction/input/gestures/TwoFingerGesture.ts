@@ -1,4 +1,4 @@
-import { ScreenPt, ClientPt } from '../../../../adam/interfaces.ts';
+import { ScreenPt, ClientPt } from '../../../../grammar/interfaces.ts';
 import { ActivePointer } from './PointerTracker.ts';
 import { distSq } from '../../../../../shared/distSq.ts';
 

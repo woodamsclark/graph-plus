@@ -12,9 +12,6 @@ export class Time {
 
   /** Register a tick callback. Returns an unregister function. */
   register(id: string, fn: FrameTick): () => void {
-    if (this.ticks.has(id)) {
-      console.warn(`FrameLoop: replacing existing tick "${id}"`);
-    }
     this.ticks.set(id, fn);
 
     return () => {

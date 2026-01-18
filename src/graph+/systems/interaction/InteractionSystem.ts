@@ -1,7 +1,7 @@
-import type { Node, GraphData, Tickable } from "../../adam/interfaces.ts";
-import type { CameraController } from "../../eve/CameraController.ts"; // adjust path to wherever CameraController lives
+import type { Node, GraphData, Tickable } from "../../grammar/interfaces.ts";
+import type { CameraController } from "../CameraController.ts"; // adjust path to wherever CameraController lives
 import type { CursorCss } from "./input/cursor_selector.ts";   // adjust path
-import type { InteractionState } from "../../adam/InteractionState.ts";
+import type { InteractionState } from "../../grammar/InteractionState.ts";
 
 export type InteractionEvent =
   | { type: "OPEN_NODE_REQUESTED"; node: Node }
@@ -44,7 +44,7 @@ export class InteractionSystem implements Tickable {
     return "default";
   }
 
-  /** Gardener drains these and routes to adapters/systems */
+  /** Orchestrator drains these and routes to adapters/systems */
   public drainEvents(): InteractionEvent[] {
     const out = this.events;
     this.events = [];
@@ -184,7 +184,6 @@ export class InteractionSystem implements Tickable {
   }
 
   // --- Tick / per-frame ------------------------------------------------------
-
   public tick(_dt: number, _nowMs: number): void {
     this.updateFollow();
     this.checkIfHovering();
