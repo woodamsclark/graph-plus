@@ -1,4 +1,4 @@
-import type { GraphData, Tickable } from "../grammar/interfaces.ts";
+import type { Tickable } from "../grammar/interfaces.ts";
 
 export class AnimaDirector implements Tickable {
 

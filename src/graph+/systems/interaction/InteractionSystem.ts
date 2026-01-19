@@ -136,7 +136,7 @@ export class Interaction implements InteractionSystem {
   }
 
   // Derived presentation detail (not stored in state)
-  getCursorType(): CursorCss {
+  public getCursorType(): CursorCss {
     if (this.state.draggedNodeId || this.state.isPanning || this.state.isRotating) return "grabbing";
     if (this.state.hoveredNodeId) return "pointer";
     return "default";

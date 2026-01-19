@@ -210,9 +210,6 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
     }
   }
 
-
-  ///////
-
   function setPinnedNodes(ids: Set<string>) {
     // create new Set to avoid external mutations
     pinnedNodes = new Set(ids);

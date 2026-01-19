@@ -1,8 +1,8 @@
 import { createSimulation } from "./simulation.ts";
-import type { GraphData, Simulation, InteractionState } from "../../grammar/interfaces.ts";
+import type { GraphData, Simulation, InteractionState, PhysicsSystem } from "../../grammar/interfaces.ts";
 import type { CameraController } from "../../systems/CameraController.ts";
 
-export class Physics {
+export class Physics implements PhysicsSystem{
   private sim: Simulation | null = null;
 
   constructor(private deps: {
@@ -11,7 +11,7 @@ export class Physics {
     getInteraction: () => InteractionState;
   }) {}
 
-  /** Call whenever the graph changes (rebuild/filter/etc.) */
+  // Call whenever the graph changes (rebuild/filter/etc.)
   public rebuild(): void {
     this.stop();
     const graph  = this.deps.getGraph();
@@ -32,6 +32,9 @@ export class Physics {
 
   public stop(): void {
     if (this.sim) this.sim.stop();
+  }
+  public start(): void {
+    this.sim?.start();
   }
 
   public destroy(): void {

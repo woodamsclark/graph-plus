@@ -111,20 +111,6 @@ export class Orchestrator {
     }
   }
 
-  private renderFrame(): void {
-    const renderer    = this.renderer;
-    const cursor      = this.cursor;
-    const interactor  = this.interactor;
-    if (!renderer || !cursor || !interactor) return;
-
-    const s = interactor.getState();
-
-    renderer.setFollowedNode(s.followedNodeId);
-    cursor.apply(interactor.getCursorType());
-    renderer.setMouseScreenPosition(s.gravityCenter);
-    renderer.render();
-  }
-
   resize(w: number, h: number): void {
     this.renderer?.resize(w, h);
   }

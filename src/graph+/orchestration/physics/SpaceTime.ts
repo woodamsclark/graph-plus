@@ -10,7 +10,7 @@ type Entry = {
 };
 
 // this class starts time and calls registered tickable systems each frame
-// it is provides space for time dependent systems to run in a coordinated fashion
+// it is provides SPACE for time dependent systems to run in TIME
 export class SpaceTime {
   private time: Time;
   private entries: Entry[] = [];

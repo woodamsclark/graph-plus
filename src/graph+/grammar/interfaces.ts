@@ -241,3 +241,13 @@ export interface RendererSystem extends Tickable{
   refreshTheme()                                              : void;
   tick(dt: number, nowMs: number): void;
 }
+
+
+// --- Physics System ----------------------------------------------------------
+
+export interface PhysicsSystem extends Tickable {
+  start(): void;
+  stop(): void;
+  rebuild(): void;
+  setPinnedNodes(ids: Set<string>): void;
+}
