@@ -87,8 +87,6 @@ export interface CameraSettings {
   rotateSensitivityX    : number;
   rotateSensitivityY    : number;
   zoomSensitivity       : number;
-  cameraAnimDuration    : number;
-  focalLengthPx         : number;
   min_distance          : number;// = 100;
   max_distance          : number;// = 5000;
   min_pitch             : number;//    = -Math.PI / 2 + 0.05;

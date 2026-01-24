@@ -1,5 +1,5 @@
 // utils/defaultSettings.ts
-import type { GraphPlusSettings } from '../../the garden/adam/interfaces.ts';
+import type { GraphPlusSettings } from '../../graph+/grammar/interfaces.ts';
 
 export const DEFAULT_SETTINGS: GraphPlusSettings = {
   graph: {
@@ -44,16 +44,14 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
     rotateSensitivityX  : 0.005,
     rotateSensitivityY  : 0.005,
     zoomSensitivity     : 20,
-    cameraAnimDuration  : 300,
-    focalLengthPx       : 800,
-    min_distance        : 100,
+    min_distance        : 300,
     max_distance        : 5000,
     min_pitch           : -Math.PI / 2 + 0.05,
     max_pitch           :  Math.PI / 2 - 0.05,
     state: {
       yaw     : 0,
       pitch   : 0,
-      distance: 1200,
+      distance: 4000,
       targetX : 0,
       targetY : 0,
       targetZ : 0,

@@ -114,7 +114,6 @@ export class CameraController {
     // "depthToCameraPlane" is how far in front of the camera the point is (in view space)
     const depthToCameraPlane  = cameraDistance - viewZ;
     const depthForDivide      = Math.max(0.0001, depthToCameraPlane); // Avoid divide-by-zero
-    //const focalLengthPx       = this.cameraSettings.focalLengthPx;
     const focalLengthPx       = this.getEffectiveFocalPx();
 
     // Pixels-per-world-unit at this depth
@@ -145,7 +144,6 @@ export class CameraController {
     const { yaw, pitch, distance: camZ, targetX, targetY, targetZ } = this.cameraState;
     const { offsetX, offsetY } = this.viewport;
 
-    //const focal       = this.cameraSettings.focalLengthPx;
     const focal       = this.getEffectiveFocalPx();
     const px          = screenX - offsetX;
     const py          = screenY - offsetY;
