@@ -342,12 +342,15 @@ export class InputManager {
                  if (this.state.longPressFired) {
                     break;
                 }
-                if (this.state.rightClickIntent) {
+                if ( this.state.clickedNodeId ) 
+                     this.callback.onFollowStart(this.state.clickedNodeId);
+                else this.callback.resetCamera();
+/*                if (this.state.rightClickIntent) {
                     if (this.state.clickedNodeId) this.callback.onFollowStart(this.state.clickedNodeId);
                     else this.callback.resetCamera();
                 } else {
                     this.callback.onOpenNode(screen.x, screen.y);
-                }
+                }*/
                 break;
         }
         this.state = { kind: 'idle' };

@@ -1,4 +1,4 @@
-import type { Node, GraphData, Tickable, InteractionSystem, InteractionEvent, InteractionState, InputEvent } from "../../grammar/interfaces.ts";
+import type { Node, GraphData, PhysicsSettings, InteractionSystem, InteractionEvent, InteractionState, InputEvent } from "../../grammar/interfaces.ts";
 import type { CameraController } from "../CameraController.ts"; // adjust path to wherever CameraController lives
 import type { CursorCss } from "./input/cursor_selector.ts";   // adjust path
 import { InputManager } from "../../systems/interaction/input/InputManager.ts";
