@@ -222,54 +222,48 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
     if (!mousePos) return;
     const { x: mouseX, y: mouseY } = mousePos;
 
-    // Radius in pixels on screen
-    const radius    = physicsSettings.mouseGravityRadius; 
-    const strength  = physicsSettings.mouseGravityStrength;
+    const baseRadiusPx = physicsSettings.mouseGravityRadius; 
+    const strength     = physicsSettings.mouseGravityStrength;
+
+    // optional new knob (or hardcode a number)
+    const padPx = (physicsSettings as any).mouseGravityPaddingPx ?? 12;
 
     for (const node of nodes) {
-        if (pinnedNodes.has(node.id)) continue;
+      if (pinnedNodes.has(node.id)) continue;
 
-        // 1. Where is the node on screen?
-        const nodePos = camera.worldToScreen(node);
+      const nodePos = camera.worldToScreen(node);
+      if (nodePos.depth < 0) continue;
 
-        // Skip if behind camera
-        if (nodePos.depth < 0) continue; 
+      // Node's *visible* radius in pixels at current zoom/lens
+      const nodeRadiusPx = node.radius * nodePos.scale;
 
-        // 2. Distance check (Screen Space 2D)
-        const dx = mouseX - nodePos.x;
-        const dy = mouseY - nodePos.y;
-        const distSq = dx * dx + dy * dy;
+      // Ensure gravity radius is never smaller than the visible node (plus a halo)
+      const radiusPx = Math.max(baseRadiusPx, nodeRadiusPx + padPx);
 
-        // If outside the interaction radius, skip
-        if (distSq > radius * radius) continue;
+      const dx = mouseX - nodePos.x;
+      const dy = mouseY - nodePos.y;
+      const distSq = dx * dx + dy * dy;
 
-        // 3. Calculate "Ideal" World Position
-        // We want the node to move to the position (x,y,z) that corresponds 
-        // to the mouse's screen coordinates, BUT at the node's current depth.
-        // This ensures the pull is purely "visual" relative to the camera angle.
-        const targetWorld = camera.screenToWorld(mouseX, mouseY, nodePos.depth);
+      if (distSq > radiusPx * radiusPx) continue;
 
-        // 4. Calculate Vector in World Space
-        const wx = targetWorld.x - node.location.x;
-        const wy = targetWorld.y - node.location.y;
-        const wz = targetWorld.z - node.location.z;
+      const targetWorld = camera.screenToWorld(mouseX, mouseY, nodePos.depth);
 
-        // 5. Apply Force
-        const dist = Math.sqrt(wx*wx + wy*wy + wz*wz) + 1e-6;
-        const maxBoost = 1 / (node.radius);
+      const wx = targetWorld.x - node.location.x;
+      const wy = targetWorld.y - node.location.y;
+      const wz = targetWorld.z - node.location.z;
 
-        // aggressive near the target (asymptote-ish), capped
-        const boost = Math.min(maxBoost, 1 / (dist*dist)); // or 1/(dist*dist)
+      const dist = Math.sqrt(wx*wx + wy*wy + wz*wz) + 1e-6;
+      const maxBoost = 1 / (node.radius);
 
-        // effective strength
-        const k = strength * boost;
+      const boost = Math.min(maxBoost, 1 / (dist*dist));
+      const k = strength * boost;
 
-        node.velocity.vx += wx * k;
-        node.velocity.vy += wy * k;
-        node.velocity.vz += wz * k;
-
+      node.velocity.vx += wx * k;
+      node.velocity.vy += wy * k;
+      node.velocity.vz += wz * k;
     }
   }
+
 
   function applyRepulsion(physicsSettings: PhysicsSettings) {
     const N = nodes.length;
