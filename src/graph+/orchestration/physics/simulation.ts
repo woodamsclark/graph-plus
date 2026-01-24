@@ -314,8 +314,8 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
       const dy = (b.location.y - a.location.y);
       const dz = ((b.location.z || 0) - (a.location.z || 0));
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.0001;
-      const displacement = dist - (physicsSettings.edgeLength || 0);
-      const f = (physicsSettings.edgeStrength || 0) * Math.tanh(displacement / 50);
+      const displacement = dist - (physicsSettings.linkLength || 0);
+      const f = (physicsSettings.linkStrength || 0) * Math.tanh(displacement / 50);
       const fx = (dx / dist) * f;
       const fy = (dy / dist) * f;
       const fz = (dz / dist) * f;
@@ -386,9 +386,11 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
       if (pinnedNodes.has(n.id)) continue;
       n.location.x += (n.velocity.vx || 0) * scale;
       n.location.y += (n.velocity.vy || 0) * scale;
-      n.location.z = (n.location.z || 0) + (n.velocity.vz || 0) * scale;
-      // optional gentle hard clamp epsilon
-      //if (isNote(n) && Math.abs(n.location.z) < 0.0001) n.location.z = 0;
+
+      const flat = true; // make this a setting later
+      if (flat) { n.location.z = 0; n.velocity.vz = 0;
+      } else { n.location.z = (n.location.z || 0) + (n.velocity.vz || 0) * scale; }
+      
       if (isTag(n) && Math.abs(n.location.x) < 0.0001) n.location.x = 0;
     }
   }

@@ -40,9 +40,17 @@ export class GraphStore {
 
         if (state) this.applyPositions(graph, state);
         this.computeAdjacency(graph);
-        this.computeNodeRadius(graph);
+        this.style(graph);
 
         this.graph = graph;
+    }
+
+    private style(graph: GraphData){
+        this.computeNodeRadius(graph);
+        // or do I have Anima completely style the graph?
+        //this.computeLinkStrength(graph); // linkStrength = 1+ number of linksIn
+        //this.computeLinkLength(graph); // linkLength = linkLength / number of linksIn
+
     }
 
     public get(): GraphData | null {
@@ -318,8 +326,8 @@ export class GraphStore {
             id          : `${sourceId}->${targetId}`,
             sourceId    : sourceId,
             targetId    : targetId,
-            length      : settings.physics.edgeLength,
-            strength    : settings.physics.edgeStrength,
+            length      : settings.physics.linkLength,
+            strength    : settings.physics.linkStrength,
             thickness   : thickness,
             gate        : {state: "closed", threshold: 0, hysteresis: 0, },
         };
