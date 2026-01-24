@@ -63,8 +63,8 @@ export interface GraphSettings {
 
 export interface PhysicsSettings {
   repulsionStrength     : number;
-  edgeStrength        : number;
-  edgeLength          : number;
+  linkStrength        : number;
+  linkLength          : number;
   centerPull            : number;
   damping               : number;
   notePlaneStiffness    : number;

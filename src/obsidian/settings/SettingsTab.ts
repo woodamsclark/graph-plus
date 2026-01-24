@@ -1,7 +1,7 @@
 import { App, PluginSettingTab, Setting, TextComponent, ToggleComponent } from 'obsidian';
 import GraphPlus from '../main.ts';
 import { getSettings, updateSettings } from '../settings/settingsStore.ts';
-import { GraphPlusSettings } from '../../the garden/adam/interfaces.ts';
+import { GraphPlusSettings } from '../../graph+/grammar/interfaces.ts';
 import { DEFAULT_SETTINGS } from '../settings/defaultSettings.ts';
 
 declare module 'obsidian' {
@@ -377,7 +377,7 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       },
     });
 
-    const springUi = Math.min(1, Math.max(0, (settings.physics.edgeStrength) / 0.5));
+    const springUi = Math.min(1, Math.max(0, settings.physics.linkStrength));
     addSliderSetting(containerEl, {
       name: 'Spring strength',
       desc: 'UI 0–1 mapped to internal spring constant (higher = stiffer).',
@@ -388,9 +388,9 @@ export class GraphPlusSettingTab extends PluginSettingTab {
       resetValue: springUi,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-            this.applySettings((s) => { s.physics.edgeStrength = v * 0.5; });
+            this.applySettings((s) => { s.physics.linkStrength = v; });
         } else if (Number.isNaN(v)) {
-            this.applySettings((s) => { s.physics.edgeStrength = settings.physics!.edgeStrength; });
+            this.applySettings((s) => { s.physics.linkStrength = settings.physics!.linkStrength; });
         }
       },
     });
@@ -398,16 +398,16 @@ export class GraphPlusSettingTab extends PluginSettingTab {
     addSliderSetting(containerEl, {
       name: 'Spring length',
       desc: 'Preferred length (px) for edge springs.',
-      value: settings.physics.edgeLength,
+      value: settings.physics.linkLength,
       min: 20,
       max: 400,
       step: 1,
-      resetValue: DEFAULT_SETTINGS.physics!.edgeLength,
+      resetValue: DEFAULT_SETTINGS.physics!.linkLength,
       onChange: async (v) => {
         if (!Number.isNaN(v) && v >= 0) {
-            this.applySettings((s) => { s.physics.edgeLength = v; });
+            this.applySettings((s) => { s.physics.linkLength = v; });
         } else if (Number.isNaN(v)) {
-            this.applySettings((s) => { s.physics.edgeLength = settings.physics!.edgeLength; });
+            this.applySettings((s) => { s.physics.linkLength = settings.physics!.linkLength; });
         }
       },
     });
@@ -432,14 +432,14 @@ export class GraphPlusSettingTab extends PluginSettingTab {
 
     addSliderSetting(containerEl, {
       name: 'Damping',
-      desc: 'Velocity damping (0.7–1.0). Higher values reduce motion faster.',
+      desc: 'Velocity damping (0.1–1.0). Higher values reduce motion faster.',
       value: settings.physics.damping,
-      min: 0.7,
+      min: 0.1,
       max: 1,
       step: 0.01,
       resetValue: DEFAULT_SETTINGS.physics.damping,
       onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0.7 && v <= 1) {
+        if (!Number.isNaN(v) && v >= 0.1 && v <= 1) {
           this.applySettings((s) => { s.physics.damping = v; });
         } else if (Number.isNaN(v)) {
             this.applySettings((s) => { s.physics.damping = settings.physics.damping; });

@@ -22,8 +22,8 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
 
   physics: {
     repulsionStrength   : 5000,
-    edgeStrength        : 1,
-    edgeLength          : 100,
+    linkStrength        : 1,
+    linkLength          : 100,
     centerPull          : 0.001,
     damping             : 0.7,
     notePlaneStiffness  : 0,
