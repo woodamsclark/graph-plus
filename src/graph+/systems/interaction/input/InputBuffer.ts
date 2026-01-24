@@ -1,9 +1,20 @@
-import { InputEvent } from "../../../grammar/interfaces.js";
-
+// InputBuffer.ts
+import type { InputEvent } from "./input_types.ts";
 
 export class InputBuffer {
-  private q: InputEvent[] = [];
-  push(e: InputEvent) { this.q.push(e); }
-  drain(): InputEvent[] { const out = this.q; this.q = []; return out; }
-  clear() { this.q = []; }
+  private buf: InputEvent[] = [];
+
+  push(e: InputEvent) {
+    this.buf.push(e);
+  }
+
+  drain(): InputEvent[] {
+    const out = this.buf;
+    this.buf = [];
+    return out;
+  }
+
+  clear() {
+    this.buf = [];
+  }
 }
