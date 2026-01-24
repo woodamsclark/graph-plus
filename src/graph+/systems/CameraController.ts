@@ -37,9 +37,16 @@ export class CameraController {
   }
 
   resetCamera() {
-    this.cameraState = { ...getSettings().camera.state };
+    const currentDistance = this.cameraState.distance;
+
+    this.cameraState = {
+      ...getSettings().camera.state,
+      distance: currentDistance,
+    };
+
     this.clearMomentum();
   }
+
 
   worldToScreen(node: Node): { x: number; y: number; depth: number; scale: number } {
     const {
@@ -107,7 +114,8 @@ export class CameraController {
     // "depthToCameraPlane" is how far in front of the camera the point is (in view space)
     const depthToCameraPlane  = cameraDistance - viewZ;
     const depthForDivide      = Math.max(0.0001, depthToCameraPlane); // Avoid divide-by-zero
-    const focalLengthPx       = this.cameraSettings.focalLengthPx;
+    //const focalLengthPx       = this.cameraSettings.focalLengthPx;
+    const focalLengthPx       = this.getEffectiveFocalPx();
 
     // Pixels-per-world-unit at this depth
     const pixelsPerWorldUnit  = focalLengthPx / depthForDivide;
@@ -137,7 +145,8 @@ export class CameraController {
     const { yaw, pitch, distance: camZ, targetX, targetY, targetZ } = this.cameraState;
     const { offsetX, offsetY } = this.viewport;
 
-    const focal       = this.cameraSettings.focalLengthPx;
+    //const focal       = this.cameraSettings.focalLengthPx;
+    const focal       = this.getEffectiveFocalPx();
     const px          = screenX - offsetX;
     const py          = screenY - offsetY;
 
@@ -276,38 +285,51 @@ export class CameraController {
     this.cameraState.distance = clamp(this.cameraState.distance, this.cameraSettings.min_distance, this.cameraSettings.max_distance);
   }
 
+  private clamp01(t: number) { return t < 0 ? 0 : t > 1 ? 1 : t; }
+
+  private lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
+
+  // Optional: smooth curve so it eases at ends
+  private smoothstep(t: number) { return t * t * (3 - 2 * t); }
+
+  /**
+   * Compute focal length in pixels from a "35mm equivalent focal length".
+   * Assumes sensorHeightMm = 24mm (full-frame). Adjust if you want a different "film gate".
+   */
+  private focalMmToPx(focalMm: number, sensorHeightMm = 24): number {
+    const vh = Math.max(1, this.viewport.height);
+    // focalPx = (vh * focalMm) / sensorHeightMm
+    return (vh * focalMm) / sensorHeightMm;
+  }
+
+  /**
+   * The lens mapping you asked for:
+   * - zoom IN (distance small) => WIDE lens (18mm) => smaller focalPx
+   * - zoom OUT (distance large) => TELE lens (120mm) => larger focalPx
+   */
+  private getEffectiveFocalPx(): number {
+    const d = this.cameraState.distance;
+    const minD = this.cameraSettings.min_distance;
+    const maxD = this.cameraSettings.max_distance;
+
+    let t = (d - minD) / Math.max(0.0001, maxD - minD);
+    t = this.clamp01(t);
+    t = this.smoothstep(t);
+
+    // Lens range
+    const wideMm = 18;
+    const teleMm = 120;
+
+    // As distance increases, focal increases (wide -> tele)
+    //const focalMm = this.lerp(wideMm, teleMm, t);
+    const focalMm = this.lerp(teleMm, wideMm, t);
+    return this.focalMmToPx(focalMm);
+  }
+
+
   updateHover(screenX: number, screenY: number) {
   }
 
-  // Step forward in time for momentum-based smoothing.
-  // dtMs is elapsed milliseconds since last frame.
-  step(dtMs: number) {
-    const t = dtMs / 16.67; // normalize relative to 60fps
-    const damping = Math.pow(1 - this.cameraSettings.momentumScale, t);
-
-    // rotate momentum
-    if (Math.abs(this.cameraState.rotateVelX) > 1e-4 || Math.abs(this.cameraState.rotateVelY) > 1e-4) {
-      this.cameraState.yaw          += this.cameraState.rotateVelX;
-      this.cameraState.pitch        += this.cameraState.rotateVelY;
-      this.cameraState.pitch         = clamp(this.cameraState.pitch, this.cameraSettings.min_pitch, this.cameraSettings.max_pitch);
-      this.cameraState.rotateVelX    *= damping;
-      this.cameraState.rotateVelY    *= damping;
-    }
-
-    // pan momentum
-    if (Math.abs(this.cameraState.panVelX) > 1e-4 || Math.abs(this.cameraState.panVelY) > 1e-4) {
-      this.cameraState.targetX     += this.cameraState.panVelX;
-      this.cameraState.targetY     += this.cameraState.panVelY;
-      this.cameraState.panVelX     *= damping;
-      this.cameraState.panVelY     *= damping;
-    }
-
-    // zoom momentum
-    if (Math.abs(this.cameraState.zoomVel) > 1e-4) {
-      this.cameraState.distance     = clamp(this.cameraState.distance + this.cameraState.zoomVel, this.cameraSettings.min_distance, this.cameraSettings.max_distance);
-      this.cameraState.zoomVel     *= damping;
-    }
-  }
 }
 
 function clamp(v: number, min: number, max: number) {

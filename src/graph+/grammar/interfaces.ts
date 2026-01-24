@@ -1,5 +1,43 @@
 import { TFile } from 'obsidian';
 
+
+export type NodeType  = 'note' | 'tag' | 'canvas'; // canvas nodes is a future feature 01-01-2026
+export type Vec2      = {  x: number;  y: number };
+export type ScreenPt  = {  x: number;  y: number };
+export type ClientPt  = {  x: number;  y: number };
+type location         = {  x: number;  y: number;  z: number  };
+type velocity         = { vx: number; vy: number; vz: number  };
+
+type anima    = { level : number,  capacity : number }; // pressure = level / threshold
+type gate     = {
+    state           : "open" | "closed",
+    // open if dp > threshold
+    // close if dp < threshold * hysteresis
+    threshold   : number,  // delta pressure needed to open; edge.strength * edge.length; modulated by strain
+    hysteresis  : number,  // 0...0.2; some fraction 
+    // Open: flow = conductance * dp
+    // Closed: backflow = leak * dp
+    // live_threshold = edge.strength * edge.length * (1 + strain) // calculated live, since strain is deviation fron length
+  }
+
+
+export type InteractionState = {
+  gravityCenter: Vec2 | null;
+  hoveredNodeId: string | null;
+  followedNodeId: string | null;
+  draggedNodeId: string | null;
+  isPanning: boolean;
+  isRotating: boolean;
+};
+
+export type InteractionEvent =
+  | { type: "OPEN_NODE_REQUESTED"; node: Node }
+  | { type: "PINNED_SET"; ids: Set<string> }
+  | { type: "MOUSE_GRAVITY_SET"; on: boolean };
+
+
+  // --- Interfaces ------------------------------------------------------
+
 export interface GraphSettings {
   minNodeRadius         : number;
   maxNodeRadius         : number;
@@ -99,13 +137,6 @@ export class GraphState {
   set(graph: GraphData | null) { this.graph = graph; }
 }
 
-export type NodeType = 'note' | 'tag' | 'canvas'; // canvas nodes is a future feature 01-01-2026
-
-type location = { x     : number;  y        : number;       z : number  };
-type velocity = { vx    : number;  vy       : number;       vz: number  };
-
-
-
   // kP = edge.thickness / edge.length;
   // kD = something you tune
   // dpRate = (dp - prevDp) / dt;
@@ -155,21 +186,6 @@ export interface WorldTransform {
   scale     : number; // unitless zoom scalar
 }
 
-export type ScreenPt = { x: number; y: number };
-export type ClientPt = { x: number; y: number };
-
-
-type anima    = { level : number,  capacity : number }; // pressure = level / threshold
-type gate     = {
-    state           : "open" | "closed",
-    // open if dp > threshold
-    // close if dp < threshold * hysteresis
-    threshold   : number,  // delta pressure needed to open; edge.strength * edge.length; modulated by strain
-    hysteresis  : number,  // 0...0.2; some fraction 
-    // Open: flow = conductance * dp
-    // Closed: backflow = leak * dp
-    // live_threshold = edge.strength * edge.length * (1 + strain) // calculated live, since strain is deviation fron length
-  }
 
 // --- Tickable Interface ------------------------------------------------------
 
@@ -186,21 +202,6 @@ export interface Tickable {
 
 // --- Interaction State & Events ----------------------------------------------
 
-export type Vec2 = { x: number; y: number };
-
-export type InteractionState = {
-  gravityCenter: Vec2 | null;
-  hoveredNodeId: string | null;
-  followedNodeId: string | null;
-  draggedNodeId: string | null;
-  isPanning: boolean;
-  isRotating: boolean;
-};
-
-export type InteractionEvent =
-  | { type: "OPEN_NODE_REQUESTED"; node: Node }
-  | { type: "PINNED_SET"; ids: Set<string> }
-  | { type: "MOUSE_GRAVITY_SET"; on: boolean };
 
 
 export interface InteractionSystem extends Tickable {

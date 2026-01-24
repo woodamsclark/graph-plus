@@ -1,6 +1,6 @@
 import type { Tickable } from "../grammar/interfaces.ts";
 
-export class AnimaDirector implements Tickable {
+export class Anima implements Tickable {
 
 
     constructor() {

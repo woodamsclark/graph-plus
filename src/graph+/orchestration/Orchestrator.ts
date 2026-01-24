@@ -1,5 +1,5 @@
 import { App, Plugin } from "obsidian";
-import { AnimaDirector } from "../systems/AnimaDirector.ts";
+import { Anima } from "../systems/Anima.ts";
 import { Renderer } from "./render/Renderer.ts";
 import { cursor_selector } from "../systems/interaction/input/cursor_selector.ts";
 import { SpaceTime } from "./physics/SpaceTime.ts";
@@ -16,14 +16,13 @@ export class Orchestrator {
   private spaceTime: SpaceTime;
 
   private canvas: HTMLCanvasElement | null = null;
-  private cursor: ReturnType<typeof cursor_selector> | null = null;
 
   private navigator: ObsidianNavigator;
   private graphSource: ObsidianGraphSource;
 
   private graphState: GraphState = new GraphState();
 
-  private anima: AnimaDirector | null = null;
+  private anima: Anima | null = null;
   private renderer: Renderer | null = null;
 
   private physics: Physics | null = null;
@@ -50,7 +49,7 @@ export class Orchestrator {
     this.deps.containerEl.appendChild(this.canvas);
 
     // Domain-ish system
-    this.anima = new AnimaDirector();
+    this.anima = new Anima();
 
     // Camera (world-owned)
     this.camera = new CameraController(getSettings().camera.state);
@@ -58,7 +57,6 @@ export class Orchestrator {
 
     // Renderer (world-owned)
     this.renderer = new Renderer(this.canvas, this.camera);
-    this.cursor = cursor_selector(this.canvas);
     if (!this.renderer) return;
 
     // Interactor (world-owned)
@@ -136,7 +134,6 @@ export class Orchestrator {
     this.renderer?.destroy();
     this.renderer = null;
 
-    this.cursor = null;
     this.interactor?.destroy();
     this.interactor = null;
     this.anima = null;
