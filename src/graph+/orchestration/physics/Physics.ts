@@ -22,7 +22,12 @@ export class Physics implements PhysicsSystem{
     }
 
     // Simulation wants a gravity center provider; we now read it from InteractionState
-    this.sim = createSimulation(graph, camera, () => this.deps.getInteraction().gravityCenter);
+    this.sim = createSimulation(
+      graph, 
+      camera, 
+      () => this.deps.getInteraction().gravityCenter,
+      (nodeId) => nodeId === this.deps.getInteraction().followedNodeId
+    );
     this.sim?.start();
   }
 

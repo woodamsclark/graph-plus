@@ -3,7 +3,12 @@ import { Node, GraphData, PhysicsSettings, Simulation } from '../../grammar/inte
 import { getSettings } from '../../../obsidian/settings/settingsStore.ts';
 import type { ScreenPt } from "../../grammar/interfaces.ts";
 
-export function createSimulation(graph: GraphData, camera : CameraController, getGravityCenter: () => ScreenPt | null) : Simulation{
+export function createSimulation(
+  graph: GraphData, 
+  camera : CameraController, 
+  getGravityCenter: () => ScreenPt | null,
+  shouldIgnoreMouseGravity?: (nodeId: string) => boolean
+) : Simulation{
   // If center not provided, compute bounding-box center from node positions
   const nodes     = graph.nodes;
   const links     = graph.links;
@@ -221,6 +226,8 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
 
     const mousePos = getGravityCenter();
     if (!mousePos) return;
+    const { x: mouseX, y: mouseY } = mousePos;
+    const ignore = shouldIgnoreMouseGravity;
 
     const strength = physicsSettings.mouseGravityStrength;
 
@@ -233,6 +240,7 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
 
     for (const node of nodes) {
       if (pinnedNodes.has(node.id)) continue;
+      if (ignore?.(node.id)) continue; // ✅ modular exclusion
 
       // 1) Project node to get its depth
       const nodeScreen = camera.worldToScreen(node);
