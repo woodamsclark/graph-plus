@@ -215,54 +215,61 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
     pinnedNodes = new Set(ids);
   }
 
+  // World Space
   function applyMouseGravity(physicsSettings: PhysicsSettings) {
     if (!physicsSettings.mouseGravityEnabled) return;
 
-    const mousePos = getGravityCenter(); 
+    const mousePos = getGravityCenter();
     if (!mousePos) return;
-    const { x: mouseX, y: mouseY } = mousePos;
 
-    const baseRadiusPx = physicsSettings.mouseGravityRadius; 
-    const strength     = physicsSettings.mouseGravityStrength;
+    const strength = physicsSettings.mouseGravityStrength;
 
-    // optional new knob (or hardcode a number)
-    const padPx = (physicsSettings as any).mouseGravityPaddingPx ?? 12;
+    // Base radius in WORLD units
+    const baseRadiusWorld = physicsSettings.mouseGravityRadius;
+
+    // Optional padding so gravity begins slightly outside the node
+    const padWorld =
+      (physicsSettings as any).mouseGravityPaddingWorld ?? 4;
 
     for (const node of nodes) {
       if (pinnedNodes.has(node.id)) continue;
 
-      const nodePos = camera.worldToScreen(node);
-      if (nodePos.depth < 0) continue;
+      // 1) Project node to get its depth
+      const nodeScreen = camera.worldToScreen(node);
+      if (nodeScreen.depth < 0) continue;
 
-      // Node's *visible* radius in pixels at current zoom/lens
-      const nodeRadiusPx = node.radius * nodePos.scale;
+      // 2) Convert mouse to WORLD position at node depth
+      const mouseWorld = camera.screenToWorld(
+        mousePos.x,
+        mousePos.y,
+        nodeScreen.depth
+      );
 
-      // Ensure gravity radius is never smaller than the visible node (plus a halo)
-      const radiusPx = Math.max(baseRadiusPx, nodeRadiusPx + padPx);
+      // 3) World-space delta
+      const dx = mouseWorld.x - node.location.x;
+      const dy = mouseWorld.y - node.location.y;
+      const dz = mouseWorld.z - node.location.z;
 
-      const dx = mouseX - nodePos.x;
-      const dy = mouseY - nodePos.y;
-      const distSq = dx * dx + dy * dy;
+      const distSq = dx*dx + dy*dy + dz*dz;
+      const dist   = Math.sqrt(distSq) + 1e-6;
 
-      if (distSq > radiusPx * radiusPx) continue;
+      // 4) Clamp gravity radius so it is never smaller than node radius
+      const minRadiusWorld = node.radius + padWorld;
+      const radiusWorld   = Math.max(baseRadiusWorld, minRadiusWorld);
 
-      const targetWorld = camera.screenToWorld(mouseX, mouseY, nodePos.depth);
+      if (dist > radiusWorld) continue;
 
-      const wx = targetWorld.x - node.location.x;
-      const wy = targetWorld.y - node.location.y;
-      const wz = targetWorld.z - node.location.z;
+      // 5) Force shaping (same logic you already use)
+      const maxBoost = 1 / node.radius;
+      const boost    = Math.min(maxBoost, 1 / (dist*dist));
+      const k        = strength * boost;
 
-      const dist = Math.sqrt(wx*wx + wy*wy + wz*wz) + 1e-6;
-      const maxBoost = 1 / (node.radius);
-
-      const boost = Math.min(maxBoost, 1 / (dist*dist));
-      const k = strength * boost;
-
-      node.velocity.vx += wx * k;
-      node.velocity.vy += wy * k;
-      node.velocity.vz += wz * k;
+      node.velocity.vx += dx * k;
+      node.velocity.vy += dy * k;
+      node.velocity.vz += dz * k;
     }
   }
+
 
 
   function applyRepulsion(physicsSettings: PhysicsSettings) {
