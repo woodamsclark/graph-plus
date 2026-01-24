@@ -1,16 +1,3 @@
-// Interaction.ts
-//
-// Full rewrite with a hard separation of concerns:
-//
-// - InputManager: only listens to DOM and pushes *raw* InputEvent facts into InputBuffer
-// - Interaction: consumes raw InputEvent facts and derives semantic behavior:
-//   hover, click vs drag, follow, double-click open, pan, rotate, zoom, node dragging, pinning
-//
-// Notes:
-// - This file assumes your InputManager now emits raw events:
-//   POINTER_DOWN / POINTER_MOVE / POINTER_UP / POINTER_CANCEL / WHEEL / LONG_PRESS
-// - This file owns hit-testing, click meaning, thresholds, camera calls, and emitted InteractionEvents.
-
 import type {
   Node,
   GraphData,

@@ -1,8 +1,8 @@
 import { App, Plugin } from "obsidian";
 import { Anima } from "../systems/Anima.ts";
-import { Renderer } from "./render/Renderer.ts";
-import { SpaceTime } from "./physics/SpaceTime.ts";
-import { Physics } from "./physics/Physics.ts";
+import { Renderer } from "../systems/render/Renderer.ts";
+import { SpaceTime } from "../systems/physics/SpaceTime.ts";
+import { Physics } from "../systems/physics/Physics.ts";
 import { Interaction } from "../systems/interaction/InteractionSystem.ts";
 import { getSettings } from "../../obsidian/settings/settingsStore.ts";
 import { ObsidianNavigator } from "../../obsidian/ObsidianNavigator.ts";
