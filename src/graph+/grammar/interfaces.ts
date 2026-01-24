@@ -31,7 +31,7 @@ export type InteractionState = {
 };
 
 export type InteractionEvent =
-  | { type: "OPEN_NODE_REQUESTED"; node: Node }
+  | { type: "OPEN_NODE_REQUESTED"; node: { id: string; label: string, type: string } }
   | { type: "PINNED_SET"; ids: Set<string> }
   | { type: "MOUSE_GRAVITY_SET"; on: boolean };
 
@@ -210,7 +210,7 @@ export interface InteractionSystem extends Tickable {
   getCursorType(): string;
 }
 
-export type InputEvent =
+/*export type InputEvent =
   | { type: "MOUSE_MOVE"; x: number; y: number }
   | { type: "DRAG_START"; nodeId: string; x: number; y: number }
   | { type: "DRAG_MOVE"; x: number; y: number }
@@ -226,7 +226,7 @@ export type InputEvent =
   | { type: "FOLLOW_START"; nodeId: string }
   | { type: "FOLLOW_END" }
   | { type: "RESET_CAMERA" };
-
+*/
 
 // --- Renderer System ---------------------------------------------------------
 
@@ -250,3 +250,63 @@ export interface PhysicsSystem extends Tickable {
   rebuild(): void;
   setPinnedNodes(ids: Set<string>): void;
 }
+
+export type PointerKind = "mouse" | "touch" | "pen";
+
+export type InputEvent =
+  | {
+      type: "POINTER_DOWN";
+      pointerId: number;
+      kind: PointerKind;
+      screen: ScreenPt;
+      client: ClientPt;
+      button: 0 | 1 | 2;
+      ctrl: boolean;
+      meta: boolean;
+      shift: boolean;
+      timeMs: number;
+    }
+  | {
+      type: "POINTER_MOVE";
+      pointerId: number;
+      kind: PointerKind;
+      screen: ScreenPt;
+      client: ClientPt;
+      timeMs: number;
+    }
+  | {
+      type: "POINTER_UP";
+      pointerId: number;
+      kind: PointerKind;
+      screen: ScreenPt;
+      client: ClientPt;
+      button: 0 | 1 | 2;
+      timeMs: number;
+    }
+  | {
+      type: "POINTER_CANCEL";
+      pointerId: number;
+      kind: PointerKind;
+      screen: ScreenPt;
+      client: ClientPt;
+      timeMs: number;
+    }
+  | {
+      type: "WHEEL";
+      screen: ScreenPt;
+      client: ClientPt;
+      deltaX: number;
+      deltaY: number;
+      ctrl: boolean;
+      meta: boolean;
+      shift: boolean;
+      timeMs: number;
+    }
+  | {
+      type: "LONG_PRESS";
+      pointerId: number;
+      kind: PointerKind;
+      screen: ScreenPt;
+      client: ClientPt;
+      timeMs: number;
+    };

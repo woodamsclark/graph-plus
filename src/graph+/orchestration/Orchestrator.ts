@@ -1,7 +1,6 @@
 import { App, Plugin } from "obsidian";
 import { Anima } from "../systems/Anima.ts";
 import { Renderer } from "./render/Renderer.ts";
-import { cursor_selector } from "../systems/interaction/input/cursor_selector.ts";
 import { SpaceTime } from "./physics/SpaceTime.ts";
 import { Physics } from "./physics/Physics.ts";
 import { Interaction } from "../systems/interaction/InteractionSystem.ts";
@@ -103,6 +102,7 @@ export class Orchestrator {
 
       if (e.type === "OPEN_NODE_REQUESTED") {
         const node = e.node;
+        
         if (node.type.toLowerCase() === "tag") void this.navigator.openTagSearch(node.id);
         else void this.navigator.openNodeById(node.id);
       }
