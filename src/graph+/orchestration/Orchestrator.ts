@@ -1,6 +1,6 @@
 import { App, Plugin } from "obsidian";
 import { Anima } from "../systems/Anima.ts";
-import { Renderer } from "./render/Renderer.ts";
+import { Renderer } from "./Renderer.ts";
 import { cursor_selector } from "../systems/interaction/input/cursor_selector.ts";
 import { SpaceTime } from "./physics/SpaceTime.ts";
 import { Physics } from "./physics/Physics.ts";
