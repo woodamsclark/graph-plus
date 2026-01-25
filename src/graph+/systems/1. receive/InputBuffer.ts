@@ -1,5 +1,5 @@
 // InputBuffer.ts
-import type { InputEvent } from "../../../grammar/interfaces.ts";
+import type { InputEvent } from "../../grammar/interfaces.ts";
 
 export class InputBuffer {
   private buf: InputEvent[] = [];
