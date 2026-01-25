@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, Plugin } from 'obsidian';
 import GraphPlus from './main.ts';
-import { Orchestrator } from '../graph+/orchestration/Orchestrator.ts';
+import { Orchestrator } from '../graph+/Orchestrator.ts';
 
 
 export const GRAPH_PLUS_TYPE = 'graph-plus';

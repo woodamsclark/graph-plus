@@ -1,23 +1,24 @@
 import type {
   Node,
   GraphData,
-  InteractionSystem,
-  InteractionEvent,
-  InteractionState,
+  TranslationSystem as TranslationSystem,
+  TranslationEvent,
+  TranslationState,
   InputEvent,
 } from "../../grammar/interfaces.ts";
 
-import type { CameraController } from "../CameraController.ts";
-import type { CursorCss } from "./input/cursor_selector.ts";
+import type { Camera } from "../5. render/Camera.ts";
+import type { CursorCss } from "../1. receive/cursor_selector.ts";
 
-import { InputManager } from "../../systems/interaction/input/InputManager.ts";
-import { InputBuffer } from "../../systems/interaction/input/InputBuffer.ts";
+import { Input } from "../1. receive/Input.ts";
+import { InputBuffer } from "../1. receive/InputBuffer.ts";
 import { getSettings } from "../../../obsidian/settings/settingsStore.ts";
 
 type InteractionDeps = {
   getGraph: () => GraphData | null;
-  getCamera: () => CameraController | null;
+  getCamera: () => Camera | null;
   getCanvas: () => HTMLCanvasElement;
+  getBuffer: () => InputBuffer;
 };
 
 type PressMode = {
@@ -72,23 +73,16 @@ function twoFingerRead(a: PointerRec, b: PointerRec) {
   return { centroid: { x: cx, y: cy }, dist, angle };
 }
 
-export class Interaction implements InteractionSystem {
-  private inputBuffer: InputBuffer;
-  private input: InputManager;
+export class Translation implements TranslationSystem {
 
   private mode: Mode = { kind: "idle" };
-
   private pointers = new Map<number, PointerRec>();
-
   private dragWorldOffset: { x: number; y: number; z: number } | null = null;
   private dragDepthFromCamera = 0;
-
   private pinnedNodes: Set<string> = new Set();
-  private events: InteractionEvent[] = [];
-
+  private events: TranslationEvent[] = [];
   private lastClick: { nodeId: string; timeMs: number } | null = null;
-
-  private state: InteractionState = {
+  private state: TranslationState = {
     gravityCenter: null,
     hoveredNodeId: null,
     followedNodeId: null,
@@ -100,14 +94,6 @@ export class Interaction implements InteractionSystem {
   private settings = getSettings();
 
   constructor(private deps: InteractionDeps) {
-    this.inputBuffer = new InputBuffer();
-
-    // InputManager is now a pure emitter into inputBuffer
-    this.input = new InputManager(
-      deps.getCanvas(),
-      this.inputBuffer,
-      () => getSettings(),
-    );
   }
 
   // Orchestrator can call this if you want, but tick() already drains buffer.
@@ -116,13 +102,13 @@ export class Interaction implements InteractionSystem {
   }
 
   /** Orchestrator drains these and routes to adapters/systems */
-  public drainEvents(): InteractionEvent[] {
+  public drainEvents(): TranslationEvent[] {
     const out = this.events;
     this.events = [];
     return out;
   }
 
-  public getState(): Readonly<InteractionState> {
+  public getState(): Readonly<TranslationState> {
     return this.state;
   }
 
@@ -136,7 +122,7 @@ export class Interaction implements InteractionSystem {
     this.settings = getSettings();
 
     // 1) consume raw input events for this frame
-    const batch = this.inputBuffer.drain();
+    const batch = this.deps.getBuffer().drain();
     this.ingest(batch);
 
     // 2) per-frame derived behavior
@@ -145,7 +131,6 @@ export class Interaction implements InteractionSystem {
   }
 
   public destroy(): void {
-    this.input.destroy();
     // optional: this.inputBuffer.clear();
   }
 
@@ -459,7 +444,7 @@ export class Interaction implements InteractionSystem {
   // Outputs + helpers
   // ----------------------------------------------------------------------------
 
-  private emit(e: InteractionEvent): void {
+  private emit(e: TranslationEvent): void {
     this.events.push(e);
   }
 

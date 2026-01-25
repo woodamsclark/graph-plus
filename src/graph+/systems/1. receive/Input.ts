@@ -1,21 +1,33 @@
 // InputManager.ts
-import type { InputEvent, ScreenPt, PointerKind } from "../../../grammar/interfaces.ts";
+import type { InputSettings, ScreenPt, PointerKind } from "../../grammar/interfaces.ts";
 import { InputBuffer } from "./InputBuffer.ts";
 
 type GetSettings = () => { camera: { longPressMs: number } } | any;
 
-export class InputManager {
+type InputDeps = {
+  getCanvas: () => HTMLCanvasElement;
+  getBuffer: () => InputBuffer;
+  initialSettings: InputSettings;
+};
+
+
+
+
+export class Input {
   private longPressTimer: number | null = null;
   private longPressPointerId: number | null = null;
+  private deps: InputDeps;
+  private settings: InputSettings = {}; // future use
 
-  constructor(
-    private canvas: HTMLCanvasElement,
-    private buffer: InputBuffer,
-    private getSettings: GetSettings,
-  ) {
-    this.canvas.style.touchAction = "none";
+  constructor(deps: InputDeps) {
+    this.deps = deps;
+    deps.getCanvas().style.touchAction = "none";
     this.attach();
   }
+
+   setInputSettings(settings: InputSettings) {
+      this.settings = settings;
+    }
 
   destroy(): void {
     this.detach();
@@ -25,21 +37,21 @@ export class InputManager {
   // ----- DOM glue ------------------------------------------------------------
 
   private attach() {
-    this.canvas.addEventListener("pointerdown", this.onPointerDown, { passive: false });
-    this.canvas.addEventListener("pointermove", this.onPointerMove, { passive: false });
-    this.canvas.addEventListener("pointerup", this.onPointerUp, { passive: false });
-    this.canvas.addEventListener("pointercancel", this.onPointerCancel, { passive: false });
-    this.canvas.addEventListener("wheel", this.onWheel, { passive: false });
-    this.canvas.addEventListener("contextmenu", this.onContextMenu, { passive: false });
+    this.deps.getCanvas().addEventListener("pointerdown",   this.onPointerDown, { passive: false });
+    this.deps.getCanvas().addEventListener("pointermove",   this.onPointerMove, { passive: false });
+    this.deps.getCanvas().addEventListener("pointerup",     this.onPointerUp, { passive: false });
+    this.deps.getCanvas().addEventListener("pointercancel", this.onPointerCancel, { passive: false });
+    this.deps.getCanvas().addEventListener("wheel",         this.onWheel, { passive: false });
+    this.deps.getCanvas().addEventListener("contextmenu",   this.onContextMenu, { passive: false });
   }
 
   private detach() {
-    this.canvas.removeEventListener("pointerdown", this.onPointerDown as any);
-    this.canvas.removeEventListener("pointermove", this.onPointerMove as any);
-    this.canvas.removeEventListener("pointerup", this.onPointerUp as any);
-    this.canvas.removeEventListener("pointercancel", this.onPointerCancel as any);
-    this.canvas.removeEventListener("wheel", this.onWheel as any);
-    this.canvas.removeEventListener("contextmenu", this.onContextMenu as any);
+    this.deps.getCanvas().removeEventListener("pointerdown",    this.onPointerDown as any);
+    this.deps.getCanvas().removeEventListener("pointermove",    this.onPointerMove as any);
+    this.deps.getCanvas().removeEventListener("pointerup",      this.onPointerUp as any);
+    this.deps.getCanvas().removeEventListener("pointercancel",  this.onPointerCancel as any);
+    this.deps.getCanvas().removeEventListener("wheel",          this.onWheel as any);
+    this.deps.getCanvas().removeEventListener("contextmenu",    this.onContextMenu as any);
   }
 
   private onContextMenu = (e: MouseEvent) => {
@@ -48,12 +60,12 @@ export class InputManager {
 
   private onPointerDown = (e: PointerEvent) => {
     e.preventDefault();
-    this.canvas.setPointerCapture(e.pointerId);
+    this.deps.getCanvas().setPointerCapture(e.pointerId);
 
     const screen = this.getScreenFromClient(e.clientX, e.clientY);
     const kind = this.toPointerKind(e.pointerType);
 
-    this.buffer.push({
+    this.deps.getBuffer().push({
       type: "POINTER_DOWN",
       pointerId: e.pointerId,
       kind,
@@ -76,7 +88,7 @@ export class InputManager {
     const screen = this.getScreenFromClient(e.clientX, e.clientY);
     const kind = this.toPointerKind(e.pointerType);
 
-    this.buffer.push({
+    this.deps.getBuffer().push({
       type: "POINTER_MOVE",
       pointerId: e.pointerId,
       kind,
@@ -89,12 +101,12 @@ export class InputManager {
   private onPointerUp = (e: PointerEvent) => {
     e.preventDefault();
     this.clearLongPress();
-    try { this.canvas.releasePointerCapture(e.pointerId); } catch {}
+    try { this.deps.getCanvas().releasePointerCapture(e.pointerId); } catch {}
 
     const screen = this.getScreenFromClient(e.clientX, e.clientY);
     const kind = this.toPointerKind(e.pointerType);
 
-    this.buffer.push({
+    this.deps.getBuffer().push({
       type: "POINTER_UP",
       pointerId: e.pointerId,
       kind,
@@ -112,7 +124,7 @@ export class InputManager {
     const screen = this.getScreenFromClient(e.clientX, e.clientY);
     const kind = this.toPointerKind(e.pointerType);
 
-    this.buffer.push({
+    this.deps.getBuffer().push({
       type: "POINTER_CANCEL",
       pointerId: e.pointerId,
       kind,
@@ -127,7 +139,7 @@ export class InputManager {
 
     const screen = this.getScreenFromClient(e.clientX, e.clientY);
 
-    this.buffer.push({
+    this.deps.getBuffer().push({
       type: "WHEEL",
       screen,
       client: { x: e.clientX, y: e.clientY },
@@ -145,12 +157,12 @@ export class InputManager {
   private startLongPress(pointerId: number, kind: PointerKind, screen: ScreenPt, client: {x:number;y:number}) {
     this.clearLongPress();
 
-    const ms = this.getSettings()?.camera?.longPressMs ?? 450;
+    const ms = 450; // make this a setting?
     this.longPressPointerId = pointerId;
 
     this.longPressTimer = window.setTimeout(() => {
       // Still holding same pointer? Interaction will decide what it means.
-      this.buffer.push({
+      this.deps.getBuffer().push({
         type: "LONG_PRESS",
         pointerId,
         kind,
@@ -176,11 +188,11 @@ export class InputManager {
   }
 
   private getScreenFromClient(clientX: number, clientY: number): ScreenPt {
-    const rect = this.canvas.getBoundingClientRect();
+    const rect = this.deps.getCanvas().getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
 
-    const logicalWidth  = this.canvas.width / dpr;
-    const logicalHeight = this.canvas.height / dpr;
+    const logicalWidth  = this.deps.getCanvas().width / dpr;
+    const logicalHeight = this.deps.getCanvas().height / dpr;
 
     const scaleX = logicalWidth / rect.width;
     const scaleY = logicalHeight / rect.height;

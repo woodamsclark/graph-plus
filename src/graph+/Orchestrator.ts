@@ -1,14 +1,16 @@
 import { App, Plugin } from "obsidian";
-import { Anima } from "../systems/Anima.ts";
-import { Renderer } from "../systems/render/Renderer.ts";
-import { SpaceTime } from "../systems/physics/SpaceTime.ts";
-import { Physics } from "../systems/physics/Physics.ts";
-import { Interaction } from "../systems/interaction/InteractionSystem.ts";
-import { getSettings } from "../../obsidian/settings/settingsStore.ts";
-import { ObsidianNavigator } from "../../obsidian/ObsidianNavigator.ts";
-import { GraphState } from "../grammar/interfaces.ts";
-import { ObsidianGraphSource } from "../../obsidian/ObsidianGraphSource.ts";
-import { CameraController } from "../systems/CameraController.ts";
+import { Anima } from "./systems/4. simulate/Anima.ts";
+import { Renderer } from "./systems/5. render/Renderer.ts";
+import { SpaceTime } from "./systems/SpaceTime.ts";
+import { Physics } from "./systems/4. simulate/Physics.ts";
+import { Translation } from "./systems/2. translate/TranslationSystem.ts";
+import { getSettings } from "../obsidian/settings/settingsStore.ts";
+import { ObsidianNavigator } from "../obsidian/ObsidianNavigator.ts";
+import { GraphState, InputSettings } from "./grammar/interfaces.ts";
+import { ObsidianGraphSource } from "../obsidian/ObsidianGraphSource.ts";
+import { Camera } from "./systems/5. render/Camera.ts";
+import { Input } from "./systems/1. receive/Input.ts";
+import { InputBuffer } from "./systems/1. receive/InputBuffer.ts";
 
 
 export class Orchestrator {
@@ -20,17 +22,19 @@ export class Orchestrator {
   private graphSource: ObsidianGraphSource;
 
   private graphState: GraphState = new GraphState();
+  private input: Input;
+  private inputBuffer: InputBuffer = new InputBuffer();
 
   private anima: Anima | null = null;
   private renderer: Renderer | null = null;
 
   private physics: Physics | null = null;
-  private interactor: Interaction | null = null;
-  private camera: CameraController | null = null;
+  private translator: Translation | null = null;
+  private camera: Camera | null = null;
 
   constructor(private deps: { app: App; plugin: Plugin; containerEl: HTMLElement }) {
-    this.spaceTime = new SpaceTime({ maxDtSeconds: 0.05 });
-    this.navigator = new ObsidianNavigator(deps.app);
+    this.spaceTime  = new SpaceTime({ maxDtSeconds: 0.05 });
+    this.navigator  = new ObsidianNavigator(deps.app);
 
     // NOTE: this casts plugin to the data storage interface expected by GraphStore/GraphSource
     this.graphSource = new ObsidianGraphSource({
@@ -47,30 +51,39 @@ export class Orchestrator {
     this.canvas.tabIndex = 0;
     this.deps.containerEl.appendChild(this.canvas);
 
-    // Domain-ish system
-    this.anima = new Anima();
 
-    // Camera (world-owned)
-    this.camera = new CameraController(getSettings().camera.state);
-    this.camera.setWorldTransform(null);
 
-    // Renderer (world-owned)
-    this.renderer = new Renderer(this.canvas, this.camera);
-    if (!this.renderer) return;
-
-    // Interactor (world-owned)
-    this.interactor = new Interaction({
-      getGraph: () => this.graphState.get(),
-      getCamera: () => this.camera,
-      getCanvas: () => this.canvas!
+    // 1. Input (world-owned)
+    this.input = new Input({
+      getCanvas: () => this.canvas!,
+      getBuffer: () => this.inputBuffer,
+      initialSettings: this.buildInputSettings(),
     });
 
-    // Physics (world-owned)
+    // 2. Translator (world-owned)
+    this.translator = new Translation({
+      getGraph: () => this.graphState.get(),
+      getCamera: () => this.camera,
+      getCanvas: () => this.canvas!,
+      getBuffer: () => this.inputBuffer,
+    });
+
+    // 3. Command
+
+    // 4. Physics (world-owned)
     this.physics = new Physics({
       getGraph:       () => this.graphState.get(),
       getCamera:      () => this.camera,
-      getInteraction: () => this.interactor!.getState(),
+      getInteraction: () => this.translator!.getState(),
     });
+
+    // 5. Render
+    this.camera = new Camera(getSettings().camera.state);
+    this.camera.setWorldTransform(null);
+
+    this.renderer = new Renderer(this.canvas, this.camera);
+    if (!this.renderer) return;
+
 
     // Initial sizing
     const rect = this.deps.containerEl.getBoundingClientRect();
@@ -80,17 +93,17 @@ export class Orchestrator {
     await this.rebuildGraph();
 
     // register systems
-    this.spaceTime.register("interaction", this.interactor, 10);
+    this.spaceTime.register("interaction", this.translator, 10);
     this.spaceTime.register("events", {tick: () => this.drainInteractionEvents()}, 20);
     this.spaceTime.register("physics", this.physics, 30);
-    this.spaceTime.register("anima", this.anima, 40);
+    //this.spaceTime.register("anima", this.anima, 40);
     this.spaceTime.register("render", this.renderer, 100);
 
     this.spaceTime.start();
   }
 
   private drainInteractionEvents(): void {
-    const interactor = this.interactor;
+    const interactor = this.translator;
     if (!interactor) return;
 
     for (const e of interactor.drainEvents()) {
@@ -125,6 +138,14 @@ export class Orchestrator {
     this.renderer?.refreshTheme();
   }
 
+
+  private buildInputSettings(): InputSettings {
+    const s = getSettings();
+
+    return {}; // future use send Input only the settings it needs
+  }
+
+
   async close(): Promise<void> {
     this.spaceTime.stop();
 
@@ -134,8 +155,8 @@ export class Orchestrator {
     this.renderer?.destroy();
     this.renderer = null;
 
-    this.interactor?.destroy();
-    this.interactor = null;
+    this.translator?.destroy();
+    this.translator = null;
     this.anima = null;
 
     this.canvas?.remove();
