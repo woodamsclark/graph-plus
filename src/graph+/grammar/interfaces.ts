@@ -21,7 +21,7 @@ type gate     = {
   }
 
 
-export type InteractionState = {
+export type TranslationState = {
   gravityCenter: Vec2 | null;
   hoveredNodeId: string | null;
   followedNodeId: string | null;
@@ -30,7 +30,7 @@ export type InteractionState = {
   isRotating: boolean;
 };
 
-export type InteractionEvent =
+export type TranslationEvent =
   | { type: "OPEN_NODE_REQUESTED"; node: { id: string; label: string, type: string } }
   | { type: "PINNED_SET"; ids: Set<string> }
   | { type: "MOUSE_GRAVITY_SET"; on: boolean };
@@ -202,31 +202,13 @@ export interface Tickable {
 
 
 
-export interface InteractionSystem extends Tickable {
-  getState(): Readonly<InteractionState>;
+export interface TranslationSystem extends Tickable {
+  getState(): Readonly<TranslationState>;
   ingest(events: InputEvent[]): void;        // optional if you drain internally
-  drainEvents(): InteractionEvent[];
+  drainEvents(): TranslationEvent[];
   // optional: cursorType if you want renderer/cursor to query it
   getCursorType(): string;
 }
-
-/*export type InputEvent =
-  | { type: "MOUSE_MOVE"; x: number; y: number }
-  | { type: "DRAG_START"; nodeId: string; x: number; y: number }
-  | { type: "DRAG_MOVE"; x: number; y: number }
-  | { type: "DRAG_END" }
-  | { type: "PAN_START"; x: number; y: number }
-  | { type: "PAN_MOVE"; x: number; y: number }
-  | { type: "PAN_END" }
-  | { type: "ROTATE_START"; x: number; y: number }
-  | { type: "ROTATE_MOVE"; x: number; y: number }
-  | { type: "ROTATE_END" }
-  | { type: "ZOOM"; x: number; y: number; delta: number }
-  | { type: "OPEN_NODE"; x: number; y: number }
-  | { type: "FOLLOW_START"; nodeId: string }
-  | { type: "FOLLOW_END" }
-  | { type: "RESET_CAMERA" };
-*/
 
 // --- Renderer System ---------------------------------------------------------
 
@@ -252,6 +234,8 @@ export interface PhysicsSystem extends Tickable {
 }
 
 export type PointerKind = "mouse" | "touch" | "pen";
+
+export type InputSettings = {}; // future use
 
 export type InputEvent =
   | {

@@ -1,11 +1,11 @@
-import { CameraController } from '../../systems/CameraController.ts';
+import { Camera } from '../5. render/Camera.ts';
 import { Node, GraphData, PhysicsSettings, Simulation } from '../../grammar/interfaces.ts';
 import { getSettings } from '../../../obsidian/settings/settingsStore.ts';
 import type { ScreenPt } from "../../grammar/interfaces.ts";
 
 export function createSimulation(
   graph: GraphData, 
-  camera : CameraController, 
+  camera : Camera, 
   getGravityCenter: () => ScreenPt | null,
   shouldIgnoreMouseGravity?: (nodeId: string) => boolean
 ) : Simulation{

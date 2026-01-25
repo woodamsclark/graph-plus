@@ -1,6 +1,6 @@
 import { App, TFile } from "obsidian";
-import { GraphData, Node, Link } from "./interfaces.ts";
-import { getSettings } from "../../obsidian/settings/settingsStore.ts";
+import { GraphData, Node, Link } from "./grammar/interfaces.ts";
+import { getSettings } from "../obsidian/settings/settingsStore.ts";
 
 type WeightedEdge = { sourceId: string; targetId: string; weight: number };
 
@@ -24,7 +24,7 @@ interface ResolvedLinks {
     [sourcePath: string]: { [targetPath: string]: number };
 };
 
-export class GraphStore {
+export class Graph {
     private deps: GraphStoreDeps;
     private graph: GraphData | null = null;
     private cachedState: PersistedGraphState | null = null;
@@ -141,7 +141,7 @@ export class GraphStore {
         const nodes = this.createNodes(app, tags, settings.graph.showTags);
         const nodeById = new Map(nodes.map(n => [n.id, n] as const));
 
-        function* allEdges(this: GraphStore): IterableIterator<WeightedEdge> {
+        function* allEdges(this: Graph): IterableIterator<WeightedEdge> {
             yield* this.noteNoteEdges(app);
 
             if (!showTags) return;

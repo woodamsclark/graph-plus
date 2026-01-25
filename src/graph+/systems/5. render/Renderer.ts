@@ -1,6 +1,6 @@
 import type { RendererSystem, GraphData, Node, Link, Tickable } from "../../grammar/interfaces.ts";
 import { getSettings } from "../../../obsidian/settings/settingsStore.ts";
-import type { CameraController } from "../../systems/CameraController.ts";
+import type { CameraController } from "../CameraController.ts";
 
 type ThemeFonts = {
   text: string;

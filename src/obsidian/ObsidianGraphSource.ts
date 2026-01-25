@@ -1,5 +1,5 @@
 import type { App } from "obsidian";
-import { GraphStore } from "../graph+/grammar/GraphStore.ts";
+import { Graph } from "../graph+/Graph.ts";
 import type { GraphData } from "../graph+/grammar/interfaces.ts";
 
 type DataStoragePlugin = {
@@ -13,10 +13,10 @@ type GraphStoreDeps = {
 };
 
 export class ObsidianGraphSource {
-  private store: GraphStore;
+  private store: Graph;
 
   constructor(deps: GraphStoreDeps) {
-    this.store = new GraphStore(deps);
+    this.store = new Graph(deps);
   }
 
   async rebuild(): Promise<GraphData | null> {
