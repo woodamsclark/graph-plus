@@ -1,6 +1,6 @@
 import type { RendererSystem, GraphData, Node, Link, Tickable } from "../../grammar/interfaces.ts";
 import { getSettings } from "../../../obsidian/settings/settingsStore.ts";
-import type { CameraController } from "../CameraController.ts";
+import type { Camera} from "./Camera.ts";
 
 type ThemeFonts = {
   text: string;
@@ -42,7 +42,7 @@ export class Renderer implements RendererSystem {
   private cssH = 1;
   private dpr = 1;
 
-  constructor(private canvas: HTMLCanvasElement, private camera: CameraController) {
+  constructor(private canvas: HTMLCanvasElement, private camera: Camera) {
     this.context = canvas.getContext("2d");
   }
 
