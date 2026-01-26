@@ -1,8 +1,8 @@
+// Translator.ts
 import type {
   Node,
   GraphData,
-  TranslationSystem as TranslationSystem,
-  TranslationEvent,
+  TranslationSystem,
   TranslationState,
   InputEvent,
 } from "../../grammar/interfaces.ts";
@@ -10,15 +10,23 @@ import type {
 import type { Camera } from "../5. render/Camera.ts";
 import type { CursorCss } from "../1. receive/cursor_selector.ts";
 
-import { Input } from "../1. receive/Input.ts";
-import { InputBuffer } from "../1. receive/InputBuffer.ts";
-import { getSettings } from "../../../obsidian/settings/settingsStore.ts";
+import type { InputBuffer } from "../1. receive/InputBuffer.ts";
+import type { CommandQueue } from "../3. apply/Command.ts";
+import type { Vec3 } from "../3. apply/Command.ts";
 
-type InteractionDeps = {
+type CameraSettings = {
+  dragThresholdPx?: number;
+  doubleClickMs?: number;
+};
+
+type TranslatorDeps = {
   getGraph: () => GraphData | null;
   getCamera: () => Camera | null;
   getCanvas: () => HTMLCanvasElement;
   getBuffer: () => InputBuffer;
+  getCommands: () => CommandQueue;
+  // Narrow settings reader: keep Translator out of global settings.
+  getCameraSettings: () => CameraSettings;
 };
 
 type PressMode = {
@@ -74,14 +82,19 @@ function twoFingerRead(a: PointerRec, b: PointerRec) {
 }
 
 export class Translation implements TranslationSystem {
-
   private mode: Mode = { kind: "idle" };
   private pointers = new Map<number, PointerRec>();
-  private dragWorldOffset: { x: number; y: number; z: number } | null = null;
+
+  // Drag intent computation
+  private dragWorldOffset: Vec3 | null = null;
   private dragDepthFromCamera = 0;
+
+  // Local interaction-only pinned set (what user is holding)
+  // We still emit pin commands so the "world" can own the authoritative pin set.
   private pinnedNodes: Set<string> = new Set();
-  private events: TranslationEvent[] = [];
+
   private lastClick: { nodeId: string; timeMs: number } | null = null;
+
   private state: TranslationState = {
     gravityCenter: null,
     hoveredNodeId: null,
@@ -91,22 +104,7 @@ export class Translation implements TranslationSystem {
     isRotating: false,
   };
 
-  private settings = getSettings();
-
-  constructor(private deps: InteractionDeps) {
-  }
-
-  // Orchestrator can call this if you want, but tick() already drains buffer.
-  public ingest(events: InputEvent[]): void {
-    for (const e of events) this.ingestOne(e);
-  }
-
-  /** Orchestrator drains these and routes to adapters/systems */
-  public drainEvents(): TranslationEvent[] {
-    const out = this.events;
-    this.events = [];
-    return out;
-  }
+  constructor(private deps: TranslatorDeps) {}
 
   public getState(): Readonly<TranslationState> {
     return this.state;
@@ -119,23 +117,21 @@ export class Translation implements TranslationSystem {
   }
 
   public tick(_dt: number, _nowMs: number): void {
-    this.settings = getSettings();
-
-    // 1) consume raw input events for this frame
+    // 1) Receive: consume raw input events for this frame
     const batch = this.deps.getBuffer().drain();
-    this.ingest(batch);
+    for (const e of batch) this.ingestOne(e);
 
-    // 2) per-frame derived behavior
+    // 2) Interpret: per-frame derived behavior
     this.updateFollow();
     this.updateHover();
   }
 
   public destroy(): void {
-    // optional: this.inputBuffer.clear();
+    // no-op
   }
 
   // ----------------------------------------------------------------------------
-  // Raw input ingestion (facts only)
+  // Receive → Interpret (raw input ingestion + semantic transitions)
   // ----------------------------------------------------------------------------
 
   private ingestOne(e: InputEvent): void {
@@ -166,7 +162,7 @@ export class Translation implements TranslationSystem {
   private onPointerDown(e: Extract<InputEvent, { type: "POINTER_DOWN" }>) {
     this.upsertPointer(e.pointerId, e.kind, e.screen.x, e.screen.y);
 
-    // If 2 pointers are down, enter touch gesture mode (and end any single-pointer mode)
+    // If 2 pointers are down, enter touch gesture mode
     if (this.pointers.size === 2) {
       this.endSinglePointerModeIfNeeded();
 
@@ -185,7 +181,7 @@ export class Translation implements TranslationSystem {
         rotateStarted: false,
       };
 
-      // Optionally set gravity center to centroid for hover semantics
+      // gravity center for hover/mouse gravity semantics
       this.state.gravityCenter = { x: g.centroid.x, y: g.centroid.y };
       return;
     }
@@ -195,7 +191,7 @@ export class Translation implements TranslationSystem {
     const isLeft = e.button === 0;
     const isRight = e.button === 2;
 
-    // "right intent" definition lives here (semantic)
+    // right intent definition lives here (semantic)
     const rightIntent = isMouse && ((isLeft && (e.ctrl || e.meta)) || isRight);
 
     const downHit = this.getClickedNodeIdLabel(e.screen.x, e.screen.y);
@@ -210,14 +206,13 @@ export class Translation implements TranslationSystem {
       longPressFired: false,
     };
 
-    // update gravity center for hover/mouse gravity
     this.state.gravityCenter = { x: e.screen.x, y: e.screen.y };
   }
 
   private onPointerMove(e: Extract<InputEvent, { type: "POINTER_MOVE" }>) {
     this.upsertPointer(e.pointerId, e.kind, e.screen.x, e.screen.y);
 
-    // Update gravity center always for hover and mouse gravity
+    // Update gravity center always for hover/mouse gravity
     this.state.gravityCenter = { x: e.screen.x, y: e.screen.y };
 
     // Two-finger gesture
@@ -255,7 +250,9 @@ export class Translation implements TranslationSystem {
 
     // Single pointer semantic transitions
     if (this.mode.kind === "press" && this.mode.pointerId === e.pointerId) {
-      const threshold = this.settings?.camera?.dragThreshold ?? 6;
+      const cameraCfg = this.deps.getCameraSettings();
+      const threshold = cameraCfg.dragThresholdPx ?? 6;
+
       const movedSq = distSq({ x: e.screen.x, y: e.screen.y }, this.mode.downScreen);
       if (movedSq <= threshold * threshold) return;
 
@@ -296,7 +293,7 @@ export class Translation implements TranslationSystem {
   private onPointerUp(e: Extract<InputEvent, { type: "POINTER_UP" }>) {
     this.pointers.delete(e.pointerId);
 
-    // If we were in touch gesture and now dropped below 2 pointers, end rotate if started.
+    // Touch gesture end
     if (this.mode.kind === "touch-gesture") {
       if (this.pointers.size < 2) {
         if (this.mode.rotateStarted) this.endRotate();
@@ -322,7 +319,7 @@ export class Translation implements TranslationSystem {
       return;
     }
 
-    // If still in press, interpret as a click release
+    // Click release
     if (this.mode.kind === "press" && this.mode.pointerId === e.pointerId) {
       const press = this.mode;
       this.mode = { kind: "idle" };
@@ -333,29 +330,15 @@ export class Translation implements TranslationSystem {
         return;
       }
 
-      const nodeId = press.downNode?.id; // if you stored {id,label}
+      const nodeId = press.downNode?.id;
       if (!nodeId) return;
 
-      this.handleClickNode(nodeId);
+      this.handleSingleOrDoubleClick(nodeId, e.timeMs);
       return;
     }
 
     this.mode = { kind: "idle" };
   }
-
-  private handleClickNode(nodeId: string) {
-    // If already following this node, open it
-    if (this.state.followedNodeId === nodeId) {
-      const node = this.getNodeIdLabel(nodeId);
-      if (!node) return;
-      this.emit({ type: "OPEN_NODE_REQUESTED", node }); // or node: {id,label} depending on your event type
-      return;
-    }
-
-    // Otherwise, follow it
-    this.startFollow(nodeId);
-  }
-
 
   private onPointerCancel(e: Extract<InputEvent, { type: "POINTER_CANCEL" }>) {
     this.pointers.delete(e.pointerId);
@@ -374,15 +357,13 @@ export class Translation implements TranslationSystem {
   }
 
   private onWheel(e: Extract<InputEvent, { type: "WHEEL" }>) {
-    // Interpret wheel here (semantic)
     const camera = this.deps.getCamera();
     if (!camera) return;
 
     const screenX = e.screen.x;
     const screenY = e.screen.y;
 
-    // Trackpad pinch commonly arrives as wheel with ctrlKey on macOS.
-    // If ctrl/meta is held, treat as zoom.
+    // Trackpad pinch often arrives as wheel + ctrl/meta on macOS.
     const zoom = e.ctrl || e.meta;
     if (zoom) {
       const direction = e.deltaY > 0 ? 1 : -1;
@@ -390,22 +371,18 @@ export class Translation implements TranslationSystem {
       return;
     }
 
-    // Otherwise treat as "pan-like" scroll.
-    // If your camera has a dedicated wheel pan session, hook it up here.
+    // Otherwise treat as pan-like scroll.
     camera.startPan(screenX, screenY);
     camera.updatePan(screenX - e.deltaX, screenY - e.deltaY);
     camera.endPan();
   }
 
   private onLongPress(e: Extract<InputEvent, { type: "LONG_PRESS" }>) {
-    // Long press is a fact. We interpret it only if we're still in press with same pointer.
     if (this.mode.kind !== "press") return;
     if (this.mode.pointerId !== e.pointerId) return;
 
-    // mark fired to suppress click-on-release
     this.mode.longPressFired = true;
 
-    // Define long press as "focus node if touched, else reset camera"
     if (this.mode.downNode?.id) {
       this.startFollow(this.mode.downNode.id);
     } else {
@@ -414,46 +391,19 @@ export class Translation implements TranslationSystem {
   }
 
   // ----------------------------------------------------------------------------
-  // Semantic click behavior
+  // Communicate intent (Commands)
   // ----------------------------------------------------------------------------
 
-  private handleSingleOrDoubleClick(nodeId: string, timeMs: number) {
-    //const doubleMs = this.settings?.camera?.doubleClickMs ?? 300; // fix this some day
-    const doubleMs = 300; // fix this some day
+  private cmd(c: import("../3. apply/Command.ts").Command): void {
+    this.deps.getCommands().push(c);
+  }
 
-    const prev = this.lastClick;
-    const isDouble =
-      !!prev &&
-      prev.nodeId === nodeId &&
-      (timeMs - prev.timeMs) <= doubleMs;
-
-    // record this click
-    this.lastClick = { nodeId, timeMs };
-
-    if (isDouble) {
-      const node = this.getNodeIdLabel(nodeId);
-      if (!node) return;
-      this.emit({ type: "OPEN_NODE_REQUESTED", node });
-      return;
-    }
-
-    this.startFollow(nodeId);
+  private replacePinnedSet(): void {
+    this.cmd({ type: "PinSetReplace", ids: new Set(this.pinnedNodes) });
   }
 
   // ----------------------------------------------------------------------------
-  // Outputs + helpers
-  // ----------------------------------------------------------------------------
-
-  private emit(e: TranslationEvent): void {
-    this.events.push(e);
-  }
-
-  private emitPinned(): void {
-    this.emit({ type: "PINNED_SET", ids: new Set(this.pinnedNodes) });
-  }
-
-  // ----------------------------------------------------------------------------
-  // Hover + follow
+  // Hover + follow (still local, camera-side effects remain here for now)
   // ----------------------------------------------------------------------------
 
   private updateHover() {
@@ -490,15 +440,37 @@ export class Translation implements TranslationSystem {
 
   private startFollow(nodeId: string) {
     this.state.followedNodeId = nodeId;
-    // Follow updates each tick via updateFollow()
   }
 
   private endFollow() {
     this.state.followedNodeId = null;
   }
 
+  private handleSingleOrDoubleClick(nodeId: string, timeMs: number) {
+    const cameraCfg = this.deps.getCameraSettings();
+    const doubleMs = cameraCfg.doubleClickMs ?? 300;
+
+    const prev = this.lastClick;
+    const isDouble = !!prev && prev.nodeId === nodeId && (timeMs - prev.timeMs) <= doubleMs;
+
+    this.lastClick = { nodeId, timeMs };
+
+    if (isDouble) {
+      this.cmd({ type: "RequestOpenNode", nodeId });
+      return;
+    }
+
+    // single click behavior: follow first, open when clicked again while following
+    if (this.state.followedNodeId === nodeId) {
+      this.cmd({ type: "RequestOpenNode", nodeId });
+      return;
+    }
+
+    this.startFollow(nodeId);
+  }
+
   // ----------------------------------------------------------------------------
-  // Dragging nodes (semantic)
+  // Dragging nodes (semantic → commands; NO direct node mutation)
   // ----------------------------------------------------------------------------
 
   private startDrag(nodeId: string, screenX: number, screenY: number) {
@@ -508,8 +480,8 @@ export class Translation implements TranslationSystem {
     const camera = this.deps.getCamera();
     if (!graph || !camera) return;
 
-    // mouse gravity off while dragging
-    this.emit({ type: "MOUSE_GRAVITY_SET", on: false });
+    // Communicate intent: disable mouse gravity while dragging
+    this.cmd({ type: "SetMouseGravity", on: false });
 
     const node = graph.nodes.find(n => n.id === nodeId);
     if (!node) return;
@@ -519,56 +491,81 @@ export class Translation implements TranslationSystem {
 
     this.state.draggedNodeId = nodeId;
 
+    // Pin while dragging (intent)
     this.pinnedNodes.add(nodeId);
-    this.emitPinned();
+    this.pinnedNodes.add(nodeId);
+    this.cmd({
+      type: "PinSetReplace",
+      ids: new Set(this.pinnedNodes),
+    });
 
+    this.replacePinnedSet();
+
+    // Compute drag offset (so node stays under cursor)
     const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
     this.dragWorldOffset = {
       x: node.location.x - underMouse.x,
       y: node.location.y - underMouse.y,
       z: (node.location.z || 0) - underMouse.z,
     };
+
+    // Tell downstream we began dragging (optional, useful for constraints)
+    this.cmd({ type: "BeginDrag", nodeId });
+
+    // Emit first target immediately
+    const targetWorld = {
+      x: underMouse.x + this.dragWorldOffset.x,
+      y: underMouse.y + this.dragWorldOffset.y,
+      z: underMouse.z + this.dragWorldOffset.z,
+    };
+    this.cmd({ type: "DragTarget", nodeId, targetWorld });
   }
 
   private updateDrag(screenX: number, screenY: number) {
     const camera = this.deps.getCamera();
-    const graph = this.deps.getGraph();
-    if (!graph || !camera) return;
+    if (!camera) return;
 
     const draggedId = this.state.draggedNodeId;
     if (!draggedId) return;
 
-    const node = graph.nodes.find(n => n.id === draggedId);
-    if (!node) return;
-
     const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
     const o = this.dragWorldOffset || { x: 0, y: 0, z: 0 };
 
-    node.location.x = underMouse.x + o.x;
-    node.location.y = underMouse.y + o.y;
-    node.location.z = underMouse.z + o.z;
+    const targetWorld = {
+      x: underMouse.x + o.x,
+      y: underMouse.y + o.y,
+      z: underMouse.z + o.z,
+    };
 
-    node.velocity.vx = 0;
-    node.velocity.vy = 0;
-    node.velocity.vz = 0;
+    // Communicate intent: physics should satisfy this constraint
+    this.cmd({ type: "DragTarget", nodeId: draggedId, targetWorld });
   }
 
   private endDrag() {
     const draggedId = this.state.draggedNodeId;
     if (!draggedId) return;
 
+    // Unpin (intent)
     this.pinnedNodes.delete(draggedId);
-    this.emitPinned();
+    this.cmd({
+      type: "PinSetReplace",
+      ids: new Set(this.pinnedNodes),
+    });
+
+    this.replacePinnedSet();
 
     this.state.draggedNodeId = null;
     this.dragWorldOffset = null;
 
-    // mouse gravity back on after drag
-    this.emit({ type: "MOUSE_GRAVITY_SET", on: true });
+    // Drag ended (optional)
+    this.cmd({ type: "EndDrag", nodeId: draggedId });
+
+    // Re-enable mouse gravity after drag
+    this.cmd({ type: "SetMouseGravity", on: true });
   }
 
   // ----------------------------------------------------------------------------
-  // Camera pan/rotate/zoom (semantic)
+  // Camera pan/rotate/zoom (kept local for now)
   // ----------------------------------------------------------------------------
 
   private startPan(screenX: number, screenY: number) {
@@ -605,22 +602,10 @@ export class Translation implements TranslationSystem {
   }
 
   // ----------------------------------------------------------------------------
-  // Node open (semantic event)
+  // Hit testing
   // ----------------------------------------------------------------------------
 
-  private getNodeIdLabel(nodeId: string): { id: string; label: string, type: string } | null {
-    const graph = this.deps.getGraph();
-    if (!graph) return null;
-    const node = graph.nodes.find(n => n.id === nodeId);
-    if (!node) return null;
-    return { id: node.id, label: node.label, type: node.type };
-  }
-
-  // ----------------------------------------------------------------------------
-  // Hit testing (Interaction owns this)
-  // ----------------------------------------------------------------------------
-
-  public getClickedNodeIdLabel(screenX: number, screenY: number): { id: string; label: string } | null {
+  private getClickedNodeIdLabel(screenX: number, screenY: number): { id: string; label: string } | null {
     const node = this.getClickedNode(screenX, screenY);
     if (!node) return null;
     return { id: node.id, label: node.label };
@@ -650,10 +635,6 @@ export class Translation implements TranslationSystem {
     }
 
     return best;
-  }
-
-  private hitTestNode(screenX: number, screenY: number): Node | null {
-    return this.getClickedNode(screenX, screenY);
   }
 
   // ----------------------------------------------------------------------------
