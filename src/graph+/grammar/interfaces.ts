@@ -204,8 +204,6 @@ export interface Tickable {
 
 export interface TranslationSystem extends Tickable {
   getState(): Readonly<TranslationState>;
-  ingest(events: InputEvent[]): void;        // optional if you drain internally
-  drainEvents(): TranslationEvent[];
   // optional: cursorType if you want renderer/cursor to query it
   getCursorType(): string;
 }

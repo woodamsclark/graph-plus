@@ -11,9 +11,15 @@ import { ObsidianGraphSource } from "../obsidian/ObsidianGraphSource.ts";
 import { Camera } from "./systems/5. render/Camera.ts";
 import { Input } from "./systems/1. receive/Input.ts";
 import { InputBuffer } from "./systems/1. receive/InputBuffer.ts";
+import { CommandQueue } from "./systems/3. apply/Command.ts";
+import { CommandSystem } from "./systems/3. apply/CommandSystem.ts";
+
 
 
 export class Orchestrator {
+  private commandQueue = new CommandQueue();
+  private commandSystem: CommandSystem | null = null;
+
   private spaceTime: SpaceTime;
 
   private canvas: HTMLCanvasElement | null = null;
@@ -51,6 +57,12 @@ export class Orchestrator {
     this.canvas.tabIndex = 0;
     this.deps.containerEl.appendChild(this.canvas);
 
+   // 5. Render
+    this.camera = new Camera(getSettings().camera.state);
+    this.camera.setWorldTransform(null);
+
+    this.renderer = new Renderer(this.canvas, this.camera);
+    if (!this.renderer) return;
 
 
     // 1. Input (world-owned)
@@ -66,9 +78,30 @@ export class Orchestrator {
       getCamera: () => this.camera,
       getCanvas: () => this.canvas!,
       getBuffer: () => this.inputBuffer,
+      getCommands: () => this.commandQueue,
+      getCameraSettings: () => ({}), // future use send Camera only the settings it needs
     });
 
     // 3. Command
+    this.commandSystem = new CommandSystem({
+      getQueue: () => this.commandQueue,
+      handlers: {
+        replacePinnedSet: (ids) => this.physics?.setPinnedNodes(ids),
+        setMouseGravity: (on) => { getSettings().physics.mouseGravityEnabled = on; },
+        openNode: (nodeId) => {
+          const graph = this.graphState.get();
+          const node = graph?.nodes.find(n => n.id === nodeId);
+          if (!node) return;
+
+          if (node.type.toLowerCase() === "tag") void this.navigator.openTagSearch(node.id);
+          else void this.navigator.openNodeById(node.id);
+        },
+
+        // Optional: if you want drag constraints written to world here:
+        // dragTarget: (nodeId, targetWorld) => { this.graphState.dragConstraint = { nodeId, targetWorld }; }
+      }
+    });
+
 
     // 4. Physics (world-owned)
     this.physics = new Physics({
@@ -77,13 +110,7 @@ export class Orchestrator {
       getInteraction: () => this.translator!.getState(),
     });
 
-    // 5. Render
-    this.camera = new Camera(getSettings().camera.state);
-    this.camera.setWorldTransform(null);
-
-    this.renderer = new Renderer(this.canvas, this.camera);
-    if (!this.renderer) return;
-
+ 
 
     // Initial sizing
     const rect = this.deps.containerEl.getBoundingClientRect();
@@ -93,33 +120,13 @@ export class Orchestrator {
     await this.rebuildGraph();
 
     // register systems
-    this.spaceTime.register("interaction", this.translator, 10);
-    this.spaceTime.register("events", {tick: () => this.drainInteractionEvents()}, 20);
+    this.spaceTime.register("translate", this.translator, 10);
+    this.spaceTime.register("commands", { tick: () => this.commandSystem?.tick() }, 20);
     this.spaceTime.register("physics", this.physics, 30);
-    //this.spaceTime.register("anima", this.anima, 40);
     this.spaceTime.register("render", this.renderer, 100);
 
+
     this.spaceTime.start();
-  }
-
-  private drainInteractionEvents(): void {
-    const interactor = this.translator;
-    if (!interactor) return;
-
-    for (const e of interactor.drainEvents()) {
-      if (e.type === "PINNED_SET") this.physics?.setPinnedNodes(e.ids);
-
-      if (e.type === "MOUSE_GRAVITY_SET") {
-        getSettings().physics.mouseGravityEnabled = e.on;
-      }
-
-      if (e.type === "OPEN_NODE_REQUESTED") {
-        const node = e.node;
-        
-        if (node.type.toLowerCase() === "tag") void this.navigator.openTagSearch(node.id);
-        else void this.navigator.openNodeById(node.id);
-      }
-    }
   }
 
   resize(w: number, h: number): void {
