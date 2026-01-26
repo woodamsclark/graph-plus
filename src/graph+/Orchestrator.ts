@@ -1,24 +1,23 @@
-import { App, Plugin } from "obsidian";
-import { Anima } from "./systems/4. simulate/Anima.ts";
-import { Renderer } from "./systems/5. render/Renderer.ts";
-import { SpaceTime } from "./systems/SpaceTime.ts";
-import { Physics } from "./systems/4. simulate/Physics.ts";
-import { Translation } from "./systems/2. translate/TranslationSystem.ts";
-import { getSettings } from "../obsidian/settings/settingsStore.ts";
-import { ObsidianNavigator } from "../obsidian/ObsidianNavigator.ts";
-import { GraphState, InputSettings } from "./grammar/interfaces.ts";
-import { ObsidianGraphSource } from "../obsidian/ObsidianGraphSource.ts";
-import { Camera } from "./systems/5. render/Camera.ts";
-import { Input } from "./systems/1. receive/Input.ts";
-import { InputBuffer } from "./systems/1. receive/InputBuffer.ts";
-import { CommandQueue } from "./systems/3. apply/Command.ts";
-import { CommandSystem } from "./systems/3. apply/CommandSystem.ts";
-
+import { App, Plugin }                from "obsidian";
+import { GraphState, InputSettings }  from "./grammar/interfaces.ts";
+import { SpaceTime }                  from "./systems/SpaceTime.ts";
+import { getSettings }                from "../obsidian/settings/settingsStore.ts";
+import { ObsidianNavigator }          from "../obsidian/ObsidianNavigator.ts";
+import { ObsidianGraphSource }        from "../obsidian/ObsidianGraphSource.ts";
+import { Input }                      from "./systems/1. receive/Input.ts";
+import { InputBuffer }                from "./systems/1. receive/InputBuffer.ts";
+import { Translator }                 from "./systems/2. translate/TranslationSystem.ts";
+import { Commander }                  from "./systems/3. execute/CommandSystem.ts";
+import { CommandBuffer }              from "./systems/3. execute/CommandBuffer.ts";
+import { Anima }                      from "./systems/4. simulate/Anima.ts";
+import { Physics }                    from "./systems/4. simulate/Physics.ts";
+import { Renderer }                   from "./systems/5. render/Renderer.ts";
+import { Camera }                     from "./systems/5. render/Camera.ts";
 
 
 export class Orchestrator {
-  private commandQueue = new CommandQueue();
-  private commandSystem: CommandSystem | null = null;
+  private commandBuffer = new CommandBuffer();
+  private commandSystem: Commander | null = null;
 
   private spaceTime: SpaceTime;
 
@@ -35,7 +34,7 @@ export class Orchestrator {
   private renderer: Renderer | null = null;
 
   private physics: Physics | null = null;
-  private translator: Translation | null = null;
+  private translator: Translator | null = null;
   private camera: Camera | null = null;
 
   constructor(private deps: { app: App; plugin: Plugin; containerEl: HTMLElement }) {
@@ -73,18 +72,18 @@ export class Orchestrator {
     });
 
     // 2. Translator (world-owned)
-    this.translator = new Translation({
+    this.translator = new Translator({
       getGraph: () => this.graphState.get(),
       getCamera: () => this.camera,
       getCanvas: () => this.canvas!,
       getBuffer: () => this.inputBuffer,
-      getCommands: () => this.commandQueue,
+      getCommands: () => this.commandBuffer,
       getCameraSettings: () => ({}), // future use send Camera only the settings it needs
     });
 
     // 3. Command
-    this.commandSystem = new CommandSystem({
-      getQueue: () => this.commandQueue,
+    this.commandSystem = new Commander({
+      getQueue: () => this.commandBuffer,
       handlers: {
         replacePinnedSet: (ids) => this.physics?.setPinnedNodes(ids),
         setMouseGravity: (on) => { getSettings().physics.mouseGravityEnabled = on; },

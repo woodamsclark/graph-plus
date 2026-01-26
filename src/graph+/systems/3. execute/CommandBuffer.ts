@@ -1,19 +1,9 @@
 // Command.ts
 // Discrete intent messages that cross system boundaries.
 // Translator emits these; CommandSystem applies them.
+import type { Command } from "../../grammar/interfaces.ts";
 
-export type Vec3 = { x: number; y: number; z: number };
-
-export type Command =
-  | { type: "RequestOpenNode"; nodeId: string }
-  | { type: "SetMouseGravity"; on: boolean }
-  | { type: "PinSetReplace"; ids: Set<string> }
-  | { type: "PinSetReplace"; ids: Set<string> }
-  | { type: "BeginDrag"; nodeId: string }
-  | { type: "DragTarget"; nodeId: string; targetWorld: Vec3 }
-  | { type: "EndDrag"; nodeId: string };
-
-export class CommandQueue {
+export class CommandBuffer {
   private q: Command[] = [];
 
   push(cmd: Command): void {

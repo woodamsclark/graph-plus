@@ -5,8 +5,9 @@ export type NodeType  = 'note' | 'tag' | 'canvas'; // canvas nodes is a future f
 export type Vec2      = {  x: number;  y: number };
 export type ScreenPt  = {  x: number;  y: number };
 export type ClientPt  = {  x: number;  y: number };
-type location         = {  x: number;  y: number;  z: number  };
-type velocity         = { vx: number; vy: number; vz: number  };
+export type location         = {  x: number;  y: number;  z: number  };
+export type velocity         = { vx: number; vy: number; vz: number  };
+export type Vec3 = { x: number; y: number; z: number };
 
 type anima    = { level : number,  capacity : number }; // pressure = level / threshold
 type gate     = {
@@ -190,14 +191,6 @@ export interface WorldTransform {
 export interface Tickable {
   tick(dt: number, nowMs: number): void;
 }
-
-/*export type WorldState = {
-  graph: GraphData | null;
-  camera: CameraController;
-  interaction: InteractionState;
-};*/
-
-
 // --- Interaction State & Events ----------------------------------------------
 
 
@@ -210,7 +203,7 @@ export interface TranslationSystem extends Tickable {
 
 // --- Renderer System ---------------------------------------------------------
 
-export interface RendererSystem extends Tickable{
+export interface RenderSystem extends Tickable{
   resize(width: number, height: number)                       : void;
   render()                                                    : void;
   destroy()                                                   : void;
@@ -229,6 +222,9 @@ export interface PhysicsSystem extends Tickable {
   stop(): void;
   rebuild(): void;
   setPinnedNodes(ids: Set<string>): void;
+}
+
+export interface CommandSystem extends Tickable {
 }
 
 export type PointerKind = "mouse" | "touch" | "pen";
@@ -292,3 +288,11 @@ export type InputEvent =
       client: ClientPt;
       timeMs: number;
     };
+
+export type Command =
+| { type: "RequestOpenNode"; nodeId: string }
+| { type: "SetMouseGravity"; on: boolean }
+| { type: "PinSetReplace"; ids: Set<string> }
+| { type: "BeginDrag"; nodeId: string }
+| { type: "DragTarget"; nodeId: string; targetWorld: Vec3 }
+| { type: "EndDrag"; nodeId: string };

@@ -1,4 +1,4 @@
-import type { RendererSystem, GraphData, Node, Link, Tickable } from "../../grammar/interfaces.ts";
+import type { RenderSystem, GraphData, Node, Link, Tickable } from "../../grammar/interfaces.ts";
 import { getSettings } from "../../../obsidian/settings/settingsStore.ts";
 import type { Camera} from "./Camera.ts";
 
@@ -24,7 +24,7 @@ type ThemeSnapshot = {
 
 type ScreenProj = { x: number; y: number; depth: number; scale: number };
 
-export class Renderer implements RendererSystem {
+export class Renderer implements RenderSystem {
   private context: CanvasRenderingContext2D | null;
 
   private settings = getSettings();

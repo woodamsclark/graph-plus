@@ -5,14 +5,15 @@ import type {
   TranslationSystem,
   TranslationState,
   InputEvent,
+  Vec3,
+  Command,
 } from "../../grammar/interfaces.ts";
 
 import type { Camera } from "../5. render/Camera.ts";
 import type { CursorCss } from "../1. receive/cursor_selector.ts";
-
 import type { InputBuffer } from "../1. receive/InputBuffer.ts";
-import type { CommandQueue } from "../3. apply/Command.ts";
-import type { Vec3 } from "../3. apply/Command.ts";
+import type { CommandBuffer } from "../3. execute/CommandBuffer.ts";
+
 
 type CameraSettings = {
   dragThresholdPx?: number;
@@ -24,7 +25,7 @@ type TranslatorDeps = {
   getCamera: () => Camera | null;
   getCanvas: () => HTMLCanvasElement;
   getBuffer: () => InputBuffer;
-  getCommands: () => CommandQueue;
+  getCommands: () => CommandBuffer;
   // Narrow settings reader: keep Translator out of global settings.
   getCameraSettings: () => CameraSettings;
 };
@@ -81,7 +82,7 @@ function twoFingerRead(a: PointerRec, b: PointerRec) {
   return { centroid: { x: cx, y: cy }, dist, angle };
 }
 
-export class Translation implements TranslationSystem {
+export class Translator implements TranslationSystem {
   private mode: Mode = { kind: "idle" };
   private pointers = new Map<number, PointerRec>();
 
@@ -394,7 +395,7 @@ export class Translation implements TranslationSystem {
   // Communicate intent (Commands)
   // ----------------------------------------------------------------------------
 
-  private cmd(c: import("../3. apply/Command.ts").Command): void {
+  private cmd(c: Command): void {
     this.deps.getCommands().push(c);
   }
 
