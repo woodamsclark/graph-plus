@@ -1,14 +1,14 @@
 import { createSimulation } from "./simulation.ts";
-import type { GraphData, Simulation, InteractionState, PhysicsSystem } from "../../grammar/interfaces.ts";
-import type { CameraController } from "../../systems/CameraController.ts";
+import type { GraphData, Simulation, TranslationState, PhysicsSystem } from "../../grammar/interfaces.ts";
+import type { Camera } from "../5. render/Camera.ts";
 
 export class Physics implements PhysicsSystem{
   private sim: Simulation | null = null;
 
   constructor(private deps: {
     getGraph:       () => GraphData         | null;
-    getCamera:      () => CameraController  | null;
-    getInteraction: () => InteractionState;
+    getCamera:      () => Camera  | null;
+    getInteraction: () => TranslationState;
   }) {}
 
   // Call whenever the graph changes (rebuild/filter/etc.)
