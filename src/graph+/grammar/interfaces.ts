@@ -84,7 +84,6 @@ export interface PhysicsSettings {
 export interface CameraSettings {
   momentumScale         : number;
   dragThreshold         : number;
-  longPressMs           : number;
   rotateSensitivityX    : number;
   rotateSensitivityY    : number;
   zoomSensitivity       : number;
@@ -99,6 +98,7 @@ export interface GraphPlusSettings {
   graph                 : GraphSettings;
   physics               : PhysicsSettings;
   camera                : CameraSettings;
+  input                 : InputSettings;
 }
 
 export interface CameraState {
@@ -229,7 +229,10 @@ export interface CommandSystem extends Tickable {
 
 export type PointerKind = "mouse" | "touch" | "pen";
 
-export type InputSettings = {}; // future use
+ export type InputSettings = {
+    longPressMs?: number;
+    longPressPointerKinds?: Array<"touch" | "pen">;
+  };
 
 export type InputEvent =
   | {

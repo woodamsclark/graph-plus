@@ -71,7 +71,7 @@ export class Orchestrator {
     this.input = new Input({
       getCanvas: () => this.canvas!,
       getBuffer: () => this.inputBuffer,
-      initialSettings: this.buildInputSettings(),
+      inputSettings: getSettings().input,
     });
 
     // 2. Translator (world-owned)
@@ -159,13 +159,6 @@ export class Orchestrator {
 
   refreshTheme(): void {
     this.renderer?.refreshTheme();
-  }
-
-
-  private buildInputSettings(): InputSettings {
-    const s = getSettings();
-
-    return {}; // future use send Input only the settings it needs
   }
 
 

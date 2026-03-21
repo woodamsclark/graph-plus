@@ -40,7 +40,6 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
   camera: {
     momentumScale       : 0.12,
     dragThreshold       : 4,
-    longPressMs         : 750,
     rotateSensitivityX  : 0.005,
     rotateSensitivityY  : 0.005,
     zoomSensitivity     : 20,
@@ -65,4 +64,7 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
       zoomVel  : 0,
     },
   },
+  input: {
+    longPressMs: 450, 
+  }
 };

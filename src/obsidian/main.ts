@@ -11,20 +11,21 @@ export default class GraphPlus extends Plugin {
 
   async onload() {
     const raw = (await this.loadData()) ?? {};
-  initSettings({
-    ...DEFAULT_SETTINGS,
-    ...raw,
-    graph: { ...DEFAULT_SETTINGS.graph, ...raw.graph },
-    physics: { ...DEFAULT_SETTINGS.physics, ...raw.physics },
-    camera: {
-     ...DEFAULT_SETTINGS.camera,
-     ...raw.camera,
-     state: {
-       ...DEFAULT_SETTINGS.camera.state,
-       ...raw.camera?.state,
-    },
-  },
-  });
+    initSettings({
+      ...DEFAULT_SETTINGS,
+      ...raw,
+      graph:    { ...DEFAULT_SETTINGS.graph, ...raw.graph },
+      physics:  { ...DEFAULT_SETTINGS.physics, ...raw.physics },
+      camera:   {
+                  ...DEFAULT_SETTINGS.camera,
+                  ...raw.camera,
+                  state: {
+                    ...DEFAULT_SETTINGS.camera.state,
+                    ...raw.camera?.state,
+                  },
+                },
+      input:    { ...DEFAULT_SETTINGS.input, ...raw.input },
+              });
     this.settings = getSettings();
 
     this.registerView(GRAPH_PLUS_TYPE, (leaf) => new GraphView(leaf, this));
