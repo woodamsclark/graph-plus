@@ -94,7 +94,7 @@ export class Translator implements TranslationSystem {
   // We still emit pin commands so the "world" can own the authoritative pin set.
   private pinnedNodes: Set<string> = new Set();
 
-  private lastClick: { nodeId: string; timeMs: number } | null = null;
+  private lastClick: { nodeId: string | null; timeMs: number } | null = null;
 
   private state: TranslationState = {
     gravityCenter: null,
@@ -385,7 +385,7 @@ export class Translator implements TranslationSystem {
     this.mode.longPressFired = true;
 
     if (this.mode.downNode?.id) {
-      this.startFollow(this.mode.downNode.id);
+      this.cmd({ type: "FollowNode", nodeId: this.mode.downNode.id });
     } else {
       this.deps.getCamera()?.resetCamera();
     }
@@ -439,7 +439,7 @@ export class Translator implements TranslationSystem {
     });
   }
 
-  private startFollow(nodeId: string) {
+  public setFollowedNode(nodeId: string | null): void {
     this.state.followedNodeId = nodeId;
   }
 
@@ -447,7 +447,7 @@ export class Translator implements TranslationSystem {
     this.state.followedNodeId = null;
   }
 
-  private handleSingleOrDoubleClick(nodeId: string, timeMs: number) {
+  private handleSingleOrDoubleClick(nodeId: string | null, timeMs: number) {
     const cameraCfg = this.deps.getCameraSettings();
     const doubleMs = cameraCfg.doubleClickMs ?? 300;
 
@@ -456,18 +456,17 @@ export class Translator implements TranslationSystem {
 
     this.lastClick = { nodeId, timeMs };
 
-    if (isDouble) {
+    if (isDouble && nodeId !== null) {
       this.cmd({ type: "RequestOpenNode", nodeId });
       return;
     }
 
-    // single click behavior: follow first, open when clicked again while following
-    if (this.state.followedNodeId === nodeId) {
+    if (this.state.followedNodeId === nodeId && nodeId !== null) {
       this.cmd({ type: "RequestOpenNode", nodeId });
       return;
     }
 
-    this.startFollow(nodeId);
+    this.cmd({ type: "FollowNode", nodeId });
   }
 
   // ----------------------------------------------------------------------------
@@ -494,12 +493,6 @@ export class Translator implements TranslationSystem {
 
     // Pin while dragging (intent)
     this.pinnedNodes.add(nodeId);
-    this.pinnedNodes.add(nodeId);
-    this.cmd({
-      type: "ReplacePinnedSet",
-      ids: new Set(this.pinnedNodes),
-    });
-
     this.replacePinnedSet();
 
     // Compute drag offset (so node stays under cursor)
@@ -548,11 +541,6 @@ export class Translator implements TranslationSystem {
 
     // Unpin (intent)
     this.pinnedNodes.delete(draggedId);
-    this.cmd({
-      type: "ReplacePinnedSet",
-      ids: new Set(this.pinnedNodes),
-    });
-
     this.replacePinnedSet();
 
     this.state.draggedNodeId = null;

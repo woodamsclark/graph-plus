@@ -9,8 +9,9 @@ export class Anima implements Tickable {
   
   }
 
-  add(nodeId: string, amount: number): void {
+  add(nodeId: string | null, amount: number): void {
   const graph = this.deps.getGraph();
+  if (!graph || !nodeId) return;
   const nodes = graph?.nodes.filter(n => n.id === nodeId);
   if (!nodes) return;
 
