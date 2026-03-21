@@ -214,10 +214,8 @@ export class Renderer implements RenderSystem {
       const p = nodeMap.get(node.id);
       if (!p || p.depth < 0) continue;
 
-      if (node.anima.level > node.anima.capacity) {
-        ctx.globalAlpha = 1;
-        ctx.fillText(node.label, p.x, p.y + node.radius + offsetY);
-      }
+      ctx.globalAlpha = node.anima.level / node.anima.capacity;
+      ctx.fillText(node.label, p.x, p.y + node.radius + offsetY);
     }
 
     ctx.restore();

@@ -17,6 +17,8 @@ export type CommandHandlers = {
   beginDrag?:       (nodeId: string) => void;
   dragTarget?:      (nodeId: string, targetWorld: { x: number; y: number; z: number }) => void;
   endDrag?:         (nodeId: string) => void;
+  
+  onNodeCommandExecuted?: (nodeId: string, commandType: Command["type"]) => void;
 };
 
 export type CommandSystemDeps = {
@@ -37,17 +39,18 @@ export class Commander implements CommandSystem {
       switch (command.type) {
         case "RequestOpenNode":
           handlers.openNode?.(command.nodeId);
+            handlers.onNodeCommandExecuted?.(command.nodeId, command.type);
           break;
 
         case "SetMouseGravity":
           handlers.setMouseGravity?.(command.on);
           break;
 
-        case "PinSetReplace":
-          handlers.setPinned?.(command.ids);
-          break;
+//        case "ReplacePinnedSet":
+//          handlers.setPinned?.(command.ids);
+//        break;
 
-        case "PinSetReplace":
+        case "ReplacePinnedSet":
           handlers.replacePinnedSet?.(command.ids);
           break;
 

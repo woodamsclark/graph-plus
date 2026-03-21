@@ -400,7 +400,7 @@ export class Translator implements TranslationSystem {
   }
 
   private replacePinnedSet(): void {
-    this.cmd({ type: "PinSetReplace", ids: new Set(this.pinnedNodes) });
+    this.cmd({ type: "ReplacePinnedSet", ids: new Set(this.pinnedNodes) });
   }
 
   // ----------------------------------------------------------------------------
@@ -496,7 +496,7 @@ export class Translator implements TranslationSystem {
     this.pinnedNodes.add(nodeId);
     this.pinnedNodes.add(nodeId);
     this.cmd({
-      type: "PinSetReplace",
+      type: "ReplacePinnedSet",
       ids: new Set(this.pinnedNodes),
     });
 
@@ -549,7 +549,7 @@ export class Translator implements TranslationSystem {
     // Unpin (intent)
     this.pinnedNodes.delete(draggedId);
     this.cmd({
-      type: "PinSetReplace",
+      type: "ReplacePinnedSet",
       ids: new Set(this.pinnedNodes),
     });
 

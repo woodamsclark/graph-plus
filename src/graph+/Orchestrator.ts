@@ -13,6 +13,7 @@ import { Anima }                      from "./systems/4. simulate/Anima.ts";
 import { Physics }                    from "./systems/4. simulate/Physics.ts";
 import { Renderer }                   from "./systems/5. render/Renderer.ts";
 import { Camera }                     from "./systems/5. render/Camera.ts";
+import { cursor_selector } from "./systems/1. receive/cursor_selector.ts";
 
 
 export class Orchestrator {
@@ -36,6 +37,7 @@ export class Orchestrator {
   private physics: Physics | null = null;
   private translator: Translator | null = null;
   private camera: Camera | null = null;
+  
 
   constructor(private deps: { app: App; plugin: Plugin; containerEl: HTMLElement }) {
     this.spaceTime  = new SpaceTime({ maxDtSeconds: 0.05 });
@@ -55,6 +57,7 @@ export class Orchestrator {
     this.canvas.style.height = "100%";
     this.canvas.tabIndex = 0;
     this.deps.containerEl.appendChild(this.canvas);
+    const cursor = cursor_selector(this.canvas);
 
    // 5. Render
     this.camera = new Camera(getSettings().camera.state);
@@ -85,9 +88,9 @@ export class Orchestrator {
     this.commandSystem = new Commander({
       getQueue: () => this.commandBuffer,
       handlers: {
-        replacePinnedSet: (ids) => this.physics?.setPinnedNodes(ids),
-        setMouseGravity: (on) => { getSettings().physics.mouseGravityEnabled = on; },
-        openNode: (nodeId) => {
+        replacePinnedSet: (ids)     => { this.physics?.setPinnedNodes(ids); },
+        setMouseGravity : (on)      => { getSettings().physics.mouseGravityEnabled = on; },
+        openNode        : (nodeId)  => {
           const graph = this.graphState.get();
           const node = graph?.nodes.find(n => n.id === nodeId);
           if (!node) return;
@@ -95,10 +98,16 @@ export class Orchestrator {
           if (node.type.toLowerCase() === "tag") void this.navigator.openTagSearch(node.id);
           else void this.navigator.openNodeById(node.id);
         },
+        dragTarget: (nodeId, targetWorld) => { this.physics?.setDragTarget(nodeId, targetWorld); },
+        beginDrag: (nodeId) => { this.physics?.beginDrag(nodeId); },
+        endDrag: (nodeId) => { this.physics?.endDrag(nodeId); },
+        onNodeCommandExecuted: (nodeId, commandType) => { this.anima?.add(nodeId, 20); },
 
         // Optional: if you want drag constraints written to world here:
         // dragTarget: (nodeId, targetWorld) => { this.graphState.dragConstraint = { nodeId, targetWorld }; }
-      }
+    }});
+    this.anima = new Anima({
+      getGraph: () => this.graphState.get(),
     });
 
 
@@ -121,7 +130,14 @@ export class Orchestrator {
     // register systems
     this.spaceTime.register("translate", this.translator, 10);
     this.spaceTime.register("commands", { tick: () => this.commandSystem?.tick() }, 20);
+    this.spaceTime.register("anima", this.anima, 25);
     this.spaceTime.register("physics", this.physics, 30);
+    this.spaceTime.register("cursor", {
+      tick: () => {
+        const css = this.translator?.getCursorType() ?? "default";
+        cursor.apply(css);
+      }
+    }, 95);
     this.spaceTime.register("render", this.renderer, 100);
 
 
