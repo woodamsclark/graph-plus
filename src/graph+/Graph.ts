@@ -241,7 +241,7 @@ export class Graph {
                 type        : "note",
                 radius      : 10,
                 file        : file,
-                anima       : { level: 100, capacity: 100 }, 
+                anima       : { level: 0, capacity: 100 }, 
             });
         }
 
@@ -264,7 +264,7 @@ export class Graph {
                 },
                 velocity: { vx: 0, vy: 0, vz: 0 },
                 type: "tag",
-                anima: { level: 100, capacity: 100 },
+                anima: { level: 0, capacity: 100 },
                 radius: 10,
             });
         }

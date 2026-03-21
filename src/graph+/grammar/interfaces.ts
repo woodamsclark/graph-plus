@@ -289,10 +289,13 @@ export type InputEvent =
       timeMs: number;
     };
 
+    // Commands are for when the user interacts with the graph
+    // Commanding it to do something
 export type Command =
 | { type: "RequestOpenNode"; nodeId: string }
 | { type: "SetMouseGravity"; on: boolean }
-| { type: "PinSetReplace"; ids: Set<string> }
+| { type: "SetPinned"; ids: Set<string> }
+| { type: "ReplacePinnedSet"; ids: Set<string> }
 | { type: "BeginDrag"; nodeId: string }
 | { type: "DragTarget"; nodeId: string; targetWorld: Vec3 }
 | { type: "EndDrag"; nodeId: string };

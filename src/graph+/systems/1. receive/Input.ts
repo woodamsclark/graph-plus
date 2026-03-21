@@ -10,9 +10,6 @@ type InputDeps = {
   initialSettings: InputSettings;
 };
 
-
-
-
 export class Input {
   private longPressTimer: number | null = null;
   private longPressPointerId: number | null = null;

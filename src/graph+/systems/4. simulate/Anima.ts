@@ -1,13 +1,21 @@
-import type { Tickable } from "../../grammar/interfaces.ts";
+import type { GraphData, Tickable } from "../../grammar/interfaces.ts";
 
 export class Anima implements Tickable {
+  constructor(private deps: {
+    getGraph: () => GraphData | null;
+  }) {}
 
+  public tick(dt: number, _nowMs: number): void {
+  
+  }
 
-    constructor() {
+  add(nodeId: string, amount: number): void {
+  const graph = this.deps.getGraph();
+  const nodes = graph?.nodes.filter(n => n.id === nodeId);
+  if (!nodes) return;
 
-    }
-
-    public tick(dt: number, nowMs: number): void {
-    
-    }
+  for (const node of nodes) {
+    node.anima.level = Math.min(node.anima.capacity, node.anima.level + amount);
+  }
+}
 }
