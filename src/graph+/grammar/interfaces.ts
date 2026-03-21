@@ -298,4 +298,5 @@ export type Command =
 | { type: "ReplacePinnedSet"; ids: Set<string> }
 | { type: "BeginDrag"; nodeId: string }
 | { type: "DragTarget"; nodeId: string; targetWorld: Vec3 }
-| { type: "EndDrag"; nodeId: string };
+| { type: "EndDrag"; nodeId: string }
+| { type: "FollowNode"; nodeId: string | null }

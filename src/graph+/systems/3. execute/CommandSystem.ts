@@ -7,18 +7,16 @@ import { CommandBuffer } from "./CommandBuffer.ts";
 
 export type CommandHandlers = {
   // World / settings mutation
-  setMouseGravity?: (on: boolean) => void;
-  setPinned?:       (nodeId: Set<string>) => void;
-  replacePinnedSet?:(ids: Set<string>) => void;
+  setMouseGravity?      : (on: boolean) => void;
+  setPinned?            : (nodeId: Set<string>) => void;
+  replacePinnedSet?     : (ids: Set<string>) => void;
 
-  openNode?:        (nodeId: string) => void;
-  // Drag constraint plumbing (optional):
-  // If you keep a world.dragConstraint object, you can update it here instead of in Physics.
-  beginDrag?:       (nodeId: string) => void;
-  dragTarget?:      (nodeId: string, targetWorld: { x: number; y: number; z: number }) => void;
-  endDrag?:         (nodeId: string) => void;
-  
-  onNodeCommandExecuted?: (nodeId: string, commandType: Command["type"]) => void;
+  openNode?             : (nodeId: string) => void;
+  beginDrag?            : (nodeId: string) => void;
+  dragTarget?           : (nodeId: string, targetWorld: { x: number; y: number; z: number }) => void;
+  endDrag?              : (nodeId: string) => void;
+  followNode?           : (nodeId: string | null) => void;
+  onNodeCommandExecuted?: (nodeId: string | null, commandType: Command["type"]) => void;
 };
 
 export type CommandSystemDeps = {
@@ -46,10 +44,6 @@ export class Commander implements CommandSystem {
           handlers.setMouseGravity?.(command.on);
           break;
 
-//        case "ReplacePinnedSet":
-//          handlers.setPinned?.(command.ids);
-//        break;
-
         case "ReplacePinnedSet":
           handlers.replacePinnedSet?.(command.ids);
           break;
@@ -64,6 +58,11 @@ export class Commander implements CommandSystem {
 
         case "EndDrag":
           handlers.endDrag?.(command.nodeId);
+          break;
+
+        case "FollowNode":
+          handlers.followNode?.(command.nodeId);
+          handlers.onNodeCommandExecuted?.(command.nodeId, command.type);
           break;
 
         default:

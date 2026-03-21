@@ -102,6 +102,7 @@ export class Orchestrator {
         beginDrag: (nodeId) => { this.physics?.beginDrag(nodeId); },
         endDrag: (nodeId) => { this.physics?.endDrag(nodeId); },
         onNodeCommandExecuted: (nodeId, commandType) => { this.anima?.add(nodeId, 20); },
+        followNode: (nodeId) => { this.translator?.setFollowedNode(nodeId); },
 
         // Optional: if you want drag constraints written to world here:
         // dragTarget: (nodeId, targetWorld) => { this.graphState.dragConstraint = { nodeId, targetWorld }; }
