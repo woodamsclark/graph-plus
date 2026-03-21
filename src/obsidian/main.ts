@@ -3,14 +3,28 @@ import { GraphView, GRAPH_PLUS_TYPE } from './GraphView.ts';
 import { initSettings, getSettings } from './settings/settingsStore.ts';
 import { GraphPlusSettingTab } from './settings/SettingsTab.ts';
 import { DEFAULT_SETTINGS } from './settings/defaultSettings.ts';
-import { GraphPlusSettings } from '../the garden/adam/interfaces.ts';
+import { GraphPlusSettings } from '../graph+/grammar/interfaces.ts';
 
 
 export default class GraphPlus extends Plugin {
   settings!: GraphPlusSettings;
 
   async onload() {
-    initSettings({ ...DEFAULT_SETTINGS });
+    const raw = (await this.loadData()) ?? {};
+  initSettings({
+    ...DEFAULT_SETTINGS,
+    ...raw,
+    graph: { ...DEFAULT_SETTINGS.graph, ...raw.graph },
+    physics: { ...DEFAULT_SETTINGS.physics, ...raw.physics },
+    camera: {
+     ...DEFAULT_SETTINGS.camera,
+     ...raw.camera,
+     state: {
+       ...DEFAULT_SETTINGS.camera.state,
+       ...raw.camera?.state,
+    },
+  },
+  });
     this.settings = getSettings();
 
     this.registerView(GRAPH_PLUS_TYPE, (leaf) => new GraphView(leaf, this));
@@ -44,6 +58,10 @@ export default class GraphPlus extends Plugin {
   }
 
   async saveSettings() {
-    await this.saveData(getSettings());
+    const raw = (await this.loadData()) ?? {};
+    raw.graph = getSettings().graph;
+    raw.physics = getSettings().physics;
+    raw.camera = getSettings().camera;
+    await this.saveData(raw);
   }
 }

@@ -28,7 +28,7 @@ export class Orchestrator {
   private graphSource: ObsidianGraphSource;
 
   private graphState: GraphState = new GraphState();
-  private input: Input;
+  private input!: Input;
   private inputBuffer: InputBuffer = new InputBuffer();
 
   private anima: Anima | null = null;
@@ -170,6 +170,7 @@ export class Orchestrator {
 
 
   async close(): Promise<void> {
+    this.graphSource.save();
     this.spaceTime.stop();
 
     this.physics?.destroy?.();
