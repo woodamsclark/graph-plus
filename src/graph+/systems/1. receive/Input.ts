@@ -2,29 +2,29 @@
 import type { InputSettings, ScreenPt, PointerKind } from "../../grammar/interfaces.ts";
 import { InputBuffer } from "./InputBuffer.ts";
 
-type GetSettings = () => { camera: { longPressMs: number } } | any;
-
 type InputDeps = {
   getCanvas: () => HTMLCanvasElement;
   getBuffer: () => InputBuffer;
-  initialSettings: InputSettings;
+  inputSettings: InputSettings;
 };
+
 
 export class Input {
   private longPressTimer: number | null = null;
   private longPressPointerId: number | null = null;
-  private deps: InputDeps;
-  private settings: InputSettings = {}; // future use
+  private settings: InputSettings = {};
 
-  constructor(deps: InputDeps) {
-    this.deps = deps;
-    deps.getCanvas().style.touchAction = "none";
+  constructor(private deps: InputDeps) {
+    this.setInputSettings(deps.inputSettings);
     this.attach();
   }
 
-   setInputSettings(settings: InputSettings) {
-      this.settings = settings;
-    }
+  setInputSettings(settings: Partial<InputSettings>) {
+    this.settings = {
+      ...this.settings,
+      ...settings,
+    };
+  }
 
   destroy(): void {
     this.detach();
@@ -76,7 +76,13 @@ export class Input {
     });
 
     // long press only for touch/pen
-    if (kind !== "mouse") this.startLongPress(e.pointerId, kind, screen, { x: e.clientX, y: e.clientY });
+    const allowedKinds: PointerKind[] =
+    this.settings.longPressPointerKinds ?? ["touch", "pen"];
+
+    if (allowedKinds.includes(kind)) {
+      this.startLongPress(e.pointerId, kind, screen, { x: e.clientX, y: e.clientY });
+    }
+    //if (kind !== "mouse") this.startLongPress(e.pointerId, kind, screen, { x: e.clientX, y: e.clientY });
   };
 
   private onPointerMove = (e: PointerEvent) => {
@@ -154,7 +160,8 @@ export class Input {
   private startLongPress(pointerId: number, kind: PointerKind, screen: ScreenPt, client: {x:number;y:number}) {
     this.clearLongPress();
 
-    const ms = 450; // make this a setting?
+    //const ms = 450; // make this a setting?
+    const ms = this.settings.longPressMs ?? 450; // this should always use default settings, but just in case
     this.longPressPointerId = pointerId;
 
     this.longPressTimer = window.setTimeout(() => {
