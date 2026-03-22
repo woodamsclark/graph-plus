@@ -88,25 +88,25 @@ export class Orchestrator {
     this.commandSystem = new Commander({
       getQueue: () => this.commandBuffer,
       handlers: {
-        replacePinnedSet: (ids)     => { this.physics?.setPinnedNodes(ids); },
-        setMouseGravity : (on)      => { getSettings().physics.mouseGravityEnabled = on; },
-        openNode        : (nodeId)  => {
-          const graph = this.graphState.get();
-          const node = graph?.nodes.find(n => n.id === nodeId);
-          if (!node) return;
-
-          if (node.type.toLowerCase() === "tag") void this.navigator.openTagSearch(node.id);
-          else void this.navigator.openNodeById(node.id);
-        },
-        dragTarget: (nodeId, targetWorld) => { this.physics?.setDragTarget(nodeId, targetWorld); },
-        beginDrag: (nodeId) => { this.physics?.beginDrag(nodeId); },
-        endDrag: (nodeId) => { this.physics?.endDrag(nodeId); },
-        onNodeCommandExecuted: (nodeId, commandType) => { this.anima?.add(nodeId, 20); },
-        followNode: (nodeId) => { this.translator?.setFollowedNode(nodeId); },
-
-        // Optional: if you want drag constraints written to world here:
-        // dragTarget: (nodeId, targetWorld) => { this.graphState.dragConstraint = { nodeId, targetWorld }; }
-    }});
+        pinNode:                (nodeId)              => { this.physics?.pinNode(nodeId); },
+        unpinNode:              (nodeId)              => { this.physics?.unpinNode(nodeId); },
+        setMouseGravity:        (on)                  => { getSettings().physics.mouseGravityEnabled = on; },
+        openNode:               (nodeId)              => { const graph = this.graphState.get(); const node = graph?.nodes.find(n => n.id === nodeId); if (!node) return; if (node.type.toLowerCase() === "tag") void this.navigator.openTagSearch(node.id); else void this.navigator.openNodeById(node.id);},
+        dragTarget:             (nodeId, targetWorld) => { this.physics?.setDragTarget(nodeId, targetWorld); },
+        beginDrag:              (nodeId)              => { this.physics?.beginDrag(nodeId); },
+        endDrag:                (nodeId)              => { this.physics?.endDrag(nodeId); },
+        onNodeCommandExecuted:  (nodeId, commandType) => { this.anima?.add(nodeId, 20); },
+        followNode:             (nodeId)              => { this.translator?.setFollowedNode(nodeId); },
+        resetCamera:            ()                    => { this.camera?.resetCamera(); },
+        startPanCamera:         (screen)              => { this.camera?.startPan(screen.x, screen.y); },
+        updatePanCamera:        (screen)              => { this.camera?.updatePan(screen.x, screen.y); },
+        endPanCamera:           ()                    => { this.camera?.endPan(); },
+        startRotateCamera:      (screen)              => { this.camera?.startRotate(screen.x, screen.y); },
+        updateRotateCamera:     (screen)              => { this.camera?.updateRotate(screen.x, screen.y); },
+        endRotateCamera:        ()                    => { this.camera?.endRotate(); },
+        zoomCamera:             (screen, delta)       => { this.camera?.updateZoom(screen.x, screen.y, delta); },
+      }
+  });
     this.anima = new Anima({
       getGraph: () => this.graphState.get(),
     });

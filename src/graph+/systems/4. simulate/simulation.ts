@@ -215,9 +215,8 @@ export function createSimulation(
     }
   }
 
-  function setPinnedNodes(ids: Set<string>) {
-    // create new Set to avoid external mutations
-    pinnedNodes = new Set(ids);
+  function setPinnedNodes(nodeIds: Set<string>) {
+    pinnedNodes = new Set(nodeIds);
   }
 
   // World Space

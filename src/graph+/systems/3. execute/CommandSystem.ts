@@ -8,15 +8,22 @@ import { CommandBuffer } from "./CommandBuffer.ts";
 export type CommandHandlers = {
   // World / settings mutation
   setMouseGravity?      : (on: boolean) => void;
-  setPinned?            : (nodeId: Set<string>) => void;
-  replacePinnedSet?     : (ids: Set<string>) => void;
-
+  pinNode?              : (nodeId: string) => void;
+  unpinNode?            : (nodeId: string) => void;
   openNode?             : (nodeId: string) => void;
   beginDrag?            : (nodeId: string) => void;
   dragTarget?           : (nodeId: string, targetWorld: { x: number; y: number; z: number }) => void;
   endDrag?              : (nodeId: string) => void;
   followNode?           : (nodeId: string | null) => void;
   onNodeCommandExecuted?: (nodeId: string | null, commandType: Command["type"]) => void;
+  resetCamera?          : () => void;
+  startPanCamera?       : (screen: { x: number; y: number }) => void;
+  updatePanCamera?      : (screen: { x: number; y: number }) => void;
+  endPanCamera?         : () => void;
+  startRotateCamera?    : (screen: { x: number; y: number }) => void;
+  updateRotateCamera?   : (screen: { x: number; y: number }) => void;
+  endRotateCamera?      : () => void;
+  zoomCamera?           : (screen: { x: number; y: number }, delta: number) => void;
 };
 
 export type CommandSystemDeps = {
@@ -44,8 +51,12 @@ export class Commander implements CommandSystem {
           handlers.setMouseGravity?.(command.on);
           break;
 
-        case "ReplacePinnedSet":
-          handlers.replacePinnedSet?.(command.ids);
+        case "PinNode":
+          handlers.pinNode?.(command.nodeId);
+          break;
+
+        case "UnpinNode":
+          handlers.unpinNode?.(command.nodeId);
           break;
 
         case "BeginDrag":
@@ -65,10 +76,42 @@ export class Commander implements CommandSystem {
           handlers.onNodeCommandExecuted?.(command.nodeId, command.type);
           break;
 
+        case "ResetCamera":
+          handlers.resetCamera?.();
+          break;
+
+        case "StartPanCamera":
+          handlers.startPanCamera?.(command.screen);
+          break;
+
+        case "UpdatePanCamera":
+          handlers.updatePanCamera?.(command.screen);
+          break;
+
+        case "EndPanCamera":
+          handlers.endPanCamera?.();
+          break;
+
+        case "StartRotateCamera":
+          handlers.startRotateCamera?.(command.screen);
+          break;
+
+        case "UpdateRotateCamera":
+          handlers.updateRotateCamera?.(command.screen);
+          break;
+
+        case "EndRotateCamera":
+          handlers.endRotateCamera?.();
+          break;
+
+        case "ZoomCamera":
+          handlers.zoomCamera?.(command.screen, command.delta);
+          break;
+
         default:
           // Exhaustiveness check for future commands
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const _never: never = command;
+          //const _never: never = command;
           break;
       }
     }
