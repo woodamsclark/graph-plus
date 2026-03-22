@@ -4,18 +4,18 @@ import { SpaceTime }                  from "./systems/SpaceTime.ts";
 import { getSettings }                from "../obsidian/settings/settingsStore.ts";
 import { ObsidianNavigator }          from "../obsidian/ObsidianNavigator.ts";
 import { ObsidianGraphSource }        from "../obsidian/ObsidianGraphSource.ts";
-import { Input }                      from "./systems/1. receive/Input.ts";
-import { InputBuffer }                from "./systems/1. receive/InputBuffer.ts";
-import { InteractionInterpreter }     from "./systems/2. translate/InteractionInterpreter.ts";
-import { Commander }                  from "./systems/3. execute/Commander.ts";
-import { CommandBuffer }              from "./systems/3. execute/CommandBuffer.ts";
-import { Anima }                      from "./systems/4. simulate/Anima.ts";
-import { Physics }                    from "./systems/4. simulate/Physics.ts";
-import { Renderer }                   from "./systems/5. render/Renderer.ts";
-import { Camera }                     from "./systems/5. render/Camera.ts";
-import { cursor_selector }            from "./cursor_selector.ts";
-import { InteractionStateStore }      from "./systems/2. translate/InteractionStateStore.ts";
-import { getCursorTypeFromInteraction } from "./CursorState.ts";
+import { Input }                      from "./systems/1. User Input/Input.ts";
+import { InputBuffer }                from "./systems/1. User Input/InputBuffer.ts";
+import { InteractionInterpreter }     from "./systems/2. UI Interpretation + State/UIInterpreter.ts";
+import { Commander }                  from "./systems/3. Module Commander/Commander.ts";
+import { CommandBuffer }              from "./systems/3. Module Commander/CommandBuffer.ts";
+import { Anima }                      from "./systems/4. Modules/Anima.ts";
+import { Physics }                    from "./systems/4. Modules/Physics.ts";
+import { Renderer }                   from "./systems/5. Render/Renderer.ts";
+import { Camera }                     from "./systems/5. Render/Camera.ts";
+import { createCursorController }            from "./CursorController.ts";
+import { InteractionStateStore }      from "./systems/2. UI Interpretation + State/UIStateStore.ts";
+import { getCursorTypeFromInteraction } from "./CursorController.ts";
 
 
 export class Orchestrator {
@@ -60,7 +60,7 @@ export class Orchestrator {
     this.canvas.style.height = "100%";
     this.canvas.tabIndex = 0;
     this.deps.containerEl.appendChild(this.canvas);
-    const cursor = cursor_selector(this.canvas);
+    const cursor = createCursorController(this.canvas);
 
    // 5. Render
     this.camera = new Camera(getSettings().camera.state);
@@ -110,7 +110,6 @@ export class Orchestrator {
         zoomCamera:             (screen, delta)       => { this.camera?.updateZoom(screen.x, screen.y, delta); },
         setGravityCenter:       (point)               => { this.interactionStateStore.setGravityCenter(point); },
         setHoveredNode:         (nodeId)              => { this.interactionStateStore.setHoveredNode(nodeId); },
-        //followNode:             (nodeId)              => { this.interactionStateStore.setFollowedNode(nodeId); },
         setFollowedNode:        (nodeId)              => { this.interactionStateStore.setFollowedNode(nodeId); },
         setDraggedNode:         (nodeId)              => { this.interactionStateStore.setDraggedNode(nodeId); },
         setPanning:             (on)                  => { this.interactionStateStore.setPanning(on); },
@@ -145,12 +144,7 @@ export class Orchestrator {
     this.spaceTime.register("commands", { tick: () => this.commandSystem?.tick() }, 20);
     this.spaceTime.register("anima", this.anima, 25);
     this.spaceTime.register("physics", this.physics, 30);
-    this.spaceTime.register("cursor", {
-      tick: () => {
-        const css = getCursorTypeFromInteraction(this.interactionStateStore.get());
-        cursor.apply(css);
-      }
-    }, 95);
+    this.spaceTime.register("cursor", { tick: () => { const css = getCursorTypeFromInteraction(this.interactionStateStore.get()); cursor.apply(css); } }, 95);
     this.spaceTime.register("render", this.renderer, 100);
 
 

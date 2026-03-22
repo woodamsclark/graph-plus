@@ -1,4 +1,3 @@
-// Translator.ts
 import type {
   Node,
   GraphData,
@@ -7,19 +6,19 @@ import type {
   Command,
   InteractionInterpreterSystem,
 } from "../../grammar/interfaces.ts";
-import type { Camera } from "../5. render/Camera.ts";
-import type { CursorCss } from "../../cursor_selector.ts";
-import type { InputBuffer } from "../1. receive/InputBuffer.ts";
-import type { CommandBuffer } from "../3. execute/CommandBuffer.ts";
-import { InteractionStateStore } from "./InteractionStateStore.ts";
 
+import type { Camera } from "../5. Render/Camera.ts";
+import type { CursorCss } from "../../CursorController.ts";
+import type { InputBuffer } from "../1. User Input/InputBuffer.ts";
+import type { CommandBuffer } from "../3. Module Commander/CommandBuffer.ts";
+import { InteractionStateStore } from "./UIStateStore.ts";
 
 type CameraSettings = {
   dragThresholdPx?: number;
   doubleClickMs?: number;
 };
 
-type TranslatorDeps = {
+type InteractionInterpreterDeps = {
   getGraph: () => GraphData | null;
   getCamera: () => Camera | null;
   getCanvas: () => HTMLCanvasElement;
@@ -55,7 +54,12 @@ type Mode =
       rotateStarted: boolean;
     };
 
-type PointerRec = { id: number; kind: "mouse" | "touch" | "pen"; x: number; y: number };
+type PointerRec = {
+  id: number;
+  kind: "mouse" | "touch" | "pen";
+  x: number;
+  y: number;
+};
 
 function distSq(a: { x: number; y: number }, b: { x: number; y: number }): number {
   const dx = a.x - b.x;
@@ -63,7 +67,6 @@ function distSq(a: { x: number; y: number }, b: { x: number; y: number }): numbe
   return dx * dx + dy * dy;
 }
 
-// Wrap angle delta into [-PI, PI] for stable twist detection
 function wrapAngleDelta(d: number): number {
   const pi = Math.PI;
   while (d > pi) d -= 2 * pi;
@@ -84,12 +87,15 @@ function twoFingerRead(a: PointerRec, b: PointerRec) {
 export class InteractionInterpreter implements InteractionInterpreterSystem {
   private mode: Mode = { kind: "idle" };
   private pointers = new Map<number, PointerRec>();
+
+  // Ephemeral interpreter-local drag math
   private dragWorldOffset: Vec3 | null = null;
   private dragDepthFromCamera = 0;
+
+  // Ephemeral click timing
   private lastClick: { nodeId: string | null; timeMs: number } | null = null;
 
-
-  constructor(private deps: TranslatorDeps) {}
+  constructor(private deps: InteractionInterpreterDeps) {}
 
   public getCursorType(): CursorCss {
     const state = this.deps.getInteractionState().get();
@@ -100,11 +106,9 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
   }
 
   public tick(_dt: number, _nowMs: number): void {
-    // 1) Receive: consume raw input events for this frame
     const batch = this.deps.getBuffer().drain();
     for (const e of batch) this.ingestOne(e);
 
-    // 2) Interpret: per-frame derived behavior
     this.updateFollow();
     this.updateHover();
   }
@@ -112,10 +116,6 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
   public destroy(): void {
     // no-op
   }
-
-  // ----------------------------------------------------------------------------
-  // Receive → Interpret (raw input ingestion + semantic transitions)
-  // ----------------------------------------------------------------------------
 
   private ingestOne(e: InputEvent): void {
     switch (e.type) {
@@ -145,13 +145,14 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
   private onPointerDown(e: Extract<InputEvent, { type: "POINTER_DOWN" }>) {
     this.upsertPointer(e.pointerId, e.kind, e.screen.x, e.screen.y);
 
-    // If 2 pointers are down, enter touch gesture mode
     if (this.pointers.size === 2) {
       this.endSinglePointerModeIfNeeded();
+
       const [a, b] = this.firstTwoPointers();
       if (!a || !b) return;
 
       const g = twoFingerRead(a, b);
+
       this.mode = {
         kind: "touch-gesture",
         pointerA: a.id,
@@ -166,14 +167,11 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
       return;
     }
 
-    // Single pointer press state
     const isMouse = e.kind === "mouse";
     const isLeft = e.button === 0;
     const isRight = e.button === 2;
 
-    // right intent definition lives here (semantic)
     const rightIntent = isMouse && ((isLeft && (e.ctrl || e.meta)) || isRight);
-
     const downHit = this.getClickedNodeIdLabel(e.screen.x, e.screen.y);
 
     this.mode = {
@@ -191,11 +189,8 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
 
   private onPointerMove(e: Extract<InputEvent, { type: "POINTER_MOVE" }>) {
     this.upsertPointer(e.pointerId, e.kind, e.screen.x, e.screen.y);
-
-    // Update gravity center always for hover/mouse gravity
     this.cmd({ type: "SetGravityCenter", point: { x: e.screen.x, y: e.screen.y } });
 
-    // Two-finger gesture
     if (this.mode.kind === "touch-gesture") {
       if (this.pointers.size !== 2) return;
 
@@ -205,7 +200,6 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
 
       const g = twoFingerRead(a, b);
 
-      // Pinch zoom: interpret dist delta
       const distDelta = g.dist - this.mode.lastDist;
       const pinchThreshold = 2;
       if (Math.abs(distDelta) >= pinchThreshold) {
@@ -213,7 +207,6 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
         this.updateZoom(g.centroid.x, g.centroid.y, direction);
       }
 
-      // Twist rotate
       const dTheta = wrapAngleDelta(g.angle - this.mode.lastAngle);
       const rotateThreshold = 0.0;
       if (!this.mode.rotateStarted && Math.abs(dTheta) > rotateThreshold) {
@@ -228,7 +221,6 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
       return;
     }
 
-    // Single pointer semantic transitions
     if (this.mode.kind === "press" && this.mode.pointerId === e.pointerId) {
       const cameraCfg = this.deps.getCameraSettings();
       const threshold = cameraCfg.dragThresholdPx ?? 6;
@@ -236,7 +228,6 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
       const movedSq = distSq({ x: e.screen.x, y: e.screen.y }, this.mode.downScreen);
       if (movedSq <= threshold * threshold) return;
 
-      // crossed drag threshold, choose a mode
       if (this.mode.rightIntent) {
         this.startRotate(e.screen.x, e.screen.y);
         this.mode = { kind: "rotate", pointerId: e.pointerId };
@@ -273,7 +264,6 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
   private onPointerUp(e: Extract<InputEvent, { type: "POINTER_UP" }>) {
     this.pointers.delete(e.pointerId);
 
-    // Touch gesture end
     if (this.mode.kind === "touch-gesture") {
       if (this.pointers.size < 2) {
         if (this.mode.rotateStarted) this.endRotate();
@@ -282,37 +272,36 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
       return;
     }
 
-    // End modes
     if (this.mode.kind === "drag-node" && this.mode.pointerId === e.pointerId) {
       this.endDrag();
       this.mode = { kind: "idle" };
       return;
     }
+
     if (this.mode.kind === "pan" && this.mode.pointerId === e.pointerId) {
       this.endPan();
       this.mode = { kind: "idle" };
       return;
     }
+
     if (this.mode.kind === "rotate" && this.mode.pointerId === e.pointerId) {
       this.endRotate();
       this.mode = { kind: "idle" };
       return;
     }
 
-    // Click release
     if (this.mode.kind === "press" && this.mode.pointerId === e.pointerId) {
       const press = this.mode;
       this.mode = { kind: "idle" };
 
       if (press.longPressFired) return;
+
       if (press.rightIntent) {
         this.cmd({ type: "ResetCamera" });
         return;
       }
 
-      const nodeId = press.downNode?.id;
-      if (!nodeId) return;
-
+      const nodeId = press.downNode?.id ?? null;
       this.handleSingleOrDoubleClick(nodeId, e.timeMs);
       return;
     }
@@ -337,13 +326,9 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
   }
 
   private onWheel(e: Extract<InputEvent, { type: "WHEEL" }>) {
-    const camera = this.deps.getCamera();
-    if (!camera) return;
-
     const screenX = e.screen.x;
     const screenY = e.screen.y;
 
-    // Trackpad pinch often arrives as wheel + ctrl/meta on macOS.
     const zoom = e.ctrl || e.meta;
     if (zoom) {
       const direction = e.deltaY > 0 ? 1 : -1;
@@ -355,7 +340,6 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
       return;
     }
 
-    // Otherwise treat as pan-like scroll.
     this.cmd({ type: "StartPanCamera", screen: { x: screenX, y: screenY } });
     this.cmd({ type: "UpdatePanCamera", screen: { x: screenX - e.deltaX, y: screenY - e.deltaY } });
     this.cmd({ type: "EndPanCamera" });
@@ -374,17 +358,9 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     }
   }
 
-  // ----------------------------------------------------------------------------
-  // Communicate intent (Commands)
-  // ----------------------------------------------------------------------------
-
   private cmd(c: Command): void {
     this.deps.getCommands().push(c);
   }
-
-  // ----------------------------------------------------------------------------
-  // Hover + follow (still local, camera-side effects remain here for now)
-  // ----------------------------------------------------------------------------
 
   private updateHover() {
     const mouse = this.deps.getInteractionState().get().gravityCenter;
@@ -420,10 +396,6 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     });
   }
 
-  private endFollow() {
-    this.cmd({ type: "SetFollowedNode", nodeId: null });
-  }
-
   private handleSingleOrDoubleClick(nodeId: string | null, timeMs: number) {
     const cameraCfg = this.deps.getCameraSettings();
     const doubleMs = cameraCfg.doubleClickMs ?? 300;
@@ -446,11 +418,6 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
 
     this.cmd({ type: "SetFollowedNode", nodeId });
   }
-  
-
-  // ----------------------------------------------------------------------------
-  // Dragging nodes (semantic → commands; NO direct node mutation)
-  // ----------------------------------------------------------------------------
 
   private startDrag(nodeId: string, screenX: number, screenY: number) {
     this.cmd({ type: "SetFollowedNode", nodeId: null });
@@ -459,7 +426,6 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     const camera = this.deps.getCamera();
     if (!graph || !camera) return;
 
-    // Communicate intent: disable mouse gravity while dragging
     this.cmd({ type: "SetMouseGravity", on: false });
 
     const node = graph.nodes.find(n => n.id === nodeId);
@@ -469,10 +435,8 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     this.dragDepthFromCamera = Math.max(0.0001, projected.depth);
 
     this.cmd({ type: "SetDraggedNode", nodeId });
-
     this.cmd({ type: "PinNode", nodeId });
 
-    // Compute drag offset (so node stays under cursor)
     const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
     this.dragWorldOffset = {
       x: node.location.x - underMouse.x,
@@ -480,10 +444,8 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
       z: (node.location.z || 0) - underMouse.z,
     };
 
-    // Tell downstream we began dragging (optional, useful for constraints)
     this.cmd({ type: "BeginDrag", nodeId });
 
-    // Emit first target immediately
     const targetWorld = {
       x: underMouse.x + this.dragWorldOffset.x,
       y: underMouse.y + this.dragWorldOffset.y,
@@ -508,7 +470,6 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
       z: underMouse.z + o.z,
     };
 
-    // Communicate intent: physics should satisfy this constraint
     this.cmd({ type: "DragTarget", nodeId: draggedId, targetWorld });
   }
 
@@ -516,22 +477,14 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     const draggedId = this.deps.getInteractionState().get().draggedNodeId;
     if (!draggedId) return;
 
-    // Unpin (intent)
     this.cmd({ type: "UnpinNode", nodeId: draggedId });
-
     this.cmd({ type: "SetDraggedNode", nodeId: null });
+
     this.dragWorldOffset = null;
 
-    // Drag ended (optional)
     this.cmd({ type: "EndDrag", nodeId: draggedId });
-
-    // Re-enable mouse gravity after drag
     this.cmd({ type: "SetMouseGravity", on: true });
   }
-
-  // ----------------------------------------------------------------------------
-  // Camera pan/rotate/zoom (kept local for now)
-  // ----------------------------------------------------------------------------
 
   private startPan(screenX: number, screenY: number) {
     this.cmd({ type: "SetFollowedNode", nodeId: null });
@@ -566,10 +519,6 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     this.cmd({ type: "ZoomCamera", screen: { x: screenX, y: screenY }, delta });
   }
 
-  // ----------------------------------------------------------------------------
-  // Hit testing
-  // ----------------------------------------------------------------------------
-
   private getClickedNodeIdLabel(screenX: number, screenY: number): { id: string; label: string } | null {
     const node = this.getClickedNode(screenX, screenY);
     if (!node) return null;
@@ -602,10 +551,6 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     return best;
   }
 
-  // ----------------------------------------------------------------------------
-  // Pointer bookkeeping
-  // ----------------------------------------------------------------------------
-
   private upsertPointer(id: number, kind: "mouse" | "touch" | "pen", x: number, y: number) {
     this.pointers.set(id, { id, kind, x, y });
   }
@@ -613,6 +558,7 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
   private firstTwoPointers(): [PointerRec | null, PointerRec | null] {
     let a: PointerRec | null = null;
     let b: PointerRec | null = null;
+
     for (const p of this.pointers.values()) {
       if (!a) a = p;
       else {
@@ -620,6 +566,7 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
         break;
       }
     }
+
     return [a, b];
   }
 

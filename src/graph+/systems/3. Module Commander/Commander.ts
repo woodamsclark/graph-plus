@@ -111,7 +111,7 @@ export class Commander implements CommandSystem {
           handlers.zoomCamera?.(command.screen, command.delta);
           break;
 
-                  case "SetGravityCenter":
+        case "SetGravityCenter":
           handlers.setGravityCenter?.(command.point);
           break;
 

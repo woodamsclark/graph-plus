@@ -1,6 +1,6 @@
 import { createSimulation } from "./simulation.ts";
 import type { GraphData, Simulation, TranslationState, PhysicsSystem } from "../../grammar/interfaces.ts";
-import type { Camera } from "../5. render/Camera.ts";
+import type { Camera } from "../5. Render/Camera.ts";
 
 export class Physics implements PhysicsSystem{
   private sim: Simulation | null = null;

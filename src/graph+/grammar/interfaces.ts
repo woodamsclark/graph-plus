@@ -306,7 +306,6 @@ export type Command =
 | { type: "SetGravityCenter"; point: { x: number; y: number } | null }
 | { type: "SetHoveredNode"; nodeId: string | null }
 | { type: "SetFollowedNode"; nodeId: string | null }
-//| { type: "FollowNode"; nodeId: string | null }
 | { type: "SetDraggedNode"; nodeId: string | null }
 | { type: "SetPanning"; on: boolean }
 | { type: "SetRotating"; on: boolean }
