@@ -189,10 +189,7 @@ export interface Tickable {
 
 
 
-export interface TranslationSystem extends Tickable {
-  getState(): Readonly<TranslationState>;
-  // optional: cursorType if you want renderer/cursor to query it
-  getCursorType(): string;
+export interface InteractionInterpreterSystem extends Tickable {
 }
 
 // --- Renderer System ---------------------------------------------------------
@@ -298,7 +295,6 @@ export type Command =
 | { type: "BeginDrag"; nodeId: string }
 | { type: "DragTarget"; nodeId: string; targetWorld: Vec3 }
 | { type: "EndDrag"; nodeId: string }
-| { type: "FollowNode"; nodeId: string | null }
 | { type: "ResetCamera" }
 | { type: "StartPanCamera"; screen: { x: number; y: number } }
 | { type: "UpdatePanCamera"; screen: { x: number; y: number } }
@@ -306,4 +302,12 @@ export type Command =
 | { type: "StartRotateCamera"; screen: { x: number; y: number } }
 | { type: "UpdateRotateCamera"; screen: { x: number; y: number } }
 | { type: "EndRotateCamera" }
-| { type: "ZoomCamera"; screen: { x: number; y: number }; delta: number };
+| { type: "ZoomCamera"; screen: { x: number; y: number }; delta: number }
+| { type: "SetGravityCenter"; point: { x: number; y: number } | null }
+| { type: "SetHoveredNode"; nodeId: string | null }
+| { type: "SetFollowedNode"; nodeId: string | null }
+//| { type: "FollowNode"; nodeId: string | null }
+| { type: "SetDraggedNode"; nodeId: string | null }
+| { type: "SetPanning"; on: boolean }
+| { type: "SetRotating"; on: boolean }
+| { type: "SetCameraTarget"; target: { x: number; y: number; z: number } }

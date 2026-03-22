@@ -2,17 +2,16 @@
 import type {
   Node,
   GraphData,
-  TranslationSystem,
-  TranslationState,
   InputEvent,
   Vec3,
   Command,
+  InteractionInterpreterSystem,
 } from "../../grammar/interfaces.ts";
-
 import type { Camera } from "../5. render/Camera.ts";
-import type { CursorCss } from "../1. receive/cursor_selector.ts";
+import type { CursorCss } from "../../cursor_selector.ts";
 import type { InputBuffer } from "../1. receive/InputBuffer.ts";
 import type { CommandBuffer } from "../3. execute/CommandBuffer.ts";
+import { InteractionStateStore } from "./InteractionStateStore.ts";
 
 
 type CameraSettings = {
@@ -26,8 +25,8 @@ type TranslatorDeps = {
   getCanvas: () => HTMLCanvasElement;
   getBuffer: () => InputBuffer;
   getCommands: () => CommandBuffer;
-  // Narrow settings reader: keep Translator out of global settings.
   getCameraSettings: () => CameraSettings;
+  getInteractionState: () => InteractionStateStore;
 };
 
 type PressMode = {
@@ -82,30 +81,21 @@ function twoFingerRead(a: PointerRec, b: PointerRec) {
   return { centroid: { x: cx, y: cy }, dist, angle };
 }
 
-export class Translator implements TranslationSystem {
+export class InteractionInterpreter implements InteractionInterpreterSystem {
   private mode: Mode = { kind: "idle" };
   private pointers = new Map<number, PointerRec>();
   private dragWorldOffset: Vec3 | null = null;
   private dragDepthFromCamera = 0;
   private lastClick: { nodeId: string | null; timeMs: number } | null = null;
-  private state: TranslationState = {
-    gravityCenter: null,
-    hoveredNodeId: null,
-    followedNodeId: null,
-    draggedNodeId: null,
-    isPanning: false,
-    isRotating: false,
-  };
+
 
   constructor(private deps: TranslatorDeps) {}
 
-  public getState(): Readonly<TranslationState> {
-    return this.state;
-  }
-
   public getCursorType(): CursorCss {
-    if (this.state.draggedNodeId || this.state.isPanning || this.state.isRotating) return "grabbing";
-    if (this.state.hoveredNodeId) return "pointer";
+    const state = this.deps.getInteractionState().get();
+
+    if (state.draggedNodeId || state.isPanning || state.isRotating) return "grabbing";
+    if (state.hoveredNodeId) return "pointer";
     return "default";
   }
 
@@ -158,12 +148,10 @@ export class Translator implements TranslationSystem {
     // If 2 pointers are down, enter touch gesture mode
     if (this.pointers.size === 2) {
       this.endSinglePointerModeIfNeeded();
-
       const [a, b] = this.firstTwoPointers();
       if (!a || !b) return;
 
       const g = twoFingerRead(a, b);
-
       this.mode = {
         kind: "touch-gesture",
         pointerA: a.id,
@@ -174,8 +162,7 @@ export class Translator implements TranslationSystem {
         rotateStarted: false,
       };
 
-      // gravity center for hover/mouse gravity semantics
-      this.state.gravityCenter = { x: g.centroid.x, y: g.centroid.y };
+      this.cmd({ type: "SetGravityCenter", point: { x: g.centroid.x, y: g.centroid.y } });
       return;
     }
 
@@ -199,14 +186,14 @@ export class Translator implements TranslationSystem {
       longPressFired: false,
     };
 
-    this.state.gravityCenter = { x: e.screen.x, y: e.screen.y };
+    this.cmd({ type: "SetGravityCenter", point: { x: e.screen.x, y: e.screen.y } });
   }
 
   private onPointerMove(e: Extract<InputEvent, { type: "POINTER_MOVE" }>) {
     this.upsertPointer(e.pointerId, e.kind, e.screen.x, e.screen.y);
 
     // Update gravity center always for hover/mouse gravity
-    this.state.gravityCenter = { x: e.screen.x, y: e.screen.y };
+    this.cmd({ type: "SetGravityCenter", point: { x: e.screen.x, y: e.screen.y } });
 
     // Two-finger gesture
     if (this.mode.kind === "touch-gesture") {
@@ -381,7 +368,7 @@ export class Translator implements TranslationSystem {
     this.mode.longPressFired = true;
 
     if (this.mode.downNode?.id) {
-      this.cmd({ type: "FollowNode", nodeId: this.mode.downNode.id });
+      this.cmd({ type: "SetFollowedNode", nodeId: this.mode.downNode.id });
     } else {
       this.cmd({ type: "ResetCamera" });
     }
@@ -400,42 +387,41 @@ export class Translator implements TranslationSystem {
   // ----------------------------------------------------------------------------
 
   private updateHover() {
-    const mouse = this.state.gravityCenter;
+    const mouse = this.deps.getInteractionState().get().gravityCenter;
     if (!mouse) {
-      this.state.hoveredNodeId = null;
+      this.cmd({ type: "SetHoveredNode", nodeId: null });
       return;
     }
 
     const hit = this.getClickedNode(mouse.x, mouse.y);
-    this.state.hoveredNodeId = hit?.id ?? null;
+    this.cmd({ type: "SetHoveredNode", nodeId: hit?.id ?? null });
   }
 
   private updateFollow(): void {
-    const id = this.state.followedNodeId;
+    const id = this.deps.getInteractionState().get().followedNodeId;
     if (!id) return;
 
     const graph = this.deps.getGraph();
-    const camera = this.deps.getCamera();
-    if (!graph || !camera) return;
+    if (!graph) return;
 
     const node = graph.nodes.find(n => n.id === id);
     if (!node) {
-      this.state.followedNodeId = null;
+      this.cmd({ type: "SetFollowedNode", nodeId: null });
       return;
     }
 
-    camera.patchState({
-      targetX: node.location.x,
-      targetY: node.location.y,
-      targetZ: node.location.z,
+    this.cmd({
+      type: "SetCameraTarget",
+      target: {
+        x: node.location.x,
+        y: node.location.y,
+        z: node.location.z,
+      },
     });
-  }
-  public setFollowedNode(nodeId: string | null): void {
-    this.state.followedNodeId = nodeId;
   }
 
   private endFollow() {
-    this.state.followedNodeId = null;
+    this.cmd({ type: "SetFollowedNode", nodeId: null });
   }
 
   private handleSingleOrDoubleClick(nodeId: string | null, timeMs: number) {
@@ -452,20 +438,22 @@ export class Translator implements TranslationSystem {
       return;
     }
 
-    if (this.state.followedNodeId === nodeId && nodeId !== null) {
+    const followedNodeId = this.deps.getInteractionState().get().followedNodeId;
+    if (followedNodeId === nodeId && nodeId !== null) {
       this.cmd({ type: "RequestOpenNode", nodeId });
       return;
     }
 
-    this.cmd({ type: "FollowNode", nodeId });
+    this.cmd({ type: "SetFollowedNode", nodeId });
   }
+  
 
   // ----------------------------------------------------------------------------
   // Dragging nodes (semantic → commands; NO direct node mutation)
   // ----------------------------------------------------------------------------
 
   private startDrag(nodeId: string, screenX: number, screenY: number) {
-    this.endFollow();
+    this.cmd({ type: "SetFollowedNode", nodeId: null });
 
     const graph = this.deps.getGraph();
     const camera = this.deps.getCamera();
@@ -480,7 +468,7 @@ export class Translator implements TranslationSystem {
     const projected = camera.worldToScreen(node);
     this.dragDepthFromCamera = Math.max(0.0001, projected.depth);
 
-    this.state.draggedNodeId = nodeId;
+    this.cmd({ type: "SetDraggedNode", nodeId });
 
     this.cmd({ type: "PinNode", nodeId });
 
@@ -508,7 +496,7 @@ export class Translator implements TranslationSystem {
     const camera = this.deps.getCamera();
     if (!camera) return;
 
-    const draggedId = this.state.draggedNodeId;
+    const draggedId = this.deps.getInteractionState().get().draggedNodeId;
     if (!draggedId) return;
 
     const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
@@ -525,13 +513,13 @@ export class Translator implements TranslationSystem {
   }
 
   private endDrag() {
-    const draggedId = this.state.draggedNodeId;
+    const draggedId = this.deps.getInteractionState().get().draggedNodeId;
     if (!draggedId) return;
 
     // Unpin (intent)
     this.cmd({ type: "UnpinNode", nodeId: draggedId });
 
-    this.state.draggedNodeId = null;
+    this.cmd({ type: "SetDraggedNode", nodeId: null });
     this.dragWorldOffset = null;
 
     // Drag ended (optional)
@@ -546,8 +534,8 @@ export class Translator implements TranslationSystem {
   // ----------------------------------------------------------------------------
 
   private startPan(screenX: number, screenY: number) {
-    this.endFollow();
-    this.state.isPanning = true;
+    this.cmd({ type: "SetFollowedNode", nodeId: null });
+    this.cmd({ type: "SetPanning", on: true });
     this.cmd({ type: "StartPanCamera", screen: { x: screenX, y: screenY } });
   }
 
@@ -556,12 +544,12 @@ export class Translator implements TranslationSystem {
   }
 
   private endPan() {
-    this.state.isPanning = false;
+    this.cmd({ type: "SetPanning", on: false });
     this.cmd({ type: "EndPanCamera" });
   }
 
   private startRotate(screenX: number, screenY: number) {
-    this.state.isRotating = true;
+    this.cmd({ type: "SetRotating", on: true });
     this.cmd({ type: "StartRotateCamera", screen: { x: screenX, y: screenY } });
   }
 
@@ -570,7 +558,7 @@ export class Translator implements TranslationSystem {
   }
 
   private endRotate() {
-    this.state.isRotating = false;
+    this.cmd({ type: "SetRotating", on: false });
     this.cmd({ type: "EndRotateCamera" });
   }
 
