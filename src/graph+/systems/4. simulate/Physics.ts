@@ -11,7 +11,7 @@ export class Physics implements PhysicsSystem{
   constructor(private deps: {
     getGraph:       () => GraphData         | null;
     getCamera:      () => Camera  | null;
-    getInteraction: () => TranslationState;
+    getInteractionState: () => TranslationState;
   }) {}
 
   // Call whenever the graph changes (rebuild/filter/etc.)
@@ -28,8 +28,8 @@ export class Physics implements PhysicsSystem{
     this.sim = createSimulation(
       graph, 
       camera, 
-      () => this.deps.getInteraction().gravityCenter,
-      (nodeId) => nodeId === this.deps.getInteraction().followedNodeId
+      () => this.deps.getInteractionState().gravityCenter,
+      (nodeId) => nodeId === this.deps.getInteractionState().followedNodeId
     );
     this.sim?.setPinnedNodes?.(new Set(this.pinnedNodeIds));
     this.sim?.start();
