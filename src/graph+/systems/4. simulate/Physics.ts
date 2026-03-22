@@ -6,6 +6,7 @@ export class Physics implements PhysicsSystem{
   private sim: Simulation | null = null;
   private dragNodeId: string | null = null;
   private dragTarget: { x: number; y: number; z: number } | null = null;
+  private pinnedNodeIds: Set<string> = new Set();
 
   constructor(private deps: {
     getGraph:       () => GraphData         | null;
@@ -30,6 +31,8 @@ export class Physics implements PhysicsSystem{
       () => this.deps.getInteraction().gravityCenter,
       (nodeId) => nodeId === this.deps.getInteraction().followedNodeId
     );
+    this.sim?.setPinnedNodes?.(new Set(this.pinnedNodeIds));
+    this.sim?.start();
     this.sim?.start();
   }
 
@@ -49,7 +52,7 @@ export class Physics implements PhysicsSystem{
   }
 
   this.sim?.tick(dt);
-}
+  }
 
   public stop(): void {
     if (this.sim) this.sim.stop();
@@ -63,9 +66,19 @@ export class Physics implements PhysicsSystem{
     this.sim = null;
   }
 
-  public setPinnedNodes(ids: Set<string>) {
-    this.sim?.setPinnedNodes?.(ids);
-    }
+  public pinNode(nodeId: string): void {
+    this.pinnedNodeIds.add(nodeId);
+    this.sim?.setPinnedNodes?.(new Set(this.pinnedNodeIds));
+  }
+
+  public unpinNode(nodeId: string): void {
+    this.pinnedNodeIds.delete(nodeId);
+    this.sim?.setPinnedNodes?.(new Set(this.pinnedNodeIds));
+  }
+
+  public getPinnedNodeIds(): ReadonlySet<string> {
+    return this.pinnedNodeIds;
+  }
 
   beginDrag(nodeId: string): void {
   this.dragNodeId = nodeId;

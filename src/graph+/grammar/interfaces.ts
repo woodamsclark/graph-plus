@@ -31,12 +31,6 @@ export type TranslationState = {
   isRotating: boolean;
 };
 
-export type TranslationEvent =
-  | { type: "OPEN_NODE_REQUESTED"; node: { id: string; label: string, type: string } }
-  | { type: "PINNED_SET"; ids: Set<string> }
-  | { type: "MOUSE_GRAVITY_SET"; on: boolean };
-
-
   // --- Interfaces ------------------------------------------------------
 
 export interface GraphSettings {
@@ -221,7 +215,8 @@ export interface PhysicsSystem extends Tickable {
   start(): void;
   stop(): void;
   rebuild(): void;
-  setPinnedNodes(ids: Set<string>): void;
+  pinNode(nodeId: string): void;
+  unpinNode(nodeId: string): void;
 }
 
 export interface CommandSystem extends Tickable {
@@ -297,9 +292,18 @@ export type InputEvent =
 export type Command =
 | { type: "RequestOpenNode"; nodeId: string }
 | { type: "SetMouseGravity"; on: boolean }
-| { type: "SetPinned"; ids: Set<string> }
-| { type: "ReplacePinnedSet"; ids: Set<string> }
+| { type: "PinNode"; nodeId: string }
+| { type: "UnpinNode"; nodeId: string }
+| { type: "ReplaceFixedNodeSet"; ids: Set<string> }
 | { type: "BeginDrag"; nodeId: string }
 | { type: "DragTarget"; nodeId: string; targetWorld: Vec3 }
 | { type: "EndDrag"; nodeId: string }
 | { type: "FollowNode"; nodeId: string | null }
+| { type: "ResetCamera" }
+| { type: "StartPanCamera"; screen: { x: number; y: number } }
+| { type: "UpdatePanCamera"; screen: { x: number; y: number } }
+| { type: "EndPanCamera" }
+| { type: "StartRotateCamera"; screen: { x: number; y: number } }
+| { type: "UpdateRotateCamera"; screen: { x: number; y: number } }
+| { type: "EndRotateCamera" }
+| { type: "ZoomCamera"; screen: { x: number; y: number }; delta: number };

@@ -85,17 +85,9 @@ function twoFingerRead(a: PointerRec, b: PointerRec) {
 export class Translator implements TranslationSystem {
   private mode: Mode = { kind: "idle" };
   private pointers = new Map<number, PointerRec>();
-
-  // Drag intent computation
   private dragWorldOffset: Vec3 | null = null;
   private dragDepthFromCamera = 0;
-
-  // Local interaction-only pinned set (what user is holding)
-  // We still emit pin commands so the "world" can own the authoritative pin set.
-  private pinnedNodes: Set<string> = new Set();
-
   private lastClick: { nodeId: string | null; timeMs: number } | null = null;
-
   private state: TranslationState = {
     gravityCenter: null,
     hoveredNodeId: null,
@@ -327,7 +319,7 @@ export class Translator implements TranslationSystem {
 
       if (press.longPressFired) return;
       if (press.rightIntent) {
-        this.deps.getCamera()?.resetCamera();
+        this.cmd({ type: "ResetCamera" });
         return;
       }
 
@@ -368,14 +360,18 @@ export class Translator implements TranslationSystem {
     const zoom = e.ctrl || e.meta;
     if (zoom) {
       const direction = e.deltaY > 0 ? 1 : -1;
-      this.updateZoom(screenX, screenY, direction);
+      this.cmd({
+        type: "ZoomCamera",
+        screen: { x: screenX, y: screenY },
+        delta: direction,
+      });
       return;
     }
 
     // Otherwise treat as pan-like scroll.
-    camera.startPan(screenX, screenY);
-    camera.updatePan(screenX - e.deltaX, screenY - e.deltaY);
-    camera.endPan();
+    this.cmd({ type: "StartPanCamera", screen: { x: screenX, y: screenY } });
+    this.cmd({ type: "UpdatePanCamera", screen: { x: screenX - e.deltaX, y: screenY - e.deltaY } });
+    this.cmd({ type: "EndPanCamera" });
   }
 
   private onLongPress(e: Extract<InputEvent, { type: "LONG_PRESS" }>) {
@@ -387,7 +383,7 @@ export class Translator implements TranslationSystem {
     if (this.mode.downNode?.id) {
       this.cmd({ type: "FollowNode", nodeId: this.mode.downNode.id });
     } else {
-      this.deps.getCamera()?.resetCamera();
+      this.cmd({ type: "ResetCamera" });
     }
   }
 
@@ -397,10 +393,6 @@ export class Translator implements TranslationSystem {
 
   private cmd(c: Command): void {
     this.deps.getCommands().push(c);
-  }
-
-  private replacePinnedSet(): void {
-    this.cmd({ type: "ReplacePinnedSet", ids: new Set(this.pinnedNodes) });
   }
 
   // ----------------------------------------------------------------------------
@@ -438,7 +430,6 @@ export class Translator implements TranslationSystem {
       targetZ: node.location.z,
     });
   }
-
   public setFollowedNode(nodeId: string | null): void {
     this.state.followedNodeId = nodeId;
   }
@@ -491,9 +482,7 @@ export class Translator implements TranslationSystem {
 
     this.state.draggedNodeId = nodeId;
 
-    // Pin while dragging (intent)
-    this.pinnedNodes.add(nodeId);
-    this.replacePinnedSet();
+    this.cmd({ type: "PinNode", nodeId });
 
     // Compute drag offset (so node stays under cursor)
     const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
@@ -540,8 +529,7 @@ export class Translator implements TranslationSystem {
     if (!draggedId) return;
 
     // Unpin (intent)
-    this.pinnedNodes.delete(draggedId);
-    this.replacePinnedSet();
+    this.cmd({ type: "UnpinNode", nodeId: draggedId });
 
     this.state.draggedNodeId = null;
     this.dragWorldOffset = null;
@@ -560,34 +548,34 @@ export class Translator implements TranslationSystem {
   private startPan(screenX: number, screenY: number) {
     this.endFollow();
     this.state.isPanning = true;
-    this.deps.getCamera()?.startPan(screenX, screenY);
+    this.cmd({ type: "StartPanCamera", screen: { x: screenX, y: screenY } });
   }
 
   private updatePan(screenX: number, screenY: number) {
-    this.deps.getCamera()?.updatePan(screenX, screenY);
+    this.cmd({ type: "UpdatePanCamera", screen: { x: screenX, y: screenY } });
   }
 
   private endPan() {
     this.state.isPanning = false;
-    this.deps.getCamera()?.endPan();
+    this.cmd({ type: "EndPanCamera" });
   }
 
   private startRotate(screenX: number, screenY: number) {
     this.state.isRotating = true;
-    this.deps.getCamera()?.startRotate(screenX, screenY);
+    this.cmd({ type: "StartRotateCamera", screen: { x: screenX, y: screenY } });
   }
 
   private updateRotate(screenX: number, screenY: number) {
-    this.deps.getCamera()?.updateRotate(screenX, screenY);
+    this.cmd({ type: "UpdateRotateCamera", screen: { x: screenX, y: screenY } });
   }
 
   private endRotate() {
     this.state.isRotating = false;
-    this.deps.getCamera()?.endRotate();
+    this.cmd({ type: "EndRotateCamera" });
   }
 
   private updateZoom(screenX: number, screenY: number, delta: number) {
-    this.deps.getCamera()?.updateZoom(screenX, screenY, delta);
+    this.cmd({ type: "ZoomCamera", screen: { x: screenX, y: screenY }, delta });
   }
 
   // ----------------------------------------------------------------------------
