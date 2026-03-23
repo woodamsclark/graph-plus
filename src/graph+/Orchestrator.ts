@@ -190,36 +190,6 @@ export class Orchestrator {
       });
     });
 
-    /////
-/*    this.commandSystem = new Commander({
-      getQueue: () => this.commandBuffer,
-      handlers: {
-        pinNode:                (nodeId)              => { this.physics?.pinNode(nodeId); },
-        unpinNode:              (nodeId)              => { this.physics?.unpinNode(nodeId); },
-        setMouseGravity:        (on)                  => { getSettings().physics.mouseGravityEnabled = on; },
-        openNode:               (nodeId)              => { const graph = this.graphState.get(); const node = graph?.nodes.find(n => n.id === nodeId); if (!node) return; if (node.type.toLowerCase() === "tag") void this.navigator.openTagSearch(node.id); else void this.navigator.openNodeById(node.id);},
-        setDragTarget:          (nodeId, targetWorld) => { this.physics?.setDragTarget(nodeId, targetWorld); },
-        beginDrag:              (nodeId)              => { this.physics?.beginDrag(nodeId); },
-        endDrag:                (nodeId)              => { this.physics?.endDrag(nodeId); },
-        onNodeCommandExecuted:  (nodeId, commandType) => { this.anima?.add(nodeId, 20); },
-        resetCamera:            ()                    => { this.camera?.resetCamera(); },
-        startPanCamera:         (screen)              => { this.camera?.startPan(screen.x, screen.y); },
-        updatePanCamera:        (screen)              => { this.camera?.updatePan(screen.x, screen.y); },
-        endPanCamera:           ()                    => { this.camera?.endPan(); },
-        startRotateCamera:      (screen)              => { this.camera?.startRotate(screen.x, screen.y); },
-        updateRotateCamera:     (screen)              => { this.camera?.updateRotate(screen.x, screen.y); },
-        endRotateCamera:        ()                    => { this.camera?.endRotate(); },
-        zoomCamera:             (screen, delta)       => { this.camera?.updateZoom(screen.x, screen.y, delta); },
-        setGravityCenter:       (point)               => { this.interactionStateStore.setGravityCenter(point); },
-        setHoveredNode:         (nodeId)              => { this.interactionStateStore.setHoveredNode(nodeId); },
-        setFollowedNode:        (nodeId)              => { this.interactionStateStore.setFollowedNode(nodeId); },
-        setDraggedNode:         (nodeId)              => { this.interactionStateStore.setDraggedNode(nodeId); },
-        setPanning:             (on)                  => { this.interactionStateStore.setPanning(on); },
-        setRotating:            (on)                  => { this.interactionStateStore.setRotating(on); },
-        setCameraTarget:        (target)              => { this.camera?.patchState({targetX: target.x,targetY: target.y,targetZ: target.z, });
-        },
-      }
-  });*/
     this.anima = new Anima({
       getGraph: () => this.graphStore.get(),
       getStore: () => this.animaStateStore,
@@ -244,6 +214,7 @@ export class Orchestrator {
       getGraph: ()            => this.graphStore.get(),
       getCamera: ()           => this.camera,
       getInteractionState: () => this.uiStateStore.get(),
+      getPhysicsSettings: ()    => getSettings().physics,
     });
 
  
