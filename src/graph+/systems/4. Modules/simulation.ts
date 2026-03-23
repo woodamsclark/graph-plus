@@ -199,9 +199,9 @@ export function createSimulation(
       const fy = (dy / safeDist) * force;
       const fz = (dz / safeDist) * force;
 
-      a.velocity.vx = (a.velocity.vx || 0) + fx;
-      a.velocity.vy = (a.velocity.vy || 0) + fy;
-      a.velocity.vz = (a.velocity.vz || 0) + fz;
+      a.velocity.x = (a.velocity.x || 0) + fx;
+      a.velocity.y = (a.velocity.y || 0) + fy;
+      a.velocity.z = (a.velocity.z || 0) + fz;
       return;
     }
 
@@ -242,7 +242,7 @@ export function createSimulation(
       if (ignore?.(node.id)) continue; // ✅ modular exclusion
 
       // 1) Project node to get its depth
-      const nodeScreen = camera.worldToScreen(node);
+      const nodeScreen = camera.worldToScreen(node.location);
       if (nodeScreen.depth < 0) continue;
 
       // 2) Convert mouse to WORLD position at node depth
@@ -271,9 +271,9 @@ export function createSimulation(
       const boost    = Math.min(maxBoost, 1 / (dist*dist));
       const k        = strength * boost;
 
-      node.velocity.vx += dx * k;
-      node.velocity.vy += dy * k;
-      node.velocity.vz += dz * k;
+      node.velocity.x += dx * k;
+      node.velocity.y += dy * k;
+      node.velocity.z += dz * k;
     }
   }
 
@@ -299,14 +299,14 @@ export function createSimulation(
         const fy = (dy / dist) * force;
         const fz = (dz / dist) * force;
         if (!pinnedNodes.has(a.id)) {
-          a.velocity.vx = (a.velocity.vx || 0) + fx;
-          a.velocity.vy = (a.velocity.vy || 0) + fy;
-          a.velocity.vz = (a.velocity.vz || 0) + fz;
+          a.velocity.x = (a.velocity.x || 0) + fx;
+          a.velocity.y = (a.velocity.y || 0) + fy;
+          a.velocity.z = (a.velocity.z || 0) + fz;
         }
         if (!pinnedNodes.has(b.id)) {
-          b.velocity.vx = (b.velocity.vx || 0) - fx;
-          b.velocity.vy = (b.velocity.vy || 0) - fy;
-          b.velocity.vz = (b.velocity.vz || 0) - fz;
+          b.velocity.x = (b.velocity.x || 0) - fx;
+          b.velocity.y = (b.velocity.y || 0) - fy;
+          b.velocity.z = (b.velocity.z || 0) - fz;
         }
       }
     }
@@ -328,14 +328,14 @@ export function createSimulation(
       const fy = (dy / dist) * f;
       const fz = (dz / dist) * f;
       if (!pinnedNodes.has(a.id)) {
-        a.velocity.vx = (a.velocity.vx || 0) + fx;
-        a.velocity.vy = (a.velocity.vy || 0) + fy;
-        a.velocity.vz = (a.velocity.vz || 0) + fz;
+        a.velocity.x = (a.velocity.x || 0) + fx;
+        a.velocity.y = (a.velocity.y || 0) + fy;
+        a.velocity.z = (a.velocity.z || 0) + fz;
       }
       if (!pinnedNodes.has(b.id)) {
-        b.velocity.vx = (b.velocity.vx || 0) - fx;
-        b.velocity.vy = (b.velocity.vy || 0) - fy;
-        b.velocity.vz = (b.velocity.vz || 0) - fz;
+        b.velocity.x = (b.velocity.x || 0) - fx;
+        b.velocity.y = (b.velocity.y || 0) - fy;
+        b.velocity.z = (b.velocity.z || 0) - fz;
       }
     }
   }
@@ -350,9 +350,9 @@ export function createSimulation(
       const dx = (cx - n.location.x);
       const dy = (cy - n.location.y);
       const dz = (cz - n.location.z);
-      n.velocity.vx = (n.velocity.vx || 0) + dx * physicsSettings.centerPull;
-      n.velocity.vy = (n.velocity.vy || 0) + dy * physicsSettings.centerPull;
-      n.velocity.vz = (n.velocity.vz || 0) + dz * physicsSettings.centerPull;
+      n.velocity.x = (n.velocity.x || 0) + dx * physicsSettings.centerPull;
+      n.velocity.y = (n.velocity.y || 0) + dy * physicsSettings.centerPull;
+      n.velocity.z = (n.velocity.z || 0) + dz * physicsSettings.centerPull;
     }
   }
 
@@ -360,12 +360,12 @@ export function createSimulation(
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
         const d = Math.max(0, Math.min(1, physicsSettings.damping));
-        n.velocity.vx = (n.velocity.vx ?? 0) * (1 - d);
-        n.velocity.vy = (n.velocity.vy ?? 0) * (1 - d);
-        n.velocity.vz = (n.velocity.vz ?? 0) * (1 - d);
-      if (Math.abs(n.velocity.vx) < 0.001) n.velocity.vx = 0;
-      if (Math.abs(n.velocity.vy) < 0.001) n.velocity.vy = 0;
-      if (Math.abs(n.velocity.vz) < 0.001) n.velocity.vz = 0;
+        n.velocity.x = (n.velocity.x ?? 0) * (1 - d);
+        n.velocity.y = (n.velocity.y ?? 0) * (1 - d);
+        n.velocity.z = (n.velocity.z ?? 0) * (1 - d);
+      if (Math.abs(n.velocity.x) < 0.001) n.velocity.x = 0;
+      if (Math.abs(n.velocity.y) < 0.001) n.velocity.y = 0;
+      if (Math.abs(n.velocity.z) < 0.001) n.velocity.z = 0;
     }
   }
 
@@ -380,10 +380,10 @@ export function createSimulation(
       if (pinnedNodes.has(n.id)) continue;
       if (isNote(n) && noteK > 0) {
         const dz = targetZ - n.location.z;
-        n.velocity.vz = (n.velocity.vz || 0) + dz * noteK;
+        n.velocity.z = (n.velocity.z || 0) + dz * noteK;
       } else if (isTag(n) && tagK > 0) {
         const dx = (targetX) - (n.location.x || 0);
-        n.velocity.vx = (n.velocity.vx || 0) + dx * tagK;
+        n.velocity.x = (n.velocity.x || 0) + dx * tagK;
       }
     }
   }
@@ -392,9 +392,9 @@ export function createSimulation(
     const scale = dt * 60;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
-      n.location.x += (n.velocity.vx || 0) * scale;
-      n.location.y += (n.velocity.vy || 0) * scale;
-      n.location.z = (n.location.z || 0) + (n.velocity.vz || 0) * scale;
+      n.location.x += (n.velocity.x || 0) * scale;
+      n.location.y += (n.velocity.y || 0) * scale;
+      n.location.z = (n.location.z || 0) + (n.velocity.z || 0) * scale;
       // optional gentle hard clamp epsilon
       //if (isNote(n) && Math.abs(n.location.z) < 0.0001) n.location.z = 0;
       if (isTag(n) && Math.abs(n.location.x) < 0.0001) n.location.x = 0;
@@ -411,8 +411,8 @@ export function createSimulation(
 
   function reset() {
     for (const n of nodes) {
-      n.velocity.vx = 0;
-      n.velocity.vy = 0;
+      n.velocity.x = 0;
+      n.velocity.y = 0;
     }
   }
 

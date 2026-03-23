@@ -1,5 +1,5 @@
 import type { CameraState, CameraSettings, WorldTransform } from '../../grammar/interfaces.ts';
-import type { Node } from '../../grammar/interfaces.ts';
+import type { Vec3 } from '../../grammar/interfaces.ts';
 import { getSettings } from '../../../obsidian/settings/settingsStore.ts';
 
 export class Camera {
@@ -9,7 +9,7 @@ export class Camera {
   private worldAnchor     : { x: number; y: number; z: number }                         | null  = null;
   private screenAnchor    : { screenX: number; screenY: number                  }       | null  = null;
   private viewport        : { width  : number; height : number; offsetX: number; offsetY: number }      = { width: 0, height: 0, offsetX: 0, offsetY: 0 };
-  private worldTransform: WorldTransform | null = null;
+  private worldTransform  : WorldTransform | null = null;
 
   // Camera/worldToScreen outputs in viewport space
   // Mouse/touch must be converted into viewport space
@@ -48,7 +48,7 @@ export class Camera {
   }
 
 
-  worldToScreen(node: Node): { x: number; y: number; depth: number; scale: number } {
+  worldToScreen(world: Vec3): { x: number; y: number; depth: number; scale: number } {
     const {
       yaw,
       pitch,
@@ -61,9 +61,9 @@ export class Camera {
     const { offsetX: viewportCenterX, offsetY: viewportCenterY } = this.viewport;
 
     // 0) Start in world space
-    let worldX = node.location.x ?? 0;
-    let worldY = node.location.y ?? 0;
-    let worldZ = node.location.z ?? 0;
+    let worldX = world.x;
+    let worldY = world.y;
+    let worldZ = world.z;
 
     // Optional "turntable world" transform (world moves, camera stays put)
     const worldXform = this.worldTransform;
@@ -267,15 +267,6 @@ export class Camera {
   endRotate(){
     this.screenAnchor           = null;
     this.cameraSnapShot         = null;
-  }
-
-  startDrag(nodeId: string, screenX: number, screenY: number){
-  }
-
-  updateDrag(screenX: number, screenY: number) {
-  }
-
-  endDrag(){
   }
 
   updateZoom(screenX: number, screenY: number, delta: number) {

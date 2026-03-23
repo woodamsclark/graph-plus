@@ -1,5 +1,5 @@
 import { createSimulation } from "./simulation.ts";
-import type { GraphData, Simulation, TranslationState, PhysicsSystem } from "../../grammar/interfaces.ts";
+import type { GraphData, Simulation, UIState, PhysicsSystem } from "../../grammar/interfaces.ts";
 import type { Camera } from "../5. Render/Camera.ts";
 
 export class Physics implements PhysicsSystem{
@@ -11,7 +11,7 @@ export class Physics implements PhysicsSystem{
   constructor(private deps: {
     getGraph:       () => GraphData         | null;
     getCamera:      () => Camera  | null;
-    getInteractionState: () => TranslationState;
+    getInteractionState: () => UIState;
   }) {}
 
   // Call whenever the graph changes (rebuild/filter/etc.)
@@ -45,9 +45,9 @@ export class Physics implements PhysicsSystem{
       node.location.x = this.dragTarget.x;
       node.location.y = this.dragTarget.y;
       node.location.z = this.dragTarget.z;
-      node.velocity.vx = 0;
-      node.velocity.vy = 0;
-      node.velocity.vz = 0;
+      node.velocity.x = 0;
+      node.velocity.y = 0;
+      node.velocity.z = 0;
     }
   }
 

@@ -6,7 +6,9 @@
   "main": "main.js",
   "scripts": {
     "build": "node esbuild.config.js",
-    "watch": "node esbuild.config.js --watch"
+    "watch": "node esbuild.config.js --watch",
+    "typecheck": "tsc --noEmit",
+    "dev": "npm run typecheck && npm run build"
   },
   "devDependencies": {
     "@types/node": "^20.5.1",
