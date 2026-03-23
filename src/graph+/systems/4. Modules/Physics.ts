@@ -1,5 +1,5 @@
 import { createSimulation } from "./simulation.ts";
-import type { GraphData, Simulation, UIState, PhysicsSystem } from "../../grammar/interfaces.ts";
+import type { GraphData, Simulation, UIState, PhysicsSystem, PhysicsSettings } from "../../grammar/interfaces.ts";
 import type { Camera } from "../5. Render/Camera.ts";
 
 export class Physics implements PhysicsSystem{
@@ -7,9 +7,10 @@ export class Physics implements PhysicsSystem{
   private pinnedNodeIds: Set<string> = new Set();
 
   constructor(private deps: {
-    getGraph:       () => GraphData         | null;
-    getCamera:      () => Camera  | null;
-    getInteractionState: () => UIState;
+    getGraph:             () => GraphData         | null;
+    getCamera:            () => Camera            | null;
+    getInteractionState:  () => UIState;
+    getPhysicsSettings: () => PhysicsSettings;
   }) {}
 
   // Call whenever the graph changes (rebuild/filter/etc.)
@@ -34,7 +35,7 @@ export class Physics implements PhysicsSystem{
   }
 
   public tick(dt: number): void {
-  this.sim?.tick(dt);
+  this.sim?.tick(dt, this.deps.getPhysicsSettings());
   }
 
   public stop(): void {

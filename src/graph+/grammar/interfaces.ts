@@ -177,7 +177,7 @@ export interface Link {
 export interface Simulation {
   start()                           : void;
   stop()                            : void;
-  tick(dt: number)                  : void;
+  tick(dt: number, physicsSettings: PhysicsSettings)                  : void;
   reset()                           : void;
   setPinnedNodes?(ids: Set<string>) : void;
   updateDragTarget?(target: { x: number; y: number } | null): void;

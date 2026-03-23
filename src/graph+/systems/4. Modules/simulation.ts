@@ -493,12 +493,9 @@ export function createSimulation(
     return dragConstraint?.node.id === nodeId;
   }
 
-  function tick(dt: number) {
+  function tick(dt: number, physicsSettings: PhysicsSettings) {
     if (!running) return;
     if (!nodes.length) return;
-
-    const settings = getSettings();
-    const physicsSettings = settings.physics;
     
     // Build tree from all nodes (including pinned nodes is fine; they still repel others)
     // If you DON'T want pinned nodes to contribute to repulsion, filter them out here.
