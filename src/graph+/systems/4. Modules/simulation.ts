@@ -1,4 +1,4 @@
-import { Camera } from '../5. Render/Camera.ts';
+import { CameraController } from '../5. Render/CameraController.ts';
 import { Node, GraphData, PhysicsSettings, Simulation } from '../../grammar/interfaces.ts';
 import { getSettings } from '../../../obsidian/settings/settingsStore.ts';
 import type { ScreenPt, Vec3 } from "../../grammar/interfaces.ts";
@@ -23,7 +23,7 @@ type DragConstraint = {
 
 export function createSimulation(
     graph: GraphData, 
-    camera : Camera, 
+    camera : CameraController, 
     getGravityCenter: () => ScreenPt | null,
     shouldIgnoreMouseGravity?: (nodeId: string) => boolean
   ) : Simulation{
