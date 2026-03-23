@@ -15,7 +15,7 @@ import { CommandBuffer } from "./systems/3. Module Commander/CommandBuffer.ts";
 import { Anima } from "./systems/4. Modules/Anima.ts";
 import { AnimaStateStore } from "./systems/4. Modules/AnimaStateStore.ts";
 import { Physics } from "./systems/4. Modules/Physics.ts";
-import { Camera } from "./systems/5. Render/Camera.ts";
+import { CameraController } from "./systems/5. Render/CameraController.ts";
 import { Renderer } from "./systems/5. Render/Renderer.ts";
 import { RenderFrameStore } from "./systems/5. Render/RenderFrameStore.ts";
 import { RenderStateComposer } from "./systems/5. Render/RenderStateComposer.ts";
@@ -36,8 +36,8 @@ export class Orchestrator {
   private anima:          Anima | null                    = null;
   private renderer:       Renderer | null                 = null;
   private physics:        Physics | null                  = null;
-  private uiInterpreter:     UIInterpreter | null         = null;
-  private camera:         Camera | null                   = null;
+  private uiInterpreter:  UIInterpreter | null            = null;
+  private camera:         CameraController | null         = null;
   private uiStateStore                                    = new UIStateStore();
   private animaStateStore                                 = new AnimaStateStore();
   private renderFrameStore                                = new RenderFrameStore();
@@ -66,7 +66,7 @@ export class Orchestrator {
     const cursor = createCursorController(this.canvas);
 
    // 5. Render
-    this.camera = new Camera(getSettings().camera.state);
+    this.camera = new CameraController(getSettings().camera.state);
     this.camera.setWorldTransform(null);
 
     this.renderer = new Renderer(this.canvas, this.camera, this.renderFrameStore);

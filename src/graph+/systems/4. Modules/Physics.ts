@@ -1,6 +1,6 @@
 import { createSimulation } from "./simulation.ts";
 import type { GraphData, Simulation, UIState, PhysicsSystem, PhysicsSettings } from "../../grammar/interfaces.ts";
-import type { Camera } from "../5. Render/Camera.ts";
+import type { CameraController } from "../5. Render/CameraController.ts";
 
 export class Physics implements PhysicsSystem{
   private sim: Simulation | null = null;
@@ -8,7 +8,7 @@ export class Physics implements PhysicsSystem{
 
   constructor(private deps: {
     getGraph:             () => GraphData         | null;
-    getCamera:            () => Camera            | null;
+    getCamera:            () => CameraController            | null;
     getInteractionState:  () => UIState;
     getPhysicsSettings: () => PhysicsSettings;
   }) {}

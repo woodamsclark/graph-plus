@@ -5,7 +5,7 @@ import type {
   RenderSystem,
 } from "../../grammar/interfaces.ts";
 
-import type { Camera } from "./Camera.ts";
+import type { CameraController } from "./CameraController.ts";
 import { RenderFrameStore } from "./RenderFrameStore.ts";
 
 export class Renderer implements RenderSystem {
@@ -15,7 +15,7 @@ export class Renderer implements RenderSystem {
 
   constructor(
     private canvas:     HTMLCanvasElement,
-    private camera:     Camera,
+    private camera:     CameraController,
     private frameStore: RenderFrameStore
   ) {
     const ctx = this.canvas.getContext("2d");

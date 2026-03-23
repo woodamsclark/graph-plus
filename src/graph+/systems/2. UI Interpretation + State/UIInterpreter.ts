@@ -7,7 +7,7 @@ import type {
   DrainableQueue,
 } from "../../grammar/interfaces.ts";
 
-import type { Camera }                from "../5. Render/Camera.ts";
+import type { CameraController }                from "../5. Render/CameraController.ts";
 import type { CursorCss }             from "../../CursorController.ts";
 import type { Command }               from "../3. Module Commander/Commander.ts";
 import      { UIStateStore } from "./UIStateStore.ts";
@@ -18,7 +18,7 @@ import { HitTester } from "./HitTester.ts";
 
 type UIInterpreterDeps = {
   getGraph:             () => GraphData | null;
-  getCamera:            () => Camera    | null;
+  getCamera:            () => CameraController    | null;
   getCanvas:            () => HTMLCanvasElement;
   getInputBuffer:       () => DrainableQueue<UserInputEvent>;
   getCommands:          () => DrainableQueue<Command>;
