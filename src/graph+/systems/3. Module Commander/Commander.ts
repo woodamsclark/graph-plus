@@ -10,8 +10,9 @@ export type Command =
 | { type: "SetMouseGravity";              on: boolean }
 | { type: "PinNode";                  nodeId: string }
 | { type: "UnpinNode";                nodeId: string }
-| { type: "BeginDrag";                nodeId: string }
-| { type: "SetDragTarget";            nodeId: string; targetWorld: Vec3 }
+| { type: "SetDraggedNode";           nodeId: string | null }
+| { type: "BeginDrag";                nodeId: string; targetWorld: Vec3 }
+| { type: "UpdateDragTarget";         targetWorld: Vec3 }
 | { type: "EndDrag";                  nodeId: string }
 | { type: "StartPanCamera";           screen: { x: number; y: number } }
 | { type: "UpdatePanCamera";          screen: { x: number; y: number } }
@@ -24,7 +25,6 @@ export type Command =
 | { type: "SetGravityCenter";          point: { x: number; y: number } | null }
 | { type: "SetHoveredNode";           nodeId: string | null }
 | { type: "SetFollowedNode";          nodeId: string | null }
-| { type: "SetDraggedNode";           nodeId: string | null }
 | { type: "SetPanning";                   on: boolean }
 | { type: "SetRotating";                  on: boolean }
 | { type: "SetCameraTarget";          target: { x: number; y: number; z: number } }

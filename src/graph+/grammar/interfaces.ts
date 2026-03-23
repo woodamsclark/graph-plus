@@ -67,8 +67,8 @@ export interface GraphSettings {
 
 export interface PhysicsSettings {
   repulsionStrength     : number;
-  edgeStrength        : number;
-  edgeLength          : number;
+  edgeStrength          : number;
+  edgeLength            : number;
   centerPull            : number;
   damping               : number;
   notePlaneStiffness    : number;
@@ -124,7 +124,6 @@ export interface CameraState {
 
 export class GraphStore {
   private graph:  GraphData | null = null;
-  
   get():          GraphData | null { return this.graph; }
   set(graph:      GraphData | null) { this.graph = graph; }
 }
@@ -181,6 +180,9 @@ export interface Simulation {
   tick(dt: number)                  : void;
   reset()                           : void;
   setPinnedNodes?(ids: Set<string>) : void;
+  updateDragTarget?(target: { x: number; y: number } | null): void;
+  beginDrag?(nodeId: string, target: { x: number; y: number; z: number }): void;
+  endDrag?(): void;
 }
 
 export interface WorldTransform {

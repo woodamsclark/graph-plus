@@ -4,8 +4,6 @@ import type { Camera } from "../5. Render/Camera.ts";
 
 export class Physics implements PhysicsSystem{
   private sim: Simulation | null = null;
-  private dragNodeId: string | null = null;
-  private dragTarget: { x: number; y: number; z: number } | null = null;
   private pinnedNodeIds: Set<string> = new Set();
 
   constructor(private deps: {
@@ -33,30 +31,16 @@ export class Physics implements PhysicsSystem{
     );
     this.sim?.setPinnedNodes?.(new Set(this.pinnedNodeIds));
     this.sim?.start();
-    this.sim?.start();
   }
 
- public tick(dt: number): void {
-  const graph = this.deps.getGraph();
-
-  if (graph && this.dragNodeId && this.dragTarget) {
-    const node = graph.nodes.find(n => n.id === this.dragNodeId);
-    if (node) {
-      node.location.x = this.dragTarget.x;
-      node.location.y = this.dragTarget.y;
-      node.location.z = this.dragTarget.z;
-      node.velocity.x = 0;
-      node.velocity.y = 0;
-      node.velocity.z = 0;
-    }
-  }
-
+  public tick(dt: number): void {
   this.sim?.tick(dt);
   }
 
   public stop(): void {
     if (this.sim) this.sim.stop();
   }
+
   public start(): void {
     this.sim?.start();
   }
@@ -80,19 +64,16 @@ export class Physics implements PhysicsSystem{
     return this.pinnedNodeIds;
   }
 
-  beginDrag(nodeId: string): void {
-  this.dragNodeId = nodeId;
+  beginDrag(nodeId: string, target: { x: number; y: number; z: number }): void {
+    this.sim?.beginDrag?.(nodeId, target);
   }
 
-  setDragTarget(nodeId: string, target: { x: number; y: number; z: number }): void {
-    if (this.dragNodeId !== nodeId) return;
-    this.dragTarget = target;
+  updateDragTarget(targetWorld: { x: number; y: number; z: number }): void {
+    this.sim?.updateDragTarget?.(targetWorld);
   }
 
-  endDrag(nodeId: string): void {
-    if (this.dragNodeId !== nodeId) return;
-    this.dragNodeId = null;
-    this.dragTarget = null;
+  endDrag(): void {
+    this.sim?.endDrag?.();
   }
 
 }
