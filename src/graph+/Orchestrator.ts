@@ -115,15 +115,15 @@ export class Orchestrator {
     });
 
     this.commandRegistry.register("BeginDrag", (command) => {
-      this.physics?.beginDrag?.(command.nodeId);
+      this.physics?.beginDrag?.(command.nodeId, command.targetWorld);
     });
 
-    this.commandRegistry.register("SetDragTarget", (command) => {
-      this.physics?.setDragTarget?.(command.nodeId, command.targetWorld);
+    this.commandRegistry.register("UpdateDragTarget", (command) => {
+      this.physics?.updateDragTarget?.(command.targetWorld);
     });
 
     this.commandRegistry.register("EndDrag", (command) => {
-      this.physics?.endDrag?.(command.nodeId);
+      this.physics?.endDrag?.();
     });
 
     this.commandRegistry.register("ResetCamera", () => {

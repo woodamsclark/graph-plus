@@ -9,8 +9,6 @@ import type {
 
 import type { Camera }                from "../5. Render/Camera.ts";
 import type { CursorCss }             from "../../CursorController.ts";
-import type { InputBuffer }           from "../1. User Input/InputBuffer.ts";
-import type { CommandBuffer }         from "../3. Module Commander/CommandBuffer.ts";
 import type { Command }               from "../3. Module Commander/Commander.ts";
 import      { UIStateStore } from "./UIStateStore.ts";
 import type { UISettings }            from "../../grammar/interfaces.ts";
@@ -404,8 +402,8 @@ export class UIInterpreter implements UIInterpreterSystem {
   private startDrag(nodeId: string, screenX: number, screenY: number) {
     this.cmd({ type: "SetFollowedNode", nodeId: null });
 
-    const graph = this.deps.getGraph();
-    const camera = this.deps.getCamera();
+    const graph   = this.deps.getGraph();
+    const camera  = this.deps.getCamera();
     if (!graph || !camera) return;
 
     this.cmd({ type: "SetMouseGravity", on: false });
@@ -413,11 +411,8 @@ export class UIInterpreter implements UIInterpreterSystem {
     const node = graph.nodes.find(n => n.id === nodeId);
     if (!node) return;
 
-    const projected = camera.worldToScreen(node.location);
-    this.dragDepthFromCamera = Math.max(0.0001, projected.depth);
-
-    this.cmd({ type: "SetDraggedNode", nodeId });
-    this.cmd({ type: "PinNode", nodeId });
+    const projected           = camera.worldToScreen(node.location);
+    this.dragDepthFromCamera  = Math.max(0.0001, projected.depth);
 
     const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
     this.dragWorldOffset = {
@@ -426,14 +421,15 @@ export class UIInterpreter implements UIInterpreterSystem {
       z: (node.location.z || 0) - underMouse.z,
     };
 
-    this.cmd({ type: "BeginDrag", nodeId });
+    this.cmd({ type: "SetDraggedNode",  nodeId });
+    this.cmd({ type: "BeginDrag",       nodeId,     targetWorld: node.location });
 
     const targetWorld = {
       x: underMouse.x + this.dragWorldOffset.x,
       y: underMouse.y + this.dragWorldOffset.y,
       z: underMouse.z + this.dragWorldOffset.z,
     };
-    this.cmd({ type: "SetDragTarget", nodeId, targetWorld });
+    this.cmd({ type: "UpdateDragTarget", targetWorld });
   }
 
   private updateDrag(screenX: number, screenY: number) {
@@ -452,20 +448,18 @@ export class UIInterpreter implements UIInterpreterSystem {
       z: underMouse.z + o.z,
     };
 
-    this.cmd({ type: "SetDragTarget", nodeId: draggedId, targetWorld });
+    this.cmd({ type: "UpdateDragTarget", targetWorld });
   }
 
   private endDrag() {
     const draggedId = this.deps.getInteractionState().get().draggedNodeId;
     if (!draggedId) return;
 
-    this.cmd({ type: "UnpinNode", nodeId: draggedId });
-    this.cmd({ type: "SetDraggedNode", nodeId: null });
-
     this.dragWorldOffset = null;
 
-    this.cmd({ type: "EndDrag", nodeId: draggedId });
-    this.cmd({ type: "SetMouseGravity", on: true });
+    this.cmd({ type: "EndDrag",         nodeId: draggedId });
+    this.cmd({ type: "SetDraggedNode",  nodeId:null });
+    this.cmd({ type: "SetMouseGravity",     on: true      });
   }
 
   private startPan(screenX: number, screenY: number) {
@@ -494,7 +488,7 @@ export class UIInterpreter implements UIInterpreterSystem {
 
   private endRotate() {
     this.cmd({ type: "SetRotating", on: false });
-    this.cmd({ type: "EndRotateCamera" });
+    this.cmd({ type: "EndRotateCamera"        });
   }
 
   private updateZoom(screenX: number, screenY: number, delta: number) {

@@ -1,33 +1,64 @@
 import { Camera } from '../5. Render/Camera.ts';
 import { Node, GraphData, PhysicsSettings, Simulation } from '../../grammar/interfaces.ts';
 import { getSettings } from '../../../obsidian/settings/settingsStore.ts';
-import type { ScreenPt } from "../../grammar/interfaces.ts";
+import type { ScreenPt, Vec3 } from "../../grammar/interfaces.ts";
+
+ type OctNode = {
+    cx:   number;   cy: number;   cz: number; // cube center
+    comX: number; comY: number; comZ: number; // center of mass
+    h:    number;                             // half-size (cube half-width)
+    mass: number;                             // number of bodies (or weighted)
+    body: Node | null;                        // if leaf with single body
+    children: (OctNode | null)[] | null;      // length 8 when subdivided
+  };
+
+
+type DragConstraint = {
+  node:       Node;
+  target:     Vec3;
+  stiffness:  number;
+  damping:    number;
+  maxForce?:  number;
+  } | null;
 
 export function createSimulation(
-  graph: GraphData, 
-  camera : Camera, 
-  getGravityCenter: () => ScreenPt | null,
-  shouldIgnoreMouseGravity?: (nodeId: string) => boolean
-) : Simulation{
+    graph: GraphData, 
+    camera : Camera, 
+    getGravityCenter: () => ScreenPt | null,
+    shouldIgnoreMouseGravity?: (nodeId: string) => boolean
+  ) : Simulation{
   // If center not provided, compute bounding-box center from node positions
   const nodes     = graph.nodes;
   const links     = graph.links;
+  let dragConstraint: DragConstraint = null;
   let running     = false;  
   let pinnedNodes = new Set<string>(); // set of node ids that should be pinned (physics skip)
   const nodeById  = new Map<string, Node>();
+  
   for (const n of nodes) nodeById.set(n.id, n);
 
-  type OctNode = {
-    cx: number; cy: number; cz: number; // cube center
-    h: number;                          // half-size (cube half-width)
+  
+  function beginDrag(nodeId: string, target: Vec3) {
+    const node = graph.nodes.find(n => n.id === nodeId);
+    if (!node) return;
 
-    mass: number;                       // number of bodies (or weighted)
-    comX: number; comY: number; comZ: number; // center of mass
+    dragConstraint = {
+      node,
+      target: { ...target },
+      stiffness: 100,
+      damping: 8,
+    };
+  }
 
-    body: Node | null;             // if leaf with single body
-    children: (OctNode | null)[] | null; // length 8 when subdivided
-  };
+  function updateDragTarget(target: Vec3) {
+    if (!dragConstraint) return;
+    dragConstraint.target = { ...target };
+  }
 
+  function endDrag() {
+    dragConstraint = null;
+  }
+ 
   function makeOctNode(cx: number, cy: number, cz: number, h: number): OctNode {
     return {
       cx, cy, cz, h,
@@ -65,7 +96,6 @@ export function createSimulation(
     cell.children![idx] = child;
     return child;
   }
-
 
   function buildOctree(bodies: Node[]): OctNode | null {
   if (!bodies.length) return null;
@@ -141,24 +171,6 @@ export function createSimulation(
     const idx = childIndex(cell, body.location.x, body.location.y, body.location.z);
     const child = getOrCreateChild(cell, idx);
     insertBody(child, body);
-  }
-
-  function applyRepulsionBarnesHut(physicsSettings: PhysicsSettings, root: OctNode): void {
-    const strength = physicsSettings.repulsionStrength;
-
-    // keep your existing "minimum separation" behavior
-    const minDist = 40;
-    const minDistSq = minDist * minDist;
-
-    // BH tuning knobs (constants for now; you can expose later)
-    const theta = 0.8;        // lower = more accurate; higher = faster (typical 0.5–1.2)
-    const thetaSq = theta * theta;
-    const eps = 1e-3;         // tiny softening to avoid 1/0
-
-    for (const a of nodes) {
-      if (pinnedNodes.has(a.id)) continue;
-      accumulateBH(a, root, strength, thetaSq, minDistSq, eps);
-    }
   }
 
   function accumulateBH(
@@ -277,8 +289,6 @@ export function createSimulation(
     }
   }
 
-
-
   function applyRepulsion(physicsSettings: PhysicsSettings) {
     const N = nodes.length;
     for (let i = 0; i < N; i++) {
@@ -309,6 +319,24 @@ export function createSimulation(
           b.velocity.z = (b.velocity.z || 0) - fz;
         }
       }
+    }
+  }
+
+  function applyRepulsionBarnesHut(physicsSettings: PhysicsSettings, root: OctNode): void {
+    const strength = physicsSettings.repulsionStrength;
+
+    // keep your existing "minimum separation" behavior
+    const minDist = 40;
+    const minDistSq = minDist * minDist;
+
+    // BH tuning knobs (constants for now; you can expose later)
+    const theta = 0.8;        // lower = more accurate; higher = faster (typical 0.5–1.2)
+    const thetaSq = theta * theta;
+    const eps = 1e-3;         // tiny softening to avoid 1/0
+
+    for (const a of nodes) {
+      if (pinnedNodes.has(a.id)) continue;
+      accumulateBH(a, root, strength, thetaSq, minDistSq, eps);
     }
   }
 
@@ -413,6 +441,7 @@ export function createSimulation(
     for (const n of nodes) {
       n.velocity.x = 0;
       n.velocity.y = 0;
+      n.velocity.z = 0;
     }
   }
 
@@ -423,6 +452,45 @@ export function createSimulation(
 
   function isNote(n: Node): boolean {
     return n.type === "note";
+  }
+
+  function applyDragConstraint(dt: number) {
+    if (!dragConstraint) return;
+
+    const node = dragConstraint.node;
+
+    if (pinnedNodes.has(node.id)) return;
+
+    const dx = dragConstraint.target.x - node.location.x;
+    const dy = dragConstraint.target.y - node.location.y;
+    const dz = dragConstraint.target.z - node.location.z;
+
+    const fx = dx * dragConstraint.stiffness - node.velocity.x * dragConstraint.damping;
+    const fy = dy * dragConstraint.stiffness - node.velocity.y * dragConstraint.damping;
+    const fz = dz * dragConstraint.stiffness - node.velocity.z * dragConstraint.damping;
+
+    node.velocity.x += fx * dt;
+    node.velocity.y += fy * dt;
+    node.velocity.z += fz * dt;
+  }
+
+  function applyDragConstraintKinematic(_dt: number) {
+    if (!dragConstraint) return;
+
+    const node = dragConstraint.node;
+    if (pinnedNodes.has(node.id)) return;
+
+    node.location.x = dragConstraint.target.x;
+    node.location.y = dragConstraint.target.y;
+    node.location.z = dragConstraint.target.z;
+
+    node.velocity.x = 0;
+    node.velocity.y = 0;
+    node.velocity.z = 0;
+  }
+
+  function isDraggedNode(nodeId: string): boolean {
+    return dragConstraint?.node.id === nodeId;
   }
 
   function tick(dt: number) {
@@ -436,9 +504,7 @@ export function createSimulation(
     // If you DON'T want pinned nodes to contribute to repulsion, filter them out here.
     const root = buildOctree(nodes);
     if (!root) return;
-
-
-    //applyRepulsion(physicsSettings); O(N^2) old method
+    
     applyRepulsionBarnesHut(physicsSettings, root);
     applySprings(physicsSettings);
     applyMouseGravity(physicsSettings);
@@ -446,10 +512,11 @@ export function createSimulation(
     applyCenteringForce(physicsSettings);
     applyPlaneConstraints(physicsSettings);
 
+    applyDragConstraintKinematic(dt);
+
     applyDamping(physicsSettings);
     integrate(dt);
   }
 
-  return { start, stop, tick, reset, setPinnedNodes };
-
+  return { beginDrag, updateDragTarget, endDrag, stop, start, tick, reset, setPinnedNodes };
 }
