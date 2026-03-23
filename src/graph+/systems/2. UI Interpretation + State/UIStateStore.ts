@@ -1,7 +1,7 @@
-import type { TranslationState } from "../../grammar/interfaces.ts";
+import type { Store, UIState } from "../../grammar/interfaces.ts";
 
-export class InteractionStateStore {
-  private state: TranslationState = {
+export class UIStateStore implements Store<UIState> {
+  private state: UIState = {
     gravityCenter: null,
     hoveredNodeId: null,
     followedNodeId: null,
@@ -10,7 +10,7 @@ export class InteractionStateStore {
     isRotating: false,
   };
 
-  public get(): Readonly<TranslationState> {
+  public get(): Readonly<UIState> {
     return this.state;
   }
 

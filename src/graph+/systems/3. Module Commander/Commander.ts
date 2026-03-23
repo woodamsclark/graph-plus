@@ -1,150 +1,84 @@
 // Commander.ts
-// "Apply Intent" stage: drains commands and applies them via injected handlers.
-// This stays boring on purpose.
+// Drains commands and routes them through a registry.
+// Modules register handlers for the command types they care about.
 
-import type { Command, CommandSystem } from "../../grammar/interfaces.ts";
+import type { CommandSystem, DrainableQueue, Vec3 } from "../../grammar/interfaces.ts";
 import { CommandBuffer } from "./CommandBuffer.ts";
 
-export type CommandHandlers = {
-  // World / settings mutation
-  setMouseGravity?:       (on: boolean) => void;
-  pinNode?:               (nodeId: string) => void;
-  unpinNode?:             (nodeId: string) => void;
-  openNode?:              (nodeId: string) => void;
-  beginDrag?:             (nodeId: string) => void;
-  dragTarget?:            (nodeId: string, targetWorld: { x: number; y: number; z: number }) => void;
-  endDrag?:               (nodeId: string) => void;
-  onNodeCommandExecuted?: (nodeId: string | null, commandType: Command["type"]) => void;
-  resetCamera?:           () => void;
-  startPanCamera?:        (screen: { x: number; y: number }) => void;
-  updatePanCamera?:       (screen: { x: number; y: number }) => void;
-  endPanCamera?:          () => void;
-  startRotateCamera?:     (screen: { x: number; y: number }) => void;
-  updateRotateCamera?:    (screen: { x: number; y: number }) => void;
-  endRotateCamera?:       () => void;
-  zoomCamera?:            (screen: { x: number; y: number }, delta: number) => void;
-  setGravityCenter?:      (point: { x: number; y: number } | null) => void;
-  setHoveredNode?:        (nodeId: string | null) => void;
-  setFollowedNode?:       (nodeId: string | null) => void;
-  //followNode?:            (nodeId: string | null) => void;
-  setDraggedNode?:        (nodeId: string | null) => void;
-  setPanning?:            (on: boolean) => void;
-  setRotating?:           (on: boolean) => void;
-  setCameraTarget?:       (target: { x: number; y: number; z: number }) => void;
+export type Command =
+| { type: "OpenNode";                 nodeId: string }
+| { type: "SetMouseGravity";              on: boolean }
+| { type: "PinNode";                  nodeId: string }
+| { type: "UnpinNode";                nodeId: string }
+| { type: "BeginDrag";                nodeId: string }
+| { type: "SetDragTarget";            nodeId: string; targetWorld: Vec3 }
+| { type: "EndDrag";                  nodeId: string }
+| { type: "StartPanCamera";           screen: { x: number; y: number } }
+| { type: "UpdatePanCamera";          screen: { x: number; y: number } }
+| { type: "EndPanCamera" }
+| { type: "StartRotateCamera";        screen: { x: number; y: number } }
+| { type: "UpdateRotateCamera";       screen: { x: number; y: number } }
+| { type: "EndRotateCamera" }
+| { type: "ResetCamera" }
+| { type: "ZoomCamera";               screen: { x: number; y: number }; delta: number }
+| { type: "SetGravityCenter";          point: { x: number; y: number } | null }
+| { type: "SetHoveredNode";           nodeId: string | null }
+| { type: "SetFollowedNode";          nodeId: string | null }
+| { type: "SetDraggedNode";           nodeId: string | null }
+| { type: "SetPanning";                   on: boolean }
+| { type: "SetRotating";                  on: boolean }
+| { type: "SetCameraTarget";          target: { x: number; y: number; z: number } }
+
+export type CommandHandler<K extends Command["type"]> = (
+  command: Extract<Command, { type: K }>
+) => void;
+
+export type CommandObserver = {
+  afterCommandApplied?: (command: Command) => void;
 };
 
+
+export class CommandRegistry {
+  private handlers = new Map<Command["type"], Array<(command: Command) => void>>();
+
+  public register<K extends Command["type"]>(
+    type: K,
+    handler: CommandHandler<K>
+  ): void {
+    const list = this.handlers.get(type) ?? [];
+    list.push(handler as (command: Command) => void);
+    this.handlers.set(type, list);
+  }
+
+  public dispatch(command: Command): void {
+    const list = this.handlers.get(command.type) ?? [];
+    for (const handler of list) {
+      handler(command);
+    }
+  }
+}
+
 export type CommandSystemDeps = {
-  getQueue: () => CommandBuffer;
-  handlers: CommandHandlers;
+  getQueue: () => DrainableQueue<Command>;
+  registry: CommandRegistry;
+  observers?: CommandObserver[];
 };
+
+
+
 
 export class Commander implements CommandSystem {
   constructor(private deps: CommandSystemDeps) {}
 
   tick(): void {
-    const commands:Command[] = this.deps.getQueue().drain();
+    const commands: Command[] = this.deps.getQueue().drain();
     if (commands.length === 0) return;
 
-    const handlers = this.deps.handlers;
-
     for (const command of commands) {
-      switch (command.type) {
-        case "RequestOpenNode":
-          handlers.openNode?.(command.nodeId);
-            handlers.onNodeCommandExecuted?.(command.nodeId, command.type);
-          break;
+      this.deps.registry.dispatch(command);
 
-        case "SetMouseGravity":
-          handlers.setMouseGravity?.(command.on);
-          break;
-
-        case "PinNode":
-          handlers.pinNode?.(command.nodeId);
-          break;
-
-        case "UnpinNode":
-          handlers.unpinNode?.(command.nodeId);
-          break;
-
-        case "BeginDrag":
-          handlers.beginDrag?.(command.nodeId);
-          break;
-
-        case "DragTarget":
-          handlers.dragTarget?.(command.nodeId, command.targetWorld);
-          break;
-
-        case "EndDrag":
-          handlers.endDrag?.(command.nodeId);
-          break;
-
-
-        case "ResetCamera":
-          handlers.resetCamera?.();
-          break;
-
-        case "StartPanCamera":
-          handlers.startPanCamera?.(command.screen);
-          break;
-
-        case "UpdatePanCamera":
-          handlers.updatePanCamera?.(command.screen);
-          break;
-
-        case "EndPanCamera":
-          handlers.endPanCamera?.();
-          break;
-
-        case "StartRotateCamera":
-          handlers.startRotateCamera?.(command.screen);
-          break;
-
-        case "UpdateRotateCamera":
-          handlers.updateRotateCamera?.(command.screen);
-          break;
-
-        case "EndRotateCamera":
-          handlers.endRotateCamera?.();
-          break;
-
-        case "ZoomCamera":
-          handlers.zoomCamera?.(command.screen, command.delta);
-          break;
-
-        case "SetGravityCenter":
-          handlers.setGravityCenter?.(command.point);
-          break;
-
-        case "SetHoveredNode":
-          handlers.setHoveredNode?.(command.nodeId);
-          break;
-
-        case "SetFollowedNode":
-          handlers.setFollowedNode?.(command.nodeId);
-          handlers.onNodeCommandExecuted?.(command.nodeId, command.type);
-          break;
-
-        case "SetDraggedNode":
-          handlers.setDraggedNode?.(command.nodeId);
-          break;
-
-        case "SetPanning":
-          handlers.setPanning?.(command.on);
-          break;
-
-        case "SetRotating":
-          handlers.setRotating?.(command.on);
-          break;
-
-        case "SetCameraTarget":
-          handlers.setCameraTarget?.(command.target);
-          break;
-
-        default:
-          // Exhaustiveness check for future commands
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          //const _never: never = command;
-          break;
+      for (const observer of this.deps.observers ?? []) {
+        observer.afterCommandApplied?.(command);
       }
     }
   }

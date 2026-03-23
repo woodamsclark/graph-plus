@@ -24,7 +24,7 @@ export default class GraphPlus extends Plugin {
                     ...raw.camera?.state,
                   },
                 },
-      input:    { ...DEFAULT_SETTINGS.input, ...raw.input },
+      input:    { ...DEFAULT_SETTINGS.ui, ...raw.input },
               });
     this.settings = getSettings();
 

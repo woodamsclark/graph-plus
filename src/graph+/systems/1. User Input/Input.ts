@@ -1,25 +1,25 @@
 // InputManager.ts
-import type { InputSettings, ScreenPt, PointerKind } from "../../grammar/interfaces.ts";
+import type { UISettings, ScreenPt, PointerKind, DrainableQueue, UserInputEvent } from "../../grammar/interfaces.ts";
 import { InputBuffer } from "./InputBuffer.ts";
 
 type InputDeps = {
   getCanvas: () => HTMLCanvasElement;
-  getBuffer: () => InputBuffer;
-  inputSettings: InputSettings;
+  getBuffer: () => DrainableQueue<UserInputEvent>;
+  uiSettings: UISettings;
 };
 
 
 export class Input {
   private longPressTimer: number | null = null;
   private longPressPointerId: number | null = null;
-  private settings: InputSettings = {};
+  private settings: UISettings;
 
   constructor(private deps: InputDeps) {
-    this.setInputSettings(deps.inputSettings);
+    this.settings = deps.uiSettings
     this.attach();
   }
 
-  setInputSettings(settings: Partial<InputSettings>) {
+  setInputSettings(settings: Partial<UISettings>) {
     this.settings = {
       ...this.settings,
       ...settings,
@@ -77,7 +77,7 @@ export class Input {
 
     // long press only for touch/pen
     const allowedKinds: PointerKind[] =
-    this.settings.longPressPointerKinds ?? ["touch", "pen"];
+    this.settings.longPressPointerKinds;
 
     if (allowedKinds.includes(kind)) {
       this.startLongPress(e.pointerId, kind, screen, { x: e.clientX, y: e.clientY });

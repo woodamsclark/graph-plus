@@ -2,13 +2,15 @@ import { TFile } from 'obsidian';
 
 
 export type NodeType  = 'note' | 'tag' | 'canvas'; // canvas nodes is a future feature 01-01-2026
-export type Vec2      = {  x: number;  y: number };
-export type ScreenPt  = {  x: number;  y: number };
-export type ClientPt  = {  x: number;  y: number };
-export type location         = {  x: number;  y: number;  z: number  };
-export type velocity         = { vx: number; vy: number; vz: number  };
-export type Vec3 = { x: number; y: number; z: number };
+export type Vec2      = { x: number;  y: number };
+export type ScreenPt  = { x: number;  y: number };
+export type ClientPt  = { x: number;  y: number };
+export type Location  = { x: number;  y: number;  z: number };
+export type Velocity  = { x: number;  y: number;  z: number };
+export type Vec3      = { x: number;  y: number;  z: number };
 
+
+// these to be moved into Anima module eventually
 type anima    = { level : number,  capacity : number }; // pressure = level / threshold
 type gate     = {
     state           : "open" | "closed",
@@ -21,17 +23,24 @@ type gate     = {
     // live_threshold = edge.strength * edge.length * (1 + strain) // calculated live, since strain is deviation fron length
   }
 
-
-export type TranslationState = {
+export type UIState = {
   gravityCenter: Vec2 | null;
-  hoveredNodeId: string | null;
+  hoveredNodeId:  string | null;
   followedNodeId: string | null;
-  draggedNodeId: string | null;
-  isPanning: boolean;
-  isRotating: boolean;
+  draggedNodeId:  string | null;
+  isPanning:      boolean;
+  isRotating:     boolean;
 };
 
   // --- Interfaces ------------------------------------------------------
+
+  // Settings
+export interface GraphPlusSettings {
+  graph                 : GraphSettings;
+  physics               : PhysicsSettings;
+  camera                : CameraSettings;
+  ui                    : UISettings;
+}
 
 export interface GraphSettings {
   minNodeRadius         : number;
@@ -77,7 +86,6 @@ export interface PhysicsSettings {
 
 export interface CameraSettings {
   momentumScale         : number;
-  dragThreshold         : number;
   rotateSensitivityX    : number;
   rotateSensitivityY    : number;
   zoomSensitivity       : number;
@@ -88,13 +96,14 @@ export interface CameraSettings {
   state                 : CameraState;
 }
 
-export interface GraphPlusSettings {
-  graph                 : GraphSettings;
-  physics               : PhysicsSettings;
-  camera                : CameraSettings;
-  input                 : InputSettings;
-}
+export type UISettings = {
+    longPressMs:            number;
+    longPressPointerKinds:  Array<PointerKind>;
+    dragThresholdPx:        number;
+    doubleClickMs:          number;
+};
 
+// State and Stores
 export interface CameraState {
   yaw                   : number;      // rotation around Y axis
   pitch                 : number;      // rotation around X axis
@@ -105,12 +114,19 @@ export interface CameraState {
   offsetX               : number;
   offsetY               : number;
   offsetZ               : number;
-  rotateVelX             : number;
-  rotateVelY             : number;
+  rotateVelX            : number;
+  rotateVelY            : number;
   panVelX               : number;
   panVelY               : number;
   zoomVel               : number;
   worldAnchorPoint?     : { x: number; y: number; z: number } | null;
+}
+
+export class GraphStore {
+  private graph:  GraphData | null = null;
+  
+  get():          GraphData | null { return this.graph; }
+  set(graph:      GraphData | null) { this.graph = graph; }
 }
 
 export interface GraphData {
@@ -122,12 +138,6 @@ export interface GraphData {
   // linksOut[nodeId] = { targetId: count, ... }
   // linksIn[nodeId][sourceId]  = count of links from sourceId to nodeId
   // linksIn[nodeId]  = { sourceId: count, ... }
-}
-
-export class GraphState {
-  private graph: GraphData | null = null;
-  get(): GraphData | null { return this.graph; }
-  set(graph: GraphData | null) { this.graph = graph; }
 }
 
   // kP = edge.thickness / edge.length;
@@ -144,8 +154,8 @@ export class GraphState {
 export interface Node {
   id            : string;
   label         : string;
-  location      : location;
-  velocity      : velocity;
+  location      : Location;
+  velocity      : Velocity;
   type          : NodeType;
   radius        : number;
   anima         : anima;
@@ -188,21 +198,15 @@ export interface Tickable {
 // --- Interaction State & Events ----------------------------------------------
 
 
-
 export interface InteractionInterpreterSystem extends Tickable {
 }
 
 // --- Renderer System ---------------------------------------------------------
 
-export interface RenderSystem extends Tickable{
-  resize(width: number, height: number)                       : void;
-  render()                                                    : void;
-  destroy()                                                   : void;
-  setGraph: (graph: GraphData | null) => void;
-  setMouseScreenPosition(pos: { x: number; y: number } | null): void;
-  setFollowedNode(node: string | null)               : void;
-  refreshTheme()                                              : void;
-  tick(dt: number, nowMs: number): void;
+export interface RenderSystem extends Tickable {
+  resize(width: number, height: number): void;
+  render(): void;
+  destroy(): void;
 }
 
 
@@ -219,14 +223,24 @@ export interface PhysicsSystem extends Tickable {
 export interface CommandSystem extends Tickable {
 }
 
+export interface DrainableQueue<T>{
+  push(e: T): void;
+  drain(): T[];
+  clear(): void;
+}
+
+export interface Store<T> {
+  get(): Readonly<T>;
+}
+
+export interface KeyedStore<K, V> {
+  get(key: K): V | null;
+}
+
 export type PointerKind = "mouse" | "touch" | "pen";
 
- export type InputSettings = {
-    longPressMs?: number;
-    longPressPointerKinds?: Array<"touch" | "pen">;
-  };
 
-export type InputEvent =
+export type UserInputEvent =
   | {
       type: "POINTER_DOWN";
       pointerId: number;
@@ -284,29 +298,43 @@ export type InputEvent =
       timeMs: number;
     };
 
-    // Commands are for when the user interacts with the graph
-    // Commanding it to do something
-export type Command =
-| { type: "RequestOpenNode"; nodeId: string }
-| { type: "SetMouseGravity"; on: boolean }
-| { type: "PinNode"; nodeId: string }
-| { type: "UnpinNode"; nodeId: string }
-| { type: "ReplaceFixedNodeSet"; ids: Set<string> }
-| { type: "BeginDrag"; nodeId: string }
-| { type: "DragTarget"; nodeId: string; targetWorld: Vec3 }
-| { type: "EndDrag"; nodeId: string }
-| { type: "ResetCamera" }
-| { type: "StartPanCamera"; screen: { x: number; y: number } }
-| { type: "UpdatePanCamera"; screen: { x: number; y: number } }
-| { type: "EndPanCamera" }
-| { type: "StartRotateCamera"; screen: { x: number; y: number } }
-| { type: "UpdateRotateCamera"; screen: { x: number; y: number } }
-| { type: "EndRotateCamera" }
-| { type: "ZoomCamera"; screen: { x: number; y: number }; delta: number }
-| { type: "SetGravityCenter"; point: { x: number; y: number } | null }
-| { type: "SetHoveredNode"; nodeId: string | null }
-| { type: "SetFollowedNode"; nodeId: string | null }
-| { type: "SetDraggedNode"; nodeId: string | null }
-| { type: "SetPanning"; on: boolean }
-| { type: "SetRotating"; on: boolean }
-| { type: "SetCameraTarget"; target: { x: number; y: number; z: number } }
+
+
+
+export type RenderConfig = {
+  backgroundColor?: string;
+  nodeColor?: string;
+  tagColor?: string;
+  edgeColor?: string;
+  labelColor?: string;
+  labelFontSize: number;
+  showLabels: boolean;
+  showTags: boolean;
+  hoverScale: number;
+  useInterfaceFont: boolean;
+};
+
+export type RenderNodeState = {
+  id: string;
+  label: string;
+  type: NodeType;
+  world: Vec3;
+  radius: number;
+  scale: number;
+  labelOpacity: number;
+  visible: boolean;
+};
+
+export type RenderLinkState = {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  thickness: number;
+  visible: boolean;
+};
+
+export type RenderFrame = {
+  nodes: RenderNodeState[];
+  links: RenderLinkState[];
+  config: RenderConfig;
+};

@@ -1,49 +1,50 @@
 import type {
   Node,
   GraphData,
-  InputEvent,
+  UserInputEvent,
   Vec3,
-  Command,
-  InteractionInterpreterSystem,
+  InteractionInterpreterSystem as UIInterpreterSystem,
+  DrainableQueue,
 } from "../../grammar/interfaces.ts";
 
-import type { Camera } from "../5. Render/Camera.ts";
-import type { CursorCss } from "../../CursorController.ts";
-import type { InputBuffer } from "../1. User Input/InputBuffer.ts";
-import type { CommandBuffer } from "../3. Module Commander/CommandBuffer.ts";
-import { InteractionStateStore } from "./UIStateStore.ts";
+import type { Camera }                from "../5. Render/Camera.ts";
+import type { CursorCss }             from "../../CursorController.ts";
+import type { InputBuffer }           from "../1. User Input/InputBuffer.ts";
+import type { CommandBuffer }         from "../3. Module Commander/CommandBuffer.ts";
+import type { Command }               from "../3. Module Commander/Commander.ts";
+import      { UIStateStore } from "./UIStateStore.ts";
+import type { UISettings }            from "../../grammar/interfaces.ts";
 
-type CameraSettings = {
-  dragThresholdPx?: number;
-  doubleClickMs?: number;
-};
+import { PointerRec, twoFingerRead, wrapAngleDelta, distSq } from "../helpers.ts";
+import { HitTester } from "./HitTester.ts";
 
-type InteractionInterpreterDeps = {
-  getGraph: () => GraphData | null;
-  getCamera: () => Camera | null;
-  getCanvas: () => HTMLCanvasElement;
-  getBuffer: () => InputBuffer;
-  getCommands: () => CommandBuffer;
-  getCameraSettings: () => CameraSettings;
-  getInteractionState: () => InteractionStateStore;
+type UIInterpreterDeps = {
+  getGraph:             () => GraphData | null;
+  getCamera:            () => Camera    | null;
+  getCanvas:            () => HTMLCanvasElement;
+  getInputBuffer:       () => DrainableQueue<UserInputEvent>;
+  getCommands:          () => DrainableQueue<Command>;
+  getUISettings:        () => UISettings;
+  getInteractionState:  () => UIStateStore;
+  getHitTester:         () => HitTester;
 };
 
 type PressMode = {
-  kind: "press";
-  pointerId: number;
-  downScreen: { x: number; y: number };
-  downTimeMs: number;
-  downNode: { id: string; label: string } | null;
-  rightIntent: boolean;
+  kind:           "press";
+  pointerId:      number;
+  downTimeMs:     number;
+  rightIntent:    boolean;
   longPressFired: boolean;
+  downNode:       { id: string; label: string } | null;
+  downScreen:     { x: number;      y: number };
 };
 
 type Mode =
   | { kind: "idle" }
   | PressMode
-  | { kind: "drag-node"; pointerId: number; nodeId: string }
-  | { kind: "pan"; pointerId: number }
-  | { kind: "rotate"; pointerId: number }
+  | { kind: "drag-node";  pointerId: number;  nodeId: string }
+  | { kind: "pan";        pointerId: number }
+  | { kind: "rotate";     pointerId: number }
   | {
       kind: "touch-gesture";
       pointerA: number;
@@ -54,37 +55,8 @@ type Mode =
       rotateStarted: boolean;
     };
 
-type PointerRec = {
-  id: number;
-  kind: "mouse" | "touch" | "pen";
-  x: number;
-  y: number;
-};
 
-function distSq(a: { x: number; y: number }, b: { x: number; y: number }): number {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return dx * dx + dy * dy;
-}
-
-function wrapAngleDelta(d: number): number {
-  const pi = Math.PI;
-  while (d > pi) d -= 2 * pi;
-  while (d < -pi) d += 2 * pi;
-  return d;
-}
-
-function twoFingerRead(a: PointerRec, b: PointerRec) {
-  const cx = (a.x + b.x) * 0.5;
-  const cy = (a.y + b.y) * 0.5;
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  const angle = Math.atan2(dy, dx);
-  return { centroid: { x: cx, y: cy }, dist, angle };
-}
-
-export class InteractionInterpreter implements InteractionInterpreterSystem {
+export class UIInterpreter implements UIInterpreterSystem {
   private mode: Mode = { kind: "idle" };
   private pointers = new Map<number, PointerRec>();
 
@@ -95,7 +67,7 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
   // Ephemeral click timing
   private lastClick: { nodeId: string | null; timeMs: number } | null = null;
 
-  constructor(private deps: InteractionInterpreterDeps) {}
+  constructor(private deps: UIInterpreterDeps) {}
 
   public getCursorType(): CursorCss {
     const state = this.deps.getInteractionState().get();
@@ -106,7 +78,7 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
   }
 
   public tick(_dt: number, _nowMs: number): void {
-    const batch = this.deps.getBuffer().drain();
+    const batch = this.deps.getInputBuffer().drain();
     for (const e of batch) this.ingestOne(e);
 
     this.updateFollow();
@@ -117,7 +89,7 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     // no-op
   }
 
-  private ingestOne(e: InputEvent): void {
+  private ingestOne(e: UserInputEvent): void {
     switch (e.type) {
       case "POINTER_DOWN":
         this.onPointerDown(e);
@@ -142,7 +114,7 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     }
   }
 
-  private onPointerDown(e: Extract<InputEvent, { type: "POINTER_DOWN" }>) {
+  private onPointerDown(e: Extract<UserInputEvent, { type: "POINTER_DOWN" }>) {
     this.upsertPointer(e.pointerId, e.kind, e.screen.x, e.screen.y);
 
     if (this.pointers.size === 2) {
@@ -172,7 +144,12 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     const isRight = e.button === 2;
 
     const rightIntent = isMouse && ((isLeft && (e.ctrl || e.meta)) || isRight);
-    const downHit = this.getClickedNodeIdLabel(e.screen.x, e.screen.y);
+    const downHit = this.deps.getHitTester().getNodeIdLabelAtScreenPoint(
+      this.deps.getGraph(),
+      this.deps.getCamera(),
+      e.screen.x,
+      e.screen.y
+    );
 
     this.mode = {
       kind: "press",
@@ -187,7 +164,7 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     this.cmd({ type: "SetGravityCenter", point: { x: e.screen.x, y: e.screen.y } });
   }
 
-  private onPointerMove(e: Extract<InputEvent, { type: "POINTER_MOVE" }>) {
+  private onPointerMove(e: Extract<UserInputEvent, { type: "POINTER_MOVE" }>) {
     this.upsertPointer(e.pointerId, e.kind, e.screen.x, e.screen.y);
     this.cmd({ type: "SetGravityCenter", point: { x: e.screen.x, y: e.screen.y } });
 
@@ -222,8 +199,8 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     }
 
     if (this.mode.kind === "press" && this.mode.pointerId === e.pointerId) {
-      const cameraCfg = this.deps.getCameraSettings();
-      const threshold = cameraCfg.dragThresholdPx ?? 6;
+      const uiCfg = this.deps.getUISettings();
+      const threshold = uiCfg.dragThresholdPx;
 
       const movedSq = distSq({ x: e.screen.x, y: e.screen.y }, this.mode.downScreen);
       if (movedSq <= threshold * threshold) return;
@@ -261,7 +238,7 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     }
   }
 
-  private onPointerUp(e: Extract<InputEvent, { type: "POINTER_UP" }>) {
+  private onPointerUp(e: Extract<UserInputEvent, { type: "POINTER_UP" }>) {
     this.pointers.delete(e.pointerId);
 
     if (this.mode.kind === "touch-gesture") {
@@ -309,7 +286,7 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     this.mode = { kind: "idle" };
   }
 
-  private onPointerCancel(e: Extract<InputEvent, { type: "POINTER_CANCEL" }>) {
+  private onPointerCancel(e: Extract<UserInputEvent, { type: "POINTER_CANCEL" }>) {
     this.pointers.delete(e.pointerId);
 
     if (this.mode.kind === "touch-gesture") {
@@ -325,7 +302,7 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     this.mode = { kind: "idle" };
   }
 
-  private onWheel(e: Extract<InputEvent, { type: "WHEEL" }>) {
+  private onWheel(e: Extract<UserInputEvent, { type: "WHEEL" }>) {
     const screenX = e.screen.x;
     const screenY = e.screen.y;
 
@@ -345,7 +322,7 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     this.cmd({ type: "EndPanCamera" });
   }
 
-  private onLongPress(e: Extract<InputEvent, { type: "LONG_PRESS" }>) {
+  private onLongPress(e: Extract<UserInputEvent, { type: "LONG_PRESS" }>) {
     if (this.mode.kind !== "press") return;
     if (this.mode.pointerId !== e.pointerId) return;
 
@@ -369,7 +346,12 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
       return;
     }
 
-    const hit = this.getClickedNode(mouse.x, mouse.y);
+    const hit = this.deps.getHitTester().getNodeAtScreenPoint(
+      this.deps.getGraph(),
+      this.deps.getCamera(),
+      mouse.x,
+      mouse.y
+    );
     this.cmd({ type: "SetHoveredNode", nodeId: hit?.id ?? null });
   }
 
@@ -397,8 +379,8 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
   }
 
   private handleSingleOrDoubleClick(nodeId: string | null, timeMs: number) {
-    const cameraCfg = this.deps.getCameraSettings();
-    const doubleMs = cameraCfg.doubleClickMs ?? 300;
+    const uiCfg = this.deps.getUISettings();
+    const doubleMs = uiCfg.doubleClickMs;
 
     const prev = this.lastClick;
     const isDouble = !!prev && prev.nodeId === nodeId && (timeMs - prev.timeMs) <= doubleMs;
@@ -406,13 +388,13 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     this.lastClick = { nodeId, timeMs };
 
     if (isDouble && nodeId !== null) {
-      this.cmd({ type: "RequestOpenNode", nodeId });
+      this.cmd({ type: "OpenNode", nodeId });
       return;
     }
 
     const followedNodeId = this.deps.getInteractionState().get().followedNodeId;
     if (followedNodeId === nodeId && nodeId !== null) {
-      this.cmd({ type: "RequestOpenNode", nodeId });
+      this.cmd({ type: "OpenNode", nodeId });
       return;
     }
 
@@ -431,7 +413,7 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
     const node = graph.nodes.find(n => n.id === nodeId);
     if (!node) return;
 
-    const projected = camera.worldToScreen(node);
+    const projected = camera.worldToScreen(node.location);
     this.dragDepthFromCamera = Math.max(0.0001, projected.depth);
 
     this.cmd({ type: "SetDraggedNode", nodeId });
@@ -451,7 +433,7 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
       y: underMouse.y + this.dragWorldOffset.y,
       z: underMouse.z + this.dragWorldOffset.z,
     };
-    this.cmd({ type: "DragTarget", nodeId, targetWorld });
+    this.cmd({ type: "SetDragTarget", nodeId, targetWorld });
   }
 
   private updateDrag(screenX: number, screenY: number) {
@@ -470,7 +452,7 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
       z: underMouse.z + o.z,
     };
 
-    this.cmd({ type: "DragTarget", nodeId: draggedId, targetWorld });
+    this.cmd({ type: "SetDragTarget", nodeId: draggedId, targetWorld });
   }
 
   private endDrag() {
@@ -517,38 +499,6 @@ export class InteractionInterpreter implements InteractionInterpreterSystem {
 
   private updateZoom(screenX: number, screenY: number, delta: number) {
     this.cmd({ type: "ZoomCamera", screen: { x: screenX, y: screenY }, delta });
-  }
-
-  private getClickedNodeIdLabel(screenX: number, screenY: number): { id: string; label: string } | null {
-    const node = this.getClickedNode(screenX, screenY);
-    if (!node) return null;
-    return { id: node.id, label: node.label };
-  }
-
-  private getClickedNode(screenX: number, screenY: number): Node | null {
-    const graph = this.deps.getGraph();
-    const camera = this.deps.getCamera();
-    if (!graph || !camera) return null;
-
-    let best: Node | null = null;
-    let bestDistSq = Infinity;
-
-    for (const node of graph.nodes) {
-      const p = camera.worldToScreen(node);
-
-      const dx = screenX - p.x;
-      const dy = screenY - p.y;
-      const d2 = dx * dx + dy * dy;
-
-      const rPx = node.radius * p.scale;
-
-      if (d2 <= rPx * rPx && d2 < bestDistSq) {
-        bestDistSq = d2;
-        best = node;
-      }
-    }
-
-    return best;
   }
 
   private upsertPointer(id: number, kind: "mouse" | "touch" | "pen", x: number, y: number) {

@@ -121,7 +121,7 @@ export class Graph {
             const p = pos[n.id];
             if (!p) continue;
             n.location.x = p.x; n.location.y = p.y; n.location.z = p.z;
-            n.velocity.vx = 0; n.velocity.vy = 0; n.velocity.vz = 0; // avoid load “explosions”
+            n.velocity.x = 0; n.velocity.y = 0; n.velocity.z = 0; // avoid load “explosions”
         }
     }
 
@@ -234,9 +234,9 @@ export class Graph {
                     z : (Math.random() - 0.5) * jitter, 
                 },
                 velocity    : {
-                    vx : 0,
-                    vy : 0,
-                    vz : 0,
+                    x : 0,
+                    y : 0,
+                    z : 0,
                 },
                 type        : "note",
                 radius      : 10,
@@ -262,7 +262,7 @@ export class Graph {
                     y: (Math.random() - 0.5) * jitter,
                     z: (Math.random() - 0.5) * jitter,
                 },
-                velocity: { vx: 0, vy: 0, vz: 0 },
+                velocity: { x: 0, y: 0, z: 0 },
                 type: "tag",
                 anima: { level: 0, capacity: 100 },
                 radius: 10,
