@@ -1,6 +1,5 @@
 import { App, TFile } from "obsidian";
-import { GraphData, Node, Link, GraphModule } from "../../grammar/interfaces.ts";
-import { getSettings } from "../../../obsidian/settings/settingsStore.ts";
+import { GraphData, Node, Link, GraphModule, GraphSettings, PhysicsSettings } from "../../grammar/interfaces.ts";
 
 type WeightedEdge = { sourceId: string; targetId: string; weight: number };
 
@@ -10,8 +9,10 @@ type DataStoragePlugin = {
 };
 
 export type GraphDeps = {
-    getApp: () => App;
-    getPlugin: () => DataStoragePlugin | null;
+    getApp: ()              => App;
+    getPlugin: ()           => DataStoragePlugin | null;
+    getGraphSettings: ()    => GraphSettings;
+    getPhysicsSettings: ()  => PhysicsSettings;
 };
 
 type PersistedGraphState = {
@@ -162,8 +163,8 @@ export class Graph implements GraphModule {
     }
 
     private generateGraph(app: App): GraphData {
-        const settings = getSettings();
-        const showTags = settings.graph.showTags;
+        const settings = this.deps.getGraphSettings();
+        const showTags = settings.showTags;
 
         let tags = new Set<string>();
         let noteTagEdges: WeightedEdge[] = [];
@@ -243,9 +244,9 @@ export class Graph implements GraphModule {
     }
 
     private *noteNoteEdges(app: App): IterableIterator<WeightedEdge> {
-        const settings                      = getSettings();
+        const settings                      = this.deps.getGraphSettings();
         const resolvedLinks: ResolvedLinks  = (app.metadataCache as any).resolvedLinks || {};
-        const countDuplicates               = Boolean(settings.graph.countDuplicateLinks);
+        const countDuplicates               = Boolean(settings.countDuplicateLinks);
 
         for (const sourcePath of Object.keys(resolvedLinks)) {
             const targets = resolvedLinks[sourcePath] || {};
@@ -361,13 +362,13 @@ export class Graph implements GraphModule {
     }
 
     private createLink(sourceId: string, targetId: string, thickness: number): Link {
-        const settings = getSettings();
+        const settings = this.deps.getGraphSettings();
         return {
             id: `${sourceId}->${targetId}`,
             sourceId: sourceId,
             targetId: targetId,
-            length: settings.physics.edgeLength,
-            strength: settings.physics.edgeStrength,
+            length: this.deps.getPhysicsSettings().edgeLength,
+            strength: this.deps.getPhysicsSettings().edgeStrength,
             thickness: thickness,
             gate: { state: "closed", threshold: 0, hysteresis: 0 },
         };
@@ -394,8 +395,8 @@ export class Graph implements GraphModule {
     }
 
     private computeNodeRadius(graph: GraphData): void {
-        const minR = getSettings().graph.minNodeRadius;
-        const maxR = getSettings().graph.maxNodeRadius;
+        const minR = this.deps.getGraphSettings().minNodeRadius;
+        const maxR = this.deps.getGraphSettings().maxNodeRadius;
 
         for (const node of graph.nodes) {
             const incoming = graph.linksIn[node.id];
