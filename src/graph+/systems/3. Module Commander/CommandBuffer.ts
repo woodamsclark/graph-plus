@@ -2,9 +2,9 @@
 // Discrete intent messages that cross system boundaries.
 // Translator emits these; CommandSystem applies them.
 import type { Command } from "./Commander.ts";
-import type { DrainableQueue } from "../../grammar/interfaces.ts";
+import type { DrainableBuffer } from "../../grammar/interfaces.ts";
 
-export class CommandBuffer implements DrainableQueue<Command> {
+export class CommandBuffer implements DrainableBuffer<Command> {
   private q: Command[] = [];
 
   push(cmd: Command): void {

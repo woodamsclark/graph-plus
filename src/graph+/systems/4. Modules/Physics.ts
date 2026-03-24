@@ -1,22 +1,32 @@
 import { createSimulation } from "./simulation.ts";
-import type { GraphData, Simulation, UIState, PhysicsSystem, PhysicsSettings } from "../../grammar/interfaces.ts";
+import type { Module, Simulation, UIState, PhysicsSystem, PhysicsSettings, GraphModule } from "../../grammar/interfaces.ts";
+import { Graph } from "./Graph.ts";
 import type { CameraController } from "../5. Render/CameraController.ts";
 
-export class Physics implements PhysicsSystem{
+export class Physics implements Module, PhysicsSystem {
   private sim: Simulation | null = null;
   private pinnedNodeIds: Set<string> = new Set();
 
   constructor(private deps: {
-    getGraph:             () => GraphData         | null;
+    getGraph:             () => GraphModule;
     getCamera:            () => CameraController            | null;
     getInteractionState:  () => UIState;
     getPhysicsSettings: () => PhysicsSettings;
   }) {}
 
+  initialize(): void {
+    // Simulation is built lazily through rebuild().
+  }
+
+  dispose(): void {
+    this.destroy();
+  }
+
   // Call whenever the graph changes (rebuild/filter/etc.)
   public rebuild(): void {
     this.stop();
-    const graph  = this.deps.getGraph();
+    const graphModule = this.deps.getGraph();
+    const graph = graphModule.get();
     const camera = this.deps.getCamera();
     if (!graph || !camera) {
       this.sim = null;

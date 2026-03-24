@@ -1,6 +1,6 @@
 import { App, TFile } from "obsidian";
-import { GraphData, Node, Link } from "./grammar/interfaces.ts";
-import { getSettings } from "../obsidian/settings/settingsStore.ts";
+import { GraphData, Node, Link, GraphModule } from "../../grammar/interfaces.ts";
+import { getSettings } from "../../../obsidian/settings/settingsStore.ts";
 
 type WeightedEdge = { sourceId: string; targetId: string; weight: number };
 
@@ -9,7 +9,7 @@ type DataStoragePlugin = {
     saveData: (data: any) => Promise<void>;
 };
 
-type GraphStoreDeps = {
+export type GraphDeps = {
     getApp: () => App;
     getPlugin: () => DataStoragePlugin | null;
 };
@@ -22,18 +22,79 @@ type PersistedGraphState = {
 
 interface ResolvedLinks {
     [sourcePath: string]: { [targetPath: string]: number };
-};
+}
 
-export class Graph {
-    private deps: GraphStoreDeps;
-    private graph: GraphData | null = null;
+export class Graph implements GraphModule {
+    private deps: GraphDeps;
+    private data: GraphData | null = null;
     private cachedState: PersistedGraphState | null = null;
 
-    constructor(deps: GraphStoreDeps) {
+    constructor(deps: GraphDeps) {
         this.deps = deps;
     }
 
-    private async buildGraph() {
+    public async initialize(): Promise<void> {
+        await this.ensureBuilt();
+    }
+
+    public async ensureBuilt(): Promise<GraphData> {
+        if (!this.data) {
+            await this.buildGraph();
+        }
+
+        if (!this.data) {
+            throw new Error("Graph failed to build.");
+        }
+
+        return this.data;
+    }
+
+    public get(): GraphData | null {
+        return this.data;
+    }
+
+    public getOrThrow(): GraphData {
+        if (!this.data) {
+            throw new Error("Graph has not been built yet.");
+        }
+
+        return this.data;
+    }
+
+    public hasGraph(): boolean {
+        return this.data !== null;
+    }
+
+    public async save(): Promise<void> {
+        if (!this.data) return;
+
+        const app = this.deps.getApp();
+        const state = this.extractState(this.data, app);
+
+        await this.saveState(state);
+        this.cachedState = state;
+    }
+
+    public async rebuild(): Promise<void> {
+        if (this.data) {
+            const app = this.deps.getApp();
+            this.cachedState = this.extractState(this.data, app);
+        }
+
+        this.invalidate();
+        await this.ensureBuilt();
+    }
+
+    private invalidate(): void {
+        this.data = null;
+    }
+
+    private clear(): void {
+        this.data = null;
+        this.cachedState = null;
+    }
+
+    private async buildGraph(): Promise<void> {
         const app = this.deps.getApp();
         const state = await this.loadState(app);
         const graph = this.generateGraph(app);
@@ -41,38 +102,9 @@ export class Graph {
         if (state) this.applyPositions(graph, state);
         this.computeAdjacency(graph);
         this.computeNodeRadius(graph);
+        this.markBidirectional(graph.links);
 
-        this.graph = graph;
-    }
-
-    public get(): GraphData | null {
-        return this.graph;
-    }
-
-    public async save(): Promise<void> {
-        if (!this.graph) return;
-
-        const app = this.deps.getApp();
-        const state = this.extractState(this.graph, app);
-
-        await this.saveState(state);
-        this.cachedState = state;
-    }
-
-    public async rebuild() {
-        // capture current layout into cachedState
-        if (this.graph) {
-            const app = this.deps.getApp();
-            this.cachedState = this.extractState(this.graph, app);
-        }
-
-        this.invalidate()
-        await this.buildGraph();
-    }
-
-    public invalidate(): void {
-        this.graph = null;
-        // keep cachedState; it remains valid
+        this.data = graph;
     }
 
     private async loadState(app: App): Promise<PersistedGraphState | null> {
@@ -120,8 +152,12 @@ export class Graph {
         for (const n of graph.nodes) {
             const p = pos[n.id];
             if (!p) continue;
-            n.location.x = p.x; n.location.y = p.y; n.location.z = p.z;
-            n.velocity.x = 0; n.velocity.y = 0; n.velocity.z = 0; // avoid load “explosions”
+            n.location.x = p.x;
+            n.location.y = p.y;
+            n.location.z = p.z;
+            n.velocity.x = 0;
+            n.velocity.y = 0;
+            n.velocity.z = 0;
         }
     }
 
@@ -138,28 +174,41 @@ export class Graph {
             noteTagEdges = collected.edges;
         }
 
-        const nodes = this.createNodes(app, tags, settings.graph.showTags);
-        const nodeById = new Map(nodes.map(n => [n.id, n] as const));
+        const nodes = this.createNodes(app, tags, showTags);
+        const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
+        const edges = this.collectEdges(app, showTags, tags, noteTagEdges);
+        const links = this.buildLinksFromEdges(edges, nodeById);
 
-        function* allEdges(this: Graph): IterableIterator<WeightedEdge> {
-            yield* this.noteNoteEdges(app);
+        return { nodes, links, linksOut: {}, linksIn: {} };
+    }
 
-            if (!showTags) return;
+    private collectEdges(
+        app: App,
+        showTags: boolean,
+        tags: Set<string>,
+        noteTagEdges: WeightedEdge[],
+    ): WeightedEdge[] {
+        const edges: WeightedEdge[] = [];
 
-            yield* noteTagEdges;
-            yield* this.tagTagEdges(tags);
+        for (const edge of this.noteNoteEdges(app)) {
+            edges.push(edge);
         }
 
-        const links = this.buildLinksFromEdges(allEdges.call(this), nodeById);
-        return { nodes, links, linksOut: {}, linksIn: {} };
+        if (!showTags) return edges;
+
+        edges.push(...noteTagEdges);
+
+        for (const edge of this.tagTagEdges(tags)) {
+            edges.push(edge);
+        }
+
+        return edges;
     }
 
     private collectTagsAndNoteTagEdges(app: App): { tags: Set<string>; edges: WeightedEdge[] } {
         const tags = new Set<string>();
         const edges: WeightedEdge[] = [];
 
-        // include metadataCache.getTags() too (optional)
-        // it may be possible that getTags() captures tags that files do not, creating orphan tags
         const tagMap = (app.metadataCache as any).getTags?.() as Record<string, number> | undefined;
         if (tagMap) {
             for (const rawTag of Object.keys(tagMap)) {
@@ -174,21 +223,22 @@ export class Graph {
             for (const cleanTag of this.extractTagsFromFile(file, app)) {
                 if (!cleanTag) continue;
 
-                this.addTagPathToSet(tags, cleanTag);               // for tag nodes + hierarchy
-                edges.push({ sourceId, targetId: cleanTag, weight: 1 }); // note -> tag
+                this.addTagPathToSet(tags, cleanTag);
+                edges.push({ sourceId, targetId: cleanTag, weight: 1 });
             }
         }
 
         return { tags, edges };
     }
 
-    private createNodes(app: App, tags: Set<string>, showTags:boolean): Node[] {
+    private createNodes(app: App, tags: Set<string>, showTags: boolean): Node[] {
+        const nodes: Node[] = [];
 
-        let nodes: Node[] = [];
-        if (showTags)
-            nodes = this.createTagNodes(tags);
-        nodes = nodes.concat(this.createNoteNodes(app));
+        if (showTags) {
+            nodes.push(...this.createTagNodes(tags));
+        }
 
+        nodes.push(...this.createNoteNodes(app));
         return nodes;
     }
 
@@ -204,7 +254,7 @@ export class Graph {
                 yield {
                     sourceId: sourcePath,
                     targetId: targetPath,
-                    weight  : countDuplicates ? rawCount : 1,
+                    weight: countDuplicates ? rawCount : 1,
                 };
             }
         }
@@ -212,7 +262,7 @@ export class Graph {
 
     private *tagTagEdges(tags: Set<string>): IterableIterator<WeightedEdge> {
         for (const t of tags) {
-            const chain = this.expandTagPath(t); // ["a","a/b","a/b/c"]
+            const chain = this.expandTagPath(t);
             for (let i = 1; i < chain.length; i++) {
                 yield { sourceId: chain[i - 1], targetId: chain[i], weight: 1 };
             }
@@ -220,28 +270,28 @@ export class Graph {
     }
 
     private createNoteNodes(app: App): Node[] {
-        const files: TFile[]        = app.vault.getMarkdownFiles();
-        const nodes: Node[]    = [];
+        const files: TFile[] = app.vault.getMarkdownFiles();
+        const nodes: Node[] = [];
 
         for (const file of files) {
             const jitter = 50;
             nodes.push({
-                id          : file.path,
-                label       : file.basename,
-                location    : { 
-                    x : (Math.random() - 0.5) * jitter,
-                    y : (Math.random() - 0.5) * jitter,
-                    z : (Math.random() - 0.5) * jitter, 
+                id: file.path,
+                label: file.basename,
+                location: {
+                    x: (Math.random() - 0.5) * jitter,
+                    y: (Math.random() - 0.5) * jitter,
+                    z: (Math.random() - 0.5) * jitter,
                 },
-                velocity    : {
-                    x : 0,
-                    y : 0,
-                    z : 0,
+                velocity: {
+                    x: 0,
+                    y: 0,
+                    z: 0,
                 },
-                type        : "note",
-                radius      : 10,
-                file        : file,
-                anima       : { level: 0, capacity: 100 }, 
+                type: "note",
+                radius: 10,
+                file: file,
+                anima: { level: 0, capacity: 100 },
             });
         }
 
@@ -249,7 +299,6 @@ export class Graph {
     }
 
     private createTagNodes(tags: Set<string>): Node[] {
-
         const jitter = 50;
         const nodes: Node[] = [];
 
@@ -273,8 +322,7 @@ export class Graph {
     }
 
     private expandTagPath(tag: string): string[] {
-        // "a/b/c" => ["a", "a/b", "a/b/c"]
-        const parts = tag.split("/").map(p => p.trim()).filter(Boolean);
+        const parts = tag.split("/").map((p) => p.trim()).filter(Boolean);
         const out: string[] = [];
         let cur = "";
         for (const p of parts) {
@@ -284,7 +332,7 @@ export class Graph {
         return out;
     }
 
-    private addTagPathToSet(tags: Set<string>, cleanTag: string) {
+    private addTagPathToSet(tags: Set<string>, cleanTag: string): void {
         for (const t of this.expandTagPath(cleanTag)) {
             tags.add(t);
         }
@@ -315,13 +363,13 @@ export class Graph {
     private createLink(sourceId: string, targetId: string, thickness: number): Link {
         const settings = getSettings();
         return {
-            id          : `${sourceId}->${targetId}`,
-            sourceId    : sourceId,
-            targetId    : targetId,
-            length      : settings.physics.edgeLength,
-            strength    : settings.physics.edgeStrength,
-            thickness   : thickness,
-            gate        : {state: "closed", threshold: 0, hysteresis: 0, },
+            id: `${sourceId}->${targetId}`,
+            sourceId: sourceId,
+            targetId: targetId,
+            length: settings.physics.edgeLength,
+            strength: settings.physics.edgeStrength,
+            thickness: thickness,
+            gate: { state: "closed", threshold: 0, hysteresis: 0 },
         };
     }
 
@@ -355,7 +403,6 @@ export class Graph {
                 ? Object.values(incoming).reduce((a, b) => a + b, 0)
                 : 0;
 
-            // example curve; tune later
             const r = minR + Math.sqrt(count) * 2;
             node.radius = Math.min(maxR, r);
         }
@@ -380,7 +427,6 @@ export class Graph {
 
         const tags = new Set<string>();
 
-        // Inline tags (well-typed)
         for (const t of cache.tags ?? []) {
             const rawTag = t?.tag;
             if (typeof rawTag === "string") {
@@ -388,17 +434,16 @@ export class Graph {
             }
         }
 
-        // Frontmatter (weakly typed → we guard)
         const fm = cache.frontmatter;
         if (fm) {
             const rawTag = (fm as any).tags ?? (fm as any).tag;
-            
+
             if (typeof rawTag === "string") {
                 for (const part of rawTag.split(/[,\s]+/)) {
                     if (!part) continue;
                     tags.add(this.normalizeTagName(part));
                 }
-            } else if (Array.isArray(rawTag)) { // frontMatter tag is an array
+            } else if (Array.isArray(rawTag)) {
                 for (const v of rawTag) {
                     if (typeof v === "string") {
                         tags.add(this.normalizeTagName(v));
@@ -406,18 +451,17 @@ export class Graph {
                 }
             }
         }
+
         return [...tags];
     }
 
     private normalizeTagName(tag: string): string {
         let t = tag.trim().toLowerCase();
 
-        // strip Obsidian search-style prefix
         if (t.startsWith("tag:")) {
             t = t.slice(4);
         }
 
-        // strip leading #
         if (t.startsWith("#")) {
             t = t.slice(1);
         }
