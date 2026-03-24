@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, Plugin } from 'obsidian';
 import GraphPlus from './main.ts';
-import { Orchestrator } from '../graph+/Orchestrator.ts';
+import { GraphEngineRuntime } from '../graph+/engine/GraphEngineRuntime.ts';
 
 
 export const GRAPH_PLUS_TYPE = 'graph-plus';
@@ -9,7 +9,7 @@ export class GraphView extends ItemView {
   private plugin              : GraphPlus;
   private scheduleGraphRebuild: (() => void) | null = null;
   private unregisters: Array<() => void> = [];
-  private garden: Orchestrator | null = null;
+  private graphEngine: GraphEngineRuntime | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: Plugin) {
     super(leaf);
@@ -20,18 +20,18 @@ export class GraphView extends ItemView {
     this.containerEl.empty();
     const container       = this.containerEl.createDiv({ cls: 'graph+' });
 
-    this.garden = new Orchestrator({ app: this.app, plugin: this.plugin, containerEl: container });
-    await this.garden.open();
+    this.graphEngine = new GraphEngineRuntime({ app: this.app, plugin: this.plugin, containerEl: container });
+    await this.graphEngine.open();
   }
 
   onResize() {
     const rect = this.containerEl.getBoundingClientRect();
-    this.garden?.resize(rect.width, rect.height);
+    this.graphEngine?.resize(rect.width, rect.height);
   }
 
   async onClose() {
-    await this.garden?.close();
-    this.garden = null;
+    await this.graphEngine?.close();
+    this.graphEngine = null;
   }
 
   getViewType(): string {
