@@ -459,7 +459,7 @@ export function createSimulation(
 
     const node = dragConstraint.node;
 
-    if (pinnedNodes.has(node.id)) return;
+    //if (pinnedNodes.has(node.id)) return;
 
     const dx = dragConstraint.target.x - node.location.x;
     const dy = dragConstraint.target.y - node.location.y;
@@ -478,7 +478,7 @@ export function createSimulation(
     if (!dragConstraint) return;
 
     const node = dragConstraint.node;
-    if (pinnedNodes.has(node.id)) return;
+    //if (pinnedNodes.has(node.id)) return;
 
     node.location.x = dragConstraint.target.x;
     node.location.y = dragConstraint.target.y;

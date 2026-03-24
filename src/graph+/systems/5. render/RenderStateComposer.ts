@@ -12,7 +12,6 @@ import type {
 
 import type { RenderFrameStore } from "./RenderFrameStore.ts";
 import type { AnimaStateStore } from "../4. Modules/AnimaStateStore.ts";
-import { Graph } from "../4. Modules/Graph.ts";
 
 type RenderStateComposerDeps = {
   getGraph: ()          => GraphModule;
