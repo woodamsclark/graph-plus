@@ -24,11 +24,11 @@ import { Graph }                                                from "./systems/
 
 export class Orchestrator {
   private navigator:      ObsidianNavigator;
-  private graph:          GraphModule;
   private spaceTime:      SpaceTime;
   private input!:         Input;
   private canvas:         HTMLCanvasElement | null        = null;
   private inputBuffer:    DrainableBuffer<UserInputEvent> = new InputBuffer();
+  private graph:          GraphModule;
   private commandBuffer:  DrainableBuffer<Command>        = new CommandBuffer();
   private commandRegistry                                 = new CommandRegistry();
   private commandSystem:  Commander | null                = null;
@@ -49,8 +49,10 @@ export class Orchestrator {
     this.navigator  = new ObsidianNavigator(deps.app);
 
     this.graph = new Graph({
-      getApp: ()    => this.deps.app,
-      getPlugin: () => this.deps.plugin as any,
+      getApp: ()              => this.deps.app,
+      getPlugin: ()           => this.deps.plugin as any,
+      getGraphSettings: ()    => getSettings().graph,
+      getPhysicsSettings: ()  => getSettings().physics,
     });
   }
 
@@ -69,14 +71,14 @@ export class Orchestrator {
 
     this.renderer = new Renderer(this.canvas, this.camera, this.renderFrameStore);
 
-    // 1. Input (world-owned)
+    // 1. Input
     this.input = new Input({
       getCanvas: () => this.canvas!,
       getBuffer: () => this.inputBuffer,
       uiSettings: getSettings().ui,
     });
 
-    // 2. Translator (world-owned)
+    // 2. UI State Interpreter
     this.uiInterpreter = new UIInterpreter({
       getGraph: ()            => this.graph,
       getCamera: ()           => this.camera,
