@@ -34,7 +34,6 @@ export type UIState = {
 
   // --- Interfaces ------------------------------------------------------
 
-  // Settings
 export interface GraphPlusSettings {
   graph                 : GraphSettings;
   physics               : PhysicsSettings;
@@ -122,12 +121,6 @@ export interface CameraState {
   worldAnchorPoint?     : { x: number; y: number; z: number } | null;
 }
 
-export class GraphStore {
-  private graph:  GraphData | null = null;
-  get():          GraphData | null { return this.graph; }
-  set(graph:      GraphData | null) { this.graph = graph; }
-}
-
 export interface GraphData {
   nodes     : Node[];
   links     : Link[];
@@ -191,12 +184,33 @@ export interface WorldTransform {
   scale     : number; // unitless zoom scalar
 }
 
-
 // --- Tickable Interface ------------------------------------------------------
+
 
 export interface Tickable {
   tick(dt: number, nowMs: number): void;
 }
+
+// --- Module Lifecycle -------------------------------------------------------
+
+export interface Module {
+  initialize?():  Promise<void> | void;
+  rebuild?():     Promise<void> | void;
+  save?():        Promise<void> | void;
+  dispose?():     Promise<void> | void;
+}
+
+export interface GraphModule extends Module {
+  initialize():   Promise<void>;
+  ensureBuilt():  Promise<GraphData>;
+  get():          GraphData | null;
+  getOrThrow():   GraphData;
+  hasGraph():     boolean;
+  rebuild():      Promise<void>;
+  save():         Promise<void>;
+}
+
+
 // --- Interaction State & Events ----------------------------------------------
 
 
@@ -207,10 +221,9 @@ export interface InteractionInterpreterSystem extends Tickable {
 
 export interface RenderSystem extends Tickable {
   resize(width: number, height: number): void;
-  render(): void;
-  destroy(): void;
+  render():     void;
+  destroy():    void;
 }
-
 
 // --- Physics System ----------------------------------------------------------
 
@@ -225,7 +238,7 @@ export interface PhysicsSystem extends Tickable {
 export interface CommandSystem extends Tickable {
 }
 
-export interface DrainableQueue<T>{
+export interface DrainableBuffer<T>{
   push(e: T): void;
   drain(): T[];
   clear(): void;

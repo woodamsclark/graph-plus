@@ -1,34 +1,33 @@
-import type { DrainableQueue as DrainableBuffer, UserInputEvent } from "./grammar/interfaces.ts";
-import { App, Plugin } from "obsidian";
-import { GraphStore } from "./grammar/interfaces.ts";
-import { SpaceTime } from "./systems/SpaceTime.ts";
-import { getSettings } from "../obsidian/settings/settingsStore.ts";
-import { ObsidianNavigator } from "../obsidian/ObsidianNavigator.ts";
-import { ObsidianGraphSource } from "../obsidian/ObsidianGraphSource.ts";
-import { Input } from "./systems/1. User Input/Input.ts";
-import { InputBuffer } from "./systems/1. User Input/InputBuffer.ts";
-import { UIInterpreter } from "./systems/2. UI Interpretation + State/UIInterpreter.ts";
-import { UIStateStore } from "./systems/2. UI Interpretation + State/UIStateStore.ts";
-import { HitTester } from "./systems/2. UI Interpretation + State/HitTester.ts";
-import { Command, Commander, CommandRegistry } from "./systems/3. Module Commander/Commander.ts";
-import { CommandBuffer } from "./systems/3. Module Commander/CommandBuffer.ts";
-import { Anima } from "./systems/4. Modules/Anima.ts";
-import { AnimaStateStore } from "./systems/4. Modules/AnimaStateStore.ts";
-import { Physics } from "./systems/4. Modules/Physics.ts";
-import { CameraController } from "./systems/5. Render/CameraController.ts";
-import { Renderer } from "./systems/5. Render/Renderer.ts";
-import { RenderFrameStore } from "./systems/5. Render/RenderFrameStore.ts";
-import { RenderStateComposer } from "./systems/5. Render/RenderStateComposer.ts";
+import type { DrainableBuffer as DrainableBuffer, UserInputEvent, GraphModule } from "./grammar/interfaces.ts";
+
+import { App, Plugin }                                          from "obsidian";
+import { SpaceTime }                                            from "./systems/SpaceTime.ts";
+import { getSettings }                                          from "../obsidian/settings/settingsStore.ts";
+import { ObsidianNavigator }                                    from "../obsidian/ObsidianNavigator.ts";
+import { Input }                                                from "./systems/1. User Input/Input.ts";
+import { InputBuffer }                                          from "./systems/1. User Input/InputBuffer.ts";
+import { UIInterpreter }                                        from "./systems/2. UI Interpretation + State/UIInterpreter.ts";
+import { UIStateStore }                                         from "./systems/2. UI Interpretation + State/UIStateStore.ts";
+import { HitTester }                                            from "./systems/2. UI Interpretation + State/HitTester.ts";
+import { Command, Commander, CommandRegistry }                  from "./systems/3. Module Commander/Commander.ts";
+import { CommandBuffer }                                        from "./systems/3. Module Commander/CommandBuffer.ts";
+import { Anima }                                                from "./systems/4. Modules/Anima.ts";
+import { AnimaStateStore }                                      from "./systems/4. Modules/AnimaStateStore.ts";
+import { Physics }                                              from "./systems/4. Modules/Physics.ts";
+import { CameraController }                                     from "./systems/5. Render/CameraController.ts";
+import { Renderer }                                             from "./systems/5. Render/Renderer.ts";
+import { RenderFrameStore }                                     from "./systems/5. Render/RenderFrameStore.ts";
+import { RenderStateComposer }                                  from "./systems/5. Render/RenderStateComposer.ts";
 import { createCursorController, getCursorTypeFromInteraction } from "./CursorController.ts";
+import { Graph }                                                from "./systems/4. Modules/Graph.ts";
 
 
 export class Orchestrator {
   private navigator:      ObsidianNavigator;
-  private graphSource:    ObsidianGraphSource;
+  private graph:          GraphModule;
   private spaceTime:      SpaceTime;
   private input!:         Input;
   private canvas:         HTMLCanvasElement | null        = null;
-  private graphStore:     GraphStore                      = new GraphStore();
   private inputBuffer:    DrainableBuffer<UserInputEvent> = new InputBuffer();
   private commandBuffer:  DrainableBuffer<Command>        = new CommandBuffer();
   private commandRegistry                                 = new CommandRegistry();
@@ -49,8 +48,7 @@ export class Orchestrator {
     this.spaceTime  = new SpaceTime({ maxDtSeconds: 0.05 });
     this.navigator  = new ObsidianNavigator(deps.app);
 
-    // NOTE: this casts plugin to the data storage interface expected by GraphStore/GraphSource
-    this.graphSource = new ObsidianGraphSource({
+    this.graph = new Graph({
       getApp: ()    => this.deps.app,
       getPlugin: () => this.deps.plugin as any,
     });
@@ -80,7 +78,7 @@ export class Orchestrator {
 
     // 2. Translator (world-owned)
     this.uiInterpreter = new UIInterpreter({
-      getGraph: ()            => this.graphStore.get(),
+      getGraph: ()            => this.graph,
       getCamera: ()           => this.camera,
       getCanvas: ()           => this.canvas!,
       getInputBuffer: ()      => this.inputBuffer,
@@ -94,7 +92,7 @@ export class Orchestrator {
    
 
     this.commandRegistry.register("OpenNode", (command) => {
-    const graph = this.graphStore.get();
+    const graph = this.graph.get();
     const node = graph?.nodes.find(n => n.id === command.nodeId);
     if (!node) return;
 
@@ -191,12 +189,12 @@ export class Orchestrator {
     });
 
     this.anima = new Anima({
-      getGraph: () => this.graphStore.get(),
+      getGraph: () => this.graph,
       getStore: () => this.animaStateStore,
     });
 
     this.renderStateComposer = new RenderStateComposer({
-      getGraph: () => this.graphStore.get(),
+      getGraph: () => this.graph,
       getUIState: () => this.uiStateStore.get(),
       getGraphSettings: () => getSettings().graph,
       getAnimaStore: () => this.animaStateStore,
@@ -211,7 +209,7 @@ export class Orchestrator {
 
     // 4. Physics (world-owned)
     this.physics = new Physics({
-      getGraph: ()            => this.graphStore.get(),
+      getGraph: ()            => this.graph,
       getCamera: ()           => this.camera,
       getInteractionState: () => this.uiStateStore.get(),
       getPhysicsSettings: ()    => getSettings().physics,
@@ -223,8 +221,9 @@ export class Orchestrator {
     const rect = this.deps.containerEl.getBoundingClientRect();
     this.renderer.resize(rect.width, rect.height);
 
-    // IMPORTANT: build graph once before starting the loop
-    await this.rebuildGraph();
+    // IMPORTANT: initialize graph once before starting the loop
+    await this.graph.initialize();
+    this.physics?.rebuild?.();
 
     // register systems
     this.spaceTime.register("translate", this.uiInterpreter, 10);
@@ -249,10 +248,8 @@ export class Orchestrator {
   }
 
   public async rebuildGraph(): Promise<void> {
-    const graph = await this.graphSource.rebuild();
-    this.graphStore.set(graph);
-
-    this.physics?.rebuild();
+    await this.graph.rebuild();
+    this.physics?.rebuild?.();
   }
 
   refreshTheme(): void {
@@ -261,19 +258,22 @@ export class Orchestrator {
 
 
   async close(): Promise<void> {
-    this.graphSource.save();
+    await this.graph.save?.();
     this.spaceTime.stop();
 
-    this.physics?.destroy?.();
+    this.physics?.dispose?.();
     this.physics = null;
 
-    this.renderer?.destroy();
+    this.renderer?.dispose?.();
     this.renderer = null;
 
     this.uiInterpreter?.destroy();
     this.uiInterpreter = null;
+    this.anima?.dispose?.();
     this.anima = null;
+    this.renderStateComposer?.dispose?.();
     this.renderStateComposer = null;
+    this.graph.dispose?.();
 
     this.canvas?.remove();
     this.canvas = null;

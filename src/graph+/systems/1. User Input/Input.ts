@@ -1,10 +1,10 @@
 // InputManager.ts
-import type { UISettings, ScreenPt, PointerKind, DrainableQueue, UserInputEvent } from "../../grammar/interfaces.ts";
+import type { UISettings, ScreenPt, PointerKind, DrainableBuffer, UserInputEvent } from "../../grammar/interfaces.ts";
 import { InputBuffer } from "./InputBuffer.ts";
 
 type InputDeps = {
   getCanvas: () => HTMLCanvasElement;
-  getBuffer: () => DrainableQueue<UserInputEvent>;
+  getBuffer: () => DrainableBuffer<UserInputEvent>;
   uiSettings: UISettings;
 };
 

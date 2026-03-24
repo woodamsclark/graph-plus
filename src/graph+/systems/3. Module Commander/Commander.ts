@@ -2,7 +2,7 @@
 // Drains commands and routes them through a registry.
 // Modules register handlers for the command types they care about.
 
-import type { CommandSystem, DrainableQueue, Vec3 } from "../../grammar/interfaces.ts";
+import type { CommandSystem, DrainableBuffer, Vec3 } from "../../grammar/interfaces.ts";
 import { CommandBuffer } from "./CommandBuffer.ts";
 
 export type Command =
@@ -59,7 +59,7 @@ export class CommandRegistry {
 }
 
 export type CommandSystemDeps = {
-  getQueue: () => DrainableQueue<Command>;
+  getQueue: () => DrainableBuffer<Command>;
   registry: CommandRegistry;
   observers?: CommandObserver[];
 };

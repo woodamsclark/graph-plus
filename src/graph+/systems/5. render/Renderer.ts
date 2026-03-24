@@ -1,4 +1,5 @@
 import type {
+  Module,
   RenderFrame,
   RenderLinkState,
   RenderNodeState,
@@ -8,7 +9,7 @@ import type {
 import type { CameraController } from "./CameraController.ts";
 import { RenderFrameStore } from "./RenderFrameStore.ts";
 
-export class Renderer implements RenderSystem {
+export class Renderer implements Module, RenderSystem {
   private ctx: CanvasRenderingContext2D;
   private width = 0;
   private height = 0;
@@ -49,6 +50,14 @@ export class Renderer implements RenderSystem {
     this.drawLinks(frame.links, frame);
     this.drawNodes(frame.nodes, frame);
     this.drawLabels(frame.nodes, frame);
+  }
+
+  public initialize(): void {
+    // no-op
+  }
+
+  public dispose(): void {
+    this.destroy();
   }
 
   public destroy(): void {
@@ -102,6 +111,7 @@ export class Renderer implements RenderSystem {
       if (!node.world) continue;
 
       const p = this.camera.worldToScreen(node.world);
+      if (p.depth < 0) continue;
       const r = node.radius * node.scale * p.scale;
 
       this.ctx.fillStyle =

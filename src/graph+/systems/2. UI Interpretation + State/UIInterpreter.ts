@@ -1,27 +1,28 @@
 import type {
   Node,
-  GraphData,
   UserInputEvent,
   Vec3,
   InteractionInterpreterSystem as UIInterpreterSystem,
-  DrainableQueue,
+  DrainableBuffer,
+  GraphModule,
 } from "../../grammar/interfaces.ts";
+import { Graph } from "../4. Modules/Graph.ts";
 
-import type { CameraController }                from "../5. Render/CameraController.ts";
+import type { CameraController }      from "../5. Render/CameraController.ts";
 import type { CursorCss }             from "../../CursorController.ts";
 import type { Command }               from "../3. Module Commander/Commander.ts";
-import      { UIStateStore } from "./UIStateStore.ts";
+import      { UIStateStore }          from "./UIStateStore.ts";
 import type { UISettings }            from "../../grammar/interfaces.ts";
 
 import { PointerRec, twoFingerRead, wrapAngleDelta, distSq } from "../helpers.ts";
 import { HitTester } from "./HitTester.ts";
 
 type UIInterpreterDeps = {
-  getGraph:             () => GraphData | null;
+  getGraph:             () => GraphModule;
   getCamera:            () => CameraController    | null;
   getCanvas:            () => HTMLCanvasElement;
-  getInputBuffer:       () => DrainableQueue<UserInputEvent>;
-  getCommands:          () => DrainableQueue<Command>;
+  getInputBuffer:       () => DrainableBuffer<UserInputEvent>;
+  getCommands:          () => DrainableBuffer<Command>;
   getUISettings:        () => UISettings;
   getInteractionState:  () => UIStateStore;
   getHitTester:         () => HitTester;
@@ -143,7 +144,7 @@ export class UIInterpreter implements UIInterpreterSystem {
 
     const rightIntent = isMouse && ((isLeft && (e.ctrl || e.meta)) || isRight);
     const downHit = this.deps.getHitTester().getNodeIdLabelAtScreenPoint(
-      this.deps.getGraph(),
+      this.deps.getGraph().get(),
       this.deps.getCamera(),
       e.screen.x,
       e.screen.y
@@ -345,7 +346,7 @@ export class UIInterpreter implements UIInterpreterSystem {
     }
 
     const hit = this.deps.getHitTester().getNodeAtScreenPoint(
-      this.deps.getGraph(),
+      this.deps.getGraph().get(),
       this.deps.getCamera(),
       mouse.x,
       mouse.y
@@ -357,7 +358,7 @@ export class UIInterpreter implements UIInterpreterSystem {
     const id = this.deps.getInteractionState().get().followedNodeId;
     if (!id) return;
 
-    const graph = this.deps.getGraph();
+    const graph = this.deps.getGraph().get();
     if (!graph) return;
 
     const node = graph.nodes.find(n => n.id === id);
@@ -402,7 +403,7 @@ export class UIInterpreter implements UIInterpreterSystem {
   private startDrag(nodeId: string, screenX: number, screenY: number) {
     this.cmd({ type: "SetFollowedNode", nodeId: null });
 
-    const graph   = this.deps.getGraph();
+    const graph   = this.deps.getGraph().get();
     const camera  = this.deps.getCamera();
     if (!graph || !camera) return;
 

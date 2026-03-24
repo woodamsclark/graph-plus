@@ -1,7 +1,5 @@
-
-
 import type {
-  GraphData,
+  Module,
   GraphSettings,
   RenderConfig,
   RenderFrame,
@@ -9,17 +7,19 @@ import type {
   RenderNodeState,
   Tickable,
   UIState,
+  GraphModule,
 } from "../../grammar/interfaces.ts";
 
 import type { RenderFrameStore } from "./RenderFrameStore.ts";
 import type { AnimaStateStore } from "../4. Modules/AnimaStateStore.ts";
+import { Graph } from "../4. Modules/Graph.ts";
 
 type RenderStateComposerDeps = {
-  getGraph: () => GraphData | null;
-  getUIState: () => UIState;
-  getGraphSettings: () => GraphSettings;
-  getAnimaStore: () => AnimaStateStore;
-  getFrameStore: () => RenderFrameStore;
+  getGraph: ()          => GraphModule;
+  getUIState: ()        => UIState;
+  getGraphSettings: ()  => GraphSettings;
+  getAnimaStore: ()     => AnimaStateStore;
+  getFrameStore: ()     => RenderFrameStore;
 };
 
 // delete this later, but for now it allows the render state composer to pick up theme colors from CSS variables, so that the default graph appearance matches the Obsidian theme.
@@ -30,11 +30,19 @@ const themeEdgeColor        = styles.getPropertyValue("--background-modifier-bor
 const themeLabelColor       = styles.getPropertyValue("--text-normal").trim()                 || "#ccc";
 const themeBackgroundColor  = styles.getPropertyValue("--background-primary").trim()          || "#111";
 
-export class RenderStateComposer implements Tickable {
+export class RenderStateComposer implements Module, Tickable {
+  initialize(): void {
+    // No startup work yet.
+  }
+
+  dispose(): void {
+    this.deps.getFrameStore().set(null);
+  }
+
   constructor(private deps: RenderStateComposerDeps) {}
 
   public tick(_dt: number, _nowMs: number): void {
-    const graph = this.deps.getGraph();
+    const graph = this.deps.getGraph().get();
     if (!graph) {
       this.deps.getFrameStore().set(null);
       return;

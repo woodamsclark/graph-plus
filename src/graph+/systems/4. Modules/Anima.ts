@@ -1,16 +1,24 @@
-import type { Tickable } from "../../grammar/interfaces.ts";
+import type { GraphModule, Module, Tickable } from "../../grammar/interfaces.ts";
 import type { Command, CommandObserver } from "../3. Module Commander/Commander.ts";
 import { AnimaStateStore } from "./AnimaStateStore.ts";
-import type { GraphData } from "../../grammar/interfaces.ts";
+import { Graph } from "./Graph.ts";
 
-export class Anima implements Tickable, CommandObserver {
+export class Anima implements Module, Tickable, CommandObserver {
   constructor(private deps: {
-    getGraph: () => GraphData | null;
+    getGraph: () => GraphModule;
     getStore: () => AnimaStateStore;
   }) {}
 
+  initialize(): void {
+    // No startup work yet.
+  }
+
+  dispose(): void {
+    // Store is owned externally; nothing to dispose here yet.
+  }
+
   tick(dt: number, _nowMs: number): void {
-    const graph = this.deps.getGraph();
+    const graph = this.deps.getGraph().get();
     if (!graph) return;
 
     const store = this.deps.getStore();
