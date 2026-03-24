@@ -77,8 +77,8 @@ export class Graph implements GraphModule {
 
     public async rebuild(): Promise<void> {
         if (this.data) {
-            const app = this.deps.getApp();
-            this.cachedState = this.extractState(this.data, app);
+            const app           = this.deps.getApp();
+            this.cachedState    = this.extractState(this.data, app);
         }
 
         this.invalidate();
@@ -174,10 +174,10 @@ export class Graph implements GraphModule {
             noteTagEdges = collected.edges;
         }
 
-        const nodes = this.createNodes(app, tags, showTags);
-        const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
-        const edges = this.collectEdges(app, showTags, tags, noteTagEdges);
-        const links = this.buildLinksFromEdges(edges, nodeById);
+        const nodes     = this.createNodes(app, tags, showTags);
+        const nodeById  = new Map(nodes.map((n) => [n.id, n] as const));
+        const edges     = this.collectEdges(app, showTags, tags, noteTagEdges);
+        const links     = this.buildLinksFromEdges(edges, nodeById);
 
         return { nodes, links, linksOut: {}, linksIn: {} };
     }
@@ -243,9 +243,9 @@ export class Graph implements GraphModule {
     }
 
     private *noteNoteEdges(app: App): IterableIterator<WeightedEdge> {
-        const settings = getSettings();
-        const resolvedLinks: ResolvedLinks = (app.metadataCache as any).resolvedLinks || {};
-        const countDuplicates = Boolean(settings.graph.countDuplicateLinks);
+        const settings                      = getSettings();
+        const resolvedLinks: ResolvedLinks  = (app.metadataCache as any).resolvedLinks || {};
+        const countDuplicates               = Boolean(settings.graph.countDuplicateLinks);
 
         for (const sourcePath of Object.keys(resolvedLinks)) {
             const targets = resolvedLinks[sourcePath] || {};

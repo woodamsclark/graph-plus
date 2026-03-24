@@ -13,7 +13,7 @@ export type Command =
 | { type: "SetDraggedNode";           nodeId: string | null }
 | { type: "BeginDrag";                nodeId: string; targetWorld: Vec3 }
 | { type: "UpdateDragTarget";         targetWorld: Vec3 }
-| { type: "EndDrag";                  nodeId: string }
+| { type: "EndDrag"; }
 | { type: "StartPanCamera";           screen: { x: number; y: number } }
 | { type: "UpdatePanCamera";          screen: { x: number; y: number } }
 | { type: "EndPanCamera" }

@@ -6,7 +6,6 @@ import type {
   DrainableBuffer,
   GraphModule,
 } from "../../grammar/interfaces.ts";
-import { Graph } from "../4. Modules/Graph.ts";
 
 import type { CameraController }      from "../5. Render/CameraController.ts";
 import type { CursorCss }             from "../../CursorController.ts";
@@ -458,7 +457,7 @@ export class UIInterpreter implements UIInterpreterSystem {
 
     this.dragWorldOffset = null;
 
-    this.cmd({ type: "EndDrag",         nodeId: draggedId });
+    this.cmd({ type: "EndDrag" });
     this.cmd({ type: "SetDraggedNode",  nodeId:null });
     this.cmd({ type: "SetMouseGravity",     on: true      });
   }
