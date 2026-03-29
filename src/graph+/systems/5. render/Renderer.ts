@@ -105,7 +105,7 @@ export class Renderer {
       .sort((a, b) => b.p.depth - a.p.depth); // far -> near
 
     for (const { node, p } of projected) {
-      const r = node.radius * node.scale * p.scale;
+      const r = node.radius * p.scale;
 
       this.ctx.fillStyle =
         node.type === "tag"
@@ -145,7 +145,7 @@ export class Renderer {
       .sort((a, b) => b.p.depth - a.p.depth); // far -> near
 
     for (const { node, p } of projected) {
-      const offsetY = node.radius * node.scale * p.scale + frame.settings.labelOffsetY;
+      const offsetY = node.radius * p.scale + frame.settings.labelOffsetY;
 
       this.ctx.globalAlpha = node.labelOpacity;
       this.ctx.fillText(node.label, p.x, p.y + offsetY);
