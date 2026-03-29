@@ -111,12 +111,16 @@ export class Renderer implements Module, RenderSystem{
   private drawNodes(nodes: RenderNodeState[], frame: RenderFrame): void {
     this.ctx.save();
 
-    for (const node of nodes) {
-      if (!node.visible) continue;
-      if (!node.world) continue;
+    const projected = nodes
+      .filter((node) => node.visible && node.world)
+      .map((node) => {
+        const p = this.camera.worldToScreen(node.world!);
+        return { node, p };
+      })
+      .filter(({ p }) => p.depth >= 0)
+      .sort((a, b) => b.p.depth - a.p.depth); // far -> near
 
-      const p = this.camera.worldToScreen(node.world);
-      if (p.depth < 0) continue;
+    for (const { node, p } of projected) {
       const r = node.radius * node.scale * p.scale;
 
       this.ctx.fillStyle =
@@ -142,15 +146,23 @@ export class Renderer implements Module, RenderSystem{
     this.ctx.textBaseline = "middle";
     this.ctx.fillStyle = frame.settings.labelColor ?? "#ccc";
 
-    for (const node of nodes) {
-      if (!node.visible) continue;
-      if (node.type === "tag" && !frame.settings.showTags) continue;
-      if (node.labelOpacity <= 0) continue;
-      if (!node.world) continue;
+    const projected = nodes
+      .filter((node) => {
+        if (!node.visible) return false;
+        if (node.type === "tag" && !frame.settings.showTags) return false;
+        if (node.labelOpacity <= 0) return false;
+        if (!node.world) return false;
+        return true;
+      })
+      .map((node) => {
+        const p = this.camera.worldToScreen(node.world!);
+        return { node, p };
+      })
+      .filter(({ p }) => p.depth >= 0)
+      .sort((a, b) => b.p.depth - a.p.depth); // far -> near
 
-      const p = this.camera.worldToScreen(node.world);
-      const offsetY =
-      node.radius * node.scale * p.scale + frame.settings.labelOffsetY;
+    for (const { node, p } of projected) {
+      const offsetY = node.radius * node.scale * p.scale + 12;
 
       this.ctx.globalAlpha = node.labelOpacity;
       this.ctx.fillText(node.label, p.x, p.y + offsetY);
