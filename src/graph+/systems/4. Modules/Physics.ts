@@ -1,17 +1,29 @@
 import { createSimulation } from "./simulation.ts";
-import type { Module, Simulation, UIState, PhysicsSystem, PhysicsSettings, GraphModule } from "../../grammar/interfaces.ts";
+import type { Module, Simulation, UIState, PhysicsSystem, PhysicsSettings, GraphModule, LayoutSettings, SettingsAwareSystem, PhysicsModuleSettings } from "../../grammar/interfaces.ts";
 import type { CameraController } from "../5. Render/CameraController.ts";
 
-export class Physics implements Module, PhysicsSystem {
+export class Physics implements Module, PhysicsSystem, SettingsAwareSystem<PhysicsModuleSettings> {
   private sim: Simulation | null = null;
   private pinnedNodeIds: Set<string> = new Set();
 
-  constructor(private deps: {
-    getGraph:             () => GraphModule;
-    getCamera:            () => CameraController            | null;
-    getInteractionState:  () => UIState;
-    getPhysicsSettings: () => PhysicsSettings;
-  }) {}
+
+  constructor
+  (
+    private settings: PhysicsModuleSettings,
+    private deps: 
+    {
+      getGraph:             ()  => GraphModule;
+      getCamera:            ()  => CameraController | null;
+      getInteractionState:  ()  => UIState;
+    }
+  ) 
+  {
+    this.settings = settings;
+  }
+
+  updateSettings(settings: PhysicsModuleSettings): void {
+    this.settings = settings;
+  }
 
   initialize(): void {
     // Simulation is built lazily through rebuild().
@@ -36,15 +48,17 @@ export class Physics implements Module, PhysicsSystem {
     this.sim = createSimulation(
       graph, 
       camera, 
-      () => this.deps.getInteractionState().gravityCenter,
-      (nodeId) => nodeId === this.deps.getInteractionState().followedNodeId
+      this.settings.tuning,
+      this.settings.physics,
+      ()        => this.deps.getInteractionState().gravityCenter,
+      (nodeId)  => nodeId === this.deps.getInteractionState().followedNodeId
     );
     this.sim?.setPinnedNodes?.(new Set(this.pinnedNodeIds));
     this.sim?.start();
   }
 
   public tick(dt: number): void {
-  this.sim?.tick(dt, this.deps.getPhysicsSettings());
+  this.sim?.tick(dt, this.settings.physics, this.settings.layout);
   }
 
   public stop(): void {

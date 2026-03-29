@@ -20,9 +20,9 @@ export type ScreenProjection = {
 };
 
 export type ProjectionContext = {
-  cameraState: CameraState;
+  cameraState   : CameraState;
   cameraSettings: CameraSettings;
-  viewport: Viewport;
+  viewport      : Viewport;
   worldTransform: WorldTransform | null;
 };
 
@@ -159,13 +159,13 @@ export function screenToWorld2D(
 }
 
 export function getEffectiveFocalPx(
-  cameraState: CameraState,
+  cameraState   : CameraState,
   cameraSettings: CameraSettings,
-  viewport: Viewport,
+  viewport      : Viewport,
 ): number {
   const d = cameraState.distance;
-  const minD = cameraSettings.min_distance;
-  const maxD = cameraSettings.max_distance;
+  const minD = cameraSettings.minDistance;
+  const maxD = cameraSettings.maxDistance;
 
   let t = (d - minD) / Math.max(0.0001, maxD - minD);
   t = clamp01(t);

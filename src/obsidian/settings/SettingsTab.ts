@@ -1,14 +1,35 @@
 import { App, PluginSettingTab, Setting, TextComponent, ToggleComponent } from 'obsidian';
 import GraphPlus from '../main.ts';
 import { getSettings, updateSettings } from '../settings/settingsStore.ts';
-import { GraphPlusSettings } from '../../graph+/grammar/interfaces.ts';
+import { GraphPlusSettings, PointerKind } from '../../graph+/grammar/interfaces.ts';
 import { DEFAULT_SETTINGS } from '../settings/defaultSettings.ts';
+import {
+  getSettingsSchema,
+  getSettingsFieldContext,
+  type FieldContext,
+  type SectionDescriptor,
+  type FieldDescriptor,
+  type SliderField,
+  type ToggleField,
+  type ColorField,
+  type TextField,
+} from './settingsSchema.ts';
 
 declare module 'obsidian' {
   interface Setting {
     controlEl: HTMLElement;
   }
 }
+
+
+const round = (value: number, decimals = 3): number => {
+  const factor = Math.pow(10, decimals);
+  return Math.round(value * factor) / factor;
+};
+
+const formatStringArray = (value: string[] | undefined): string => {
+  return Array.isArray(value) ? value.join(', ') : '';
+};
 
 export class GraphPlusSettingTab extends PluginSettingTab {
   plugin: GraphPlus;
@@ -19,501 +40,242 @@ export class GraphPlusSettingTab extends PluginSettingTab {
   }
 
   display(): void {
-    const settings          = getSettings();
-    const { containerEl }   = this;
+    const settings = getSettings();
+    const defaults = DEFAULT_SETTINGS;
+    const ctx: FieldContext = getSettingsFieldContext(settings);
+    const { containerEl } = this;
+
     containerEl.empty();
-    containerEl.createEl('h2', { text: 'Graph Settings' });
+    containerEl.createEl('h2', { text: 'GraphPlus Settings' });
 
-    // helper to create a slider with reset button inside a Setting
-    const addSliderSetting  = (parent: HTMLElement, opts: { 
-        name        : string; 
-        desc?       : string; 
-        value       : number; 
-        min         : number; 
-        max         : number; 
-        step?       : number; 
-        onChange    : (v: number) => Promise<void>  | void; 
-        resetValue? : number                        | undefined; 
-    }) => {
-      const s               = new Setting(parent).setName(opts.name).setDesc(opts.desc || '');
-      const wrap            = document.createElement('div');
-      wrap.style.display    = 'flex';
-      wrap.style.alignItems = 'center';
-      wrap.style.gap        = '8px';
-
-      const range           = document.createElement('input');
-      range.type            = 'range';
-      range.min             = String(opts.min);
-      range.max             = String(opts.max);
-      range.step            = String(opts.step ?? (opts.step === 0 ? 0 : (opts.step || 1)));
-      range.value           = String(opts.value);
-      range.style.flex      = '1';
-
-      const num             = document.createElement('input');
-      num.type              = 'number';
-      num.min               = String(opts.min); 
-      num.max               = String(opts.max); 
-      num.step              = String(opts.step ?? (opts.step === 0 ? 0 : (opts.step || 1)));
-      num.value             = String(opts.value);
-      num.style.minWidth    = '56px';
-      num.style.textAlign   = 'right';
-      num.style.width       = '80px';
-
-      range.addEventListener('input', (e)         => { num.value    = (e.target         as HTMLInputElement).value; });
-      num.addEventListener  ('input', (e)         => { range.value  = (e.target         as HTMLInputElement).value; });
-      range.addEventListener('change', async (e)  => { const v      = Number((e.target  as HTMLInputElement).value); await opts.onChange(v); });
-      num.addEventListener  ('change', async (e)  => { const v      = Number((e.target  as HTMLInputElement).value); await opts.onChange(v); });
-
-      const rbtn            = document.createElement('button');
-      rbtn.type             = 'button';
-      rbtn.textContent      = '↺';
-      rbtn.title            = 'Reset to default';
-      rbtn.style.border     = 'none';
-      rbtn.style.background = 'transparent';
-      rbtn.style.cursor     = 'pointer';
-      rbtn.addEventListener('click', async () => {
-        try {
-          if (typeof opts.resetValue === 'number') {
-            range.value = String(opts.resetValue);
-            num.value   = range.value;
-            await opts.onChange(Number(range.value));
-          } else {
-            // if resetValue undefined -> delete stored setting by calling onChange with NaN
-            await opts.onChange(NaN as any);
-          }
-        } catch (e) {}
-      });
-
-      wrap.appendChild(range);
-      wrap.appendChild(num);
-      wrap.appendChild(rbtn);
-      s.controlEl.appendChild(wrap);
-      return { range, num, reset: rbtn };
-    };
-
-    const addNumericSlider = 
-    (parent: HTMLElement, 
-      opts: {
-        name      : string;
-        desc?     : string;
-        min       : number;
-        max       : number;
-        step?     : number;
-        get       : (s: GraphPlusSettings)            => number;
-        getDefault: (s: GraphPlusSettings)            => number;
-        set       : (s: GraphPlusSettings, v: number) => void;
-        clamp?    : (v: number)                       => number;
-      }
-    ) => {
-      const current = opts.get(settings);
-      const def     = opts.getDefault(DEFAULT_SETTINGS);
-
-      addSliderSetting(parent, {
-        name : opts.name,
-        desc : opts.desc,
-        value: current,
-        min  : opts.min,
-        max  : opts.max,
-        step : opts.step,
-        resetValue: def,
-        onChange: async (raw) => {
-          if (Number.isNaN(raw)) {
-            // reset to default
-            const dv = opts.clamp ? opts.clamp(def) : def;
-            this.applySettings((s) => { opts.set(s, dv); });
-            return;
-          }
-          const v = opts.clamp ? opts.clamp(raw) : raw;
-          this.applySettings((s) => { opts.set(s, v); });
-        },
-      });
-    };
-
-// ============================================================================ //
-
-    // Minimum node radius (UI in pixels)
-    addNumericSlider(containerEl, {
-      name      : 'Minimum node radius',
-      desc      : 'Minimum radius for the smallest node (in pixels).',
-      min       : 1,
-      max       : 20,
-      step      : 1,
-      get       : (s)     => s.graph.minNodeRadius,
-      getDefault: (s)     => s.graph.minNodeRadius,
-      set       : (s, v)  => { s.graph.minNodeRadius = Math.round(v); },
-      clamp     : (v)     => Math.max(1, Math.min(20, Math.round(v))),
-    });
-
-
-    addNumericSlider(containerEl, {
-      name      : 'Maximum node radius',
-      desc      : 'Maximum radius for the most connected node (in pixels).',
-      min       : 8,
-      max       : 80,
-      step      : 1,
-      get       : (s)     => s.graph.maxNodeRadius,
-      getDefault: (s)     => s.graph.maxNodeRadius,
-      set       : (s, v)  => { s.graph.maxNodeRadius = Math.round(v); },
-      clamp     : (v)     => Math.max(8, Math.min(80, Math.round(v))),
-    });
-
-    addNumericSlider(containerEl, {
-      name: 'Gravity Radius',
-      desc: 'Scales each node\'s screen-space radius for glow/mouse gravity.',
-      min: 10,
-      max: 30,
-      step: 1,
-      get: (s)        => s.physics.mouseGravityRadius,
-      getDefault: (s) => s.physics.mouseGravityRadius,
-      set: (s, v)     => { s.physics.mouseGravityRadius = v; },
-      clamp: (v)      => Math.max(10, Math.min(30, v)),
-    });
-
-    addNumericSlider(containerEl, {
-      name: 'Gravity strength',
-      desc: 'Overall strength of the mouse gravity effect.',
-      min: 1,
-      max: 20,
-      step: 1,
-      get: (s)        => s.physics.mouseGravityStrength,
-      getDefault: (s) => s.physics.mouseGravityStrength,
-      set: (s, v)     => { s.physics.mouseGravityStrength = v; },
-      clamp: (v)      => Math.max(1, Math.min(20, v)),
-    });
-
-    addNumericSlider(containerEl, {
-      name: 'Label Radius',
-      desc: 'Screen-space label reveal radius (× node size).',
-      min: 0.5,
-      max: 10,
-      step: 0.1,
-      get: (s)        => s.graph.labelRevealRadius,
-      getDefault: (s) => s.graph.labelRevealRadius,
-      set: (s, v)     => { s.graph.labelRevealRadius = v; },
-      clamp: (v)      => Math.max(0.5, Math.min(10, v)),
-    });
-
-    //// COLORS ////
-    containerEl.createEl('h2', { text: 'Color Settings' });
-
-    {
-      const s = new Setting(containerEl)
-        .setName('Node color (override)')
-        .setDesc('Optional color to override the theme accent for node fill. Leave unset to use the active theme.');
-      const colorInput  = document.createElement('input');
-      colorInput.type   = 'color';
-      try { 
-        colorInput.value = settings.graph.nodeColor ? String(settings.graph.nodeColor) : '#000000'; 
-    } catch (e) { 
-        colorInput.value = '#000000';
+    for (const section of getSettingsSchema()) {
+      this.renderSection(containerEl, section, ctx);
     }
-      colorInput.style.marginLeft = '8px';
-      colorInput.addEventListener('change', async (e) => {
-        const v = (e.target as HTMLInputElement).value.trim();
-        this.applySettings((s) => { s.graph.nodeColor = v === '' ? undefined : v; });
-      });
-
-      const rb                      = document.createElement('button'); 
-      rb.type                       = 'button'; 
-      rb.textContent                = '↺'; 
-      rb.title                      = 'Reset to default'; 
-      rb.style.marginLeft           = '8px'; 
-      rb.style.border               = 'none'; 
-      rb.style.background           = 'transparent'; 
-      rb.style.cursor               = 'pointer';
-      s.controlEl.appendChild(rb);
-      const hint                = document.createElement('span'); 
-      hint.textContent          = '(alpha)'; 
-      hint.style.marginLeft     = '8px'; 
-      hint.style.marginRight    = '6px';
-      s.controlEl.appendChild(hint);
-      s.controlEl.appendChild(colorInput);
-    }
-
-    {
-      const s = new Setting(containerEl)
-        .setName('Edge color (override)')
-        .setDesc('Optional color to override edge stroke color. Leave unset to use a theme-appropriate color.');
-      const colorInput  = document.createElement('input');
-      colorInput.type   = 'color';
-      
-      try { 
-        colorInput.value = settings.graph.edgeColor ? String(settings.graph.edgeColor) : '#000000'; 
-      } catch (e) { 
-        colorInput.value = '#000000'; 
-      }
-      colorInput.style.marginLeft = '8px';
-      colorInput.addEventListener('change', async (e) => {
-        const v = (e.target as HTMLInputElement).value.trim();
-        this.applySettings((s) => { s.graph.edgeColor = v === '' ? undefined : v; });
-      });
-      const rb                      = document.createElement('button'); 
-      rb.type                       = 'button'; 
-      rb.textContent                = '↺'; 
-      rb.title                      = 'Reset to default'; 
-      rb.style.marginLeft           = '8px'; 
-      rb.style.border               = 'none'; 
-      rb.style.background           = 'transparent'; 
-      rb.style.cursor               = 'pointer';
-      s.controlEl.appendChild(rb);
-      s.controlEl.appendChild(colorInput);
-      const hint                = document.createElement('span'); 
-      hint.textContent          = '(alpha)'; 
-      hint.style.marginLeft     = '8px'; 
-      hint.style.marginRight    = '6px';
-      s.controlEl.appendChild(hint);
-    }
-
-    // Tag color (override)
-    {
-      const s = new Setting(containerEl)
-        .setName('Tag color (override)')
-        .setDesc('Optional color to override tag node color. Leave unset to use the active theme.');
-      const colorInput              = document.createElement('input');
-      colorInput.type               = 'color';
-      try { 
-        colorInput.value            = settings.graph.tagColor ? String(settings.graph.tagColor) : '#000000';
-      } catch (e) { 
-        colorInput.value            = '#000000'; 
-    }
-      colorInput.style.marginLeft   = '8px';
-      colorInput.addEventListener('change', async (e) => {
-        const v = (e.target as HTMLInputElement).value.trim();
-        settings.graph.tagColor = v === '' ? undefined : v;
-        await this.plugin.saveSettings();
-      });
-      const rb                  = document.createElement('button'); 
-      rb.type                   = 'button'; 
-      rb.textContent            = '↺'; 
-      rb.title                  = 'Reset to default'; 
-      rb.style.marginLeft       = '8px';
-      rb.style.border           = 'none'; 
-      rb.style.background       = 'transparent'; 
-      rb.style.cursor           = 'pointer';
-      s.controlEl.appendChild(rb);
-      s.controlEl.appendChild(colorInput);
-      const hint                = document.createElement('span'); 
-      hint.textContent          = '(alpha)'; 
-      hint.style.marginLeft     = '8px'; 
-      hint.style.marginRight    = '6px';
-      s.controlEl.appendChild(hint);
-    }
-
-    {
-      const s = new Setting(containerEl)
-        .setName('Label color (override)')
-        .setDesc('Optional color to override the label text color. Leave unset to use the active theme.');
-      const colorInput = document.createElement('input');
-      colorInput.type = 'color';
-      try { 
-        colorInput.value = settings.graph.labelColor ? String(settings.graph.labelColor) : '#000000'; 
-      } catch (e) { 
-        colorInput.value = '#000000'; 
-      }
-      colorInput.style.marginLeft = '8px';
-      colorInput.addEventListener('change', async (e) => {
-        const v = (e.target as HTMLInputElement).value.trim();
-        settings.graph.labelColor = v === '' ? undefined : v;
-        await this.plugin.saveSettings();
-      });
-      const rb                          = document.createElement('button'); 
-      rb.type                           = 'button'; rb.textContent = '↺'; 
-      rb.title                          = 'Reset to default'; 
-      rb.style.marginLeft               = '8px'; 
-      rb.style.border                   ='none'; 
-      rb.style.background               ='transparent'; 
-      rb.style.cursor                   ='pointer';
-      s.controlEl.appendChild(rb);
-      s.controlEl.appendChild(colorInput);
-      const hint = document.createElement('span'); 
-      hint.textContent          = '(alpha)'; 
-      hint.style.marginLeft     = '8px'; 
-      hint.style.marginRight    = '6px';
-      s.controlEl.appendChild(hint);
-    }
-
-    new Setting(containerEl)
-      .setName('Use interface font for labels')
-      .setDesc('When enabled, the plugin will use the theme/Obsidian interface font for file labels. When disabled, a monospace/code font will be preferred.')
-      .addToggle((t: ToggleComponent ) => t.setValue(Boolean(settings.graph.useInterfaceFont)).onChange(async (v: boolean) => {
-        this.applySettings((s) => { s.graph.useInterfaceFont = v; });
-      }));
-
-    addNumericSlider(containerEl, {
-      name: 'Base label font size',
-      desc: 'Base font size for labels in pixels (before camera zoom scaling).',
-      min: 6,
-      max: 24,
-      step: 1,
-      get: (s)        => s.graph.labelFontSize,
-      getDefault: (s) => s.graph.labelFontSize,
-      set: (s, v)     => { s.graph.labelFontSize = v; },
-      clamp: (v)      => Math.max(6, Math.min(24, v)),
-    });
-
-    //// settings.physics ////
-    containerEl.createEl('h2', { text: 'Physics Settings' });
-
-    const repulsionUi = (() => {
-      const internal = (settings.physics.repulsionStrength);
-      const ui = Math.sqrt(Math.max(0, internal / 2000));
-      return Math.min(1, Math.max(0, ui));
-    })();
-    
-    addSliderSetting(containerEl, {
-      name: 'Repulsion strength',
-      desc: 'UI 0–1 (mapped internally). Higher = more node separation.',
-      value: repulsionUi,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      resetValue: repulsionUi,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-            this.applySettings((s) => { s.physics.repulsionStrength = v * v * 2000; });
-        } else if (Number.isNaN(v)) {
-            this.applySettings((s) => { s.physics.repulsionStrength = settings.physics.repulsionStrength; });
-        }
-      },
-    });
-
-    const springUi = Math.min(1, Math.max(0, (settings.physics.edgeStrength) / 0.5));
-    addSliderSetting(containerEl, {
-      name: 'Spring strength',
-      desc: 'UI 0–1 mapped to internal spring constant (higher = stiffer).',
-      value: springUi,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      resetValue: springUi,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-            this.applySettings((s) => { s.physics.edgeStrength = v * 0.5; });
-        } else if (Number.isNaN(v)) {
-            this.applySettings((s) => { s.physics.edgeStrength = settings.physics!.edgeStrength; });
-        }
-      },
-    });
-
-    addSliderSetting(containerEl, {
-      name: 'Spring length',
-      desc: 'Preferred length (px) for edge springs.',
-      value: settings.physics.edgeLength,
-      min: 20,
-      max: 400,
-      step: 1,
-      resetValue: DEFAULT_SETTINGS.physics!.edgeLength,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0) {
-            this.applySettings((s) => { s.physics.edgeLength = v; });
-        } else if (Number.isNaN(v)) {
-            this.applySettings((s) => { s.physics.edgeLength = settings.physics!.edgeLength; });
-        }
-      },
-    });
-
-    const centerUi = Math.min(1, Math.max(0, (settings.physics.centerPull) / 0.01));
-    addSliderSetting(containerEl, {
-      name: 'Center pull',
-      desc: 'UI 0–1 mapped to a small centering force (internal scale).',
-      value: centerUi,
-      min: 0,
-      max: 1,
-      step: 0.001,
-      resetValue: 0.1,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-            this.applySettings((s) => { s.physics.centerPull = v * 0.01; });
-        } else if (Number.isNaN(v)) {
-            this.applySettings((s) => { s.physics.centerPull = 0; });
-        }
-      },
-    });
-
-    addSliderSetting(containerEl, {
-      name: 'Damping',
-      desc: 'Velocity damping (0.7–1.0). Higher values reduce motion faster.',
-      value: settings.physics.damping,
-      min: 0.7,
-      max: 1,
-      step: 0.01,
-      resetValue: DEFAULT_SETTINGS.physics.damping,
-      onChange: async (v) => {
-        if (!Number.isNaN(v) && v >= 0.7 && v <= 1) {
-          this.applySettings((s) => { s.physics.damping = v; });
-        } else if (Number.isNaN(v)) {
-            this.applySettings((s) => { s.physics.damping = settings.physics.damping; });
-        }
-      },
-    });
-
-    new Setting(containerEl)
-      .setName('Count duplicate links')
-      .setDesc('If enabled, multiple links between the same two files will be counted when computing in/out degrees.')
-      .addToggle((t: ToggleComponent) => t.setValue(Boolean(settings.graph.countDuplicateLinks)).onChange(async (v: boolean) => {
-        this.applySettings((s) => { s.graph.countDuplicateLinks = Boolean(v); });
-      }));
-
-    new Setting(containerEl)
-      .setName('Double-line mutual links')
-      .setDesc('When enabled, mutual links (A ↔ B) are drawn as two parallel lines; when disabled, mutual links appear as a single line.')
-      .addToggle((t: ToggleComponent) => t.setValue(Boolean(settings.graph.drawDoubleLines)).onChange(async (v: boolean) => {
-        this.applySettings((s) => { s.graph.drawDoubleLines = Boolean(v); });
-      }));
-
-    new Setting(containerEl)
-      .setName('Show tag nodes')
-      .setDesc('Toggle visibility of tag nodes and their edges in the graph.')
-      .addToggle((t: ToggleComponent) => t.setValue(settings.graph.showTags !== false).onChange(async (v: boolean) => {
-        this.applySettings((s) => { s.graph.showTags = Boolean(v); });
-      }));
-
-      const notePlaneUi = Math.min(1, Math.max(0, (settings.physics.notePlaneStiffness) / 0.02));
-      addSliderSetting(containerEl, {
-        name: 'Note plane stiffness (z)',
-        desc: 'How strongly notes are pulled toward the z=0 plane (UI 0–1).',
-        value: notePlaneUi,
-        min: 0,
-        max: 1,
-        step: 0.01,
-        resetValue: 0.2,
-        onChange: async (v) => {
-          if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-            this.applySettings((s) => { s.physics.notePlaneStiffness = v * 0.02; });
-          } else if (Number.isNaN(v)) {
-            this.applySettings((s) => { s.physics.notePlaneStiffness = 0; });
-          }
-        },
-      });
-
-      const tagPlaneUi = Math.min(1, Math.max(0, (settings.physics.tagPlaneStiffness) / 0.02));
-      addSliderSetting(containerEl, {
-        name: 'Tag plane stiffness (x)',
-        desc: 'How strongly tag nodes are pulled toward the x=0 plane (UI 0–1).',
-        value: tagPlaneUi,
-        min: 0,
-        max: 1,
-        step: 0.01,
-        resetValue: 0.4,
-        onChange: async (v) => {
-          if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-            this.applySettings((s) => { s.physics.tagPlaneStiffness = v * 0.02; });
-          } else if (Number.isNaN(v)) {
-            this.applySettings((s) => { s.physics.tagPlaneStiffness = 0; });
-          }
-        },
-      });
-
-      // Mouse gravity toggle (replaces old radius control)
-      new Setting(containerEl)
-        .setName('Mouse gravity')
-        .setDesc('Enable the mouse gravity well that attracts nearby nodes.')
-        .addToggle((t: any) => t
-          .setValue(Boolean((settings.physics as any).mouseGravityEnabled !== false))
-          .onChange(async (v: any) => {
-            this.applySettings((s) => { (s.physics as any).mouseGravityEnabled = Boolean(v); });
-          }));
   }
+
+  private renderSection(parent: HTMLElement, section: SectionDescriptor, ctx: FieldContext): void {
+    parent.createEl('h3', { text: section.title });
+
+    for (const field of section.fields) {
+      if (field.visible && !field.visible(ctx)) {
+        continue;
+      }
+
+      this.renderField(parent, field, ctx);
+    }
+  }
+
+  private renderField(parent: HTMLElement, field: FieldDescriptor, ctx: FieldContext): void {
+    switch (field.kind) {
+      case 'slider':
+        this.renderSliderField(parent, field, ctx);
+        return;
+      case 'toggle':
+        this.renderToggleField(parent, field, ctx);
+        return;
+      case 'color':
+        this.renderColorField(parent, field, ctx);
+        return;
+      case 'text':
+        this.renderTextField(parent, field, ctx);
+        return;
+    }
+  }
+
+  private renderSliderField(parent: HTMLElement, field: SliderField, ctx: FieldContext): void {
+    const currentValue = field.get(ctx.settings);
+    const defaultValue = field.getDefault(ctx.defaults);
+    const uiValue = field.toUi ? field.toUi(currentValue, ctx) : currentValue;
+
+    const setting = new Setting(parent)
+      .setName(field.name)
+      .setDesc(field.desc || '');
+
+    const wrap = document.createElement('div');
+    wrap.style.display = 'flex';
+    wrap.style.alignItems = 'center';
+    wrap.style.gap = '8px';
+
+    const range = document.createElement('input');
+    range.type = 'range';
+    range.min = String(field.min);
+    range.max = String(field.max);
+    range.step = String(field.step ?? 1);
+    range.value = String(uiValue);
+    range.style.flex = '1';
+
+    const numberInput = document.createElement('input');
+    numberInput.type = 'number';
+    numberInput.min = String(field.min);
+    numberInput.max = String(field.max);
+    numberInput.step = String(field.step ?? 1);
+    numberInput.value = String(uiValue);
+    numberInput.style.minWidth = '72px';
+    numberInput.style.textAlign = 'right';
+    numberInput.style.width = '84px';
+
+    const syncValue = (rawValue: string) => {
+      range.value = rawValue;
+      numberInput.value = rawValue;
+    };
+
+    range.addEventListener('input', (e) => {
+      syncValue((e.target as HTMLInputElement).value);
+    });
+
+    numberInput.addEventListener('input', (e) => {
+      syncValue((e.target as HTMLInputElement).value);
+    });
+
+    const commitValue = async (raw: number) => {
+      if (Number.isNaN(raw)) {
+        const resetUiValue = field.toUi ? field.toUi(defaultValue, ctx) : defaultValue;
+        syncValue(String(resetUiValue));
+        await this.applySettings((settings) => {
+          field.set(settings, defaultValue);
+        });
+        return;
+      }
+
+      const clampedUi = field.clamp ? field.clamp(raw) : raw;
+      const resolvedValue = field.fromUi ? field.fromUi(clampedUi, ctx) : clampedUi;
+      syncValue(String(clampedUi));
+      await this.applySettings((settings) => {
+        field.set(settings, resolvedValue);
+      });
+    };
+
+    range.addEventListener('change', async (e) => {
+      await commitValue(Number((e.target as HTMLInputElement).value));
+    });
+
+    numberInput.addEventListener('change', async (e) => {
+      await commitValue(Number((e.target as HTMLInputElement).value));
+    });
+
+    const resetButton = this.createResetButton(async () => {
+      await commitValue(NaN);
+    });
+
+    wrap.appendChild(range);
+    wrap.appendChild(numberInput);
+    wrap.appendChild(resetButton);
+    setting.controlEl.appendChild(wrap);
+  }
+
+  private renderToggleField(parent: HTMLElement, field: ToggleField, ctx: FieldContext): void {
+    const setting = new Setting(parent)
+      .setName(field.name)
+      .setDesc(field.desc || '');
+
+    setting.addToggle((toggle: ToggleComponent) => {
+      toggle.setValue(field.get(ctx.settings));
+      toggle.onChange(async (value: boolean) => {
+        await this.applySettings((settings) => {
+          field.set(settings, value);
+        });
+      });
+    });
+
+    setting.controlEl.appendChild(
+      this.createResetButton(async () => {
+        await this.applySettings((settings) => {
+          field.set(settings, field.getDefault(ctx.defaults));
+        });
+        this.display();
+      }),
+    );
+  }
+
+  private renderColorField(parent: HTMLElement, field: ColorField, ctx: FieldContext): void {
+    const setting = new Setting(parent)
+      .setName(field.name)
+      .setDesc(field.desc || '');
+
+    const fallback = field.fallback ?? '#000000';
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+
+    try {
+      colorInput.value = field.get(ctx.settings) ?? fallback;
+    } catch {
+      colorInput.value = fallback;
+    }
+
+    colorInput.style.marginLeft = '8px';
+    colorInput.addEventListener('change', async (e) => {
+      const value = (e.target as HTMLInputElement).value.trim();
+      await this.applySettings((settings) => {
+        field.set(settings, value === '' ? undefined : value);
+      });
+    });
+
+    const alphaHint = document.createElement('span');
+    alphaHint.textContent = '(alpha ignored by picker)';
+    alphaHint.style.marginLeft = '8px';
+    alphaHint.style.marginRight = '6px';
+    alphaHint.style.fontSize = '12px';
+
+    const resetButton = this.createResetButton(async () => {
+      const defaultValue = field.getDefault(ctx.defaults);
+      await this.applySettings((settings) => {
+        field.set(settings, defaultValue);
+      });
+      this.display();
+    });
+
+    setting.controlEl.appendChild(resetButton);
+    setting.controlEl.appendChild(alphaHint);
+    setting.controlEl.appendChild(colorInput);
+  }
+
+  private renderTextField(parent: HTMLElement, field: TextField, ctx: FieldContext): void {
+    const setting = new Setting(parent)
+      .setName(field.name)
+      .setDesc(field.desc || '');
+
+    setting.addText((text: TextComponent) => {
+      text.setValue(field.get(ctx.settings));
+      if (field.placeholder) {
+        text.setPlaceholder(field.placeholder);
+      }
+      text.onChange(async (value: string) => {
+        const parsed = field.parse ? field.parse(value, ctx) : value;
+        await this.applySettings((settings) => {
+          field.set(settings, parsed);
+        });
+      });
+    });
+
+    setting.controlEl.appendChild(
+      this.createResetButton(async () => {
+        await this.applySettings((settings) => {
+          field.set(settings, field.getDefault(ctx.defaults));
+        });
+        this.display();
+      }),
+    );
+  }
+
+  private createResetButton(onClick: () => Promise<void> | void): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = '↺';
+    button.title = 'Reset to default';
+    button.style.marginLeft = '8px';
+    button.style.border = 'none';
+    button.style.background = 'transparent';
+    button.style.cursor = 'pointer';
+    button.addEventListener('click', async () => {
+      try {
+        await onClick();
+      } catch {
+        // no-op
+      }
+    });
+    return button;
+  }
+
   async applySettings(mutator: (s: GraphPlusSettings) => void) {
     updateSettings(mutator);
     await this.plugin.saveSettings();

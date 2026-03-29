@@ -1,23 +1,30 @@
 import type {
+  RenderSettings,
+  GraphPlusSettings,
   Module,
   RenderFrame,
   RenderLinkState,
   RenderNodeState,
   RenderSystem,
+  RendererModuleSettings,
 } from "../../grammar/interfaces.ts";
 
 import type { CameraController } from "./CameraController.ts";
 import { RenderFrameStore } from "./RenderFrameStore.ts";
 
-export class Renderer implements Module, RenderSystem {
+type RendererDeps = {
+  getRenderSettings: () => Pick<GraphPlusSettings, 'base' | 'tuning'>;
+};
+
+export class Renderer implements Module, RenderSystem{
   private ctx: CanvasRenderingContext2D;
   private width = 0;
   private height = 0;
 
   constructor(
-    private canvas:     HTMLCanvasElement,
-    private camera:     CameraController,
-    private frameStore: RenderFrameStore
+    private canvas    : HTMLCanvasElement,
+    private camera    : CameraController,
+    private frameStore: RenderFrameStore,
   ) {
     const ctx = this.canvas.getContext("2d");
     if (!ctx) throw new Error("Could not acquire 2D rendering context");
@@ -67,8 +74,8 @@ export class Renderer implements Module, RenderSystem {
   private clear(frame: RenderFrame): void {
     this.ctx.clearRect(0, 0, this.width, this.height);
 
-    if (frame.config.backgroundColor) {
-      this.ctx.fillStyle = frame.config.backgroundColor;
+    if (frame.settings.backgroundColor) {
+      this.ctx.fillStyle = frame.settings.backgroundColor;
       this.ctx.fillRect(0, 0, this.width, this.height);
     }
   }
@@ -78,7 +85,7 @@ export class Renderer implements Module, RenderSystem {
 
     this.ctx.save();
 
-    this.ctx.strokeStyle = frame.config.edgeColor ?? "#888";
+    this.ctx.strokeStyle = frame.settings.edgeColor ?? "#888";
 
     for (const link of links) {
       if (!link.visible) continue;
@@ -116,8 +123,8 @@ export class Renderer implements Module, RenderSystem {
 
       this.ctx.fillStyle =
         node.type === "tag"
-          ? (frame.config.tagColor ?? "#888")
-          : (frame.config.nodeColor ?? "#888");
+          ? (frame.settings.tagColor ?? "#888")
+          : (frame.settings.nodeColor ?? "#888");
 
       this.ctx.beginPath();
       this.ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
@@ -126,24 +133,26 @@ export class Renderer implements Module, RenderSystem {
 
     this.ctx.restore();
   }
+  
 
   private drawLabels(nodes: RenderNodeState[], frame: RenderFrame): void {
-    if (!frame.config.showLabels) return;
+    if (!frame.settings.showLabels) return;
 
     this.ctx.save();
-    this.ctx.font = `${frame.config.labelFontSize}px sans-serif`;
+    this.ctx.font = `${frame.settings.labelFontSize}px sans-serif`;
     this.ctx.textAlign = "center";
     this.ctx.textBaseline = "middle";
-    this.ctx.fillStyle = frame.config.labelColor ?? "#ccc";
+    this.ctx.fillStyle = frame.settings.labelColor ?? "#ccc";
 
     for (const node of nodes) {
       if (!node.visible) continue;
-      if (node.type === "tag" && !frame.config.showTags) continue;
+      if (node.type === "tag" && !frame.settings.showTags) continue;
       if (node.labelOpacity <= 0) continue;
       if (!node.world) continue;
 
       const p = this.camera.worldToScreen(node.world);
-      const offsetY = node.radius * node.scale * p.scale + 12;
+      const offsetY =
+      node.radius * node.scale * p.scale + frame.settings.labelOffsetY;
 
       this.ctx.globalAlpha = node.labelOpacity;
       this.ctx.fillText(node.label, p.x, p.y + offsetY);

@@ -5,6 +5,10 @@ import type {
   InteractionInterpreterSystem as UIInterpreterSystem,
   DrainableBuffer,
   GraphModule,
+  GraphPlusSettings,
+  UIModuleSettings,
+  LayoutSettings,
+  SettingsAwareSystem,
 } from "../../grammar/interfaces.ts";
 
 import type { CameraController }      from "../5. Render/CameraController.ts";
@@ -22,10 +26,10 @@ type UIInterpreterDeps = {
   getCanvas:            () => HTMLCanvasElement;
   getInputBuffer:       () => DrainableBuffer<UserInputEvent>;
   getCommands:          () => DrainableBuffer<Command>;
-  getUISettings:        () => UISettings;
   getInteractionState:  () => UIStateStore;
   getHitTester:         () => HitTester;
 };
+
 
 type PressMode = {
   kind:           "press";
@@ -54,7 +58,7 @@ type Mode =
     };
 
 
-export class UIInterpreter implements UIInterpreterSystem {
+export class UIInterpreter implements SettingsAwareSystem<UIModuleSettings> {
   private mode: Mode = { kind: "idle" };
   private pointers = new Map<number, PointerRec>();
 
@@ -65,8 +69,14 @@ export class UIInterpreter implements UIInterpreterSystem {
   // Ephemeral click timing
   private lastClick: { nodeId: string | null; timeMs: number } | null = null;
 
-  constructor(private deps: UIInterpreterDeps) {}
+  constructor(private settings: UIModuleSettings, private deps: UIInterpreterDeps) {
+    this.settings = settings;
+  }
 
+  public updateSettings(settings: UIModuleSettings): void {
+      this.settings = settings;
+  }
+    
   public getCursorType(): CursorCss {
     const state = this.deps.getInteractionState().get();
 
@@ -176,14 +186,15 @@ export class UIInterpreter implements UIInterpreterSystem {
       const g = twoFingerRead(a, b);
 
       const distDelta = g.dist - this.mode.lastDist;
-      const pinchThreshold = 2;
+      const tuning = this.settings.tuning;
+      const pinchThreshold = tuning.pinchThresholdPx;
       if (Math.abs(distDelta) >= pinchThreshold) {
         const direction = distDelta > 0 ? -1 : 1;
         this.updateZoom(g.centroid.x, g.centroid.y, direction);
       }
 
       const dTheta = wrapAngleDelta(g.angle - this.mode.lastAngle);
-      const rotateThreshold = 0.0;
+      const rotateThreshold = tuning.rotateThresholdRad;
       if (!this.mode.rotateStarted && Math.abs(dTheta) > rotateThreshold) {
         this.mode.rotateStarted = true;
         this.startRotate(g.centroid.x, g.centroid.y);
@@ -197,7 +208,7 @@ export class UIInterpreter implements UIInterpreterSystem {
     }
 
     if (this.mode.kind === "press" && this.mode.pointerId === e.pointerId) {
-      const uiCfg = this.deps.getUISettings();
+      const uiCfg = this.settings.ui;
       const threshold = uiCfg.dragThresholdPx;
 
       const movedSq = distSq({ x: e.screen.x, y: e.screen.y }, this.mode.downScreen);
@@ -377,7 +388,7 @@ export class UIInterpreter implements UIInterpreterSystem {
   }
 
   private handleSingleOrDoubleClick(nodeId: string | null, timeMs: number) {
-    const uiCfg = this.deps.getUISettings();
+    const uiCfg = this.settings.ui;
     const doubleMs = uiCfg.doubleClickMs;
 
     const prev = this.lastClick;
