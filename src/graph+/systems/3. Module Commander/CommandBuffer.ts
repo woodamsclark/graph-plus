@@ -1,8 +1,8 @@
 // Command.ts
 // Discrete intent messages that cross system boundaries.
 // Translator emits these; CommandSystem applies them.
-import type { Command } from "./Commander.ts";
-import type { DrainableBuffer } from "../../grammar/interfaces.ts";
+import type { Command } from "../../types/domain/commands.ts";
+import type { DrainableBuffer } from "../../types/domain/ui.ts";
 
 export class CommandBuffer implements DrainableBuffer<Command> {
   private q: Command[] = [];

@@ -1,27 +1,26 @@
-import { createSimulation } from "./simulation.ts";
-import type { Module, Simulation, UIState, PhysicsSystem, PhysicsSettings, GraphModule, LayoutSettings, SettingsAwareSystem, PhysicsModuleSettings } from "../../grammar/interfaces.ts";
-import type { CameraController } from "../5. Render/CameraController.ts";
+import type { Simulation }        from '../../types/domain/physics.ts';
+import type { PhysicsDeps }       from '../../deps/physics.deps.ts';
+import { createSimulation }       from './simulation.ts';
+import type {
+  ModuleWithSettings,
+  SettingsFor,
+} from '../../types/index.ts';
 
-export class Physics implements Module, PhysicsSystem, SettingsAwareSystem<PhysicsModuleSettings> {
-  private sim: Simulation | null = null;
-  private pinnedNodeIds: Set<string> = new Set();
+export class Physics implements ModuleWithSettings<'physics'> {
+  private settings: SettingsFor<'physics'>;
+  private deps:     PhysicsDeps;
+  private sim:      Simulation | null = null;
+  private pinned:   Set<string>       = new Set();
 
-
-  constructor
-  (
-    private settings: PhysicsModuleSettings,
-    private deps: 
-    {
-      getGraph:             ()  => GraphModule;
-      getCamera:            ()  => CameraController | null;
-      getInteractionState:  ()  => UIState;
-    }
-  ) 
-  {
+  constructor(
+    settings:       SettingsFor<'physics'>,
+    deps:           PhysicsDeps,
+  ) {
     this.settings = settings;
+    this.deps     = deps;
   }
 
-  updateSettings(settings: PhysicsModuleSettings): void {
+  updateSettings(settings: SettingsFor<'physics'>): void {
     this.settings = settings;
   }
 
@@ -29,15 +28,10 @@ export class Physics implements Module, PhysicsSystem, SettingsAwareSystem<Physi
     // Simulation is built lazily through rebuild().
   }
 
-  dispose(): void {
-    this.destroy();
-  }
-
   // Call whenever the graph changes (rebuild/filter/etc.)
   public rebuild(): void {
     this.stop();
-    const graphModule = this.deps.getGraph();
-    const graph = graphModule.get();
+    const graph  = this.deps.getGraph();
     const camera = this.deps.getCamera();
     if (!graph || !camera) {
       this.sim = null;
@@ -53,12 +47,12 @@ export class Physics implements Module, PhysicsSystem, SettingsAwareSystem<Physi
       ()        => this.deps.getInteractionState().gravityCenter,
       (nodeId)  => nodeId === this.deps.getInteractionState().followedNodeId
     );
-    this.sim?.setPinnedNodes?.(new Set(this.pinnedNodeIds));
+    this.sim?.setPinnedNodes?.(new Set(this.pinned));
     this.sim?.start();
   }
 
   public tick(dt: number): void {
-  this.sim?.tick(dt, this.settings.physics, this.settings.layout);
+    this.sim?.tick(dt, this.settings.physics, this.settings.layout);
   }
 
   public stop(): void {
@@ -75,17 +69,17 @@ export class Physics implements Module, PhysicsSystem, SettingsAwareSystem<Physi
   }
 
   public pinNode(nodeId: string): void {
-    this.pinnedNodeIds.add(nodeId);
-    this.sim?.setPinnedNodes?.(new Set(this.pinnedNodeIds));
+    this.pinned.add(nodeId);
+    this.sim?.setPinnedNodes?.(new Set(this.pinned));
   }
 
   public unpinNode(nodeId: string): void {
-    this.pinnedNodeIds.delete(nodeId);
-    this.sim?.setPinnedNodes?.(new Set(this.pinnedNodeIds));
+    this.pinned.delete(nodeId);
+    this.sim?.setPinnedNodes?.(new Set(this.pinned));
   }
 
   public getPinnedNodeIds(): ReadonlySet<string> {
-    return this.pinnedNodeIds;
+    return this.pinned;
   }
 
   beginDrag(nodeId: string, target: { x: number; y: number; z: number }): void {

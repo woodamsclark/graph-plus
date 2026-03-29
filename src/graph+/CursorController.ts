@@ -1,4 +1,4 @@
-import type { UIState } from "./grammar/interfaces.ts";
+import type { UIState } from "./types/domain/ui.ts";
 
 export type CursorCss = "default" | "pointer" | "grabbing";
 

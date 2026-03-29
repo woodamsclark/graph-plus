@@ -9,7 +9,7 @@ import {
   type SectionDescriptor,
 } from '../../obsidian/settings/settingsSchema.ts';
 
-import type { GraphPlusSettings } from '../grammar/interfaces.ts';
+import type { GraphPlusSettings } from '../types/settings/appSettings.ts';
 import { getSettings, updateSettings } from '../../obsidian/settings/settingsStore.ts';
 
 type OverlayDeps = {

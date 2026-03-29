@@ -1,5 +1,9 @@
 import { App, TFile } from "obsidian";
-import { GraphData, Node, Link, GraphModule, GraphPlusSettings, PhysicsSettings, BaseSettings, LayoutSettings, GraphModuleSettings, SettingsAwareSystem } from "../../grammar/interfaces.ts";
+import type { GraphData, Node, Link, GraphModuleLike } from "../../types/domain/graph.ts";
+import type {
+  ModuleWithSettings,
+  SettingsFor,
+} from "../../types/index.ts";
 
 type WeightedEdge = { sourceId: string; targetId: string; weight: number };
 
@@ -9,9 +13,10 @@ type DataStoragePlugin = {
 };
 
 export type GraphDeps = {
-    getApp: ()      => App;
-    getPlugin: ()   => DataStoragePlugin | null;
-};  
+  getApp: () => App;
+  getPlugin: () => DataStoragePlugin | null;
+};
+
 type PersistedGraphState = {
     version: number;
     vaultId: string;
@@ -22,18 +27,18 @@ interface ResolvedLinks {
     [sourcePath: string]: { [targetPath: string]: number };
 }
 
-export class Graph implements GraphModule, SettingsAwareSystem<GraphModuleSettings> {
-    private settings: GraphModuleSettings;
-    private deps: GraphDeps;
-    private data: GraphData | null = null;
-    private cachedState: PersistedGraphState | null = null;
+export class Graph implements ModuleWithSettings<'graph'> {
+    private settings: SettingsFor<'graph'>;
+    private deps:           GraphDeps;
+    private data:           GraphData           | null = null;
+    private cachedState:    PersistedGraphState | null = null;
 
-    constructor(settings: GraphModuleSettings, deps: GraphDeps) {
+    constructor(settings: SettingsFor<'graph'>, deps: GraphDeps) {
         this.deps       = deps;
         this.settings   = settings;
     }
 
-    updateSettings(settings: GraphModuleSettings): void {
+    updateSettings(settings: SettingsFor<'graph'>): void {
         this.settings = settings;
     }
 
@@ -101,13 +106,13 @@ export class Graph implements GraphModule, SettingsAwareSystem<GraphModuleSettin
         this.data = null;
     }
 
-    private clear(): void {
-        this.data = null;
-        this.cachedState = null;
+    public destroy(): void {
+        this.data           = null;
+        this.cachedState    = null;
     }
 
     private async buildGraph(): Promise<void> {
-        const app = this.deps.getApp();
+        const app   = this.deps.getApp();
         const state = await this.loadState(app);
         const graph = this.generateGraph(app);
 
@@ -145,7 +150,7 @@ export class Graph implements GraphModule, SettingsAwareSystem<GraphModuleSettin
         next.graphStateByVault[state.vaultId] = state;
 
         await plugin.saveData(next);
-    }
+    }  
 
     private extractState(graph: GraphData, app: App): PersistedGraphState {
         const vaultId = app.vault.getName();

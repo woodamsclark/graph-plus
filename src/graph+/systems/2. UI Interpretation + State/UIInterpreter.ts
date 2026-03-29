@@ -1,34 +1,14 @@
+import type { UserInputEvent }                                from "../../types/domain/ui.ts";
+import type { Vec3 }                                          from "../../types/domain/math.ts";
 import type {
-  Node,
-  UserInputEvent,
-  Vec3,
-  InteractionInterpreterSystem as UIInterpreterSystem,
-  DrainableBuffer,
-  GraphModule,
-  GraphPlusSettings,
-  UIModuleSettings,
-  LayoutSettings,
-  SettingsAwareSystem,
-} from "../../grammar/interfaces.ts";
+  ModuleWithSettings,
+  SettingsFor,
+}                                                             from "../../types/index.ts";
+import type { Command }                                       from "../../types/domain/commands.ts";
+import { PointerRec, twoFingerRead, wrapAngleDelta, distSq }  from "../helpers.ts";
+import { CursorCss }                                          from "../../types/domain/ui.ts";
+import type { UIInterpreterDeps }                             from "../../deps/uiinterpreter.deps.ts";
 
-import type { CameraController }      from "../5. Render/CameraController.ts";
-import type { CursorCss }             from "../../CursorController.ts";
-import type { Command }               from "../3. Module Commander/Commander.ts";
-import      { UIStateStore }          from "./UIStateStore.ts";
-import type { UISettings }            from "../../grammar/interfaces.ts";
-
-import { PointerRec, twoFingerRead, wrapAngleDelta, distSq } from "../helpers.ts";
-import { HitTester } from "./HitTester.ts";
-
-type UIInterpreterDeps = {
-  getGraph:             () => GraphModule;
-  getCamera:            () => CameraController    | null;
-  getCanvas:            () => HTMLCanvasElement;
-  getInputBuffer:       () => DrainableBuffer<UserInputEvent>;
-  getCommands:          () => DrainableBuffer<Command>;
-  getInteractionState:  () => UIStateStore;
-  getHitTester:         () => HitTester;
-};
 
 
 type PressMode = {
@@ -58,7 +38,7 @@ type Mode =
     };
 
 
-export class UIInterpreter implements SettingsAwareSystem<UIModuleSettings> {
+export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
   private mode: Mode = { kind: "idle" };
   private pointers = new Map<number, PointerRec>();
 
@@ -69,11 +49,13 @@ export class UIInterpreter implements SettingsAwareSystem<UIModuleSettings> {
   // Ephemeral click timing
   private lastClick: { nodeId: string | null; timeMs: number } | null = null;
 
-  constructor(private settings: UIModuleSettings, private deps: UIInterpreterDeps) {
-    this.settings = settings;
-  }
+  constructor(
+    private settings: SettingsFor<'uiInterpreter'>,
+    private deps:     UIInterpreterDeps,
+  ) {}
 
-  public updateSettings(settings: UIModuleSettings): void {
+
+  public updateSettings(settings: SettingsFor<'uiInterpreter'>): void {
       this.settings = settings;
   }
     
@@ -85,7 +67,7 @@ export class UIInterpreter implements SettingsAwareSystem<UIModuleSettings> {
     return "default";
   }
 
-  public tick(_dt: number, _nowMs: number): void {
+  public tick(_dt: number): void {
     const batch = this.deps.getInputBuffer().drain();
     for (const e of batch) this.ingestOne(e);
 
@@ -153,7 +135,7 @@ export class UIInterpreter implements SettingsAwareSystem<UIModuleSettings> {
 
     const rightIntent = isMouse && ((isLeft && (e.ctrl || e.meta)) || isRight);
     const downHit = this.deps.getHitTester().getNodeIdLabelAtScreenPoint(
-      this.deps.getGraph().get(),
+      this.deps.getGraph(),
       this.deps.getCamera(),
       e.screen.x,
       e.screen.y
@@ -356,7 +338,7 @@ export class UIInterpreter implements SettingsAwareSystem<UIModuleSettings> {
     }
 
     const hit = this.deps.getHitTester().getNodeAtScreenPoint(
-      this.deps.getGraph().get(),
+      this.deps.getGraph(),
       this.deps.getCamera(),
       mouse.x,
       mouse.y
@@ -368,7 +350,7 @@ export class UIInterpreter implements SettingsAwareSystem<UIModuleSettings> {
     const id = this.deps.getInteractionState().get().followedNodeId;
     if (!id) return;
 
-    const graph = this.deps.getGraph().get();
+    const graph = this.deps.getGraph();
     if (!graph) return;
 
     const node = graph.nodes.find(n => n.id === id);
@@ -413,7 +395,7 @@ export class UIInterpreter implements SettingsAwareSystem<UIModuleSettings> {
   private startDrag(nodeId: string, screenX: number, screenY: number) {
     this.cmd({ type: "SetFollowedNode", nodeId: null });
 
-    const graph   = this.deps.getGraph().get();
+    const graph   = this.deps.getGraph();
     const camera  = this.deps.getCamera();
     if (!graph || !camera) return;
 

@@ -1,4 +1,4 @@
-import type { PointerKind } from "../grammar/interfaces.ts";
+import type { PointerKind } from "../types/domain/ui.ts";
 
 
 export type PointerRec = {

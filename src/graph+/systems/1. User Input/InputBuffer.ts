@@ -1,5 +1,5 @@
 // InputBuffer.ts
-import type { DrainableBuffer, UserInputEvent } from "../../grammar/interfaces.ts";
+import type { DrainableBuffer, UserInputEvent } from "../../types/domain/ui.ts";
 
 export class InputBuffer implements DrainableBuffer<UserInputEvent> {
   private buf: UserInputEvent[] = [];

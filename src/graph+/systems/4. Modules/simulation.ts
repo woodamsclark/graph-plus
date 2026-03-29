@@ -1,6 +1,8 @@
-import { CameraController } from '../5. Render/CameraController.ts';
-import { Node, GraphData, PhysicsSettings, Simulation } from '../../grammar/interfaces.ts';
-import type { GraphPlusSettings, LayoutSettings, ScreenPt, TuningSettings, Vec3 } from "../../grammar/interfaces.ts";
+import type { CameraLike } from '../../types/domain/camera.ts';
+import type { Node, GraphData } from '../../types/domain/graph.ts';
+import type { Simulation } from '../../types/domain/physics.ts';
+import type { PhysicsSettings, LayoutSettings, TuningSettings } from '../../types/settings/appSettings.ts';
+import type { ScreenPt, Vec3 } from '../../types/domain/math.ts';
 
  type OctNode = {
     cx:   number;   cy: number;   cz: number; // cube center
@@ -20,11 +22,10 @@ type DragConstraint = {
   maxForce?:  number;
   } | null;
 
-type SimulationSettings = Pick<GraphPlusSettings, 'layout' | 'physics' | 'tuning'>;
 
 export function createSimulation(
     graph                     : GraphData, 
-    camera                    : CameraController, 
+    camera                    : CameraLike, 
     tuningSettings            : TuningSettings,
     physicsSettings           : PhysicsSettings,
     getGravityCenter          : () => ScreenPt | null,
@@ -248,10 +249,6 @@ export function createSimulation(
     // Base radius in WORLD units
     const baseRadiusWorld = physicsSettings.mouseGravityRadius;
 
-    // Optional padding so gravity begins slightly outside the node
-    const padWorld =
-      (physicsSettings as any).mouseGravityPaddingWorld ?? 4;
-
     for (const node of nodes) {
       if (pinnedNodes.has(node.id)) continue;
       if (ignore?.(node.id)) continue; // ✅ modular exclusion
@@ -276,7 +273,7 @@ export function createSimulation(
       const dist   = Math.sqrt(distSq) + 1e-6;
 
       // 4) Clamp gravity radius so it is never smaller than node radius
-      const minRadiusWorld = node.radius + padWorld;
+      const minRadiusWorld = node.radius;
       const radiusWorld   = Math.max(baseRadiusWorld, minRadiusWorld);
 
       if (dist > radiusWorld) continue;

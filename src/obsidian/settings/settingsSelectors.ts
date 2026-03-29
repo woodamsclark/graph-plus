@@ -1,13 +1,17 @@
+import type { GraphPlusSettings } from '../../graph+/types/settings/appSettings.ts';
+
 import type {
-  GraphPlusSettings,
   GraphModuleSettings,
   PhysicsModuleSettings,
+  CameraModuleSettings,
+  InputModuleSettings,
   RendererModuleSettings,
   UIModuleSettings,
-  CameraModuleSettings,
-  AnimaSettings,
-  InputModuleSettings,
-} from '../../graph+/grammar/interfaces.ts';
+} from '../../graph+/types/settings/scopedSettings.ts';
+
+
+
+
 
 export function selectGraphSettings(s: GraphPlusSettings): GraphModuleSettings {
   return {

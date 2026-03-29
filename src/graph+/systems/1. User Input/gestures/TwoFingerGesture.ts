@@ -1,4 +1,4 @@
-import { ScreenPt } from '../../../grammar/interfaces.ts';
+import { ScreenPt } from '../../../types/domain/math.ts';
 import { ActivePointer } from './PointerTracker.ts';
 
 type TwoFingerReading = { centroid: ScreenPt; dist: number; angle: number };

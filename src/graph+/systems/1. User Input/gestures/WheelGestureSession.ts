@@ -1,4 +1,4 @@
-import { ScreenPt } from '../../../grammar/interfaces.ts';
+import { ScreenPt } from '../../../types/domain/math.ts';
 type WheelMode = 'pan' | 'zoom';
 
 

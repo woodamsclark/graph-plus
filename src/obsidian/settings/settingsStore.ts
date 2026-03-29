@@ -1,4 +1,4 @@
-import type { GraphPlusSettings } from '../../graph+/grammar/interfaces';
+import type { GraphPlusSettings } from '../../graph+/types/settings/appSettings.ts';
 
 let currentSettings: GraphPlusSettings;
 const listeners = new Set<() => void>();

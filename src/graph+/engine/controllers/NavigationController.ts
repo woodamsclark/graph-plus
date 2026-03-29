@@ -1,17 +1,17 @@
 
 
-import type { GraphModule } from "../../grammar/interfaces.ts";
+import type { GraphData } from "../../types/domain/graph.ts";
 
 import { ObsidianNavigator } from "../../../obsidian/ObsidianNavigator.ts";
 
 export class NavigationController {
   constructor(private deps: {
     navigator: ObsidianNavigator;
-    getGraph: () => GraphModule;
+    getGraph: () => GraphData | null;
   }) {}
 
   openNode(nodeId: string): void {
-    const graph = this.deps.getGraph().get();
+    const graph = this.deps.getGraph();
     const node = graph?.nodes.find((n) => n.id === nodeId);
     if (!node) return;
 
