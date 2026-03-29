@@ -9,9 +9,9 @@ import { UIStateStore } from "../../systems/2. UI Interpretation + State/UIState
 
 export class InteractionController {
   constructor(private deps: {
-    getPhysics: ()      => Physics | null;
-    getCamera: ()       => CameraController | null;
-    getUIStateStore: () => UIStateStore;
+    physics:  Physics | null;
+    camera:   CameraController | null;
+    uiStateStore:UIStateStore;
   }) {}
 
   setMouseGravity(on: boolean): void {
@@ -19,83 +19,83 @@ export class InteractionController {
   }
 
   pinNode(nodeId: string): void {
-    this.deps.getPhysics()?.pinNode(nodeId);
+    this.deps.physics?.pinNode(nodeId);
   }
 
   unpinNode(nodeId: string): void {
-    this.deps.getPhysics()?.unpinNode(nodeId);
+    this.deps.physics?.unpinNode(nodeId);
   }
 
   beginDrag(nodeId: string, targetWorld: Vec3): void {
-    this.deps.getPhysics()?.beginDrag?.(nodeId, targetWorld);
+    this.deps.physics?.beginDrag?.(nodeId, targetWorld);
   }
 
   updateDragTarget(targetWorld: Vec3): void {
-    this.deps.getPhysics()?.updateDragTarget?.(targetWorld);
+    this.deps.physics?.updateDragTarget?.(targetWorld);
   }
 
   endDrag(): void {
-    this.deps.getPhysics()?.endDrag?.();
+    this.deps.physics?.endDrag?.();
   }
 
   resetCamera(): void {
-    this.deps.getCamera()?.resetCamera();
+    this.deps.camera?.resetCamera();
   }
 
   startPan(screen: { x: number; y: number }): void {
-    this.deps.getCamera()?.startPan(screen.x, screen.y);
+    this.deps.camera?.startPan(screen.x, screen.y);
   }
 
   updatePan(screen: { x: number; y: number }): void {
-    this.deps.getCamera()?.updatePan(screen.x, screen.y);
+    this.deps.camera?.updatePan(screen.x, screen.y);
   }
 
   endPan(): void {
-    this.deps.getCamera()?.endPan();
+    this.deps.camera?.endPan();
   }
 
   startRotate(screen: { x: number; y: number }): void {
-    this.deps.getCamera()?.startRotate(screen.x, screen.y);
+    this.deps.camera?.startRotate(screen.x, screen.y);
   }
 
   updateRotate(screen: { x: number; y: number }): void {
-    this.deps.getCamera()?.updateRotate(screen.x, screen.y);
+    this.deps.camera?.updateRotate(screen.x, screen.y);
   }
 
   endRotate(): void {
-    this.deps.getCamera()?.endRotate();
+    this.deps.camera?.endRotate();
   }
 
   zoomCamera(screen: { x: number; y: number }, delta: number): void {
-    this.deps.getCamera()?.updateZoom(screen.x, screen.y, delta);
+    this.deps.camera?.updateZoom(screen.x, screen.y, delta);
   }
 
   setGravityCenter(point: { x: number; y: number } | null): void {
-    this.deps.getUIStateStore().setGravityCenter(point);
+    this.deps.uiStateStore.setGravityCenter(point);
   }
 
   setHoveredNode(nodeId: string | null): void {
-    this.deps.getUIStateStore().setHoveredNode(nodeId);
+    this.deps.uiStateStore.setHoveredNode(nodeId);
   }
 
   setFollowedNode(nodeId: string | null): void {
-    this.deps.getUIStateStore().setFollowedNode(nodeId);
+    this.deps.uiStateStore.setFollowedNode(nodeId);
   }
 
   setDraggedNode(nodeId: string | null): void {
-    this.deps.getUIStateStore().setDraggedNode(nodeId);
+    this.deps.uiStateStore.setDraggedNode(nodeId);
   }
 
   setPanning(on: boolean): void {
-    this.deps.getUIStateStore().setPanning(on);
+    this.deps.uiStateStore.setPanning(on);
   }
 
   setRotating(on: boolean): void {
-    this.deps.getUIStateStore().setRotating(on);
+    this.deps.uiStateStore.setRotating(on);
   }
 
   setCameraTarget(target: Vec3): void {
-    this.deps.getCamera()?.patchState({
+    this.deps.camera?.patchState({
       targetX: target.x,
       targetY: target.y,
       targetZ: target.z,

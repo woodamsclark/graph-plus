@@ -37,14 +37,27 @@ export interface Link {
 }
 
 export interface GraphData {
-  nodes: Node[];
-  links: Link[];
+  nodes:    Node[];
+  links:    Link[];
   linksOut: Record<string, Record<string, number>>;
-  linksIn: Record<string, Record<string, number>>;
+  linksIn:  Record<string, Record<string, number>>;
 }
 
-export interface GraphModuleLike {
+export interface GraphAccessor {
   get():        GraphData | null;
   hasGraph():   boolean;
-  clear():      void;
+  destroy():      void;
 }
+
+export type WeightedEdge = { sourceId: string; targetId: string; weight: number };
+
+export type DataStoragePlugin = {
+    loadData: () => Promise<any>;
+    saveData: (data: any) => Promise<void>;
+};
+
+export type PersistedGraphState = {
+    version: number;
+    vaultId: string;
+    nodePositions: Record<string, { x: number; y: number; z: number }>;
+};

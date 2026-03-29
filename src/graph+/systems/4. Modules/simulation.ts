@@ -1,8 +1,8 @@
-import type { CameraLike } from '../../types/domain/camera.ts';
-import type { Node, GraphData } from '../../types/domain/graph.ts';
-import type { Simulation } from '../../types/domain/physics.ts';
+import type { CameraAccessor }                                    from '../../types/domain/camera.ts';
+import type { Node, GraphData }                                 from '../../types/domain/graph.ts';
+import type { Simulation }                                      from '../../types/domain/physics.ts';
 import type { PhysicsSettings, LayoutSettings, TuningSettings } from '../../types/settings/appSettings.ts';
-import type { ScreenPt, Vec3 } from '../../types/domain/math.ts';
+import type { ScreenPt, Vec3 }                                  from '../../types/domain/math.ts';
 
  type OctNode = {
     cx:   number;   cy: number;   cz: number; // cube center
@@ -25,7 +25,7 @@ type DragConstraint = {
 
 export function createSimulation(
     graph                     : GraphData, 
-    camera                    : CameraLike, 
+    camera                    : CameraAccessor, 
     tuningSettings            : TuningSettings,
     physicsSettings           : PhysicsSettings,
     getGravityCenter          : () => ScreenPt | null,
