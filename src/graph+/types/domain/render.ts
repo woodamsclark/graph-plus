@@ -9,7 +9,6 @@ export type RenderSettings = {
   labelFontSize:    number;
   showLabels:       boolean;
   showTags:         boolean;
-  hoverScale:       number;
   useInterfaceFont: boolean;
   labelOffsetY:     number;
 };
@@ -20,7 +19,6 @@ export type RenderNodeState = {
   type:         "note" | "tag" | "canvas";
   world:        Vec3;
   radius:       number;
-  scale:        number;
   labelOpacity: number;
   visible:      boolean;
 };

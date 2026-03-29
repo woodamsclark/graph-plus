@@ -16,7 +16,6 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
     drawDoubleLines: true,
     showTags: true,
     showLabels: true,
-    hoverScale: 1.0,
   },
 
   layout: {

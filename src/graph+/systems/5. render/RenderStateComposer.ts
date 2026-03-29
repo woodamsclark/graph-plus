@@ -56,7 +56,6 @@ export class RenderStateComposer implements ModuleWithSettings<'renderComposer'>
       labelFontSize:    base.labelFontSize,
       showLabels:       base.showLabels,
       showTags:         base.showTags,
-      hoverScale:       base.hoverScale,
       useInterfaceFont: base.useInterfaceFont,
       labelOffsetY:     tuning.labelOffsetY,
     };
@@ -70,7 +69,6 @@ export class RenderStateComposer implements ModuleWithSettings<'renderComposer'>
         : 0;
 
       const hovered = ui.hoveredNodeId === node.id;
-      const scale = hovered ? base.hoverScale : 1;
       const visible = base.showTags || node.type !== "tag";
 
       return {
@@ -79,7 +77,6 @@ export class RenderStateComposer implements ModuleWithSettings<'renderComposer'>
         type: node.type,
         world: node.location,
         radius: node.radius,
-        scale,
         labelOpacity,
         visible,
       };
