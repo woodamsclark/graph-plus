@@ -1,17 +1,21 @@
-import type { Store, UIState } from "../../grammar/interfaces.ts";
+import type { Store, UIState } from "../../types/domain/ui.ts";
 
 export class UIStateStore implements Store<UIState> {
   private state: UIState = {
-    gravityCenter: null,
-    hoveredNodeId: null,
+    gravityCenter:  null,
+    hoveredNodeId:  null,
     followedNodeId: null,
-    draggedNodeId: null,
-    isPanning: false,
-    isRotating: false,
+    draggedNodeId:  null,
+    isPanning:      false,
+    isRotating:     false,
   };
 
   public get(): Readonly<UIState> {
     return this.state;
+  }
+
+  public set(next: UIState): void {
+    this.state = next;
   }
 
   public setGravityCenter(point: { x: number; y: number } | null): void {

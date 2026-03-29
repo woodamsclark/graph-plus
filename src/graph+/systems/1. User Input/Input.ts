@@ -1,11 +1,12 @@
 // InputManager.ts
 import type { 
-  InputModuleSettings, 
   PointerKind, 
   DrainableBuffer, 
   UserInputEvent,
-  ScreenPt,
-} from "../../grammar/interfaces.ts";
+} from "../../types/domain/ui.ts";
+
+import type { InputModuleSettings,} from "../../types/settings/scopedSettings.ts"
+import type { ScreenPt } from "../../types/domain/math.ts";
 
 type InputDeps = {
   getCanvas: () => HTMLCanvasElement;
@@ -48,12 +49,12 @@ export class Input {
   }
 
   private detach() {
-    this.deps.getCanvas().removeEventListener("pointerdown",    this.onPointerDown as any);
-    this.deps.getCanvas().removeEventListener("pointermove",    this.onPointerMove as any);
-    this.deps.getCanvas().removeEventListener("pointerup",      this.onPointerUp as any);
-    this.deps.getCanvas().removeEventListener("pointercancel",  this.onPointerCancel as any);
-    this.deps.getCanvas().removeEventListener("wheel",          this.onWheel as any);
-    this.deps.getCanvas().removeEventListener("contextmenu",    this.onContextMenu as any);
+    this.deps.getCanvas().removeEventListener("pointerdown",    this.onPointerDown    as any);
+    this.deps.getCanvas().removeEventListener("pointermove",    this.onPointerMove    as any);
+    this.deps.getCanvas().removeEventListener("pointerup",      this.onPointerUp      as any);
+    this.deps.getCanvas().removeEventListener("pointercancel",  this.onPointerCancel  as any);
+    this.deps.getCanvas().removeEventListener("wheel",          this.onWheel          as any);
+    this.deps.getCanvas().removeEventListener("contextmenu",    this.onContextMenu    as any);
   }
 
   private onContextMenu = (e: MouseEvent) => {
@@ -81,8 +82,7 @@ export class Input {
     });
 
     // long press only for touch/pen
-    const allowedKinds: PointerKind[] =
-    this.settings.ui.longPressPointerKinds;
+    const allowedKinds: PointerKind[] = this.settings.ui.longPressPointerKinds;
 
     if (allowedKinds.includes(kind)) {
       this.startLongPress(e.pointerId, kind, screen, { x: e.clientX, y: e.clientY });

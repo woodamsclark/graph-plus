@@ -1,16 +1,15 @@
-import type { DrainableBuffer as DrainableBuffer, UserInputEvent, GraphModule } from "../../grammar/interfaces.ts";
-
 import { App, Plugin }                                          from "obsidian";
 import { SpaceTime }                                            from "../../systems/SpaceTime.ts";
-import { onSettingsChange, getSettings } from "../../../obsidian/settings/settingsStore.ts";
-import { LiveSettingsOverlay } from "../../ui/LiveSettingsOverlay.ts";
+import { onSettingsChange, getSettings }                        from "../../../obsidian/settings/settingsStore.ts";
+import { LiveSettingsOverlay }                                  from "../../ui/LiveSettingsOverlay.ts";
 import { ObsidianNavigator }                                    from "../../../obsidian/ObsidianNavigator.ts";
 import { Input }                                                from "../../systems/1. User Input/Input.ts";
 import { InputBuffer }                                          from "../../systems/1. User Input/InputBuffer.ts";
 import { UIInterpreter }                                        from "../../systems/2. UI Interpretation + State/UIInterpreter.ts";
 import { UIStateStore }                                         from "../../systems/2. UI Interpretation + State/UIStateStore.ts";
 import { HitTester }                                            from "../../systems/2. UI Interpretation + State/HitTester.ts";
-import { Command, Commander, CommandRegistry }                  from "../../systems/3. Module Commander/Commander.ts";
+import { Command  }                                             from "../../types/domain/commands.ts";
+import {  Commander, CommandRegistry }                          from "../../systems/3. Module Commander/Commander.ts";
 import { CommandBuffer }                                        from "../../systems/3. Module Commander/CommandBuffer.ts";
 import { Anima }                                                from "../../systems/4. Modules/Anima.ts";
 import { AnimaStateStore }                                      from "../../systems/4. Modules/AnimaStateStore.ts";
@@ -25,14 +24,22 @@ import { NavigationController }                                 from "../control
 import { InteractionController }                                from "../controllers/InteractionController.ts";
 import { GraphCommandBindings }                                 from "./GraphCommandBindings.ts";
 import { GraphSystemRegistry }                                  from "./GraphSystemRegistry.ts";
-import { selectCameraSettings, selectGraphSettings, selectInputSettings, selectPhysicsSettings, selectUIInterpreterSettings } from "../../../obsidian/settings/settingsSelectors.ts";
-import { selectRendererStateComposerSettings } from "../../../obsidian/settings/settingsSelectors.ts";
+import {
+  selectGraphSettings,
+  selectPhysicsSettings,
+  selectUIInterpreterSettings,
+  selectRenderComposerSettings,
+  selectInputSettings,
+  selectCameraSettings,
+  selectAnimaSettings,
+} from '../../types/index.ts';
+import type { UserInputEvent, DrainableBuffer } from '../../types/domain/ui.ts';
 
 
 
 export class GraphEngineRuntime {
   private canvas:                 HTMLCanvasElement       | null = null;
-  private graph:                  GraphModule             | null = null;
+  private graph:                  Graph                   | null = null;
   private commandSystem:          Commander               | null = null;
   private anima:                  Anima                   | null = null;
   private renderer:               Renderer                | null = null;
@@ -63,14 +70,16 @@ export class GraphEngineRuntime {
     this.navigator            = new ObsidianNavigator(deps.app);
   }
 
-  private async applySettings(mode: 'live' | 'rebuild'): Promise<void> {
+  private async applySettings(mode: 'live' | 'rebuild' = 'live'): Promise<void> {
     const settings = getSettings();
 
-    this.input?.updateSettings(settings);
-    this.camera?.updateSettings(settings);
-    //this.renderer?.updateSettings(settings);
-    this.uiInterpreter?.updateSettings(settings);
-    this.physics?.updateSettings(settings);
+    this.graph?.updateSettings(               selectGraphSettings(settings)         );
+    this.physics?.updateSettings(             selectPhysicsSettings(settings)       );
+    this.uiInterpreter?.updateSettings(       selectUIInterpreterSettings(settings) );
+    this.renderStateComposer?.updateSettings( selectRenderComposerSettings(settings));
+    this.input?.updateSettings(               selectInputSettings(settings)         );
+    this.camera?.updateSettings(              selectCameraSettings(settings)        );
+    this.anima?.updateSettings(               selectAnimaSettings(settings)         );
 
     if (mode === 'rebuild') {
       await this.rebuildGraph();
@@ -85,120 +94,77 @@ export class GraphEngineRuntime {
     this.canvas.tabIndex      = 0;
     this.deps.containerEl.appendChild(this.canvas);
 
-    const overlay = document.createElement("div");
-    overlay.className = "graphplus-live-settings";
-    this.deps.containerEl.appendChild(overlay);
-
-    const cursor = createCursorController(this.canvas);
-
-
+    const cursor      = createCursorController(this.canvas);
 
     const settings = getSettings();
-    
-   // 5. Camera
+
     this.camera = new CameraController(selectCameraSettings(settings));
-    this.camera.setWorldTransform(null);
 
+    this.graph = new Graph(selectGraphSettings(settings), {
+      getApp: () => this.deps.app,
+      getPlugin: () => this.deps.plugin as any,
+    });
+    
 
-
-
-    // 1. Input
-    this.input = new Input(
-      selectInputSettings(settings),
-      {
-        getCanvas: ()           => this.canvas!,
-        getBuffer: ()           => this.inputBuffer,
-      }
-    );
-
-
-    this.graph = new Graph(
-      selectGraphSettings(settings),
-      { getApp: () => this.deps.app, getPlugin: () => this.deps.plugin as any }
-    );
-
-
-    // 2. UI State Interpreter
-    this.uiInterpreter = new UIInterpreter(
-      selectUIInterpreterSettings(settings),
-      {
-        getGraph: ()            => this.graph!,
-        getCamera: ()           => this.camera!,
-        getCanvas: ()           => this.canvas!,
-        getInputBuffer: ()      => this.inputBuffer,
-        getCommands: ()         => this.commandBuffer,
-        getInteractionState: () => this.uiStateStore,
-        getHitTester: ()        => this.hitTester,
-      }
-    );
-
-    /// 3. Commander
-    this.commandSystem = new Commander({
-      getQueue: () => this.commandBuffer,
-      registry: this.commandRegistry,
-      observers: this.anima ? [this.anima] : [],
+    this.input = new Input(selectInputSettings(settings), {
+      getCanvas: () => this.canvas!,
+      getBuffer: () => this.inputBuffer,
     });
 
-    // 4. Physics (world-owned)
+    this.uiInterpreter = new UIInterpreter(selectUIInterpreterSettings(settings), {
+      getGraph:             () => this.graph?.get() ?? null,
+      getCamera:            () => this.camera,
+      getCanvas:            () => this.canvas!,
+      getInputBuffer:       () => this.inputBuffer,
+      getCommands:          () => this.commandBuffer,
+      getInteractionState:  () => this.uiStateStore,
+      getHitTester:         () => this.hitTester,
+    });
 
+    this.physics = new Physics(selectPhysicsSettings(settings), {
+      getGraph:             () => this.graph?.get() ?? null,
+      getCamera:            () => this.camera,
+      getInteractionState:  () => this.uiStateStore.get(),
+    });
 
-    this.physics = new Physics( 
-      selectPhysicsSettings(settings),
-      {
-        getGraph:             ()  => this.graph!,
-        getCamera:            ()  => this.camera,
-        getInteractionState:  ()  => this.uiStateStore.get()
-      }
-    );
+    this.anima = new Anima(selectAnimaSettings(settings), {
+      getGraph:             () => this.graph?.get() ?? null,
+      getAnimaStore:        () => this.animaStateStore,
+    });
+
+    this.renderStateComposer = new RenderStateComposer(selectRenderComposerSettings(settings), {
+      getGraph:             () => this.graph?.get() ?? null,
+      getUIState:           () => this.uiStateStore.get(),
+      getAnimaStore:        () => this.animaStateStore,
+      getFrameStore:        () => this.renderFrameStore,
+    });
+
+    this.renderer = new Renderer(this.canvas, this.camera, this.renderFrameStore);
 
     this.navigationController = new NavigationController({
       navigator: this.navigator,
-      getGraph: ()            => this.graph!,
+      getGraph: () => this.graph?.get() ?? null,
     });
 
     this.interactionController = new InteractionController({
-      getPhysics: ()          => this.physics,
-      getCamera: ()           => this.camera,
-      getUIStateStore: ()     => this.uiStateStore,
+      getPhysics: () => this.physics,
+      getCamera: () => this.camera,
+      getUIStateStore: () => this.uiStateStore,
+    });
+
+    this.commandSystem = new Commander({
+      getQueue: () => this.commandBuffer,
+      registry: this.commandRegistry,
+      observers: [this.anima],
     });
 
     this.commandBindings = new GraphCommandBindings({
-      registry:     this.commandRegistry,
-      navigation:   this.navigationController,
-      interaction:  this.interactionController,
+      registry: this.commandRegistry,
+      navigation: this.navigationController,
+      interaction: this.interactionController,
     });
 
     this.commandBindings.register();
-
-
-    this.anima = new Anima(
-      //selectGraphSettings(settings),
-      {
-        getGraph: ()      => this.graph!,
-        getAnimaStore: () => this.animaStateStore,
-      }
-    );
-
-
-    // 5. Render
-        this.renderer = new Renderer(
-      this.canvas, 
-      this.camera,
-      this.renderFrameStore
-    );
-
-    this.renderStateComposer = new RenderStateComposer(
-      selectRendererStateComposerSettings(settings),
-      {
-        getGraph:       () => this.graph!,
-        getUIState:     () => this.uiStateStore.get(),
-        getAnimaStore:  () => this.animaStateStore,
-        getFrameStore:  () => this.renderFrameStore,
-      }
-    );
-
-    
-
     // Initial sizing
     const rect = this.deps.containerEl.getBoundingClientRect();
     this.renderer.resize(rect.width, rect.height);
@@ -226,21 +192,16 @@ export class GraphEngineRuntime {
        {
         getContainer: () => this.deps.containerEl,
         onSettingsApplied: async (mode) => {
-          this.input?.updateSettings(settings);
-          this.camera?.updateSettings(settings);
-
-          if (mode === 'rebuild') {
-            await this.rebuildGraph();
-          }
-        } } );
+          await this.applySettings(mode);
+        }
+      });
 
     this.liveSettingsOverlay.mount();
-      this.unsubscribeSettings = onSettingsChange(() => {
-      this.input?.updateSettings(settings);
-      this.camera?.updateSettings(settings);
+    this.unsubscribeSettings = onSettingsChange(() => {
+      void this.applySettings('live');
     });
 
-    this.applySettings("rebuild");
+    await this.applySettings("live");
 
     this.spaceTime.start();
   }
@@ -255,37 +216,43 @@ export class GraphEngineRuntime {
   }
 
   async close(): Promise<void> {
-    await this.graph?.save?.();
-    this.spaceTime.stop();
+  this.spaceTime.stop();
 
-    this.physics?.dispose?.();
-    this.physics = null;
+  this.unsubscribeSettings?.();
+  this.unsubscribeSettings = null;
 
-    this.renderer?.dispose?.();
-    this.renderer = null;
+  this.liveSettingsOverlay?.unmount();
+  this.liveSettingsOverlay = null;
 
-    this.uiInterpreter?.destroy();
-    this.uiInterpreter = null;
-    this.anima?.dispose?.();
-    this.anima = null;
-    this.renderStateComposer?.dispose?.();
-    this.renderStateComposer = null;
-    this.commandBindings = null;
-    this.interactionController = null;
-    this.navigationController = null;
-    this.graph?.dispose?.();
+  this.physics?.destroy?.();
+  this.physics = null;
 
-    this.unsubscribeSettings?.();
-    this.unsubscribeSettings = null;
+  this.renderer?.destroy?.();
+  this.renderer = null;
 
-    this.liveSettingsOverlay?.unmount();
-    this.liveSettingsOverlay = null;
+  this.uiInterpreter?.destroy?.();
+  this.uiInterpreter = null;
 
-    this.input?.destroy?.();
+  this.anima?.destroy?.();
+  this.anima = null;
 
-    this.canvas?.remove();
-    this.canvas = null;
-  }
+  this.renderStateComposer?.destroy?.();
+  this.renderStateComposer = null;
+
+  this.commandSystem = null;
+  this.commandBindings = null;
+  this.interactionController = null;
+  this.navigationController = null;
+
+  await this.graph?.save?.();
+  this.graph?.destroy?.();
+  this.graph = null;
+
+  this.camera = null;
+
+  this.canvas?.remove();
+  this.canvas = null;
+}
 
   
 }

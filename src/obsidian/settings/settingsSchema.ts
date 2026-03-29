@@ -1,4 +1,4 @@
-import type { GraphPlusSettings } from '../../graph+/grammar/interfaces.ts';
+import type { GraphPlusSettings } from '../../graph+/types/settings/appSettings.ts';
 import { DEFAULT_SETTINGS } from './defaultSettings.ts';
 
 export type SettingsUpdateMode = 'live' | 'rebuild';
@@ -82,7 +82,7 @@ export function getSettingsSchema(): SectionDescriptor[] {
           name: 'Minimum node radius',
           desc: 'Minimum radius for the smallest node in pixels.',
           updateMode: 'rebuild',
-          min: 1,
+          min:  1,
           max: 20,
           step: 1,
           get: (s) => s.base.minNodeRadius,
@@ -202,9 +202,9 @@ export function getSettingsSchema(): SectionDescriptor[] {
           name: 'Use interface font',
           desc: 'Use the current Obsidian interface font for labels.',
           updateMode: 'live',
-          get: (s) => Boolean(s.base.useInterfaceFont),
-          getDefault: (s) => Boolean(s.base.useInterfaceFont),
-          set: (s, v) => { s.base.useInterfaceFont = v; },
+          get:        (s)     => Boolean(s.base.useInterfaceFont),
+          getDefault: (s)     => Boolean(s.base.useInterfaceFont),
+          set:        (s, v)  => { s.base.useInterfaceFont = v; },
         },
         {
           id: 'count-duplicate-links',

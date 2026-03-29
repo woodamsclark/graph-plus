@@ -1,4 +1,4 @@
-import type { GraphPlusSettings } from "../../graph+/grammar/interfaces.ts";
+import type { GraphPlusSettings } from "../../graph+/types/settings/appSettings.ts";
 
 export const DEFAULT_SETTINGS: GraphPlusSettings = {
   base: {

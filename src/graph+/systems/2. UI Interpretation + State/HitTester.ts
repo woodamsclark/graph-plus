@@ -1,10 +1,11 @@
-import type { GraphData, Node } from "../../grammar/interfaces.ts";
-import type { CameraController } from "../5. Render/CameraController.ts";
+import type { GraphData, Node } from "../../types/domain/graph.ts";
+import type { CameraLike } from "../../types/domain/camera.ts";
+import { CameraController } from "../5. Render/CameraController.ts";
 
 export class HitTester {
   public getNodeAtScreenPoint(
     graph: GraphData | null,
-    camera: CameraController | null,
+    camera: CameraLike | null,
     screenX: number,
     screenY: number
   ): Node | null {
@@ -32,10 +33,10 @@ export class HitTester {
   }
 
   public getNodeIdLabelAtScreenPoint(
-    graph: GraphData          | null,
-    camera: CameraController  | null,
-    screenX: number,
-    screenY: number
+    graph:    GraphData | null,
+    camera:   CameraController | null,
+    screenX:  number,
+    screenY:  number
   ): { id: string; label: string } | null {
     const node = this.getNodeAtScreenPoint(graph, camera, screenX, screenY);
     if (!node) return null;

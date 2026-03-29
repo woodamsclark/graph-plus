@@ -1,4 +1,4 @@
-import type {RenderFrame} from "../../grammar/interfaces.ts";
+import type { RenderFrame } from "../../types/domain/render.ts";
 
 export class RenderFrameStore {
   private frame: RenderFrame | null = null;

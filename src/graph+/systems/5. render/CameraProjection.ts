@@ -1,9 +1,10 @@
 import type {
   CameraState,
-  CameraSettings,
   WorldTransform,
-  Vec3,
-} from '../../grammar/interfaces.ts';
+} from '../../types/domain/camera.ts';
+
+import type { Vec3 } from '../../types/domain/math.ts';
+import type { CameraSettings } from '../../types/settings/appSettings.ts';
 
 export type Viewport = {
   width: number;

@@ -1,36 +1,33 @@
-import type { AnimaSettings, GraphModule, Module, SettingsAwareSystem, Tickable } from "../../grammar/interfaces.ts";
-import type { Command, CommandObserver } from "../3. Module Commander/Commander.ts";
-import { AnimaStateStore } from "./AnimaStateStore.ts";
+import type { Command, CommandObserver } from "../../types/domain/commands.ts";
+import type {
+  ModuleWithSettings,
+  SettingsFor,
+} from "../../types/index.ts";
+import type { AnimaDeps } from "../../deps/anima.deps.ts";
 
-export class Anima implements Module, Tickable, CommandObserver, SettingsAwareSystem<AnimaSettings> {
+export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
 
-  constructor
-  (
-//    private settings: AnimaSettings,
-    private deps: 
-    { 
-      getGraph: () => GraphModule; 
-      getAnimaStore: () => AnimaStateStore 
-    }
-  )
-  {
- //   this.settings = settings;
-  }
+  constructor(
+    private settings: SettingsFor<'anima'>,
+    private deps: AnimaDeps,
+  ) {}
+
 
   initialize(): void {
     // No startup work yet.
   }
 
-  updateSettings(settings: AnimaSettings): void {
+  updateSettings(settings: SettingsFor<'anima'>): void {
 //    this.settings = settings;
   }
 
-  dispose(): void {
+  destroy(): void {
     // Store is owned externally; nothing to dispose here yet.
   }
 
-  tick(dt: number, _nowMs: number): void {
-    const graph = this.deps.getGraph().get();
+  tick(dt: number): void {
+    const graphModule = this.deps.getGraph();
+    const graph = graphModule;
     if (!graph) return;
 
     const store = this.deps.getAnimaStore();
@@ -39,7 +36,7 @@ export class Anima implements Module, Tickable, CommandObserver, SettingsAwareSy
 
     for (const node of graph.nodes) {
       const anima = store.ensure(node.id, { level: 0, capacity: 100 });
-      anima.level = Math.max(0, anima.level - 10 * dt);
+      anima.level = Math.max(0, anima.level - this.settings.drainPerSecond * dt);
     }
   }
 
@@ -48,19 +45,19 @@ export class Anima implements Module, Tickable, CommandObserver, SettingsAwareSy
 
     switch (command.type) {
       case "OpenNode":
-        store.add(command.nodeId, 20);
+        store.add(command.nodeId, this.settings.openNodeGain);
         break;
 
       case "SetFollowedNode":
-        if (command.nodeId) store.add(command.nodeId, 10);
+        if (command.nodeId) store.add(command.nodeId, this.settings.followNodeGain);
         break;
 
       case "PinNode":
-        store.add(command.nodeId, 8);
+        store.add(command.nodeId, this.settings.pinNodeGain);
         break;
 
       case "BeginDrag":
-        store.add(command.nodeId, 6);
+        store.add(command.nodeId, this.settings.dragNodeGain);
         break;
 
       default:

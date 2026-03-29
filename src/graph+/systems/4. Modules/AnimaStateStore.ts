@@ -1,11 +1,9 @@
-import type { KeyedStore } from "../../grammar/interfaces.ts";
-
 export type AnimaState = {
-  level: number;
+  level:    number;
   capacity: number;
 };
 
-export class AnimaStateStore implements KeyedStore<string, AnimaState> {
+export class AnimaStateStore {
   private state = new Map<string, AnimaState>();
 
   get(nodeId: string): AnimaState | null {
@@ -16,8 +14,8 @@ export class AnimaStateStore implements KeyedStore<string, AnimaState> {
     let current = this.state.get(nodeId);
     if (!current) {
       current = {
-        level: initial?.level ?? 0,
-        capacity: initial?.capacity ?? 100,
+        level: initial?.level       ??    0,
+        capacity: initial?.capacity ??  100,
       };
       this.state.set(nodeId, current);
     }

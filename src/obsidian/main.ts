@@ -3,7 +3,7 @@ import { GraphView, GRAPH_PLUS_TYPE } from './GraphView.ts';
 import { initSettings, getSettings } from './settings/settingsStore.ts';
 import { GraphPlusSettingTab } from './settings/SettingsTab.ts';
 import { DEFAULT_SETTINGS } from './settings/defaultSettings.ts';
-import { GraphPlusSettings } from '../graph+/grammar/interfaces.ts';
+import { GraphPlusSettings } from '../graph+/types/settings/appSettings.ts';
 
 
 export default class GraphPlus extends Plugin {

@@ -1,4 +1,4 @@
-import type { Tickable } from "../grammar/interfaces.ts";
+import type { Tickable } from "../types/core/lifecycle.ts";
 import { Time } from "./Time.ts";
 
 export type TickFn = (dt: number, now: number) => void;
@@ -22,7 +22,7 @@ export class SpaceTime {
 
   // register systems to be ticked each frame
   register(id: string,  tickable: Tickable, priority = 0): void {
-    const tick: TickFn = (dt, now) => tickable.tick(dt, now);
+    const tick: TickFn = (dt, now) => tickable.tick(dt);
     this.registeredSystems.push({ id, priority, tick });
     this.registeredSystems.sort((a, b) => a.priority - b.priority);
 

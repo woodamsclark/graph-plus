@@ -1,6 +1,6 @@
 
 
-import type { Vec3 } from "../../grammar/interfaces.ts";
+import type { Vec3 } from "../../types/domain/math.ts";
 
 import { getSettings } from "../../../obsidian/settings/settingsStore.ts";
 import { Physics } from "../../systems/4. Modules/Physics.ts";

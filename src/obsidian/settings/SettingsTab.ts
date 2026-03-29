@@ -1,7 +1,7 @@
 import { App, PluginSettingTab, Setting, TextComponent, ToggleComponent } from 'obsidian';
 import GraphPlus from '../main.ts';
 import { getSettings, updateSettings } from '../settings/settingsStore.ts';
-import { GraphPlusSettings, PointerKind } from '../../graph+/grammar/interfaces.ts';
+import { GraphPlusSettings } from '../../graph+/types/settings/appSettings.ts';
 import { DEFAULT_SETTINGS } from '../settings/defaultSettings.ts';
 import {
   getSettingsSchema,

@@ -1,27 +1,17 @@
-import type {
-  GraphPlusSettings,
-  Module,
-  RenderFrame,
-  RenderLinkState,
-  RenderNodeState,
-  RenderSystem,
-} from "../../grammar/interfaces.ts";
-
-import type { CameraController } from "./CameraController.ts";
+import type { RenderFrame, RenderLinkState, RenderNodeState } from "../../types/domain/render.ts";
+import type { CameraLike } from "../../types/domain/camera.ts";
 import { RenderFrameStore } from "./RenderFrameStore.ts";
+import { ModuleWithSettings } from "../../types/index.ts";
 
-type RendererDeps = {
-  getRenderSettings: () => Pick<GraphPlusSettings, 'base' | 'tuning'>;
-};
 
-export class Renderer implements Module, RenderSystem{
+export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private width = 0;
   private height = 0;
 
   constructor(
     private canvas    : HTMLCanvasElement,
-    private camera    : CameraController,
+    private camera    : CameraLike,
     private frameStore: RenderFrameStore,
   ) {
     const ctx = this.canvas.getContext("2d");
@@ -43,7 +33,7 @@ export class Renderer implements Module, RenderSystem{
     this.camera.setViewport(width, height);
   }
 
-  public tick(_dt: number, _nowMs: number): void {
+  public tick(_dt: number ): void {
     this.render();
   }
 
@@ -59,10 +49,6 @@ export class Renderer implements Module, RenderSystem{
 
   public initialize(): void {
     // no-op
-  }
-
-  public dispose(): void {
-    this.destroy();
   }
 
   public destroy(): void {
@@ -136,7 +122,6 @@ export class Renderer implements Module, RenderSystem{
     this.ctx.restore();
   }
   
-
   private drawLabels(nodes: RenderNodeState[], frame: RenderFrame): void {
     if (!frame.settings.showLabels) return;
 
@@ -162,7 +147,7 @@ export class Renderer implements Module, RenderSystem{
       .sort((a, b) => b.p.depth - a.p.depth); // far -> near
 
     for (const { node, p } of projected) {
-      const offsetY = node.radius * node.scale * p.scale + 12;
+      const offsetY = node.radius * node.scale * p.scale + frame.settings.labelOffsetY;
 
       this.ctx.globalAlpha = node.labelOpacity;
       this.ctx.fillText(node.label, p.x, p.y + offsetY);

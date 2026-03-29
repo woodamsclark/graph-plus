@@ -1,11 +1,10 @@
+import { ModuleWithSettings, SettingsFor } from '../../types/index.ts';
 import type {
   CameraState,
   WorldTransform,
-  Vec3,
-  CameraModuleSettings,
-  SettingsAwareSystem,
-  CameraSettings,
-} from '../../grammar/interfaces.ts';
+} from '../../types/domain/camera.ts';
+import type { Vec3 } from '../../types/domain/math.ts';
+import type { CameraModuleSettings } from '../../types/settings/scopedSettings.ts';
 import {
   worldToScreen,
   screenToWorld,
@@ -15,8 +14,8 @@ import {
   type Viewport,
 } from './CameraProjection.ts';
 
-export class CameraController implements SettingsAwareSystem<CameraModuleSettings> {
-  private settings      : CameraModuleSettings;
+export class CameraController implements ModuleWithSettings<'camera'> {
+  private settings      : SettingsFor<'camera'>
   private cameraState   : CameraState;
   private cameraSnapShot: CameraState | null = null;
   private worldAnchor   : Vec3        | null = null;
