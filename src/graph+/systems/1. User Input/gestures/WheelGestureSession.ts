@@ -1,4 +1,4 @@
-import { ScreenPt, ClientPt } from '../../../../grammar/interfaces.ts';
+import { ScreenPt } from '../../../grammar/interfaces.ts';
 type WheelMode = 'pan' | 'zoom';
 
 

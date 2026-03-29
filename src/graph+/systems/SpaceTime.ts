@@ -1,4 +1,4 @@
-import type { Tickable } from "../../grammar/interfaces.ts";
+import type { Tickable } from "../grammar/interfaces.ts";
 import { Time } from "./Time.ts";
 
 export type TickFn = (dt: number, now: number) => void;
@@ -12,9 +12,9 @@ type Entry = {
 // this class starts time and calls registered tickable systems each frame
 // it is provides SPACE for time dependent systems to run in TIME
 export class SpaceTime {
-  private time: Time;
-  private entries: Entry[] = [];
-  private unreg: (() => void) | null = null;
+  private time              : Time;
+  private registeredSystems : Entry[] = [];
+  private unreg             : (() => void) | null = null;
 
   constructor(opts?: { maxDtSeconds?: number }) {
     this.time = new Time(opts);
@@ -23,8 +23,8 @@ export class SpaceTime {
   // register systems to be ticked each frame
   register(id: string,  tickable: Tickable, priority = 0): void {
     const tick: TickFn = (dt, now) => tickable.tick(dt, now);
-    this.entries.push({ id, priority, tick });
-    this.entries.sort((a, b) => a.priority - b.priority);
+    this.registeredSystems.push({ id, priority, tick });
+    this.registeredSystems.sort((a, b) => a.priority - b.priority);
 
     if (this.unreg) this.rebind();
   }
@@ -32,7 +32,7 @@ export class SpaceTime {
   private rebind() {
     this.unreg?.();
     this.unreg = this.time.register("spacetime", (dt, now) => {
-      for (const e of this.entries) e.tick(dt, now);
+      for (const e of this.registeredSystems) e.tick(dt, now);
     });
   }
 
@@ -45,6 +45,6 @@ export class SpaceTime {
     this.time.stop();
     this.unreg?.();
     this.unreg = null;
-    this.entries = [];
+    this.registeredSystems = [];
   }
 }

@@ -1,28 +1,67 @@
-import { CameraController } from '../../systems/CameraController.ts';
+import { CameraController } from '../5. Render/CameraController.ts';
 import { Node, GraphData, PhysicsSettings, Simulation } from '../../grammar/interfaces.ts';
-import { getSettings } from '../../../obsidian/settings/settingsStore.ts';
-import type { ScreenPt } from "../../grammar/interfaces.ts";
+import type { GraphPlusSettings, LayoutSettings, ScreenPt, TuningSettings, Vec3 } from "../../grammar/interfaces.ts";
 
-export function createSimulation(graph: GraphData, camera : CameraController, getGravityCenter: () => ScreenPt | null) : Simulation{
+ type OctNode = {
+    cx:   number;   cy: number;   cz: number; // cube center
+    comX: number; comY: number; comZ: number; // center of mass
+    h:    number;                             // half-size (cube half-width)
+    mass: number;                             // number of bodies (or weighted)
+    body: Node | null;                        // if leaf with single body
+    children: (OctNode | null)[] | null;      // length 8 when subdivided
+  };
+
+
+type DragConstraint = {
+  node:       Node;
+  target:     Vec3;
+  stiffness:  number;
+  damping:    number;
+  maxForce?:  number;
+  } | null;
+
+type SimulationSettings = Pick<GraphPlusSettings, 'layout' | 'physics' | 'tuning'>;
+
+export function createSimulation(
+    graph                     : GraphData, 
+    camera                    : CameraController, 
+    tuningSettings            : TuningSettings,
+    physicsSettings           : PhysicsSettings,
+    getGravityCenter          : () => ScreenPt | null,
+    shouldIgnoreMouseGravity? : (nodeId: string) => boolean,
+  ) : Simulation{
   // If center not provided, compute bounding-box center from node positions
   const nodes     = graph.nodes;
   const links     = graph.links;
+  let dragConstraint: DragConstraint = null;
   let running     = false;  
   let pinnedNodes = new Set<string>(); // set of node ids that should be pinned (physics skip)
   const nodeById  = new Map<string, Node>();
+  
   for (const n of nodes) nodeById.set(n.id, n);
 
-  type OctNode = {
-    cx: number; cy: number; cz: number; // cube center
-    h: number;                          // half-size (cube half-width)
+  
+  function beginDrag(nodeId: string, target: Vec3) {
+    const node = graph.nodes.find(n => n.id === nodeId);
+    if (!node) return;
 
-    mass: number;                       // number of bodies (or weighted)
-    comX: number; comY: number; comZ: number; // center of mass
+    dragConstraint = {
+      node,
+      target: { ...target },
+      stiffness: 100,
+      damping: 8,
+    };
+  }
 
-    body: Node | null;             // if leaf with single body
-    children: (OctNode | null)[] | null; // length 8 when subdivided
-  };
+  function updateDragTarget(target: Vec3) {
+    if (!dragConstraint) return;
+    dragConstraint.target = { ...target };
+  }
 
+  function endDrag() {
+    dragConstraint = null;
+  }
+ 
   function makeOctNode(cx: number, cy: number, cz: number, h: number): OctNode {
     return {
       cx, cy, cz, h,
@@ -60,7 +99,6 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
     cell.children![idx] = child;
     return child;
   }
-
 
   function buildOctree(bodies: Node[]): OctNode | null {
   if (!bodies.length) return null;
@@ -138,24 +176,6 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
     insertBody(child, body);
   }
 
-  function applyRepulsionBarnesHut(physicsSettings: PhysicsSettings, root: OctNode): void {
-    const strength = physicsSettings.repulsionStrength;
-
-    // keep your existing "minimum separation" behavior
-    const minDist = 40;
-    const minDistSq = minDist * minDist;
-
-    // BH tuning knobs (constants for now; you can expose later)
-    const theta = 0.8;        // lower = more accurate; higher = faster (typical 0.5–1.2)
-    const thetaSq = theta * theta;
-    const eps = 1e-3;         // tiny softening to avoid 1/0
-
-    for (const a of nodes) {
-      if (pinnedNodes.has(a.id)) continue;
-      accumulateBH(a, root, strength, thetaSq, minDistSq, eps);
-    }
-  }
-
   function accumulateBH(
     a: Node,
     cell: OctNode,
@@ -194,9 +214,9 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
       const fy = (dy / safeDist) * force;
       const fz = (dz / safeDist) * force;
 
-      a.velocity.vx = (a.velocity.vx || 0) + fx;
-      a.velocity.vy = (a.velocity.vy || 0) + fy;
-      a.velocity.vz = (a.velocity.vz || 0) + fz;
+      a.velocity.x = (a.velocity.x || 0) + fx;
+      a.velocity.y = (a.velocity.y || 0) + fy;
+      a.velocity.z = (a.velocity.z || 0) + fz;
       return;
     }
 
@@ -210,64 +230,65 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
     }
   }
 
-  function setPinnedNodes(ids: Set<string>) {
-    // create new Set to avoid external mutations
-    pinnedNodes = new Set(ids);
+  function setPinnedNodes(nodeIds: Set<string>) {
+    pinnedNodes = new Set(nodeIds);
   }
 
+  // World Space
   function applyMouseGravity(physicsSettings: PhysicsSettings) {
     if (!physicsSettings.mouseGravityEnabled) return;
 
-    const mousePos = getGravityCenter(); 
+    const mousePos = getGravityCenter();
     if (!mousePos) return;
     const { x: mouseX, y: mouseY } = mousePos;
+    const ignore = shouldIgnoreMouseGravity;
 
-    // Radius in pixels on screen
-    const radius    = physicsSettings.mouseGravityRadius; 
-    const strength  = physicsSettings.mouseGravityStrength;
+    const strength = physicsSettings.mouseGravityStrength;
+
+    // Base radius in WORLD units
+    const baseRadiusWorld = physicsSettings.mouseGravityRadius;
+
+    // Optional padding so gravity begins slightly outside the node
+    const padWorld =
+      (physicsSettings as any).mouseGravityPaddingWorld ?? 4;
 
     for (const node of nodes) {
-        if (pinnedNodes.has(node.id)) continue;
+      if (pinnedNodes.has(node.id)) continue;
+      if (ignore?.(node.id)) continue; // ✅ modular exclusion
 
-        // 1. Where is the node on screen?
-        const nodePos = camera.worldToScreen(node);
+      // 1) Project node to get its depth
+      const nodeScreen = camera.worldToScreen(node.location);
+      if (nodeScreen.depth < 0) continue;
 
-        // Skip if behind camera
-        if (nodePos.depth < 0) continue; 
+      // 2) Convert mouse to WORLD position at node depth
+      const mouseWorld = camera.screenToWorld(
+        mousePos.x,
+        mousePos.y,
+        nodeScreen.depth
+      );
 
-        // 2. Distance check (Screen Space 2D)
-        const dx = mouseX - nodePos.x;
-        const dy = mouseY - nodePos.y;
-        const distSq = dx * dx + dy * dy;
+      // 3) World-space delta
+      const dx = mouseWorld.x - node.location.x;
+      const dy = mouseWorld.y - node.location.y;
+      const dz = mouseWorld.z - node.location.z;
 
-        // If outside the interaction radius, skip
-        if (distSq > radius * radius) continue;
+      const distSq = dx*dx + dy*dy + dz*dz;
+      const dist   = Math.sqrt(distSq) + 1e-6;
 
-        // 3. Calculate "Ideal" World Position
-        // We want the node to move to the position (x,y,z) that corresponds 
-        // to the mouse's screen coordinates, BUT at the node's current depth.
-        // This ensures the pull is purely "visual" relative to the camera angle.
-        const targetWorld = camera.screenToWorld(mouseX, mouseY, nodePos.depth);
+      // 4) Clamp gravity radius so it is never smaller than node radius
+      const minRadiusWorld = node.radius + padWorld;
+      const radiusWorld   = Math.max(baseRadiusWorld, minRadiusWorld);
 
-        // 4. Calculate Vector in World Space
-        const wx = targetWorld.x - node.location.x;
-        const wy = targetWorld.y - node.location.y;
-        const wz = targetWorld.z - node.location.z;
+      if (dist > radiusWorld) continue;
 
-        // 5. Apply Force
-        const dist = Math.sqrt(wx*wx + wy*wy + wz*wz) + 1e-6;
-        const maxBoost = 1 / (node.radius);
+      // 5) Force shaping (same logic you already use)
+      const maxBoost = 1 / node.radius;
+      const boost    = Math.min(maxBoost, 1 / (dist*dist));
+      const k        = strength * boost;
 
-        // aggressive near the target (asymptote-ish), capped
-        const boost = Math.min(maxBoost, 1 / (dist*dist)); // or 1/(dist*dist)
-
-        // effective strength
-        const k = strength * boost;
-
-        node.velocity.vx += wx * k;
-        node.velocity.vy += wy * k;
-        node.velocity.vz += wz * k;
-
+      node.velocity.x += dx * k;
+      node.velocity.y += dy * k;
+      node.velocity.z += dz * k;
     }
   }
 
@@ -284,27 +305,45 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
         if (distSq === 0) distSq = 0.0001;
         const dist = Math.sqrt(distSq);
         // minimum separation to avoid extreme forces
-        const minDist = 40;
+        const minDist = tuningSettings.repulsionMinDistance;
         const effectiveDist = Math.max(dist, minDist);
         const force = physicsSettings.repulsionStrength / (effectiveDist * effectiveDist);
         const fx = (dx / dist) * force;
         const fy = (dy / dist) * force;
         const fz = (dz / dist) * force;
         if (!pinnedNodes.has(a.id)) {
-          a.velocity.vx = (a.velocity.vx || 0) + fx;
-          a.velocity.vy = (a.velocity.vy || 0) + fy;
-          a.velocity.vz = (a.velocity.vz || 0) + fz;
+          a.velocity.x = (a.velocity.x || 0) + fx;
+          a.velocity.y = (a.velocity.y || 0) + fy;
+          a.velocity.z = (a.velocity.z || 0) + fz;
         }
         if (!pinnedNodes.has(b.id)) {
-          b.velocity.vx = (b.velocity.vx || 0) - fx;
-          b.velocity.vy = (b.velocity.vy || 0) - fy;
-          b.velocity.vz = (b.velocity.vz || 0) - fz;
+          b.velocity.x = (b.velocity.x || 0) - fx;
+          b.velocity.y = (b.velocity.y || 0) - fy;
+          b.velocity.z = (b.velocity.z || 0) - fz;
         }
       }
     }
   }
 
-  function applySprings(physicsSettings: PhysicsSettings) {
+  function applyRepulsionBarnesHut(physicsSettings: PhysicsSettings, root: OctNode): void {
+    const strength = physicsSettings.repulsionStrength;
+
+    // keep your existing "minimum separation" behavior
+    const minDist   = tuningSettings.repulsionMinDistance;
+    const minDistSq = minDist * minDist;
+
+    // BH tuning knobs (constants for now; you can expose later)
+    const theta   = tuningSettings.barnesHutTheta;
+    const thetaSq = theta * theta;
+    const eps     = tuningSettings.barnesHutEpsilon;
+
+    for (const a of nodes) {
+      if (pinnedNodes.has(a.id)) continue;
+      accumulateBH(a, root, strength, thetaSq, minDistSq, eps);
+    }
+  }
+
+  function applySprings(layoutSettings: LayoutSettings) {
     if (!links) return;
     for (const e of links) {
       const a = nodeById.get(e.sourceId);
@@ -314,37 +353,37 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
       const dy = (b.location.y - a.location.y);
       const dz = ((b.location.z || 0) - (a.location.z || 0));
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.0001;
-      const displacement = dist - (physicsSettings.linkLength || 0);
-      const f = (physicsSettings.linkStrength || 0) * Math.tanh(displacement / 50);
+      const displacement = dist - (layoutSettings.linkLength || 0);
+      const f = (layoutSettings.linkStrength || 0) * Math.tanh(displacement / 50);
       const fx = (dx / dist) * f;
       const fy = (dy / dist) * f;
       const fz = (dz / dist) * f;
       if (!pinnedNodes.has(a.id)) {
-        a.velocity.vx = (a.velocity.vx || 0) + fx;
-        a.velocity.vy = (a.velocity.vy || 0) + fy;
-        a.velocity.vz = (a.velocity.vz || 0) + fz;
+        a.velocity.x = (a.velocity.x || 0) + fx;
+        a.velocity.y = (a.velocity.y || 0) + fy;
+        a.velocity.z = (a.velocity.z || 0) + fz;
       }
       if (!pinnedNodes.has(b.id)) {
-        b.velocity.vx = (b.velocity.vx || 0) - fx;
-        b.velocity.vy = (b.velocity.vy || 0) - fy;
-        b.velocity.vz = (b.velocity.vz || 0) - fz;
+        b.velocity.x = (b.velocity.x || 0) - fx;
+        b.velocity.y = (b.velocity.y || 0) - fy;
+        b.velocity.z = (b.velocity.z || 0) - fz;
       }
     }
   }
 
-  function applyCenteringForce(physicsSettings: PhysicsSettings) {
-    if (physicsSettings.centerPull <= 0) return;
-    const cx = physicsSettings.worldCenterX;
-    const cy = physicsSettings.worldCenterY;
-    const cz = physicsSettings.worldCenterZ;
+  function applyCenteringForce(layoutSettings: LayoutSettings) {
+    if (layoutSettings.centerPull <= 0) return;
+    const cx = layoutSettings.worldCenterX;
+    const cy = layoutSettings.worldCenterY;
+    const cz = layoutSettings.worldCenterZ;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
       const dx = (cx - n.location.x);
       const dy = (cy - n.location.y);
       const dz = (cz - n.location.z);
-      n.velocity.vx = (n.velocity.vx || 0) + dx * physicsSettings.centerPull;
-      n.velocity.vy = (n.velocity.vy || 0) + dy * physicsSettings.centerPull;
-      n.velocity.vz = (n.velocity.vz || 0) + dz * physicsSettings.centerPull;
+      n.velocity.x = (n.velocity.x || 0) + dx * layoutSettings.centerPull;
+      n.velocity.y = (n.velocity.y || 0) + dy * layoutSettings.centerPull;
+      n.velocity.z = (n.velocity.z || 0) + dz * layoutSettings.centerPull;
     }
   }
 
@@ -352,30 +391,30 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
         const d = Math.max(0, Math.min(1, physicsSettings.damping));
-        n.velocity.vx = (n.velocity.vx ?? 0) * (1 - d);
-        n.velocity.vy = (n.velocity.vy ?? 0) * (1 - d);
-        n.velocity.vz = (n.velocity.vz ?? 0) * (1 - d);
-      if (Math.abs(n.velocity.vx) < 0.001) n.velocity.vx = 0;
-      if (Math.abs(n.velocity.vy) < 0.001) n.velocity.vy = 0;
-      if (Math.abs(n.velocity.vz) < 0.001) n.velocity.vz = 0;
+        n.velocity.x = (n.velocity.x ?? 0) * (1 - d);
+        n.velocity.y = (n.velocity.y ?? 0) * (1 - d);
+        n.velocity.z = (n.velocity.z ?? 0) * (1 - d);
+      if (Math.abs(n.velocity.x) < 0.001) n.velocity.x = 0;
+      if (Math.abs(n.velocity.y) < 0.001) n.velocity.y = 0;
+      if (Math.abs(n.velocity.z) < 0.001) n.velocity.z = 0;
     }
   }
 
-  function applyPlaneConstraints(physicsSettings: PhysicsSettings) {
-    const noteK = physicsSettings.notePlaneStiffness;
-    const tagK  = physicsSettings.tagPlaneStiffness;
+  function applyPlaneConstraints(layoutSettings: LayoutSettings) {
+    const noteK = layoutSettings.notePlaneStiffness;
+    const tagK  = layoutSettings.tagPlaneStiffness;
     if (noteK === 0 && tagK === 0) return;
     // Pull notes/tags toward the simulation center (not always world origin)
-    const targetZ = physicsSettings.worldCenterZ;
-    const targetX = physicsSettings.worldCenterX;
+    const targetZ = layoutSettings.worldCenterZ;
+    const targetX = layoutSettings.worldCenterX;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
       if (isNote(n) && noteK > 0) {
         const dz = targetZ - n.location.z;
-        n.velocity.vz = (n.velocity.vz || 0) + dz * noteK;
+        n.velocity.z = (n.velocity.z || 0) + dz * noteK;
       } else if (isTag(n) && tagK > 0) {
         const dx = (targetX) - (n.location.x || 0);
-        n.velocity.vx = (n.velocity.vx || 0) + dx * tagK;
+        n.velocity.x = (n.velocity.x || 0) + dx * tagK;
       }
     }
   }
@@ -384,13 +423,11 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
     const scale = dt * 60;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
-      n.location.x += (n.velocity.vx || 0) * scale;
-      n.location.y += (n.velocity.vy || 0) * scale;
-
-      const flat = true; // make this a setting later
-      if (flat) { n.location.z = 0; n.velocity.vz = 0;
-      } else { n.location.z = (n.location.z || 0) + (n.velocity.vz || 0) * scale; }
-      
+      n.location.x += (n.velocity.x || 0) * scale;
+      n.location.y += (n.velocity.y || 0) * scale;
+      n.location.z = (n.location.z || 0) + (n.velocity.z || 0) * scale;
+      // optional gentle hard clamp epsilon
+      //if (isNote(n) && Math.abs(n.location.z) < 0.0001) n.location.z = 0;
       if (isTag(n) && Math.abs(n.location.x) < 0.0001) n.location.x = 0;
     }
   }
@@ -405,8 +442,9 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
 
   function reset() {
     for (const n of nodes) {
-      n.velocity.vx = 0;
-      n.velocity.vy = 0;
+      n.velocity.x = 0;
+      n.velocity.y = 0;
+      n.velocity.z = 0;
     }
   }
 
@@ -419,31 +457,66 @@ export function createSimulation(graph: GraphData, camera : CameraController, ge
     return n.type === "note";
   }
 
-  function tick(dt: number) {
+  function applyDragConstraint(dt: number) {
+    if (!dragConstraint) return;
+
+    const node = dragConstraint.node;
+
+    //if (pinnedNodes.has(node.id)) return;
+
+    const dx = dragConstraint.target.x - node.location.x;
+    const dy = dragConstraint.target.y - node.location.y;
+    const dz = dragConstraint.target.z - node.location.z;
+
+    const fx = dx * dragConstraint.stiffness - node.velocity.x * dragConstraint.damping;
+    const fy = dy * dragConstraint.stiffness - node.velocity.y * dragConstraint.damping;
+    const fz = dz * dragConstraint.stiffness - node.velocity.z * dragConstraint.damping;
+
+    node.velocity.x += fx * dt;
+    node.velocity.y += fy * dt;
+    node.velocity.z += fz * dt;
+  }
+
+  function applyDragConstraintKinematic(_dt: number) {
+    if (!dragConstraint) return;
+
+    const node = dragConstraint.node;
+    //if (pinnedNodes.has(node.id)) return;
+
+    node.location.x = dragConstraint.target.x;
+    node.location.y = dragConstraint.target.y;
+    node.location.z = dragConstraint.target.z;
+
+    node.velocity.x = 0;
+    node.velocity.y = 0;
+    node.velocity.z = 0;
+  }
+
+  function isDraggedNode(nodeId: string): boolean {
+    return dragConstraint?.node.id === nodeId;
+  }
+
+  function tick(dt: number, physicsSettings: PhysicsSettings, layoutSettings: LayoutSettings) {
     if (!running) return;
     if (!nodes.length) return;
-
-    const settings = getSettings();
-    const physicsSettings = settings.physics;
     
     // Build tree from all nodes (including pinned nodes is fine; they still repel others)
     // If you DON'T want pinned nodes to contribute to repulsion, filter them out here.
     const root = buildOctree(nodes);
     if (!root) return;
-
-
-    //applyRepulsion(physicsSettings); O(N^2) old method
+    
     applyRepulsionBarnesHut(physicsSettings, root);
-    applySprings(physicsSettings);
+    applySprings(layoutSettings);
     applyMouseGravity(physicsSettings);
 
-    applyCenteringForce(physicsSettings);
-    applyPlaneConstraints(physicsSettings);
+    applyCenteringForce(layoutSettings);
+    applyPlaneConstraints(layoutSettings);
+
+    applyDragConstraintKinematic(dt);
 
     applyDamping(physicsSettings);
     integrate(dt);
   }
 
-  return { start, stop, tick, reset, setPinnedNodes };
-
+  return { beginDrag, updateDragTarget, endDrag, stop, start, tick, reset, setPinnedNodes };
 }
