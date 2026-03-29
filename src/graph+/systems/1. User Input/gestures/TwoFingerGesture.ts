@@ -1,6 +1,5 @@
-import { ScreenPt, ClientPt } from '../../../../grammar/interfaces.ts';
+import { ScreenPt } from '../../../grammar/interfaces.ts';
 import { ActivePointer } from './PointerTracker.ts';
-import { distSq } from '../../../../../shared/distSq.ts';
 
 type TwoFingerReading = { centroid: ScreenPt; dist: number; angle: number };
 
@@ -24,9 +23,15 @@ export class TwoFingerGesture {
 
     return { centroid, dist, angle };
   }
-
+  
   shouldStartPan(prevCentroid: ScreenPt, nextCentroid: ScreenPt) {
     const thresholdSq = this.dragThresholdPx * this.dragThresholdPx;
     return distSq(prevCentroid, nextCentroid) > thresholdSq;
   }
+}
+
+function distSq(a: ScreenPt, b: ScreenPt) {
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    return dx * dx + dy * dy;
 }
