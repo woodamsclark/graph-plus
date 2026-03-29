@@ -1,25 +1,14 @@
 import type { GraphData } from "../../types/domain/graph.ts";
-import type { UIState } from "../../types/domain/ui.ts";
+import type { UIState }   from "../../types/domain/ui.ts";
 import type {
   RenderFrame,
   RenderLinkState,
   RenderNodeState,
   RenderSettings,
-} from "../../types/domain/render.ts";
-import type {
-  ModuleWithSettings,
-  SettingsFor,
-} from "../../types/index.ts";
+}                                               from "../../types/domain/render.ts";
+import type { ModuleWithSettings, SettingsFor } from "../../types/index.ts";
+import type { RenderStateComposerDeps }         from "../../deps/renderstatecomposer.deps.ts";
 
-import type { RenderFrameStore } from "./RenderFrameStore.ts";
-import type { AnimaStateStore } from "../4. Modules/AnimaStateStore.ts";
-
-type RenderStateComposerDeps = {
-  getGraph: ()          => GraphData | null;
-  getUIState: ()        => UIState;
-  getAnimaStore: ()     => AnimaStateStore;
-  getFrameStore: ()     => RenderFrameStore;
-};
 
 // delete this later, but for now it allows the render state composer to pick up theme colors from CSS variables, so that the default graph appearance matches the Obsidian theme.
 const styles = getComputedStyle(document.body);
@@ -46,16 +35,16 @@ export class RenderStateComposer implements ModuleWithSettings<'renderComposer'>
   }
   
   public tick(_dt: number): void {
-    const graph = this.deps.getGraph();
+    const graph = this.deps.graph?.get();
     if (!graph) {
-      this.deps.getFrameStore().set(null);
+      this.deps.frameStore.set(null);
       return;
     }
 
     const tuning      = this.settings.tuning;
     const base        = this.settings.base;
-    const ui          = this.deps.getUIState();
-    const animaStore  = this.deps.getAnimaStore();
+    const ui          = this.deps.uiState;
+    const animaStore  = this.deps.animaStore;
 
     // --- Config snapshot
     const settings: RenderSettings = {
@@ -111,7 +100,7 @@ export class RenderStateComposer implements ModuleWithSettings<'renderComposer'>
       settings,
     };
 
-    this.deps.getFrameStore().set(frame);
+    this.deps.frameStore.set(frame);
   }
 
   public destroy(): void {

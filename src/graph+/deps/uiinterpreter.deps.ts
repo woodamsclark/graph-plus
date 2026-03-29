@@ -1,4 +1,4 @@
-import type { GraphData }                       from "../types/domain/graph.ts";
+import type { GraphAccessor }                   from "../types/domain/graph.ts";
 import type { UserInputEvent, DrainableBuffer } from "../types/domain/ui.ts";
 import type { UIStateStore }                    from "../systems/2. UI Interpretation + State/UIStateStore.ts";
 import type { Command }                         from "../types/domain/commands.ts";
@@ -6,11 +6,11 @@ import type { HitTester }                       from "../systems/2. UI Interpret
 import      { CameraController }                from "../systems/5. Render/CameraController.ts";
 
 export type UIInterpreterDeps = {
-  getGraph:             () => GraphData | null;
-  getCamera:            () => CameraController | null;
-  getCanvas:            () => HTMLCanvasElement;
-  getInputBuffer:       () => DrainableBuffer<UserInputEvent>;
-  getCommands:          () => DrainableBuffer<Command>;
-  getInteractionState:  () => UIStateStore;
-  getHitTester:         () => HitTester;
+  graph:            GraphAccessor     | null;
+  camera:           CameraController  | null;
+  canvas:           HTMLCanvasElement;
+  inputBuffer:      DrainableBuffer<UserInputEvent>;
+  commandBuffer:    DrainableBuffer<Command>;
+  interactionState: UIStateStore;
+  hitTester:        HitTester;
 };

@@ -26,11 +26,10 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
   }
 
   tick(dt: number): void {
-    const graphModule = this.deps.getGraph();
-    const graph = graphModule;
+    const graph = this.deps.graph?.get();
     if (!graph) return;
 
-    const store = this.deps.getAnimaStore();
+    const store = this.deps.animaStore;
     const validNodeIds = new Set(graph.nodes.map((n) => n.id));
     store.clearMissing(validNodeIds);
 
@@ -41,7 +40,7 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
   }
 
   afterCommandApplied(command: Command): void {
-    const store = this.deps.getAnimaStore();
+    const store = this.deps.animaStore;
 
     switch (command.type) {
       case "OpenNode":

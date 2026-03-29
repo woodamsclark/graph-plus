@@ -1,11 +1,11 @@
 import type { GraphData, Node } from "../../types/domain/graph.ts";
-import type { CameraLike } from "../../types/domain/camera.ts";
-import { CameraController } from "../5. Render/CameraController.ts";
+import type { CameraAccessor }      from "../../types/domain/camera.ts";
+import { CameraController }     from "../5. Render/CameraController.ts";
 
 export class HitTester {
   public getNodeAtScreenPoint(
     graph: GraphData | null,
-    camera: CameraLike | null,
+    camera: CameraAccessor | null,
     screenX: number,
     screenY: number
   ): Node | null {

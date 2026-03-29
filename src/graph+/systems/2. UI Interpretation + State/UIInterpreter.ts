@@ -1,15 +1,10 @@
 import type { UserInputEvent }                                from "../../types/domain/ui.ts";
 import type { Vec3 }                                          from "../../types/domain/math.ts";
-import type {
-  ModuleWithSettings,
-  SettingsFor,
-}                                                             from "../../types/index.ts";
+import type { ModuleWithSettings, SettingsFor}                from "../../types/index.ts";
+import type { UIInterpreterDeps }                             from "../../deps/uiinterpreter.deps.ts";
 import type { Command }                                       from "../../types/domain/commands.ts";
 import { PointerRec, twoFingerRead, wrapAngleDelta, distSq }  from "../helpers.ts";
 import { CursorCss }                                          from "../../types/domain/ui.ts";
-import type { UIInterpreterDeps }                             from "../../deps/uiinterpreter.deps.ts";
-
-
 
 type PressMode = {
   kind:           "press";
@@ -60,7 +55,7 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
   }
     
   public getCursorType(): CursorCss {
-    const state = this.deps.getInteractionState().get();
+    const state = this.deps.interactionState.get();
 
     if (state.draggedNodeId || state.isPanning || state.isRotating) return "grabbing";
     if (state.hoveredNodeId) return "pointer";
@@ -68,7 +63,7 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
   }
 
   public tick(_dt: number): void {
-    const batch = this.deps.getInputBuffer().drain();
+    const batch = this.deps.inputBuffer.drain();
     for (const e of batch) this.ingestOne(e);
 
     this.updateFollow();
@@ -134,9 +129,9 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
     const isRight = e.button === 2;
 
     const rightIntent = isMouse && ((isLeft && (e.ctrl || e.meta)) || isRight);
-    const downHit = this.deps.getHitTester().getNodeIdLabelAtScreenPoint(
-      this.deps.getGraph(),
-      this.deps.getCamera(),
+    const downHit = this.deps.hitTester.getNodeIdLabelAtScreenPoint(
+      this.deps.graph?.get() ?? null,
+      this.deps.camera,
       e.screen.x,
       e.screen.y
     );
@@ -327,19 +322,19 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
   }
 
   private cmd(c: Command): void {
-    this.deps.getCommands().push(c);
+    this.deps.commandBuffer.push(c);
   }
 
   private updateHover() {
-    const mouse = this.deps.getInteractionState().get().gravityCenter;
+    const mouse = this.deps.interactionState.get().gravityCenter;
     if (!mouse) {
       this.cmd({ type: "SetHoveredNode", nodeId: null });
       return;
     }
 
-    const hit = this.deps.getHitTester().getNodeAtScreenPoint(
-      this.deps.getGraph(),
-      this.deps.getCamera(),
+    const hit = this.deps.hitTester.getNodeAtScreenPoint(
+      this.deps.graph?.get() ?? null,
+      this.deps.camera,
       mouse.x,
       mouse.y
     );
@@ -347,10 +342,10 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
   }
 
   private updateFollow(): void {
-    const id = this.deps.getInteractionState().get().followedNodeId;
+    const id = this.deps.interactionState.get().followedNodeId;
     if (!id) return;
 
-    const graph = this.deps.getGraph();
+    const graph = this.deps.graph?.get();
     if (!graph) return;
 
     const node = graph.nodes.find(n => n.id === id);
@@ -383,7 +378,7 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
       return;
     }
 
-    const followedNodeId = this.deps.getInteractionState().get().followedNodeId;
+    const followedNodeId = this.deps.interactionState.get().followedNodeId;
     if (followedNodeId === nodeId && nodeId !== null) {
       this.cmd({ type: "OpenNode", nodeId });
       return;
@@ -395,8 +390,8 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
   private startDrag(nodeId: string, screenX: number, screenY: number) {
     this.cmd({ type: "SetFollowedNode", nodeId: null });
 
-    const graph   = this.deps.getGraph();
-    const camera  = this.deps.getCamera();
+    const graph   = this.deps.graph?.get();
+    const camera  = this.deps.camera;
     if (!graph || !camera) return;
 
     this.cmd({ type: "SetMouseGravity", on: false });
@@ -426,10 +421,10 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
   }
 
   private updateDrag(screenX: number, screenY: number) {
-    const camera = this.deps.getCamera();
+    const camera = this.deps.camera;
     if (!camera) return;
 
-    const draggedId = this.deps.getInteractionState().get().draggedNodeId;
+    const draggedId = this.deps.interactionState.get().draggedNodeId;
     if (!draggedId) return;
 
     const underMouse = camera.screenToWorld(screenX, screenY, this.dragDepthFromCamera);
@@ -445,7 +440,7 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
   }
 
   private endDrag() {
-    const draggedId = this.deps.getInteractionState().get().draggedNodeId;
+    const draggedId = this.deps.interactionState.get().draggedNodeId;
     if (!draggedId) return;
 
     this.dragWorldOffset = null;

@@ -1,6 +1,6 @@
 import type { Simulation }        from '../../types/domain/physics.ts';
 import type { PhysicsDeps }       from '../../deps/physics.deps.ts';
-import { createSimulation }       from './simulation.ts';
+import      { createSimulation }  from './simulation.ts';
 import type {
   ModuleWithSettings,
   SettingsFor,
@@ -31,8 +31,8 @@ export class Physics implements ModuleWithSettings<'physics'> {
   // Call whenever the graph changes (rebuild/filter/etc.)
   public rebuild(): void {
     this.stop();
-    const graph  = this.deps.getGraph();
-    const camera = this.deps.getCamera();
+    const graph  = this.deps.graph?.get();
+    const camera = this.deps.camera;
     if (!graph || !camera) {
       this.sim = null;
       return;
@@ -44,8 +44,8 @@ export class Physics implements ModuleWithSettings<'physics'> {
       camera, 
       this.settings.tuning,
       this.settings.physics,
-      ()        => this.deps.getInteractionState().gravityCenter,
-      (nodeId)  => nodeId === this.deps.getInteractionState().followedNodeId
+      ()        => this.deps.interactionState.gravityCenter,
+      (nodeId)  => nodeId === this.deps.interactionState.followedNodeId
     );
     this.sim?.setPinnedNodes?.(new Set(this.pinned));
     this.sim?.start();

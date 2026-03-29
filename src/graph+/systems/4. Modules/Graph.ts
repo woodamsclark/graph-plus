@@ -1,27 +1,9 @@
-import { App, TFile } from "obsidian";
-import type { GraphData, Node, Link, GraphModuleLike } from "../../types/domain/graph.ts";
-import type {
-  ModuleWithSettings,
-  SettingsFor,
-} from "../../types/index.ts";
+import { App, TFile }                               from "obsidian";
+import type { GraphData, Node, Link }               from "../../types/domain/graph.ts";
+import type { ModuleWithSettings, SettingsFor }     from "../../types/index.ts";
+import type { GraphDeps }                           from "../../deps/graph.deps.ts";
+import type { PersistedGraphState, WeightedEdge }   from "../../types/domain/graph.ts";
 
-type WeightedEdge = { sourceId: string; targetId: string; weight: number };
-
-type DataStoragePlugin = {
-    loadData: () => Promise<any>;
-    saveData: (data: any) => Promise<void>;
-};
-
-export type GraphDeps = {
-  getApp: () => App;
-  getPlugin: () => DataStoragePlugin | null;
-};
-
-type PersistedGraphState = {
-    version: number;
-    vaultId: string;
-    nodePositions: Record<string, { x: number; y: number; z: number }>;
-};
 
 interface ResolvedLinks {
     [sourcePath: string]: { [targetPath: string]: number };
@@ -85,7 +67,7 @@ export class Graph implements ModuleWithSettings<'graph'> {
     public async save(): Promise<void> {
         if (!this.data) return;
 
-        const app = this.deps.getApp();
+        const app = this.deps.app;
         const state = this.extractState(this.data, app);
 
         await this.saveState(state);
@@ -94,7 +76,7 @@ export class Graph implements ModuleWithSettings<'graph'> {
 
     public async rebuild(): Promise<void> {
         if (this.data) {
-            const app           = this.deps.getApp();
+            const app           = this.deps.app;
             this.cachedState    = this.extractState(this.data, app);
         }
 
@@ -112,7 +94,7 @@ export class Graph implements ModuleWithSettings<'graph'> {
     }
 
     private async buildGraph(): Promise<void> {
-        const app   = this.deps.getApp();
+        const app   = this.deps.app;
         const state = await this.loadState(app);
         const graph = this.generateGraph(app);
 
@@ -127,7 +109,7 @@ export class Graph implements ModuleWithSettings<'graph'> {
     private async loadState(app: App): Promise<PersistedGraphState | null> {
         if (this.cachedState) return this.cachedState;
 
-        const plugin = this.deps.getPlugin();
+        const plugin = this.deps.plugin;
         if (!plugin) return null;
 
         const raw = await plugin.loadData().catch(() => null);
@@ -141,7 +123,7 @@ export class Graph implements ModuleWithSettings<'graph'> {
     }
 
     private async saveState(state: PersistedGraphState): Promise<void> {
-        const plugin = this.deps.getPlugin();
+        const plugin = this.deps.plugin;
         if (!plugin) return;
 
         const raw = await plugin.loadData().catch(() => ({}));

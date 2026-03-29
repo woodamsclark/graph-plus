@@ -1,5 +1,5 @@
-import { ScreenPt } from '../../../types/domain/math.ts';
-import { ActivePointer } from './PointerTracker.ts';
+import { ScreenPt }       from '../../../types/domain/math.ts';
+import { ActivePointer }  from './PointerTracker.ts';
 
 type TwoFingerReading = { centroid: ScreenPt; dist: number; angle: number };
 

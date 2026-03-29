@@ -1,8 +1,6 @@
 import type { RenderFrame, RenderLinkState, RenderNodeState } from "../../types/domain/render.ts";
-import type { CameraLike } from "../../types/domain/camera.ts";
-import { RenderFrameStore } from "./RenderFrameStore.ts";
-import { ModuleWithSettings } from "../../types/index.ts";
-
+import type { CameraAccessor }                                  from "../../types/domain/camera.ts";
+import { RenderFrameStore }                                   from "./RenderFrameStore.ts";
 
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
@@ -11,7 +9,7 @@ export class Renderer {
 
   constructor(
     private canvas    : HTMLCanvasElement,
-    private camera    : CameraLike,
+    private camera    : CameraAccessor,
     private frameStore: RenderFrameStore,
   ) {
     const ctx = this.canvas.getContext("2d");

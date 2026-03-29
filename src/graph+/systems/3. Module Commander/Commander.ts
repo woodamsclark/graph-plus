@@ -2,12 +2,9 @@
 // Drains commands and routes them through a registry.
 // Modules register handlers for the command types they care about.
 
-import type { DrainableBuffer } from "../../types/domain/ui.ts";
-import type { Command, CommandHandler, CommandObserver } from "../../types/domain/commands.ts";
+import type { Command, CommandHandler } from "../../types/domain/commands.ts";
 import type { CommandSystemDeps } from "../../deps/commands.deps.ts";
 import { Tickable } from "../../types/index.ts";
-
-// CommandSystem
 
 export class CommandRegistry {
   private handlers = new Map<Command["type"], Array<(command: Command) => void>>();
@@ -29,14 +26,11 @@ export class CommandRegistry {
   }
 }
 
-
-
-
 export class Commander implements Tickable {
   constructor(private deps: CommandSystemDeps) {}
 
   tick(): void {
-    const commands: Command[] = this.deps.getQueue().drain();
+    const commands: Command[] = this.deps.queue.drain();
     if (commands.length === 0) return;
 
     for (const command of commands) {

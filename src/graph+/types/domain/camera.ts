@@ -24,7 +24,7 @@ export type WorldTransform = {
   scale: number;
 };
 
-export interface CameraLike {
+export interface CameraAccessor {
   worldToScreen(world: Vec3): {
     x: number;
     y: number;

@@ -101,8 +101,8 @@ export class GraphEngineRuntime {
     this.camera = new CameraController(selectCameraSettings(settings));
 
     this.graph = new Graph(selectGraphSettings(settings), {
-      getApp: () => this.deps.app,
-      getPlugin: () => this.deps.plugin as any,
+      app:    this.deps.app,
+      plugin: this.deps.plugin as any,
     });
     
 
@@ -112,48 +112,48 @@ export class GraphEngineRuntime {
     });
 
     this.uiInterpreter = new UIInterpreter(selectUIInterpreterSettings(settings), {
-      getGraph:             () => this.graph?.get() ?? null,
-      getCamera:            () => this.camera,
-      getCanvas:            () => this.canvas!,
-      getInputBuffer:       () => this.inputBuffer,
-      getCommands:          () => this.commandBuffer,
-      getInteractionState:  () => this.uiStateStore,
-      getHitTester:         () => this.hitTester,
+      graph:             this.graph,
+      camera:            this.camera,
+      canvas:            this.canvas!,
+      inputBuffer:       this.inputBuffer,
+      commandBuffer:     this.commandBuffer,
+      interactionState:  this.uiStateStore,
+      hitTester:         this.hitTester,
     });
 
     this.physics = new Physics(selectPhysicsSettings(settings), {
-      getGraph:             () => this.graph?.get() ?? null,
-      getCamera:            () => this.camera,
-      getInteractionState:  () => this.uiStateStore.get(),
+      graph:             this.graph,
+      camera:            this.camera,
+      interactionState:  this.uiStateStore.get(),
     });
 
     this.anima = new Anima(selectAnimaSettings(settings), {
-      getGraph:             () => this.graph?.get() ?? null,
-      getAnimaStore:        () => this.animaStateStore,
+      graph:             this.graph,
+      animaStore:        this.animaStateStore,
     });
 
     this.renderStateComposer = new RenderStateComposer(selectRenderComposerSettings(settings), {
-      getGraph:             () => this.graph?.get() ?? null,
-      getUIState:           () => this.uiStateStore.get(),
-      getAnimaStore:        () => this.animaStateStore,
-      getFrameStore:        () => this.renderFrameStore,
+      graph:             this.graph,
+      uiState:           this.uiStateStore.get(),
+      animaStore:        this.animaStateStore,
+      frameStore:        this.renderFrameStore,
     });
 
     this.renderer = new Renderer(this.canvas, this.camera, this.renderFrameStore);
 
     this.navigationController = new NavigationController({
       navigator: this.navigator,
-      getGraph: () => this.graph?.get() ?? null,
+      graph: this.graph,
     });
 
     this.interactionController = new InteractionController({
-      getPhysics: () => this.physics,
-      getCamera: () => this.camera,
-      getUIStateStore: () => this.uiStateStore,
+      physics: this.physics,
+      camera: this.camera,
+      uiStateStore: this.uiStateStore,
     });
 
     this.commandSystem = new Commander({
-      getQueue: () => this.commandBuffer,
+      queue: this.commandBuffer,
       registry: this.commandRegistry,
       observers: [this.anima],
     });
