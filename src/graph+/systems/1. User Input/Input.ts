@@ -1,29 +1,34 @@
 // InputManager.ts
-import type { UISettings, ScreenPt, PointerKind, DrainableBuffer, UserInputEvent } from "../../grammar/interfaces.ts";
-import { InputBuffer } from "./InputBuffer.ts";
+import type { 
+  InputModuleSettings, 
+  PointerKind, 
+  DrainableBuffer, 
+  UserInputEvent,
+  ScreenPt,
+} from "../../grammar/interfaces.ts";
 
 type InputDeps = {
   getCanvas: () => HTMLCanvasElement;
   getBuffer: () => DrainableBuffer<UserInputEvent>;
-  uiSettings: UISettings;
 };
 
 
 export class Input {
   private longPressTimer: number | null = null;
   private longPressPointerId: number | null = null;
-  private settings: UISettings;
 
-  constructor(private deps: InputDeps) {
-    this.settings = deps.uiSettings
+  constructor
+  (
+    private settings: InputModuleSettings,
+    private deps: InputDeps
+  ) 
+  {
+    this.settings = settings;
     this.attach();
   }
 
-  setInputSettings(settings: Partial<UISettings>) {
-    this.settings = {
-      ...this.settings,
-      ...settings,
-    };
+  updateSettings(settings: InputModuleSettings): void {
+    this.settings = settings;
   }
 
   destroy(): void {
@@ -77,7 +82,7 @@ export class Input {
 
     // long press only for touch/pen
     const allowedKinds: PointerKind[] =
-    this.settings.longPressPointerKinds;
+    this.settings.ui.longPressPointerKinds;
 
     if (allowedKinds.includes(kind)) {
       this.startLongPress(e.pointerId, kind, screen, { x: e.clientX, y: e.clientY });
@@ -161,7 +166,7 @@ export class Input {
     this.clearLongPress();
 
     //const ms = 450; // make this a setting?
-    const ms = this.settings.longPressMs ?? 450; // this should always use default settings, but just in case
+    const ms = this.settings.ui.longPressMs ?? 450; // this should always use default settings, but just in case
     this.longPressPointerId = pointerId;
 
     this.longPressTimer = window.setTimeout(() => {

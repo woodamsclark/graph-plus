@@ -1,13 +1,16 @@
 import type {
   Module,
-  GraphSettings,
-  RenderConfig,
+  BaseSettings,
+  RenderSettings,
   RenderFrame,
   RenderLinkState,
   RenderNodeState,
   Tickable,
   UIState,
   GraphModule,
+  TuningSettings,
+  RendererModuleSettings,
+  SettingsAwareSystem,
 } from "../../grammar/interfaces.ts";
 
 import type { RenderFrameStore } from "./RenderFrameStore.ts";
@@ -16,7 +19,6 @@ import type { AnimaStateStore } from "../4. Modules/AnimaStateStore.ts";
 type RenderStateComposerDeps = {
   getGraph: ()          => GraphModule;
   getUIState: ()        => UIState;
-  getGraphSettings: ()  => GraphSettings;
   getAnimaStore: ()     => AnimaStateStore;
   getFrameStore: ()     => RenderFrameStore;
 };
@@ -29,7 +31,7 @@ const themeEdgeColor        = styles.getPropertyValue("--background-modifier-bor
 const themeLabelColor       = styles.getPropertyValue("--text-normal").trim()                 || "#ccc";
 const themeBackgroundColor  = styles.getPropertyValue("--background-primary").trim()          || "#111";
 
-export class RenderStateComposer implements Module, Tickable {
+export class RenderStateComposer implements Module, Tickable, SettingsAwareSystem<RendererModuleSettings>  {
   initialize(): void {
     // No startup work yet.
   }
@@ -38,8 +40,18 @@ export class RenderStateComposer implements Module, Tickable {
     this.deps.getFrameStore().set(null);
   }
 
-  constructor(private deps: RenderStateComposerDeps) {}
+  constructor(
+    private settings: RendererModuleSettings,
+    private deps: RenderStateComposerDeps) {
 
+    }
+
+
+  updateSettings(settings: RendererModuleSettings): void {
+    this.settings = settings;
+  }
+  
+  
   public tick(_dt: number, _nowMs: number): void {
     const graph = this.deps.getGraph().get();
     if (!graph) {
@@ -47,22 +59,24 @@ export class RenderStateComposer implements Module, Tickable {
       return;
     }
 
+    const tuning      = this.settings.tuning;
+    const base        = this.settings.base;
     const ui          = this.deps.getUIState();
-    const settings    = this.deps.getGraphSettings();
     const animaStore  = this.deps.getAnimaStore();
 
     // --- Config snapshot
-    const config: RenderConfig = {
-      backgroundColor:  settings.backgroundColor ?? themeBackgroundColor,
-      nodeColor:        settings.nodeColor ?? themeNodeColor,
-      tagColor:         settings.tagColor ?? themeTagColor,
-      edgeColor:        settings.edgeColor ?? "#888",
-      labelColor:       settings.labelColor ?? themeLabelColor,
-      labelFontSize:    settings.labelFontSize,
-      showLabels:       settings.showLabels,
-      showTags:         settings.showTags,
-      hoverScale:       settings.hoverScale,
-      useInterfaceFont: settings.useInterfaceFont,
+    const settings: RenderSettings = {
+      backgroundColor:  base.backgroundColor ?? themeBackgroundColor,
+      nodeColor:        base.nodeColor ?? themeNodeColor,
+      tagColor:         base.tagColor ?? themeTagColor,
+      edgeColor:        base.linkColor ?? "#888",
+      labelColor:       base.labelColor ?? themeLabelColor,
+      labelFontSize:    base.labelFontSize,
+      showLabels:       base.showLabels,
+      showTags:         base.showTags,
+      hoverScale:       base.hoverScale,
+      useInterfaceFont: base.useInterfaceFont,
+      labelOffsetY:     tuning.labelOffsetY,
     };
 
     // --- Nodes
@@ -74,8 +88,8 @@ export class RenderStateComposer implements Module, Tickable {
         : 0;
 
       const hovered = ui.hoveredNodeId === node.id;
-      const scale = hovered ? settings.hoverScale : 1;
-      const visible = settings.showTags || node.type !== "tag";
+      const scale = hovered ? base.hoverScale : 1;
+      const visible = base.showTags || node.type !== "tag";
 
       return {
         id: node.id,
@@ -101,9 +115,11 @@ export class RenderStateComposer implements Module, Tickable {
     const frame: RenderFrame = {
       nodes,
       links,
-      config,
+      settings,
     };
 
     this.deps.getFrameStore().set(frame);
   }
+
+
 }

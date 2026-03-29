@@ -1,5 +1,5 @@
 import { App, TFile } from "obsidian";
-import { GraphData, Node, Link, GraphModule, GraphSettings, PhysicsSettings } from "../../grammar/interfaces.ts";
+import { GraphData, Node, Link, GraphModule, GraphPlusSettings, PhysicsSettings, BaseSettings, LayoutSettings, GraphModuleSettings, SettingsAwareSystem } from "../../grammar/interfaces.ts";
 
 type WeightedEdge = { sourceId: string; targetId: string; weight: number };
 
@@ -9,12 +9,9 @@ type DataStoragePlugin = {
 };
 
 export type GraphDeps = {
-    getApp: ()              => App;
-    getPlugin: ()           => DataStoragePlugin | null;
-    getGraphSettings: ()    => GraphSettings;
-    getPhysicsSettings: ()  => PhysicsSettings;
-};
-
+    getApp: ()      => App;
+    getPlugin: ()   => DataStoragePlugin | null;
+};  
 type PersistedGraphState = {
     version: number;
     vaultId: string;
@@ -25,13 +22,19 @@ interface ResolvedLinks {
     [sourcePath: string]: { [targetPath: string]: number };
 }
 
-export class Graph implements GraphModule {
+export class Graph implements GraphModule, SettingsAwareSystem<GraphModuleSettings> {
+    private settings: GraphModuleSettings;
     private deps: GraphDeps;
     private data: GraphData | null = null;
     private cachedState: PersistedGraphState | null = null;
 
-    constructor(deps: GraphDeps) {
-        this.deps = deps;
+    constructor(settings: GraphModuleSettings, deps: GraphDeps) {
+        this.deps       = deps;
+        this.settings   = settings;
+    }
+
+    updateSettings(settings: GraphModuleSettings): void {
+        this.settings = settings;
     }
 
     public async initialize(): Promise<void> {
@@ -163,8 +166,8 @@ export class Graph implements GraphModule {
     }
 
     private generateGraph(app: App): GraphData {
-        const settings = this.deps.getGraphSettings();
-        const showTags = settings.showTags;
+        const settings = this.settings;
+        const showTags = settings.base.showTags;
 
         let tags = new Set<string>();
         let noteTagEdges: WeightedEdge[] = [];
@@ -244,9 +247,9 @@ export class Graph implements GraphModule {
     }
 
     private *noteNoteEdges(app: App): IterableIterator<WeightedEdge> {
-        const settings                      = this.deps.getGraphSettings();
+        const settings                      = this.settings;
         const resolvedLinks: ResolvedLinks  = (app.metadataCache as any).resolvedLinks || {};
-        const countDuplicates               = Boolean(settings.countDuplicateLinks);
+        const countDuplicates               = Boolean(settings.base.countDuplicateLinks);
 
         for (const sourcePath of Object.keys(resolvedLinks)) {
             const targets = resolvedLinks[sourcePath] || {};
@@ -275,7 +278,9 @@ export class Graph implements GraphModule {
         const nodes: Node[] = [];
 
         for (const file of files) {
-            const jitter = 50;
+            const tuning = this.settings.tuning;
+
+            const jitter = tuning.initialJitter;
             nodes.push({
                 id: file.path,
                 label: file.basename,
@@ -300,7 +305,9 @@ export class Graph implements GraphModule {
     }
 
     private createTagNodes(tags: Set<string>): Node[] {
-        const jitter = 50;
+        const tuning = this.settings.tuning;
+
+        const jitter = tuning.initialJitter;
         const nodes: Node[] = [];
 
         for (const cleanTag of tags) {
@@ -345,7 +352,13 @@ export class Graph implements GraphModule {
         for (const e of edges) {
             if (!nodeById.has(e.sourceId) || !nodeById.has(e.targetId)) continue;
 
-            const thickness = Number.isFinite(e.weight) && e.weight > 0 ? e.weight : 1;
+            const tuning    = this.settings.tuning;
+            const rawWeight = Number.isFinite(e.weight) && e.weight > 0 ? e.weight : 1;
+
+            const thickness = Math.max(
+            tuning.linkThicknessMin,
+            rawWeight * tuning.linkThicknessScale,
+            );
             const id = `${e.sourceId}->${e.targetId}`;
 
             const existing = byId.get(id);
@@ -362,13 +375,13 @@ export class Graph implements GraphModule {
     }
 
     private createLink(sourceId: string, targetId: string, thickness: number): Link {
-        const settings = this.deps.getGraphSettings();
+        const settings = this.settings;
         return {
             id: `${sourceId}->${targetId}`,
             sourceId: sourceId,
             targetId: targetId,
-            length: this.deps.getPhysicsSettings().edgeLength,
-            strength: this.deps.getPhysicsSettings().edgeStrength,
+            length: this.settings.layout.linkLength,
+            strength: this.settings.layout.linkStrength,
             thickness: thickness,
             gate: { state: "closed", threshold: 0, hysteresis: 0 },
         };
@@ -395,8 +408,10 @@ export class Graph implements GraphModule {
     }
 
     private computeNodeRadius(graph: GraphData): void {
-        const minR = this.deps.getGraphSettings().minNodeRadius;
-        const maxR = this.deps.getGraphSettings().maxNodeRadius;
+        const minR = this.settings.base.minNodeRadius;
+        const maxR = this.settings.base.maxNodeRadius;
+
+        const tuning = this.settings.tuning;
 
         for (const node of graph.nodes) {
             const incoming = graph.linksIn[node.id];
@@ -404,7 +419,7 @@ export class Graph implements GraphModule {
                 ? Object.values(incoming).reduce((a, b) => a + b, 0)
                 : 0;
 
-            const r = minR + Math.sqrt(count) * 2;
+            const r = minR + Math.sqrt(count) * tuning.nodeDegreeRadiusScale;
             node.radius = Math.min(maxR, r);
         }
     }

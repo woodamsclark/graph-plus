@@ -34,66 +34,89 @@ export type UIState = {
 
   // --- Interfaces ------------------------------------------------------
 
-export interface GraphPlusSettings {
-  graph                 : GraphSettings;
-  physics               : PhysicsSettings;
-  camera                : CameraSettings;
-  ui                    : UISettings;
-}
+export type GraphPlusSettings = {
+  base:     BaseSettings;
+  layout:   LayoutSettings;
+  physics:  PhysicsSettings;
+  camera:   CameraSettings;
+  tuning:   TuningSettings;
+  ui:       UISettings;
+};
 
-export interface GraphSettings {
-  minNodeRadius         : number;
-  maxNodeRadius         : number;
-  // nodeRadiusScaling // global scaling
-  nodeColor?            : string;   // optional color overrides (CSS color strings). If unset, theme vars are used.
-  tagColor?             : string;
-  edgeColor?            : string;
-  
-  showTags              : boolean;
-  showLabels            : boolean;
-  
-  labelFontSize         : number;
-  labelRevealRadius     : number;
-  labelColor?           : string; 
+export type BaseSettings = {
+  minNodeRadius: number;
+  maxNodeRadius: number;
+  nodeColor?: string;
+  tagColor?: string;
+  linkColor?: string;
+  backgroundColor?: string;
+  labelColor?: string;
+  labelFontSize: number;
+  labelRevealRadius: number;
+  useInterfaceFont: boolean;
+  countDuplicateLinks: boolean;
+  drawDoubleLines: boolean;
+  showTags: boolean;
+  showLabels: boolean;
+  hoverScale: number;
+};
 
-  backgroundColor?      : string;
-  useInterfaceFont      : boolean;
-  countDuplicateLinks   : boolean;
-  drawDoubleLines       : boolean;
-  hoverScale            : number;
-  //highlightDepth        : number;  // screen-space label reveal radius (× size)
-}
+export type LayoutSettings = {
+  linkLength:         number;
+  linkStrength:       number;
+  centerPull:         number;
+  notePlaneStiffness: number;
+  tagPlaneStiffness:  number;
+  worldCenterX:       number;
+  worldCenterY:       number;
+  worldCenterZ:       number;
+}; 
 
 export interface PhysicsSettings {
   repulsionStrength     : number;
-  edgeStrength          : number;
-  edgeLength            : number;
-  centerPull            : number;
   damping               : number;
-  notePlaneStiffness    : number;
-  tagPlaneStiffness     : number;
   mouseGravityEnabled   : boolean;
   mouseGravityRadius    : number;
   mouseGravityStrength  : number;
-  mouseGravityExponent  : number;  
-  // not changeable by user, maybe move these elsewhere conceptually
-  readonly worldCenterX : number;
-  readonly worldCenterY : number;
-  readonly worldCenterZ : number;
-
+  mouseGravityExponent  : number;
 }
 
 export interface CameraSettings {
-  momentumScale         : number;
-  rotateSensitivityX    : number;
-  rotateSensitivityY    : number;
-  zoomSensitivity       : number;
-  min_distance          : number;// = 100;
-  max_distance          : number;// = 5000;
-  min_pitch             : number;//    = -Math.PI / 2 + 0.05;
-  max_pitch             : number;//    =  Math.PI / 2 - 0.05;
-  state                 : CameraState;
+    momentumScale     : number; 
+    rotateSensitivityX: number;
+    rotateSensitivityY: number;
+    zoomSensitivity   : number; 
+    minDistance       : number; 
+    maxDistance       : number; 
+    minPitch          : number;
+    maxPitch          : number;
+    initialState: {
+      yaw       : number;
+      pitch     : number;
+      distance  : number;
+      targetX   : number;
+      targetY   : number;
+      targetZ   : number;
+      offsetX   : number;
+      offsetY   : number;
+      offsetZ   : number;
+      rotateVelX: number;
+      rotateVelY: number;
+      panVelX   : number;
+      panVelY   : number;
+      zoomVel   : number;
+    },
 }
+
+
+export interface AnimaSettings { // I'm not sure if I actually want these // 03-28-2026
+  drainPerSecond: number;
+  openNodeGain  : number;
+  followNodeGain: number;
+  pinNodeGain   : number;
+  dragNodeGain  : number;
+};
+
 
 export type UISettings = {
     longPressMs:            number;
@@ -170,7 +193,7 @@ export interface Link {
 export interface Simulation {
   start()                           : void;
   stop()                            : void;
-  tick(dt: number, physicsSettings: PhysicsSettings)                  : void;
+  tick(dt: number, physicsSettings: PhysicsSettings, layoutSettings: LayoutSettings)                  : void;
   reset()                           : void;
   setPinnedNodes?(ids: Set<string>) : void;
   updateDragTarget?(target: { x: number; y: number } | null): void;
@@ -316,7 +339,7 @@ export type UserInputEvent =
 
 
 
-export type RenderConfig = {
+export type RenderSettings = {
   backgroundColor?: string;
   nodeColor?: string;
   tagColor?: string;
@@ -327,6 +350,7 @@ export type RenderConfig = {
   showTags: boolean;
   hoverScale: number;
   useInterfaceFont: boolean;
+  labelOffsetY: number;
 };
 
 export type RenderNodeState = {
@@ -351,5 +375,42 @@ export type RenderLinkState = {
 export type RenderFrame = {
   nodes: RenderNodeState[];
   links: RenderLinkState[];
-  config: RenderConfig;
+  settings: RenderSettings;
 };
+
+export type TuningSettings = {
+  linkThicknessScale: number;
+  linkThicknessMin: number;
+
+  nodeDegreeRadiusScale: number;
+  initialJitter: number;
+
+  labelOffsetY: number;
+
+  pinchThresholdPx: number;
+  rotateThresholdRad: number;
+
+  repulsionMinDistance: number;
+  barnesHutTheta: number;
+  barnesHutEpsilon: number;
+
+  mouseGravityPaddingWorld: number;
+};
+
+export type GraphModuleSettings         = Pick<GraphPlusSettings, 'base'    | 'layout' | 'tuning'>;
+export type PhysicsModuleSettings       = Pick<GraphPlusSettings, 'physics' | 'layout' | 'tuning'>;
+export type RendererModuleSettings      = Pick<GraphPlusSettings, 'base'    | 'tuning'>;
+export type UIModuleSettings            = Pick<GraphPlusSettings, 'ui'      | 'tuning'>;
+export type CameraModuleSettings        = Pick<GraphPlusSettings, 'camera'>;
+export type InputModuleSettings         = Pick<GraphPlusSettings, 'ui'>;
+
+
+export interface SettingsAwareSystem<TSettings> {
+  updateSettings(settings: TSettings): void;
+}
+
+export interface ConfigurableModule<TSettings> extends Module, SettingsAwareSystem<TSettings> {}
+
+export interface ConfigurableSystem<TSettings> {
+  updateSettings(settings: TSettings): void;
+}

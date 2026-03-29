@@ -1,7 +1,6 @@
 import { CameraController } from '../5. Render/CameraController.ts';
 import { Node, GraphData, PhysicsSettings, Simulation } from '../../grammar/interfaces.ts';
-import { getSettings } from '../../../obsidian/settings/settingsStore.ts';
-import type { ScreenPt, Vec3 } from "../../grammar/interfaces.ts";
+import type { GraphPlusSettings, LayoutSettings, ScreenPt, TuningSettings, Vec3 } from "../../grammar/interfaces.ts";
 
  type OctNode = {
     cx:   number;   cy: number;   cz: number; // cube center
@@ -21,11 +20,15 @@ type DragConstraint = {
   maxForce?:  number;
   } | null;
 
+type SimulationSettings = Pick<GraphPlusSettings, 'layout' | 'physics' | 'tuning'>;
+
 export function createSimulation(
-    graph: GraphData, 
-    camera : CameraController, 
-    getGravityCenter: () => ScreenPt | null,
-    shouldIgnoreMouseGravity?: (nodeId: string) => boolean
+    graph                     : GraphData, 
+    camera                    : CameraController, 
+    tuningSettings            : TuningSettings,
+    physicsSettings           : PhysicsSettings,
+    getGravityCenter          : () => ScreenPt | null,
+    shouldIgnoreMouseGravity? : (nodeId: string) => boolean,
   ) : Simulation{
   // If center not provided, compute bounding-box center from node positions
   const nodes     = graph.nodes;
@@ -302,7 +305,7 @@ export function createSimulation(
         if (distSq === 0) distSq = 0.0001;
         const dist = Math.sqrt(distSq);
         // minimum separation to avoid extreme forces
-        const minDist = 40;
+        const minDist = tuningSettings.repulsionMinDistance;
         const effectiveDist = Math.max(dist, minDist);
         const force = physicsSettings.repulsionStrength / (effectiveDist * effectiveDist);
         const fx = (dx / dist) * force;
@@ -326,13 +329,13 @@ export function createSimulation(
     const strength = physicsSettings.repulsionStrength;
 
     // keep your existing "minimum separation" behavior
-    const minDist = 40;
+    const minDist   = tuningSettings.repulsionMinDistance;
     const minDistSq = minDist * minDist;
 
     // BH tuning knobs (constants for now; you can expose later)
-    const theta = 0.8;        // lower = more accurate; higher = faster (typical 0.5–1.2)
+    const theta   = tuningSettings.barnesHutTheta;
     const thetaSq = theta * theta;
-    const eps = 1e-3;         // tiny softening to avoid 1/0
+    const eps     = tuningSettings.barnesHutEpsilon;
 
     for (const a of nodes) {
       if (pinnedNodes.has(a.id)) continue;
@@ -340,7 +343,7 @@ export function createSimulation(
     }
   }
 
-  function applySprings(physicsSettings: PhysicsSettings) {
+  function applySprings(layoutSettings: LayoutSettings) {
     if (!links) return;
     for (const e of links) {
       const a = nodeById.get(e.sourceId);
@@ -350,8 +353,8 @@ export function createSimulation(
       const dy = (b.location.y - a.location.y);
       const dz = ((b.location.z || 0) - (a.location.z || 0));
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.0001;
-      const displacement = dist - (physicsSettings.edgeLength || 0);
-      const f = (physicsSettings.edgeStrength || 0) * Math.tanh(displacement / 50);
+      const displacement = dist - (layoutSettings.linkLength || 0);
+      const f = (layoutSettings.linkStrength || 0) * Math.tanh(displacement / 50);
       const fx = (dx / dist) * f;
       const fy = (dy / dist) * f;
       const fz = (dz / dist) * f;
@@ -368,19 +371,19 @@ export function createSimulation(
     }
   }
 
-  function applyCenteringForce(physicsSettings: PhysicsSettings) {
-    if (physicsSettings.centerPull <= 0) return;
-    const cx = physicsSettings.worldCenterX;
-    const cy = physicsSettings.worldCenterY;
-    const cz = physicsSettings.worldCenterZ;
+  function applyCenteringForce(layoutSettings: LayoutSettings) {
+    if (layoutSettings.centerPull <= 0) return;
+    const cx = layoutSettings.worldCenterX;
+    const cy = layoutSettings.worldCenterY;
+    const cz = layoutSettings.worldCenterZ;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
       const dx = (cx - n.location.x);
       const dy = (cy - n.location.y);
       const dz = (cz - n.location.z);
-      n.velocity.x = (n.velocity.x || 0) + dx * physicsSettings.centerPull;
-      n.velocity.y = (n.velocity.y || 0) + dy * physicsSettings.centerPull;
-      n.velocity.z = (n.velocity.z || 0) + dz * physicsSettings.centerPull;
+      n.velocity.x = (n.velocity.x || 0) + dx * layoutSettings.centerPull;
+      n.velocity.y = (n.velocity.y || 0) + dy * layoutSettings.centerPull;
+      n.velocity.z = (n.velocity.z || 0) + dz * layoutSettings.centerPull;
     }
   }
 
@@ -397,13 +400,13 @@ export function createSimulation(
     }
   }
 
-  function applyPlaneConstraints(physicsSettings: PhysicsSettings) {
-    const noteK = physicsSettings.notePlaneStiffness;
-    const tagK  = physicsSettings.tagPlaneStiffness;
+  function applyPlaneConstraints(layoutSettings: LayoutSettings) {
+    const noteK = layoutSettings.notePlaneStiffness;
+    const tagK  = layoutSettings.tagPlaneStiffness;
     if (noteK === 0 && tagK === 0) return;
     // Pull notes/tags toward the simulation center (not always world origin)
-    const targetZ = physicsSettings.worldCenterZ;
-    const targetX = physicsSettings.worldCenterX;
+    const targetZ = layoutSettings.worldCenterZ;
+    const targetX = layoutSettings.worldCenterX;
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
       if (isNote(n) && noteK > 0) {
@@ -493,7 +496,7 @@ export function createSimulation(
     return dragConstraint?.node.id === nodeId;
   }
 
-  function tick(dt: number, physicsSettings: PhysicsSettings) {
+  function tick(dt: number, physicsSettings: PhysicsSettings, layoutSettings: LayoutSettings) {
     if (!running) return;
     if (!nodes.length) return;
     
@@ -503,11 +506,11 @@ export function createSimulation(
     if (!root) return;
     
     applyRepulsionBarnesHut(physicsSettings, root);
-    applySprings(physicsSettings);
+    applySprings(layoutSettings);
     applyMouseGravity(physicsSettings);
 
-    applyCenteringForce(physicsSettings);
-    applyPlaneConstraints(physicsSettings);
+    applyCenteringForce(layoutSettings);
+    applyPlaneConstraints(layoutSettings);
 
     applyDragConstraintKinematic(dt);
 

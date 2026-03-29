@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, Plugin } from 'obsidian';
 import GraphPlus from './main.ts';
-import { GraphEngineRuntime } from '../graph+/engine/GraphEngineRuntime.ts';
+import { GraphEngineRuntime } from '../graph+/engine/runtime/GraphEngineRuntime.ts';
 
 
 export const GRAPH_PLUS_TYPE = 'graph-plus';

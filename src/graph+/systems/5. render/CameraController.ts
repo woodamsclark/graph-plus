@@ -1,10 +1,11 @@
 import type {
   CameraState,
-  CameraSettings,
   WorldTransform,
   Vec3,
+  CameraModuleSettings,
+  SettingsAwareSystem,
+  CameraSettings,
 } from '../../grammar/interfaces.ts';
-import { getSettings } from '../../../obsidian/settings/settingsStore.ts';
 import {
   worldToScreen,
   screenToWorld,
@@ -14,26 +15,25 @@ import {
   type Viewport,
 } from './CameraProjection.ts';
 
-export class CameraController {
-  private cameraSettings: CameraSettings;
-  private cameraState: CameraState;
-
+export class CameraController implements SettingsAwareSystem<CameraModuleSettings> {
+  private settings      : CameraModuleSettings;
+  private cameraState   : CameraState;
   private cameraSnapShot: CameraState | null = null;
-  private worldAnchor: Vec3 | null = null;
-  private screenAnchor: { screenX: number; screenY: number } | null = null;
+  private worldAnchor   : Vec3        | null = null;
+  private screenAnchor  : { screenX: number; screenY: number } | null = null;
 
   private viewport: Viewport = {
-    width: 0,
-    height: 0,
-    offsetX: 0,
-    offsetY: 0,
+    width   : 0,
+    height  : 0,
+    offsetX : 0,
+    offsetY : 0,
   };
 
   private worldTransform: WorldTransform | null = null;
 
-  constructor(initialState: CameraState) {
-    this.cameraState = { ...initialState };
-    this.cameraSettings = getSettings().camera;
+  constructor(settings: CameraModuleSettings) {
+    this.settings = settings;
+    this.cameraState = { ...settings.camera.initialState };
   }
 
   getState(): CameraState {
@@ -48,15 +48,15 @@ export class CameraController {
     this.cameraState = { ...this.cameraState, ...partial };
   }
 
-  updateSettings(settings: CameraSettings) {
-    this.cameraSettings = { ...settings };
+  updateSettings(settings: CameraModuleSettings) {
+    this.settings = settings;
   }
 
   resetCamera() {
     const currentDistance = this.cameraState.distance;
 
     this.cameraState = {
-      ...getSettings().camera.state,
+      ...this.settings.camera.initialState,
       distance: currentDistance,
     };
 
@@ -149,11 +149,11 @@ export class CameraController {
     const dx = screenX - this.screenAnchor.screenX;
     const dy = screenY - this.screenAnchor.screenY;
 
-    let yaw = this.cameraSnapShot.yaw - dx * this.cameraSettings.rotateSensitivityX;
-    let pitch = this.cameraSnapShot.pitch - dy * this.cameraSettings.rotateSensitivityY;
+    let yaw = this.cameraSnapShot.yaw - dx * this.settings.camera.rotateSensitivityX;
+    let pitch = this.cameraSnapShot.pitch - dy * this.settings.camera.rotateSensitivityY;
 
-    const maxPitch = Math.PI / 2;
-    const minPitch = -maxPitch;
+    const maxPitch = this.settings.camera.maxPitch;
+    const minPitch = this.settings.camera.minPitch;
 
     if (pitch > maxPitch) pitch = maxPitch;
     if (pitch < minPitch) pitch = minPitch;
@@ -168,11 +168,11 @@ export class CameraController {
   }
 
   updateZoom(_screenX: number, _screenY: number, delta: number) {
-    this.cameraState.distance += delta * this.cameraSettings.zoomSensitivity;
+    this.cameraState.distance += delta * this.settings.camera.zoomSensitivity;
     this.cameraState.distance = clamp(
       this.cameraState.distance,
-      this.cameraSettings.min_distance,
-      this.cameraSettings.max_distance,
+      this.settings.camera.minDistance,
+      this.settings.camera.maxDistance,
     );
   }
 
@@ -197,9 +197,9 @@ export class CameraController {
 
   private getProjectionContext() {
     return {
-      cameraState: this.cameraState,
-      cameraSettings: this.cameraSettings,
-      viewport: this.viewport,
+      cameraState   : this.cameraState,
+      cameraSettings: this.settings.camera,
+      viewport      : this.viewport,
       worldTransform: this.worldTransform,
     };
   }

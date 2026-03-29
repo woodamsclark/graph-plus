@@ -1,15 +1,28 @@
-import type { GraphModule, Module, Tickable } from "../../grammar/interfaces.ts";
+import type { AnimaSettings, GraphModule, Module, SettingsAwareSystem, Tickable } from "../../grammar/interfaces.ts";
 import type { Command, CommandObserver } from "../3. Module Commander/Commander.ts";
 import { AnimaStateStore } from "./AnimaStateStore.ts";
 
-export class Anima implements Module, Tickable, CommandObserver {
-  constructor(private deps: {
-    getGraph: () => GraphModule;
-    getStore: () => AnimaStateStore;
-  }) {}
+export class Anima implements Module, Tickable, CommandObserver, SettingsAwareSystem<AnimaSettings> {
+
+  constructor
+  (
+//    private settings: AnimaSettings,
+    private deps: 
+    { 
+      getGraph: () => GraphModule; 
+      getAnimaStore: () => AnimaStateStore 
+    }
+  )
+  {
+ //   this.settings = settings;
+  }
 
   initialize(): void {
     // No startup work yet.
+  }
+
+  updateSettings(settings: AnimaSettings): void {
+//    this.settings = settings;
   }
 
   dispose(): void {
@@ -20,7 +33,7 @@ export class Anima implements Module, Tickable, CommandObserver {
     const graph = this.deps.getGraph().get();
     if (!graph) return;
 
-    const store = this.deps.getStore();
+    const store = this.deps.getAnimaStore();
     const validNodeIds = new Set(graph.nodes.map((n) => n.id));
     store.clearMissing(validNodeIds);
 
@@ -31,7 +44,7 @@ export class Anima implements Module, Tickable, CommandObserver {
   }
 
   afterCommandApplied(command: Command): void {
-    const store = this.deps.getStore();
+    const store = this.deps.getAnimaStore();
 
     switch (command.type) {
       case "OpenNode":
