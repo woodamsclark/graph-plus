@@ -10,7 +10,6 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
     backgroundColor: undefined,
     labelColor: undefined,
     labelFontSize: 12,
-    labelRevealRadius: 100,
     useInterfaceFont: true,
     countDuplicateLinks: true,
     drawDoubleLines: true,
