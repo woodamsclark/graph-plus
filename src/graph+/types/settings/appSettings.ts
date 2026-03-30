@@ -4,7 +4,6 @@ export type BaseSettings = {
   minNodeRadius:        number;
   maxNodeRadius:        number;
   labelFontSize:        number;
-  labelRevealRadius:    number;
   nodeColor?:           string;
   tagColor?:            string;
   linkColor?:           string;
