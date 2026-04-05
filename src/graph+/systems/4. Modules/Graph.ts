@@ -251,9 +251,9 @@ export class Graph implements ModuleWithSettings<'graph'> {
             for (const targetPath of Object.keys(targets)) {
                 const rawCount = Number(targets[targetPath]) || 1;
                 yield {
-                    sourceId: sourcePath,
-                    targetId: targetPath,
-                    weight: countDuplicates ? rawCount : 1,
+                    sourceId:   sourcePath,
+                    targetId:   targetPath,
+                    weight:     countDuplicates ? rawCount : 1,
                 };
             }
         }

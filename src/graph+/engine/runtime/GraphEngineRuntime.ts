@@ -16,8 +16,8 @@ import { AnimaStateStore }                                      from "../../syst
 import { Physics }                                              from "../../systems/4. Modules/Physics.ts";
 import { CameraController }                                     from "../../systems/5. Render/CameraController.ts";
 import { Renderer }                                             from "../../systems/5. Render/Renderer.ts";
-import { RenderFrameStore }                                     from "../../systems/5. Render/RenderFrameStore.ts";
-import { RenderStateComposer }                                  from "../../systems/5. Render/RenderStateComposer.ts";
+import { FrameStore }                                     from "../../systems/5. Render/FrameStore.ts";
+import { FrameComposer }                                  from "../../systems/5. Render/FrameComposer.ts";
 import { createCursorController, getCursorTypeFromInteraction } from "../../CursorController.ts";
 import { Graph }                                                from "../../systems/4. Modules/Graph.ts";
 import { NavigationController }                                 from "../controllers/NavigationController.ts";
@@ -46,7 +46,7 @@ export class GraphEngineRuntime {
   private physics:                Physics                 | null = null;
   private uiInterpreter:          UIInterpreter           | null = null;
   private camera:                 CameraController        | null = null;
-  private renderStateComposer:    RenderStateComposer     | null = null;
+  private frameComposer:          FrameComposer           | null = null;
   private navigationController:   NavigationController    | null = null;
   private interactionController:  InteractionController   | null = null;
   private commandBindings:        GraphCommandBindings    | null = null;
@@ -60,7 +60,7 @@ export class GraphEngineRuntime {
   private commandRegistry                                         = new CommandRegistry();
   private uiStateStore                                            = new UIStateStore();
   private animaStateStore                                         = new AnimaStateStore();
-  private renderFrameStore                                        = new RenderFrameStore();
+  private renderFrameStore                                        = new FrameStore();
   private hitTester                                               = new HitTester();
   private systemRegistry                                          = new GraphSystemRegistry();
   
@@ -76,7 +76,7 @@ export class GraphEngineRuntime {
     this.graph?.updateSettings(               selectGraphSettings(settings)         );
     this.physics?.updateSettings(             selectPhysicsSettings(settings)       );
     this.uiInterpreter?.updateSettings(       selectUIInterpreterSettings(settings) );
-    this.renderStateComposer?.updateSettings( selectRenderComposerSettings(settings));
+    this.frameComposer?.updateSettings( selectRenderComposerSettings(settings));
     this.input?.updateSettings(               selectInputSettings(settings)         );
     this.camera?.updateSettings(              selectCameraSettings(settings)        );
     this.anima?.updateSettings(               selectAnimaSettings(settings)         );
@@ -132,7 +132,7 @@ export class GraphEngineRuntime {
       animaStore:        this.animaStateStore,
     });
 
-    this.renderStateComposer = new RenderStateComposer(selectRenderComposerSettings(settings), {
+    this.frameComposer = new FrameComposer(selectRenderComposerSettings(settings), {
       graph:             this.graph,
       uiState:           this.uiStateStore.get(),
       animaStore:        this.animaStateStore,
@@ -174,13 +174,13 @@ export class GraphEngineRuntime {
     this.physics?.rebuild?.();
 
     this.systemRegistry.register({
-      spaceTime:            this.spaceTime,
-      uiInterpreter:        this.uiInterpreter,
-      commandSystem:        this.commandSystem,
-      anima:                this.anima,
-      physics:              this.physics,
-      renderStateComposer:  this.renderStateComposer,
-      renderer:             this.renderer,
+      spaceTime:      this.spaceTime,
+      uiInterpreter:  this.uiInterpreter,
+      commandSystem:  this.commandSystem,
+      anima:          this.anima,
+      physics:        this.physics,
+      frameComposer:  this.frameComposer,
+      renderer:       this.renderer,
       cursorTick: () => {
         const css = getCursorTypeFromInteraction(this.uiStateStore.get());
         cursor.apply(css);
@@ -236,8 +236,8 @@ export class GraphEngineRuntime {
   this.anima?.destroy?.();
   this.anima = null;
 
-  this.renderStateComposer?.destroy?.();
-  this.renderStateComposer = null;
+  this.frameComposer?.destroy?.();
+  this.frameComposer = null;
 
   this.commandSystem = null;
   this.commandBindings = null;

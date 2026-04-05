@@ -1,6 +1,6 @@
 import type { RenderFrame } from "../../types/domain/render.ts";
 
-export class RenderFrameStore {
+export class FrameStore {
   private frame: RenderFrame | null = null;
 
   public get(): RenderFrame | null {

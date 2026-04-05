@@ -2,19 +2,19 @@ import type { GraphPlusSettings } from "../../graph+/types/settings/appSettings.
 
 export const DEFAULT_SETTINGS: GraphPlusSettings = {
   base: {
-    minNodeRadius: 3,
-    maxNodeRadius: 20,
-    nodeColor: undefined,
-    tagColor: undefined,
-    linkColor: undefined,
-    backgroundColor: undefined,
-    labelColor: undefined,
-    labelFontSize: 12,
-    useInterfaceFont: true,
-    countDuplicateLinks: true,
-    drawDoubleLines: true,
-    showTags: true,
-    showLabels: true,
+    minNodeRadius:        3,
+    maxNodeRadius:        20,
+    nodeColor:            undefined,
+    tagColor:             undefined,
+    linkColor:            undefined,
+    backgroundColor:      undefined,
+    labelColor:           undefined,
+    labelFontSize:        12,
+    useInterfaceFont:     true,
+    countDuplicateLinks:  false,
+    drawDoubleLines:      false,
+    showTags:             true,
+    showLabels:           true,
   },
 
   layout: {
@@ -30,7 +30,7 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
 
   physics: {
     repulsionStrength: 5000,
-    damping: 0.7,
+    damping: 0.5,
     mouseGravityEnabled: true,
     mouseGravityRadius: 15,
     mouseGravityStrength: 10,
