@@ -60,10 +60,17 @@ export default class GraphPlus extends Plugin {
   }
 
   async saveSettings() {
-    const raw = (await this.loadData()) ?? {};
-    raw.base = getSettings().base;
-    raw.physics = getSettings().physics;
-    raw.camera = getSettings().camera;
-    await this.saveData(raw);
+    const raw       = (await this.loadData()) ?? {};
+    const settings  = getSettings();
+
+    await this.saveData({
+      ...raw,
+      base:     settings.base,
+      layout:   settings.layout,
+      physics:  settings.physics,
+      camera:   settings.camera,
+      ui:       settings.ui,
+      tuning:   settings.tuning,
+    });
   }
 }
