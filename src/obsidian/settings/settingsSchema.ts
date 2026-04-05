@@ -18,33 +18,33 @@ type BaseField = {
 
 export type SliderField = BaseField & {
   kind: 'slider';
-  min: number;
-  max: number;
-  step?: number;
-  get: (settings: GraphPlusSettings) => number;
-  getDefault: (defaults: GraphPlusSettings) => number;
-  set: (settings: GraphPlusSettings, value: number) => void;
-  clamp?: (value: number) => number;
-  toUi?: (value: number, ctx: FieldContext) => number;
-  fromUi?: (value: number, ctx: FieldContext) => number;
+  min:    number;
+  max:    number;
+  step?:  number;
+  get:        (settings: GraphPlusSettings)                 => number;
+  getDefault: (defaults: GraphPlusSettings)                 => number;
+  set:        (settings: GraphPlusSettings, value: number)  => void;
+  clamp?:     (value: number)                               => number;
+  toUi?:      (value: number, ctx: FieldContext)            => number;
+  fromUi?:    (value: number, ctx: FieldContext)            => number;
 };
 
 export type ToggleField = BaseField & {
   kind: 'toggle';
-  get: (settings: GraphPlusSettings) => boolean;
-  getDefault: (defaults: GraphPlusSettings) => boolean;
-  set: (settings: GraphPlusSettings, value: boolean) => void;
+  get:        (settings: GraphPlusSettings)                 => boolean;
+  getDefault: (defaults: GraphPlusSettings)                 => boolean;
+  set:        (settings: GraphPlusSettings, value: boolean) => void;
 };
 
-export type ColorField = BaseField & {
+export type ColorField  = BaseField & {
   kind: 'color';
-  get: (settings: GraphPlusSettings) => string | undefined;
-  getDefault: (defaults: GraphPlusSettings) => string | undefined;
-  set: (settings: GraphPlusSettings, value: string | undefined) => void;
+  get:        (settings: GraphPlusSettings)                             => string | undefined;
+  getDefault: (defaults: GraphPlusSettings)                             => string | undefined;
+  set:        (settings: GraphPlusSettings, value: string | undefined)  => void;
   fallback?: string;
 };
 
-export type TextField = BaseField & {
+export type TextField   = BaseField & {
   kind: 'text';
   placeholder?: string;
   get: (settings: GraphPlusSettings) => string;
@@ -377,13 +377,13 @@ export function getSettingsSchema(): SectionDescriptor[] {
           name: 'Damping',
           desc: 'Velocity damping. Higher values reduce motion faster.',
           updateMode: 'live',
-          min: 0.7,
-          max: 1,
-          step: 0.01,
+          min: 0.0,
+          max: 1.0,
+          step: 0.1,
           get: (s) => s.physics.damping,
           getDefault: (s) => s.physics.damping,
           set: (s, v) => { s.physics.damping = round(v, 3); },
-          clamp: (v) => Math.max(0.7, Math.min(1, v)),
+          clamp: (v) => Math.max(0.0, Math.min(1.0, v)),
         },
         {
           id: 'mouse-gravity-enabled',

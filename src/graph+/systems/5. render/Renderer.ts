@@ -1,6 +1,6 @@
-import type { RenderFrame, RenderLinkState, RenderNodeState } from "../../types/domain/render.ts";
+import type { RenderFrame, RenderLinkState, RenderNodeState }   from "../../types/domain/render.ts";
 import type { CameraAccessor }                                  from "../../types/domain/camera.ts";
-import { RenderFrameStore }                                   from "./RenderFrameStore.ts";
+import      { FrameStore }                                from "./FrameStore.ts";
 
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
@@ -10,7 +10,7 @@ export class Renderer {
   constructor(
     private canvas    : HTMLCanvasElement,
     private camera    : CameraAccessor,
-    private frameStore: RenderFrameStore,
+    private frameStore: FrameStore,
   ) {
     const ctx = this.canvas.getContext("2d");
     if (!ctx) throw new Error("Could not acquire 2D rendering context");
@@ -67,7 +67,7 @@ export class Renderer {
 
     this.ctx.save();
 
-    this.ctx.strokeStyle = frame.settings.edgeColor ?? "#888";
+    this.ctx.strokeStyle = frame.settings.linkColor;
 
     for (const link of links) {
       if (!link.visible) continue;
@@ -109,8 +109,8 @@ export class Renderer {
 
       this.ctx.fillStyle =
         node.type === "tag"
-          ? (frame.settings.tagColor ?? "#888")
-          : (frame.settings.nodeColor ?? "#888");
+          ? (frame.settings.tagColor)
+          : (frame.settings.nodeColor);
 
       this.ctx.beginPath();
       this.ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
@@ -127,7 +127,7 @@ export class Renderer {
     this.ctx.font = `${frame.settings.labelFontSize}px sans-serif`;
     this.ctx.textAlign = "center";
     this.ctx.textBaseline = "middle";
-    this.ctx.fillStyle = frame.settings.labelColor ?? "#ccc";
+    this.ctx.fillStyle = frame.settings.labelColor;
 
     const projected = nodes
       .filter((node) => {

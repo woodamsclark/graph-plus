@@ -1,11 +1,11 @@
 import type { Vec3 } from "./math.ts";
 
 export type RenderSettings = {
-  backgroundColor?: string;
-  nodeColor?:       string;
-  tagColor?:        string;
-  edgeColor?:       string;
-  labelColor?:      string;
+  backgroundColor:  string;
+  nodeColor:        string;
+  tagColor:         string;
+  linkColor:        string;
+  labelColor:       string;
   labelFontSize:    number;
   showLabels:       boolean;
   showTags:         boolean;

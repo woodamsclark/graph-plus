@@ -1,5 +1,3 @@
-import type { GraphData } from "../../types/domain/graph.ts";
-import type { UIState }   from "../../types/domain/ui.ts";
 import type {
   RenderFrame,
   RenderLinkState,
@@ -7,22 +5,22 @@ import type {
   RenderSettings,
 }                                               from "../../types/domain/render.ts";
 import type { ModuleWithSettings, SettingsFor } from "../../types/index.ts";
-import type { RenderStateComposerDeps }         from "../../deps/renderstatecomposer.deps.ts";
+import type { FrameComposerDeps }               from "../../deps/framecomposer.deps.ts";
 
 
 // delete this later, but for now it allows the render state composer to pick up theme colors from CSS variables, so that the default graph appearance matches the Obsidian theme.
-const styles = getComputedStyle(document.body);
+const styles                = getComputedStyle(document.body);
 const themeNodeColor        = styles.getPropertyValue("--interactive-accent").trim()          || "#888";
 const themeTagColor         = styles.getPropertyValue("--color-purple").trim()                || themeNodeColor;
-const themeEdgeColor        = styles.getPropertyValue("--background-modifier-border").trim()  || "#666";
+const themeLinkColor        = styles.getPropertyValue("--background-modifier-border").trim()  || "#666";
 const themeLabelColor       = styles.getPropertyValue("--text-normal").trim()                 || "#ccc";
 const themeBackgroundColor  = styles.getPropertyValue("--background-primary").trim()          || "#111";
 
-export class RenderStateComposer implements ModuleWithSettings<'renderComposer'> {
+export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
 
   constructor(
     private settings: SettingsFor<'renderComposer'>,
-    private deps:     RenderStateComposerDeps) {
+    private deps:     FrameComposerDeps) {
 
     }
   
@@ -51,7 +49,7 @@ export class RenderStateComposer implements ModuleWithSettings<'renderComposer'>
       backgroundColor:  base.backgroundColor  ?? themeBackgroundColor,
       nodeColor:        base.nodeColor        ?? themeNodeColor,
       tagColor:         base.tagColor         ?? themeTagColor,
-      edgeColor:        base.linkColor        ?? "#888",
+      linkColor:        base.linkColor        ?? themeLinkColor,
       labelColor:       base.labelColor       ?? themeLabelColor,
       labelFontSize:    base.labelFontSize,
       showLabels:       base.showLabels,

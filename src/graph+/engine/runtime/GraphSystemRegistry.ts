@@ -3,7 +3,7 @@ import { UIInterpreter        } from "../../systems/2. UI Interpretation + State
 import { Commander            } from "../../systems/3. Module Commander/Commander.ts";
 import { Anima                } from "../../systems/4. Modules/Anima.ts";
 import { Physics              } from "../../systems/4. Modules/Physics.ts";
-import { RenderStateComposer  } from "../../systems/5. Render/RenderStateComposer.ts";
+import { FrameComposer        } from "../../systems/5. Render/FrameComposer.ts";
 import { Renderer             } from "../../systems/5. Render/Renderer.ts";
 
 export class GraphSystemRegistry {
@@ -13,7 +13,7 @@ export class GraphSystemRegistry {
     commandSystem:        Commander           | null;
     anima:                Anima               | null;
     physics:              Physics             | null;
-    renderStateComposer:  RenderStateComposer | null;
+    frameComposer:        FrameComposer       | null;
     renderer:             Renderer            | null;
     cursorTick: () => void;
   }): void {
@@ -23,7 +23,7 @@ export class GraphSystemRegistry {
       commandSystem,
       anima,
       physics,
-      renderStateComposer,
+      frameComposer: frameComposer,
       renderer,
       cursorTick,
     } = deps;
@@ -44,8 +44,8 @@ export class GraphSystemRegistry {
       spaceTime.register("physics", physics, 30);
     }
 
-    if (renderStateComposer) {
-      spaceTime.register("render-state-composer", renderStateComposer, 90);
+    if (frameComposer) {
+      spaceTime.register("render-state-composer", frameComposer, 90);
     }
 
     spaceTime.register("cursor", {
