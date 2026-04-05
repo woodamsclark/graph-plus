@@ -184,9 +184,9 @@ export function getSettingsSchema(): SectionDescriptor[] {
           name: 'Count duplicate links',
           desc: 'Count multiple links between the same notes when computing degree.',
           updateMode: 'rebuild',
-          get: (s) => Boolean(s.base.countDuplicateLinks),
+          get: (s)        => Boolean(s.base.countDuplicateLinks),
           getDefault: (s) => Boolean(s.base.countDuplicateLinks),
-          set: (s, v) => { s.base.countDuplicateLinks = v; },
+          set: (s, v)     => { s.base.countDuplicateLinks = v; },
         },
         {
           id: 'draw-double-lines',

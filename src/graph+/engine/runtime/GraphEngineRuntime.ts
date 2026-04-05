@@ -34,6 +34,7 @@ import {
   selectAnimaSettings,
 } from '../../types/index.ts';
 import type { UserInputEvent, DrainableBuffer } from '../../types/domain/ui.ts';
+import { ThemeStyleResolver } from "../../../obsidian/themeStyleResolver.ts";
 
 
 
@@ -63,6 +64,7 @@ export class GraphEngineRuntime {
   private renderFrameStore                                        = new FrameStore();
   private hitTester                                               = new HitTester();
   private systemRegistry                                          = new GraphSystemRegistry();
+  private themeStyleResolver = new ThemeStyleResolver(() => document.body);
   
 
   constructor(private deps: { app: App; plugin: Plugin; containerEl: HTMLElement }) {
@@ -137,6 +139,7 @@ export class GraphEngineRuntime {
       uiState:           this.uiStateStore.get(),
       animaStore:        this.animaStateStore,
       frameStore:        this.renderFrameStore,
+      getThemePalette: () => this.themeStyleResolver.getPalette(),
     });
 
     this.renderer = new Renderer(this.canvas, this.camera, this.renderFrameStore);
