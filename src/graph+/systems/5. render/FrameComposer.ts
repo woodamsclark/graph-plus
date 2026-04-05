@@ -4,24 +4,22 @@ import type {
   RenderNodeState,
   RenderSettings,
 }                                               from "../../types/domain/render.ts";
-import type { ModuleWithSettings, SettingsFor } from "../../types/index.ts";
+
+import type { 
+  BaseSettings, 
+  ModuleWithSettings, 
+  SettingsFor, 
+  TuningSettings }                              from "../../types/index.ts";
+  
 import type { FrameComposerDeps }               from "../../deps/framecomposer.deps.ts";
-
-
-// delete this later, but for now it allows the render state composer to pick up theme colors from CSS variables, so that the default graph appearance matches the Obsidian theme.
-const styles                = getComputedStyle(document.body);
-const themeNodeColor        = styles.getPropertyValue("--interactive-accent").trim()          || "#888";
-const themeTagColor         = styles.getPropertyValue("--color-purple").trim()                || themeNodeColor;
-const themeLinkColor        = styles.getPropertyValue("--background-modifier-border").trim()  || "#666";
-const themeLabelColor       = styles.getPropertyValue("--text-normal").trim()                 || "#ccc";
-const themeBackgroundColor  = styles.getPropertyValue("--background-primary").trim()          || "#111";
+import type { ThemePalette }                    from "../../../obsidian/themeStyleResolver.ts";
 
 export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
 
   constructor(
     private settings: SettingsFor<'renderComposer'>,
-    private deps:     FrameComposerDeps) {
-
+    private deps:     FrameComposerDeps) 
+    {
     }
   
   initialize(): void {
@@ -44,19 +42,8 @@ export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
     const ui          = this.deps.uiState;
     const animaStore  = this.deps.animaStore;
 
-    // --- Config snapshot
-    const settings: RenderSettings = {
-      backgroundColor:  base.backgroundColor  ?? themeBackgroundColor,
-      nodeColor:        base.nodeColor        ?? themeNodeColor,
-      tagColor:         base.tagColor         ?? themeTagColor,
-      linkColor:        base.linkColor        ?? themeLinkColor,
-      labelColor:       base.labelColor       ?? themeLabelColor,
-      labelFontSize:    base.labelFontSize,
-      showLabels:       base.showLabels,
-      showTags:         base.showTags,
-      useInterfaceFont: base.useInterfaceFont,
-      labelOffsetY:     tuning.labelOffsetY,
-    };
+    const theme                     = this.deps.getThemePalette();
+    const settings: RenderSettings  = resolveRenderStyle(base, theme, tuning);
 
     // --- Nodes
     const nodes: RenderNodeState[] = graph.nodes.map((node) => {
@@ -103,3 +90,22 @@ export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
   }
 
 }
+
+function resolveRenderStyle(
+    base: BaseSettings,
+    theme: ThemePalette,
+    tuning: TuningSettings
+  ): RenderSettings {
+    return {
+      backgroundColor:  base.backgroundColor ?? theme.backgroundColor,
+      nodeColor:        base.nodeColor ?? theme.nodeColor,
+      tagColor:         base.tagColor ?? theme.tagColor,
+      linkColor:        base.linkColor ?? theme.linkColor,
+      labelColor:       base.labelColor ?? theme.labelColor,
+      labelFontSize:    base.labelFontSize,
+      showLabels:       base.showLabels,
+      showTags:         base.showTags,
+      useInterfaceFont: base.useInterfaceFont,
+      labelOffsetY:     tuning.labelOffsetY,
+    };
+  }
