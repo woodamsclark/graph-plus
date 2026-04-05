@@ -65,10 +65,8 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
   },
 
 tuning: {
-  linkThicknessScale: 1,
-  linkThicknessMin: 1,
+  linkThickness:    .1,
 
-  nodeDegreeRadiusScale: 2,
   initialJitter: 50,
 
   labelOffsetY: 12,

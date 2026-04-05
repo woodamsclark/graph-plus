@@ -73,9 +73,7 @@ export type UISettings = {
 };
 
 export type TuningSettings = {
-  linkThicknessScale:       number;
-  linkThicknessMin:         number;
-  nodeDegreeRadiusScale:    number;
+  linkThickness:            number;
   initialJitter:            number;
   labelOffsetY:             number;
   pinchThresholdPx:         number;
