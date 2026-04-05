@@ -350,10 +350,7 @@ export class Graph implements ModuleWithSettings<'graph'> {
             const tuning    = this.settings.tuning;
             const rawWeight = Number.isFinite(e.weight) && e.weight > 0 ? e.weight : 1;
 
-            const thickness = Math.max(
-            tuning.linkThicknessMin,
-            rawWeight * tuning.linkThicknessScale,
-            );
+            const thickness = tuning.linkThickness;
             const id = `${e.sourceId}->${e.targetId}`;
 
             const existing = byId.get(id);
@@ -405,17 +402,31 @@ export class Graph implements ModuleWithSettings<'graph'> {
     private computeNodeRadius(graph: GraphData): void {
         const minR = this.settings.base.minNodeRadius;
         const maxR = this.settings.base.maxNodeRadius;
+        const countDuplicates = this.settings.base.countDuplicateLinks;
 
-        const tuning = this.settings.tuning;
+        const gamma = 1.8;
 
-        for (const node of graph.nodes) {
+        const counts = graph.nodes.map((node) => {
             const incoming = graph.linksIn[node.id];
-            const count = incoming
-                ? Object.values(incoming).reduce((a, b) => a + b, 0)
-                : 0;
+            if (!incoming) return 0;
 
-            const r = minR + Math.sqrt(count) * tuning.nodeDegreeRadiusScale;
-            node.radius = Math.min(maxR, r);
+            if (countDuplicates) {
+            return Object.values(incoming).reduce((sum, weight) => sum + weight, 0);
+            }
+
+            return Object.keys(incoming).length;
+        });
+
+        const maxCount = Math.max(...counts, 1);
+
+        for (let i = 0; i < graph.nodes.length; i++) {
+            const node = graph.nodes[i];
+            const count = counts[i];
+
+            const normalized = count / maxCount;
+            const curved = Math.pow(normalized, gamma);
+
+            node.radius = minR + curved * (maxR - minR);
         }
     }
 
