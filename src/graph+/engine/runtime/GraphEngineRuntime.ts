@@ -191,13 +191,13 @@ export class GraphEngineRuntime {
     });
 
     this.deps.containerEl.style.position = "relative";
-    this.liveSettingsOverlay = new LiveSettingsOverlay(
-       {
-        getContainer: () => this.deps.containerEl,
-        onSettingsApplied: async (mode) => {
-          await this.applySettings(mode);
-        }
-      });
+    this.liveSettingsOverlay = new LiveSettingsOverlay({
+      getContainer: () => this.deps.containerEl,
+      onSettingsApplied: async (mode) => {
+        await this.applySettings(mode);
+        await (this.deps.plugin as any).saveSettings();
+      }
+    });
 
     this.liveSettingsOverlay.mount();
     this.unsubscribeSettings = onSettingsChange(() => {
