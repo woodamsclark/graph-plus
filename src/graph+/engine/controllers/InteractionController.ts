@@ -83,6 +83,9 @@ export class InteractionController {
   }
 
   setDraggedNode(nodeId: string | null): void {
+    if (nodeId === null) {
+      this.deps.physics?.endDrag?.();
+    }
     this.deps.uiStateStore.setDraggedNode(nodeId);
   }
 

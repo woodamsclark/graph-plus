@@ -445,7 +445,6 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
 
     this.dragWorldOffset = null;
 
-    this.cmd({ type: "EndDrag" });
     this.cmd({ type: "SetDraggedNode",  nodeId:null });
     this.cmd({ type: "SetMouseGravity",     on: true      });
   }

@@ -20,7 +20,6 @@ export type RenderNodeState = {
   world:        Vec3;
   radius:       number;
   animaPressure: number;
-  animaWellStrength: number;
   labelOpacity: number;
   visible:      boolean;
 };

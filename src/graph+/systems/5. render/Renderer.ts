@@ -213,9 +213,14 @@ export class Renderer {
 
     for (const { node, p } of projected) {
       const offsetY = node.radius * p.scale + frame.settings.labelOffsetY;
+      const lines = node.label.split("\n");
+      const lineHeight = frame.settings.labelFontSize * 1.1;
+      const firstLineY = p.y + offsetY - ((lines.length - 1) * lineHeight) / 2;
 
       this.ctx.globalAlpha = node.labelOpacity;
-      this.ctx.fillText(node.label, p.x, p.y + offsetY);
+      for (let i = 0; i < lines.length; i++) {
+        this.ctx.fillText(lines[i], p.x, firstLineY + i * lineHeight);
+      }
     }
 
     this.ctx.restore();
@@ -256,29 +261,30 @@ export class Renderer {
           node.type === "tag"
             ? frame.settings.tagColor
             : frame.settings.nodeColor;
-        const wellStrength = Math.max(0, Math.min(1, node.animaWellStrength));
-        const bodyOpacity = Math.max(0.35, Math.min(1, 0.35 + node.animaPressure * 0.65));
+        const displayPressure = Math.max(0, Math.min(1.5, node.animaPressure));
+        const darken = Math.max(0, 1 - Math.min(1, displayPressure));
+        const brighten = Math.max(0, displayPressure - 1);
 
-        if (wellStrength > 0) {
-          this.ctx.globalAlpha = 0.08 + wellStrength * 0.22;
-          this.ctx.fillStyle = fillColor;
-          this.ctx.beginPath();
-          this.ctx.arc(p.x, p.y, r * (1.35 + wellStrength * 0.65), 0, Math.PI * 2);
-          this.ctx.fill();
-
-          this.ctx.globalAlpha = 0.16 + wellStrength * 0.24;
-          this.ctx.strokeStyle = fillColor;
-          this.ctx.lineWidth = Math.max(1, r * 0.12);
-          this.ctx.beginPath();
-          this.ctx.arc(p.x, p.y, r * (1.08 + wellStrength * 0.2), 0, Math.PI * 2);
-          this.ctx.stroke();
-        }
-
-        this.ctx.globalAlpha = bodyOpacity;
+        this.ctx.globalAlpha = 1;
         this.ctx.fillStyle = fillColor;
         this.ctx.beginPath();
         this.ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
         this.ctx.fill();
+
+        if (darken > 0) {
+          this.ctx.globalAlpha = Math.min(0.65, darken * 0.65);
+          this.ctx.fillStyle = "#000000";
+          this.ctx.beginPath();
+          this.ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+          this.ctx.fill();
+        } else if (brighten > 0) {
+          this.ctx.globalAlpha = Math.min(0.35, brighten * 0.7);
+          this.ctx.fillStyle = "#ffffff";
+          this.ctx.beginPath();
+          this.ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+          this.ctx.fill();
+        }
+
         this.ctx.globalAlpha = 1;
       }
     }

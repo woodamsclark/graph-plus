@@ -8,7 +8,6 @@ export type Command =
 | { type: "SetDraggedNode";           nodeId: string | null }
 | { type: "BeginDrag";                nodeId: string; targetWorld: Vec3 }
 | { type: "UpdateDragTarget";         targetWorld: Vec3 }
-| { type: "EndDrag"; }
 | { type: "EndPanCamera" }
 | { type: "EndRotateCamera" }
 | { type: "EndFocusedNode" }

@@ -46,18 +46,13 @@ export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
 
     // --- Nodes
     const nodes: RenderNodeState[] = graph.nodes.map((node) => {
-      const anima = animaStore.get(node.id);
-      const effectiveCapacity = anima
-        ? Math.max(1, anima.capacity + anima.capacity_modifier)
-        : 1;
-      const pressure = anima
-        ? Math.max(0, anima.level) / effectiveCapacity
-        : 0;
-      const wellStrength = Math.max(0, Math.min(1, 1 - pressure));
+      const anima        = animaStore.get(node.id);
+      const capacity     = anima ? Math.max(1, anima.capacity) : 1;
+      const level        = anima ? Math.max(0, anima.level) : 0;
+      const pressure     = anima ? level / capacity : 0;
+      // const pressureLabel = formatAnimaLabel(pressure, level, capacity);
 
-      const labelOpacity = anima
-        ? Math.max(0.2, Math.min(1, pressure))
-        : 0;
+      const labelOpacity = anima ? pressureToLabelOpacity(pressure) : 0;
       const visible = base.showTags || node.type !== "tag";
 
       return {
@@ -67,7 +62,6 @@ export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
         world: node.location,
         radius: node.radius,
         animaPressure: pressure,
-        animaWellStrength: wellStrength,
         labelOpacity,
         visible,
       };
@@ -95,6 +89,11 @@ export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
     // No cleanup work yet.
   }
 
+}
+
+function pressureToLabelOpacity(pressure: number): number {
+  const excessPressure = Math.max(0, pressure - 1);
+  return 1 - Math.exp(-2 * excessPressure);
 }
 
 function resolveRenderStyle(

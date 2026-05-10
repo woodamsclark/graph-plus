@@ -13,7 +13,6 @@ import type { AnimaDeps } from "../../deps/anima.deps.ts";
 
 const FLOW_RATE = 8; // units per second maximum transfer per link
 const PRESSURE_RESPONSE = 0.5;
-const FOCUS_CAPACITY_MULTIPLIER = 1;
 const MIN_EFFECTIVE_CAPACITY = 1;
 
 export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
@@ -113,7 +112,8 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
     if (this.focusedNodeId) {
       const focused = store.get(this.focusedNodeId);
       if (focused) {
-        focused.capacity_modifier += focused.capacity * FOCUS_CAPACITY_MULTIPLIER;
+        const focusedIncomingLinks = Object.keys(graph.linksIn[this.focusedNodeId] || {}).length;
+        focused.capacity_modifier += focused.capacity * focusedIncomingLinks;
       }
     }
   }
@@ -150,9 +150,8 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
       const to              = flowFromSource ? target : source;
       const pressureDelta   = Math.abs(sourcePressure - targetPressure);
       const demand          = pressureDelta * PRESSURE_RESPONSE * maxPerLink;
-      const room            = Math.max(0, this.getEffectiveCapacity(to) - to.level);
       const supply          = Math.max(0, from.level);
-      const amount          = Math.max(0, Math.min(demand, maxPerLink, room, supply));
+      const amount          = Math.max(0, Math.min(demand, maxPerLink, supply));
 
       if (amount <= 0) continue;
 

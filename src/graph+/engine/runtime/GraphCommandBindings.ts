@@ -38,10 +38,6 @@ export class GraphCommandBindings {
       interaction.updateDragTarget(command.targetWorld);
     });
 
-    registry.register("EndDrag", () => {
-      interaction.endDrag();
-    });
-
     registry.register("ResetCamera", () => {
       interaction.resetCamera();
     });
