@@ -1,4 +1,4 @@
-import type { UserInputEvent }                                from "../../types/domain/ui.ts";
+import type { PointerKind, UserInputEvent }                   from "../../types/domain/ui.ts";
 import type { Vec3 }                                          from "../../types/domain/math.ts";
 import type { ModuleWithSettings, SettingsFor}                from "../../types/index.ts";
 import type { UIInterpreterDeps }                             from "../../deps/uiinterpreter.deps.ts";
@@ -12,6 +12,7 @@ type PressMode = {
   downTimeMs:     number;
   rightIntent:    boolean;
   longPressFired: boolean;
+  doubleTapCandidate: boolean;
   downNode:       { id: string; label: string } | null;
   downScreen:     { x: number;      y: number };
 };
@@ -22,6 +23,13 @@ type Mode =
   | { kind: "drag-node";  pointerId: number;  nodeId: string }
   | { kind: "pan";        pointerId: number }
   | { kind: "rotate";     pointerId: number }
+  | {
+      kind: "double-tap-drag";
+      pointerId: number;
+      gesture: "zoom" | "rotate";
+      anchorScreen: { x: number; y: number };
+      lastScreen: { x: number; y: number };
+    }
   | {
       kind: "touch-gesture";
       pointerA: number;
@@ -42,7 +50,14 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
   private dragDepthFromCamera = 0;
 
   // Ephemeral click timing
-  private lastClick: { nodeId: string | null; timeMs: number } | null = null;
+  private lastTap:
+    | {
+        nodeId: string | null;
+        kind: PointerKind;
+        timeMs: number;
+        screen: { x: number; y: number };
+      }
+    | null = null;
 
   constructor(
     private settings: SettingsFor<'uiInterpreter'>,
@@ -104,6 +119,9 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
 
     if (this.pointers.size === 2) {
       this.endSinglePointerModeIfNeeded();
+      if (this.isFocusedModeActive()) {
+        this.cmd({ type: "SetFocusedNode", nodeId: null });
+      }
 
       const [a, b] = this.firstTwoPointers();
       if (!a || !b) return;
@@ -144,6 +162,7 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
       downNode: downHit,
       rightIntent,
       longPressFired: false,
+      doubleTapCandidate: this.isDoubleTapDragCandidate(e),
     };
 
     this.cmd({ type: "SetGravityCenter", point: { x: e.screen.x, y: e.screen.y } });
@@ -191,6 +210,30 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
       const movedSq = distSq({ x: e.screen.x, y: e.screen.y }, this.mode.downScreen);
       if (movedSq <= threshold * threshold) return;
 
+      if (this.mode.doubleTapCandidate) {
+        const anchorScreen = { ...this.mode.downScreen };
+        const gesture = this.classifyDoubleTapDragGesture(anchorScreen, e.screen);
+        const mode: Extract<Mode, { kind: "double-tap-drag" }> = {
+          kind: "double-tap-drag",
+          pointerId: e.pointerId,
+          gesture,
+          anchorScreen,
+          lastScreen: anchorScreen,
+        };
+
+        this.mode = mode;
+
+        if (gesture === "rotate") {
+          this.startRotate(anchorScreen.x, anchorScreen.y);
+          this.updateRotate(e.screen.x, e.screen.y);
+        } else {
+          this.updateDoubleTapZoom(anchorScreen, e.screen);
+        }
+
+        mode.lastScreen = { x: e.screen.x, y: e.screen.y };
+        return;
+      }
+
       if (this.mode.rightIntent) {
         this.startRotate(e.screen.x, e.screen.y);
         this.mode = { kind: "rotate", pointerId: e.pointerId };
@@ -200,6 +243,12 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
       if (this.mode.downNode?.id) {
         this.startDrag(this.mode.downNode.id, e.screen.x, e.screen.y);
         this.mode = { kind: "drag-node", pointerId: e.pointerId, nodeId: this.mode.downNode.id };
+        return;
+      }
+
+      if (this.shouldRotateSinglePointerWhileFocused(e.kind)) {
+        this.startRotate(e.screen.x, e.screen.y);
+        this.mode = { kind: "rotate", pointerId: e.pointerId };
         return;
       }
 
@@ -220,6 +269,17 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
 
     if (this.mode.kind === "rotate" && this.mode.pointerId === e.pointerId) {
       this.updateRotate(e.screen.x, e.screen.y);
+      return;
+    }
+
+    if (this.mode.kind === "double-tap-drag" && this.mode.pointerId === e.pointerId) {
+      if (this.mode.gesture === "rotate") {
+        this.updateRotate(e.screen.x, e.screen.y);
+      } else {
+        this.updateDoubleTapZoom(this.mode.lastScreen, e.screen);
+      }
+
+      this.mode.lastScreen = { x: e.screen.x, y: e.screen.y };
       return;
     }
   }
@@ -253,6 +313,12 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
       return;
     }
 
+    if (this.mode.kind === "double-tap-drag" && this.mode.pointerId === e.pointerId) {
+      if (this.mode.gesture === "rotate") this.endRotate();
+      this.mode = { kind: "idle" };
+      return;
+    }
+
     if (this.mode.kind === "press" && this.mode.pointerId === e.pointerId) {
       const press = this.mode;
       this.mode = { kind: "idle" };
@@ -265,7 +331,7 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
       }
 
       const nodeId = press.downNode?.id ?? null;
-      this.handleSingleOrDoubleClick(nodeId, e.timeMs);
+      this.handleSingleOrDoubleClick(nodeId, e.kind, e.screen, e.timeMs);
       return;
     }
 
@@ -284,6 +350,7 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
     if (this.mode.kind === "drag-node") this.endDrag();
     if (this.mode.kind === "pan") this.endPan();
     if (this.mode.kind === "rotate") this.endRotate();
+    if (this.mode.kind === "double-tap-drag" && this.mode.gesture === "rotate") this.endRotate();
 
     this.mode = { kind: "idle" };
   }
@@ -311,6 +378,7 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
   private onLongPress(e: Extract<UserInputEvent, { type: "LONG_PRESS" }>) {
     if (this.mode.kind !== "press") return;
     if (this.mode.pointerId !== e.pointerId) return;
+    if (this.mode.doubleTapCandidate) return;
 
     this.mode.longPressFired = true;
 
@@ -364,14 +432,28 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
     });
   }
 
-  private handleSingleOrDoubleClick(nodeId: string | null, timeMs: number) {
+  private handleSingleOrDoubleClick(
+    nodeId: string | null,
+    kind: PointerKind,
+    screen: { x: number; y: number },
+    timeMs: number,
+  ) {
     const uiCfg = this.settings.ui;
     const doubleMs = uiCfg.doubleClickMs;
 
-    const prev = this.lastClick;
-    const isDouble = !!prev && prev.nodeId === nodeId && (timeMs - prev.timeMs) <= doubleMs;
+    const prev = this.lastTap;
+    const isDouble =
+      !!prev &&
+      prev.nodeId === nodeId &&
+      prev.kind === kind &&
+      (timeMs - prev.timeMs) <= doubleMs;
 
-    this.lastClick = { nodeId, timeMs };
+    this.lastTap = {
+      nodeId,
+      timeMs,
+      kind,
+      screen,
+    };
 
     if (isDouble && nodeId !== null) {
       this.cmd({ type: "OpenNode", nodeId });
@@ -379,6 +461,8 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
     }
 
     const followedNodeId = this.deps.interactionState.get().followedNodeId;
+    if (followedNodeId !== null && nodeId === null && kind !== "mouse") return;
+
     if (followedNodeId === nodeId && nodeId !== null) {
       this.cmd({ type: "OpenNode", nodeId });
       return;
@@ -482,6 +566,46 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
     this.cmd({ type: "ZoomCamera", screen: { x: screenX, y: screenY }, delta });
   }
 
+  private updateDoubleTapZoom(
+    previousScreen: { x: number; y: number },
+    currentScreen: { x: number; y: number },
+  ) {
+    const deltaY = previousScreen.y - currentScreen.y;
+    if (deltaY === 0) return;
+
+    const pixelsPerZoomUnit = Math.max(4, this.settings.ui.dragThresholdPx / 2);
+    this.updateZoom(currentScreen.x, currentScreen.y, deltaY / pixelsPerZoomUnit);
+  }
+
+  private isDoubleTapDragCandidate(e: Extract<UserInputEvent, { type: "POINTER_DOWN" }>): boolean {
+    if (e.kind !== "touch") return false;
+
+    const prev = this.lastTap;
+    if (!prev || prev.kind !== "touch") return false;
+
+    if ((e.timeMs - prev.timeMs) > this.settings.ui.doubleClickMs) return false;
+
+    const slopPx = Math.max(24, this.settings.ui.dragThresholdPx * 4);
+    return distSq(prev.screen, e.screen) <= slopPx * slopPx;
+  }
+
+  private classifyDoubleTapDragGesture(
+    anchor: { x: number; y: number },
+    current: { x: number; y: number },
+  ): "zoom" | "rotate" {
+    const dx = Math.abs(current.x - anchor.x);
+    const dy = Math.abs(current.y - anchor.y);
+    return dx > dy ? "rotate" : "zoom";
+  }
+
+  private shouldRotateSinglePointerWhileFocused(kind: PointerKind): boolean {
+    return kind !== "mouse" && this.isFocusedModeActive();
+  }
+
+  private isFocusedModeActive(): boolean {
+    return this.deps.interactionState.get().followedNodeId !== null;
+  }
+
   private upsertPointer(id: number, kind: "mouse" | "touch" | "pen", x: number, y: number) {
     this.pointers.set(id, { id, kind, x, y });
   }
@@ -505,6 +629,7 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
     if (this.mode.kind === "drag-node") this.endDrag();
     if (this.mode.kind === "pan") this.endPan();
     if (this.mode.kind === "rotate") this.endRotate();
+    if (this.mode.kind === "double-tap-drag" && this.mode.gesture === "rotate") this.endRotate();
     this.mode = { kind: "idle" };
   }
 }

@@ -2,12 +2,18 @@ export type AnimaState = {
   level:    number;
   capacity: number;
   capacity_modifier: number; 
+  pressure: number;
+  effective_pressure: number;
+  focus_link_compression: number;
 };
 
 // Experimental Anima constants (tunable without UI for now)
 const INITIAL_CAPACITY            = 100;
 const INITIAL_LEVEL               = 100;
 const INITIAL_CAPACITY_MODIFIER   = 0;
+const INITIAL_PRESSURE            = 1;
+const INITIAL_EFFECTIVE_PRESSURE  = 1;
+const INITIAL_FOCUS_LINK_COMPRESSION = 0;
 
 export class AnimaStateStore {
   private state = new Map<string, AnimaState>();
@@ -23,6 +29,9 @@ export class AnimaStateStore {
         level:              INITIAL_LEVEL,
         capacity:           INITIAL_CAPACITY,
         capacity_modifier:  INITIAL_CAPACITY_MODIFIER,
+        pressure:           INITIAL_PRESSURE,
+        effective_pressure: INITIAL_EFFECTIVE_PRESSURE,
+        focus_link_compression: INITIAL_FOCUS_LINK_COMPRESSION,
       };
       this.state.set(nodeId, current);
     }

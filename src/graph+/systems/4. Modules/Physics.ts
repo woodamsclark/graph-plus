@@ -44,6 +44,7 @@ export class Physics implements ModuleWithSettings<'physics'> {
       camera, 
       this.settings.tuning,
       this.settings.physics,
+      this.deps.animaStore,
       ()        => this.deps.interactionState.gravityCenter,
       (nodeId)  => nodeId === this.deps.interactionState.followedNodeId
     );

@@ -47,9 +47,7 @@ export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
     // --- Nodes
     const nodes: RenderNodeState[] = graph.nodes.map((node) => {
       const anima        = animaStore.get(node.id);
-      const capacity     = anima ? Math.max(1, anima.capacity) : 1;
-      const level        = anima ? Math.max(0, anima.level) : 0;
-      const pressure     = anima ? level / capacity : 0;
+      const pressure     = anima?.pressure ?? 0;
       // const pressureLabel = formatAnimaLabel(pressure, level, capacity);
 
       const labelOpacity = anima ? pressureToLabelOpacity(pressure) : 0;

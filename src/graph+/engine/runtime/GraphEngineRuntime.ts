@@ -127,6 +127,7 @@ export class GraphEngineRuntime {
       graph:             this.graph,
       camera:            this.camera,
       interactionState:  this.uiStateStore.get(),
+      animaStore:        this.animaStateStore,
     });
 
     this.anima = new Anima(selectAnimaSettings(settings), {

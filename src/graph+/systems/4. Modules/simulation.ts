@@ -3,6 +3,7 @@ import type { Node, GraphData }                                 from '../../type
 import type { Simulation }                                      from '../../types/domain/physics.ts';
 import type { PhysicsSettings, LayoutSettings, TuningSettings } from '../../types/settings/appSettings.ts';
 import type { ScreenPt, Vec3 }                                  from '../../types/domain/math.ts';
+import type { AnimaStateStore }                                 from './AnimaStateStore.ts';
 
  type OctNode = {
     cx:   number;   cy: number;   cz: number; // cube center
@@ -28,6 +29,7 @@ export function createSimulation(
     camera                    : CameraAccessor, 
     tuningSettings            : TuningSettings,
     physicsSettings           : PhysicsSettings,
+    animaStore                : AnimaStateStore,
     getGravityCenter          : () => ScreenPt | null,
     shouldIgnoreMouseGravity? : (nodeId: string) => boolean,
   ) : Simulation{
@@ -350,8 +352,17 @@ export function createSimulation(
       const dy = (b.location.y - a.location.y);
       const dz = ((b.location.z || 0) - (a.location.z || 0));
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.0001;
-      const displacement = dist - (layoutSettings.linkLength || 0);
-      const f = (layoutSettings.linkStrength || 0) * Math.tanh(displacement / 50);
+      const sourceCompression = animaStore.get(a.id)?.focus_link_compression ?? 0;
+      const targetCompression = animaStore.get(b.id)?.focus_link_compression ?? 0;
+      const compression = Math.max(sourceCompression, targetCompression);
+      const restLengthScale = 1 - 0.5 * Math.max(0, Math.min(1, compression));
+      const baseRestLength = e.length || layoutSettings.linkLength || 0;
+      const displacement = dist - (baseRestLength * restLengthScale);
+      const compressionStrengthScale = 1 + compression;
+      const f =
+        (layoutSettings.linkStrength || 0) *
+        compressionStrengthScale *
+        Math.tanh(displacement / 50);
       const fx = (dx / dist) * f;
       const fy = (dy / dist) * f;
       const fz = (dz / dist) * f;

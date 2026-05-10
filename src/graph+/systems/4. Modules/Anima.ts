@@ -6,7 +6,8 @@ import type { AnimaDeps } from "../../deps/anima.deps.ts";
 
 
 // Pressure-field model:
-// - pressure = level / effectiveCapacity
+// - pressure = level / capacity
+// - effective_pressure = level / effectiveCapacity
 // - Node radius defines baseline capacity
 // - Commands change capacity_modifier, creating temporary wells
 // - Anima flows from high pressure toward low pressure, conserving total anima
@@ -14,6 +15,7 @@ import type { AnimaDeps } from "../../deps/anima.deps.ts";
 const FLOW_RATE = 8; // units per second maximum transfer per link
 const PRESSURE_RESPONSE = 0.5;
 const MIN_EFFECTIVE_CAPACITY = 1;
+const MAX_FOCUSED_LINK_COMPRESSION = 1;
 
 export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
   private syncedGraph: GraphData | null = null;
@@ -52,6 +54,8 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
     this.recomputePressureField(graph);
 
     this.equalizeAcrossLinks(graph, dt);
+    this.updateDerivedPressures(graph);
+    this.updateFocusLinkCompression(graph);
   }
 
   afterCommandApplied(command: Command): void {
@@ -93,6 +97,8 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
       state.capacity = baseCapacity;
       state.level = baseCapacity;
       state.capacity_modifier = 0;
+      state.pressure = 1;
+      state.effective_pressure = 1;
     }
 
     this.syncedGraph = graph;
@@ -106,16 +112,32 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
       if (!state) continue;
 
       state.capacity_modifier = 0;
+      state.pressure = 0;
+      state.effective_pressure = 0;
+      state.focus_link_compression = 0;
       state.capacity = this.computeBaseCapacity(node.radius);
     }
 
     if (this.focusedNodeId) {
       const focused = store.get(this.focusedNodeId);
       if (focused) {
-        const focusedIncomingLinks = Object.keys(graph.linksIn[this.focusedNodeId] || {}).length;
-        focused.capacity_modifier += focused.capacity * focusedIncomingLinks;
+        const focusedNeighborCount = this.getFocusedNeighborCount(graph, this.focusedNodeId);
+        focused.capacity_modifier += focused.capacity * focusedNeighborCount;
       }
     }
+  }
+
+  private updateFocusLinkCompression(graph: GraphData): void {
+    if (!this.focusedNodeId) return;
+
+    const store = this.deps.animaStore;
+    const focused = store.get(this.focusedNodeId);
+    if (!focused) return;
+
+    focused.focus_link_compression = Math.max(
+      0,
+      Math.min(MAX_FOCUSED_LINK_COMPRESSION, focused.pressure - 1),
+    );
   }
 
   private computeBaseCapacity(nodeRadius: number): number {
@@ -126,8 +148,32 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
     return Math.max(MIN_EFFECTIVE_CAPACITY, animaState.capacity + animaState.capacity_modifier);
   }
 
-  private getPressure(animaState: { level: number; capacity: number; capacity_modifier: number }): number {
+  private getPressure(animaState: { level: number; capacity: number }): number {
+    return Math.max(0, animaState.level) / Math.max(MIN_EFFECTIVE_CAPACITY, animaState.capacity);
+  }
+
+  private getEffectivePressure(animaState: { level: number; capacity: number; capacity_modifier: number }): number {
     return Math.max(0, animaState.level) / this.getEffectiveCapacity(animaState);
+  }
+
+  private updateDerivedPressures(graph: GraphData): void {
+    const store = this.deps.animaStore;
+
+    for (const node of graph.nodes) {
+      const state = store.get(node.id);
+      if (!state) continue;
+
+      state.pressure = this.getPressure(state);
+      state.effective_pressure = this.getEffectivePressure(state);
+    }
+  }
+
+  private getFocusedNeighborCount(graph: GraphData, nodeId: string): number {
+    const neighbors = new Set<string>([
+      ...Object.keys(graph.linksIn[nodeId] || {}),
+      ...Object.keys(graph.linksOut[nodeId] || {}),
+    ]);
+    return neighbors.size;
   }
 
   // Move anima along links from higher pressure -> lower pressure.
@@ -141,8 +187,8 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
       const target = store.get(link.targetId);
       if (!source || !target) continue;
 
-      const sourcePressure = this.getPressure(source);
-      const targetPressure = this.getPressure(target);
+      const sourcePressure = this.getEffectivePressure(source);
+      const targetPressure = this.getEffectivePressure(target);
       if (sourcePressure === targetPressure) continue;
 
       const flowFromSource  = sourcePressure > targetPressure;
