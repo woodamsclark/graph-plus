@@ -78,8 +78,8 @@ export class InteractionController {
     this.deps.uiStateStore.setHoveredNode(nodeId);
   }
 
-  setFollowedNode(nodeId: string | null): void {
-    this.deps.uiStateStore.setFollowedNode(nodeId);
+  setFocusedNode(nodeId: string | null): void {
+    this.deps.uiStateStore.setFocusedNode(nodeId);
   }
 
   setDraggedNode(nodeId: string | null): void {

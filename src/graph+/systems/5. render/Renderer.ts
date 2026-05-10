@@ -240,24 +240,46 @@ export class Renderer {
         const endX   = b.x - ux * (tgt.radius * b.scale);
         const endY   = b.y - uy * (tgt.radius * b.scale);
 
+        const pressureDelta = Math.abs(src.animaPressure - tgt.animaPressure);
+        this.ctx.globalAlpha = Math.max(0.2, Math.min(1, 0.2 + pressureDelta * 0.8));
         this.ctx.strokeStyle = frame.settings.linkColor;
         this.ctx.lineWidth = link.thickness;
         this.ctx.beginPath();
         this.ctx.moveTo(startX, startY);
         this.ctx.lineTo(endX, endY);
         this.ctx.stroke();
+        this.ctx.globalAlpha = 1;
       } else {
         const { node, p } = item;
         const r = node.radius * p.scale;
-
-        this.ctx.fillStyle =
+        const fillColor =
           node.type === "tag"
             ? frame.settings.tagColor
             : frame.settings.nodeColor;
+        const wellStrength = Math.max(0, Math.min(1, node.animaWellStrength));
+        const bodyOpacity = Math.max(0.35, Math.min(1, 0.35 + node.animaPressure * 0.65));
 
+        if (wellStrength > 0) {
+          this.ctx.globalAlpha = 0.08 + wellStrength * 0.22;
+          this.ctx.fillStyle = fillColor;
+          this.ctx.beginPath();
+          this.ctx.arc(p.x, p.y, r * (1.35 + wellStrength * 0.65), 0, Math.PI * 2);
+          this.ctx.fill();
+
+          this.ctx.globalAlpha = 0.16 + wellStrength * 0.24;
+          this.ctx.strokeStyle = fillColor;
+          this.ctx.lineWidth = Math.max(1, r * 0.12);
+          this.ctx.beginPath();
+          this.ctx.arc(p.x, p.y, r * (1.08 + wellStrength * 0.2), 0, Math.PI * 2);
+          this.ctx.stroke();
+        }
+
+        this.ctx.globalAlpha = bodyOpacity;
+        this.ctx.fillStyle = fillColor;
         this.ctx.beginPath();
         this.ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
         this.ctx.fill();
+        this.ctx.globalAlpha = 1;
       }
     }
 

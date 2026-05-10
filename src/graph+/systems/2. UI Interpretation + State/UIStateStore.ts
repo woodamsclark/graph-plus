@@ -26,7 +26,7 @@ export class UIStateStore implements Store<UIState> {
     this.state.hoveredNodeId = nodeId;
   }
 
-  public setFollowedNode(nodeId: string | null): void {
+  public setFocusedNode(nodeId: string | null): void {
     this.state.followedNodeId = nodeId;
   }
 

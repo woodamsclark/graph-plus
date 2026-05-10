@@ -315,7 +315,7 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
     this.mode.longPressFired = true;
 
     if (this.mode.downNode?.id) {
-      this.cmd({ type: "SetFollowedNode", nodeId: this.mode.downNode.id });
+      this.cmd({ type: "SetFocusedNode", nodeId: this.mode.downNode.id });
     } else {
       this.cmd({ type: "ResetCamera" });
     }
@@ -350,7 +350,7 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
 
     const node = graph.nodes.find(n => n.id === id);
     if (!node) {
-      this.cmd({ type: "SetFollowedNode", nodeId: null });
+      this.cmd({ type: "SetFocusedNode", nodeId: null });
       return;
     }
 
@@ -384,11 +384,11 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
       return;
     }
 
-    this.cmd({ type: "SetFollowedNode", nodeId });
+    this.cmd({ type: "SetFocusedNode", nodeId });
   }
 
   private startDrag(nodeId: string, screenX: number, screenY: number) {
-    this.cmd({ type: "SetFollowedNode", nodeId: null });
+    this.cmd({ type: "SetFocusedNode", nodeId: null });
 
     const graph   = this.deps.graph?.get();
     const camera  = this.deps.camera;
@@ -451,7 +451,7 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
   }
 
   private startPan(screenX: number, screenY: number) {
-    this.cmd({ type: "SetFollowedNode", nodeId: null });
+    this.cmd({ type: "SetFocusedNode", nodeId: null });
     this.cmd({ type: "SetPanning", on: true });
     this.cmd({ type: "StartPanCamera", screen: { x: screenX, y: screenY } });
   }

@@ -39,7 +39,6 @@ export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
 
     const tuning      = this.settings.tuning;
     const base        = this.settings.base;
-    const ui          = this.deps.uiState;
     const animaStore  = this.deps.animaStore;
 
     const theme                     = this.deps.getThemePalette();
@@ -48,12 +47,17 @@ export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
     // --- Nodes
     const nodes: RenderNodeState[] = graph.nodes.map((node) => {
       const anima = animaStore.get(node.id);
+      const effectiveCapacity = anima
+        ? Math.max(1, anima.capacity + anima.capacity_modifier)
+        : 1;
+      const pressure = anima
+        ? Math.max(0, anima.level) / effectiveCapacity
+        : 0;
+      const wellStrength = Math.max(0, Math.min(1, 1 - pressure));
 
       const labelOpacity = anima
-        ? Math.max(0, Math.min(1, anima.level / anima.capacity))
+        ? Math.max(0.2, Math.min(1, pressure))
         : 0;
-
-      const hovered = ui.hoveredNodeId === node.id;
       const visible = base.showTags || node.type !== "tag";
 
       return {
@@ -62,6 +66,8 @@ export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
         type: node.type,
         world: node.location,
         radius: node.radius,
+        animaPressure: pressure,
+        animaWellStrength: wellStrength,
         labelOpacity,
         visible,
       };

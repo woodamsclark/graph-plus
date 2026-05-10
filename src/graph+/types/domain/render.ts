@@ -19,6 +19,8 @@ export type RenderNodeState = {
   type:         "note" | "tag" | "canvas";
   world:        Vec3;
   radius:       number;
+  animaPressure: number;
+  animaWellStrength: number;
   labelOpacity: number;
   visible:      boolean;
 };

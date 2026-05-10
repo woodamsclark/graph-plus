@@ -1,7 +1,13 @@
 export type AnimaState = {
   level:    number;
   capacity: number;
+  capacity_modifier: number; 
 };
+
+// Experimental Anima constants (tunable without UI for now)
+const INITIAL_CAPACITY            = 100;
+const INITIAL_LEVEL               = 100;
+const INITIAL_CAPACITY_MODIFIER   = 0;
 
 export class AnimaStateStore {
   private state = new Map<string, AnimaState>();
@@ -10,12 +16,13 @@ export class AnimaStateStore {
     return this.state.get(nodeId) ?? null;
   }
 
-  ensure(nodeId: string, initial?: Partial<AnimaState>): AnimaState {
+  ensured_get(nodeId: string ): AnimaState {
     let current = this.state.get(nodeId);
     if (!current) {
       current = {
-        level: initial?.level       ??    0,
-        capacity: initial?.capacity ??  100,
+        level:              INITIAL_LEVEL,
+        capacity:           INITIAL_CAPACITY,
+        capacity_modifier:  INITIAL_CAPACITY_MODIFIER,
       };
       this.state.set(nodeId, current);
     }
@@ -23,7 +30,7 @@ export class AnimaStateStore {
   }
 
   add(nodeId: string, amount: number): void {
-    const current = this.ensure(nodeId);
+    const current = this.ensured_get(nodeId);
     current.level = Math.max(0, Math.min(current.capacity, current.level + amount));
   }
 

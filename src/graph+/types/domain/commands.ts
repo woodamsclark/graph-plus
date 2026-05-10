@@ -9,17 +9,18 @@ export type Command =
 | { type: "BeginDrag";                nodeId: string; targetWorld: Vec3 }
 | { type: "UpdateDragTarget";         targetWorld: Vec3 }
 | { type: "EndDrag"; }
+| { type: "EndPanCamera" }
+| { type: "EndRotateCamera" }
+| { type: "EndFocusedNode" }
 | { type: "StartPanCamera";           screen: { x: number; y: number } }
 | { type: "UpdatePanCamera";          screen: { x: number; y: number } }
-| { type: "EndPanCamera" }
 | { type: "StartRotateCamera";        screen: { x: number; y: number } }
 | { type: "UpdateRotateCamera";       screen: { x: number; y: number } }
-| { type: "EndRotateCamera" }
 | { type: "ResetCamera" }
 | { type: "ZoomCamera";               screen: { x: number; y: number }; delta: number }
 | { type: "SetGravityCenter";          point: { x: number; y: number } | null }
 | { type: "SetHoveredNode";           nodeId: string | null }
-| { type: "SetFollowedNode";          nodeId: string | null }
+| { type: "SetFocusedNode";           nodeId: string | null }
 | { type: "SetPanning";                   on: boolean }
 | { type: "SetRotating";                  on: boolean }
 | { type: "SetCameraTarget";          target: { x: number; y: number; z: number } }

@@ -82,8 +82,8 @@ export class GraphCommandBindings {
       interaction.setHoveredNode(command.nodeId);
     });
 
-    registry.register("SetFollowedNode", (command) => {
-      interaction.setFollowedNode(command.nodeId);
+    registry.register("SetFocusedNode", (command) => {
+      interaction.setFocusedNode(command.nodeId);
     });
 
     registry.register("SetDraggedNode", (command) => {
