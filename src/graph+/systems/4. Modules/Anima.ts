@@ -121,8 +121,22 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
     if (this.focusedNodeId) {
       const focused = store.get(this.focusedNodeId);
       if (focused) {
-        const focusedNeighborCount = this.getFocusedNeighborCount(graph, this.focusedNodeId);
-        focused.capacity_modifier += focused.capacity * focusedNeighborCount;
+        // Distribute focus well to focused node (depth 0) and immediate neighbors (depth 1).
+        // Strength s is 1.0 for now. TODO: expose strength via settings.
+        const neighborIds = this.getUndirectedNeighborIds(graph, this.focusedNodeId);
+        const degree = neighborIds.size; // deg(focused)
+
+        // Depth 0 (focused): full share (1.0)
+        focused.capacity_modifier += focused.capacity * degree * 1.0;
+
+        // Depth 1 neighbors: half share (0.5)
+        for (const nid of neighborIds) {
+          const nstate = store.get(nid);
+          if (!nstate) continue;
+          nstate.capacity_modifier += nstate.capacity * degree * 0.5;
+        }
+
+        // TODO: consider making maxDepth configurable and adding deeper levels with 1/(d+1) falloff.
       }
     }
   }
@@ -174,6 +188,14 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
       ...Object.keys(graph.linksOut[nodeId] || {}),
     ]);
     return neighbors.size;
+  }
+
+  // Helper: undirected neighbor set (union of inbound and outbound links)
+  private getUndirectedNeighborIds(graph: GraphData, nodeId: string): Set<string> {
+    return new Set<string>([
+      ...Object.keys(graph.linksIn[nodeId] || {}),
+      ...Object.keys(graph.linksOut[nodeId] || {}),
+    ]);
   }
 
   // Move anima along links from higher pressure -> lower pressure.
