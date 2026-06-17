@@ -30,6 +30,12 @@ export type LayoutSettings = {
 export type PhysicsSettings = {
   repulsionStrength:    number;
   damping:              number;
+  /** Optional new name for damping; interpreted as velocity decay per tick */
+  velocityDecay?:       number;
+  /** D3-like simulation cooling rate; higher settles faster */
+  alphaDecay?:          number;
+  /** Threshold below which the sim auto-stops when not interacting */
+  alphaMin?:            number;
   mouseGravityEnabled:  boolean;
   mouseGravityRadius:   number;
   mouseGravityStrength: number;

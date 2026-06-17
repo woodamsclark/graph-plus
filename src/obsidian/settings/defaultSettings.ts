@@ -19,8 +19,8 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
 
   layout: {
     linkLength: 100,
-    linkStrength: 1,
-    centerPull: 0.001,
+    linkStrength: 0.25,
+    centerPull: 0.002,
     notePlaneStiffness: 0,
     tagPlaneStiffness: 0,
     worldCenterX: 0,
@@ -29,8 +29,11 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
   },
 
   physics: {
-    repulsionStrength: 5000,
-    damping: 0.5,
+    repulsionStrength: 7000,
+    damping: 0.4,
+    velocityDecay: 0.4,
+    alphaDecay: 0.035,
+    alphaMin: 0.001,
     mouseGravityEnabled: true,
     mouseGravityRadius: 15,
     mouseGravityStrength: 10,
