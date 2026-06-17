@@ -302,9 +302,10 @@ export function createSimulation(
       const boost    = Math.min(maxBoost, 1 / (dist*dist));
       const k        = strength * boost;
 
-      node.velocity.x += dx * k * alpha;
-      node.velocity.y += dy * k * alpha;
-      node.velocity.z += dz * k * alpha;
+      // Mouse gravity should feel responsive regardless of alpha temperature
+      node.velocity.x += dx * k;
+      node.velocity.y += dy * k;
+      node.velocity.z += dz * k;
     }
   }
 
@@ -544,7 +545,12 @@ export function createSimulation(
   }
 
   function tick(dt: number, physicsSettings: PhysicsSettings, layoutSettings: LayoutSettings) {
-    if (!running) return;
+    // If mouse gravity is active, ensure the sim is running (without rewarming alpha)
+    const mouseActive = Boolean(physicsSettings.mouseGravityEnabled && getGravityCenter());
+    if (!running) {
+      if (!mouseActive) return;
+      running = true;
+    }
     if (!nodes.length) return;
     // Update alpha each tick using settings overrides if present
     const dec = Math.max(0, Math.min(1, (physicsSettings as any).alphaDecay ?? alphaDecay));
@@ -570,7 +576,7 @@ export function createSimulation(
     integrate(dt);
 
     // Stop when cooled and not interacting; fallback to velocity settle
-    if (!dragConstraint && alpha < stopMin) { stop(); return; }
+    if (!dragConstraint && !mouseActive && alpha < stopMin) { stop(); return; }
     if (isSettled()) stop();
   }
 
