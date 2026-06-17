@@ -38,6 +38,11 @@ export function createSimulation(
   const links     = graph.links;
   let dragConstraint: DragConstraint = null;
   let running     = false;  
+  // D3-like simulation temperature controls
+  let alpha       = 1;
+  let alphaTarget = 0;
+  let alphaDecay  = 0.035;
+  let alphaMin    = 0.001;
   let pinnedNodes = new Set<string>(); // set of node ids that should be pinned (physics skip)
   const nodeById  = new Map<string, Node>();
   
@@ -54,15 +59,27 @@ export function createSimulation(
       stiffness: 100,
       damping: 8,
     };
+
+    // Ensure the simulation is running while dragging
+    alphaTarget = 0.3;
+    start();
   }
 
   function updateDragTarget(target: Vec3) {
     if (!dragConstraint) return;
     dragConstraint.target = { ...target };
+
+    // Keep simulation active during target updates
+    alphaTarget = 0.3;
+    start();
   }
 
   function endDrag() {
     dragConstraint = null;
+
+    // After release, let neighbors settle; restart if stopped
+    alphaTarget = 0;
+    start();
   }
  
   function makeOctNode(cx: number, cy: number, cz: number, h: number): OctNode {
@@ -217,9 +234,9 @@ export function createSimulation(
       const fy = (dy / safeDist) * force;
       const fz = (dz / safeDist) * force;
 
-      a.velocity.x = (a.velocity.x || 0) + fx;
-      a.velocity.y = (a.velocity.y || 0) + fy;
-      a.velocity.z = (a.velocity.z || 0) + fz;
+      a.velocity.x = (a.velocity.x || 0) + fx * alpha;
+      a.velocity.y = (a.velocity.y || 0) + fy * alpha;
+      a.velocity.z = (a.velocity.z || 0) + fz * alpha;
       return;
     }
 
@@ -285,9 +302,9 @@ export function createSimulation(
       const boost    = Math.min(maxBoost, 1 / (dist*dist));
       const k        = strength * boost;
 
-      node.velocity.x += dx * k;
-      node.velocity.y += dy * k;
-      node.velocity.z += dz * k;
+      node.velocity.x += dx * k * alpha;
+      node.velocity.y += dy * k * alpha;
+      node.velocity.z += dz * k * alpha;
     }
   }
 
@@ -311,14 +328,14 @@ export function createSimulation(
         const fy = (dy / dist) * force;
         const fz = (dz / dist) * force;
         if (!pinnedNodes.has(a.id)) {
-          a.velocity.x = (a.velocity.x || 0) + fx;
-          a.velocity.y = (a.velocity.y || 0) + fy;
-          a.velocity.z = (a.velocity.z || 0) + fz;
+          a.velocity.x = (a.velocity.x || 0) + fx * alpha;
+          a.velocity.y = (a.velocity.y || 0) + fy * alpha;
+          a.velocity.z = (a.velocity.z || 0) + fz * alpha;
         }
         if (!pinnedNodes.has(b.id)) {
-          b.velocity.x = (b.velocity.x || 0) - fx;
-          b.velocity.y = (b.velocity.y || 0) - fy;
-          b.velocity.z = (b.velocity.z || 0) - fz;
+          b.velocity.x = (b.velocity.x || 0) - fx * alpha;
+          b.velocity.y = (b.velocity.y || 0) - fy * alpha;
+          b.velocity.z = (b.velocity.z || 0) - fz * alpha;
         }
       }
     }
@@ -367,14 +384,14 @@ export function createSimulation(
       const fy = (dy / dist) * f;
       const fz = (dz / dist) * f;
       if (!pinnedNodes.has(a.id)) {
-        a.velocity.x = (a.velocity.x || 0) + fx;
-        a.velocity.y = (a.velocity.y || 0) + fy;
-        a.velocity.z = (a.velocity.z || 0) + fz;
+        a.velocity.x = (a.velocity.x || 0) + fx * alpha;
+        a.velocity.y = (a.velocity.y || 0) + fy * alpha;
+        a.velocity.z = (a.velocity.z || 0) + fz * alpha;
       }
       if (!pinnedNodes.has(b.id)) {
-        b.velocity.x = (b.velocity.x || 0) - fx;
-        b.velocity.y = (b.velocity.y || 0) - fy;
-        b.velocity.z = (b.velocity.z || 0) - fz;
+        b.velocity.x = (b.velocity.x || 0) - fx * alpha;
+        b.velocity.y = (b.velocity.y || 0) - fy * alpha;
+        b.velocity.z = (b.velocity.z || 0) - fz * alpha;
       }
     }
   }
@@ -389,19 +406,20 @@ export function createSimulation(
       const dx = (cx - n.location.x);
       const dy = (cy - n.location.y);
       const dz = (cz - n.location.z);
-      n.velocity.x = (n.velocity.x || 0) + dx * layoutSettings.centerPull;
-      n.velocity.y = (n.velocity.y || 0) + dy * layoutSettings.centerPull;
-      n.velocity.z = (n.velocity.z || 0) + dz * layoutSettings.centerPull;
+      const s = layoutSettings.centerPull * alpha;
+      n.velocity.x = (n.velocity.x || 0) + dx * s;
+      n.velocity.y = (n.velocity.y || 0) + dy * s;
+      n.velocity.z = (n.velocity.z || 0) + dz * s;
     }
   }
 
   function applyDamping(physicsSettings: PhysicsSettings) {
     for (const n of nodes) {
       if (pinnedNodes.has(n.id)) continue;
-        const d = Math.max(0, Math.min(1, physicsSettings.damping));
-        n.velocity.x = (n.velocity.x ?? 0) * (1 - d);
-        n.velocity.y = (n.velocity.y ?? 0) * (1 - d);
-        n.velocity.z = (n.velocity.z ?? 0) * (1 - d);
+        const decay = Math.max(0, Math.min(1, (physicsSettings as any).velocityDecay ?? physicsSettings.damping));
+        n.velocity.x = (n.velocity.x ?? 0) * (1 - decay);
+        n.velocity.y = (n.velocity.y ?? 0) * (1 - decay);
+        n.velocity.z = (n.velocity.z ?? 0) * (1 - decay);
       if (Math.abs(n.velocity.x) < 0.001) n.velocity.x = 0;
       if (Math.abs(n.velocity.y) < 0.001) n.velocity.y = 0;
       if (Math.abs(n.velocity.z) < 0.001) n.velocity.z = 0;
@@ -419,10 +437,10 @@ export function createSimulation(
       if (pinnedNodes.has(n.id)) continue;
       if (isNote(n) && noteK > 0) {
         const dz = targetZ - n.location.z;
-        n.velocity.z = (n.velocity.z || 0) + dz * noteK;
+        n.velocity.z = (n.velocity.z || 0) + dz * noteK * alpha;
       } else if (isTag(n) && tagK > 0) {
         const dx = (targetX) - (n.location.x || 0);
-        n.velocity.x = (n.velocity.x || 0) + dx * tagK;
+        n.velocity.x = (n.velocity.x || 0) + dx * tagK * alpha;
       }
     }
   }
@@ -440,8 +458,29 @@ export function createSimulation(
     }
   }
 
+  // Strong forces create quick response, high damping kills overshoot,
+  // settle check stops CPU work once velocities are nearly zero.
+  function isSettled(threshold = 0.01): boolean {
+    if (dragConstraint) return false;
+
+    let maxComponent = 0;
+    for (const n of nodes) {
+      if (pinnedNodes.has(n.id)) continue;
+      const vx = Math.abs(n.velocity.x ?? 0);
+      const vy = Math.abs(n.velocity.y ?? 0);
+      const vz = Math.abs(n.velocity.z ?? 0);
+      const localMax = Math.max(vx, vy, vz);
+      if (localMax > maxComponent) maxComponent = localMax;
+      if (maxComponent >= threshold) return false;
+    }
+    return true;
+  }
+
   function start() {
-    running = true;
+    // Warm and run
+    alpha       = 1;
+    alphaTarget = 0;
+    running     = true;
   }
 
   function stop() {
@@ -507,6 +546,10 @@ export function createSimulation(
   function tick(dt: number, physicsSettings: PhysicsSettings, layoutSettings: LayoutSettings) {
     if (!running) return;
     if (!nodes.length) return;
+    // Update alpha each tick using settings overrides if present
+    const dec = Math.max(0, Math.min(1, (physicsSettings as any).alphaDecay ?? alphaDecay));
+    const stopMin = Math.max(0, (physicsSettings as any).alphaMin ?? alphaMin);
+    alpha += (alphaTarget - alpha) * dec;
     
     // Build tree from all nodes (including pinned nodes is fine; they still repel others)
     // If you DON'T want pinned nodes to contribute to repulsion, filter them out here.
@@ -520,10 +563,15 @@ export function createSimulation(
     applyCenteringForce(layoutSettings);
     applyPlaneConstraints(layoutSettings);
 
-    applyDragConstraintKinematic(dt);
+    // Use spring drag for fluid cursor following
+    applyDragConstraint(dt);
 
     applyDamping(physicsSettings);
     integrate(dt);
+
+    // Stop when cooled and not interacting; fallback to velocity settle
+    if (!dragConstraint && alpha < stopMin) { stop(); return; }
+    if (isSettled()) stop();
   }
 
   return { beginDrag, updateDragTarget, endDrag, stop, start, tick, reset, setPinnedNodes };

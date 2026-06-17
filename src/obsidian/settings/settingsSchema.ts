@@ -243,7 +243,7 @@ export function getSettingsSchema(): SectionDescriptor[] {
           id: 'link-strength',
           kind: 'slider',
           name: 'Link strength',
-          desc: 'UI 0–1 mapped to internal link stiffness.',
+          desc: 'UI 0–1 mapped to internal link stiffness (0–3).',
           updateMode: 'live',
           min: 0,
           max: 1,
@@ -252,8 +252,8 @@ export function getSettingsSchema(): SectionDescriptor[] {
           getDefault: (s) => s.layout.linkStrength,
           set: (s, v) => { s.layout.linkStrength = v; },
           clamp: (v) => Math.max(0, Math.min(1, v)),
-          toUi: (value) => Math.min(1, Math.max(0, value / 0.5)),
-          fromUi: (value) => round(value * 0.5, 4),
+          toUi: (value) => Math.min(1, Math.max(0, value / 3)),
+          fromUi: (value) => round(value * 3, 4),
         },
         {
           id: 'center-pull',
@@ -356,7 +356,7 @@ export function getSettingsSchema(): SectionDescriptor[] {
           id: 'repulsion-strength',
           kind: 'slider',
           name: 'Repulsion strength',
-          desc: 'UI 0–1 mapped internally. Higher values separate nodes more strongly.',
+          desc: 'UI 0–1 mapped internally to 0–10000. Higher values separate nodes more strongly.',
           updateMode: 'live',
           min: 0,
           max: 1,
@@ -366,24 +366,42 @@ export function getSettingsSchema(): SectionDescriptor[] {
           set: (s, v) => { s.physics.repulsionStrength = v; },
           clamp: (v) => Math.max(0, Math.min(1, v)),
           toUi: (value) => {
-            const ui = Math.sqrt(Math.max(0, value / 2000));
+            const ui = Math.sqrt(Math.max(0, value / 10000));
             return Math.min(1, Math.max(0, ui));
           },
-          fromUi: (value) => round(value * value * 2000, 3),
+          fromUi: (value) => round(value * value * 10000, 3),
         },
         {
           id: 'damping',
           kind: 'slider',
-          name: 'Damping',
-          desc: 'Velocity damping. Higher values reduce motion faster.',
+          name: 'Fluidity (velocity decay)',
+          desc: 'Per-tick velocity decay. Higher settles faster; lower feels floatier.',
           updateMode: 'live',
           min: 0.0,
           max: 1.0,
-          step: 0.1,
-          get: (s) => s.physics.damping,
-          getDefault: (s) => s.physics.damping,
-          set: (s, v) => { s.physics.damping = round(v, 3); },
+          step: 0.01,
+          get: (s) => (s.physics.velocityDecay ?? s.physics.damping),
+          getDefault: (s) => (s.physics.velocityDecay ?? s.physics.damping),
+          set: (s, v) => {
+            const val = round(v, 3);
+            s.physics.damping = val;       // backward-compatible storage
+            (s.physics as any).velocityDecay = val;
+          },
           clamp: (v) => Math.max(0.0, Math.min(1.0, v)),
+        },
+        {
+          id: 'alpha-decay',
+          kind: 'slider',
+          name: 'Settle speed',
+          desc: 'Cooling rate (alpha decay). Higher cools faster like d3-force.',
+          updateMode: 'live',
+          min: 0.001,
+          max: 0.2,
+          step: 0.001,
+          get: (s) => (s.physics.alphaDecay ?? 0.035),
+          getDefault: (s) => (s.physics.alphaDecay ?? 0.035),
+          set: (s, v) => { (s.physics as any).alphaDecay = round(v, 3); },
+          clamp: (v) => Math.max(0.001, Math.min(0.2, v)),
         },
         {
           id: 'mouse-gravity-enabled',
