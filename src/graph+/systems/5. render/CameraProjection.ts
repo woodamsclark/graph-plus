@@ -38,6 +38,9 @@ export function worldToScreen(
     targetX,
     targetY,
     targetZ,
+    offsetX,
+    offsetY,
+    offsetZ,
   } = ctx.cameraState;
 
   const { offsetX: viewportCenterX, offsetY: viewportCenterY } = ctx.viewport;
@@ -57,9 +60,13 @@ export function worldToScreen(
   }
 
   // 1) Move into camera-target-relative space
-  const relX = worldX - targetX;
-  const relY = worldY - targetY;
-  const relZ = worldZ - targetZ;
+  const effectiveTargetX = targetX + offsetX;
+  const effectiveTargetY = targetY + offsetY;
+  const effectiveTargetZ = targetZ + offsetZ;
+
+  const relX = worldX - effectiveTargetX;
+  const relY = worldY - effectiveTargetY;
+  const relZ = worldZ - effectiveTargetZ;
 
   // 2) Rotate into camera view space
   const cosYaw = Math.cos(yaw);
@@ -100,6 +107,9 @@ export function screenToWorld(
     targetX,
     targetY,
     targetZ,
+    offsetX: targetOffsetX,
+    offsetY: targetOffsetY,
+    offsetZ: targetOffsetZ,
   } = ctx.cameraState;
 
   const { offsetX, offsetY } = ctx.viewport;
@@ -129,9 +139,9 @@ export function screenToWorld(
   const wz = -xz * sinY + zz * cosY;
 
   let world: Vec3 = {
-    x: wx + targetX,
-    y: wy + targetY,
-    z: wz + targetZ,
+    x: wx + targetX + targetOffsetX,
+    y: wy + targetY + targetOffsetY,
+    z: wz + targetZ + targetOffsetZ,
   };
 
   if (ctx.worldTransform) {

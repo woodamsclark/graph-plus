@@ -20,6 +20,7 @@ export class CameraController implements ModuleWithSettings<'camera'> {
   private cameraSnapShot: CameraState | null = null;
   private worldAnchor   : Vec3        | null = null;
   private screenAnchor  : { screenX: number; screenY: number } | null = null;
+  private panMode: "target" | "offset" = "target";
 
   private viewport: Viewport = {
     width   : 0,
@@ -108,8 +109,9 @@ export class CameraController implements ModuleWithSettings<'camera'> {
     return screenToWorld2D(this.getProjectionContext(), screenX, screenY);
   }
 
-  startPan(screenX: number, screenY: number) {
+  startPan(screenX: number, screenY: number, mode: "target" | "offset" = "target") {
     const cam = this.cameraState;
+    this.panMode = mode;
     this.screenAnchor = { screenX, screenY };
     this.worldAnchor = this.screenToWorld(screenX, screenY, cam.distance);
   }
@@ -124,9 +126,15 @@ export class CameraController implements ModuleWithSettings<'camera'> {
     const dy = current.y - this.worldAnchor.y;
     const dz = current.z - this.worldAnchor.z;
 
-    cam.targetX -= dx;
-    cam.targetY -= dy;
-    cam.targetZ -= dz;
+    if (this.panMode === "offset") {
+      cam.offsetX -= dx;
+      cam.offsetY -= dy;
+      cam.offsetZ -= dz;
+    } else {
+      cam.targetX -= dx;
+      cam.targetY -= dy;
+      cam.targetZ -= dz;
+    }
 
     // Keep the anchor sliding with the drag
     this.worldAnchor = this.screenToWorld(screenX, screenY, cam.distance);
@@ -135,6 +143,7 @@ export class CameraController implements ModuleWithSettings<'camera'> {
   endPan() {
     this.screenAnchor = null;
     this.worldAnchor = null;
+    this.panMode = "target";
   }
 
   startRotate(screenX: number, screenY: number) {
@@ -192,6 +201,7 @@ export class CameraController implements ModuleWithSettings<'camera'> {
     this.cameraSnapShot = null;
     this.worldAnchor = null;
     this.screenAnchor = null;
+    this.panMode = "target";
   }
 
   private getProjectionContext() {
