@@ -49,6 +49,10 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
     maxDistance: 5000,
     minPitch: -Math.PI / 2 + 0.05,
     maxPitch: Math.PI / 2 - 0.05,
+    focusPlaneEnabled: true,
+    focusPlaneHalfWidth: 200,
+    focusPlaneFadeDistance: 1000,
+    focusPlaneMinAlpha: 0.18,
     initialState: {
       yaw: 0,
       pitch: 0,

@@ -83,7 +83,7 @@ export class CameraController implements ModuleWithSettings<'camera'> {
     return { ...this.viewport };
   }
 
-  worldToScreen(world: Vec3): { x: number; y: number; depth: number; scale: number } {
+  worldToScreen(world: Vec3): { x: number; y: number; depth: number; scale: number; viewZ: number } {
     return worldToScreen(this.getProjectionContext(), world);
   }
 

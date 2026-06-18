@@ -25,11 +25,14 @@ export type WorldTransform = {
 };
 
 export interface CameraAccessor {
+  getState(): CameraState;
+
   worldToScreen(world: Vec3): {
     x: number;
     y: number;
     depth: number;
     scale: number;
+    viewZ: number;
   };
 
   screenToWorld(screenX: number, screenY: number, depthFromCamera: number): Vec3;

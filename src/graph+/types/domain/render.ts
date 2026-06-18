@@ -13,6 +13,14 @@ export type RenderSettings = {
   labelOffsetY:     number;
 };
 
+export type RenderFocusPlane = {
+  enabled: boolean;
+  centerViewZ: number;
+  halfWidth: number;
+  fadeDistance: number;
+  minAlpha: number;
+};
+
 export type RenderNodeState = {
   id:           string;
   label:        string;
@@ -36,4 +44,5 @@ export type RenderFrame = {
   nodes:    RenderNodeState[];
   links:    RenderLinkState[];
   settings: RenderSettings;
+  focusPlane: RenderFocusPlane;
 };

@@ -9,7 +9,7 @@ export type PhysicsModuleSettings       = Pick<GraphPlusSettings, 'physics' | 'l
 export type UIInterpreterModuleSettings = Pick<GraphPlusSettings, 'ui'      | 'tuning'>;
 export type RendererModuleSettings      = Pick<GraphPlusSettings, 'base'    | 'tuning'>;
 export type UIModuleSettings            = Pick<GraphPlusSettings, 'ui'      | 'tuning'>;
-export type RenderComposerSettings      = Pick<GraphPlusSettings, 'base'    | 'tuning'>;
+export type RenderComposerSettings      = Pick<GraphPlusSettings, 'base'    | 'tuning' | 'camera'>;
 
 export type InputModuleSettings = {
   ui: UISettings;

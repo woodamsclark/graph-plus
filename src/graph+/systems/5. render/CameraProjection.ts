@@ -18,6 +18,7 @@ export type ScreenProjection = {
   y: number;
   depth: number;
   scale: number;
+  viewZ: number;
 };
 
 export type ProjectionContext = {
@@ -91,6 +92,7 @@ export function worldToScreen(
     y: viewY * pixelsPerWorldUnit + viewportCenterY,
     depth: depthToCameraPlane,
     scale: pixelsPerWorldUnit,
+    viewZ,
   };
 }
 

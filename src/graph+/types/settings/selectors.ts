@@ -37,6 +37,7 @@ export function selectRenderComposerSettings(s: GraphPlusSettings): RenderCompos
   return {
     base:       s.base,
     tuning:     s.tuning,
+    camera:     s.camera,
   };
 }
 

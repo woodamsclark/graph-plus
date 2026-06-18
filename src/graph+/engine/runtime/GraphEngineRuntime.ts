@@ -137,6 +137,7 @@ export class GraphEngineRuntime {
 
     this.frameComposer = new FrameComposer(selectRenderComposerSettings(settings), {
       graph:             this.graph,
+      camera:            this.camera,
       uiState:           this.uiStateStore.get(),
       animaStore:        this.animaStateStore,
       frameStore:        this.renderFrameStore,

@@ -1,15 +1,18 @@
 import type {
   RenderFrame,
+  RenderFocusPlane,
   RenderLinkState,
   RenderNodeState,
   RenderSettings,
 }                                               from "../../types/domain/render.ts";
 
-import type { 
+import type {
+  CameraSettings,
   BaseSettings, 
   ModuleWithSettings, 
   SettingsFor, 
   TuningSettings }                              from "../../types/index.ts";
+import type { GraphData }                       from "../../types/domain/graph.ts";
   
 import type { FrameComposerDeps }               from "../../deps/framecomposer.deps.ts";
 import type { ThemePalette }                    from "../../../obsidian/themeStyleResolver.ts";
@@ -43,6 +46,7 @@ export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
 
     const theme                     = this.deps.getThemePalette();
     const settings: RenderSettings  = resolveRenderStyle(base, theme, tuning);
+    const focusPlane: RenderFocusPlane = resolveFocusPlane(this.settings.camera, graph, this.deps);
 
     // --- Nodes
     const nodes: RenderNodeState[] = graph.nodes.map((node) => {
@@ -78,6 +82,7 @@ export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
       nodes,
       links,
       settings,
+      focusPlane,
     };
 
     this.deps.frameStore.set(frame);
@@ -87,6 +92,60 @@ export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
     // No cleanup work yet.
   }
 
+}
+
+function resolveFocusPlane(
+  cameraSettings: CameraSettings,
+  graph: GraphData,
+  deps: FrameComposerDeps,
+): RenderFocusPlane {
+  const currentDistance = deps.camera?.getState().distance ?? cameraSettings.initialState.distance;
+  const zoomScaledFocus = scaleFocusPlaneForZoom(
+    cameraSettings.focusPlaneHalfWidth,
+    cameraSettings.focusPlaneFadeDistance,
+    currentDistance,
+    cameraSettings.initialState.distance,
+  );
+
+  let centerViewZ = 0;
+  const followedNodeId = deps.uiState.followedNodeId;
+  if (followedNodeId && deps.camera) {
+    const focusedNode = graph.nodes.find((node) => node.id === followedNodeId);
+    if (focusedNode) {
+      centerViewZ = deps.camera.worldToScreen(focusedNode.location).viewZ;
+    }
+  }
+
+  return {
+    enabled: cameraSettings.focusPlaneEnabled,
+    centerViewZ,
+    halfWidth: zoomScaledFocus.halfWidth,
+    fadeDistance: zoomScaledFocus.fadeDistance,
+    minAlpha: cameraSettings.focusPlaneMinAlpha,
+  };
+}
+
+function scaleFocusPlaneForZoom(
+  halfWidth: number,
+  fadeDistance: number,
+  currentDistance: number,
+  baselineDistance: number,
+): { halfWidth: number; fadeDistance: number } {
+  const safeBaseline = Math.max(1, baselineDistance);
+  const zoomRatio = Math.max(0.0001, currentDistance) / safeBaseline;
+
+  // Use a softened zoom curve so close-in focus tightens noticeably
+  // without collapsing into an unusably thin band.
+  const zoomScale = clamp(Math.sqrt(zoomRatio), 0.25, 4);
+
+  return {
+    halfWidth: halfWidth * zoomScale,
+    fadeDistance: fadeDistance * zoomScale,
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function pressureToLabelOpacity(pressure: number): number {

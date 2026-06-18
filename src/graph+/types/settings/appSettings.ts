@@ -51,6 +51,10 @@ export type CameraSettings = {
   maxDistance:          number;
   minPitch:             number;
   maxPitch:             number;
+  focusPlaneEnabled:    boolean;
+  focusPlaneHalfWidth:  number;
+  focusPlaneFadeDistance: number;
+  focusPlaneMinAlpha:   number;
   initialState: {
     yaw:        number;
     pitch:      number;
