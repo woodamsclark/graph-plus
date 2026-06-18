@@ -61,6 +61,7 @@ export type UserInputEvent =
       client: ClientPt;
       deltaX: number;
       deltaY: number;
+      deltaMode: 0 | 1 | 2;
       ctrl: boolean;
       meta: boolean;
       shift: boolean;

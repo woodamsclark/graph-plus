@@ -153,6 +153,7 @@ export class Input {
       client: { x: e.clientX, y: e.clientY },
       deltaX: e.deltaX,
       deltaY: e.deltaY,
+      deltaMode: e.deltaMode as 0 | 1 | 2,
       ctrl: !!e.ctrlKey,
       meta: !!e.metaKey,
       shift: !!e.shiftKey,

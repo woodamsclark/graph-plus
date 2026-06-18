@@ -54,11 +54,10 @@ export function selectCameraSettings(s: GraphPlusSettings): CameraModuleSettings
 
 export function selectAnimaSettings(_s: GraphPlusSettings): AnimaModuleSettings {
   return {
-    drainPerSecond: 10,
-    openNodeGain:   20,
-    followNodeGain: 10,
-    pinNodeGain:     8,
-    dragNodeGain:    6,
+    focusBurst: 20,
+    focusFeedPerSecond: 24,
+    focusBurnPerSecond: 6,
+    emissionPerLinkPerSecond: 4,
   };
 }
 

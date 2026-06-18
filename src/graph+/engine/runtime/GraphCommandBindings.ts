@@ -43,7 +43,7 @@ export class GraphCommandBindings {
     });
 
     registry.register("StartPanCamera", (command) => {
-      interaction.startPan(command.screen);
+      interaction.startPan(command.screen, command.mode);
     });
 
     registry.register("UpdatePanCamera", (command) => {

@@ -20,9 +20,8 @@ export type CameraModuleSettings = {
 };
 
 export type AnimaModuleSettings = {
-  drainPerSecond:   number;
-  openNodeGain:     number;
-  followNodeGain:   number;
-  pinNodeGain:      number;
-  dragNodeGain:     number;
+  focusBurst: number;
+  focusFeedPerSecond: number;
+  focusBurnPerSecond: number;
+  emissionPerLinkPerSecond: number;
 };

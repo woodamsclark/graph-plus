@@ -2,24 +2,16 @@ import type { Command, CommandObserver } from "../../types/domain/commands.ts";
 import type { GraphData } from "../../types/domain/graph.ts";
 import type { ModuleWithSettings, SettingsFor } from "../../types/index.ts";
 import type { AnimaDeps } from "../../deps/anima.deps.ts";
+import type { AnimaState } from "./AnimaStateStore.ts";
 
-
-
-// Pressure-field model:
-// - pressure = level / capacity
-// - effective_pressure = level / effectiveCapacity
-// - Node radius defines baseline capacity
-// - Commands change capacity_modifier, creating temporary wells
-// - Anima flows from high pressure toward low pressure, conserving total anima
-
-const FLOW_RATE = 8; // units per second maximum transfer per link
-const PRESSURE_RESPONSE = 0.5;
-const MIN_EFFECTIVE_CAPACITY = 1;
+const CONTAINER_2_MULTIPLIER = 2;
+const CONTAINER_3_MULTIPLIER = 4;
+const DISPLAY_BASELINE_PRESSURE = 0.75;
+const MIN_CONTAINER_1_CAPACITY = 1;
 const MAX_FOCUSED_LINK_COMPRESSION = 1;
 
 export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
   private syncedGraph: GraphData | null = null;
-  // The current focused/selected/opened/followed node acts as a temporary "sink".
   private focusedNodeId: string | null = null;
 
   constructor(
@@ -33,7 +25,6 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
   }
 
   updateSettings(settings: SettingsFor<'anima'>): void {
-    // Settings currently unused for the pressure-field prototype; keep signature for compatibility.
     this.settings = settings;
   }
 
@@ -51,19 +42,19 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
     }
 
     this.syncStoreToGraph(graph);
-    this.recomputePressureField(graph);
-
-    this.equalizeAcrossLinks(graph, dt);
-    this.updateDerivedPressures(graph);
-    this.updateFocusLinkCompression(graph);
+    this.feedFocusedNode(dt);
+    this.emitFromFocusedNode(graph, dt);
+    this.burnFocusedNode(dt);
+    this.updateDerivedState(graph);
   }
 
   afterCommandApplied(command: Command): void {
-    // Track focus sources: click/selection (SetFollowedNode) and open events.
     switch (command.type) {
-      case "SetFocusedNode": // set to null if focused mode is exited
-        // Null clears focus; non-null sets the current sink.
+      case "SetFocusedNode":
         this.setFocusedNode(command.nodeId);
+        if (command.nodeId) {
+          this.injectFocusBurst(command.nodeId);
+        }
         return;
 
       default:
@@ -75,6 +66,17 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
 
   private setFocusedNode(nodeId: string | null): void {
     this.focusedNodeId = nodeId ?? null;
+  }
+
+  private injectFocusBurst(nodeId: string): void {
+    const graph = this.deps.graph?.get();
+    if (graph) this.syncStoreToGraph(graph);
+
+    const state = this.deps.animaStore.ensured_get(nodeId);
+    state.level = Math.min(
+      this.getMaxLevel(state),
+      state.level + this.settings.focusBurst,
+    );
   }
 
   private syncStoreToGraph(graph: GraphData): void {
@@ -95,102 +97,94 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
       const state = store.ensured_get(node.id);
       const baseCapacity = this.computeBaseCapacity(node.radius);
       state.capacity = baseCapacity;
-      state.level = baseCapacity;
+      state.level = 0;
       state.capacity_modifier = 0;
-      state.pressure = 1;
-      state.effective_pressure = 1;
+      state.pressure = DISPLAY_BASELINE_PRESSURE;
+      state.effective_pressure = 0;
+      state.container_1_capacity = baseCapacity;
+      state.container_2_capacity = baseCapacity * CONTAINER_2_MULTIPLIER;
+      state.container_3_capacity = baseCapacity * CONTAINER_3_MULTIPLIER;
+      state.container_1_level = 0;
+      state.container_2_level = 0;
+      state.container_3_level = 0;
+      state.active = false;
+      state.surplus_ratio = 0;
     }
 
     this.syncedGraph = graph;
   }
 
-  private recomputePressureField(graph: GraphData): void {
-    const store = this.deps.animaStore;
-
-    for (const node of graph.nodes) {
-      const state = store.get(node.id);
-      if (!state) continue;
-
-      state.capacity_modifier = 0;
-      state.pressure = 0;
-      state.effective_pressure = 0;
-      state.focus_link_compression = 0;
-      state.capacity = this.computeBaseCapacity(node.radius);
-    }
-
-    if (this.focusedNodeId) {
-      const focused = store.get(this.focusedNodeId);
-      if (focused) {
-        // Distribute focus well to focused node (depth 0) and immediate neighbors (depth 1).
-        // Strength s is 1.0 for now. TODO: expose strength via settings.
-        const neighborIds = this.getUndirectedNeighborIds(graph, this.focusedNodeId);
-        const degree = neighborIds.size; // deg(focused)
-
-        // Depth 0 (focused): full share (1.0)
-        focused.capacity_modifier += focused.capacity * degree * 1.0;
-
-        // Depth 1 neighbors: half share (0.5)
-        for (const nid of neighborIds) {
-          const nstate = store.get(nid);
-          if (!nstate) continue;
-          nstate.capacity_modifier += nstate.capacity * degree * 0.5;
-        }
-
-        // TODO: consider making maxDepth configurable and adding deeper levels with 1/(d+1) falloff.
-      }
-    }
-  }
-
-  private updateFocusLinkCompression(graph: GraphData): void {
+  private feedFocusedNode(dt: number): void {
     if (!this.focusedNodeId) return;
 
-    const store = this.deps.animaStore;
-    const focused = store.get(this.focusedNodeId);
+    const focused = this.deps.animaStore.get(this.focusedNodeId);
     if (!focused) return;
 
-    focused.focus_link_compression = Math.max(
+    focused.level = Math.min(
+      this.getMaxLevel(focused),
+      focused.level + Math.max(0, this.settings.focusFeedPerSecond) * Math.max(0, dt),
+    );
+  }
+
+  private burnFocusedNode(dt: number): void {
+    if (!this.focusedNodeId) return;
+
+    const focused = this.deps.animaStore.get(this.focusedNodeId);
+    if (!focused) return;
+
+    focused.level = Math.max(
       0,
-      Math.min(MAX_FOCUSED_LINK_COMPRESSION, focused.pressure - 1),
+      focused.level - Math.max(0, this.settings.focusBurnPerSecond) * Math.max(0, dt),
     );
   }
 
   private computeBaseCapacity(nodeRadius: number): number {
-    return Math.max(MIN_EFFECTIVE_CAPACITY, nodeRadius*3);
+    return Math.max(MIN_CONTAINER_1_CAPACITY, nodeRadius * 2);
   }
 
-  private getEffectiveCapacity(animaState: { capacity: number; capacity_modifier: number }): number {
-    return Math.max(MIN_EFFECTIVE_CAPACITY, animaState.capacity + animaState.capacity_modifier);
-  }
-
-  private getPressure(animaState: { level: number; capacity: number }): number {
-    return Math.max(0, animaState.level) / Math.max(MIN_EFFECTIVE_CAPACITY, animaState.capacity);
-  }
-
-  private getEffectivePressure(animaState: { level: number; capacity: number; capacity_modifier: number }): number {
-    return Math.max(0, animaState.level) / this.getEffectiveCapacity(animaState);
-  }
-
-  private updateDerivedPressures(graph: GraphData): void {
+  private updateDerivedState(graph: GraphData): void {
     const store = this.deps.animaStore;
 
     for (const node of graph.nodes) {
       const state = store.get(node.id);
       if (!state) continue;
 
-      state.pressure = this.getPressure(state);
-      state.effective_pressure = this.getEffectivePressure(state);
+      state.capacity = this.computeBaseCapacity(node.radius);
+      state.capacity_modifier = 0;
+      state.container_1_capacity = state.capacity;
+      state.container_2_capacity = state.capacity * CONTAINER_2_MULTIPLIER;
+      state.container_3_capacity = state.capacity * CONTAINER_3_MULTIPLIER;
+      state.level = Math.max(0, Math.min(this.getMaxLevel(state), state.level));
+
+      const container1 = Math.min(state.level, state.container_1_capacity);
+      const container2 = Math.min(
+        Math.max(0, state.level - state.container_1_capacity),
+        state.container_2_capacity,
+      );
+      const container3 = Math.min(
+        Math.max(0, state.level - state.container_1_capacity - state.container_2_capacity),
+        state.container_3_capacity,
+      );
+
+      state.container_1_level = container1;
+      state.container_2_level = container2;
+      state.container_3_level = container3;
+      state.active = this.isNodeActive(state);
+      state.surplus_ratio = this.getSurplusRatio(state);
+      state.pressure = Math.min(
+        2,
+        DISPLAY_BASELINE_PRESSURE +
+          this.getContainer1FillRatio(state) * (1 - DISPLAY_BASELINE_PRESSURE) +
+          state.surplus_ratio,
+      );
+      state.effective_pressure = this.getTotalFillRatio(state);
+      state.focus_link_compression =
+        this.focusedNodeId === node.id && state.active
+          ? Math.min(MAX_FOCUSED_LINK_COMPRESSION, state.surplus_ratio)
+          : 0;
     }
   }
 
-  private getFocusedNeighborCount(graph: GraphData, nodeId: string): number {
-    const neighbors = new Set<string>([
-      ...Object.keys(graph.linksIn[nodeId] || {}),
-      ...Object.keys(graph.linksOut[nodeId] || {}),
-    ]);
-    return neighbors.size;
-  }
-
-  // Helper: undirected neighbor set (union of inbound and outbound links)
   private getUndirectedNeighborIds(graph: GraphData, nodeId: string): Set<string> {
     return new Set<string>([
       ...Object.keys(graph.linksIn[nodeId] || {}),
@@ -198,33 +192,67 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
     ]);
   }
 
-  // Move anima along links from higher pressure -> lower pressure.
-  private equalizeAcrossLinks(graph: GraphData, dt: number): void {
+  private emitFromFocusedNode(graph: GraphData, dt: number): void {
+    if (!this.focusedNodeId) return;
+
     const store = this.deps.animaStore;
+    const focused = store.get(this.focusedNodeId);
+    if (!focused || !this.isNodeActive(focused)) return;
 
-    const maxPerLink = Math.max(0, FLOW_RATE) * Math.max(0, dt);
+    const neighborIds = this.getUndirectedNeighborIds(graph, this.focusedNodeId);
+    if (neighborIds.size === 0) return;
 
-    for (const link of graph.links) {
-      const source = store.get(link.sourceId);
-      const target = store.get(link.targetId);
-      if (!source || !target) continue;
+    const perLinkBudget = Math.max(0, this.settings.emissionPerLinkPerSecond) * Math.max(0, dt);
+    if (perLinkBudget <= 0) return;
 
-      const sourcePressure = this.getEffectivePressure(source);
-      const targetPressure = this.getEffectivePressure(target);
-      if (sourcePressure === targetPressure) continue;
+    for (const neighborId of neighborIds) {
+      const target = store.get(neighborId);
+      if (!target) continue;
 
-      const flowFromSource  = sourcePressure > targetPressure;
-      const from            = flowFromSource ? source : target;
-      const to              = flowFromSource ? target : source;
-      const pressureDelta   = Math.abs(sourcePressure - targetPressure);
-      const demand          = pressureDelta * PRESSURE_RESPONSE * maxPerLink;
-      const supply          = Math.max(0, from.level);
-      const amount          = Math.max(0, Math.min(demand, maxPerLink, supply));
+      const availableSurplus = this.getSurplusLevel(focused);
+      if (availableSurplus <= 0) break;
+
+      const targetFreeSpace = this.getMaxLevel(target) - target.level;
+      if (targetFreeSpace <= 0) continue;
+
+      const drive = Math.max(0, 1 - this.getTotalFillRatio(target));
+      if (drive <= 0) continue;
+
+      const amount = Math.min(
+        availableSurplus,
+        targetFreeSpace,
+        perLinkBudget * drive,
+      );
 
       if (amount <= 0) continue;
 
-      from.level -= amount;
-      to.level += amount;
+      focused.level -= amount;
+      target.level += amount;
     }
+  }
+
+  private getMaxLevel(animaState: Pick<AnimaState, "capacity">): number {
+    return animaState.capacity * (1 + CONTAINER_2_MULTIPLIER + CONTAINER_3_MULTIPLIER);
+  }
+
+  private getContainer1FillRatio(animaState: Pick<AnimaState, "level" | "capacity">): number {
+    return Math.max(0, Math.min(1, animaState.level / Math.max(MIN_CONTAINER_1_CAPACITY, animaState.capacity)));
+  }
+
+  private getTotalFillRatio(animaState: Pick<AnimaState, "level" | "capacity">): number {
+    return Math.max(0, Math.min(1, animaState.level / Math.max(MIN_CONTAINER_1_CAPACITY, this.getMaxLevel(animaState))));
+  }
+
+  private getSurplusLevel(animaState: Pick<AnimaState, "level" | "capacity">): number {
+    return Math.max(0, animaState.level - animaState.capacity);
+  }
+
+  private getSurplusRatio(animaState: Pick<AnimaState, "level" | "capacity">): number {
+    const surplusCapacity = animaState.capacity * (CONTAINER_2_MULTIPLIER + CONTAINER_3_MULTIPLIER);
+    return Math.max(0, Math.min(1, this.getSurplusLevel(animaState) / Math.max(MIN_CONTAINER_1_CAPACITY, surplusCapacity)));
+  }
+
+  private isNodeActive(animaState: Pick<AnimaState, "level" | "capacity">): boolean {
+    return animaState.level + 1e-6 >= animaState.capacity;
   }
 }

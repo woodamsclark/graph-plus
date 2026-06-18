@@ -11,7 +11,7 @@ export type Command =
 | { type: "EndPanCamera" }
 | { type: "EndRotateCamera" }
 | { type: "EndFocusedNode" }
-| { type: "StartPanCamera";           screen: { x: number; y: number } }
+| { type: "StartPanCamera";           screen: { x: number; y: number }; mode?: "target" | "offset" }
 | { type: "UpdatePanCamera";          screen: { x: number; y: number } }
 | { type: "StartRotateCamera";        screen: { x: number; y: number } }
 | { type: "UpdateRotateCamera";       screen: { x: number; y: number } }

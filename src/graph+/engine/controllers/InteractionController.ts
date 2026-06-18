@@ -42,8 +42,8 @@ export class InteractionController {
     this.deps.camera?.resetCamera();
   }
 
-  startPan(screen: { x: number; y: number }): void {
-    this.deps.camera?.startPan(screen.x, screen.y);
+  startPan(screen: { x: number; y: number }, mode: "target" | "offset" = "target"): void {
+    this.deps.camera?.startPan(screen.x, screen.y, mode);
   }
 
   updatePan(screen: { x: number; y: number }): void {
@@ -79,6 +79,9 @@ export class InteractionController {
   }
 
   setFocusedNode(nodeId: string | null): void {
+    if (nodeId !== null) {
+      this.deps.physics?.start();
+    }
     this.deps.uiStateStore.setFocusedNode(nodeId);
   }
 

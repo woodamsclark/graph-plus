@@ -235,8 +235,13 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
       }
 
       if (this.mode.rightIntent) {
-        this.startRotate(e.screen.x, e.screen.y);
-        this.mode = { kind: "rotate", pointerId: e.pointerId };
+        if (this.isFocusedModeActive()) {
+          this.startPan(e.screen.x, e.screen.y, "offset");
+          this.mode = { kind: "pan", pointerId: e.pointerId };
+        } else {
+          this.startRotate(e.screen.x, e.screen.y);
+          this.mode = { kind: "rotate", pointerId: e.pointerId };
+        }
         return;
       }
 
@@ -360,6 +365,11 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
     const screenY = e.screen.y;
 
     const zoom = e.ctrl || e.meta;
+    if (!zoom && this.isFocusedModeActive()) {
+      this.rotateFromWheel(screenX, screenY, e);
+      return;
+    }
+
     if (zoom) {
       const direction = e.deltaY > 0 ? 1 : -1;
       this.cmd({
@@ -533,10 +543,16 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
     this.cmd({ type: "SetMouseGravity",     on: true      });
   }
 
-  private startPan(screenX: number, screenY: number) {
-    this.cmd({ type: "SetFocusedNode", nodeId: null });
+  private startPan(
+    screenX: number,
+    screenY: number,
+    mode: "target" | "offset" = "target",
+  ) {
+    if (mode === "target") {
+      this.cmd({ type: "SetFocusedNode", nodeId: null });
+    }
     this.cmd({ type: "SetPanning", on: true });
-    this.cmd({ type: "StartPanCamera", screen: { x: screenX, y: screenY } });
+    this.cmd({ type: "StartPanCamera", screen: { x: screenX, y: screenY }, mode });
   }
 
   private updatePan(screenX: number, screenY: number) {
@@ -564,6 +580,25 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
 
   private updateZoom(screenX: number, screenY: number, delta: number) {
     this.cmd({ type: "ZoomCamera", screen: { x: screenX, y: screenY }, delta });
+  }
+
+  private rotateFromWheel(
+    screenX: number,
+    screenY: number,
+    e: Extract<UserInputEvent, { type: "WHEEL" }>,
+  ) {
+    const delta = this.normalizeWheelDelta(e);
+    if (delta.x === 0 && delta.y === 0) return;
+
+    this.cmd({ type: "StartRotateCamera", screen: { x: screenX, y: screenY } });
+    this.cmd({
+      type: "UpdateRotateCamera",
+      screen: {
+        x: screenX + delta.x,
+        y: screenY + delta.y,
+      },
+    });
+    this.cmd({ type: "EndRotateCamera" });
   }
 
   private updateDoubleTapZoom(
@@ -604,6 +639,28 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
 
   private isFocusedModeActive(): boolean {
     return this.deps.interactionState.get().followedNodeId !== null;
+  }
+
+  private normalizeWheelDelta(e: Extract<UserInputEvent, { type: "WHEEL" }>): { x: number; y: number } {
+    const pageScale = Math.max(
+      this.deps.canvas.clientWidth,
+      this.deps.canvas.clientHeight,
+      1,
+    );
+
+    let scale = 1;
+    if (e.deltaMode === 1) scale = 16;
+    else if (e.deltaMode === 2) scale = pageScale;
+
+    return {
+      x: this.clampWheelPixels(e.deltaX * scale),
+      y: this.clampWheelPixels(e.deltaY * scale),
+    };
+  }
+
+  private clampWheelPixels(delta: number): number {
+    const maxWheelPixelsPerTick = 48;
+    return Math.max(-maxWheelPixelsPerTick, Math.min(maxWheelPixelsPerTick, delta));
   }
 
   private upsertPointer(id: number, kind: "mouse" | "touch" | "pen", x: number, y: number) {
