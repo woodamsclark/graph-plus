@@ -1,6 +1,5 @@
 import type { GraphData, Node } from "../../types/domain/graph.ts";
-import type { CameraAccessor }      from "../../types/domain/camera.ts";
-import { CameraController }     from "../5. Render/CameraController.ts";
+import type { CameraAccessor }  from "../../types/domain/camera.ts";
 
 export class HitTester {
   public getNodeAtScreenPoint(
@@ -11,30 +10,36 @@ export class HitTester {
   ): Node | null {
     if (!graph || !camera) return null;
 
-    let best: Node | null = null;
+    let bestNode: Node | null = null;
+    let bestDepth = Infinity;
     let bestDistSq = Infinity;
+    const depthEpsilon = 0.0001;
 
     for (const node of graph.nodes) {
       const p = camera.worldToScreen(node.location);
+      if (p.depth < 0) continue;
 
       const dx = screenX - p.x;
       const dy = screenY - p.y;
       const d2 = dx * dx + dy * dy;
-
       const rPx = node.radius * p.scale;
+      if (d2 > rPx * rPx) continue;
 
-      if (d2 <= rPx * rPx && d2 < bestDistSq) {
+      const isNearer = p.depth + depthEpsilon < bestDepth;
+      const isSameDepth = Math.abs(p.depth - bestDepth) <= depthEpsilon;
+      if (isNearer || (isSameDepth && d2 < bestDistSq)) {
+        bestDepth = p.depth;
         bestDistSq = d2;
-        best = node;
+        bestNode = node;
       }
     }
 
-    return best;
+    return bestNode;
   }
 
   public getNodeIdLabelAtScreenPoint(
     graph:    GraphData | null,
-    camera:   CameraController | null,
+    camera:   CameraAccessor | null,
     screenX:  number,
     screenY:  number
   ): { id: string; label: string } | null {

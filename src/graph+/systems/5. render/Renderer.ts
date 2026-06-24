@@ -16,19 +16,17 @@ type ProjectedNode = {
   focusAlpha: number;
 };
 
-type Drawable =
-  | {
-      kind: "link";
-      depth: number;
-      link: RenderLinkState;
-      src: ProjectedNode;
-      tgt: ProjectedNode;
-    }
-  | {
-      kind: "node";
-      depth: number;
-      projected: ProjectedNode;
-    };
+type LinkDrawable = {
+  depth: number;
+  link: RenderLinkState;
+  src: ProjectedNode;
+  tgt: ProjectedNode;
+};
+
+type NodeDrawable = {
+  depth: number;
+  projected: ProjectedNode;
+};
 
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
@@ -71,7 +69,8 @@ export class Renderer {
 
     const projectedNodes: ProjectedNode[] = [];
     const nodeMap = new Map<string, ProjectedNode>();
-    const drawables: Drawable[] = [];
+    const nodeDrawables: NodeDrawable[] = [];
+    const linkDrawables: LinkDrawable[] = [];
 
     for (const node of frame.nodes) {
       if (!node.visible || !node.world) continue;
@@ -87,8 +86,7 @@ export class Renderer {
       projectedNodes.push(projected);
       nodeMap.set(node.id, projected);
 
-      drawables.push({
-        kind: "node",
+      nodeDrawables.push({
         depth: p.depth,
         projected,
       });
@@ -101,8 +99,7 @@ export class Renderer {
       const tgt = nodeMap.get(link.targetId);
       if (!src || !tgt) continue;
 
-      drawables.push({
-        kind: "link",
+      linkDrawables.push({
         depth: (src.p.depth + tgt.p.depth) / 2,
         link,
         src,
@@ -110,9 +107,12 @@ export class Renderer {
       });
     }
 
-    drawables.sort((a, b) => b.depth - a.depth); // far -> near
+    linkDrawables.sort((a, b) => b.depth - a.depth); // far -> near
+    nodeDrawables.sort((a, b) => b.depth - a.depth); // far -> near
 
-    this.drawDrawables(drawables, frame);
+    // Keep links depth-sorted, but always paint nodes on top so overlap reads consistently.
+    this.drawLinks(linkDrawables, frame);
+    this.drawNodes(nodeDrawables, frame);
     this.drawLabels(projectedNodes, frame);
   }
 
@@ -168,70 +168,75 @@ export class Renderer {
     this.ctx.globalAlpha = 1;
   }
 
-  private drawDrawables(drawables: Drawable[], frame: RenderFrame): void {
+  private drawLinks(drawables: LinkDrawable[], frame: RenderFrame): void {
     this.ctx.save();
 
-    for (const item of drawables) {
-      if (item.kind === "link") {
-        const { link, src, tgt } = item;
-        const a = src.p;
-        const b = tgt.p;
+    for (const { link, src, tgt } of drawables) {
+      const a = src.p;
+      const b = tgt.p;
 
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const len = Math.hypot(dx, dy) || 1;
-        const ux = dx / len;
-        const uy = dy / len;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len;
+      const uy = dy / len;
 
-        const startX = a.x + ux * (src.node.radius * a.scale);
-        const startY = a.y + uy * (src.node.radius * a.scale);
-        const endX   = b.x - ux * (tgt.node.radius * b.scale);
-        const endY   = b.y - uy * (tgt.node.radius * b.scale);
+      const startX = a.x + ux * (src.node.radius * a.scale);
+      const startY = a.y + uy * (src.node.radius * a.scale);
+      const endX   = b.x - ux * (tgt.node.radius * b.scale);
+      const endY   = b.y - uy * (tgt.node.radius * b.scale);
 
-        const pressureDelta = Math.abs(src.node.animaPressure - tgt.node.animaPressure);
-        const pressureAlpha = Math.max(0.2, Math.min(1, 0.2 + pressureDelta * 0.8));
-        const focusAlpha = (src.focusAlpha + tgt.focusAlpha) / 2;
-        this.ctx.globalAlpha = pressureAlpha * focusAlpha;
-        this.ctx.strokeStyle = frame.settings.linkColor;
-        this.ctx.lineWidth = link.thickness;
-        this.ctx.beginPath();
-        this.ctx.moveTo(startX, startY);
-        this.ctx.lineTo(endX, endY);
-        this.ctx.stroke();
-        this.ctx.globalAlpha = 1;
-      } else {
-        const { node, p, focusAlpha } = item.projected;
-        const r = node.radius * p.scale;
-        const fillColor =
-          node.type === "tag"
-            ? frame.settings.tagColor
-            : frame.settings.nodeColor;
-        const displayPressure = Math.max(0, Math.min(1.5, node.animaPressure));
-        const darken = Math.max(0, 1 - Math.min(1, displayPressure));
-        const brighten = Math.max(0, displayPressure - 1);
+      const pressureDelta = Math.abs(src.node.animaPressure - tgt.node.animaPressure);
+      const pressureAlpha = Math.max(0.2, Math.min(1, 0.2 + pressureDelta * 0.8));
+      const focusAlpha = (src.focusAlpha + tgt.focusAlpha) / 2;
+      this.ctx.globalAlpha = pressureAlpha * focusAlpha;
+      this.ctx.strokeStyle = frame.settings.linkColor;
+      this.ctx.lineWidth = link.thickness;
+      this.ctx.beginPath();
+      this.ctx.moveTo(startX, startY);
+      this.ctx.lineTo(endX, endY);
+      this.ctx.stroke();
+      this.ctx.globalAlpha = 1;
+    }
 
-        this.ctx.globalAlpha = focusAlpha;
-        this.ctx.fillStyle = fillColor;
+    this.ctx.restore();
+  }
+
+  private drawNodes(drawables: NodeDrawable[], frame: RenderFrame): void {
+    this.ctx.save();
+
+    for (const { projected } of drawables) {
+      const { node, p, focusAlpha } = projected;
+      const r = node.radius * p.scale;
+      const fillColor =
+        node.type === "tag"
+          ? frame.settings.tagColor
+          : frame.settings.nodeColor;
+      const displayPressure = Math.max(0, Math.min(1.5, node.animaPressure));
+      const darken = Math.max(0, 1 - Math.min(1, displayPressure));
+      const brighten = Math.max(0, displayPressure - 1);
+
+      this.ctx.globalAlpha = focusAlpha;
+      this.ctx.fillStyle = fillColor;
+      this.ctx.beginPath();
+      this.ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      if (darken > 0) {
+        this.ctx.globalAlpha = focusAlpha * Math.min(0.65, darken * 0.65);
+        this.ctx.fillStyle = "#000000";
         this.ctx.beginPath();
         this.ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
         this.ctx.fill();
-
-        if (darken > 0) {
-          this.ctx.globalAlpha = focusAlpha * Math.min(0.65, darken * 0.65);
-          this.ctx.fillStyle = "#000000";
-          this.ctx.beginPath();
-          this.ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-          this.ctx.fill();
-        } else if (brighten > 0) {
-          this.ctx.globalAlpha = focusAlpha * Math.min(0.35, brighten * 0.7);
-          this.ctx.fillStyle = "#ffffff";
-          this.ctx.beginPath();
-          this.ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-          this.ctx.fill();
-        }
-
-        this.ctx.globalAlpha = 1;
+      } else if (brighten > 0) {
+        this.ctx.globalAlpha = focusAlpha * Math.min(0.35, brighten * 0.7);
+        this.ctx.fillStyle = "#ffffff";
+        this.ctx.beginPath();
+        this.ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        this.ctx.fill();
       }
+
+      this.ctx.globalAlpha = 1;
     }
 
     this.ctx.restore();

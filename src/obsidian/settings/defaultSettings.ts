@@ -56,6 +56,7 @@ export const DEFAULT_SETTINGS: GraphPlusSettings = {
     initialState: {
       yaw: 0,
       pitch: 0,
+      roll: 0,
       distance: 4000,
       targetX: 0,
       targetY: 0,

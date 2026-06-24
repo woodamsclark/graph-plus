@@ -587,7 +587,11 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
     screenY: number,
     e: Extract<UserInputEvent, { type: "WHEEL" }>,
   ) {
-    const delta = this.normalizeWheelDelta(e);
+    const rawDelta = this.normalizeWheelDelta(e);
+    const delta = {
+      x: -rawDelta.x,
+      y: rawDelta.y,
+    };
     if (delta.x === 0 && delta.y === 0) return;
 
     this.cmd({ type: "StartRotateCamera", screen: { x: screenX, y: screenY } });

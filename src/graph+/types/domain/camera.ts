@@ -3,6 +3,7 @@ import type { Vec3 } from "./math.ts";
 export type CameraState = {
   yaw:        number;
   pitch:      number;
+  roll?:      number;
   distance:   number;
   targetX:    number;
   targetY:    number;

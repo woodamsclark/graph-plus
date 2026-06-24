@@ -58,6 +58,7 @@ export type CameraSettings = {
   initialState: {
     yaw:        number;
     pitch:      number;
+    roll?:      number;
     distance:   number;
     targetX:    number;
     targetY:    number;

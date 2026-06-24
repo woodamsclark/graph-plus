@@ -10,6 +10,7 @@ import {
   screenToWorld,
   screenToWorld2D,
   screenToWorld3D,
+  rotateCameraLocally,
   clamp,
   type Viewport,
 } from './CameraProjection.ts';
@@ -17,7 +18,6 @@ import {
 export class CameraController implements ModuleWithSettings<'camera'> {
   private settings      : SettingsFor<'camera'>
   private cameraState   : CameraState;
-  private cameraSnapShot: CameraState | null = null;
   private worldAnchor   : Vec3        | null = null;
   private screenAnchor  : { screenX: number; screenY: number } | null = null;
   private panMode: "target" | "offset" = "target";
@@ -148,31 +148,31 @@ export class CameraController implements ModuleWithSettings<'camera'> {
 
   startRotate(screenX: number, screenY: number) {
     this.screenAnchor = { screenX, screenY };
-    this.cameraSnapShot = { ...this.cameraState };
   }
 
   updateRotate(screenX: number, screenY: number) {
-    if (!this.screenAnchor || !this.cameraSnapShot) return;
+    if (!this.screenAnchor) return;
 
     const dx = screenX - this.screenAnchor.screenX;
     const dy = screenY - this.screenAnchor.screenY;
+    if (dx === 0 && dy === 0) return;
 
-    let yaw = this.cameraSnapShot.yaw - dx * this.settings.camera.rotateSensitivityX;
-    let pitch = this.cameraSnapShot.pitch - dy * this.settings.camera.rotateSensitivityY;
+    const orientation = rotateCameraLocally(
+      this.cameraState,
+      -dx * this.settings.camera.rotateSensitivityX,
+      -dy * this.settings.camera.rotateSensitivityY,
+      this.settings.camera.minPitch,
+      this.settings.camera.maxPitch,
+    );
 
-    const maxPitch = this.settings.camera.maxPitch;
-    const minPitch = this.settings.camera.minPitch;
-
-    if (pitch > maxPitch) pitch = maxPitch;
-    if (pitch < minPitch) pitch = minPitch;
-
-    this.cameraState.yaw = yaw;
-    this.cameraState.pitch = pitch;
+    this.cameraState.yaw = orientation.yaw;
+    this.cameraState.pitch = orientation.pitch;
+    this.cameraState.roll = orientation.roll;
+    this.screenAnchor = { screenX, screenY };
   }
 
   endRotate() {
     this.screenAnchor = null;
-    this.cameraSnapShot = null;
   }
 
   updateZoom(_screenX: number, _screenY: number, delta: number) {
@@ -198,7 +198,6 @@ export class CameraController implements ModuleWithSettings<'camera'> {
   }
 
   private clearInteractionAnchors() {
-    this.cameraSnapShot = null;
     this.worldAnchor = null;
     this.screenAnchor = null;
     this.panMode = "target";
