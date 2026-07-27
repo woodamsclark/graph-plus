@@ -35,6 +35,8 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
   }
 
   tick(dt: number): void {
+    this.deps.animaStore.beginFlowFrame();
+
     const graph = this.deps.graph?.get();
     if (!graph) {
       this.syncedGraph = null;
@@ -228,6 +230,12 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
 
       focused.level -= amount;
       target.level += amount;
+      store.recordFlow({
+        fromNodeId: this.focusedNodeId,
+        toNodeId: neighborId,
+        amount,
+        strength: Math.min(1, amount / perLinkBudget),
+      });
     }
   }
 

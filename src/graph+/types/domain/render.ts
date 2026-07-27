@@ -40,9 +40,17 @@ export type RenderLinkState = {
   visible:    boolean;
 };
 
+export type RenderAnimaFlowState = {
+  fromNodeId: string;
+  toNodeId:   string;
+  amount:     number;
+  strength:   number;
+};
+
 export type RenderFrame = {
-  nodes:    RenderNodeState[];
-  links:    RenderLinkState[];
-  settings: RenderSettings;
+  nodes:      RenderNodeState[];
+  links:      RenderLinkState[];
+  animaFlows: RenderAnimaFlowState[];
+  settings:   RenderSettings;
   focusPlane: RenderFocusPlane;
 };

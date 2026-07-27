@@ -15,6 +15,13 @@ export type AnimaState = {
   surplus_ratio: number;
 };
 
+export type AnimaFlow = {
+  fromNodeId: string;
+  toNodeId: string;
+  amount: number;
+  strength: number;
+};
+
 // Experimental Anima constants (tunable without UI for now)
 const INITIAL_CAPACITY = 100;
 const INITIAL_LEVEL = 0;
@@ -31,6 +38,7 @@ const INITIAL_SURPLUS_RATIO = 0;
 
 export class AnimaStateStore {
   private state = new Map<string, AnimaState>();
+  private currentFlows = new Map<string, AnimaFlow>();
 
   get(nodeId: string): AnimaState | null {
     return this.state.get(nodeId) ?? null;
@@ -67,6 +75,27 @@ export class AnimaStateStore {
       current.container_2_capacity +
       current.container_3_capacity;
     current.level = Math.max(0, Math.min(maxLevel, current.level + amount));
+  }
+
+  beginFlowFrame(): void {
+    this.currentFlows.clear();
+  }
+
+  recordFlow(flow: AnimaFlow): void {
+    const key = `${flow.fromNodeId}\u0000${flow.toNodeId}`;
+    const current = this.currentFlows.get(key);
+
+    if (current) {
+      current.amount += flow.amount;
+      current.strength = Math.max(current.strength, flow.strength);
+      return;
+    }
+
+    this.currentFlows.set(key, { ...flow });
+  }
+
+  getCurrentFlows(): readonly AnimaFlow[] {
+    return Array.from(this.currentFlows.values());
   }
 
   clearMissing(validNodeIds: Set<string>): void {

@@ -78,9 +78,17 @@ export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
       visible: true,
     }));
 
+    const animaFlows = animaStore.getCurrentFlows().map((flow) => ({
+      fromNodeId: flow.fromNodeId,
+      toNodeId: flow.toNodeId,
+      amount: flow.amount,
+      strength: flow.strength,
+    }));
+
     const frame: RenderFrame = {
       nodes,
       links,
+      animaFlows,
       settings,
       focusPlane,
     };
