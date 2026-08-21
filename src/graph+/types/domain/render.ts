@@ -1,4 +1,5 @@
 import type { Vec3 } from "./math.ts";
+import type { NodeType } from "./graph.ts";
 
 export type RenderSettings = {
   backgroundColor:  string;
@@ -24,12 +25,14 @@ export type RenderFocusPlane = {
 export type RenderNodeState = {
   id:           string;
   label:        string;
-  type:         "note" | "tag" | "canvas";
+  type:         NodeType;
   world:        Vec3;
   radius:       number;
   animaPressure: number;
   labelOpacity: number;
   visible:      boolean;
+  color?:       string;
+  role?:        'root' | 'branch' | 'leaf' | 'disconnected';
 };
 
 export type RenderLinkState = {
@@ -38,6 +41,8 @@ export type RenderLinkState = {
   targetId:   string;
   thickness:  number;
   visible:    boolean;
+  color?:     string;
+  role?:      'tree' | 'cross';
 };
 
 export type RenderAnimaFlowState = {

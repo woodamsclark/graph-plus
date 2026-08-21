@@ -1,493 +1,481 @@
-import { App, TFile }                               from "obsidian";
-import type { GraphData, Node, Link }               from "../../types/domain/graph.ts";
-import type { ModuleWithSettings, SettingsFor }     from "../../types/index.ts";
-import type { GraphDeps }                           from "../../deps/graph.deps.ts";
-import type { PersistedGraphState, WeightedEdge }   from "../../types/domain/graph.ts";
-
+import { App, TFile } from 'obsidian';
+import type {
+  GraphData,
+  Link,
+  Node,
+  NodeFacets,
+  PersistedGraphState,
+  WeightedEdge,
+} from '../../types/domain/graph.ts';
+import type { GraphLensState } from '../../types/domain/lens.ts';
+import { cloneGraphLens, createDefaultGraphLens } from '../../types/domain/lens.ts';
+import type { ModuleWithSettings, SettingsFor } from '../../types/index.ts';
+import type { GraphDeps } from '../../deps/graph.deps.ts';
+import { projectGraph } from '../../lens/GraphProjector.ts';
 
 interface ResolvedLinks {
-    [sourcePath: string]: { [targetPath: string]: number };
+  [sourcePath: string]: { [targetPath: string]: number };
 }
 
 export class Graph implements ModuleWithSettings<'graph'> {
-    private settings: SettingsFor<'graph'>;
-    private deps:           GraphDeps;
-    private data:           GraphData           | null = null;
-    private cachedState:    PersistedGraphState | null = null;
+  private settings: SettingsFor<'graph'>;
+  private deps: GraphDeps;
+  private sourceData: GraphData | null = null;
+  private data: GraphData | null = null;
+  private cachedState: PersistedGraphState | null = null;
+  private lensState: GraphLensState;
 
-    constructor(settings: SettingsFor<'graph'>, deps: GraphDeps) {
-        this.deps       = deps;
-        this.settings   = settings;
+  constructor(settings: SettingsFor<'graph'>, deps: GraphDeps, initialLens?: GraphLensState) {
+    this.deps = deps;
+    this.settings = settings;
+    this.lensState = initialLens
+      ? cloneGraphLens(initialLens)
+      : createDefaultGraphLens(settings.base.showTags);
+  }
+
+  updateSettings(settings: SettingsFor<'graph'>): void {
+    this.settings = settings;
+    if (this.sourceData) {
+      for (const link of this.sourceData.links) {
+        link.length = settings.layout.linkLength;
+        link.strength = settings.layout.linkStrength;
+        link.thickness = settings.tuning.linkThickness * Math.sqrt(link.weight);
+      }
+      this.computeNodeRadius(this.sourceData);
     }
+    this.applyProjection();
+  }
 
-    updateSettings(settings: SettingsFor<'graph'>): void {
-        this.settings = settings;
+  async initialize(): Promise<void> {
+    await this.ensureBuilt();
+  }
+
+  async ensureBuilt(): Promise<GraphData> {
+    if (!this.sourceData) await this.buildGraph();
+    if (!this.data) throw new Error('Graph failed to build.');
+    return this.data;
+  }
+
+  get(): GraphData | null {
+    return this.data;
+  }
+
+  getSource(): GraphData | null {
+    return this.sourceData;
+  }
+
+  getOrThrow(): GraphData {
+    if (!this.data) throw new Error('Graph has not been built yet.');
+    return this.data;
+  }
+
+  hasGraph(): boolean {
+    return this.data !== null;
+  }
+
+  getLensState(): GraphLensState {
+    return cloneGraphLens(this.lensState);
+  }
+
+  setLensState(next: GraphLensState): GraphData | null {
+    this.lensState = cloneGraphLens(next);
+    this.applyProjection();
+    return this.data;
+  }
+
+  async save(): Promise<void> {
+    if (!this.sourceData) return;
+    const state = this.extractState(this.sourceData, this.deps.app);
+    await this.saveState(state);
+    this.cachedState = state;
+  }
+
+  async rebuild(): Promise<void> {
+    if (this.sourceData) this.cachedState = this.extractState(this.sourceData, this.deps.app);
+    this.sourceData = null;
+    this.data = null;
+    await this.ensureBuilt();
+  }
+
+  destroy(): void {
+    this.sourceData = null;
+    this.data = null;
+    this.cachedState = null;
+  }
+
+  private async buildGraph(): Promise<void> {
+    const state = await this.loadState(this.deps.app);
+    const graph = this.generateGraph(this.deps.app);
+    if (state) this.applyPositions(graph, state);
+    this.computeAdjacency(graph);
+    this.computeNodeRadius(graph);
+    this.markBidirectional(graph.links);
+    this.sourceData = graph;
+    this.applyProjection();
+  }
+
+  private applyProjection(): void {
+    if (!this.sourceData) return;
+    this.data = projectGraph(this.sourceData, this.lensState, {
+      ringSpacing: Math.max(80, this.settings.layout.linkLength * 1.45),
+    });
+  }
+
+  private async loadState(app: App): Promise<PersistedGraphState | null> {
+    if (this.cachedState) return this.cachedState;
+    const plugin = this.deps.plugin;
+    if (!plugin) return null;
+    const raw = await plugin.loadData().catch(() => null);
+    if (!raw) return null;
+    const state = raw?.graphStateByVault?.[app.vault.getName()] ?? null;
+    this.cachedState = state;
+    return state;
+  }
+
+  private async saveState(state: PersistedGraphState): Promise<void> {
+    const plugin = this.deps.plugin;
+    if (!plugin) return;
+    const raw = await plugin.loadData().catch(() => ({}));
+    const next = raw ?? {};
+    next.graphStateByVault ??= {};
+    next.graphStateByVault[state.vaultId] = state;
+    await plugin.saveData(next);
+  }
+
+  private extractState(graph: GraphData, app: App): PersistedGraphState {
+    const nodePositions: PersistedGraphState['nodePositions'] = {};
+    for (const node of graph.nodes) {
+      const { x, y, z } = node.location;
+      if (![x, y, z].every(Number.isFinite)) continue;
+      nodePositions[node.id] = { x, y, z };
     }
+    return { version: 1, vaultId: app.vault.getName(), nodePositions };
+  }
 
-    public async initialize(): Promise<void> {
-        await this.ensureBuilt();
+  private applyPositions(graph: GraphData, state: PersistedGraphState): void {
+    for (const node of graph.nodes) {
+      const position = state.nodePositions?.[node.id];
+      if (!position) continue;
+      node.location = { ...position };
+      node.velocity = { x: 0, y: 0, z: 0 };
     }
+  }
 
-    public async ensureBuilt(): Promise<GraphData> {
-        if (!this.data) {
-            await this.buildGraph();
-        }
+  private generateGraph(app: App): GraphData {
+    const { tags, edges: noteTagEdges } = this.collectTagsAndNoteTagEdges(app);
+    const unresolved = this.collectUnresolved(app);
+    const nodes = [
+      ...this.createFileNodes(app),
+      ...this.createTagNodes(tags),
+      ...this.createUnresolvedNodes(unresolved.targets),
+    ];
+    const nodeById = new Map(nodes.map((node) => [node.id, node] as const));
+    const edges: WeightedEdge[] = [
+      ...this.noteNoteEdges(app),
+      ...noteTagEdges,
+      ...this.tagTagEdges(tags),
+      ...unresolved.edges,
+    ];
+    const links = this.buildLinksFromEdges(edges, nodeById);
+    this.addFrontmatterRelations(app, links);
+    return {
+      nodes,
+      links,
+      linksOut: {},
+      linksIn: {},
+      projection: {
+        mode: 'free',
+        sourceNodeCount: nodes.length,
+        sourceLinkCount: links.length,
+      },
+    };
+  }
 
-        if (!this.data) {
-            throw new Error("Graph failed to build.");
-        }
-
-        return this.data;
+  private collectTagsAndNoteTagEdges(app: App): { tags: Set<string>; edges: WeightedEdge[] } {
+    const tags = new Set<string>();
+    const edges: WeightedEdge[] = [];
+    const tagMap = (app.metadataCache as any).getTags?.() as Record<string, number> | undefined;
+    for (const rawTag of Object.keys(tagMap ?? {})) {
+      const clean = this.normalizeTagName(rawTag);
+      if (clean) this.addTagPathToSet(tags, clean);
     }
-
-    private style(graph: GraphData){
-        this.computeNodeRadius(graph);
-        // or do I have Anima completely style the graph?
-        //this.computeLinkStrength(graph); // linkStrength = 1+ number of linksIn
-        //this.computeLinkLength(graph); // linkLength = linkLength / number of linksIn
-
+    for (const file of app.vault.getMarkdownFiles()) {
+      for (const cleanTag of this.extractTagsFromFile(file, app)) {
+        if (!cleanTag) continue;
+        this.addTagPathToSet(tags, cleanTag);
+        edges.push({ sourceId: file.path, targetId: cleanTag, weight: 1, relation: 'tag' });
+      }
     }
-
-    public get(): GraphData | null {
-        return this.data;
-    }
-
-    public getOrThrow(): GraphData {
-        if (!this.data) {
-            throw new Error("Graph has not been built yet.");
-        }
-
-        return this.data;
-    }
-
-    public hasGraph(): boolean {
-        return this.data !== null;
-    }
-
-    public async save(): Promise<void> {
-        if (!this.data) return;
-
-        const app = this.deps.app;
-        const state = this.extractState(this.data, app);
-
-        await this.saveState(state);
-        this.cachedState = state;
-    }
-
-    public async rebuild(): Promise<void> {
-        if (this.data) {
-            const app           = this.deps.app;
-            this.cachedState    = this.extractState(this.data, app);
-        }
-
-        this.invalidate();
-        await this.ensureBuilt();
-    }
-
-    private invalidate(): void {
-        this.data = null;
-    }
-
-    public destroy(): void {
-        this.data           = null;
-        this.cachedState    = null;
-    }
-
-    private async buildGraph(): Promise<void> {
-        const app   = this.deps.app;
-        const state = await this.loadState(app);
-        const graph = this.generateGraph(app);
-
-        if (state) this.applyPositions(graph, state);
-        this.computeAdjacency(graph);
-        this.computeNodeRadius(graph);
-        this.markBidirectional(graph.links);
-
-        this.data = graph;
-    }
-
-    private async loadState(app: App): Promise<PersistedGraphState | null> {
-        if (this.cachedState) return this.cachedState;
-
-        const plugin = this.deps.plugin;
-        if (!plugin) return null;
-
-        const raw = await plugin.loadData().catch(() => null);
-        if (!raw) return null;
-
-        const vaultId = app.vault.getName();
-        const state = raw?.graphStateByVault?.[vaultId] ?? null;
-
-        this.cachedState = state;
-        return state;
-    }
-
-    private async saveState(state: PersistedGraphState): Promise<void> {
-        const plugin = this.deps.plugin;
-        if (!plugin) return;
-
-        const raw = await plugin.loadData().catch(() => ({}));
-        const next = raw ?? {};
-        next.graphStateByVault ??= {};
-        next.graphStateByVault[state.vaultId] = state;
-
-        await plugin.saveData(next);
-    }  
-
-    private extractState(graph: GraphData, app: App): PersistedGraphState {
-        const vaultId = app.vault.getName();
-        const nodePositions: PersistedGraphState["nodePositions"] = {};
-
-        for (const n of graph.nodes) {
-            if (!Number.isFinite(n.location.x) || !Number.isFinite(n.location.y) || !Number.isFinite(n.location.z)) continue;
-            nodePositions[n.id] = { x: n.location.x, y: n.location.y, z: n.location.z };
-        }
-
-        return { version: 1, vaultId, nodePositions };
-    }
-
-    private applyPositions(graph: GraphData, state: PersistedGraphState): void {
-        const pos = state.nodePositions || {};
-        for (const n of graph.nodes) {
-            const p = pos[n.id];
-            if (!p) continue;
-            n.location.x = p.x;
-            n.location.y = p.y;
-            n.location.z = p.z;
-            n.velocity.x = 0;
-            n.velocity.y = 0;
-            n.velocity.z = 0;
-        }
-    }
-
-    private generateGraph(app: App): GraphData {
-        const settings = this.settings;
-        const showTags = settings.base.showTags;
-
-        let tags = new Set<string>();
-        let noteTagEdges: WeightedEdge[] = [];
-
-        if (showTags) {
-            const collected = this.collectTagsAndNoteTagEdges(app);
-            tags = collected.tags;
-            noteTagEdges = collected.edges;
-        }
-
-        const nodes     = this.createNodes(app, tags, showTags);
-        const nodeById  = new Map(nodes.map((n) => [n.id, n] as const));
-        const edges     = this.collectEdges(app, showTags, tags, noteTagEdges);
-        const links     = this.buildLinksFromEdges(edges, nodeById);
-
-        return { nodes, links, linksOut: {}, linksIn: {} };
-    }
-
-    private collectEdges(
-        app: App,
-        showTags: boolean,
-        tags: Set<string>,
-        noteTagEdges: WeightedEdge[],
-    ): WeightedEdge[] {
-        const edges: WeightedEdge[] = [];
-
-        for (const edge of this.noteNoteEdges(app)) {
-            edges.push(edge);
-        }
-
-        if (!showTags) return edges;
-
-        edges.push(...noteTagEdges);
-
-        for (const edge of this.tagTagEdges(tags)) {
-            edges.push(edge);
-        }
-
-        return edges;
-    }
-
-    private collectTagsAndNoteTagEdges(app: App): { tags: Set<string>; edges: WeightedEdge[] } {
-        const tags = new Set<string>();
-        const edges: WeightedEdge[] = [];
-
-        const tagMap = (app.metadataCache as any).getTags?.() as Record<string, number> | undefined;
-        if (tagMap) {
-            for (const rawTag of Object.keys(tagMap)) {
-                const clean = this.normalizeTagName(rawTag);
-                if (clean) this.addTagPathToSet(tags, clean);
-            }
-        }
-
-        for (const file of app.vault.getMarkdownFiles()) {
-            const sourceId = file.path;
-
-            for (const cleanTag of this.extractTagsFromFile(file, app)) {
-                if (!cleanTag) continue;
-
-                this.addTagPathToSet(tags, cleanTag);
-                edges.push({ sourceId, targetId: cleanTag, weight: 1 });
-            }
-        }
-
-        return { tags, edges };
-    }
-
-    private createNodes(app: App, tags: Set<string>, showTags: boolean): Node[] {
-        const nodes: Node[] = [];
-
-        if (showTags) {
-            nodes.push(...this.createTagNodes(tags));
-        }
-
-        nodes.push(...this.createNoteNodes(app));
-        return nodes;
-    }
-
-    private *noteNoteEdges(app: App): IterableIterator<WeightedEdge> {
-        const settings                      = this.settings;
-        const resolvedLinks: ResolvedLinks  = (app.metadataCache as any).resolvedLinks || {};
-        const countDuplicates               = Boolean(settings.base.countDuplicateLinks);
-
-        for (const sourcePath of Object.keys(resolvedLinks)) {
-            const targets = resolvedLinks[sourcePath] || {};
-            for (const targetPath of Object.keys(targets)) {
-                const rawCount = Number(targets[targetPath]) || 1;
-                yield {
-                    sourceId:   sourcePath,
-                    targetId:   targetPath,
-                    weight:     countDuplicates ? rawCount : 1,
-                };
-            }
-        }
-    }
-
-    private *tagTagEdges(tags: Set<string>): IterableIterator<WeightedEdge> {
-        for (const t of tags) {
-            const chain = this.expandTagPath(t);
-            for (let i = 1; i < chain.length; i++) {
-                yield { sourceId: chain[i - 1], targetId: chain[i], weight: 1 };
-            }
-        }
-    }
-
-    private createNoteNodes(app: App): Node[] {
-        const files: TFile[] = app.vault.getMarkdownFiles();
-        const nodes: Node[] = [];
-
-        for (const file of files) {
-            const tuning = this.settings.tuning;
-
-            const jitter = tuning.initialJitter;
-            nodes.push({
-                id: file.path,
-                label: file.basename,
-                location: {
-                    x: (Math.random() - 0.5) * jitter,
-                    y: (Math.random() - 0.5) * jitter,
-                    z: (Math.random() - 0.5) * jitter,
-                },
-                velocity: {
-                    x: 0,
-                    y: 0,
-                    z: 0,
-                },
-                type: "note",
-                radius: 10,
-                file: file,
-                anima: { level: 0, capacity: 100 },
-            });
-        }
-
-        return nodes;
-    }
-
-    private createTagNodes(tags: Set<string>): Node[] {
-        const tuning = this.settings.tuning;
-
-        const jitter = tuning.initialJitter;
-        const nodes: Node[] = [];
-
-        for (const cleanTag of tags) {
-            nodes.push({
-                id: cleanTag,
-                label: `#${cleanTag}`,
-                location: {
-                    x: (Math.random() - 0.5) * jitter,
-                    y: (Math.random() - 0.5) * jitter,
-                    z: (Math.random() - 0.5) * jitter,
-                },
-                velocity: { x: 0, y: 0, z: 0 },
-                type: "tag",
-                anima: { level: 0, capacity: 100 },
-                radius: 10,
-            });
-        }
-
-        return nodes;
-    }
-
-    private expandTagPath(tag: string): string[] {
-        const parts = tag.split("/").map((p) => p.trim()).filter(Boolean);
-        const out: string[] = [];
-        let cur = "";
-        for (const p of parts) {
-            cur = cur ? `${cur}/${p}` : p;
-            out.push(cur);
-        }
-        return out;
-    }
-
-    private addTagPathToSet(tags: Set<string>, cleanTag: string): void {
-        for (const t of this.expandTagPath(cleanTag)) {
-            tags.add(t);
-        }
-    }
-
-    private buildLinksFromEdges(edges: Iterable<WeightedEdge>, nodeById: Map<string, Node>): Link[] {
-        const byId = new Map<string, Link>();
-
-        for (const e of edges) {
-            if (!nodeById.has(e.sourceId) || !nodeById.has(e.targetId)) continue;
-
-            const tuning    = this.settings.tuning;
-            const rawWeight = Number.isFinite(e.weight) && e.weight > 0 ? e.weight : 1;
-
-            const thickness = tuning.linkThickness;
-            const id = `${e.sourceId}->${e.targetId}`;
-
-            const existing = byId.get(id);
-            if (existing) {
-                existing.thickness += thickness;
-                continue;
-            }
-
-            const link = this.createLink(e.sourceId, e.targetId, thickness);
-            byId.set(id, link);
-        }
-
-        return [...byId.values()];
-    }
-
-    private createLink(sourceId: string, targetId: string, thickness: number): Link {
-        const settings = this.settings;
-        return {
-            id: `${sourceId}->${targetId}`,
-            sourceId: sourceId,
-            targetId: targetId,
-            length: this.settings.layout.linkLength,
-            strength: this.settings.layout.linkStrength,
-            thickness: thickness,
-            gate: { state: "closed", threshold: 0, hysteresis: 0 },
+    return { tags, edges };
+  }
+
+  private *noteNoteEdges(app: App): IterableIterator<WeightedEdge> {
+    const resolvedLinks: ResolvedLinks = (app.metadataCache as any).resolvedLinks ?? {};
+    const countDuplicates = Boolean(this.settings.base.countDuplicateLinks);
+    for (const sourcePath of Object.keys(resolvedLinks)) {
+      for (const [targetPath, count] of Object.entries(resolvedLinks[sourcePath] ?? {})) {
+        yield {
+          sourceId: sourcePath,
+          targetId: targetPath,
+          weight: countDuplicates ? Math.max(1, Number(count) || 1) : 1,
+          relation: 'link',
         };
+      }
     }
+  }
 
-    private computeAdjacency(graph: GraphData): void {
-        const out: Record<string, Record<string, number>> = {};
-        const inn: Record<string, Record<string, number>> = {};
-
-        for (const link of graph.links) {
-            const s = link.sourceId;
-            const t = link.targetId;
-            const w = link.thickness;
-
-            (out[s] ??= {});
-            out[s][t] = (out[s][t] || 0) + w;
-
-            (inn[t] ??= {});
-            inn[t][s] = (inn[t][s] || 0) + w;
-        }
-
-        graph.linksOut = out;
-        graph.linksIn = inn;
+  private *tagTagEdges(tags: Set<string>): IterableIterator<WeightedEdge> {
+    for (const tag of tags) {
+      const chain = this.expandTagPath(tag);
+      for (let index = 1; index < chain.length; index++) {
+        yield {
+          sourceId: chain[index - 1],
+          targetId: chain[index],
+          weight: 1,
+          relation: 'tag-parent',
+        };
+      }
     }
+  }
 
-    private computeNodeRadius(graph: GraphData): void {
-        const minR = this.settings.base.minNodeRadius;
-        const maxR = this.settings.base.maxNodeRadius;
-        const countDuplicates = this.settings.base.countDuplicateLinks;
-
-        const gamma = 1.8;
-
-        const counts = graph.nodes.map((node) => {
-            const incoming = graph.linksIn[node.id];
-            if (!incoming) return 0;
-
-            if (countDuplicates) {
-            return Object.values(incoming).reduce((sum, weight) => sum + weight, 0);
-            }
-
-            return Object.keys(incoming).length;
+  private collectUnresolved(app: App): { targets: Set<string>; edges: WeightedEdge[] } {
+    const unresolvedLinks = (app.metadataCache as any).unresolvedLinks as ResolvedLinks | undefined;
+    const targets = new Set<string>();
+    const edges: WeightedEdge[] = [];
+    for (const [sourcePath, targetMap] of Object.entries(unresolvedLinks ?? {})) {
+      for (const [rawTarget, count] of Object.entries(targetMap ?? {})) {
+        const target = rawTarget.trim();
+        if (!target) continue;
+        const targetId = this.unresolvedId(target);
+        targets.add(target);
+        edges.push({
+          sourceId: sourcePath,
+          targetId,
+          weight: this.settings.base.countDuplicateLinks ? Math.max(1, Number(count) || 1) : 1,
+          relation: 'unresolved',
         });
-
-        const maxCount = Math.max(...counts, 1);
-
-        for (let i = 0; i < graph.nodes.length; i++) {
-            const node = graph.nodes[i];
-            const count = counts[i];
-
-            const normalized = count / maxCount;
-            const curved = Math.pow(normalized, gamma);
-
-            node.radius = minR + curved * (maxR - minR);
-        }
+      }
     }
+    return { targets, edges };
+  }
 
-    private markBidirectional(links: Link[]): void {
-        const byId = new Map<string, Link>();
-        for (const link of links) byId.set(`${link.sourceId}->${link.targetId}`, link);
+  private createFileNodes(app: App): Node[] {
+    return app.vault.getFiles().map((file) => {
+      const type = file.extension === 'md'
+        ? 'note'
+        : file.extension === 'canvas'
+          ? 'canvas'
+          : 'attachment';
+      const facets = this.createFileFacets(file, app);
+      return this.createNode(file.path, file.basename, type, facets, file);
+    });
+  }
 
-        for (const link of links) {
-            const rev = byId.get(`${link.targetId}->${link.sourceId}`);
-            if (rev) {
-                link.bidirectional = true;
-                rev.bidirectional = true;
-            }
-        }
+  private createTagNodes(tags: Set<string>): Node[] {
+    return [...tags].sort().map((tag) => this.createNode(
+      tag,
+      `#${tag}`,
+      'tag',
+      { tags: [tag], properties: {}, searchText: `#${tag} ${tag}`.toLowerCase() },
+    ));
+  }
+
+  private createUnresolvedNodes(targets: Set<string>): Node[] {
+    return [...targets].sort().map((target) => this.createNode(
+      this.unresolvedId(target),
+      target,
+      'unresolved',
+      { path: target, tags: [], properties: {}, searchText: target.toLowerCase() },
+    ));
+  }
+
+  private createNode(
+    id: string,
+    label: string,
+    type: Node['type'],
+    facets: NodeFacets,
+    file?: TFile,
+  ): Node {
+    const jitter = this.settings.tuning.initialJitter;
+    const seed = stableHash(id);
+    return {
+      id,
+      label,
+      location: {
+        x: (unitFromHash(seed) - 0.5) * jitter,
+        y: (unitFromHash(seed ^ 0x9e3779b9) - 0.5) * jitter,
+        z: (unitFromHash(seed ^ 0x85ebca6b) - 0.5) * jitter,
+      },
+      velocity: { x: 0, y: 0, z: 0 },
+      type,
+      radius: 10,
+      file,
+      facets,
+      anima: { level: 0, capacity: 100 },
+    };
+  }
+
+  private createFileFacets(file: TFile, app: App): NodeFacets {
+    const tags = file.extension === 'md' ? this.extractTagsFromFile(file, app) : [];
+    const properties: Record<string, string[]> = {};
+    const frontmatter = file.extension === 'md' ? app.metadataCache.getFileCache(file)?.frontmatter : null;
+    if (frontmatter) {
+      for (const [key, raw] of Object.entries(frontmatter)) {
+        if (key === 'position') continue;
+        const values = flattenFacetValues(raw);
+        if (values.length) properties[key.toLowerCase()] = values;
+      }
     }
+    const propertyText = Object.entries(properties).flatMap(([key, values]) => [key, ...values]);
+    return {
+      path: file.path,
+      extension: file.extension.toLowerCase(),
+      tags,
+      properties,
+      searchText: [file.path, file.basename, file.extension, ...tags, ...propertyText].join(' ').toLowerCase(),
+    };
+  }
 
-    private extractTagsFromFile(file: TFile, app: App): string[] {
-        const cache = app.metadataCache.getFileCache(file);
-        if (!cache) return [];
-
-        const tags = new Set<string>();
-
-        for (const t of cache.tags ?? []) {
-            const rawTag = t?.tag;
-            if (typeof rawTag === "string") {
-                tags.add(this.normalizeTagName(rawTag));
-            }
-        }
-
-        const fm = cache.frontmatter;
-        if (fm) {
-            const rawTag = (fm as any).tags ?? (fm as any).tag;
-
-            if (typeof rawTag === "string") {
-                for (const part of rawTag.split(/[,\s]+/)) {
-                    if (!part) continue;
-                    tags.add(this.normalizeTagName(part));
-                }
-            } else if (Array.isArray(rawTag)) {
-                for (const v of rawTag) {
-                    if (typeof v === "string") {
-                        tags.add(this.normalizeTagName(v));
-                    }
-                }
-            }
-        }
-
-        return [...tags];
+  private buildLinksFromEdges(edges: Iterable<WeightedEdge>, nodeById: Map<string, Node>): Link[] {
+    const byId = new Map<string, Link>();
+    for (const edge of edges) {
+      if (!nodeById.has(edge.sourceId) || !nodeById.has(edge.targetId)) continue;
+      const weight = Number.isFinite(edge.weight) && edge.weight > 0 ? edge.weight : 1;
+      const id = `${edge.sourceId}->${edge.targetId}`;
+      const existing = byId.get(id);
+      if (existing) {
+        existing.weight += weight;
+        existing.thickness = this.settings.tuning.linkThickness * Math.sqrt(existing.weight);
+        if (edge.relation && !existing.relations.includes(edge.relation)) existing.relations.push(edge.relation);
+        continue;
+      }
+      byId.set(id, {
+        id,
+        sourceId: edge.sourceId,
+        targetId: edge.targetId,
+        length: this.settings.layout.linkLength,
+        strength: this.settings.layout.linkStrength,
+        thickness: this.settings.tuning.linkThickness * Math.sqrt(weight),
+        weight,
+        relations: [edge.relation ?? 'link'],
+        gate: { state: 'closed', threshold: 0, hysteresis: 0 },
+      });
     }
+    return [...byId.values()];
+  }
 
-    private normalizeTagName(tag: string): string {
-        let t = tag.trim().toLowerCase();
-
-        if (t.startsWith("tag:")) {
-            t = t.slice(4);
-        }
-
-        if (t.startsWith("#")) {
-            t = t.slice(1);
-        }
-
-        return t.trim();
+  private addFrontmatterRelations(app: App, links: Link[]): void {
+    const byDirection = new Map(links.map((link) => [`${link.sourceId}\u0000${link.targetId}`, link] as const));
+    for (const file of app.vault.getMarkdownFiles()) {
+      const frontmatterLinks = (app.metadataCache.getFileCache(file) as any)?.frontmatterLinks as
+        | Array<{ key?: string; link?: string }>
+        | undefined;
+      for (const entry of frontmatterLinks ?? []) {
+        if (!entry.key || !entry.link) continue;
+        const target = app.metadataCache.getFirstLinkpathDest(entry.link, file.path);
+        if (!target) continue;
+        const link = byDirection.get(`${file.path}\u0000${target.path}`);
+        const relation = entry.key.trim().toLowerCase();
+        if (link && relation && !link.relations.includes(relation)) link.relations.push(relation);
+      }
     }
+  }
+
+  private computeAdjacency(graph: GraphData): void {
+    graph.linksOut = {};
+    graph.linksIn = {};
+    for (const link of graph.links) {
+      (graph.linksOut[link.sourceId] ??= {})[link.targetId] =
+        ((graph.linksOut[link.sourceId] ?? {})[link.targetId] ?? 0) + link.weight;
+      (graph.linksIn[link.targetId] ??= {})[link.sourceId] =
+        ((graph.linksIn[link.targetId] ?? {})[link.sourceId] ?? 0) + link.weight;
+    }
+  }
+
+  private computeNodeRadius(graph: GraphData): void {
+    const counts = graph.nodes.map((node) => {
+      const incoming = Object.values(graph.linksIn[node.id] ?? {}).reduce((sum, value) => sum + value, 0);
+      const outgoing = Object.values(graph.linksOut[node.id] ?? {}).reduce((sum, value) => sum + value, 0);
+      return incoming + outgoing;
+    });
+    const maxCount = Math.max(...counts, 1);
+    for (let index = 0; index < graph.nodes.length; index++) {
+      const normalized = counts[index] / maxCount;
+      graph.nodes[index].radius = this.settings.base.minNodeRadius
+        + Math.pow(normalized, 1.45) * (this.settings.base.maxNodeRadius - this.settings.base.minNodeRadius);
+    }
+  }
+
+  private markBidirectional(links: Link[]): void {
+    const byId = new Map(links.map((link) => [`${link.sourceId}\u0000${link.targetId}`, link] as const));
+    for (const link of links) {
+      if (byId.has(`${link.targetId}\u0000${link.sourceId}`)) link.bidirectional = true;
+    }
+  }
+
+  private extractTagsFromFile(file: TFile, app: App): string[] {
+    const cache = app.metadataCache.getFileCache(file);
+    if (!cache) return [];
+    const tags = new Set<string>();
+    for (const tagCache of cache.tags ?? []) {
+      if (typeof tagCache?.tag === 'string') tags.add(this.normalizeTagName(tagCache.tag));
+    }
+    const rawTags = (cache.frontmatter as any)?.tags ?? (cache.frontmatter as any)?.tag;
+    if (typeof rawTags === 'string') {
+      for (const value of rawTags.split(/[,\s]+/)) if (value) tags.add(this.normalizeTagName(value));
+    } else if (Array.isArray(rawTags)) {
+      for (const value of rawTags) if (typeof value === 'string') tags.add(this.normalizeTagName(value));
+    }
+    return [...tags].filter(Boolean);
+  }
+
+  private expandTagPath(tag: string): string[] {
+    const parts = tag.split('/').map((part) => part.trim()).filter(Boolean);
+    const result: string[] = [];
+    let current = '';
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      result.push(current);
+    }
+    return result;
+  }
+
+  private addTagPathToSet(tags: Set<string>, tag: string): void {
+    for (const value of this.expandTagPath(tag)) tags.add(value);
+  }
+
+  private normalizeTagName(tag: string): string {
+    return tag.trim().toLowerCase().replace(/^tag:/, '').replace(/^#/, '').trim();
+  }
+
+  private unresolvedId(target: string): string {
+    return `unresolved:${target.trim().toLowerCase()}`;
+  }
+}
+
+function flattenFacetValues(value: unknown): string[] {
+  if (value === null || value === undefined) return [];
+  if (Array.isArray(value)) return value.flatMap(flattenFacetValues);
+  if (typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .flatMap(([key, nested]) => [key.toLowerCase(), ...flattenFacetValues(nested)]);
+  }
+  return [String(value).toLowerCase()];
+}
+
+function stableHash(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function unitFromHash(seed: number): number {
+  let value = seed >>> 0;
+  value ^= value << 13;
+  value ^= value >>> 17;
+  value ^= value << 5;
+  return (value >>> 0) / 0xffffffff;
 }

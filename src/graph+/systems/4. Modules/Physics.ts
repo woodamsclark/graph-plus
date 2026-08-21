@@ -38,6 +38,13 @@ export class Physics implements ModuleWithSettings<'physics'> {
       return;
     }
 
+    // Form is an intentional, deterministic projection. Its coordinates are
+    // semantic output rather than seeds for force simulation.
+    if (graph.projection.mode === 'mind-map') {
+      this.sim = null;
+      return;
+    }
+
     // Simulation wants a gravity center provider; we now read it from InteractionState
     this.sim = createSimulation(
       graph, 

@@ -1,7 +1,27 @@
 import type { TFile } from 'obsidian';
 import type { Location, Velocity } from './math.ts';
 
-export type NodeType = 'note' | 'tag' | 'canvas';
+export type NodeType = 'note' | 'tag' | 'canvas' | 'attachment' | 'unresolved';
+
+export type NodeFacets = {
+  path?: string;
+  extension?: string;
+  tags: string[];
+  properties: Record<string, string[]>;
+  searchText: string;
+};
+
+export type NodeView = {
+  color?: string;
+  branchId?: string;
+  depth?: number;
+  role?: 'root' | 'branch' | 'leaf' | 'disconnected';
+};
+
+export type LinkView = {
+  color?: string;
+  role?: 'tree' | 'cross';
+};
 
 export type AnimaState = {
   level: number;
@@ -23,6 +43,8 @@ export interface Node {
   radius: number;
   anima: AnimaState;
   file?: TFile;
+  facets: NodeFacets;
+  view?: NodeView;
 }
 
 export interface Link {
@@ -33,7 +55,10 @@ export interface Link {
   length: number;
   strength: number;
   thickness: number;
+  weight: number;
+  relations: string[];
   gate: GateState;
+  view?: LinkView;
 }
 
 export interface GraphData {
@@ -41,6 +66,13 @@ export interface GraphData {
   links:    Link[];
   linksOut: Record<string, Record<string, number>>;
   linksIn:  Record<string, Record<string, number>>;
+  projection: {
+    mode: 'free' | 'mind-map';
+    sourceNodeCount: number;
+    sourceLinkCount: number;
+    rootId?: string;
+    queryError?: string;
+  };
 }
 
 export interface GraphAccessor {
@@ -49,7 +81,12 @@ export interface GraphAccessor {
   destroy():      void;
 }
 
-export type WeightedEdge = { sourceId: string; targetId: string; weight: number };
+export type WeightedEdge = {
+  sourceId: string;
+  targetId: string;
+  weight: number;
+  relation?: string;
+};
 
 export type DataStoragePlugin = {
     loadData: () => Promise<any>;

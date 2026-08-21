@@ -54,9 +54,11 @@ export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
       const pressure     = anima?.pressure ?? 0;
       // const pressureLabel = formatAnimaLabel(pressure, level, capacity);
 
-      const labelOpacity = anima ? pressureToLabelOpacity(pressure) : 0;
-      const visible = base.showTags || node.type !== "tag";
-
+      const labelOpacity = graph.projection.mode === 'mind-map'
+        ? 1
+        : anima
+          ? pressureToLabelOpacity(pressure)
+          : 0;
       return {
         id: node.id,
         label: node.label,
@@ -65,7 +67,9 @@ export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
         radius: node.radius,
         animaPressure: pressure,
         labelOpacity,
-        visible,
+        visible: true,
+        color: node.view?.color,
+        role: node.view?.role,
       };
     });
 
@@ -76,6 +80,8 @@ export class FrameComposer implements ModuleWithSettings<'renderComposer'> {
       targetId: link.targetId,
       thickness: link.thickness,
       visible: true,
+      color: link.view?.color,
+      role: link.view?.role,
     }));
 
     const animaFlows = animaStore.getCurrentFlows().map((flow) => ({

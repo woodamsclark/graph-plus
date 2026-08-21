@@ -196,7 +196,6 @@ export class Renderer {
     const projected = nodes
       .filter(({ node, focusAlpha }) => {
         if (!node.visible) return false;
-        if (node.type === "tag" && !frame.settings.showTags) return false;
         if (node.labelOpacity <= 0) return false;
         if (focusAlpha <= 0) return false;
         return true;
@@ -242,13 +241,16 @@ export class Renderer {
       const pressureDelta = Math.abs(src.node.animaPressure - tgt.node.animaPressure);
       const pressureAlpha = Math.max(0.2, Math.min(1, 0.2 + pressureDelta * 0.8));
       const focusAlpha = (src.focusAlpha + tgt.focusAlpha) / 2;
-      this.ctx.globalAlpha = pressureAlpha * focusAlpha;
-      this.ctx.strokeStyle = frame.settings.linkColor;
+      const crossAlpha = link.role === 'cross' ? 0.42 : 1;
+      this.ctx.globalAlpha = pressureAlpha * focusAlpha * crossAlpha;
+      this.ctx.strokeStyle = link.color ?? frame.settings.linkColor;
       this.ctx.lineWidth = link.thickness;
+      this.ctx.setLineDash(link.role === 'cross' ? [4, 5] : []);
       this.ctx.beginPath();
       this.ctx.moveTo(startX, startY);
       this.ctx.lineTo(endX, endY);
       this.ctx.stroke();
+      this.ctx.setLineDash([]);
       this.ctx.globalAlpha = 1;
     }
 
@@ -261,10 +263,11 @@ export class Renderer {
     for (const { projected } of drawables) {
       const { node, p, focusAlpha } = projected;
       const r = node.radius * p.scale * this.getNodeSwell(node);
-      const fillColor =
+      const fillColor = node.color ?? (
         node.type === "tag"
           ? frame.settings.tagColor
-          : frame.settings.nodeColor;
+          : frame.settings.nodeColor
+      );
       const displayPressure = Math.max(0, Math.min(1.5, node.animaPressure));
       const darken = Math.max(0, 1 - Math.min(1, displayPressure));
       const brighten = Math.max(0, displayPressure - 1);
@@ -328,10 +331,11 @@ export class Renderer {
       if (fill <= 0.01 || focusAlpha <= 0.01) continue;
 
       const radius = node.radius * p.scale * this.getNodeSwell(node);
-      const color =
+      const color = node.color ?? (
         node.type === "tag"
           ? frame.settings.tagColor
-          : frame.settings.nodeColor;
+          : frame.settings.nodeColor
+      );
 
       field.globalAlpha = focusAlpha * (0.22 + fill * 0.58);
       field.fillStyle = color;
@@ -349,10 +353,11 @@ export class Renderer {
       const focusAlpha = (drawable.src.focusAlpha + drawable.tgt.focusAlpha) / 2;
       if (focusAlpha <= 0.01) continue;
 
-      const color =
+      const color = drawable.src.node.color ?? (
         drawable.src.node.type === "tag"
           ? frame.settings.tagColor
-          : frame.settings.nodeColor;
+          : frame.settings.nodeColor
+      );
 
       field.globalAlpha = focusAlpha * (0.55 + drawable.flow.strength * 0.35);
       field.fillStyle = color;
@@ -381,10 +386,11 @@ export class Renderer {
       if (focusAlpha <= 0.01) continue;
 
       const blob = this.getFlowBlob(drawable);
-      const color =
+      const color = drawable.src.node.color ?? (
         drawable.src.node.type === "tag"
           ? frame.settings.tagColor
-          : frame.settings.nodeColor;
+          : frame.settings.nodeColor
+      );
 
       this.ctx.globalCompositeOperation = "source-over";
       this.ctx.globalAlpha = focusAlpha * 0.86;
