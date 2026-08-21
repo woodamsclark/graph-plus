@@ -39,6 +39,7 @@ export class InteractionController {
   }
 
   resetCamera(): void {
+    this.deps.uiStateStore.setFocusedNode(null);
     this.deps.camera?.resetCamera();
   }
 

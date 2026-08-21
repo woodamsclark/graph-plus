@@ -5,12 +5,14 @@ import { Anima                } from "../../systems/4. Modules/Anima.ts";
 import { Physics              } from "../../systems/4. Modules/Physics.ts";
 import { FrameComposer        } from "../../systems/5. Render/FrameComposer.ts";
 import { Renderer             } from "../../systems/5. Render/Renderer.ts";
+import { FocusFollowSystem    } from "../../systems/2. UI Interpretation + State/FocusFollowSystem.ts";
 
 export class GraphSystemRegistry {
   register(deps: {
     spaceTime:            SpaceTime;
     uiInterpreter:        UIInterpreter       | null;
     commandSystem:        Commander           | null;
+    focusFollow:          FocusFollowSystem   | null;
     anima:                Anima               | null;
     physics:              Physics             | null;
     frameComposer:        FrameComposer       | null;
@@ -21,6 +23,7 @@ export class GraphSystemRegistry {
       spaceTime,
       uiInterpreter,
       commandSystem,
+      focusFollow,
       anima,
       physics,
       frameComposer: frameComposer,
@@ -34,6 +37,10 @@ export class GraphSystemRegistry {
 
     if (commandSystem) {
       spaceTime.register("commands", commandSystem, 20);
+    }
+
+    if (focusFollow) {
+      spaceTime.register("focus-follow", focusFollow, 22);
     }
 
     if (anima) {

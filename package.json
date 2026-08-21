@@ -8,6 +8,7 @@
     "build": "node esbuild.config.js",
     "watch": "node esbuild.config.js --watch",
     "typecheck": "tsc --noEmit",
+    "test": "node test.config.js",
     "dev": "npm run typecheck && npm run build"
   },
   "devDependencies": {

@@ -1,7 +1,7 @@
 import { App, Plugin }                                          from "obsidian";
 import { SpaceTime }                                            from "../../systems/SpaceTime.ts";
 import { onSettingsChange, getSettings }                        from "../../../obsidian/settings/settingsStore.ts";
-import { LiveSettingsOverlay }                                  from "../../ui/LiveSettingsOverlay.ts";
+import { GraphControlsPanel }                                   from "../../ui/GraphControlsPanel.ts";
 import { ObsidianNavigator }                                    from "../../../obsidian/ObsidianNavigator.ts";
 import { Input }                                                from "../../systems/1. User Input/Input.ts";
 import { InputBuffer }                                          from "../../systems/1. User Input/InputBuffer.ts";
@@ -35,6 +35,9 @@ import {
 } from '../../types/index.ts';
 import type { UserInputEvent, DrainableBuffer } from '../../types/domain/ui.ts';
 import { ThemeStyleResolver } from "../../../obsidian/themeStyleResolver.ts";
+import { FocusFollowSystem } from "../../systems/2. UI Interpretation + State/FocusFollowSystem.ts";
+import type { GraphLensState } from "../../types/domain/lens.ts";
+import { createDefaultGraphLens } from "../../types/domain/lens.ts";
 
 
 
@@ -46,12 +49,13 @@ export class GraphEngineRuntime {
   private renderer:               Renderer                | null = null;
   private physics:                Physics                 | null = null;
   private uiInterpreter:          UIInterpreter           | null = null;
+  private focusFollow:            FocusFollowSystem       | null = null;
   private camera:                 CameraController        | null = null;
   private frameComposer:          FrameComposer           | null = null;
   private navigationController:   NavigationController    | null = null;
   private interactionController:  InteractionController   | null = null;
   private commandBindings:        GraphCommandBindings    | null = null;
-  private liveSettingsOverlay:    LiveSettingsOverlay     | null = null;
+  private controlsPanel:          GraphControlsPanel      | null = null;
   private unsubscribeSettings: (() => void)               | null = null;  
   private navigator:              ObsidianNavigator;
   private spaceTime:              SpaceTime;
@@ -67,7 +71,13 @@ export class GraphEngineRuntime {
   private themeStyleResolver = new ThemeStyleResolver(() => document.body);
   
 
-  constructor(private deps: { app: App; plugin: Plugin; containerEl: HTMLElement }) {
+  constructor(private deps: {
+    app: App;
+    plugin: Plugin;
+    containerEl: HTMLElement;
+    initialLensState?: GraphLensState;
+    onLensStateChange?: (state: GraphLensState) => void;
+  }) {
     this.spaceTime            = new SpaceTime({ maxDtSeconds: 0.05 });
     this.navigator            = new ObsidianNavigator(deps.app);
   }
@@ -105,7 +115,7 @@ export class GraphEngineRuntime {
     this.graph = new Graph(selectGraphSettings(settings), {
       app:    this.deps.app,
       plugin: this.deps.plugin as any,
-    });
+    }, this.deps.initialLensState);
     
 
     this.input = new Input(selectInputSettings(settings), {
@@ -121,6 +131,12 @@ export class GraphEngineRuntime {
       commandBuffer:     this.commandBuffer,
       interactionState:  this.uiStateStore,
       hitTester:         this.hitTester,
+    });
+
+    this.focusFollow = new FocusFollowSystem({
+      graph: this.graph,
+      camera: this.camera,
+      uiStateStore: this.uiStateStore,
     });
 
     this.physics = new Physics(selectPhysicsSettings(settings), {
@@ -182,6 +198,7 @@ export class GraphEngineRuntime {
       spaceTime:      this.spaceTime,
       uiInterpreter:  this.uiInterpreter,
       commandSystem:  this.commandSystem,
+      focusFollow:    this.focusFollow,
       anima:          this.anima,
       physics:        this.physics,
       frameComposer:  this.frameComposer,
@@ -193,15 +210,25 @@ export class GraphEngineRuntime {
     });
 
     this.deps.containerEl.style.position = "relative";
-    this.liveSettingsOverlay = new LiveSettingsOverlay({
+    this.controlsPanel = new GraphControlsPanel({
       getContainer: () => this.deps.containerEl,
+      getLens: () => this.getLensState(),
+      getGraph: () => this.graph?.get() ?? null,
+      getSourceNodes: () => this.graph?.getSource()?.nodes ?? [],
+      getRelations: () => [...new Set(
+        (this.graph?.getSource()?.links ?? []).flatMap((link) => link.relations),
+      )].sort(),
+      getFocusedNodeId: () => this.uiStateStore.get().followedNodeId,
+      getCurrentFileId: () => this.deps.app.workspace.getActiveFile()?.path ?? null,
+      onLensChange: (next) => this.setLensState(next),
+      onResetView: () => this.resetView(),
       onSettingsApplied: async (mode) => {
         await this.applySettings(mode);
         await (this.deps.plugin as any).saveSettings();
       }
     });
 
-    this.liveSettingsOverlay.mount();
+    this.controlsPanel.mount();
     this.unsubscribeSettings = onSettingsChange(() => {
       void this.applySettings('live');
     });
@@ -217,7 +244,51 @@ export class GraphEngineRuntime {
 
   public async rebuildGraph(): Promise<void> {
     await this.graph?.rebuild();
+    this.releaseMissingFocus();
     this.physics?.rebuild?.();
+    this.controlsPanel?.refresh();
+  }
+
+  public getLensState(): GraphLensState {
+    return this.graph?.getLensState()
+      ?? this.deps.initialLensState
+      ?? createDefaultGraphLens(getSettings().base.showTags);
+  }
+
+  public setLensState(next: GraphLensState): void {
+    const previousMode = this.graph?.getLensState().form.mode ?? 'free';
+    const effective = {
+      filter: { ...next.filter },
+      groups: next.groups.map((group) => ({ ...group })),
+      form: { ...next.form },
+    };
+
+    if (previousMode !== 'mind-map' && effective.form.mode === 'mind-map' && !effective.form.rootId) {
+      effective.form.rootId = this.uiStateStore.get().followedNodeId
+        ?? this.deps.app.workspace.getActiveFile()?.path
+        ?? null;
+    }
+
+    this.graph?.setLensState(effective);
+    this.releaseMissingFocus();
+    this.physics?.rebuild();
+    if (previousMode !== effective.form.mode) this.resetView();
+    this.controlsPanel?.refresh();
+    this.deps.onLensStateChange?.(effective);
+  }
+
+  public resetView(): void {
+    // Keep reset inside the command pipeline so UI state, camera state, and
+    // command observers such as Anima all release focus together.
+    this.commandBuffer.push({ type: 'ResetCamera' });
+  }
+
+  private releaseMissingFocus(): void {
+    const followed = this.uiStateStore.get().followedNodeId;
+    if (!followed) return;
+    if (!this.graph?.get()?.nodes.some((node) => node.id === followed)) {
+      this.uiStateStore.setFocusedNode(null);
+    }
   }
 
   async close(): Promise<void> {
@@ -226,8 +297,8 @@ export class GraphEngineRuntime {
   this.unsubscribeSettings?.();
   this.unsubscribeSettings = null;
 
-  this.liveSettingsOverlay?.unmount();
-  this.liveSettingsOverlay = null;
+  this.controlsPanel?.unmount();
+  this.controlsPanel = null;
 
   this.physics?.destroy?.();
   this.physics = null;
@@ -237,6 +308,7 @@ export class GraphEngineRuntime {
 
   this.uiInterpreter?.destroy?.();
   this.uiInterpreter = null;
+  this.focusFollow = null;
 
   this.anima?.destroy?.();
   this.anima = null;

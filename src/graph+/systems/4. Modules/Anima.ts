@@ -59,6 +59,10 @@ export class Anima implements ModuleWithSettings<'anima'>, CommandObserver {
         }
         return;
 
+      case "ResetCamera":
+        this.setFocusedNode(null);
+        return;
+
       default:
         return;
     }

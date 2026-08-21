@@ -81,7 +81,6 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
     const batch = this.deps.inputBuffer.drain();
     for (const e of batch) this.ingestOne(e);
 
-    this.updateFollow();
     this.updateHover();
   }
 
@@ -210,6 +209,10 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
       const movedSq = distSq({ x: e.screen.x, y: e.screen.y }, this.mode.downScreen);
       if (movedSq <= threshold * threshold) return;
 
+      if (this.shouldBreakFocusFromPrimaryMouseDrag(this.mode, e.kind)) {
+        this.cmd({ type: "SetFocusedNode", nodeId: null });
+      }
+
       if (this.mode.doubleTapCandidate) {
         const anchorScreen = { ...this.mode.downScreen };
         const gesture = this.classifyDoubleTapDragGesture(anchorScreen, e.screen);
@@ -251,13 +254,17 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
         return;
       }
 
-      if (this.shouldRotateSinglePointerWhileFocused(e.kind)) {
+      if (this.shouldRotateSinglePointer(e.kind)) {
         this.startRotate(e.screen.x, e.screen.y);
         this.mode = { kind: "rotate", pointerId: e.pointerId };
         return;
       }
 
-      this.startPan(e.screen.x, e.screen.y);
+      // Begin at the original press point so the movement which crossed the
+      // drag threshold is not discarded. This also makes the first primary
+      // drag visibly release focused view in the same frame.
+      this.startPan(this.mode.downScreen.x, this.mode.downScreen.y);
+      this.updatePan(e.screen.x, e.screen.y);
       this.mode = { kind: "pan", pointerId: e.pointerId };
       return;
     }
@@ -365,7 +372,7 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
     const screenY = e.screen.y;
 
     const zoom = e.ctrl || e.meta;
-    if (!zoom && this.isFocusedModeActive()) {
+    if (!zoom) {
       this.rotateFromWheel(screenX, screenY, e);
       return;
     }
@@ -417,29 +424,6 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
       mouse.y
     );
     this.cmd({ type: "SetHoveredNode", nodeId: hit?.id ?? null });
-  }
-
-  private updateFollow(): void {
-    const id = this.deps.interactionState.get().followedNodeId;
-    if (!id) return;
-
-    const graph = this.deps.graph?.get();
-    if (!graph) return;
-
-    const node = graph.nodes.find(n => n.id === id);
-    if (!node) {
-      this.cmd({ type: "SetFocusedNode", nodeId: null });
-      return;
-    }
-
-    this.cmd({
-      type: "SetCameraTarget",
-      target: {
-        x: node.location.x,
-        y: node.location.y,
-        z: node.location.z,
-      },
-    });
   }
 
   private handleSingleOrDoubleClick(
@@ -637,8 +621,12 @@ export class UIInterpreter implements ModuleWithSettings<'uiInterpreter'> {
     return dx > dy ? "rotate" : "zoom";
   }
 
-  private shouldRotateSinglePointerWhileFocused(kind: PointerKind): boolean {
-    return kind !== "mouse" && this.isFocusedModeActive();
+  private shouldRotateSinglePointer(kind: PointerKind): boolean {
+    return kind !== "mouse";
+  }
+
+  private shouldBreakFocusFromPrimaryMouseDrag(mode: PressMode, kind: PointerKind): boolean {
+    return kind === "mouse" && !mode.rightIntent && this.isFocusedModeActive();
   }
 
   private isFocusedModeActive(): boolean {

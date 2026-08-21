@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Graph+ controls visual fixture</title>
+  <link rel="stylesheet" href="../../styles.css">
+  <style>
+    :root {
+      color-scheme: dark;
+      --background-primary: #1e1e1e;
+      --background-secondary: #262626;
+      --background-secondary-alt: #202020;
+      --background-modifier-border: #3c3c3c;
+      --background-modifier-hover: #353535;
+      --text-normal: #dcddde;
+      --text-muted: #a8a8a8;
+      --text-faint: #777;
+      --text-error: #ff6b6b;
+      --radius-s: 4px;
+      --radius-m: 8px;
+      --font-ui-small: 13px;
+      --font-ui-smaller: 12px;
+      --font-ui-smallest: 11px;
+      --font-medium: 500;
+      --font-semibold: 600;
+      --shadow-s: 0 4px 14px rgb(0 0 0 / 35%);
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--background-primary); }
+    button, input, select { font: inherit; color: var(--text-normal); background: #303030; border: 1px solid #494949; border-radius: 5px; }
+    button { min-height: 28px; padding: 3px 8px; }
+    input[type="search"] { min-height: 30px; padding: 4px 8px; }
+    input[type="range"] { width: 86px; }
+    .clickable-icon { width: 28px; height: 28px; padding: 3px; border: 0; background: transparent; }
+    .fixture-stage { position: relative; width: 100%; height: 100%; }
+    .fixture-graph { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .setting-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .setting-item-info { flex: 1 1 auto; }
+    .setting-item-name { color: var(--text-normal); }
+    .setting-item-description { color: var(--text-faint); }
+    .setting-item-control { display: flex; align-items: center; }
+    .search-input-container { position: relative; }
+    .checkbox-container { width: 34px; height: 18px; border-radius: 10px; background: #555; position: relative; }
+    .checkbox-container::after { content: ''; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px; border-radius: 50%; background: #ddd; }
+    .checkbox-container.is-enabled { background: #7c5cff; }
+    .checkbox-container.is-enabled::after { left: 18px; }
+  </style>
+</head>
+<body>
+  <main class="fixture-stage greater-graph-view graphplus-view">
+    <svg class="fixture-graph" viewBox="0 0 1000 700" role="img" aria-label="Radial mind map preview">
+      <rect width="1000" height="700" fill="#1e1e1e"/>
+      <g fill="none" stroke-linecap="round">
+        <path d="M390 350 L255 210 M390 350 L218 385 M390 350 L320 540" stroke="#64b5f6" stroke-width="5"/>
+        <path d="M255 210 L130 135 M255 210 L105 260" stroke="#64b5f6" stroke-width="3"/>
+        <path d="M218 385 L75 365 M218 385 L125 485" stroke="#81c784" stroke-width="3"/>
+        <path d="M320 540 L240 620 M320 540 L430 625" stroke="#e57373" stroke-width="3"/>
+        <path d="M105 260 L125 485" stroke="#777" stroke-width="1.5" stroke-dasharray="5 7" opacity=".55"/>
+      </g>
+      <g stroke="#111" stroke-width="2">
+        <circle cx="390" cy="350" r="28" fill="#9b87f5"/><circle cx="255" cy="210" r="19" fill="#64b5f6"/>
+        <circle cx="218" cy="385" r="19" fill="#81c784"/><circle cx="320" cy="540" r="19" fill="#e57373"/>
+        <circle cx="130" cy="135" r="12" fill="#64b5f6"/><circle cx="105" cy="260" r="12" fill="#64b5f6"/>
+        <circle cx="75" cy="365" r="12" fill="#81c784"/><circle cx="125" cy="485" r="12" fill="#81c784"/>
+        <circle cx="240" cy="620" r="12" fill="#e57373"/><circle cx="430" cy="625" r="12" fill="#e57373"/>
+      </g>
+      <g fill="#ddd" font-size="14" text-anchor="middle">
+        <text x="390" y="397">Central idea</text><text x="255" y="177">Branch A</text>
+        <text x="218" y="420">Branch B</text><text x="320" y="575">Branch C</text>
+      </g>
+    </svg>
+
+    <aside class="graphplus-graph-controls graph-controls" aria-label="Graph controls">
+      <header class="graphplus-controls-header">
+        <span class="graphplus-controls-title">Graph controls</span>
+        <div class="graphplus-controls-actions">
+          <button class="clickable-icon graphplus-icon-button" aria-label="Reset camera">↺</button>
+          <button class="clickable-icon graphplus-icon-button" aria-label="Close graph controls">×</button>
+        </div>
+      </header>
+      <div class="graphplus-controls-body">
+        <details class="graphplus-control-section" open>
+          <summary><span>Filter</span><span class="graphplus-section-chevron">⌄</span></summary>
+          <div class="graphplus-control-section-body">
+            <div class="setting-item">
+              <div class="setting-item-info"><div class="setting-item-name">Search</div><div class="setting-item-description">path:, tag:, type:, [property:value], -term, OR</div></div>
+              <div class="setting-item-control"><div class="search-input-container"><input type="search" placeholder="Filter nodes…" value="tag:ideas"></div></div>
+            </div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Tags</div></div><div class="checkbox-container is-enabled"></div></div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Attachments</div></div><div class="checkbox-container"></div></div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Unresolved links</div></div><div class="checkbox-container"></div></div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Orphans</div></div><div class="checkbox-container is-enabled"></div></div>
+          </div>
+        </details>
+        <details class="graphplus-control-section" open>
+          <summary><span>Form</span><span class="graphplus-section-chevron">⌄</span></summary>
+          <div class="graphplus-control-section-body">
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Layout</div></div><div class="setting-item-control"><select><option>Mind map</option></select></div></div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Central idea</div><div class="setting-item-description">Blank chooses the most connected visible node.</div></div><div class="setting-item-control"><div class="search-input-container"><input type="search" value="Central idea.md"></div></div></div>
+            <div class="graphplus-root-actions"><button>Use focused</button><button>Use current note</button></div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Direction</div></div><div class="setting-item-control"><select><option>Both</option></select></div></div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Relation</div></div><div class="setting-item-control"><select><option>Any relation</option></select></div></div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Depth</div><div class="setting-item-description">Unlimited</div></div><div class="setting-item-control"><input type="range" min="0" max="8" value="0"></div></div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Branch colors</div></div><div class="checkbox-container is-enabled"></div></div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Cross-links</div></div><div class="checkbox-container is-enabled"></div></div>
+          </div>
+        </details>
+        <details class="graphplus-control-section"><summary><span>Groups</span><span class="graphplus-section-chevron">⌄</span></summary></details>
+        <details class="graphplus-control-section"><summary><span>Display</span><span class="graphplus-section-chevron">⌄</span></summary></details>
+        <details class="graphplus-control-section"><summary><span>Forces</span><span class="graphplus-section-chevron">⌄</span></summary></details>
+      </div>
+      <footer class="graphplus-controls-status">42/310 nodes · 47/628 links · center: Central idea</footer>
+    </aside>
+  </main>
+</body>
+</html>
