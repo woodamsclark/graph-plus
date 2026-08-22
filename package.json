@@ -1,7 +1,7 @@
 {
-  "name": "greater-graph",
-  "version": "0.1.0",
-  "description": "Greater Graph Obsidian plugin (v0) - minimal 2D node view",
+  "name": "graph-plus",
+  "version": "0.6.0",
+  "description": "A better Obsidian graph with a reusable graph engine.",
   "private": true,
   "main": "main.js",
   "scripts": {
