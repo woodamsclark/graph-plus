@@ -1,30 +1,21 @@
 import type { GraphDimensionsV1 } from '../../contracts/v1/index.ts';
 import type { SessionResizeObserverV1, SessionRuntimePlatformV1 } from '../platform/index.ts';
+import type {
+  SessionSurfaceStateV1,
+  SessionSurfaceV1,
+  SessionSurfaceViewportV1,
+} from './SessionSurface.ts';
 
-export interface SessionSurfaceStateV1 {
-  readonly documentId: string;
-  readonly documentRevision: number;
-  readonly projectedNodeCount: number;
-  readonly projectedEdgeCount: number;
-  readonly renderedNodeCount: number;
-  readonly renderedEdgeCount: number;
-  readonly selectedNodeCount: number;
-  readonly focusedNodeId?: string;
-}
+export class CanvasSessionSurface implements SessionSurfaceV1 {
+  readonly canvas: HTMLCanvasElement;
 
-export interface SessionSurfaceV1 {
-  update(state: SessionSurfaceStateV1): void;
-  recordFrame(frameCount: number): void;
-  dispose(): void;
-}
-
-export class DiagnosticSessionSurface implements SessionSurfaceV1 {
   private readonly container: HTMLElement;
   private readonly platform: SessionRuntimePlatformV1;
   private readonly root: HTMLDivElement;
-  private readonly canvas: HTMLCanvasElement;
   private readonly accessibleSummary: HTMLDivElement;
   private readonly resizeObserver: SessionResizeObserverV1;
+  private readonly resizeListeners = new Set<(viewport: SessionSurfaceViewportV1) => void>();
+  private viewport: SessionSurfaceViewportV1 = { width: 0, height: 0, devicePixelRatio: 1 };
   private disposed = false;
 
   constructor(options: {
@@ -50,6 +41,7 @@ export class DiagnosticSessionSurface implements SessionSurfaceV1 {
     this.canvas.style.display = 'block';
     this.canvas.style.width = '100%';
     this.canvas.style.height = '100%';
+    this.canvas.style.touchAction = 'none';
     this.canvas.setAttribute('role', 'application');
     this.canvas.setAttribute('aria-label', 'Interactive graph surface');
 
@@ -78,6 +70,16 @@ export class DiagnosticSessionSurface implements SessionSurfaceV1 {
     }
   }
 
+  getViewport(): SessionSurfaceViewportV1 {
+    return { ...this.viewport };
+  }
+
+  onResize(listener: (viewport: SessionSurfaceViewportV1) => void) {
+    if (this.disposed) throw new Error('The graph surface has been disposed.');
+    this.resizeListeners.add(listener);
+    return { dispose: () => this.resizeListeners.delete(listener) };
+  }
+
   update(state: SessionSurfaceStateV1): void {
     if (this.disposed) return;
     this.root.dataset.documentId = state.documentId;
@@ -95,10 +97,15 @@ export class DiagnosticSessionSurface implements SessionSurfaceV1 {
     if (!this.disposed) this.root.dataset.frameCount = String(frameCount);
   }
 
+  setCursor(cursor: 'default' | 'pointer' | 'grabbing'): void {
+    if (!this.disposed) this.canvas.style.cursor = cursor;
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     this.resizeObserver.disconnect();
+    this.resizeListeners.clear();
     this.root.remove();
   }
 
@@ -107,11 +114,13 @@ export class DiagnosticSessionSurface implements SessionSurfaceV1 {
     const bounds = this.container.getBoundingClientRect();
     const width = Math.max(0, bounds.width || this.container.clientWidth || 0);
     const height = Math.max(0, bounds.height || this.container.clientHeight || 0);
-    const ratio = this.platform.devicePixelRatio;
-    this.canvas.width = Math.round(width * ratio);
-    this.canvas.height = Math.round(height * ratio);
+    const devicePixelRatio = this.platform.devicePixelRatio;
+    this.viewport = { width, height, devicePixelRatio };
+    this.canvas.width = Math.round(width * devicePixelRatio);
+    this.canvas.height = Math.round(height * devicePixelRatio);
     this.root.dataset.width = String(width);
     this.root.dataset.height = String(height);
-    this.root.dataset.devicePixelRatio = String(ratio);
+    this.root.dataset.devicePixelRatio = String(devicePixelRatio);
+    for (const listener of [...this.resizeListeners]) listener({ ...this.viewport });
   }
 }

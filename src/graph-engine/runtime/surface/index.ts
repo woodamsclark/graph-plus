@@ -1,1 +1,2 @@
-export * from './DiagnosticSessionSurface.ts';
+export * from './CanvasSessionSurface.ts';
+export * from './SessionSurface.ts';

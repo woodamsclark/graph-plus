@@ -21,8 +21,15 @@ import {
   cloneGraphViewStateV1,
   reconcileGraphViewStateV1,
 } from '../core/state/index.ts';
+import { GraphCameraController } from './camera/index.ts';
+import { SessionInteractionRuntime } from './interaction/index.ts';
 import type { SessionRuntimePlatformV1 } from './platform/index.ts';
-import { DiagnosticSessionSurface, type SessionSurfaceV1 } from './surface/index.ts';
+import {
+  CanvasGraphRenderer,
+  composeGraphRenderFrameV1,
+  GraphFrameStore,
+} from './render/index.ts';
+import { CanvasSessionSurface, type SessionSurfaceV1 } from './surface/index.ts';
 
 export interface GraphSessionRuntimeOptionsV1 {
   readonly sessionId: string;
@@ -54,7 +61,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly profile: EffectiveConsumerProfileV1;
   private readonly container: HTMLElement;
   private readonly platform: SessionRuntimePlatformV1;
-  private readonly surface: SessionSurfaceV1;
+  private surface!: SessionSurfaceV1;
+  private camera!: GraphCameraController;
+  private frames!: GraphFrameStore;
+  private renderer!: CanvasGraphRenderer;
+  private interaction!: SessionInteractionRuntime;
+  private surfaceResizeSubscription: Disposable | null = null;
   private store: GraphDocumentStore;
   private viewState: GraphViewStateV1;
   private projectionSelection: GraphFilterSelectionV1;
@@ -70,12 +82,15 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   private readonly onVisibilityChange = (): void => {
     this.documentSuspended = this.platform.document.hidden;
-    this.synchronizeFrameLoop();
+    this.synchronizeRuntimeActivity();
   };
 
   private readonly onAnimationFrame: FrameRequestCallback = () => {
     this.animationFrame = null;
     if (this.isSuspended()) return;
+    this.interaction.tick();
+    this.refreshFrame();
+    this.renderer.render();
     this.frameCount += 1;
     this.surface.recordFrame(this.frameCount);
     this.scheduleFrame();
@@ -92,31 +107,69 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.assertPlatformOwnership();
     this.store = new GraphDocumentStore(options.document);
     this.viewState = options.restoreViewState
-      ? addMissingPositionHints(reconcileGraphViewStateV1(options.restoreViewState, this.restoreContext()), this.store.exportDocument())
+      ? addMissingPositions(
+          reconcileGraphViewStateV1(options.restoreViewState, this.restoreContext()),
+          this.store.exportDocument(),
+          this.profile.dimensions,
+        )
       : this.createInitialViewState();
     this.projectionSelection = allOf(this.store.exportDocument());
     this.renderSelection = allOf(this.store.exportDocument());
 
-    this.surface = new DiagnosticSessionSurface({
-      sessionId: this.sessionId,
-      dimensions: this.profile.dimensions,
-      container: this.container,
-      platform: this.platform,
-    });
     let visibilityListenerInstalled = false;
     try {
+      this.camera = new GraphCameraController(this.viewState.camera, this.profile.dimensions);
+      this.surface = new CanvasSessionSurface({
+        sessionId: this.sessionId,
+        dimensions: this.profile.dimensions,
+        container: this.container,
+        platform: this.platform,
+      });
+      this.frames = new GraphFrameStore();
+      this.renderer = new CanvasGraphRenderer(this.surface.canvas, this.camera, this.frames);
+      const viewport = this.surface.getViewport();
+      this.camera.setViewport(viewport.width, viewport.height);
+      this.renderer.resize(viewport.width, viewport.height, viewport.devicePixelRatio);
+      this.surfaceResizeSubscription = this.surface.onResize((next) => {
+        this.camera.setViewport(next.width, next.height);
+        this.renderer.resize(next.width, next.height, next.devicePixelRatio);
+      });
+      this.interaction = new SessionInteractionRuntime({
+        sessionId: this.sessionId,
+        dimensions: this.profile.dimensions,
+        platform: this.platform,
+        surface: this.surface,
+        camera: this.camera,
+        frames: this.frames,
+        getDocument: () => this.store.exportDocument(),
+        getViewState: () => this.viewState,
+        setViewState: (state) => { this.viewState = state; },
+        getRenderSelection: () => this.renderSelection,
+        getResetCamera: () => defaultCamera(this.profile.dimensions),
+        onViewStateChanged: () => {
+          this.refreshFrame();
+          this.updateSurface();
+        },
+        onIntent: (intent) => this.emitIntent(intent),
+      });
       this.platform.document.addEventListener('visibilitychange', this.onVisibilityChange);
       visibilityListenerInstalled = true;
       this.documentSuspended = this.platform.document.hidden;
       this.recomputeView();
-      this.synchronizeFrameLoop();
+      if (!options.restoreViewState) this.fitPositions(Object.values(this.viewState.positions));
+      this.refreshFrame();
+      this.renderer.render();
+      this.synchronizeRuntimeActivity();
     } catch (error) {
       if (this.animationFrame !== null) this.platform.cancelAnimationFrame(this.animationFrame);
       this.animationFrame = null;
+      this.interaction?.dispose();
+      this.surfaceResizeSubscription?.dispose();
+      this.surfaceResizeSubscription = null;
       if (visibilityListenerInstalled) {
         this.platform.document.removeEventListener('visibilitychange', this.onVisibilityChange);
       }
-      this.surface.dispose();
+      this.surface?.dispose();
       this.disposed = true;
       throw error;
     }
@@ -130,9 +183,15 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       const next = nextStore.exportDocument();
       this.store = nextStore;
       this.viewState = previous.documentId === next.documentId
-        ? addMissingPositionHints(reconcileGraphViewStateV1(this.viewState, this.restoreContext()), next)
+        ? addMissingPositions(
+            reconcileGraphViewStateV1(this.viewState, this.restoreContext()),
+            next,
+            this.profile.dimensions,
+          )
         : this.createInitialViewState();
+      this.camera.setState(this.viewState.camera);
       this.recomputeView();
+      if (previous.documentId !== next.documentId) this.fitPositions(Object.values(this.viewState.positions));
       this.emitGraphChanged({
         sessionId: this.sessionId,
         documentId: next.documentId,
@@ -163,9 +222,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       }
       return result;
     }
-    this.viewState = addMissingPositionHints(
+    this.viewState = addMissingPositions(
       reconcileGraphViewStateV1(this.viewState, this.restoreContext()),
       this.store.exportDocument(),
+      this.profile.dimensions,
     );
     this.recomputeView();
     this.emitGraphChanged({
@@ -212,10 +272,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   async setSelection(nodeIds: readonly string[]): Promise<void> {
     this.requireActive();
-    const known = new Set(this.store.exportDocument().nodes.map((node) => node.id));
-    const selectedNodeIds = [...new Set(nodeIds)].filter((id) => known.has(id));
-    this.viewState = cloneGraphViewStateV1({ ...this.viewState, selectedNodeIds });
-    this.updateSurface();
+    this.setSelectionState(nodeIds);
   }
 
   async focusNode(nodeId: string | null): Promise<void> {
@@ -223,9 +280,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (nodeId !== null && !this.store.exportDocument().nodes.some((node) => node.id === nodeId)) {
       throw new Error(`Cannot focus unknown node "${nodeId}".`);
     }
-    const { focusedNodeId: _focusedNodeId, ...state } = this.viewState;
-    this.viewState = cloneGraphViewStateV1(nodeId === null ? state : { ...state, focusedNodeId: nodeId });
-    this.updateSurface();
+    this.setFocusState(nodeId ?? undefined);
   }
 
   async fitNodes(nodeIds?: readonly string[], options?: TransitionOptionsV1): Promise<void> {
@@ -238,22 +293,15 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       .map((id) => this.viewState.positions[id])
       .filter((position): position is Vec3 => position !== undefined);
     if (!positions.length) return;
-    const target = centroid(positions);
-    this.viewState = cloneGraphViewStateV1({
-      ...this.viewState,
-      camera: { ...this.viewState.camera, target },
-    });
-    this.updateSurface();
+    this.fitPositions(positions);
   }
 
   async resetCamera(options?: TransitionOptionsV1): Promise<void> {
     this.requireActive();
     assertTransition(options);
-    this.viewState = cloneGraphViewStateV1({
-      ...this.viewState,
-      camera: defaultCamera(this.profile.dimensions),
-    });
-    this.updateSurface();
+    this.camera.setState(defaultCamera(this.profile.dimensions));
+    this.synchronizeCameraState();
+    this.refreshFrame();
   }
 
   async exportViewState(): Promise<GraphViewStateV1> {
@@ -264,10 +312,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   async restoreViewState(state: GraphViewStateV1): Promise<void> {
     this.requireActive();
     try {
-      this.viewState = addMissingPositionHints(
+      this.viewState = addMissingPositions(
         reconcileGraphViewStateV1(state, this.restoreContext()),
         this.store.exportDocument(),
+        this.profile.dimensions,
       );
+      this.camera.setState(this.viewState.camera);
       this.recomputeView();
     } catch (error) {
       this.emitError({
@@ -295,7 +345,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.requireActive();
     if (this.manuallySuspended === suspended) return;
     this.manuallySuspended = suspended;
-    this.synchronizeFrameLoop();
+    this.synchronizeRuntimeActivity();
   }
 
   async dispose(): Promise<void> {
@@ -305,6 +355,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.platform.cancelAnimationFrame(this.animationFrame);
       this.animationFrame = null;
     }
+    this.interaction.dispose();
+    this.frames.set(null);
+    this.surfaceResizeSubscription?.dispose();
+    this.surfaceResizeSubscription = null;
     this.platform.document.removeEventListener('visibilitychange', this.onVisibilityChange);
     this.intentListeners.clear();
     this.graphChangedListeners.clear();
@@ -331,9 +385,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       profileId: this.profileId,
       dimensions: this.profile.dimensions,
       positions: Object.fromEntries(
-        document.nodes
-          .filter((node) => node.positionHint !== undefined)
-          .map((node) => [node.id, { ...node.positionHint! }]),
+        document.nodes.map((node, index) => [
+          node.id,
+          node.positionHint ? { ...node.positionHint } : defaultNodePosition(index, this.profile.dimensions),
+        ]),
       ),
       pinnedNodeIds: [],
       camera: defaultCamera(this.profile.dimensions),
@@ -344,6 +399,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private recomputeView(): void {
+    this.interaction.reset();
     const document = this.store.exportDocument();
     const projectionFilter = this.viewState.activeFilters.projection;
     this.projectionSelection = projectionFilter
@@ -354,7 +410,16 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.renderSelection = renderFilter
       ? evaluateGraphFilterV1(projected, renderFilter)
       : allOf(projected);
+    this.refreshFrame();
     this.updateSurface();
+  }
+
+  private refreshFrame(): void {
+    this.frames.set(composeGraphRenderFrameV1({
+      document: this.store.exportDocument(),
+      viewState: this.viewState,
+      selection: this.renderSelection,
+    }));
   }
 
   private updateSurface(): void {
@@ -371,8 +436,56 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     });
   }
 
-  private synchronizeFrameLoop(): void {
-    if (this.isSuspended()) {
+  private synchronizeCameraState(): void {
+    this.viewState = cloneGraphViewStateV1({ ...this.viewState, camera: this.camera.getState() });
+  }
+
+  private fitPositions(positions: readonly Vec3[]): void {
+    if (!positions.length) return;
+    this.camera.fit(positions);
+    this.synchronizeCameraState();
+    this.refreshFrame();
+  }
+
+  private setSelectionState(nodeIds: readonly string[]): void {
+    const known = new Set(this.store.exportDocument().nodes.map((node) => node.id));
+    const selectedNodeIds = [...new Set(nodeIds)].filter((id) => known.has(id));
+    if (sameIds(selectedNodeIds, this.viewState.selectedNodeIds)) return;
+    this.viewState = cloneGraphViewStateV1({ ...this.viewState, selectedNodeIds });
+    this.refreshFrame();
+    this.updateSurface();
+  }
+
+  private setFocusState(nodeId: string | undefined): void {
+    if (nodeId !== undefined && !this.store.exportDocument().nodes.some((node) => node.id === nodeId)) return;
+    if (this.viewState.focusedNodeId === nodeId) return;
+    const { focusedNodeId: _focusedNodeId, ...withoutFocus } = this.viewState;
+    this.viewState = cloneGraphViewStateV1(nodeId === undefined ? withoutFocus : { ...withoutFocus, focusedNodeId: nodeId });
+    if (nodeId) {
+      const position = this.viewState.positions[nodeId];
+      if (position) {
+        this.camera.setTarget(position);
+        this.synchronizeCameraState();
+      }
+    }
+    this.refreshFrame();
+    this.updateSurface();
+  }
+
+  private emitIntent(intent: GraphIntentV1): void {
+    for (const listener of [...this.intentListeners]) {
+      try {
+        listener(cloneIntent(intent));
+      } catch {
+        // Consumer intent handlers are isolated from the runtime pipeline.
+      }
+    }
+  }
+
+  private synchronizeRuntimeActivity(): void {
+    const suspended = this.isSuspended();
+    this.interaction.setEnabled(!suspended);
+    if (suspended) {
       if (this.animationFrame !== null) {
         this.platform.cancelAnimationFrame(this.animationFrame);
         this.animationFrame = null;
@@ -471,24 +584,44 @@ function cloneGraphChangedEvent(event: GraphChangedEventV1): GraphChangedEventV1
   };
 }
 
-function addMissingPositionHints(state: GraphViewStateV1, document: GraphDocumentV1): GraphViewStateV1 {
-  const additions = document.nodes.filter((node) => state.positions[node.id] === undefined && node.positionHint !== undefined);
+function addMissingPositions(
+  state: GraphViewStateV1,
+  document: GraphDocumentV1,
+  dimensions: '2d' | '3d',
+): GraphViewStateV1 {
+  const additions = document.nodes
+    .map((node, index) => ({ node, index }))
+    .filter(({ node }) => state.positions[node.id] === undefined);
   if (!additions.length) return state;
   return cloneGraphViewStateV1({
     ...state,
     positions: {
       ...state.positions,
-      ...Object.fromEntries(additions.map((node) => [node.id, { ...node.positionHint! }])),
+      ...Object.fromEntries(additions.map(({ node, index }) => [
+        node.id,
+        node.positionHint ? { ...node.positionHint } : defaultNodePosition(index, dimensions),
+      ])),
     },
   });
 }
 
-function centroid(positions: readonly Vec3[]): Vec3 {
-  const total = positions.reduce(
-    (sum, position) => ({ x: sum.x + position.x, y: sum.y + position.y, z: sum.z + position.z }),
-    { x: 0, y: 0, z: 0 },
-  );
-  return { x: total.x / positions.length, y: total.y / positions.length, z: total.z / positions.length };
+function defaultNodePosition(index: number, dimensions: '2d' | '3d'): Vec3 {
+  if (index === 0) return { x: 0, y: 0, z: 0 };
+  const angle = index * Math.PI * (3 - Math.sqrt(5));
+  const radius = 42 * Math.sqrt(index);
+  return {
+    x: Math.cos(angle) * radius,
+    y: Math.sin(angle) * radius,
+    z: dimensions === '3d' ? ((index * 47) % 101) - 50 : 0,
+  };
+}
+
+function sameIds(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function cloneIntent(intent: GraphIntentV1): GraphIntentV1 {
+  return JSON.parse(JSON.stringify(intent)) as GraphIntentV1;
 }
 
 function assertTransition(options?: TransitionOptionsV1): void {

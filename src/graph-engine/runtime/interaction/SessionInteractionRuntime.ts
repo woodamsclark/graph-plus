@@ -1,0 +1,328 @@
+import type {
+  GraphCameraStateV1,
+  GraphDimensionsV1,
+  GraphDocumentV1,
+  GraphIntentV1,
+  GraphViewStateV1,
+  Vec3,
+} from '../../contracts/v1/index.ts';
+import { cloneGraphViewStateV1 } from '../../core/state/index.ts';
+import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
+import type { GraphCameraController } from '../camera/index.ts';
+import type { SessionRuntimePlatformV1 } from '../platform/index.ts';
+import type { GraphFrameStore } from '../render/index.ts';
+import type { SessionSurfaceV1 } from '../surface/index.ts';
+import { BufferedQueue } from './BufferedQueue.ts';
+import { GraphCommander, GraphCommandRegistry } from './GraphCommander.ts';
+import { GraphHitTester } from './GraphHitTester.ts';
+import { GraphInput } from './GraphInput.ts';
+import { GraphInteractionInterpreter } from './GraphInteractionInterpreter.ts';
+import type {
+  GraphInputEventV1,
+  GraphRuntimeCommandV1,
+  GraphScreenPointV1,
+} from './GraphInteractionTypes.ts';
+
+export class SessionInteractionRuntime {
+  private readonly inputEvents = new BufferedQueue<GraphInputEventV1>();
+  private readonly commands = new BufferedQueue<GraphRuntimeCommandV1>();
+  private readonly commandRegistry = new GraphCommandRegistry();
+  private readonly commander = new GraphCommander(this.commands, this.commandRegistry);
+  private readonly hitTester: GraphHitTester;
+  private readonly input: GraphInput;
+  private readonly interpreter: GraphInteractionInterpreter;
+  private hoveredNodeId: string | undefined;
+  private dragContext: {
+    readonly nodeId: string;
+    readonly depth: number;
+    readonly offset: Vec3;
+  } | null = null;
+
+  constructor(private readonly options: {
+    readonly sessionId: string;
+    readonly dimensions: GraphDimensionsV1;
+    readonly platform: SessionRuntimePlatformV1;
+    readonly surface: SessionSurfaceV1;
+    readonly camera: GraphCameraController;
+    readonly frames: GraphFrameStore;
+    readonly getDocument: () => GraphDocumentV1;
+    readonly getViewState: () => GraphViewStateV1;
+    readonly setViewState: (state: GraphViewStateV1) => void;
+    readonly getRenderSelection: () => GraphFilterSelectionV1;
+    readonly getResetCamera: () => GraphCameraStateV1;
+    readonly onViewStateChanged: () => void;
+    readonly onIntent: (intent: GraphIntentV1) => void;
+  }) {
+    this.hitTester = new GraphHitTester(this.options.camera, this.options.frames);
+    this.registerCommandHandlers();
+    this.input = new GraphInput({
+      canvas: this.options.surface.canvas,
+      platform: this.options.platform,
+      events: this.inputEvents,
+      getIdentity: () => {
+        const document = this.options.getDocument();
+        return { documentId: document.documentId, documentRevision: document.revision };
+      },
+    });
+    this.interpreter = new GraphInteractionInterpreter({
+      dimensions: this.options.dimensions,
+      events: this.inputEvents,
+      commands: this.commands,
+      hitTest: (point) => this.hitTester.hit(point),
+      getFocusedNodeId: () => this.options.getViewState().focusedNodeId,
+      getSelectedNodeIds: () => this.options.getViewState().selectedNodeIds,
+      getViewport: () => this.options.surface.getViewport(),
+    });
+  }
+
+  tick(): void {
+    this.interpreter.tick();
+    this.commander.tick();
+  }
+
+  setEnabled(enabled: boolean): void {
+    this.input.setEnabled(enabled);
+    if (!enabled) this.resetTransientState();
+  }
+
+  reset(): void {
+    this.input.reset();
+    this.resetTransientState();
+  }
+
+  dispose(): void {
+    this.input.dispose();
+    this.resetTransientState();
+  }
+
+  private registerCommandHandlers(): void {
+    const types: readonly GraphRuntimeCommandV1['type'][] = [
+      'pan-by',
+      'orbit-by',
+      'zoom-by',
+      'reset-camera',
+      'fit-camera',
+      'set-selection',
+      'set-focus',
+      'activate-node',
+      'activate-background',
+      'set-hover',
+      'drag-start',
+      'drag-update',
+      'drag-end',
+    ];
+    for (const type of types) this.commandRegistry.register(type, (command) => this.applyCommand(command));
+  }
+
+  private applyCommand(command: GraphRuntimeCommandV1): void {
+    if (!this.commandBelongsToActiveDocument(command)) return;
+    switch (command.type) {
+      case 'pan-by':
+        this.options.camera.panByPixels(command.deltaX, command.deltaY);
+        this.cameraChanged(command);
+        return;
+      case 'orbit-by':
+        this.options.camera.orbitByPixels(command.deltaX, command.deltaY);
+        this.cameraChanged(command);
+        return;
+      case 'zoom-by':
+        this.options.camera.zoomByWheel(command.deltaY);
+        this.cameraChanged(command);
+        return;
+      case 'reset-camera':
+        this.options.camera.setState(this.options.getResetCamera());
+        this.setFocus(undefined, command);
+        this.cameraChanged(command);
+        return;
+      case 'fit-camera':
+        this.fitVisibleNodes();
+        this.emitViewportIntent(command);
+        return;
+      case 'set-selection':
+        this.setSelection(command.nodeIds, command);
+        return;
+      case 'set-focus':
+        this.setFocus(command.nodeId, command);
+        return;
+      case 'activate-node':
+        if (!this.options.getRenderSelection().nodeIds.has(command.nodeId)) return;
+        this.options.onIntent({
+          ...this.intentBase(command),
+          type: 'node-activated',
+          nodeId: command.nodeId,
+          activation: command.activation,
+        });
+        return;
+      case 'activate-background':
+        this.options.onIntent({ ...this.intentBase(command), type: 'background-activated' });
+        return;
+      case 'set-hover':
+        this.hoveredNodeId = command.nodeId;
+        this.updateCursor();
+        return;
+      case 'drag-start':
+        this.beginNodeDrag(command.nodeId, command.point);
+        return;
+      case 'drag-update':
+        this.updateNodeDrag(command.nodeId, command.point);
+        return;
+      case 'drag-end':
+        this.updateNodeDrag(command.nodeId, command.point);
+        this.endNodeDrag(command);
+        return;
+    }
+  }
+
+  private commandBelongsToActiveDocument(command: GraphRuntimeCommandV1): boolean {
+    const document = this.options.getDocument();
+    return command.identity.documentId === document.documentId
+      && command.identity.documentRevision === document.revision;
+  }
+
+  private cameraChanged(command: GraphRuntimeCommandV1): void {
+    this.commitCamera();
+    this.options.onViewStateChanged();
+    this.emitViewportIntent(command);
+  }
+
+  private commitCamera(): void {
+    this.commit({ ...this.options.getViewState(), camera: this.options.camera.getState() });
+  }
+
+  private fitVisibleNodes(): void {
+    const state = this.options.getViewState();
+    const positions = [...this.options.getRenderSelection().nodeIds]
+      .map((id) => state.positions[id])
+      .filter(isVec3);
+    if (!positions.length) return;
+    this.options.camera.fit(positions);
+    this.commitCamera();
+    this.options.onViewStateChanged();
+  }
+
+  private setSelection(nodeIds: readonly string[], command: GraphRuntimeCommandV1): void {
+    const state = this.options.getViewState();
+    const known = new Set(this.options.getDocument().nodes.map((node) => node.id));
+    const selectedNodeIds = [...new Set(nodeIds)].filter((id) => known.has(id));
+    if (sameIds(selectedNodeIds, state.selectedNodeIds)) return;
+    this.commit({ ...state, selectedNodeIds });
+    this.options.onViewStateChanged();
+    this.options.onIntent({
+      ...this.intentBase(command),
+      type: 'selection-changed',
+      selectedNodeIds: [...selectedNodeIds],
+    });
+  }
+
+  private setFocus(nodeId: string | undefined, command: GraphRuntimeCommandV1): void {
+    const document = this.options.getDocument();
+    if (nodeId !== undefined && !document.nodes.some((node) => node.id === nodeId)) return;
+    const state = this.options.getViewState();
+    if (state.focusedNodeId === nodeId) return;
+    const { focusedNodeId: _focusedNodeId, ...withoutFocus } = state;
+    this.commit(nodeId === undefined ? withoutFocus : { ...withoutFocus, focusedNodeId: nodeId });
+    if (nodeId) {
+      const position = this.options.getViewState().positions[nodeId];
+      if (position) {
+        this.options.camera.setTarget(position);
+        this.commitCamera();
+      }
+    }
+    this.options.onViewStateChanged();
+    this.options.onIntent({
+      ...this.intentBase(command),
+      type: 'focus-changed',
+      ...(nodeId === undefined ? {} : { focusedNodeId: nodeId }),
+    });
+  }
+
+  private beginNodeDrag(nodeId: string, point: GraphScreenPointV1): void {
+    if (!this.options.getRenderSelection().nodeIds.has(nodeId)) return;
+    const position = this.options.getViewState().positions[nodeId];
+    if (!position) return;
+    const projected = this.options.camera.worldToScreen(position);
+    const underPointer = this.options.camera.screenToWorld(point.x, point.y, projected.depth);
+    this.dragContext = {
+      nodeId,
+      depth: projected.depth,
+      offset: subtract(position, underPointer),
+    };
+    this.updateCursor();
+  }
+
+  private updateNodeDrag(nodeId: string, point: GraphScreenPointV1): void {
+    if (!this.dragContext || this.dragContext.nodeId !== nodeId) return;
+    const state = this.options.getViewState();
+    const underPointer = this.options.camera.screenToWorld(point.x, point.y, this.dragContext.depth);
+    const position = add(underPointer, this.dragContext.offset);
+    this.commit({ ...state, positions: { ...state.positions, [nodeId]: position } });
+    if (state.focusedNodeId === nodeId) this.options.camera.setTarget(position);
+    this.commitCamera();
+    this.options.onViewStateChanged();
+  }
+
+  private endNodeDrag(command: Extract<GraphRuntimeCommandV1, { type: 'drag-end' }>): void {
+    if (!this.dragContext || this.dragContext.nodeId !== command.nodeId) return;
+    const position = this.options.getViewState().positions[command.nodeId];
+    this.dragContext = null;
+    this.hoveredNodeId = command.nodeId;
+    this.updateCursor();
+    if (!position) return;
+    this.options.onIntent({
+      ...this.intentBase(command),
+      type: 'node-drag-ended',
+      nodeId: command.nodeId,
+      position: { ...position },
+    });
+  }
+
+  private updateCursor(): void {
+    this.options.surface.setCursor(this.dragContext ? 'grabbing' : this.hoveredNodeId ? 'pointer' : 'default');
+  }
+
+  private resetTransientState(): void {
+    this.interpreter.reset();
+    this.inputEvents.clear();
+    this.commands.clear();
+    this.dragContext = null;
+    this.hoveredNodeId = undefined;
+    this.updateCursor();
+  }
+
+  private intentBase(command: GraphRuntimeCommandV1) {
+    return {
+      sessionId: this.options.sessionId,
+      documentId: command.identity.documentId,
+      documentRevision: command.identity.documentRevision,
+      timestamp: command.timestamp,
+    } as const;
+  }
+
+  private emitViewportIntent(command: GraphRuntimeCommandV1): void {
+    this.options.onIntent({
+      ...this.intentBase(command),
+      type: 'viewport-changed',
+      camera: this.options.camera.getState(),
+    });
+  }
+
+  private commit(state: GraphViewStateV1): void {
+    this.options.setViewState(cloneGraphViewStateV1(state));
+  }
+}
+
+function sameIds(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function isVec3(value: Vec3 | undefined): value is Vec3 {
+  return value !== undefined;
+}
+
+function add(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+}
+
+function subtract(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+}

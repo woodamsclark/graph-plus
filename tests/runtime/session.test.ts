@@ -1,211 +1,17 @@
 import { Window } from 'happy-dom';
-import type {
-  ConsumerRegistrationV1,
-  GraphDocumentV1,
-  GraphSessionV1,
-} from '../../src/graph-engine/contracts/v1/index.ts';
-import { ConsumerProfileRegistry } from '../../src/graph-engine/core/profile/index.ts';
 import {
   GraphSessionDisposedErrorV1,
   GraphSessionProfileErrorV1,
-  SessionFactory,
   createSessionRuntimePlatformV1,
-  type SessionResizeObserverV1,
-  type SessionRuntimePlatformV1,
 } from '../../src/graph-engine/runtime/index.ts';
-import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures.ts';
+import { graphDocument, graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
-
-class InstrumentedPlatform implements SessionRuntimePlatformV1 {
-  readonly document: Document;
-  readonly window: globalThis.Window;
-  pixelRatio = 2;
-  observedTargets: Element[] = [];
-  disconnectedObservers = 0;
-  cancelledFrames = 0;
-  visibilityListenerAdds = 0;
-  visibilityListenerRemoves = 0;
-  failObservation = false;
-  private nextHandle = 1;
-  private readonly frames = new Map<number, FrameRequestCallback>();
-  private resizeCallback: ResizeObserverCallback | null = null;
-
-  constructor(window: Window) {
-    this.document = window.document as unknown as Document;
-    this.window = window as unknown as globalThis.Window;
-    const addEventListener = this.document.addEventListener.bind(this.document);
-    const removeEventListener = this.document.removeEventListener.bind(this.document);
-    this.document.addEventListener = ((
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: boolean | AddEventListenerOptions,
-    ) => {
-      if (type === 'visibilitychange') this.visibilityListenerAdds += 1;
-      addEventListener(type, listener, options);
-    }) as typeof this.document.addEventListener;
-    this.document.removeEventListener = ((
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: boolean | EventListenerOptions,
-    ) => {
-      if (type === 'visibilitychange') this.visibilityListenerRemoves += 1;
-      removeEventListener(type, listener, options);
-    }) as typeof this.document.removeEventListener;
-  }
-
-  get devicePixelRatio(): number {
-    return this.pixelRatio;
-  }
-
-  get pendingFrames(): number {
-    return this.frames.size;
-  }
-
-  requestAnimationFrame(callback: FrameRequestCallback): number {
-    const handle = this.nextHandle++;
-    this.frames.set(handle, callback);
-    return handle;
-  }
-
-  cancelAnimationFrame(handle: number): void {
-    if (this.frames.delete(handle)) this.cancelledFrames += 1;
-  }
-
-  setTimeout(_callback: () => void, _delayMs: number): number {
-    return this.nextHandle++;
-  }
-
-  clearTimeout(_handle: number): void {}
-
-  createResizeObserver(callback: ResizeObserverCallback): SessionResizeObserverV1 {
-    this.resizeCallback = callback;
-    return {
-      observe: (target) => {
-        if (this.failObservation) throw new Error('resize observation failed');
-        this.observedTargets.push(target);
-      },
-      disconnect: () => {
-        this.disconnectedObservers += 1;
-        this.observedTargets = [];
-      },
-    };
-  }
-
-  now(): number {
-    return 100;
-  }
-
-  flushFrame(timestamp = 16): void {
-    const entry = this.frames.entries().next().value as [number, FrameRequestCallback] | undefined;
-    if (!entry) return;
-    this.frames.delete(entry[0]);
-    entry[1](timestamp);
-  }
-
-  triggerResize(): void {
-    this.resizeCallback?.([], {} as ResizeObserver);
-  }
-}
-
-function registration(): ConsumerRegistrationV1 {
-  return {
-    consumerId: 'synthetic-consumer',
-    displayName: 'Synthetic Consumer',
-    consumerVersion: '1.0.0',
-    supportedProtocolVersions: [1],
-    profiles: [
-      {
-        profileId: 'two-dimensional',
-        displayName: 'Two dimensional',
-        descriptorVersion: 1,
-        dimensions: '2d',
-        requestedCapabilities: ['render'],
-        modules: {},
-      },
-      {
-        profileId: 'three-dimensional',
-        displayName: 'Three dimensional',
-        descriptorVersion: 1,
-        dimensions: '3d',
-        requestedCapabilities: ['render'],
-        modules: {},
-      },
-    ],
-  };
-}
-
-function fixture(): GraphDocumentV1 {
-  return graphDocument({
-    nodes: [
-      graphNode('a', { tokens: ['keep'], positionHint: { x: 10, y: 20, z: 0 } }),
-      graphNode('b', { tokens: ['remove'], positionHint: { x: 30, y: 40, z: 0 } }),
-      graphNode('c', { tokens: ['keep'] }),
-    ],
-    edges: [
-      graphEdge('a-b', 'a', 'b', { tokens: ['ordinary'] }),
-      graphEdge('a-c', 'a', 'c', { tokens: ['important'] }),
-    ],
-  });
-}
-
-function harness(options: { profileId?: string; document?: GraphDocumentV1 } = {}) {
-  const window = new Window();
-  const document = window.document as unknown as Document;
-  const container = document.createElement('section');
-  const size = { width: 640, height: 360 };
-  Object.defineProperty(container, 'getBoundingClientRect', {
-    value: () => ({
-      width: size.width,
-      height: size.height,
-      x: 0,
-      y: 0,
-      top: 0,
-      right: size.width,
-      bottom: size.height,
-      left: 0,
-    }),
-  });
-  document.body.append(container);
-  const platform = new InstrumentedPlatform(window);
-  const profiles = new ConsumerProfileRegistry();
-  profiles.registerConsumer(registration());
-  const factory = new SessionFactory({
-    engineInstanceId: 'engine-test',
-    profiles,
-    createSessionId: () => 'session-test',
-    createPlatform: (target) => {
-      equal(target, container, 'factory must derive its platform from the supplied container');
-      return platform;
-    },
-  });
-  return {
-    window,
-    document,
-    container,
-    platform,
-    profiles,
-    factory,
-    resize: (width: number, height: number, pixelRatio: number) => {
-      size.width = width;
-      size.height = height;
-      platform.pixelRatio = pixelRatio;
-      platform.triggerResize();
-    },
-    create: (restoreViewState?: Parameters<typeof factory.createSession>[0]['restoreViewState']) => factory.createSession({
-      consumerId: 'synthetic-consumer',
-      profileId: options.profileId ?? 'two-dimensional',
-      container,
-      document: options.document ?? fixture(),
-      restoreViewState,
-    }),
-  };
-}
-
-function surface(container: HTMLElement): HTMLElement {
-  const value = container.querySelector<HTMLElement>('[data-graph-engine-session]');
-  assert(value, 'session surface should be mounted');
-  return value;
-}
+import {
+  runtimeFixture as fixture,
+  runtimeHarness as harness,
+  runtimeRegistration as registration,
+  runtimeSurface as surface,
+} from '../support/runtimeHarness.ts';
 
 test('R-SHELL-01 mounts a deterministic surface in the container owning document', async () => {
   const unrelatedWindow = new Window();
@@ -235,7 +41,6 @@ test('R-SHELL-01 mounts a deterministic surface in the container owning document
   equal(canvas.height, 300, 'resized canvas height should use current pixel ratio');
   await session.dispose();
 });
-
 test('neutral platform derives browser services from the supplied container', () => {
   const value = harness();
   const platform = createSessionRuntimePlatformV1(value.container);
