@@ -305,6 +305,35 @@ function validateModuleGraph(
       }
     }
   }
+  const enabledIds = Object.values(effective).filter((module) => module.enabled).map((module) => module.id).sort();
+  const complete = new Set<string>();
+  const visiting = new Set<string>();
+  const path: string[] = [];
+  let cycleReported = false;
+  const visit = (moduleId: string): void => {
+    if (complete.has(moduleId) || cycleReported) return;
+    if (visiting.has(moduleId)) {
+      const start = path.indexOf(moduleId);
+      const cycle = [...path.slice(Math.max(0, start)), moduleId];
+      issues.push({
+        code: 'module-conflict',
+        path: `modules.${moduleId}`,
+        message: `Enabled module dependency cycle: ${cycle.join(' -> ')}.`,
+        fatal: true,
+      });
+      cycleReported = true;
+      return;
+    }
+    visiting.add(moduleId);
+    path.push(moduleId);
+    for (const dependency of descriptors.get(moduleId)?.dependencies ?? []) {
+      if (effective[dependency]?.enabled) visit(dependency);
+    }
+    path.pop();
+    visiting.delete(moduleId);
+    complete.add(moduleId);
+  };
+  for (const moduleId of enabledIds) visit(moduleId);
 }
 
 function reportUnknownOverrideModules(

@@ -7,6 +7,7 @@ export interface GraphRenderNodeV1 {
   readonly radius: number;
   readonly selected: boolean;
   readonly focused: boolean;
+  readonly color?: string;
 }
 
 export interface GraphRenderEdgeV1 {
@@ -15,6 +16,19 @@ export interface GraphRenderEdgeV1 {
   readonly targetId: string;
   readonly directed: boolean;
   readonly thickness: number;
+  readonly color?: string;
+  readonly dashed?: boolean;
+}
+
+export interface GraphNodeRenderContributionV1 {
+  readonly color?: string;
+  readonly radiusScale?: number;
+}
+
+export interface GraphEdgeRenderContributionV1 {
+  readonly color?: string;
+  readonly thicknessScale?: number;
+  readonly dashed?: boolean;
 }
 
 export interface GraphRenderThemeV1 {

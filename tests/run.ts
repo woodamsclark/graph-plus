@@ -8,6 +8,7 @@ import './core/filter.test.ts';
 import './core/profile.test.ts';
 import './core/view-state.test.ts';
 import './runtime/interaction.test.ts';
+import './runtime/modules.test.ts';
 import './runtime/session.test.ts';
 import { runTests } from './support/harness.ts';
 

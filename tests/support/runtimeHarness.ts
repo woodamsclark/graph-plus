@@ -5,7 +5,10 @@ import type {
 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { ConsumerProfileRegistry } from '../../src/graph-engine/core/profile/index.ts';
 import {
+  DEFAULT_GRAPH_RENDER_THEME_V1,
+  GraphModuleRegistry,
   SessionFactory,
+  type GraphRenderThemeV1,
   type SessionResizeObserverV1,
   type SessionRuntimePlatformV1,
 } from '../../src/graph-engine/runtime/index.ts';
@@ -137,7 +140,13 @@ export function runtimeRegistration(): ConsumerRegistrationV1 {
         descriptorVersion: 1,
         dimensions: '2d',
         requestedCapabilities: ['render'],
-        modules: {},
+        modules: {
+          rendering: { policy: 'required' },
+          filtering: { policy: 'required' },
+          form: { policy: 'optional', defaultEnabled: false },
+          'force-layout': { policy: 'optional', defaultEnabled: false },
+          anima: { policy: 'optional', defaultEnabled: false },
+        },
       },
       {
         profileId: 'three-dimensional',
@@ -145,7 +154,13 @@ export function runtimeRegistration(): ConsumerRegistrationV1 {
         descriptorVersion: 1,
         dimensions: '3d',
         requestedCapabilities: ['render'],
-        modules: {},
+        modules: {
+          rendering: { policy: 'required' },
+          filtering: { policy: 'required' },
+          form: { policy: 'optional', defaultEnabled: false },
+          'force-layout': { policy: 'optional', defaultEnabled: false },
+          anima: { policy: 'optional', defaultEnabled: false },
+        },
       },
     ],
   };
@@ -165,12 +180,19 @@ export function runtimeFixture(): GraphDocumentV1 {
   });
 }
 
-export function runtimeHarness(options: { profileId?: string; document?: GraphDocumentV1 } = {}) {
+export function runtimeHarness(options: {
+  profileId?: string;
+  document?: GraphDocumentV1;
+  registration?: ConsumerRegistrationV1;
+  modules?: GraphModuleRegistry;
+  resolveThemePalette?: (container: HTMLElement) => GraphRenderThemeV1;
+} = {}) {
   const window = new Window();
   const drawCalls: string[] = [];
+  const styleAssignments: string[] = [];
   const Canvas = (window as unknown as { HTMLCanvasElement: { prototype: HTMLCanvasElement } }).HTMLCanvasElement;
   Canvas.prototype.getContext = function getContext(contextId: string) {
-    return contextId === '2d' ? fakeCanvasContext(drawCalls) : null;
+    return contextId === '2d' ? fakeCanvasContext(drawCalls, styleAssignments) : null;
   } as HTMLCanvasElement['getContext'];
   const document = window.document as unknown as Document;
   const container = document.createElement('section');
@@ -190,7 +212,7 @@ export function runtimeHarness(options: { profileId?: string; document?: GraphDo
   document.body.append(container);
   const platform = new InstrumentedPlatform(window);
   const profiles = new ConsumerProfileRegistry();
-  profiles.registerConsumer(runtimeRegistration());
+  profiles.registerConsumer(options.registration ?? runtimeRegistration());
   const factory = new SessionFactory({
     engineInstanceId: 'engine-test',
     profiles,
@@ -199,6 +221,8 @@ export function runtimeHarness(options: { profileId?: string; document?: GraphDo
       equal(target, container, 'factory must derive its platform from the supplied container');
       return platform;
     },
+    ...(options.modules ? { modules: options.modules } : {}),
+    resolveThemePalette: options.resolveThemePalette ?? (() => DEFAULT_GRAPH_RENDER_THEME_V1),
   });
   return {
     window,
@@ -208,6 +232,7 @@ export function runtimeHarness(options: { profileId?: string; document?: GraphDo
     profiles,
     factory,
     drawCalls,
+    styleAssignments,
     resize: (width: number, height: number, pixelRatio: number) => {
       size.width = width;
       size.height = height;
@@ -236,7 +261,7 @@ export function runtimeCanvas(container: HTMLElement): HTMLCanvasElement {
   return value;
 }
 
-function fakeCanvasContext(calls: string[]): CanvasRenderingContext2D {
+function fakeCanvasContext(calls: string[], styleAssignments: string[]): CanvasRenderingContext2D {
   const methods = [
     'arc',
     'beginPath',
@@ -249,6 +274,7 @@ function fakeCanvasContext(calls: string[]): CanvasRenderingContext2D {
     'moveTo',
     'restore',
     'save',
+    'setLineDash',
     'setTransform',
     'stroke',
   ];
@@ -260,6 +286,7 @@ function fakeCanvasContext(calls: string[]): CanvasRenderingContext2D {
       return Reflect.get(target, property);
     },
     set(target, property, value) {
+      if (typeof property === 'string') styleAssignments.push(`${property}:${String(value)}`);
       return Reflect.set(target, property, value);
     },
   });

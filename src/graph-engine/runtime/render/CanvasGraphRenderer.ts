@@ -55,8 +55,6 @@ export class CanvasGraphRenderer {
 
   private drawEdges(frame: GraphRenderFrameV1, nodes: ReadonlyMap<string, ProjectedNode>): void {
     this.context.save();
-    this.context.strokeStyle = frame.theme.edgeColor;
-    this.context.fillStyle = frame.theme.edgeColor;
     for (const edge of frame.edges) {
       const source = nodes.get(edge.sourceId);
       const target = nodes.get(edge.targetId);
@@ -71,7 +69,10 @@ export class CanvasGraphRenderer {
       const startY = source.point.y + unitY * source.radius;
       const endX = target.point.x - unitX * target.radius;
       const endY = target.point.y - unitY * target.radius;
+      this.context.strokeStyle = edge.color ?? frame.theme.edgeColor;
+      this.context.fillStyle = edge.color ?? frame.theme.edgeColor;
       this.context.lineWidth = edge.thickness;
+      this.context.setLineDash(edge.dashed ? [4, 5] : []);
       this.context.beginPath();
       this.context.moveTo(startX, startY);
       this.context.lineTo(endX, endY);
@@ -91,7 +92,7 @@ export class CanvasGraphRenderer {
         ? frame.theme.focusedNodeColor
         : node.selected
           ? frame.theme.selectedNodeColor
-          : frame.theme.nodeColor;
+          : node.color ?? frame.theme.nodeColor;
       this.context.beginPath();
       this.context.arc(point.x, point.y, radius, 0, Math.PI * 2);
       this.context.fill();

@@ -23,11 +23,20 @@ import {
 } from '../core/state/index.ts';
 import { GraphCameraController } from './camera/index.ts';
 import { SessionInteractionRuntime } from './interaction/index.ts';
+import {
+  GraphModuleHost,
+  GraphRequiredModuleErrorV1,
+  SHIPPED_GRAPH_MODULE_IDS_V1,
+  type GraphModuleFailureV1,
+  type GraphModulePipelineStateV1,
+  type GraphModuleRegistry,
+} from './modules/index.ts';
 import type { SessionRuntimePlatformV1 } from './platform/index.ts';
 import {
   CanvasGraphRenderer,
   composeGraphRenderFrameV1,
   GraphFrameStore,
+  type GraphRenderThemeV1,
 } from './render/index.ts';
 import { CanvasSessionSurface, type SessionSurfaceV1 } from './surface/index.ts';
 
@@ -39,6 +48,8 @@ export interface GraphSessionRuntimeOptionsV1 {
   readonly container: HTMLElement;
   readonly document: GraphDocumentV1;
   readonly profile: EffectiveConsumerProfileV1;
+  readonly modules: GraphModuleRegistry;
+  readonly themePalette: GraphRenderThemeV1;
   readonly restoreViewState?: GraphViewStateV1;
   readonly platform: SessionRuntimePlatformV1;
 }
@@ -61,11 +72,14 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly profile: EffectiveConsumerProfileV1;
   private readonly container: HTMLElement;
   private readonly platform: SessionRuntimePlatformV1;
+  private readonly themePalette: GraphRenderThemeV1;
   private surface!: SessionSurfaceV1;
   private camera!: GraphCameraController;
   private frames!: GraphFrameStore;
   private renderer!: CanvasGraphRenderer;
   private interaction!: SessionInteractionRuntime;
+  private moduleHost!: GraphModuleHost;
+  private moduleView!: GraphModulePipelineStateV1;
   private surfaceResizeSubscription: Disposable | null = null;
   private store: GraphDocumentStore;
   private viewState: GraphViewStateV1;
@@ -76,20 +90,33 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly errorListeners = new Set<(error: GraphSessionErrorV1) => void>();
   private animationFrame: number | null = null;
   private frameCount = 0;
+  private lastFrameTimestamp: number | null = null;
   private manuallySuspended = false;
   private documentSuspended = false;
   private disposed = false;
+  private fatalModuleError: GraphRequiredModuleErrorV1 | null = null;
+  private readonly deferredErrors: GraphSessionErrorV1[] = [];
 
   private readonly onVisibilityChange = (): void => {
     this.documentSuspended = this.platform.document.hidden;
     this.synchronizeRuntimeActivity();
   };
 
-  private readonly onAnimationFrame: FrameRequestCallback = () => {
+  private readonly onAnimationFrame: FrameRequestCallback = (timestamp) => {
     this.animationFrame = null;
     if (this.isSuspended()) return;
     this.interaction.tick();
-    this.refreshFrame();
+    const deltaSeconds = this.lastFrameTimestamp === null ? 1 / 60 : Math.max(0, (timestamp - this.lastFrameTimestamp) / 1000);
+    this.lastFrameTimestamp = timestamp;
+    const positions = this.moduleHost.tick(this.moduleView, deltaSeconds);
+    if (positions) {
+      this.viewState = cloneGraphViewStateV1({ ...this.viewState, positions });
+      this.moduleHost.viewChanged(this.viewState);
+      this.recomputeView(false);
+    } else {
+      this.refreshFrame();
+    }
+    if (this.isSuspended()) return;
     this.renderer.render();
     this.frameCount += 1;
     this.surface.recordFrame(this.frameCount);
@@ -104,6 +131,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.profile = options.profile;
     this.container = options.container;
     this.platform = options.platform;
+    this.themePalette = options.themePalette;
     this.assertPlatformOwnership();
     this.store = new GraphDocumentStore(options.document);
     this.viewState = options.restoreViewState
@@ -134,6 +162,16 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         this.camera.setViewport(next.width, next.height);
         this.renderer.resize(next.width, next.height, next.devicePixelRatio);
       });
+      this.moduleHost = new GraphModuleHost({
+        registry: options.modules,
+        profile: this.profile,
+        sessionId: this.sessionId,
+        themePalette: options.themePalette,
+        initialModuleState: this.viewState.moduleState,
+        getDocument: () => this.store.exportDocument(),
+        getViewState: () => this.viewState,
+        onFailure: (failure) => this.handleModuleFailure(failure),
+      });
       this.interaction = new SessionInteractionRuntime({
         sessionId: this.sessionId,
         dimensions: this.profile.dimensions,
@@ -143,12 +181,14 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         frames: this.frames,
         getDocument: () => this.store.exportDocument(),
         getViewState: () => this.viewState,
+        getInteractivePositions: () => this.moduleView?.positions ?? this.viewState.positions,
+        isNodeDraggable: () => !this.moduleView?.formActive,
         setViewState: (state) => { this.viewState = state; },
         getRenderSelection: () => this.renderSelection,
         getResetCamera: () => defaultCamera(this.profile.dimensions),
         onViewStateChanged: () => {
-          this.refreshFrame();
-          this.updateSurface();
+          this.moduleHost.viewChanged(this.viewState);
+          this.recomputeView(false);
         },
         onIntent: (intent) => this.emitIntent(intent),
       });
@@ -156,7 +196,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       visibilityListenerInstalled = true;
       this.documentSuspended = this.platform.document.hidden;
       this.recomputeView();
-      if (!options.restoreViewState) this.fitPositions(Object.values(this.viewState.positions));
+      if (!options.restoreViewState) this.fitPositions(Object.values(this.moduleView.positions));
       this.refreshFrame();
       this.renderer.render();
       this.synchronizeRuntimeActivity();
@@ -164,6 +204,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       if (this.animationFrame !== null) this.platform.cancelAnimationFrame(this.animationFrame);
       this.animationFrame = null;
       this.interaction?.dispose();
+      this.moduleHost?.dispose();
       this.surfaceResizeSubscription?.dispose();
       this.surfaceResizeSubscription = null;
       if (visibilityListenerInstalled) {
@@ -190,8 +231,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
           )
         : this.createInitialViewState();
       this.camera.setState(this.viewState.camera);
+      this.moduleHost.documentChanged(next);
+      this.moduleHost.viewChanged(this.viewState);
       this.recomputeView();
-      if (previous.documentId !== next.documentId) this.fitPositions(Object.values(this.viewState.positions));
+      if (previous.documentId !== next.documentId) this.fitPositions(Object.values(this.moduleView.positions));
       this.emitGraphChanged({
         sessionId: this.sessionId,
         documentId: next.documentId,
@@ -227,6 +270,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.store.exportDocument(),
       this.profile.dimensions,
     );
+    this.moduleHost.documentChanged(this.store.exportDocument());
+    this.moduleHost.viewChanged(this.viewState);
     this.recomputeView();
     this.emitGraphChanged({
       sessionId: this.sessionId,
@@ -246,6 +291,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   async applyFilter(filter: GraphFilterRequestV1): Promise<void> {
     this.requireActive();
+    if (!this.moduleHost.has(SHIPPED_GRAPH_MODULE_IDS_V1.filtering)) {
+      throw new Error('Filtering is unavailable in the active graph profile.');
+    }
     evaluateGraphFilterV1(this.store.exportDocument(), filter);
     this.viewState = cloneGraphViewStateV1({
       ...this.viewState,
@@ -254,6 +302,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         [filter.scope]: cloneFilter(filter),
       },
     });
+    this.moduleHost.viewChanged(this.viewState);
     this.recomputeView();
   }
 
@@ -267,6 +316,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       delete activeFilters[scope];
     }
     this.viewState = cloneGraphViewStateV1({ ...this.viewState, activeFilters });
+    this.moduleHost.viewChanged(this.viewState);
     this.recomputeView();
   }
 
@@ -290,7 +340,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const candidates = nodeIds ?? [...this.renderSelection.nodeIds];
     const positions = [...new Set(candidates)]
       .filter((id) => document.nodes.some((node) => node.id === id))
-      .map((id) => this.viewState.positions[id])
+      .map((id) => this.moduleView.positions[id])
       .filter((position): position is Vec3 => position !== undefined);
     if (!positions.length) return;
     this.fitPositions(positions);
@@ -301,11 +351,13 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     assertTransition(options);
     this.camera.setState(defaultCamera(this.profile.dimensions));
     this.synchronizeCameraState();
+    this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame();
   }
 
   async exportViewState(): Promise<GraphViewStateV1> {
     this.requireActive();
+    this.synchronizeModuleState();
     return cloneGraphViewStateV1(this.viewState);
   }
 
@@ -318,6 +370,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         this.profile.dimensions,
       );
       this.camera.setState(this.viewState.camera);
+      this.moduleHost.restoreState(this.viewState.moduleState);
+      this.moduleHost.viewChanged(this.viewState);
       this.recomputeView();
     } catch (error) {
       this.emitError({
@@ -338,7 +392,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   onError(listener: (error: GraphSessionErrorV1) => void): Disposable {
-    return this.subscribe(this.errorListeners, listener);
+    const subscription = this.subscribe(this.errorListeners, listener);
+    const deferred = this.deferredErrors.splice(0);
+    for (const error of deferred) {
+      try { listener({ ...error }); } catch {}
+    }
+    return subscription;
   }
 
   setSuspended(suspended: boolean): void {
@@ -356,6 +415,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.animationFrame = null;
     }
     this.interaction.dispose();
+    this.moduleHost.dispose();
     this.frames.set(null);
     this.surfaceResizeSubscription?.dispose();
     this.surfaceResizeSubscription = null;
@@ -398,27 +458,36 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     };
   }
 
-  private recomputeView(): void {
-    this.interaction.reset();
+  private recomputeView(resetInteraction = true): void {
+    if (resetInteraction) this.interaction.reset();
     const document = this.store.exportDocument();
-    const projectionFilter = this.viewState.activeFilters.projection;
-    this.projectionSelection = projectionFilter
-      ? evaluateGraphFilterV1(document, projectionFilter)
-      : allOf(document);
-    const projected = selectDocument(document, this.projectionSelection);
-    const renderFilter = this.viewState.activeFilters.render;
-    this.renderSelection = renderFilter
-      ? evaluateGraphFilterV1(projected, renderFilter)
-      : allOf(projected);
+    this.moduleView = this.moduleHost.project({
+      sourceDocument: document,
+      document,
+      viewState: this.viewState,
+      positions: this.viewState.positions,
+      projectionSelection: allOf(document),
+      renderSelection: allOf(document),
+      formActive: false,
+      nodeContributions: {},
+      edgeContributions: {},
+      theme: this.themePalette,
+    });
+    this.projectionSelection = this.moduleView.projectionSelection;
+    this.renderSelection = this.moduleView.renderSelection;
     this.refreshFrame();
     this.updateSurface();
   }
 
   private refreshFrame(): void {
     this.frames.set(composeGraphRenderFrameV1({
-      document: this.store.exportDocument(),
+      document: this.moduleView.document,
       viewState: this.viewState,
       selection: this.renderSelection,
+      positions: this.moduleView.positions,
+      nodeContributions: this.moduleView.nodeContributions,
+      edgeContributions: this.moduleView.edgeContributions,
+      theme: this.moduleView.theme,
     }));
   }
 
@@ -444,6 +513,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (!positions.length) return;
     this.camera.fit(positions);
     this.synchronizeCameraState();
+    this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame();
   }
 
@@ -452,8 +522,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const selectedNodeIds = [...new Set(nodeIds)].filter((id) => known.has(id));
     if (sameIds(selectedNodeIds, this.viewState.selectedNodeIds)) return;
     this.viewState = cloneGraphViewStateV1({ ...this.viewState, selectedNodeIds });
-    this.refreshFrame();
-    this.updateSurface();
+    this.moduleHost.viewChanged(this.viewState);
+    this.recomputeView(false);
   }
 
   private setFocusState(nodeId: string | undefined): void {
@@ -468,8 +538,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         this.synchronizeCameraState();
       }
     }
-    this.refreshFrame();
-    this.updateSurface();
+    this.moduleHost.viewChanged(this.viewState);
+    this.recomputeView(false);
   }
 
   private emitIntent(intent: GraphIntentV1): void {
@@ -482,10 +552,43 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     }
   }
 
+  private synchronizeModuleState(): void {
+    this.viewState = cloneGraphViewStateV1({
+      ...this.viewState,
+      moduleState: this.moduleHost.exportState(this.viewState.moduleState),
+    });
+  }
+
+  private handleModuleFailure(failure: GraphModuleFailureV1): void {
+    const required = failure.policy === 'required';
+    if (!required && failure.hook === 'restore-state'
+      && Object.prototype.hasOwnProperty.call(this.viewState.moduleState, failure.moduleId)) {
+      const moduleState = { ...this.viewState.moduleState };
+      delete moduleState[failure.moduleId];
+      this.viewState = cloneGraphViewStateV1({ ...this.viewState, moduleState });
+    }
+    this.emitError({
+      code: required ? 'required-module-failed' : 'module-failed',
+      message: `Graph module "${failure.moduleId}" failed during ${failure.hook}: ${errorMessage(failure.error)}`,
+      moduleId: failure.moduleId,
+      recoverable: !required,
+    });
+    if (!required || this.fatalModuleError) return;
+    this.fatalModuleError = new GraphRequiredModuleErrorV1(failure.moduleId, failure.hook, failure.error);
+    if (this.animationFrame !== null) {
+      this.platform.cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = null;
+    }
+    this.lastFrameTimestamp = null;
+    this.interaction?.setEnabled(false);
+  }
+
   private synchronizeRuntimeActivity(): void {
     const suspended = this.isSuspended();
     this.interaction.setEnabled(!suspended);
+    this.moduleHost.setSuspended(suspended);
     if (suspended) {
+      this.lastFrameTimestamp = null;
       if (this.animationFrame !== null) {
         this.platform.cancelAnimationFrame(this.animationFrame);
         this.animationFrame = null;
@@ -502,11 +605,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private isSuspended(): boolean {
-    return this.disposed || this.manuallySuspended || this.documentSuspended;
+    return this.disposed || this.manuallySuspended || this.documentSuspended || this.fatalModuleError !== null;
   }
 
   private requireActive(): void {
     if (this.disposed) throw new GraphSessionDisposedErrorV1();
+    if (this.fatalModuleError) throw this.fatalModuleError;
   }
 
   private assertPlatformOwnership(): void {
@@ -532,6 +636,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private emitError(error: GraphSessionErrorV1): void {
+    if (!this.errorListeners.size) {
+      this.deferredErrors.push({ ...error });
+      return;
+    }
     for (const listener of [...this.errorListeners]) {
       try {
         listener({ ...error });
@@ -546,16 +654,6 @@ function allOf(document: GraphDocumentV1): GraphFilterSelectionV1 {
   return {
     nodeIds: new Set(document.nodes.map((node) => node.id)),
     edgeIds: new Set(document.edges.map((edge) => edge.id)),
-  };
-}
-
-function selectDocument(document: GraphDocumentV1, selection: GraphFilterSelectionV1): GraphDocumentV1 {
-  return {
-    schemaVersion: 1,
-    documentId: document.documentId,
-    revision: document.revision,
-    nodes: document.nodes.filter((node) => selection.nodeIds.has(node.id)),
-    edges: document.edges.filter((edge) => selection.edgeIds.has(edge.id)),
   };
 }
 

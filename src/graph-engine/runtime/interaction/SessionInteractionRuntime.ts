@@ -47,6 +47,8 @@ export class SessionInteractionRuntime {
     readonly frames: GraphFrameStore;
     readonly getDocument: () => GraphDocumentV1;
     readonly getViewState: () => GraphViewStateV1;
+    readonly getInteractivePositions: () => Readonly<Record<string, Vec3>>;
+    readonly isNodeDraggable: (nodeId: string) => boolean;
     readonly setViewState: (state: GraphViewStateV1) => void;
     readonly getRenderSelection: () => GraphFilterSelectionV1;
     readonly getResetCamera: () => GraphCameraStateV1;
@@ -238,7 +240,8 @@ export class SessionInteractionRuntime {
 
   private beginNodeDrag(nodeId: string, point: GraphScreenPointV1): void {
     if (!this.options.getRenderSelection().nodeIds.has(nodeId)) return;
-    const position = this.options.getViewState().positions[nodeId];
+    if (!this.options.isNodeDraggable(nodeId)) return;
+    const position = this.options.getInteractivePositions()[nodeId];
     if (!position) return;
     const projected = this.options.camera.worldToScreen(position);
     const underPointer = this.options.camera.screenToWorld(point.x, point.y, projected.depth);
