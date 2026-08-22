@@ -22,6 +22,7 @@ import {
   ObsidianWorkspaceEventBusV1,
 } from './ObsidianWorkspaceEventBus.ts';
 import { GraphEngineSettingsControllerV1 } from './settings/GraphEngineSettingsController.ts';
+import { ThemeStyleResolver } from './themeStyleResolver.ts';
 import {
   migrateGraphPlusPluginDataV1,
   readGraphPlusCheckpointV1,
@@ -63,6 +64,18 @@ export default class GraphPlus extends Plugin {
       profiles,
       modules,
       getGlobalOverrides: () => this.pluginData.engine.globalSettings,
+      resolveThemePalette: (container) => {
+        const palette = new ThemeStyleResolver(() => container.ownerDocument.body).getPalette();
+        return {
+          backgroundColor: palette.backgroundColor,
+          nodeColor: palette.nodeColor,
+          selectedNodeColor: palette.tagColor,
+          focusedNodeColor: palette.tagColor,
+          edgeColor: palette.linkColor,
+          labelColor: palette.labelColor,
+          labelFont: container.ownerDocument.defaultView?.getComputedStyle(container).font || '12px sans-serif',
+        };
+      },
     });
     const capabilities = [...new Set(modules.descriptors().flatMap((module) => module.capabilities))];
     const providerCore = new GraphEngineProviderCoreV1({

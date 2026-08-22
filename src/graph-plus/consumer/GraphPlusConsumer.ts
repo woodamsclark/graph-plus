@@ -153,13 +153,16 @@ export class GraphPlusConsumerV1<TFile> {
   async close(): Promise<void> {
     this.opened = false;
     this.sessionSubscriptions.splice(0).forEach((subscription) => subscription.dispose());
-    await this.checkpoint.closeAndDispose();
-    this.session = undefined;
-    this.document = undefined;
-    this.lookup = new GraphPlusLookupV1<TFile>();
-    if (!this.leaseReleased) {
-      this.leaseReleased = true;
-      await this.options.lease.release();
+    try {
+      await this.checkpoint.closeAndDispose();
+    } finally {
+      this.session = undefined;
+      this.document = undefined;
+      this.lookup = new GraphPlusLookupV1<TFile>();
+      if (!this.leaseReleased) {
+        this.leaseReleased = true;
+        await this.options.lease.release();
+      }
     }
   }
 

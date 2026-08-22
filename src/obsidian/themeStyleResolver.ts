@@ -19,7 +19,17 @@ export class ThemeStyleResolver {
 
   getPalette(): ThemePalette {
     
-    const styles = getComputedStyle(this.getRoot());
+    const root = this.getRoot();
+    const styles = root.ownerDocument.defaultView?.getComputedStyle(root);
+    if (!styles) {
+      return {
+        nodeColor: '#888',
+        tagColor: '#888',
+        linkColor: '#666',
+        labelColor: '#ccc',
+        backgroundColor: '#111',
+      };
+    }
 
     const accent = this.read(
       styles,
