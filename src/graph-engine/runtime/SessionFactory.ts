@@ -22,6 +22,7 @@ export interface SessionFactoryOptionsV1 {
   readonly engineInstanceId: string;
   readonly profiles: ConsumerProfileRegistry;
   readonly globalOverrides?: GraphSettingsOverridesV1;
+  readonly getGlobalOverrides?: () => GraphSettingsOverridesV1;
   readonly createSessionId?: () => string;
   readonly createPlatform?: SessionRuntimePlatformFactoryV1;
   readonly modules?: GraphModuleRegistry;
@@ -38,7 +39,7 @@ export class GraphSessionProfileErrorV1 extends Error {
 export class SessionFactory {
   private readonly engineInstanceId: string;
   private readonly profiles: ConsumerProfileRegistry;
-  private readonly globalOverrides?: GraphSettingsOverridesV1;
+  private readonly getGlobalOverrides: () => GraphSettingsOverridesV1;
   private readonly createSessionId: () => string;
   private readonly createPlatform: SessionRuntimePlatformFactoryV1;
   private readonly modules: GraphModuleRegistry;
@@ -48,7 +49,7 @@ export class SessionFactory {
   constructor(options: SessionFactoryOptionsV1) {
     this.engineInstanceId = requireId(options.engineInstanceId, 'engine instance ID');
     this.profiles = options.profiles;
-    this.globalOverrides = options.globalOverrides;
+    this.getGlobalOverrides = options.getGlobalOverrides ?? (() => options.globalOverrides ?? {});
     this.createSessionId = options.createSessionId ?? (() => `${this.engineInstanceId}:session:${this.nextSessionNumber++}`);
     this.createPlatform = options.createPlatform ?? createSessionRuntimePlatformV1;
     this.modules = options.modules ?? createShippedGraphModuleRegistryV1();
@@ -58,7 +59,7 @@ export class SessionFactory {
 
   async createSession(options: GraphSessionOptionsV1): Promise<GraphSessionV1> {
     const profile = this.profiles.resolve(options.consumerId, options.profileId, {
-      globalOverrides: this.globalOverrides,
+      globalOverrides: this.getGlobalOverrides(),
       sessionOverrides: options.sessionOverrides,
     });
     const fatalIssues = profile.issues.filter((issue) => issue.fatal);

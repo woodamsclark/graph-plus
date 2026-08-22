@@ -49,6 +49,16 @@ export interface RegisteredProfileSummaryV1 {
   readonly active: boolean;
 }
 
+export interface PersistedConsumerProfileV1 {
+  readonly registration: ConsumerRegistrationV1;
+  readonly profileOverrides: Readonly<Record<string, GraphSettingsOverridesV1>>;
+}
+
+export interface ConsumerProfileRegistrySnapshotV1 {
+  readonly schemaVersion: 1;
+  readonly consumers: readonly PersistedConsumerProfileV1[];
+}
+
 interface StoredConsumer {
   registration: ConsumerRegistrationV1;
   active: boolean;
@@ -93,6 +103,59 @@ export class ConsumerProfileRegistry {
 
   clearUserOverrides(consumerId: string, profileId: string): void {
     this.userOverrides.delete(profileKey(consumerId, profileId));
+  }
+
+  getUserOverrides(consumerId: string, profileId: string): GraphSettingsOverridesV1 {
+    this.requireProfile(consumerId, profileId);
+    return cloneOverrides(this.userOverrides.get(profileKey(consumerId, profileId)) ?? {});
+  }
+
+  getProfileDescriptor(consumerId: string, profileId: string): ConsumerProfileDescriptorV1 {
+    return cloneConsumerProfile(this.requireProfile(consumerId, profileId).profile);
+  }
+
+  getModuleDescriptors(): readonly EngineModuleDescriptorV1[] {
+    return [...this.modules.values()].map(cloneModuleDescriptor);
+  }
+
+  exportSnapshot(): ConsumerProfileRegistrySnapshotV1 {
+    return {
+      schemaVersion: 1,
+      consumers: [...this.consumers.values()].map(({ registration }) => ({
+        registration: cloneConsumerRegistration(registration),
+        profileOverrides: Object.fromEntries(registration.profiles.map((profile) => [
+          profile.profileId,
+          cloneOverrides(this.userOverrides.get(profileKey(registration.consumerId, profile.profileId)) ?? {}),
+        ])),
+      })),
+    };
+  }
+
+  restoreSnapshot(snapshot: ConsumerProfileRegistrySnapshotV1): void {
+    if (snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.consumers)) {
+      throw new Error('Unsupported consumer profile snapshot.');
+    }
+    const restoredConsumers = new Map<string, StoredConsumer>();
+    const restoredOverrides = new Map<string, GraphSettingsOverridesV1>();
+    for (const stored of snapshot.consumers) {
+      validateConsumerRegistration(stored.registration);
+      if (restoredConsumers.has(stored.registration.consumerId)) {
+        throw new Error(`Duplicate consumer "${stored.registration.consumerId}" in profile snapshot.`);
+      }
+      const registration = cloneConsumerRegistration(stored.registration);
+      restoredConsumers.set(registration.consumerId, { registration, active: false });
+      for (const [profileId, overrides] of Object.entries(stored.profileOverrides ?? {}) as [string, GraphSettingsOverridesV1][]) {
+        if (!registration.profiles.some((profile) => profile.profileId === profileId)) {
+          throw new Error(`Unknown persisted profile "${registration.consumerId}/${profileId}".`);
+        }
+        validateSettingsOverrides(overrides);
+        restoredOverrides.set(profileKey(registration.consumerId, profileId), cloneOverrides(overrides));
+      }
+    }
+    this.consumers.clear();
+    this.userOverrides.clear();
+    for (const [consumerId, stored] of restoredConsumers) this.consumers.set(consumerId, stored);
+    for (const [key, overrides] of restoredOverrides) this.userOverrides.set(key, overrides);
   }
 
   listProfiles(): readonly RegisteredProfileSummaryV1[] {
@@ -452,19 +515,23 @@ function cloneConsumerRegistration(registration: ConsumerRegistrationV1): Consum
   return {
     ...registration,
     supportedProtocolVersions: [...registration.supportedProtocolVersions],
-    profiles: registration.profiles.map((profile) => ({
-      ...profile,
-      requestedCapabilities: [...profile.requestedCapabilities],
-      profileSettings: profile.profileSettings ? cloneJsonRecord(profile.profileSettings) : undefined,
-      modules: Object.fromEntries(Object.entries(profile.modules).map(([moduleId, module]) => [moduleId, {
-        ...module,
-        defaults: module.defaults ? cloneJsonRecord(module.defaults) : undefined,
-        constraints: module.constraints
-          ? Object.fromEntries(Object.entries(module.constraints).map(([key, constraint]) => [key, cloneConstraint(constraint)]))
-          : undefined,
-        lockedValues: module.lockedValues ? cloneJsonRecord(module.lockedValues) : undefined,
-      }])),
-    })),
+    profiles: registration.profiles.map(cloneConsumerProfile),
+  };
+}
+
+function cloneConsumerProfile(profile: ConsumerProfileDescriptorV1): ConsumerProfileDescriptorV1 {
+  return {
+    ...profile,
+    requestedCapabilities: [...profile.requestedCapabilities],
+    profileSettings: profile.profileSettings ? cloneJsonRecord(profile.profileSettings) : undefined,
+    modules: Object.fromEntries(Object.entries(profile.modules).map(([moduleId, module]) => [moduleId, {
+      ...module,
+      defaults: module.defaults ? cloneJsonRecord(module.defaults) : undefined,
+      constraints: module.constraints
+        ? Object.fromEntries(Object.entries(module.constraints).map(([key, constraint]) => [key, cloneConstraint(constraint)]))
+        : undefined,
+      lockedValues: module.lockedValues ? cloneJsonRecord(module.lockedValues) : undefined,
+    }])),
   };
 }
 

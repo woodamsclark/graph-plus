@@ -34,6 +34,17 @@ export interface GraphEngineConnectionErrorV1 {
   readonly message: string;
 }
 
+export interface GraphEngineAvailabilityV1 {
+  readonly protocolVersions: readonly number[];
+  readonly engineVersion: string;
+  readonly engineInstanceId: string;
+  readonly capabilities: readonly string[];
+}
+
+export interface GraphEngineUnavailabilityV1 {
+  readonly engineInstanceId: string;
+}
+
 export const GRAPH_ENGINE_REQUEST_EVENT_V1 = 'graph-engine:request:v1';
 export const GRAPH_ENGINE_AVAILABLE_EVENT_V1 = 'graph-engine:available:v1';
 export const GRAPH_ENGINE_UNAVAILABLE_EVENT_V1 = 'graph-engine:unavailable:v1';

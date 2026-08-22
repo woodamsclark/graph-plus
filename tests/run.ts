@@ -10,6 +10,8 @@ import './core/view-state.test.ts';
 import './runtime/interaction.test.ts';
 import './runtime/modules.test.ts';
 import './runtime/session.test.ts';
+import './service/service.test.ts';
+import './obsidian/persistence.test.ts';
 import { runTests } from './support/harness.ts';
 
 void runTests();

@@ -14,6 +14,11 @@ import {
   type ColorField,
   type TextField,
 } from './settingsSchema.ts';
+import {
+  GRAPH_ENGINE_GLOBAL_PANE,
+  GRAPH_PLUS_LEGACY_PANE,
+  GraphEngineSettingsPanelV1,
+} from './GraphEngineSettingsPanel.ts';
 
 declare module 'obsidian' {
   interface Setting {
@@ -33,6 +38,7 @@ const formatStringArray = (value: string[] | undefined): string => {
 
 export class GraphPlusSettingTab extends PluginSettingTab {
   plugin: GraphPlus;
+  private selectedPane = GRAPH_ENGINE_GLOBAL_PANE;
 
   constructor(app: App, plugin: GraphPlus) {
     super(app, plugin);
@@ -46,7 +52,22 @@ export class GraphPlusSettingTab extends PluginSettingTab {
     const { containerEl } = this;
 
     containerEl.empty();
-    containerEl.createEl('h2', { text: 'GraphPlus Settings' });
+    containerEl.createEl('h2', { text: 'Graph+ and Graph Engine' });
+    const enginePanel = new GraphEngineSettingsPanelV1(this.plugin.engineSettings);
+    enginePanel.addPaneSelector(containerEl, this.selectedPane, (value) => {
+      this.selectedPane = value;
+      this.display();
+    });
+    if (this.selectedPane !== GRAPH_PLUS_LEGACY_PANE) {
+      enginePanel.render(containerEl, this.selectedPane, () => this.display());
+      return;
+    }
+
+    containerEl.createEl('h3', { text: 'Graph+ legacy controls' });
+    containerEl.createEl('p', {
+      text: 'These controls continue to configure the current Graph+ view during the engine migration.',
+      cls: 'setting-item-description',
+    });
 
     for (const section of getSettingsSchema()) {
       this.renderSection(containerEl, section, ctx);
