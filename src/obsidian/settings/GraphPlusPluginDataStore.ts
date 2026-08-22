@@ -2,6 +2,8 @@ import type {
   ConsumerProfileRegistrySnapshotV1,
 } from '../../graph-engine/core/profile/index.ts';
 import type { GraphSettingsOverridesV1 } from '../../graph-engine/contracts/v1/index.ts';
+import type { GraphPlusCheckpointV1 } from '../../graph-plus/persistence/index.ts';
+import { validateGraphPlusCheckpointV1 } from '../../graph-plus/persistence/index.ts';
 import type { GraphPlusSettings } from '../../graph+/types/settings/appSettings.ts';
 import { DEFAULT_SETTINGS } from './defaultSettings.ts';
 
@@ -17,8 +19,9 @@ export interface GraphPlusPluginDataV1 {
   readonly consumers: {
     readonly graphPlus: {
       readonly dataSchemaVersion: 1;
-      readonly graphDocuments?: unknown;
-      readonly viewStates?: unknown;
+      readonly graphDocuments?: Readonly<Record<string, unknown>>;
+      readonly viewStates?: Readonly<Record<string, unknown>>;
+      readonly checkpoints?: Readonly<Record<string, unknown>>;
       readonly consumerSettings: GraphPlusSettings;
     };
     readonly [consumerId: string]: unknown;
@@ -102,6 +105,46 @@ export function withGraphPlusSettingsV1(
         ...data.consumers.graphPlus,
         dataSchemaVersion: GRAPH_PLUS_CONSUMER_DATA_SCHEMA_VERSION,
         consumerSettings: cloneJson(consumerSettings),
+      },
+    },
+  };
+}
+
+export function readGraphPlusCheckpointV1(
+  data: GraphPlusPluginDataV1,
+  vaultId: string,
+): GraphPlusCheckpointV1 | undefined {
+  const checkpoint = data.consumers.graphPlus.checkpoints?.[vaultId];
+  if (checkpoint !== undefined) return validateGraphPlusCheckpointV1(checkpoint);
+  const document = data.consumers.graphPlus.graphDocuments?.[vaultId];
+  const viewState = data.consumers.graphPlus.viewStates?.[vaultId];
+  return validateGraphPlusCheckpointV1({ document, viewState, savedAt: 0 });
+}
+
+export function withGraphPlusCheckpointV1(
+  data: GraphPlusPluginDataV1,
+  vaultId: string,
+  checkpoint: GraphPlusCheckpointV1,
+): GraphPlusPluginDataV1 {
+  const checked = validateGraphPlusCheckpointV1(checkpoint);
+  if (!checked) throw new Error('Cannot persist an invalid Graph+ checkpoint.');
+  return {
+    ...data,
+    consumers: {
+      ...data.consumers,
+      graphPlus: {
+        ...data.consumers.graphPlus,
+        checkpoints: {
+          ...(data.consumers.graphPlus.checkpoints ?? {}),
+          [vaultId]: cloneJson(checked),
+        },
+        graphDocuments: {
+          ...(data.consumers.graphPlus.graphDocuments ?? {}),
+          [vaultId]: cloneJson(checked.document),
+        },
+        viewStates: checked.viewState
+          ? { ...(data.consumers.graphPlus.viewStates ?? {}), [vaultId]: cloneJson(checked.viewState) }
+          : data.consumers.graphPlus.viewStates,
       },
     },
   };
