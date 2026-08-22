@@ -26,6 +26,21 @@ test('graph engine core and neutral runtime have no host or legacy imports', () 
   deepEqual(violations, [], 'core and neutral runtime should remain independent of Obsidian and legacy Graph+');
 });
 
+test('Graph+ consumer imports only the public Graph Engine boundary', () => {
+  const root = join(process.cwd(), 'src', 'graph-plus');
+  const violations: string[] = [];
+  for (const path of walk(root)) {
+    const source = readFileSync(path, 'utf8');
+    const imports = [...source.matchAll(/from\s+['"]([^'"]+)['"]/g)].map((match) => match[1]);
+    for (const value of imports.filter((entry) => entry.includes('graph-engine'))) {
+      if (!value.includes('/contracts/') && !value.endsWith('/public.ts')) {
+        violations.push(`${path}: private Graph Engine import ${value}`);
+      }
+    }
+  }
+  deepEqual(violations, [], 'Graph+ should consume only contracts and the public client artifact');
+});
+
 function walk(directory: string): string[] {
   const result: string[] = [];
   for (const name of readdirSync(directory)) {

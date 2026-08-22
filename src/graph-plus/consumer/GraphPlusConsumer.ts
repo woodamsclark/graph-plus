@@ -60,6 +60,7 @@ export class GraphPlusConsumerV1<TFile> {
   private document?: GraphDocumentV1;
   private sessionSubscriptions: Disposable[] = [];
   private opened = false;
+  private leaseReleased = false;
 
   constructor(private readonly options: GraphPlusConsumerOptionsV1<TFile>) {
     this.adapter = new VaultGraphAdapterV1({ countDuplicateLinks: options.countDuplicateLinks });
@@ -150,14 +151,16 @@ export class GraphPlusConsumerV1<TFile> {
   }
 
   async close(): Promise<void> {
-    if (!this.opened) return;
     this.opened = false;
     this.sessionSubscriptions.splice(0).forEach((subscription) => subscription.dispose());
     await this.checkpoint.closeAndDispose();
     this.session = undefined;
     this.document = undefined;
     this.lookup = new GraphPlusLookupV1<TFile>();
-    await this.options.lease.release();
+    if (!this.leaseReleased) {
+      this.leaseReleased = true;
+      await this.options.lease.release();
+    }
   }
 
   private async mount(document: GraphDocumentV1, restoreViewState?: GraphViewStateV1): Promise<void> {

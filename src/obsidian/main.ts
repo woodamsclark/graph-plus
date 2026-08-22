@@ -1,19 +1,22 @@
 import { Plugin } from 'obsidian';
-import { GraphView, GRAPH_PLUS_TYPE } from './GraphView.ts';
+import { GraphPlusView, GRAPH_PLUS_TYPE } from './GraphView.ts';
 import { initSettings, getSettings } from './settings/settingsStore.ts';
 import { GraphPlusSettingTab } from './settings/SettingsTab.ts';
 import { GraphPlusSettings } from '../graph+/types/settings/appSettings.ts';
-import type { ConsumerRegistrationV1, GraphEngineLeaseV1 } from '../graph-engine/contracts/v1/index.ts';
+import type { GraphEngineLeaseV1 } from '../graph-engine/contracts/v1/index.ts';
 import { ConsumerProfileRegistry } from '../graph-engine/core/profile/index.ts';
 import { SessionFactory } from '../graph-engine/runtime/index.ts';
-import {
-  createShippedGraphModuleRegistryV1,
-  SHIPPED_GRAPH_MODULE_IDS_V1,
-} from '../graph-engine/runtime/modules/index.ts';
+import { createShippedGraphModuleRegistryV1 } from '../graph-engine/runtime/modules/index.ts';
 import {
   GraphEngineProviderCoreV1,
+  GraphEngineServiceErrorV1,
   GraphEngineWorkspaceProviderV1,
 } from '../graph-engine/service/index.ts';
+import {
+  GRAPH_PLUS_CONSUMER_REGISTRATION_V1,
+  GRAPH_PLUS_REQUESTED_CAPABILITIES_V1,
+} from '../graph-plus/consumer/index.ts';
+import type { GraphPlusCheckpointStoreV1 } from '../graph-plus/persistence/index.ts';
 import {
   asObsidianWorkspaceEventsV1,
   ObsidianWorkspaceEventBusV1,
@@ -21,7 +24,9 @@ import {
 import { GraphEngineSettingsControllerV1 } from './settings/GraphEngineSettingsController.ts';
 import {
   migrateGraphPlusPluginDataV1,
+  readGraphPlusCheckpointV1,
   withEngineSettingsV1,
+  withGraphPlusCheckpointV1,
   withGraphPlusSettingsV1,
   type GraphPlusPluginDataV1,
 } from './settings/GraphPlusPluginDataStore.ts';
@@ -32,6 +37,7 @@ export default class GraphPlus extends Plugin {
   engineSettings!: GraphEngineSettingsControllerV1;
   private pluginData!: GraphPlusPluginDataV1;
   private profiles?: ConsumerProfileRegistry;
+  private graphEngineCore?: GraphEngineProviderCoreV1;
   private graphEngineProvider?: GraphEngineWorkspaceProviderV1;
   private graphPlusLease?: GraphEngineLeaseV1;
   private saveQueue: Promise<void> = Promise.resolve();
@@ -67,6 +73,7 @@ export default class GraphPlus extends Plugin {
       sessions: sessionFactory,
       onProfilesChanged: () => this.persistEngineSettings(),
     });
+    this.graphEngineCore = providerCore;
     this.engineSettings = new GraphEngineSettingsControllerV1(
       profiles,
       this.pluginData.engine.globalSettings,
@@ -76,8 +83,7 @@ export default class GraphPlus extends Plugin {
     const localLease = providerCore.connectLocal({
       consumerId: 'graph-plus',
       supportedProtocolVersions: [1],
-      requestedCapabilities: GRAPH_PLUS_CONSUMER_REGISTRATION_V1.profiles
-        .flatMap((profile) => profile.requestedCapabilities),
+      requestedCapabilities: GRAPH_PLUS_REQUESTED_CAPABILITIES_V1,
     });
     if (localLease.ok) {
       this.graphPlusLease = localLease.lease;
@@ -87,7 +93,7 @@ export default class GraphPlus extends Plugin {
     this.graphEngineProvider = new GraphEngineWorkspaceProviderV1(eventBus, providerCore);
     this.graphEngineProvider.start();
 
-    this.registerView(GRAPH_PLUS_TYPE, (leaf) => new GraphView(leaf, this));
+    this.registerView(GRAPH_PLUS_TYPE, (leaf) => new GraphPlusView(leaf, this));
     this.addCommand({
       id  : 'open-graph+',
       name: 'open graph+',
@@ -118,11 +124,40 @@ export default class GraphPlus extends Plugin {
     void this.graphEngineProvider?.stop();
     this.graphPlusLease = undefined;
     this.graphEngineProvider = undefined;
+    this.graphEngineCore = undefined;
   }
 
   async saveSettings() {
     this.pluginData = withGraphPlusSettingsV1(this.pluginData, getSettings());
     await this.persistPluginData();
+  }
+
+  acquireGraphPlusLease(): GraphEngineLeaseV1 {
+    const result = this.graphEngineCore?.connectLocal({
+      consumerId: 'graph-plus',
+      supportedProtocolVersions: [1],
+      requestedCapabilities: GRAPH_PLUS_REQUESTED_CAPABILITIES_V1,
+    }) ?? {
+      ok: false as const,
+      error: { code: 'engine-unavailable' as const, message: 'Graph Engine is unavailable.' },
+    };
+    if (!result.ok) throw new GraphEngineServiceErrorV1(result.error);
+    return result.lease;
+  }
+
+  readonly graphPlusCheckpointStore: GraphPlusCheckpointStoreV1 = {
+    load: async (vaultId) => readGraphPlusCheckpointV1(this.pluginData, vaultId),
+    save: async (vaultId, checkpoint) => {
+      this.pluginData = withGraphPlusCheckpointV1(this.pluginData, vaultId, checkpoint);
+      await this.persistPluginData();
+    },
+  };
+
+  getLegacyGraphState(vaultId: string): unknown {
+    const legacy = this.pluginData.graphStateByVault;
+    return legacy !== null && typeof legacy === 'object' && !Array.isArray(legacy)
+      ? (legacy as Record<string, unknown>)[vaultId]
+      : undefined;
   }
 
   private async persistEngineSettings(): Promise<void> {
@@ -140,34 +175,6 @@ export default class GraphPlus extends Plugin {
     this.saveQueue = this.saveQueue.catch(() => undefined).then(() => this.saveData(snapshot));
     return this.saveQueue;
   }
-}
-
-const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
-  consumerId: 'graph-plus',
-  displayName: 'Graph+',
-  consumerVersion: '1.0.0',
-  supportedProtocolVersions: [1],
-  profiles: [
-    createGraphPlusProfile('default-3d', 'Default 3D', '3d'),
-    createGraphPlusProfile('default-2d', 'Default 2D', '2d'),
-  ],
-};
-
-function createGraphPlusProfile(profileId: string, displayName: string, dimensions: '2d' | '3d') {
-  return {
-    profileId,
-    displayName,
-    descriptorVersion: 1,
-    dimensions,
-    requestedCapabilities: ['render', 'camera', 'input', 'filter', 'projection', 'form', 'layout', 'force-layout', 'animation'],
-    modules: {
-      [SHIPPED_GRAPH_MODULE_IDS_V1.rendering]: { policy: 'required' as const },
-      [SHIPPED_GRAPH_MODULE_IDS_V1.filtering]: { policy: 'required' as const },
-      [SHIPPED_GRAPH_MODULE_IDS_V1.form]: { policy: 'optional' as const, defaultEnabled: false },
-      [SHIPPED_GRAPH_MODULE_IDS_V1.forceLayout]: { policy: 'optional' as const, defaultEnabled: true },
-      [SHIPPED_GRAPH_MODULE_IDS_V1.anima]: { policy: 'optional' as const, defaultEnabled: false },
-    },
-  };
 }
 
 function createEngineInstanceId(): string {

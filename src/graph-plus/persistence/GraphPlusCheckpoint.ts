@@ -1,11 +1,11 @@
-import type {
-  Disposable,
-  GraphDocumentV1,
-  GraphSessionV1,
-  GraphViewStateV1,
-} from '../../graph-engine/contracts/v1/index.ts';
-import { assertGraphDocumentV1 } from '../../graph-engine/contracts/v1/index.ts';
-import { assertGraphViewStateV1 } from '../../graph-engine/core/state/index.ts';
+import {
+  assertGraphDocumentV1,
+  assertGraphViewStateV1,
+  type Disposable,
+  type GraphDocumentV1,
+  type GraphSessionV1,
+  type GraphViewStateV1,
+} from '../../graph-engine/public.ts';
 
 export interface GraphPlusCheckpointV1 {
   readonly document: GraphDocumentV1;

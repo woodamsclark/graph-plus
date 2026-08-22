@@ -1,89 +1,104 @@
-import { ItemView, WorkspaceLeaf, Plugin, type ViewStateResult } from 'obsidian';
-import GraphPlus from './main.ts';
-import { GraphEngineRuntime } from '../graph+/engine/runtime/GraphEngineRuntime.ts';
-import type { GraphLensState } from '../graph+/types/domain/lens.ts';
-import { createDefaultGraphLens } from '../graph+/types/domain/lens.ts';
-import { getSettings } from './settings/settingsStore.ts';
-
+import { ItemView, type Plugin, type TFile, type ViewStateResult, type WorkspaceLeaf } from 'obsidian';
+import { mountGraphEngineUnavailableSurfaceV1, type Disposable } from '../graph-engine/public.ts';
+import { ObsidianVaultGraphSourceV1, noteNodeId } from '../graph-plus/adapter/index.ts';
+import { GraphPlusConsumerV1 } from '../graph-plus/consumer/index.ts';
+import { createDefaultGraphPlusLensV1, type GraphPlusLensStateV1 } from '../graph-plus/query/index.ts';
+import { GraphPlusControlsPanelV1 } from './GraphPlusControlsPanel.ts';
+import { GraphPlusObsidianNavigatorV1 } from './GraphPlusObsidianNavigator.ts';
+import type GraphPlus from './main.ts';
 
 export const GRAPH_PLUS_TYPE = 'graph-plus';
 
-export class GraphView extends ItemView {
-  private plugin              : GraphPlus;
-  private scheduleGraphRebuild: (() => void) | null = null;
+export class GraphPlusView extends ItemView {
+  private readonly plugin: GraphPlus;
+  private consumer?: GraphPlusConsumerV1<TFile>;
+  private controls?: GraphPlusControlsPanelV1<TFile>;
+  private fallback?: Disposable;
   private unregisters: Array<() => void> = [];
-  private graphEngine: GraphEngineRuntime | null = null;
-  private pendingLensState: GraphLensState | null = null;
-  private rebuildTimer: number | null = null;
+  private rebuildTimer: number | undefined;
+  private pendingLens: GraphPlusLensStateV1 = createDefaultGraphPlusLensV1();
 
   constructor(leaf: WorkspaceLeaf, plugin: Plugin) {
     super(leaf);
     this.plugin = plugin as GraphPlus;
   }
 
-  async onOpen() {
+  async onOpen(): Promise<void> {
     this.contentEl.empty();
     const container = this.contentEl.createDiv({ cls: 'greater-graph-view graphplus-view' });
-
-    this.graphEngine = new GraphEngineRuntime({
-      app: this.app,
-      plugin: this.plugin,
-      containerEl: container,
-      initialLensState: this.pendingLensState ?? undefined,
-      onLensStateChange: (state) => {
-        this.pendingLensState = state;
-        this.app.workspace.requestSaveLayout();
-      },
-    });
-    await this.graphEngine.open();
-    this.registerGraphRebuildEvents();
+    try {
+      const lease = this.plugin.acquireGraphPlusLease();
+      this.consumer = new GraphPlusConsumerV1({
+        lease,
+        container,
+        vaultId: this.app.vault.getName(),
+        source: new ObsidianVaultGraphSourceV1(this.app),
+        checkpointStore: this.plugin.graphPlusCheckpointStore,
+        navigator: new GraphPlusObsidianNavigatorV1(this.app),
+        countDuplicateLinks: this.plugin.settings.base.countDuplicateLinks,
+        legacyPositions: this.plugin.getLegacyGraphState(this.app.vault.getName()),
+        initialLens: this.pendingLens,
+        clock: createWindowClock(container),
+        onError: (error) => console.error('[Graph+] consumer error', error),
+      });
+      await this.consumer.open();
+      this.controls = new GraphPlusControlsPanelV1(
+        container,
+        this.consumer,
+        () => {
+          const file = this.app.workspace.getActiveFile();
+          return file ? noteNodeId(file.path) : undefined;
+        },
+      );
+      this.controls.mount();
+      this.registerGraphRebuildEvents();
+    } catch (error) {
+      console.error('[Graph+] failed to open', error);
+      await this.consumer?.close().catch(() => undefined);
+      this.consumer = undefined;
+      this.fallback = mountGraphEngineUnavailableSurfaceV1(container, {
+        code: 'initialization-failed',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
-  onResize() {
-    const rect = this.contentEl.getBoundingClientRect();
-    this.graphEngine?.resize(rect.width, rect.height);
+  async onClose(): Promise<void> {
+    const window = this.contentEl.ownerDocument.defaultView;
+    if (this.rebuildTimer !== undefined) window?.clearTimeout(this.rebuildTimer);
+    this.rebuildTimer = undefined;
+    this.unregisters.splice(0).forEach((unregister) => unregister());
+    this.controls?.unmount();
+    this.controls = undefined;
+    await this.consumer?.close();
+    this.consumer = undefined;
+    this.fallback?.dispose();
+    this.fallback = undefined;
   }
 
-  async onClose() {
-    if (this.rebuildTimer !== null) window.clearTimeout(this.rebuildTimer);
-    this.rebuildTimer = null;
-    for (const unregister of this.unregisters.splice(0)) unregister();
-    await this.graphEngine?.close();
-    this.graphEngine = null;
-  }
-
-  getViewType(): string {
-    return GRAPH_PLUS_TYPE;
-  }
-
-  getDisplayText(): string {
-    return 'graph+';
-  }
-
-  getIcon(): string {
-    return 'dot-network';
-  }
+  getViewType(): string { return GRAPH_PLUS_TYPE; }
+  getDisplayText(): string { return 'graph+'; }
+  getIcon(): string { return 'dot-network'; }
 
   getState(): Record<string, unknown> {
-    return {
-      lens: this.graphEngine?.getLensState() ?? this.pendingLensState,
-    };
+    return { lens: this.consumer?.getLens() ?? this.pendingLens };
   }
 
   async setState(state: unknown, _result: ViewStateResult): Promise<void> {
-    const raw = isRecord(state) && isRecord(state.lens) ? state.lens : null;
-    if (!raw) return;
-    this.pendingLensState = coerceLens(raw);
-    this.graphEngine?.setLensState(this.pendingLensState);
+    const lens = coerceLens(isRecord(state) ? state.lens : undefined);
+    if (!lens) return;
+    this.pendingLens = lens;
+    await this.consumer?.setLens(lens);
   }
 
   private registerGraphRebuildEvents(): void {
-    if (this.unregisters.length) return;
-    const schedule = () => {
-      if (this.rebuildTimer !== null) window.clearTimeout(this.rebuildTimer);
-      this.rebuildTimer = window.setTimeout(() => {
-        this.rebuildTimer = null;
-        void this.graphEngine?.rebuildGraph();
+    if (this.unregisters.length > 0) return;
+    const schedule = (): void => {
+      const window = this.contentEl.ownerDocument.defaultView;
+      if (this.rebuildTimer !== undefined) window?.clearTimeout(this.rebuildTimer);
+      this.rebuildTimer = window?.setTimeout(() => {
+        this.rebuildTimer = undefined;
+        void this.consumer?.reconcile().then(() => this.controls?.refresh());
       }, 180);
     };
     const createRef = this.app.vault.on('create', schedule);
@@ -99,37 +114,36 @@ export class GraphView extends ItemView {
   }
 }
 
-function coerceLens(raw: Record<string, unknown>): GraphLensState {
-  const fallback = createDefaultGraphLens(getSettings().base.showTags);
-  const filter = isRecord(raw.filter) ? raw.filter : {};
-  const form = isRecord(raw.form) ? raw.form : {};
-  const groups = Array.isArray(raw.groups) ? raw.groups : [];
+function coerceLens(value: unknown): GraphPlusLensStateV1 | undefined {
+  if (!isRecord(value)) return undefined;
+  const fallback = createDefaultGraphPlusLensV1();
+  const form = isRecord(value.form) ? value.form : {};
   return {
-    filter: {
-      query: typeof filter.query === 'string' ? filter.query : fallback.filter.query,
-      showTags: typeof filter.showTags === 'boolean' ? filter.showTags : fallback.filter.showTags,
-      showAttachments: typeof filter.showAttachments === 'boolean' ? filter.showAttachments : fallback.filter.showAttachments,
-      showUnresolved: typeof filter.showUnresolved === 'boolean' ? filter.showUnresolved : fallback.filter.showUnresolved,
-      showOrphans: typeof filter.showOrphans === 'boolean' ? filter.showOrphans : fallback.filter.showOrphans,
-    },
-    groups: groups.filter(isRecord).map((group, index) => ({
-      id: typeof group.id === 'string' ? group.id : `group-${index}`,
-      query: typeof group.query === 'string' ? group.query : '',
-      color: typeof group.color === 'string' ? group.color : '#4fc3f7',
-    })),
+    query: typeof value.query === 'string' ? value.query : fallback.query,
+    showTags: typeof value.showTags === 'boolean' ? value.showTags : fallback.showTags,
+    showOrphans: typeof value.showOrphans === 'boolean' ? value.showOrphans : fallback.showOrphans,
     form: {
-      mode: form.mode === 'mind-map' ? 'mind-map' : 'free',
-      rootId: typeof form.rootId === 'string' ? form.rootId : null,
-      direction: form.direction === 'incoming' || form.direction === 'outgoing' ? form.direction : 'both',
-      relation: typeof form.relation === 'string' ? form.relation : '',
-      maxDepth: typeof form.maxDepth === 'number' ? form.maxDepth : null,
-      showCrossLinks: typeof form.showCrossLinks === 'boolean' ? form.showCrossLinks : true,
-      showDisconnected: typeof form.showDisconnected === 'boolean' ? form.showDisconnected : false,
-      colorBranches: typeof form.colorBranches === 'boolean' ? form.colorBranches : true,
+      enabled: typeof form.enabled === 'boolean' ? form.enabled : fallback.form.enabled,
+      ...(typeof form.rootNodeId === 'string' && form.rootNodeId ? { rootNodeId: form.rootNodeId } : {}),
+      direction: form.direction === 'incoming' || form.direction === 'outgoing' ? form.direction : 'either',
+      ...(typeof form.relation === 'string' && form.relation ? { relation: form.relation } : {}),
+      ...(typeof form.maxDepth === 'number' ? { maxDepth: form.maxDepth } : {}),
+      showCrossLinks: typeof form.showCrossLinks === 'boolean' ? form.showCrossLinks : fallback.form.showCrossLinks,
+      showDisconnected: typeof form.showDisconnected === 'boolean' ? form.showDisconnected : fallback.form.showDisconnected,
+      colorBranches: typeof form.colorBranches === 'boolean' ? form.colorBranches : fallback.form.colorBranches,
     },
   };
 }
 
-function isRecord(value: unknown): value is Record<string, any> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+function createWindowClock(container: HTMLElement) {
+  const window = container.ownerDocument.defaultView;
+  return {
+    now: () => Date.now(),
+    setTimeout: (callback: () => void, delayMs: number) => window?.setTimeout(callback, delayMs),
+    clearTimeout: (handle: unknown) => window?.clearTimeout(handle as number),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
