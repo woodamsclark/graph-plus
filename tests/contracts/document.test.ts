@@ -83,6 +83,24 @@ test('C-DOC-05 rejects non-finite and nested attribute values', () => {
   equal(result.errors.filter((entry) => entry.code === 'invalid-value').length >= 4, true, 'each invalid value should be identified');
 });
 
+test('public documents reject legacy runtime and Obsidian fields', () => {
+  const value = graphDocument() as any;
+  value.nodes[0] = {
+    ...value.nodes[0],
+    file: { path: 'A.md' },
+    anima: { level: 2 },
+    location: { x: 1, y: 2, z: 3 },
+  };
+  value.edges[0] = { ...value.edges[0], gate: { state: 'closed' } };
+  const result = validateGraphDocumentV1(value);
+  assert(!result.valid, 'private legacy fields should fail at the public boundary');
+  const paths = result.errors.map((entry) => entry.path);
+  assert(paths.includes('$.nodes[0].file'), 'Obsidian file reference should be rejected');
+  assert(paths.includes('$.nodes[0].anima'), 'Anima state should be rejected');
+  assert(paths.includes('$.nodes[0].location'), 'runtime position should be rejected');
+  assert(paths.includes('$.edges[0].gate'), 'gate state should be rejected');
+});
+
 test('C-DOC-06 builder and direct input share validation and output semantics', () => {
   const direct = graphDocument({
     documentId: 'builder',

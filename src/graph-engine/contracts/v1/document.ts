@@ -68,6 +68,7 @@ export function validateGraphDocumentV1(value: unknown): GraphDocumentValidation
   if (!isRecord(value)) {
     return invalid('invalid-value', '$', 'Graph document must be an object.');
   }
+  validateKnownKeys(value, ['schemaVersion', 'documentId', 'revision', 'nodes', 'edges'], '$', errors);
 
   if (value.schemaVersion !== 1) {
     errors.push(error('invalid-schema-version', '$.schemaVersion', 'Expected schema version 1.'));
@@ -90,6 +91,7 @@ export function validateGraphDocumentV1(value: unknown): GraphDocumentValidation
       errors.push(error('invalid-node', path, 'Node must be an object.'));
       continue;
     }
+    validateKnownKeys(node, ['id', 'label', 'tokens', 'attributes', 'positionHint'], path, errors);
     const idValid = validateId(node.id, `${path}.id`, 'invalid-node', errors);
     if (idValid) {
       if (nodeIds.has(node.id as string)) {
@@ -112,6 +114,7 @@ export function validateGraphDocumentV1(value: unknown): GraphDocumentValidation
       errors.push(error('invalid-edge', path, 'Edge must be an object.'));
       continue;
     }
+    validateKnownKeys(edge, ['id', 'sourceId', 'targetId', 'directed', 'weight', 'tokens', 'attributes'], path, errors);
     const idValid = validateId(edge.id, `${path}.id`, 'invalid-edge', errors);
     if (idValid) {
       if (edgeIds.has(edge.id as string)) {
@@ -259,6 +262,22 @@ function validateOptionalAttributes(
 function validateVec3(value: unknown, path: string, errors: GraphDocumentValidationErrorV1[]): void {
   if (!isRecord(value) || !isFiniteNumber(value.x) || !isFiniteNumber(value.y) || !isFiniteNumber(value.z)) {
     errors.push(error('invalid-value', path, 'Position must contain finite x, y, and z numbers.'));
+    return;
+  }
+  validateKnownKeys(value, ['x', 'y', 'z'], path, errors);
+}
+
+function validateKnownKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  path: string,
+  errors: GraphDocumentValidationErrorV1[],
+): void {
+  const allowedKeys = new Set(allowed);
+  for (const key of Object.keys(value)) {
+    if (!allowedKeys.has(key)) {
+      errors.push(error('invalid-value', `${path}.${key}`, `Unknown public graph field "${key}".`));
+    }
   }
 }
 
@@ -289,7 +308,9 @@ function isFiniteNumber(value: unknown): value is number {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 function error(

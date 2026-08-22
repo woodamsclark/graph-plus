@@ -15,6 +15,12 @@ test('V1 contracts have no Obsidian or implementation imports', () => {
   deepEqual(violations, [], 'contract boundary should remain host-neutral');
 });
 
+test('graph engine core has no Obsidian imports', () => {
+  const root = join(process.cwd(), 'src', 'graph-engine', 'core');
+  const violations = walk(root).filter((path) => /from\s+['"]obsidian['"]/.test(readFileSync(path, 'utf8')));
+  deepEqual(violations, [], 'pure core should remain independent of Obsidian');
+});
+
 function walk(directory: string): string[] {
   const result: string[] = [];
   for (const name of readdirSync(directory)) {

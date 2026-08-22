@@ -475,6 +475,19 @@ const filter: GraphFilterRequestV1 = {
 
 The second example does not teach the engine what `due` means.
 
+Scalar and topology comparisons are deterministic:
+
+- IDs, tokens, attribute names, and string values compare exactly and case-sensitively.
+- `attribute-equals` matches only a scalar attribute equal to the requested scalar.
+- `attribute-contains` matches only a scalar-array attribute containing the requested
+  scalar; it is not substring search.
+- `attribute-number-range` matches only a scalar finite number and uses inclusive
+  minimum and maximum bounds.
+- `connected-to` traverses one edge outward, inward, or either way from the supplied
+  node IDs. Undirected edges are traversable both ways.
+- `within-depth` uses the same direction relative to each supplied root and includes
+  the roots at depth zero.
+
 ### 9.2 Render and projection scopes
 
 Render scope:
