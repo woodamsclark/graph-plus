@@ -1,8 +1,8 @@
 # Graph Engine V1 Migration Plan
 
-Status: Approved for implementation
+Status: Implemented through Slice 11; automated gates green, host smoke review pending
 
-Phase: Step 4 complete — source topology and ordered extraction approved
+Phase: Steps 5–11 implemented — PatternSmith handoff is the next separate project
 
 Date: 2026-08-21
 

@@ -101,8 +101,10 @@ export class CanvasGraphRenderer {
         this.context.lineWidth = node.focused ? 2 : 1;
         this.context.stroke();
       }
-      this.context.fillStyle = frame.theme.labelColor;
-      this.context.fillText(node.label, point.x, point.y + radius + 4);
+      if (node.showLabel !== false) {
+        this.context.fillStyle = frame.theme.labelColor;
+        this.context.fillText(node.label, point.x, point.y + radius + 4);
+      }
     }
     this.context.restore();
   }

@@ -177,7 +177,6 @@ export class GraphEngineProviderCoreV1 {
     await Promise.all(sessions.map((session) => session.dispose()));
     if (![...this.leases].some((lease) => !lease.released && lease.consumerId === record.consumerId)) {
       this.profiles.markConsumerInactive(record.consumerId);
-      await this.onProfilesChanged();
     }
   }
 }

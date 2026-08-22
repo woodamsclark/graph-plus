@@ -16,6 +16,17 @@ export interface GraphPlusLensStateV1 {
   readonly query: string;
   readonly showTags: boolean;
   readonly showOrphans: boolean;
+  readonly display: {
+    readonly showLabels: boolean;
+    readonly nodeRadiusScale: number;
+    readonly edgeThicknessScale: number;
+  };
+  readonly force: {
+    readonly repulsionStrength: number;
+    readonly springStrength: number;
+    readonly springLength: number;
+    readonly centeringStrength: number;
+  };
   readonly form: {
     readonly enabled: boolean;
     readonly rootNodeId?: string;
@@ -38,6 +49,8 @@ export function createDefaultGraphPlusLensV1(showTags = true): GraphPlusLensStat
     query: '',
     showTags,
     showOrphans: true,
+    display: { showLabels: true, nodeRadiusScale: 1, edgeThicknessScale: 1 },
+    force: { repulsionStrength: 18000, springStrength: 3.5, springLength: 80, centeringStrength: 0.45 },
     form: {
       enabled: false,
       direction: 'either',
@@ -88,6 +101,21 @@ export function graphPlusSessionOverridesV1(lens: GraphPlusLensStateV1): GraphSe
           showCrossLinks: lens.form.showCrossLinks,
           showDisconnected: lens.form.showDisconnected,
           colorBranches: lens.form.colorBranches,
+        },
+      },
+      rendering: {
+        settings: {
+          showLabels: lens.display.showLabels,
+          nodeRadiusScale: lens.display.nodeRadiusScale,
+          edgeThicknessScale: lens.display.edgeThicknessScale,
+        },
+      },
+      'force-layout': {
+        settings: {
+          repulsionStrength: lens.force.repulsionStrength,
+          springStrength: lens.force.springStrength,
+          springLength: lens.force.springLength,
+          centeringStrength: lens.force.centeringStrength,
         },
       },
     },

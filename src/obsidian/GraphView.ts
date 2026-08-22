@@ -17,6 +17,7 @@ export class GraphPlusView extends ItemView {
   private unregisters: Array<() => void> = [];
   private rebuildTimer: number | undefined;
   private pendingLens: GraphPlusLensStateV1 = createDefaultGraphPlusLensV1();
+  private stateRestored = false;
 
   constructor(leaf: WorkspaceLeaf, plugin: Plugin) {
     super(leaf);
@@ -26,6 +27,7 @@ export class GraphPlusView extends ItemView {
   async onOpen(): Promise<void> {
     this.contentEl.empty();
     const container = this.contentEl.createDiv({ cls: 'greater-graph-view graphplus-view' });
+    if (!this.stateRestored) this.pendingLens = { ...this.pendingLens, showTags: this.plugin.settings.showTags };
     try {
       const lease = this.plugin.acquireGraphPlusLease();
       this.consumer = new GraphPlusConsumerV1({
@@ -35,7 +37,7 @@ export class GraphPlusView extends ItemView {
         source: new ObsidianVaultGraphSourceV1(this.app),
         checkpointStore: this.plugin.graphPlusCheckpointStore,
         navigator: new GraphPlusObsidianNavigatorV1(this.app),
-        countDuplicateLinks: this.plugin.settings.base.countDuplicateLinks,
+        countDuplicateLinks: this.plugin.settings.countDuplicateLinks,
         legacyPositions: this.plugin.getLegacyGraphState(this.app.vault.getName()),
         initialLens: this.pendingLens,
         clock: createWindowClock(container),
@@ -88,6 +90,7 @@ export class GraphPlusView extends ItemView {
     const lens = coerceLens(isRecord(state) ? state.lens : undefined);
     if (!lens) return;
     this.pendingLens = lens;
+    this.stateRestored = true;
     await this.consumer?.setLens(lens);
   }
 
@@ -122,6 +125,17 @@ function coerceLens(value: unknown): GraphPlusLensStateV1 | undefined {
     query: typeof value.query === 'string' ? value.query : fallback.query,
     showTags: typeof value.showTags === 'boolean' ? value.showTags : fallback.showTags,
     showOrphans: typeof value.showOrphans === 'boolean' ? value.showOrphans : fallback.showOrphans,
+    display: isRecord(value.display) ? {
+      showLabels: typeof value.display.showLabels === 'boolean' ? value.display.showLabels : fallback.display.showLabels,
+      nodeRadiusScale: finitePositive(value.display.nodeRadiusScale, fallback.display.nodeRadiusScale),
+      edgeThicknessScale: finitePositive(value.display.edgeThicknessScale, fallback.display.edgeThicknessScale),
+    } : fallback.display,
+    force: isRecord(value.force) ? {
+      repulsionStrength: finiteNonNegative(value.force.repulsionStrength, fallback.force.repulsionStrength),
+      springStrength: finiteNonNegative(value.force.springStrength, fallback.force.springStrength),
+      springLength: finitePositive(value.force.springLength, fallback.force.springLength),
+      centeringStrength: finiteNonNegative(value.force.centeringStrength, fallback.force.centeringStrength),
+    } : fallback.force,
     form: {
       enabled: typeof form.enabled === 'boolean' ? form.enabled : fallback.form.enabled,
       ...(typeof form.rootNodeId === 'string' && form.rootNodeId ? { rootNodeId: form.rootNodeId } : {}),
@@ -146,4 +160,12 @@ function createWindowClock(container: HTMLElement) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function finitePositive(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function finiteNonNegative(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
 }

@@ -22,7 +22,7 @@ test('profile snapshots restore registrations inactive and retain overrides thro
 
 test('legacy flat settings copy forward into the Graph+ consumer namespace', () => {
   const migrated = migrateGraphPlusPluginDataV1({ base: { showTags: false }, unrelated: { keep: true } });
-  equal(migrated.data.consumers.graphPlus.consumerSettings.base.showTags, false, 'legacy consumer setting should migrate');
+  equal(migrated.data.consumers.graphPlus.consumerSettings.showTags, false, 'legacy consumer setting should migrate');
   deepEqual(migrated.data.unrelated, { keep: true }, 'unknown root data should survive migration');
   equal(migrated.data.engine.settingsSchemaVersion, 1, 'engine namespace should initialize independently');
 });
@@ -35,6 +35,6 @@ test('engine corruption recovers without replacing readable Graph+ consumer data
   });
   const corrupt = { ...namespaced, engine: { settingsSchemaVersion: 99, globalSettings: 'bad', profileOverrides: null } };
   const recovered = migrateGraphPlusPluginDataV1(corrupt);
-  equal(recovered.data.consumers.graphPlus.consumerSettings.base.showTags, false, 'consumer namespace should remain readable');
+  equal(recovered.data.consumers.graphPlus.consumerSettings.showTags, false, 'consumer namespace should remain readable');
   deepEqual(recovered.data.engine.globalSettings, {}, 'only corrupt engine namespace should reset');
 });

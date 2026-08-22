@@ -31,6 +31,7 @@ export function composeGraphRenderFrameV1(options: {
           selected: selected.has(node.id),
           focused: options.viewState.focusedNodeId === node.id,
           ...(contribution?.color === undefined ? {} : { color: contribution.color }),
+          ...(contribution?.showLabel === undefined ? {} : { showLabel: contribution.showLabel }),
         };
       }),
     edges: options.document.edges

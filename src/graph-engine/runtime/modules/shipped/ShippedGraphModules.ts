@@ -23,7 +23,12 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       displayName: 'Rendering',
       capabilities: ['render', 'camera', 'input'],
       settingsSchemaVersion: 1,
-      defaultSettings: {},
+      defaultSettings: {
+        showLabels: true,
+        nodeRadiusScale: 1,
+        edgeThicknessScale: 1,
+        tokenColors: {},
+      },
     },
     create: ({ themePalette, settings }) => new RenderingModule(themePalette, settings),
   });

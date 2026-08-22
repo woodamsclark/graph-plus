@@ -1,8 +1,6 @@
 import { Plugin } from 'obsidian';
 import { GraphPlusView, GRAPH_PLUS_TYPE } from './GraphView.ts';
-import { initSettings, getSettings } from './settings/settingsStore.ts';
 import { GraphPlusSettingTab } from './settings/SettingsTab.ts';
-import { GraphPlusSettings } from '../graph+/types/settings/appSettings.ts';
 import type { GraphEngineLeaseV1 } from '../graph-engine/contracts/v1/index.ts';
 import { ConsumerProfileRegistry } from '../graph-engine/core/profile/index.ts';
 import { SessionFactory } from '../graph-engine/runtime/index.ts';
@@ -15,6 +13,7 @@ import {
 import {
   GRAPH_PLUS_CONSUMER_REGISTRATION_V1,
   GRAPH_PLUS_REQUESTED_CAPABILITIES_V1,
+  type GraphPlusConsumerSettingsV1,
 } from '../graph-plus/consumer/index.ts';
 import type { GraphPlusCheckpointStoreV1 } from '../graph-plus/persistence/index.ts';
 import {
@@ -34,7 +33,7 @@ import {
 
 
 export default class GraphPlus extends Plugin {
-  settings!: GraphPlusSettings;
+  settings!: GraphPlusConsumerSettingsV1;
   engineSettings!: GraphEngineSettingsControllerV1;
   private pluginData!: GraphPlusPluginDataV1;
   private profiles?: ConsumerProfileRegistry;
@@ -46,8 +45,7 @@ export default class GraphPlus extends Plugin {
   async onload() {
     const migration = migrateGraphPlusPluginDataV1(await this.loadData());
     this.pluginData = migration.data;
-    initSettings(this.pluginData.consumers.graphPlus.consumerSettings);
-    this.settings = getSettings();
+    this.settings = this.pluginData.consumers.graphPlus.consumerSettings;
 
     const profiles = new ConsumerProfileRegistry();
     this.profiles = profiles;
@@ -117,10 +115,9 @@ export default class GraphPlus extends Plugin {
   }
 
   async activateView() {
-    // Change this to open as a tab
+    if (!this.settings.enabled) return;
     const leaves = this.app.workspace.getLeavesOfType(GRAPH_PLUS_TYPE);
     if (leaves.length === 0) {
-      // open in the main area as a new tab/leaf
       const leaf = this.app.workspace.getLeaf(true);
       await leaf.setViewState({
         type: GRAPH_PLUS_TYPE,
@@ -140,12 +137,17 @@ export default class GraphPlus extends Plugin {
     this.graphEngineCore = undefined;
   }
 
-  async saveSettings() {
-    this.pluginData = withGraphPlusSettingsV1(this.pluginData, getSettings());
+  async updateGraphPlusSettings(settings: GraphPlusConsumerSettingsV1) {
+    this.settings = { ...settings };
+    this.pluginData = withGraphPlusSettingsV1(this.pluginData, this.settings);
     await this.persistPluginData();
+    if (!settings.enabled) this.app.workspace.detachLeavesOfType(GRAPH_PLUS_TYPE);
   }
 
   acquireGraphPlusLease(): GraphEngineLeaseV1 {
+    if (!this.settings.enabled) {
+      throw new GraphEngineServiceErrorV1({ code: 'engine-unavailable', message: 'The bundled Graph+ consumer is disabled.' });
+    }
     const result = this.graphEngineCore?.connectLocal({
       consumerId: 'graph-plus',
       supportedProtocolVersions: [1],

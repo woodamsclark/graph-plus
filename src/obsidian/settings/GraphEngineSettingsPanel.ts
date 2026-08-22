@@ -8,7 +8,7 @@ import type {
 import { GraphEngineSettingsControllerV1 } from './GraphEngineSettingsController.ts';
 
 export const GRAPH_ENGINE_GLOBAL_PANE = 'engine:global';
-export const GRAPH_PLUS_LEGACY_PANE = 'consumer:graph-plus:legacy';
+export const GRAPH_PLUS_CONSUMER_PANE = 'consumer:graph-plus';
 
 export class GraphEngineSettingsPanelV1 {
   constructor(private readonly controller: GraphEngineSettingsControllerV1) {}
@@ -29,7 +29,7 @@ export class GraphEngineSettingsPanelV1 {
             `${profile.consumerDisplayName} — ${profile.profileDisplayName}${profile.active ? '' : ' (inactive)'}`,
           );
         }
-        dropdown.addOption(GRAPH_PLUS_LEGACY_PANE, 'Graph+ legacy controls');
+        dropdown.addOption(GRAPH_PLUS_CONSUMER_PANE, 'Graph+ product');
         dropdown.setValue(selected);
         dropdown.onChange(onChange);
       });

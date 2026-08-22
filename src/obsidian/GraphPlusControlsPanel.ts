@@ -60,6 +60,8 @@ export class GraphPlusControlsPanelV1<TFile> {
     const body = div(this.root, 'graphplus-controls-body');
     this.renderFilter(body);
     this.renderForm(body);
+    this.renderDisplay(body);
+    this.renderForces(body);
     this.status = div(this.root, 'graphplus-controls-status');
     this.updateStatus();
   }
@@ -146,6 +148,29 @@ export class GraphPlusControlsPanelV1<TFile> {
     this.toggle(body, 'Disconnected nodes', lens.form.showDisconnected, (value) => this.updateLens((next) => { next.form.showDisconnected = value; }));
   }
 
+  private renderDisplay(parent: HTMLElement): void {
+    const body = this.section(parent, 'Display', false);
+    const lens = this.consumer.getLens();
+    this.toggle(body, 'Text', lens.display.showLabels, (value) => this.updateLens((next) => { next.display.showLabels = value; }));
+    this.slider(body, 'Node size', lens.display.nodeRadiusScale, 0.5, 4, 0.1,
+      (value) => this.updateLens((next) => { next.display.nodeRadiusScale = value; }));
+    this.slider(body, 'Link thickness', lens.display.edgeThicknessScale, 0.25, 4, 0.05,
+      (value) => this.updateLens((next) => { next.display.edgeThicknessScale = value; }));
+  }
+
+  private renderForces(parent: HTMLElement): void {
+    const body = this.section(parent, 'Forces', false);
+    const lens = this.consumer.getLens();
+    this.slider(body, 'Center force', lens.force.centeringStrength, 0, 2, 0.01,
+      (value) => this.updateLens((next) => { next.force.centeringStrength = value; }));
+    this.slider(body, 'Repel force', lens.force.repulsionStrength, 0, 50000, 250,
+      (value) => this.updateLens((next) => { next.force.repulsionStrength = value; }));
+    this.slider(body, 'Link force', lens.force.springStrength, 0, 10, 0.1,
+      (value) => this.updateLens((next) => { next.force.springStrength = value; }));
+    this.slider(body, 'Link distance', lens.force.springLength, 20, 500, 5,
+      (value) => this.updateLens((next) => { next.force.springLength = value; }));
+  }
+
   private section(parent: HTMLElement, title: string, open: boolean): HTMLElement {
     const details = this.container.ownerDocument.createElement('details');
     details.className = 'graphplus-control-section';
@@ -165,6 +190,22 @@ export class GraphPlusControlsPanelV1<TFile> {
 
   private toggle(parent: HTMLElement, name: string, value: boolean, change: (value: boolean) => void | Promise<void>): void {
     new Setting(parent).setName(name).addToggle((toggle) => toggle.setValue(value).onChange(change));
+  }
+
+  private slider(
+    parent: HTMLElement,
+    name: string,
+    value: number,
+    min: number,
+    max: number,
+    step: number,
+    change: (value: number) => void | Promise<void>,
+  ): void {
+    new Setting(parent).setName(name).addSlider((slider) => slider
+      .setLimits(min, max, step)
+      .setValue(value)
+      .setDynamicTooltip()
+      .onChange(change));
   }
 
   private async updateLens(mutator: (lens: MutableLens) => void): Promise<void> {
@@ -191,9 +232,21 @@ export class GraphPlusControlsPanelV1<TFile> {
 }
 
 type MutableLens = {
-  -readonly [Key in keyof GraphPlusLensStateV1]: Key extends 'form'
-    ? { -readonly [FormKey in keyof GraphPlusLensStateV1['form']]: GraphPlusLensStateV1['form'][FormKey] }
-    : GraphPlusLensStateV1[Key]
+  query: string;
+  showTags: boolean;
+  showOrphans: boolean;
+  display: { showLabels: boolean; nodeRadiusScale: number; edgeThicknessScale: number };
+  force: { repulsionStrength: number; springStrength: number; springLength: number; centeringStrength: number };
+  form: {
+    enabled: boolean;
+    rootNodeId?: string;
+    direction: 'incoming' | 'outgoing' | 'either';
+    relation?: string;
+    maxDepth?: number;
+    showCrossLinks: boolean;
+    showDisconnected: boolean;
+    colorBranches: boolean;
+  };
 };
 
 function div(parent: HTMLElement, className: string): HTMLDivElement {

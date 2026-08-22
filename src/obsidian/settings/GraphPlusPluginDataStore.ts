@@ -4,8 +4,10 @@ import type {
 import type { GraphSettingsOverridesV1 } from '../../graph-engine/contracts/v1/index.ts';
 import type { GraphPlusCheckpointV1 } from '../../graph-plus/persistence/index.ts';
 import { validateGraphPlusCheckpointV1 } from '../../graph-plus/persistence/index.ts';
-import type { GraphPlusSettings } from '../../graph+/types/settings/appSettings.ts';
-import { DEFAULT_SETTINGS } from './defaultSettings.ts';
+import {
+  coerceGraphPlusConsumerSettingsV1,
+  type GraphPlusConsumerSettingsV1,
+} from '../../graph-plus/consumer/index.ts';
 
 export const GRAPH_ENGINE_SETTINGS_SCHEMA_VERSION = 1;
 export const GRAPH_PLUS_CONSUMER_DATA_SCHEMA_VERSION = 1;
@@ -22,7 +24,8 @@ export interface GraphPlusPluginDataV1 {
       readonly graphDocuments?: Readonly<Record<string, unknown>>;
       readonly viewStates?: Readonly<Record<string, unknown>>;
       readonly checkpoints?: Readonly<Record<string, unknown>>;
-      readonly consumerSettings: GraphPlusSettings;
+      readonly consumerSettings: GraphPlusConsumerSettingsV1;
+      readonly legacySettings?: unknown;
     };
     readonly [consumerId: string]: unknown;
   };
@@ -48,7 +51,7 @@ export function migrateGraphPlusPluginDataV1(raw: unknown): GraphPlusPluginDataM
     && isRecord(graphPlus.consumerSettings);
 
   const legacySource = graphPlusValid ? graphPlus.consumerSettings : root;
-  const consumerSettings = mergeLegacyGraphPlusSettings(legacySource);
+  const consumerSettings = coerceGraphPlusConsumerSettingsV1(legacySource);
   const profileOverrides: ConsumerProfileRegistrySnapshotV1 = engineValid
     ? cloneJson(engine.profileOverrides) as ConsumerProfileRegistrySnapshotV1
     : { schemaVersion: 1, consumers: [] };
@@ -70,6 +73,7 @@ export function migrateGraphPlusPluginDataV1(raw: unknown): GraphPlusPluginDataM
           ...(graphPlus ?? {}),
           dataSchemaVersion: GRAPH_PLUS_CONSUMER_DATA_SCHEMA_VERSION,
           consumerSettings,
+          ...(!graphPlus?.legacySettings && hasLegacySettings(root) ? { legacySettings: cloneJson(root) } : {}),
         },
       },
     },
@@ -95,7 +99,7 @@ export function withEngineSettingsV1(
 
 export function withGraphPlusSettingsV1(
   data: GraphPlusPluginDataV1,
-  consumerSettings: GraphPlusSettings,
+  consumerSettings: GraphPlusConsumerSettingsV1,
 ): GraphPlusPluginDataV1 {
   return {
     ...data,
@@ -148,29 +152,6 @@ export function withGraphPlusCheckpointV1(
       },
     },
   };
-}
-
-export function mergeLegacyGraphPlusSettings(raw: unknown): GraphPlusSettings {
-  const source = isRecord(raw) ? raw : {};
-  const base = isRecord(source.base) ? source.base : {};
-  const layout = isRecord(source.layout) ? source.layout : {};
-  const physics = isRecord(source.physics) ? source.physics : {};
-  const camera = isRecord(source.camera) ? source.camera : {};
-  const cameraState = isRecord(camera.state) ? camera.state : {};
-  const ui = isRecord(source.ui) ? source.ui : {};
-  return {
-    ...DEFAULT_SETTINGS,
-    ...source,
-    base: { ...DEFAULT_SETTINGS.base, ...base },
-    layout: { ...DEFAULT_SETTINGS.layout, ...layout },
-    physics: { ...DEFAULT_SETTINGS.physics, ...physics },
-    camera: {
-      ...DEFAULT_SETTINGS.camera,
-      ...camera,
-      state: { ...DEFAULT_SETTINGS.camera.initialState, ...cameraState },
-    },
-    ui: { ...DEFAULT_SETTINGS.ui, ...ui },
-  } as GraphPlusSettings;
 }
 
 function isProfileSnapshot(value: unknown): value is ConsumerProfileRegistrySnapshotV1 {

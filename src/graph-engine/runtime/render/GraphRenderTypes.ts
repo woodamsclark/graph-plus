@@ -8,6 +8,7 @@ export interface GraphRenderNodeV1 {
   readonly selected: boolean;
   readonly focused: boolean;
   readonly color?: string;
+  readonly showLabel?: boolean;
 }
 
 export interface GraphRenderEdgeV1 {
@@ -23,6 +24,7 @@ export interface GraphRenderEdgeV1 {
 export interface GraphNodeRenderContributionV1 {
   readonly color?: string;
   readonly radiusScale?: number;
+  readonly showLabel?: boolean;
 }
 
 export interface GraphEdgeRenderContributionV1 {

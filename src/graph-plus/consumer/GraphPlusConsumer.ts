@@ -6,6 +6,7 @@ import type {
   GraphSessionV1,
   GraphViewStateV1,
 } from '../../graph-engine/contracts/v1/index.ts';
+import { reconcileGraphViewStateV1 } from '../../graph-engine/public.ts';
 import {
   GraphPlusLookupV1,
   VaultGraphAdapterV1,
@@ -61,6 +62,7 @@ export class GraphPlusConsumerV1<TFile> {
   private sessionSubscriptions: Disposable[] = [];
   private opened = false;
   private leaseReleased = false;
+  private lensQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: GraphPlusConsumerOptionsV1<TFile>) {
     this.adapter = new VaultGraphAdapterV1({ countDuplicateLinks: options.countDuplicateLinks });
@@ -121,11 +123,17 @@ export class GraphPlusConsumerV1<TFile> {
     }
   }
 
-  async setLens(next: GraphPlusLensStateV1): Promise<void> {
-    const previousForm = JSON.stringify(this.lens.form);
+  setLens(next: GraphPlusLensStateV1): Promise<void> {
+    const requested = clone(next);
+    this.lensQueue = this.lensQueue.catch(() => undefined).then(() => this.applyLensState(requested));
+    return this.lensQueue;
+  }
+
+  private async applyLensState(next: GraphPlusLensStateV1): Promise<void> {
+    const previousRuntimeSettings = JSON.stringify(graphPlusSessionOverridesV1(this.lens));
     this.lens = clone(next);
     if (!this.session || !this.document) return;
-    if (previousForm !== JSON.stringify(this.lens.form)) {
+    if (previousRuntimeSettings !== JSON.stringify(graphPlusSessionOverridesV1(this.lens))) {
       const state = await this.session.exportViewState();
       await this.checkpoint.flush();
       this.checkpoint.detach();
@@ -152,6 +160,7 @@ export class GraphPlusConsumerV1<TFile> {
 
   async close(): Promise<void> {
     this.opened = false;
+    await this.lensQueue.catch(() => undefined);
     this.sessionSubscriptions.splice(0).forEach((subscription) => subscription.dispose());
     try {
       await this.checkpoint.closeAndDispose();
@@ -167,12 +176,13 @@ export class GraphPlusConsumerV1<TFile> {
   }
 
   private async mount(document: GraphDocumentV1, restoreViewState?: GraphViewStateV1): Promise<void> {
+    const compatibleViewState = restoreViewState ? this.compatibleViewState(document, restoreViewState) : undefined;
     const session = await this.options.lease.createSession({
       consumerId: 'graph-plus',
       profileId: this.profileId,
       container: this.options.container,
       document,
-      restoreViewState,
+      restoreViewState: compatibleViewState,
       sessionOverrides: graphPlusSessionOverridesV1(this.lens),
     });
     this.session = session;
@@ -186,6 +196,19 @@ export class GraphPlusConsumerV1<TFile> {
     }));
     this.sessionSubscriptions.push(session.onError((error) => this.options.onError?.(error)));
     await this.applyFilter();
+  }
+
+  private compatibleViewState(document: GraphDocumentV1, state: GraphViewStateV1): GraphViewStateV1 | undefined {
+    try {
+      return reconcileGraphViewStateV1(state, {
+        document,
+        consumerId: 'graph-plus',
+        profileId: this.profileId,
+        dimensions: this.dimensions,
+      });
+    } catch {
+      return undefined;
+    }
   }
 
   private async applyFilter(): Promise<void> {
