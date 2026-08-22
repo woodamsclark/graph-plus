@@ -1,8 +1,9 @@
 import type { GraphDocumentV1 } from './document.ts';
 import type { GraphFilterRequestV1, GraphFilterScopeV1 } from './filter.ts';
 import type { ApplyGraphPatchResultV1, GraphPatchV1 } from './patch.ts';
+import type { GraphSettingsOverridesV1 } from './profile.ts';
 import type { GraphCameraStateV1, GraphViewStateV1 } from './view-state.ts';
-import type { Disposable, JsonValue, Vec3 } from './values.ts';
+import type { Disposable, Vec3 } from './values.ts';
 
 export interface GraphSessionOptionsV1 {
   readonly consumerId: string;
@@ -10,7 +11,7 @@ export interface GraphSessionOptionsV1 {
   readonly container: HTMLElement;
   readonly document: GraphDocumentV1;
   readonly restoreViewState?: GraphViewStateV1;
-  readonly sessionOverrides?: Readonly<Record<string, JsonValue>>;
+  readonly sessionOverrides?: GraphSettingsOverridesV1;
 }
 
 export interface GraphSessionV1 {

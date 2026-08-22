@@ -44,3 +44,13 @@ export interface ConsumerProfileDescriptorV1 {
   readonly modules: Readonly<Record<string, EngineModuleProfileV1>>;
   readonly profileSettings?: Readonly<Record<string, JsonValue>>;
 }
+
+export interface EngineModuleOverrideV1 {
+  readonly enabled?: boolean;
+  readonly settings?: Readonly<Record<string, JsonValue>>;
+}
+
+export interface GraphSettingsOverridesV1 {
+  readonly profileSettings?: Readonly<Record<string, JsonValue>>;
+  readonly modules?: Readonly<Record<string, EngineModuleOverrideV1>>;
+}

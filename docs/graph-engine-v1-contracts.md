@@ -542,7 +542,17 @@ interface GraphSessionOptionsV1 {
   readonly container: HTMLElement;
   readonly document: GraphDocumentV1;
   readonly restoreViewState?: GraphViewStateV1;
-  readonly sessionOverrides?: Readonly<Record<string, JsonValue>>;
+  readonly sessionOverrides?: GraphSettingsOverridesV1;
+}
+
+interface EngineModuleOverrideV1 {
+  readonly enabled?: boolean;
+  readonly settings?: Readonly<Record<string, JsonValue>>;
+}
+
+interface GraphSettingsOverridesV1 {
+  readonly profileSettings?: Readonly<Record<string, JsonValue>>;
+  readonly modules?: Readonly<Record<string, EngineModuleOverrideV1>>;
 }
 
 interface GraphSessionV1 {
