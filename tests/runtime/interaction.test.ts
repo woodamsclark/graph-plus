@@ -36,10 +36,22 @@ test('R-INPUT-01 pans an unfocused wheel and orbits a focused 3d graph', async (
   assert(!sameVector(orbited.camera.position, focused.camera.position), 'focused wheel should orbit the camera position');
   assert(viewportIntents.length >= 2, 'both wheel navigation modes should emit viewport intents');
 
+  await session.restoreViewState(focused);
+  pointer(value, canvas, 'pointerdown', 320, 180, { pointerId: 91, button: 2 });
+  pointer(value, canvas, 'pointermove', 296, 168, { pointerId: 91, button: 2 });
+  value.platform.flushFrame();
+  const rightDragged = await session.exportViewState();
+  assert(vectorDistance(rightDragged.camera.position, orbited.camera.position) < 0.000001, 'trackpad orbit should match the equivalent secondary-button drag');
+  pointer(value, canvas, 'pointerup', 296, 168, { pointerId: 91, button: 2 });
+
+  await session.restoreViewState(orbited);
   const zoomBefore = orbited.camera.zoom;
+  const distanceBefore = vectorDistance(orbited.camera.position, orbited.camera.target);
   wheel(value, canvas, { deltaY: -30, ctrlKey: true });
   value.platform.flushFrame();
-  assert((await session.exportViewState()).camera.zoom > zoomBefore, 'modified wheel should zoom instead of pan or orbit');
+  const zoomed = await session.exportViewState();
+  equal(zoomed.camera.zoom, zoomBefore, 'perspective zoom should preserve the profile focal length');
+  assert(vectorDistance(zoomed.camera.position, zoomed.camera.target) < distanceBefore, 'perspective zoom-in should dolly the camera toward its target');
   await session.dispose();
 });
 
@@ -250,10 +262,13 @@ test('R-INPUT-02 handles keyboard and two-finger navigation within one session',
   key(keyboard, canvas, 'ArrowRight');
   keyboard.platform.flushFrame();
   assert(!sameVector((await session.exportViewState()).camera.target, before.camera.target), 'arrow key should pan');
-  const zoomBefore = (await session.exportViewState()).camera.zoom;
+  const beforeKeyboardZoom = await session.exportViewState();
+  const distanceBeforeKeyboardZoom = vectorDistance(beforeKeyboardZoom.camera.position, beforeKeyboardZoom.camera.target);
   key(keyboard, canvas, '+');
   keyboard.platform.flushFrame();
-  assert((await session.exportViewState()).camera.zoom > zoomBefore, 'plus key should zoom in');
+  const afterKeyboardZoom = await session.exportViewState();
+  equal(afterKeyboardZoom.camera.zoom, beforeKeyboardZoom.camera.zoom, 'perspective keyboard zoom should preserve focal length');
+  assert(vectorDistance(afterKeyboardZoom.camera.position, afterKeyboardZoom.camera.target) < distanceBeforeKeyboardZoom, 'plus key should dolly in');
   key(keyboard, canvas, '0');
   keyboard.platform.flushFrame();
   deepEqual((await session.exportViewState()).camera.target, { x: 0, y: 0, z: 0 }, 'zero key should reset camera');
@@ -465,4 +480,11 @@ function sameVector(
   b: { readonly x: number; readonly y: number; readonly z: number },
 ): boolean {
   return a.x === b.x && a.y === b.y && a.z === b.z;
+}
+
+function vectorDistance(
+  a: { readonly x: number; readonly y: number; readonly z: number },
+  b: { readonly x: number; readonly y: number; readonly z: number },
+): number {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 }

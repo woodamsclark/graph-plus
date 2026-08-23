@@ -185,19 +185,19 @@ export class GraphPlusControlsPanelV1<TFile> {
   private renderForces(parent: HTMLElement): void {
     const body = this.section(parent, 'Forces', false);
     const lens = this.consumer.getLens();
-    this.slider(body, 'Center force', lens.force.centeringStrength ?? this.effectiveNumber('force-layout', 'centeringStrength', 0.45), 0, 2, 0.01,
+    this.slider(body, 'Center force', lens.force.centeringStrength ?? this.effectiveNumber('force-layout', 'centeringStrength', 0.002), 0, 0.05, 0.001,
       (value) => { this.scheduleLensUpdate((next) => { next.force.centeringStrength = value; }); },
       () => this.updateLens((next) => { delete next.force.centeringStrength; }),
       lens.force.centeringStrength !== undefined);
-    this.slider(body, 'Repel force', lens.force.repulsionStrength ?? this.effectiveNumber('force-layout', 'repulsionStrength', 18000), 0, 50000, 250,
+    this.slider(body, 'Repel force', lens.force.repulsionStrength ?? this.effectiveNumber('force-layout', 'repulsionStrength', 7000), 0, 50000, 250,
       (value) => { this.scheduleLensUpdate((next) => { next.force.repulsionStrength = value; }); },
       () => this.updateLens((next) => { delete next.force.repulsionStrength; }),
       lens.force.repulsionStrength !== undefined);
-    this.slider(body, 'Link force', lens.force.springStrength ?? this.effectiveNumber('force-layout', 'springStrength', 3.5), 0, 10, 0.1,
+    this.slider(body, 'Link force', lens.force.springStrength ?? this.effectiveNumber('force-layout', 'springStrength', 0.25), 0, 5, 0.05,
       (value) => { this.scheduleLensUpdate((next) => { next.force.springStrength = value; }); },
       () => this.updateLens((next) => { delete next.force.springStrength; }),
       lens.force.springStrength !== undefined);
-    this.slider(body, 'Link distance', lens.force.springLength ?? this.effectiveNumber('force-layout', 'springLength', 80), 20, 500, 5,
+    this.slider(body, 'Link distance', lens.force.springLength ?? this.effectiveNumber('force-layout', 'springLength', 100), 20, 500, 5,
       (value) => { this.scheduleLensUpdate((next) => { next.force.springLength = value; }); },
       () => this.updateLens((next) => { delete next.force.springLength; }),
       lens.force.springLength !== undefined);

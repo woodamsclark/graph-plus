@@ -191,7 +191,7 @@ measurements demonstrate improvement rather than merely reduced visual density.
 
 ## 6. Implementation verification — 2026-08-22
 
-- Graph+ contract/runtime/consumer suite: 89 tests passing, including the
+- Graph+ contract/runtime/consumer suite: 90 tests passing, including the
   1,400-node/2,600-link fixture, live settings, cached labels, stage timing export,
   mobile orbit, context gestures, drag policy, and Mind Map root behavior.
 - Graph+ public client artifact, typecheck, and production build pass.
@@ -202,3 +202,13 @@ measurements demonstrate improvement rather than merely reduced visual density.
 - Remaining completion work is experiential smoke testing inside desktop and mobile
   Obsidian: gesture feel, drag persistence after reopen, context-menu host behavior,
   keyboard/host-chrome variants, and before/after timing capture on the user's actual vault.
+
+### V1 stabilization follow-up
+
+- Perspective zoom is a fixed-focal-length camera dolly. Existing saved 3D views migrate
+  zoom into camera distance while preserving apparent scale.
+- Trackpad orbit uses the same directional mapping as secondary-button drag.
+- Force layout again uses Barnes-Hut repulsion, the pre-extraction Graph+ defaults, and
+  alpha cooling (`0.035` decay to `0.001`) so it reaches a stable stopped state.
+- Physics-only frames update positions without rerunning Filter, Form, or render-module
+  projection. Settled unchanged frames no longer redraw the canvas.

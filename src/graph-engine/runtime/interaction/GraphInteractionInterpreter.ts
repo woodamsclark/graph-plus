@@ -234,7 +234,7 @@ export class GraphInteractionInterpreter {
       return;
     }
     if (this.options.dimensions === '3d' && this.options.getFocusedNodeId() !== undefined) {
-      this.command(event, { type: 'orbit-by', deltaX: delta.x, deltaY: -delta.y });
+      this.command(event, { type: 'orbit-by', deltaX: -delta.x, deltaY: delta.y });
       return;
     }
     this.command(event, { type: 'pan-by', deltaX: delta.x, deltaY: delta.y });

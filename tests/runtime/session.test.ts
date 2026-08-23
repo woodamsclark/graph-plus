@@ -161,6 +161,33 @@ test('R-SHELL-03 round-trips consumer-owned view state and supports camera comma
   await restored.dispose();
 });
 
+test('restored 3d views migrate zoom into fixed focal length without changing apparent scale', async () => {
+  const value = harness({ profileId: 'three-dimensional' });
+  const session = await value.create();
+  const saved = await session.exportViewState();
+  const previousZoom = 0.5;
+  const previousDistance = 240;
+  const legacy = {
+    ...saved,
+    camera: {
+      ...saved.camera,
+      position: { x: saved.camera.target.x, y: saved.camera.target.y, z: saved.camera.target.z + previousDistance },
+      zoom: previousZoom,
+    },
+  };
+  await session.restoreViewState(legacy);
+  const restored = (await session.exportViewState()).camera;
+  const expectedZoom = 50 / 24;
+  equal(restored.zoom, expectedZoom, 'the profile focal length should replace legacy perspective zoom');
+  const restoredDistance = Math.hypot(
+    restored.position.x - restored.target.x,
+    restored.position.y - restored.target.y,
+    restored.position.z - restored.target.z,
+  );
+  assert(Math.abs(restoredDistance - previousDistance * expectedZoom / previousZoom) < 0.000001, 'camera distance should compensate for focal migration');
+  await session.dispose();
+});
+
 test('R-SHELL-04 suspends animation work and disposes every owned lifecycle resource', async () => {
   const value = harness();
   const sentinel = value.document.createElement('p');
@@ -266,6 +293,9 @@ test('large-graph fixture keeps adaptive labels bounded and exports stage timing
     `large-${(index * 37 + 1) % nodes.length}`,
   ));
   const value = harness({ document: graphDocument({ documentId: 'large-fixture', nodes, edges }) });
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
+    modules: { 'force-layout': { enabled: true } },
+  });
   const session = await value.create();
   const initialLabelDraws = value.drawCalls.filter((call) => call === 'fillText').length;
   assert(initialLabelDraws <= 120, 'adaptive mode should enforce its maximum normal label budget on the large fixture');

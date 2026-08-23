@@ -99,6 +99,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly errorListeners = new Set<(error: GraphSessionErrorV1) => void>();
   private animationFrame: number | null = null;
   private frameCount = 0;
+  private frameDirty = true;
   private latestFramePerformance = emptyFramePerformance();
   private lastFrameTimestamp: number | null = null;
   private manuallySuspended = false;
@@ -129,23 +130,25 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (positions) {
       this.viewState = cloneGraphViewStateV1({ ...this.viewState, positions });
       this.moduleHost.viewChanged(this.viewState);
-      this.recomputeView(false);
-    } else {
+      this.moduleView = { ...this.moduleView, positions };
       this.refreshFrame();
     }
     const compositionMs = duration(compositionStart, this.platform.now());
     if (this.isSuspended()) return;
-    const render = this.renderer.render();
-    this.frameCount += 1;
-    this.latestFramePerformance = {
-      interactionMs,
-      hitTestMs,
-      moduleTickMs,
-      compositionMs,
-      ...render,
-      totalMs: duration(frameStart, this.platform.now()),
-    };
-    this.surface.recordFrame(this.frameCount);
+    if (this.frameDirty) {
+      const render = this.renderer.render();
+      this.frameDirty = false;
+      this.frameCount += 1;
+      this.latestFramePerformance = {
+        interactionMs,
+        hitTestMs,
+        moduleTickMs,
+        compositionMs,
+        ...render,
+        totalMs: duration(frameStart, this.platform.now()),
+      };
+      this.surface.recordFrame(this.frameCount);
+    }
     this.scheduleFrame();
   };
 
@@ -163,13 +166,13 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.themePalette = options.themePalette;
     this.assertPlatformOwnership();
     this.store = new GraphDocumentStore(options.document);
-    this.viewState = options.restoreViewState
+    this.viewState = normalizePerspectiveViewState(options.restoreViewState
       ? addMissingPositions(
           reconcileGraphViewStateV1(options.restoreViewState, this.restoreContext()),
           this.store.exportDocument(),
           this.profile.dimensions,
         )
-      : this.createInitialViewState();
+      : this.createInitialViewState(), this.profile.dimensions, focalLengthMm(this.profile.profileSettings));
     this.projectionSelection = allOf(this.store.exportDocument());
     this.renderSelection = allOf(this.store.exportDocument());
 
@@ -190,6 +193,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.surfaceResizeSubscription = this.surface.onResize((next) => {
         this.camera.setViewport(next.width, next.height);
         this.renderer.resize(next.width, next.height, next.devicePixelRatio);
+        this.frameDirty = true;
       });
       this.moduleHost = new GraphModuleHost({
         registry: options.modules,
@@ -409,11 +413,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   async restoreViewState(state: GraphViewStateV1): Promise<void> {
     this.requireActive();
     try {
-      this.viewState = addMissingPositions(
+      this.viewState = normalizePerspectiveViewState(addMissingPositions(
         reconcileGraphViewStateV1(state, this.restoreContext()),
         this.store.exportDocument(),
         this.profile.dimensions,
-      );
+      ), this.profile.dimensions, focalLengthMm(this.profile.profileSettings));
       this.camera.setState(this.viewState.camera);
       this.moduleHost.restoreState(this.viewState.moduleState);
       this.moduleHost.viewChanged(this.viewState);
@@ -450,6 +454,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       throw new Error('A mounted graph session requires the rendering module.');
     }
     this.moduleHost.updateProfile(next);
+    this.camera.setPerspectiveZoom(focalLengthMm(next.profileSettings) / 24);
+    this.synchronizeCameraState();
     this.profile = next;
     this.recomputeView(false);
   }
@@ -583,6 +589,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       theme: this.moduleView.theme,
       hoveredNodeId: this.interaction?.getHoveredNodeId(),
     }));
+    this.frameDirty = true;
   }
 
   private updateSurface(): void {
@@ -776,6 +783,37 @@ function defaultCamera(dimensions: '2d' | '3d', focalLength: number): GraphCamer
 function focalLengthMm(settings: Readonly<Record<string, import('../contracts/v1/index.ts').JsonValue>>): number {
   const value = settings.focalLengthMm;
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 50;
+}
+
+function normalizePerspectiveViewState(
+  state: GraphViewStateV1,
+  dimensions: '2d' | '3d',
+  focalLength: number,
+): GraphViewStateV1 {
+  if (dimensions !== '3d' || state.camera.projection !== 'perspective') return state;
+  const nextZoom = focalLength / 24;
+  const previousZoom = Math.max(0.02, state.camera.zoom);
+  const offset = subtractVec(state.camera.position, state.camera.target);
+  return cloneGraphViewStateV1({
+    ...state,
+    camera: {
+      ...state.camera,
+      position: addVec(state.camera.target, scaleVec(offset, nextZoom / previousZoom)),
+      zoom: nextZoom,
+    },
+  });
+}
+
+function addVec(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+}
+
+function subtractVec(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+}
+
+function scaleVec(value: Vec3, amount: number): Vec3 {
+  return { x: value.x * amount, y: value.y * amount, z: value.z * amount };
 }
 
 function cloneFilter(filter: GraphFilterRequestV1): GraphFilterRequestV1 {

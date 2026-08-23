@@ -272,6 +272,12 @@ test('shipped Filter, Form, force layout, and palette contributions stay domain-
   for (let index = 1; index <= 5; index += 1) force.platform.flushFrame(index * 16);
   const after = await forceSession.exportViewState();
   assert(JSON.stringify(before.positions) !== JSON.stringify(after.positions), 'force layout should evolve generic positions without Anima');
+  for (let index = 6; index <= 240; index += 1) force.platform.flushFrame(index * 16);
+  const settled = await forceSession.exportViewState();
+  const settledDrawCount = force.drawCalls.length;
+  for (let index = 241; index <= 260; index += 1) force.platform.flushFrame(index * 16);
+  deepEqual((await forceSession.exportViewState()).positions, settled.positions, 'cooled force layout should stop changing positions');
+  equal(force.drawCalls.length, settledDrawCount, 'settled graphs should not redraw unchanged frames');
   const forceDescriptor = createShippedGraphModuleRegistryV1().descriptors().find((descriptor) => descriptor.id === 'force-layout');
   deepEqual(forceDescriptor?.dependencies ?? [], [], 'force layout must have no Anima dependency');
   await forceSession.dispose();

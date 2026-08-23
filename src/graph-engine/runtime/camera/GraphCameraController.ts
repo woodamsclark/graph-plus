@@ -18,6 +18,8 @@ export interface ProjectedGraphPointV1 {
 
 const MIN_ZOOM = 0.02;
 const MAX_ZOOM = 40;
+const MIN_PERSPECTIVE_DISTANCE = 10;
+const MAX_PERSPECTIVE_DISTANCE = 10_000_000;
 
 export class GraphCameraController {
   private state: GraphCameraStateV1;
@@ -134,8 +136,34 @@ export class GraphCameraController {
   }
 
   zoomByWheel(deltaY: number): void {
+    if (this.state.projection === 'perspective') {
+      const offset = subtract(this.state.position, this.state.target);
+      const currentDistance = Math.max(0.0001, length(offset));
+      const nextDistance = clamp(
+        currentDistance * Math.exp(deltaY * 0.0015),
+        MIN_PERSPECTIVE_DISTANCE,
+        MAX_PERSPECTIVE_DISTANCE,
+      );
+      this.state = {
+        ...this.state,
+        position: add(this.state.target, scaleVector(offset, nextDistance / currentDistance)),
+      };
+      return;
+    }
     const zoom = clamp(this.state.zoom * Math.exp(-deltaY * 0.0015), MIN_ZOOM, MAX_ZOOM);
     this.state = { ...this.state, zoom };
+  }
+
+  setPerspectiveZoom(zoom: number): void {
+    if (this.state.projection !== 'perspective') return;
+    const nextZoom = clamp(zoom, MIN_ZOOM, MAX_ZOOM);
+    const previousZoom = Math.max(MIN_ZOOM, this.state.zoom);
+    const offset = subtract(this.state.position, this.state.target);
+    this.state = {
+      ...this.state,
+      position: add(this.state.target, scaleVector(offset, nextZoom / previousZoom)),
+      zoom: nextZoom,
+    };
   }
 
   setTarget(target: Vec3, preserveView = true): void {
