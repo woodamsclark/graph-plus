@@ -637,6 +637,24 @@ Generic engine commands include operations such as:
 - apply filter;
 - replace document or apply patch.
 
+Selection and focus are related but distinct session states:
+
+- **selection** is the zero-or-more-node set explicitly chosen by the user or consumer;
+  it drives selected-node presentation and `selection-changed` intents;
+- **focus** is the optional single node used as the keyboard/navigation and camera
+  interaction reference; it drives focused-node presentation, focused navigation
+  behavior, and `focus-changed` intents.
+
+A normal primary node click may set both states to the same node, but the public API
+keeps them independent for multi-selection, keyboard focus, and consumer-controlled
+camera workflows.
+
+When a primary background drag crosses the pan threshold, the default interaction
+contract clears `focusedNodeId`, clears `selectedNodeIds`, emits each applicable state
+change once, and applies the threshold-crossing pan movement immediately. The camera
+then pans with neither a focused nor selected node. A secondary-button 3D orbit is a
+different gesture and does not implicitly clear either state.
+
 Graph+-specific actions such as opening an Obsidian file or using the current note as
 a Form root remain in Graph+.
 

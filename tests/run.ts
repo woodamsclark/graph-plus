@@ -1,4 +1,5 @@
 import './contracts/architecture.test.ts';
+import './contracts/client-artifact.test.ts';
 import './contracts/document.test.ts';
 import './core/document-store.test.ts';
 import './core/filter.test.ts';

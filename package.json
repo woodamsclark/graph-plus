@@ -5,7 +5,8 @@
   "private": true,
   "main": "main.js",
   "scripts": {
-    "build": "node esbuild.config.js",
+    "build": "npm run build:client && node esbuild.config.js",
+    "build:client": "node scripts/build-graph-engine-client.mjs",
     "watch": "node esbuild.config.js --watch",
     "typecheck": "tsc --noEmit",
     "test": "node test.config.js",

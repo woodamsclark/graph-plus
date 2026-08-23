@@ -361,6 +361,14 @@ occur, then pan, orbit, zoom, reset, and fit commands update only the session vi
 Given visible nodes, when selection and focus interactions occur, then the session
 state changes and exactly one corresponding domain-neutral intent is emitted.
 
+Selection is a zero-or-more-node chosen set; focus is an optional single
+keyboard/navigation and camera-interaction reference. Given a primary node click, the
+default interaction may set both to that node. Given a selected and focused node, when
+a primary background drag crosses the pan threshold, then selection and focus both
+clear, each applicable change emits exactly one intent, the threshold-crossing movement
+is included in the pan, and no selected or focused highlight remains. A secondary 3D
+orbit does not implicitly clear either state.
+
 #### R-INPUT-04 — Activation
 
 Given a hit-tested node, when primary, secondary, or keyboard activation occurs, then

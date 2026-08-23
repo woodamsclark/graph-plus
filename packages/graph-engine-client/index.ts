@@ -1,1 +1,1 @@
-export * from '../../src/graph-engine/public.ts';
+export * from './src/graph-engine/public.ts';

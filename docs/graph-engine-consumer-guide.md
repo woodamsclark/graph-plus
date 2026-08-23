@@ -6,11 +6,12 @@ only one consumer; opening its view is what starts the vault adapter and graph s
 
 ## Public artifact
 
-Consumer code depends only on [`src/graph-engine/public.ts`](../src/graph-engine/public.ts).
-The repository-local source package at
-[`packages/graph-engine-client/package.json`](../packages/graph-engine-client/package.json)
-names that boundary for local development. Before external publication, bundle that
-entry as the `@graph-plus/graph-engine-client` package; do not import provider core,
+External consumer code depends only on the generated
+[`@graph-plus/graph-engine-client`](../packages/graph-engine-client/package.json)
+artifact. Graph+'s canonical public entry remains
+[`src/graph-engine/public.ts`](../src/graph-engine/public.ts), and `npm run build:client`
+copies its reviewed dependency closure into the self-contained package. Consumers may
+install a packed copy or vendor the artifact; they must not import provider core,
 runtime, renderer, module, or profile-registry paths.
 
 The public boundary contains:
@@ -67,3 +68,8 @@ filters, intent subscription, view export/restore, disposal, and lease release.
 
 PatternSmith integration begins as a separate change against this public artifact.
 It should not import Graph+ vault-adapter code or private Graph Engine implementations.
+
+The first real external-plugin proof is governed by the
+[external consumer smoke contract](external-consumer-smoke-contract.md) and its
+[acceptance checklist](external-consumer-smoke-acceptance.md). PatternSmith acts as an
+isolated harness in that pass; its learning product integration remains separate.

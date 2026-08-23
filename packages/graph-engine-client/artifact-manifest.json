@@ -1,0 +1,26 @@
+{
+  "artifact": "@graph-plus/graph-engine-client",
+  "artifactVersion": "1.0.0",
+  "protocolVersion": 1,
+  "contentSha256": "3aa02de96c0a77294709ed41e4f59b4342768441c514420905dc832db9046ad8",
+  "generatedFrom": "src/graph-engine/public.ts",
+  "publicFiles": [
+    "src/graph-engine/public.ts",
+    "src/graph-engine/contracts/v1/document.ts",
+    "src/graph-engine/contracts/v1/filter.ts",
+    "src/graph-engine/contracts/v1/index.ts",
+    "src/graph-engine/contracts/v1/patch.ts",
+    "src/graph-engine/contracts/v1/profile.ts",
+    "src/graph-engine/contracts/v1/service.ts",
+    "src/graph-engine/contracts/v1/session.ts",
+    "src/graph-engine/contracts/v1/values.ts",
+    "src/graph-engine/contracts/v1/view-state.ts",
+    "src/graph-engine/core/document/GraphTopologyIndex.ts",
+    "src/graph-engine/core/filter/GraphFilterEvaluator.ts",
+    "src/graph-engine/core/filter/index.ts",
+    "src/graph-engine/core/state/GraphViewState.ts",
+    "src/graph-engine/core/state/index.ts",
+    "src/graph-engine/service/GraphEngineWorkspaceClient.ts",
+    "src/graph-engine/service/UnavailableGraphSurface.ts"
+  ]
+}
