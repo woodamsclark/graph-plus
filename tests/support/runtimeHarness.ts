@@ -2,6 +2,7 @@ import { Window } from 'happy-dom';
 import type {
   ConsumerRegistrationV1,
   GraphDocumentV1,
+  GraphSettingsOverridesV1,
 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { ConsumerProfileRegistry } from '../../src/graph-engine/core/profile/index.ts';
 import {
@@ -185,6 +186,7 @@ export function runtimeHarness(options: {
   document?: GraphDocumentV1;
   registration?: ConsumerRegistrationV1;
   modules?: GraphModuleRegistry;
+  getGlobalOverrides?: () => GraphSettingsOverridesV1;
   resolveThemePalette?: (container: HTMLElement) => GraphRenderThemeV1;
 } = {}) {
   const window = new Window();
@@ -222,6 +224,7 @@ export function runtimeHarness(options: {
       return platform;
     },
     ...(options.modules ? { modules: options.modules } : {}),
+    ...(options.getGlobalOverrides ? { getGlobalOverrides: options.getGlobalOverrides } : {}),
     resolveThemePalette: options.resolveThemePalette ?? (() => DEFAULT_GRAPH_RENDER_THEME_V1),
   });
   return {
@@ -280,6 +283,12 @@ function fakeCanvasContext(calls: string[], styleAssignments: string[]): CanvasR
   ];
   return new Proxy({} as CanvasRenderingContext2D, {
     get(target, property) {
+      if (property === 'measureText') {
+        return (value: string) => {
+          calls.push('measureText');
+          return { width: value.length * 7 };
+        };
+      }
       if (typeof property === 'string' && methods.includes(property)) {
         return (..._args: unknown[]) => calls.push(property);
       }

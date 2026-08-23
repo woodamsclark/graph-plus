@@ -1,4 +1,5 @@
-import { Setting, setIcon } from 'obsidian';
+import { Menu, Notice, Setting, setIcon } from 'obsidian';
+import type { Disposable, GraphNodeContextRequestedIntentV1, GraphViewStateV1 } from '../graph-engine/public.ts';
 import type { GraphPlusConsumerV1 } from '../graph-plus/consumer/index.ts';
 import type { GraphPlusLensStateV1 } from '../graph-plus/query/index.ts';
 
@@ -7,11 +8,14 @@ export class GraphPlusControlsPanelV1<TFile> {
   private status?: HTMLDivElement;
   private collapsed = false;
   private filterTimer: number | undefined;
+  private lensFrame: number | undefined;
+  private pendingLens?: MutableLens;
+  private intentSubscription?: Disposable;
+  private viewState?: GraphViewStateV1;
 
   constructor(
     private readonly container: HTMLElement,
     private readonly consumer: GraphPlusConsumerV1<TFile>,
-    private readonly getActiveNoteId: () => string | undefined,
   ) {}
 
   mount(): void {
@@ -21,12 +25,25 @@ export class GraphPlusControlsPanelV1<TFile> {
     this.root.addEventListener('pointerdown', stopPropagation);
     this.root.addEventListener('wheel', stopPropagation);
     this.container.append(this.root);
+    this.intentSubscription = this.consumer.getSession()?.onIntent((intent) => {
+      if (intent.type === 'node-context-requested') this.openContextMenu(intent);
+      if (intent.type === 'selection-changed' || intent.type === 'focus-changed' || intent.type === 'node-drag-ended') {
+        void this.refreshViewState(true);
+      }
+    });
     this.render();
+    void this.refreshViewState(true);
   }
 
   unmount(): void {
     if (this.filterTimer !== undefined) this.container.ownerDocument.defaultView?.clearTimeout(this.filterTimer);
+    if (this.lensFrame !== undefined) this.container.ownerDocument.defaultView?.cancelAnimationFrame(this.lensFrame);
+    if (this.pendingLens) void this.consumer.setLens(this.pendingLens);
     this.filterTimer = undefined;
+    this.lensFrame = undefined;
+    this.pendingLens = undefined;
+    this.intentSubscription?.dispose();
+    this.intentSubscription = undefined;
     this.root?.remove();
     this.root = undefined;
     this.status = undefined;
@@ -34,6 +51,7 @@ export class GraphPlusControlsPanelV1<TFile> {
 
   refresh(): void {
     this.updateStatus();
+    void this.refreshViewState(false);
   }
 
   private render(): void {
@@ -58,16 +76,15 @@ export class GraphPlusControlsPanelV1<TFile> {
     }));
     actions.append(this.iconButton('x', 'Close graph controls', () => { this.collapsed = true; this.render(); }));
     const body = div(this.root, 'graphplus-controls-body');
-    this.renderFilter(body);
-    this.renderForm(body);
+    this.renderRefine(body);
     this.renderDisplay(body);
     this.renderForces(body);
     this.status = div(this.root, 'graphplus-controls-status');
     this.updateStatus();
   }
 
-  private renderFilter(parent: HTMLElement): void {
-    const body = this.section(parent, 'Filter', true);
+  private renderRefine(parent: HTMLElement): void {
+    const body = this.section(parent, 'Refine graph', true);
     const lens = this.consumer.getLens();
     new Setting(body).setName('Search').setDesc('path:, tag:, type:, [property:value], -term, OR').addSearch((search) => {
       search.setPlaceholder('Filter nodes…').setValue(lens.query);
@@ -86,48 +103,40 @@ export class GraphPlusControlsPanelV1<TFile> {
       await this.updateLens((next) => { next.query = ''; next.showTags = true; next.showOrphans = true; });
       this.render();
     }));
+    this.renderMindMap(body, lens);
   }
 
-  private renderForm(parent: HTMLElement): void {
-    const body = this.section(parent, 'Form', true);
-    const lens = this.consumer.getLens();
-    this.toggle(body, 'Mind map', lens.form.enabled, async (value) => {
-      await this.updateLens((next) => { next.form.enabled = value; });
-      this.render();
-    });
-    const roots = this.consumer.getDocument()?.nodes ?? [];
-    const rootSetting = new Setting(body).setName('Central idea').setDesc('Blank chooses the most connected visible node.');
-    rootSetting.addSearch((search) => {
-      search.setPlaceholder('Automatic').setValue(lens.form.rootNodeId ?? '');
-      const listId = `graphplus-roots-${Math.random().toString(36).slice(2)}`;
-      search.inputEl.setAttribute('list', listId);
-      const list = this.container.ownerDocument.createElement('datalist');
-      list.id = listId;
-      for (const node of roots) {
-        const option = this.container.ownerDocument.createElement('option');
-        option.value = node.id;
-        option.label = node.label ?? node.id;
-        list.append(option);
-      }
-      body.append(list);
-      search.onChange((value) => void this.updateLens((next) => {
-        next.form.rootNodeId = value.trim() || undefined;
-      }));
-    });
-    const rootActions = div(body, 'graphplus-root-actions');
-    const focused = this.consumer.getSession();
-    const focusedButton = button(this.container, 'Use focused');
-    focusedButton.addEventListener('click', async () => {
-      const focusedId = (await focused?.exportViewState())?.focusedNodeId;
-      if (focusedId) await this.updateLens((next) => { next.form.rootNodeId = focusedId; });
-    });
-    const activeId = this.getActiveNoteId();
-    const activeButton = button(this.container, 'Use current note');
-    activeButton.disabled = activeId === undefined;
-    activeButton.addEventListener('click', () => {
-      if (activeId) void this.updateLens((next) => { next.form.rootNodeId = activeId; });
-    });
-    rootActions.append(focusedButton, activeButton);
+  private renderMindMap(body: HTMLElement, lens: GraphPlusLensStateV1): void {
+    const selected = this.viewState?.selectedNodeIds ?? [];
+    const selectedId = selected.length === 1 ? selected[0] : undefined;
+    new Setting(body).setName('Mind map').setDesc(lens.form.enabled
+      ? `Root: ${this.nodeLabel(lens.form.rootNodeId)}`
+      : selectedId ? `Ready from: ${this.nodeLabel(selectedId)}` : 'Select one visible node to enable.')
+      .addToggle((toggle) => toggle
+        .setValue(lens.form.enabled)
+        .setDisabled(!lens.form.enabled && selectedId === undefined)
+        .onChange(async (value) => {
+          if (value) {
+            if (!selectedId) { new Notice('Select one visible node before enabling Mind Map.'); this.render(); return; }
+            await this.consumer.mindMapFromNode(selectedId);
+          } else {
+            await this.updateLens((next) => { next.form.enabled = false; });
+          }
+          await this.refreshViewState(false);
+          this.render();
+        }));
+    if (!lens.form.enabled) return;
+    if (selectedId && selectedId !== lens.form.rootNodeId) {
+      const reform = new Setting(body).setName('Selected node').setDesc(this.nodeLabel(selectedId));
+      reform.settingEl.classList.add('graphplus-reform-setting');
+      reform.addButton((control) => control
+        .setButtonText('Re-form from selected')
+        .onClick(async () => {
+          await this.consumer.mindMapFromNode(selectedId);
+          await this.refreshViewState(false);
+          this.render();
+        }));
+    }
     new Setting(body).setName('Direction').addDropdown((dropdown) => dropdown
       .addOptions({ either: 'Both', outgoing: 'Outgoing', incoming: 'Incoming' })
       .setValue(lens.form.direction)
@@ -140,9 +149,11 @@ export class GraphPlusControlsPanelV1<TFile> {
       .addOptions(relationOptions)
       .setValue(lens.form.relation ?? '')
       .onChange((value) => void this.updateLens((next) => { next.form.relation = value || undefined; })));
-    new Setting(body).setName('Depth').setDesc(lens.form.maxDepth === undefined ? 'Unlimited' : String(lens.form.maxDepth))
-      .addSlider((slider) => slider.setLimits(0, 8, 1).setValue(lens.form.maxDepth ?? 0).setDynamicTooltip()
-        .onChange((value) => void this.updateLens((next) => { next.form.maxDepth = value === 0 ? undefined : value; })));
+    const depth = lens.form.maxDepth ?? this.effectiveNumber('form', 'maxDepth', 3);
+    this.slider(body, 'Depth', depth, 1, 8, 1,
+      (value) => { this.scheduleLensUpdate((next) => { next.form.maxDepth = value; }); },
+      () => this.updateLens((next) => { delete next.form.maxDepth; }),
+      lens.form.maxDepth !== undefined);
     this.toggle(body, 'Branch colors', lens.form.colorBranches, (value) => this.updateLens((next) => { next.form.colorBranches = value; }));
     this.toggle(body, 'Cross-links', lens.form.showCrossLinks, (value) => this.updateLens((next) => { next.form.showCrossLinks = value; }));
     this.toggle(body, 'Disconnected nodes', lens.form.showDisconnected, (value) => this.updateLens((next) => { next.form.showDisconnected = value; }));
@@ -151,24 +162,45 @@ export class GraphPlusControlsPanelV1<TFile> {
   private renderDisplay(parent: HTMLElement): void {
     const body = this.section(parent, 'Display', false);
     const lens = this.consumer.getLens();
-    this.toggle(body, 'Text', lens.display.showLabels, (value) => this.updateLens((next) => { next.display.showLabels = value; }));
-    this.slider(body, 'Node size', lens.display.nodeRadiusScale, 0.5, 4, 0.1,
-      (value) => this.updateLens((next) => { next.display.nodeRadiusScale = value; }));
-    this.slider(body, 'Link thickness', lens.display.edgeThicknessScale, 0.25, 4, 0.05,
-      (value) => this.updateLens((next) => { next.display.edgeThicknessScale = value; }));
+    const labels = new Setting(body).setName('Labels');
+    labels.addDropdown((dropdown) => dropdown
+      .addOptions({ adaptive: 'Adaptive', all: 'All', off: 'Off' })
+      .setValue(lens.display.labelMode ?? this.effectiveLabelMode())
+      .onChange((value) => void this.updateLens((next) => {
+        next.display.labelMode = value === 'all' || value === 'off' ? value : 'adaptive';
+      })));
+    if (lens.display.labelMode !== undefined) labels.addExtraButton((control) => control
+      .setIcon('rotate-ccw').setTooltip('Reset to profile default')
+      .onClick(async () => { await this.updateLens((next) => { delete next.display.labelMode; }); this.render(); }));
+    this.slider(body, 'Node size', lens.display.nodeRadiusScale ?? this.effectiveNumber('rendering', 'nodeRadiusScale', 1), 0.5, 4, 0.1,
+      (value) => { this.scheduleLensUpdate((next) => { next.display.nodeRadiusScale = value; }); },
+      () => this.updateLens((next) => { delete next.display.nodeRadiusScale; }),
+      lens.display.nodeRadiusScale !== undefined);
+    this.slider(body, 'Link thickness', lens.display.edgeThicknessScale ?? this.effectiveNumber('rendering', 'edgeThicknessScale', 1), 0.25, 4, 0.05,
+      (value) => { this.scheduleLensUpdate((next) => { next.display.edgeThicknessScale = value; }); },
+      () => this.updateLens((next) => { delete next.display.edgeThicknessScale; }),
+      lens.display.edgeThicknessScale !== undefined);
   }
 
   private renderForces(parent: HTMLElement): void {
     const body = this.section(parent, 'Forces', false);
     const lens = this.consumer.getLens();
-    this.slider(body, 'Center force', lens.force.centeringStrength, 0, 2, 0.01,
-      (value) => this.updateLens((next) => { next.force.centeringStrength = value; }));
-    this.slider(body, 'Repel force', lens.force.repulsionStrength, 0, 50000, 250,
-      (value) => this.updateLens((next) => { next.force.repulsionStrength = value; }));
-    this.slider(body, 'Link force', lens.force.springStrength, 0, 10, 0.1,
-      (value) => this.updateLens((next) => { next.force.springStrength = value; }));
-    this.slider(body, 'Link distance', lens.force.springLength, 20, 500, 5,
-      (value) => this.updateLens((next) => { next.force.springLength = value; }));
+    this.slider(body, 'Center force', lens.force.centeringStrength ?? this.effectiveNumber('force-layout', 'centeringStrength', 0.45), 0, 2, 0.01,
+      (value) => { this.scheduleLensUpdate((next) => { next.force.centeringStrength = value; }); },
+      () => this.updateLens((next) => { delete next.force.centeringStrength; }),
+      lens.force.centeringStrength !== undefined);
+    this.slider(body, 'Repel force', lens.force.repulsionStrength ?? this.effectiveNumber('force-layout', 'repulsionStrength', 18000), 0, 50000, 250,
+      (value) => { this.scheduleLensUpdate((next) => { next.force.repulsionStrength = value; }); },
+      () => this.updateLens((next) => { delete next.force.repulsionStrength; }),
+      lens.force.repulsionStrength !== undefined);
+    this.slider(body, 'Link force', lens.force.springStrength ?? this.effectiveNumber('force-layout', 'springStrength', 3.5), 0, 10, 0.1,
+      (value) => { this.scheduleLensUpdate((next) => { next.force.springStrength = value; }); },
+      () => this.updateLens((next) => { delete next.force.springStrength; }),
+      lens.force.springStrength !== undefined);
+    this.slider(body, 'Link distance', lens.force.springLength ?? this.effectiveNumber('force-layout', 'springLength', 80), 20, 500, 5,
+      (value) => { this.scheduleLensUpdate((next) => { next.force.springLength = value; }); },
+      () => this.updateLens((next) => { delete next.force.springLength; }),
+      lens.force.springLength !== undefined);
   }
 
   private section(parent: HTMLElement, title: string, open: boolean): HTMLElement {
@@ -199,26 +231,88 @@ export class GraphPlusControlsPanelV1<TFile> {
     min: number,
     max: number,
     step: number,
-    change: (value: number) => void | Promise<void>,
+    change: (value: number) => void,
+    reset: () => void | Promise<void>,
+    overridden: boolean,
   ): void {
-    new Setting(parent).setName(name).addSlider((slider) => slider
-      .setLimits(min, max, step)
-      .setValue(value)
-      .setDynamicTooltip()
-      .onChange(change));
+    const setting = new Setting(parent).setName(name).setDesc(`Current: ${formatNumber(value)}`);
+    setting.settingEl.classList.add('graphplus-slider-setting');
+    setting.addSlider((slider) => {
+      slider.setLimits(min, max, step).setValue(value).setDynamicTooltip().onChange(change);
+      slider.sliderEl.addEventListener('dblclick', async (event) => {
+        event.preventDefault();
+        await reset();
+        this.render();
+      });
+    });
+    if (overridden) setting.addExtraButton((control) => control
+      .setIcon('rotate-ccw').setTooltip('Reset to profile default')
+      .onClick(async () => { await reset(); this.render(); }));
   }
 
   private async updateLens(mutator: (lens: MutableLens) => void): Promise<void> {
-    const lens = this.consumer.getLens() as MutableLens;
+    const lens = this.pendingLens ?? this.consumer.getLens() as MutableLens;
+    if (this.lensFrame !== undefined) this.container.ownerDocument.defaultView?.cancelAnimationFrame(this.lensFrame);
+    this.lensFrame = undefined;
+    this.pendingLens = undefined;
     mutator(lens);
     await this.consumer.setLens(lens);
     this.updateStatus();
+  }
+
+  private scheduleLensUpdate(mutator: (lens: MutableLens) => void): void {
+    const lens = this.pendingLens ?? this.consumer.getLens() as MutableLens;
+    mutator(lens);
+    this.pendingLens = lens;
+    if (this.lensFrame !== undefined) return;
+    this.lensFrame = this.container.ownerDocument.defaultView?.requestAnimationFrame(() => {
+      this.lensFrame = undefined;
+      const pending = this.pendingLens;
+      this.pendingLens = undefined;
+      if (pending) void this.consumer.setLens(pending).then(() => this.updateStatus());
+    });
+  }
+
+  private async refreshViewState(rerender: boolean): Promise<void> {
+    const session = this.consumer.getSession();
+    if (!session) return;
+    this.viewState = await session.exportViewState();
+    if (rerender) this.render();
+  }
+
+  private nodeLabel(nodeId: string | undefined): string {
+    if (!nodeId) return 'Unavailable';
+    const node = this.consumer.getDocument()?.nodes.find((candidate) => candidate.id === nodeId);
+    return node?.label ?? nodeId;
+  }
+
+  private openContextMenu(intent: GraphNodeContextRequestedIntentV1): void {
+    const menu = new Menu();
+    menu.addItem((item) => item.setTitle('Focus node').setIcon('scan-eye').onClick(() => void this.consumer.focusNode(intent.nodeId)));
+    menu.addItem((item) => item.setTitle('Mind map from here').setIcon('git-fork').onClick(() => void this.consumer.mindMapFromNode(intent.nodeId).then(() => this.refreshViewState(true))));
+    const kind = this.consumer.nodeKind(intent.nodeId);
+    if (kind) menu.addItem((item) => item.setTitle(kind === 'note' ? 'Open note' : 'Open tag').setIcon('file-text').onClick(() => void this.consumer.openNode(intent.nodeId)));
+    const pinned = this.viewState?.pinnedNodeIds.includes(intent.nodeId) === true;
+    menu.addSeparator();
+    menu.addItem((item) => item.setTitle(pinned ? 'Unpin node' : 'Pin node').setIcon(pinned ? 'pin-off' : 'pin').onClick(() => void this.consumer.setNodePinned(intent.nodeId, !pinned).then(() => this.refreshViewState(true))));
+    const bounds = this.container.getBoundingClientRect();
+    menu.showAtPosition({ x: bounds.left + intent.anchor.x, y: bounds.top + intent.anchor.y });
   }
 
   private updateStatus(): void {
     if (!this.status) return;
     const document = this.consumer.getDocument();
     this.status.textContent = document ? `${document.nodes.length} nodes · ${document.edges.length} links` : 'Loading graph…';
+  }
+
+  private effectiveNumber(moduleId: string, key: string, fallback: number): number {
+    const value = this.consumer.getEffectiveSettings()?.modules[moduleId]?.settings[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  }
+
+  private effectiveLabelMode(): 'adaptive' | 'all' | 'off' {
+    const value = this.consumer.getEffectiveSettings()?.modules.rendering?.settings.labelMode;
+    return value === 'all' || value === 'off' ? value : 'adaptive';
   }
 
   private iconButton(icon: string, label: string, action: () => void): HTMLButtonElement {
@@ -235,8 +329,8 @@ type MutableLens = {
   query: string;
   showTags: boolean;
   showOrphans: boolean;
-  display: { showLabels: boolean; nodeRadiusScale: number; edgeThicknessScale: number };
-  force: { repulsionStrength: number; springStrength: number; springLength: number; centeringStrength: number };
+  display: { labelMode?: 'adaptive' | 'all' | 'off'; nodeRadiusScale?: number; edgeThicknessScale?: number };
+  force: { repulsionStrength?: number; springStrength?: number; springLength?: number; centeringStrength?: number };
   form: {
     enabled: boolean;
     rootNodeId?: string;
@@ -265,4 +359,8 @@ function button(container: HTMLElement, text: string): HTMLButtonElement {
 
 function stopPropagation(event: Event): void {
   event.stopPropagation();
+}
+
+function formatNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
 }

@@ -1,6 +1,6 @@
 import { ItemView, type Plugin, type TFile, type ViewStateResult, type WorkspaceLeaf } from 'obsidian';
 import { mountGraphEngineUnavailableSurfaceV1, type Disposable } from '../graph-engine/public.ts';
-import { ObsidianVaultGraphSourceV1, noteNodeId } from '../graph-plus/adapter/index.ts';
+import { ObsidianVaultGraphSourceV1 } from '../graph-plus/adapter/index.ts';
 import { GraphPlusConsumerV1 } from '../graph-plus/consumer/index.ts';
 import { createDefaultGraphPlusLensV1, type GraphPlusLensStateV1 } from '../graph-plus/query/index.ts';
 import { GraphPlusControlsPanelV1 } from './GraphPlusControlsPanel.ts';
@@ -47,10 +47,6 @@ export class GraphPlusView extends ItemView {
       this.controls = new GraphPlusControlsPanelV1(
         container,
         this.consumer,
-        () => {
-          const file = this.app.workspace.getActiveFile();
-          return file ? noteNodeId(file.path) : undefined;
-        },
       );
       this.controls.mount();
       this.registerGraphRebuildEvents();
@@ -126,15 +122,19 @@ function coerceLens(value: unknown): GraphPlusLensStateV1 | undefined {
     showTags: typeof value.showTags === 'boolean' ? value.showTags : fallback.showTags,
     showOrphans: typeof value.showOrphans === 'boolean' ? value.showOrphans : fallback.showOrphans,
     display: isRecord(value.display) ? {
-      showLabels: typeof value.display.showLabels === 'boolean' ? value.display.showLabels : fallback.display.showLabels,
-      nodeRadiusScale: finitePositive(value.display.nodeRadiusScale, fallback.display.nodeRadiusScale),
-      edgeThicknessScale: finitePositive(value.display.edgeThicknessScale, fallback.display.edgeThicknessScale),
+      ...(value.display.labelMode === 'adaptive' || value.display.labelMode === 'all' || value.display.labelMode === 'off'
+        ? { labelMode: value.display.labelMode }
+        : typeof value.display.showLabels === 'boolean' && value.display.showLabels === false
+          ? { labelMode: 'off' as const }
+          : {}),
+      ...optionalLegacyNumber(value.display.nodeRadiusScale, 1, true, 'nodeRadiusScale'),
+      ...optionalLegacyNumber(value.display.edgeThicknessScale, 1, true, 'edgeThicknessScale'),
     } : fallback.display,
     force: isRecord(value.force) ? {
-      repulsionStrength: finiteNonNegative(value.force.repulsionStrength, fallback.force.repulsionStrength),
-      springStrength: finiteNonNegative(value.force.springStrength, fallback.force.springStrength),
-      springLength: finitePositive(value.force.springLength, fallback.force.springLength),
-      centeringStrength: finiteNonNegative(value.force.centeringStrength, fallback.force.centeringStrength),
+      ...optionalLegacyNumber(value.force.repulsionStrength, 18000, false, 'repulsionStrength'),
+      ...optionalLegacyNumber(value.force.springStrength, 3.5, false, 'springStrength'),
+      ...optionalLegacyNumber(value.force.springLength, 80, true, 'springLength'),
+      ...optionalLegacyNumber(value.force.centeringStrength, 0.45, false, 'centeringStrength'),
     } : fallback.force,
     form: {
       enabled: typeof form.enabled === 'boolean' ? form.enabled : fallback.form.enabled,
@@ -168,4 +168,15 @@ function finitePositive(value: unknown, fallback: number): number {
 
 function finiteNonNegative(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function optionalLegacyNumber(
+  value: unknown,
+  legacyDefault: number,
+  positive: boolean,
+  key: string,
+): Record<string, number> {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return {};
+  if (positive ? value <= 0 : value < 0) return {};
+  return value === legacyDefault ? {} : { [key]: value };
 }

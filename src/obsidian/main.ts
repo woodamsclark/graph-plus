@@ -82,13 +82,19 @@ export default class GraphPlus extends Plugin {
       capabilities,
       profiles,
       sessions: sessionFactory,
-      onProfilesChanged: () => this.persistEngineSettings(),
+      onProfilesChanged: () => {
+        sessionFactory.refreshActiveProfiles();
+        return this.persistEngineSettings();
+      },
     });
     this.graphEngineCore = providerCore;
     this.engineSettings = new GraphEngineSettingsControllerV1(
       profiles,
       this.pluginData.engine.globalSettings,
-      () => this.persistEngineSettings(),
+      () => {
+        sessionFactory.refreshActiveProfiles();
+        return this.persistEngineSettings();
+      },
     );
 
     const localLease = providerCore.connectLocal({

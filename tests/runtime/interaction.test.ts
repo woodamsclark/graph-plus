@@ -8,6 +8,7 @@ import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import {
   runtimeCanvas,
   runtimeHarness,
+  runtimeRegistration,
 } from '../support/runtimeHarness.ts';
 
 test('R-INPUT-01 pans an unfocused wheel and orbits a focused 3d graph', async () => {
@@ -65,7 +66,12 @@ test('R-INPUT-03 and R-INPUT-04 emit one neutral intent for each selection, focu
   value.platform.advanceTime(400);
   click(value, canvas, await nodePoint(session, 'a'), { pointerId: 3, button: 2 });
   value.platform.flushFrame();
-  equal(intents.filter((intent) => intent.type === 'node-activated' && intent.activation === 'secondary').length, 1, 'secondary click should emit one secondary activation');
+  const contexts = intents.filter((intent) => intent.type === 'node-context-requested');
+  equal(contexts.length, 1, 'secondary click should emit one context request');
+  const context = contexts[0];
+  assert(context.type === 'node-context-requested', 'context request should narrow structurally');
+  equal(context.nodeId, 'a', 'context request should identify its hit-tested node');
+  equal(context.modality, 'mouse', 'context request should preserve pointer modality');
 
   key(value, canvas, 'Enter');
   value.platform.flushFrame();
@@ -101,7 +107,13 @@ test('R-INPUT-05 excludes render-filtered and projection-filtered nodes from hit
 });
 
 test('R-INPUT-06 updates view position and emits one revision-bearing drag intent', async () => {
-  const value = runtimeHarness();
+  const base = runtimeRegistration();
+  const value = runtimeHarness({
+    registration: {
+      ...base,
+      profiles: base.profiles.map((profile) => ({ ...profile, profileSettings: { dragRelease: 'pin' } })),
+    },
+  });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
   const before = await session.exportViewState();
@@ -129,6 +141,9 @@ test('R-INPUT-06 updates view position and emits one revision-bearing drag inten
   assert(dragIntent.type === 'node-drag-ended', 'drag intent should be structurally narrowed');
   deepEqual(dragIntent.position, after.positions.a, 'drag intent should contain the final neutral position');
   equal(dragIntent.documentRevision, 0, 'drag intent should identify its producing revision');
+  assert(after.pinnedNodeIds.includes('a'), 'pin release policy should retain the dragged node');
+  await session.setNodePinned('a', false);
+  assert(!(await session.exportViewState()).pinnedNodeIds.includes('a'), 'public pin control should release the node reversibly');
 
   await session.applyPatch({
     schemaVersion: 1,
@@ -164,6 +179,67 @@ test('pointer background drags pan in 2d and secondary-drag orbits in 3d', async
   pointer(threeD, threeDCanvas, 'pointerup', -40, -70, { pointerId: 31, button: 2 });
   threeD.platform.flushFrame();
   await threeDSession.dispose();
+});
+
+test('background pan clears selection and focus only after crossing its threshold', async () => {
+  const value = runtimeHarness();
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  await session.setSelection(['a']);
+  await session.focusNode('a');
+  const intents: GraphIntentV1[] = [];
+  session.onIntent((intent) => intents.push(intent));
+  pointer(value, canvas, 'pointerdown', -100, -100, { pointerId: 32 });
+  pointer(value, canvas, 'pointermove', -98, -98, { pointerId: 32 });
+  value.platform.flushFrame();
+  equal((await session.exportViewState()).focusedNodeId, 'a', 'sub-threshold motion should retain focus');
+  deepEqual((await session.exportViewState()).selectedNodeIds, ['a'], 'sub-threshold motion should retain selection');
+  pointer(value, canvas, 'pointermove', -70, -80, { pointerId: 32 });
+  value.platform.flushFrame();
+  equal((await session.exportViewState()).focusedNodeId, undefined, 'pan threshold should clear focus');
+  deepEqual((await session.exportViewState()).selectedNodeIds, [], 'pan threshold should clear selection');
+  equal(intents.filter((intent) => intent.type === 'focus-changed').length, 1, 'pan should emit one focus clear');
+  equal(intents.filter((intent) => intent.type === 'selection-changed').length, 1, 'pan should emit one selection clear');
+  await session.dispose();
+});
+
+test('mobile one-finger background drag orbits with and without a focused node', async () => {
+  for (const focused of [false, true]) {
+    const value = runtimeHarness({ profileId: 'three-dimensional' });
+    const session = await value.create();
+    const canvas = runtimeCanvas(value.container);
+    if (focused) {
+      await session.setSelection(['a']);
+      await session.focusNode('a');
+    }
+    const before = await session.exportViewState();
+    pointer(value, canvas, 'pointerdown', -100, -100, { pointerId: focused ? 34 : 33, pointerType: 'touch' });
+    pointer(value, canvas, 'pointermove', -40, -70, { pointerId: focused ? 34 : 33, pointerType: 'touch' });
+    value.platform.flushFrame();
+    const after = await session.exportViewState();
+    assert(!sameVector(after.camera.position, before.camera.position), `touch orbit should work when focused=${String(focused)}`);
+    if (focused) {
+      equal(after.focusedNodeId, 'a', 'touch orbit should retain focus');
+      deepEqual(after.selectedNodeIds, ['a'], 'touch orbit should retain selection');
+    }
+    await session.dispose();
+  }
+});
+
+test('stationary mobile long-press requests node context without selecting or focusing', async () => {
+  const value = runtimeHarness();
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  const point = await nodePoint(session, 'a');
+  const intents: GraphIntentV1[] = [];
+  session.onIntent((intent) => intents.push(intent));
+  pointer(value, canvas, 'pointerdown', point.x, point.y, { pointerId: 35, pointerType: 'touch' });
+  value.platform.flushTimer();
+  value.platform.flushFrame();
+  equal(intents.filter((intent) => intent.type === 'node-context-requested').length, 1, 'long press should emit one context request');
+  equal((await session.exportViewState()).focusedNodeId, undefined, 'opening context should not focus');
+  deepEqual((await session.exportViewState()).selectedNodeIds, [], 'opening context should not select');
+  await session.dispose();
 });
 
 test('R-INPUT-02 handles keyboard and two-finger navigation within one session', async () => {
@@ -216,6 +292,47 @@ test('renderer draws generic nodes, labels, edges, and directed arrows in both p
     assert(value.drawCalls.includes('closePath'), `${profileId} renderer should draw directed arrowheads`);
     await session.dispose();
   }
+});
+
+test('profile-backed adaptive, all, and off label modes update live', async () => {
+  const nodes = Array.from({ length: 40 }, (_, index) => graphNode(`node-${index}`, {
+    positionHint: { x: 0, y: 0, z: 0 },
+  }));
+  const value = runtimeHarness({ document: graphDocument({ nodes, edges: [] }) });
+  const session = await value.create();
+  value.drawCalls.length = 0;
+  value.platform.flushFrame();
+  const adaptiveLabels = value.drawCalls.filter((call) => call === 'fillText').length;
+  assert(adaptiveLabels < nodes.length, 'adaptive mode should reject colliding labels');
+
+  value.drawCalls.length = 0;
+  await session.setSessionOverrides({ modules: { rendering: { settings: { labelMode: 'all' } } } });
+  value.platform.flushFrame();
+  equal(value.drawCalls.filter((call) => call === 'fillText').length, nodes.length, 'all mode should draw every onscreen label');
+
+  value.drawCalls.length = 0;
+  await session.setSessionOverrides({ modules: { rendering: { settings: { labelMode: 'off' } } } });
+  value.platform.flushFrame();
+  equal(value.drawCalls.filter((call) => call === 'fillText').length, 0, 'off mode should draw no labels');
+  equal((await session.exportEffectiveSettings()).modules.rendering?.settings.labelMode, 'off', 'effective settings should expose label mode');
+  await session.dispose();
+
+  const base = runtimeRegistration();
+  const profileDefault = runtimeHarness({
+    registration: {
+      ...base,
+      profiles: base.profiles.map((profile) => ({
+        ...profile,
+        modules: {
+          ...profile.modules,
+          rendering: { ...profile.modules.rendering, defaults: { labelMode: 'off' } },
+        },
+      })),
+    },
+  });
+  const profileSession = await profileDefault.create();
+  equal((await profileSession.exportEffectiveSettings()).modules.rendering?.settings.labelMode, 'off', 'a consumer profile should control its default label mode');
+  await profileSession.dispose();
 });
 
 test('3d hit testing chooses the nearest visible node at an overlapping screen point', async () => {

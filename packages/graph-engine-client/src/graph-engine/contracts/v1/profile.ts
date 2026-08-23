@@ -54,3 +54,26 @@ export interface GraphSettingsOverridesV1 {
   readonly profileSettings?: Readonly<Record<string, JsonValue>>;
   readonly modules?: Readonly<Record<string, EngineModuleOverrideV1>>;
 }
+
+export type GraphSettingSourceV1 =
+  | 'engine-default'
+  | 'global'
+  | 'consumer-profile'
+  | 'user-profile'
+  | 'session'
+  | 'locked';
+
+export interface GraphEffectiveModuleSettingsV1 {
+  readonly enabled: boolean;
+  readonly enabledSource: GraphSettingSourceV1;
+  readonly settings: Readonly<Record<string, JsonValue>>;
+  readonly settingSources: Readonly<Record<string, GraphSettingSourceV1>>;
+}
+
+export interface GraphEffectiveSettingsV1 {
+  readonly consumerId: string;
+  readonly profileId: string;
+  readonly profileSettings: Readonly<Record<string, JsonValue>>;
+  readonly profileSettingSources: Readonly<Record<string, GraphSettingSourceV1>>;
+  readonly modules: Readonly<Record<string, GraphEffectiveModuleSettingsV1>>;
+}

@@ -32,10 +32,12 @@ export class SessionInteractionRuntime {
   private readonly input: GraphInput;
   private readonly interpreter: GraphInteractionInterpreter;
   private hoveredNodeId: string | undefined;
+  private hitTestMs = 0;
   private dragContext: {
     readonly nodeId: string;
     readonly depth: number;
     readonly offset: Vec3;
+    readonly wasPinned: boolean;
   } | null = null;
 
   constructor(private readonly options: {
@@ -52,6 +54,7 @@ export class SessionInteractionRuntime {
     readonly setViewState: (state: GraphViewStateV1) => void;
     readonly getRenderSelection: () => GraphFilterSelectionV1;
     readonly getResetCamera: () => GraphCameraStateV1;
+    readonly getDragReleasePolicy: () => 'pin' | 'dynamic';
     readonly onViewStateChanged: () => void;
     readonly onIntent: (intent: GraphIntentV1) => void;
   }) {
@@ -70,7 +73,12 @@ export class SessionInteractionRuntime {
       dimensions: this.options.dimensions,
       events: this.inputEvents,
       commands: this.commands,
-      hitTest: (point) => this.hitTester.hit(point),
+      hitTest: (point) => {
+        const start = this.options.platform.now();
+        const hit = this.hitTester.hit(point);
+        this.hitTestMs += Math.max(0, this.options.platform.now() - start);
+        return hit;
+      },
       getFocusedNodeId: () => this.options.getViewState().focusedNodeId,
       getSelectedNodeIds: () => this.options.getViewState().selectedNodeIds,
       getViewport: () => this.options.surface.getViewport(),
@@ -82,6 +90,12 @@ export class SessionInteractionRuntime {
     this.commander.tick();
   }
 
+  consumeHitTestDuration(): number {
+    const value = this.hitTestMs;
+    this.hitTestMs = 0;
+    return value;
+  }
+
   setEnabled(enabled: boolean): void {
     this.input.setEnabled(enabled);
     if (!enabled) this.resetTransientState();
@@ -90,6 +104,10 @@ export class SessionInteractionRuntime {
   reset(): void {
     this.input.reset();
     this.resetTransientState();
+  }
+
+  getHoveredNodeId(): string | undefined {
+    return this.hoveredNodeId;
   }
 
   dispose(): void {
@@ -108,6 +126,7 @@ export class SessionInteractionRuntime {
       'set-focus',
       'activate-node',
       'activate-background',
+      'request-node-context',
       'set-hover',
       'drag-start',
       'drag-update',
@@ -158,9 +177,20 @@ export class SessionInteractionRuntime {
       case 'activate-background':
         this.options.onIntent({ ...this.intentBase(command), type: 'background-activated' });
         return;
+      case 'request-node-context':
+        if (!this.options.getRenderSelection().nodeIds.has(command.nodeId)) return;
+        this.options.onIntent({
+          ...this.intentBase(command),
+          type: 'node-context-requested',
+          nodeId: command.nodeId,
+          anchor: { ...command.point },
+          modality: command.modality,
+        });
+        return;
       case 'set-hover':
         this.hoveredNodeId = command.nodeId;
         this.updateCursor();
+        this.options.onViewStateChanged();
         return;
       case 'drag-start':
         this.beginNodeDrag(command.nodeId, command.point);
@@ -245,11 +275,18 @@ export class SessionInteractionRuntime {
     if (!position) return;
     const projected = this.options.camera.worldToScreen(position);
     const underPointer = this.options.camera.screenToWorld(point.x, point.y, projected.depth);
+    const state = this.options.getViewState();
+    const wasPinned = state.pinnedNodeIds.includes(nodeId);
     this.dragContext = {
       nodeId,
       depth: projected.depth,
       offset: subtract(position, underPointer),
+      wasPinned,
     };
+    if (!wasPinned) {
+      this.commit({ ...state, pinnedNodeIds: [...state.pinnedNodeIds, nodeId] });
+      this.options.onViewStateChanged();
+    }
     this.updateCursor();
   }
 
@@ -267,10 +304,16 @@ export class SessionInteractionRuntime {
   private endNodeDrag(command: Extract<GraphRuntimeCommandV1, { type: 'drag-end' }>): void {
     if (!this.dragContext || this.dragContext.nodeId !== command.nodeId) return;
     const position = this.options.getViewState().positions[command.nodeId];
+    const wasPinned = this.dragContext.wasPinned;
     this.dragContext = null;
     this.hoveredNodeId = command.nodeId;
     this.updateCursor();
     if (!position) return;
+    if (!wasPinned && this.options.getDragReleasePolicy() === 'dynamic') {
+      const state = this.options.getViewState();
+      this.commit({ ...state, pinnedNodeIds: state.pinnedNodeIds.filter((id) => id !== command.nodeId) });
+      this.options.onViewStateChanged();
+    }
     this.options.onIntent({
       ...this.intentBase(command),
       type: 'node-drag-ended',

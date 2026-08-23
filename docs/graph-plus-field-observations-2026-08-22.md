@@ -1,6 +1,6 @@
 # Graph+ Field Observation Backlog
 
-Status: Fix designs approved — implementation has not begun
+Status: Implemented in code — real-device field verification remains
 
 Date: 2026-08-22
 

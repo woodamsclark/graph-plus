@@ -44,6 +44,8 @@ interface TouchGesture {
   centroid: GraphScreenPointV1;
   distance: number;
   angle: number;
+  readonly startCentroid: GraphScreenPointV1;
+  readonly panStarted: boolean;
 }
 
 export class GraphInteractionInterpreter {
@@ -119,20 +121,23 @@ export class GraphInteractionInterpreter {
       if (distanceSquared(this.mode.downPoint, event.point) <= threshold ** 2) return;
       if (this.mode.hit && this.mode.button === 0) {
         this.command(event, { type: 'set-focus' });
+        this.command(event, { type: 'set-selection', nodeIds: [this.mode.hit.nodeId] });
         this.command(event, { type: 'drag-start', nodeId: this.mode.hit.nodeId, point: this.mode.downPoint });
         this.command(event, { type: 'drag-update', nodeId: this.mode.hit.nodeId, point: event.point });
         this.mode = { kind: 'drag', pointerId: event.pointerId, nodeId: this.mode.hit.nodeId, lastPoint: event.point };
         return;
       }
-      const orbit = this.mode.button === 2 && this.options.dimensions === '3d';
+      const orbit = this.options.dimensions === '3d'
+        && (this.mode.button === 2 || (this.mode.pointerKind === 'touch' && !this.mode.hit));
       if (orbit) {
         this.command(event, {
           type: 'orbit-by',
           deltaX: event.point.x - this.mode.lastPoint.x,
-          deltaY: event.point.y - this.mode.lastPoint.y,
+          deltaY: this.mode.lastPoint.y - event.point.y,
         });
         this.mode = { kind: 'orbit', pointerId: event.pointerId, lastPoint: event.point };
       } else {
+        this.command(event, { type: 'set-selection', nodeIds: [] });
         this.command(event, { type: 'set-focus' });
         this.command(event, {
           type: 'pan-by',
@@ -152,7 +157,7 @@ export class GraphInteractionInterpreter {
           : event.point.x - this.mode.lastPoint.x,
         deltaY: this.mode.kind === 'pan'
           ? this.mode.lastPoint.y - event.point.y
-          : event.point.y - this.mode.lastPoint.y,
+          : this.mode.lastPoint.y - event.point.y,
       });
       this.mode.lastPoint = event.point;
       return;
@@ -184,9 +189,15 @@ export class GraphInteractionInterpreter {
       return;
     }
     const hit = this.mode.hit;
+    const pointerKind = this.mode.pointerKind;
     this.mode = { kind: 'idle' };
     if (event.button === 2) {
-      if (hit) this.command(event, { type: 'activate-node', nodeId: hit.nodeId, activation: 'secondary' });
+      if (hit) this.command(event, {
+        type: 'request-node-context',
+        nodeId: hit.nodeId,
+        point: event.point,
+        modality: pointerKind,
+      });
       else this.command(event, { type: 'reset-camera' });
       return;
     }
@@ -223,7 +234,7 @@ export class GraphInteractionInterpreter {
       return;
     }
     if (this.options.dimensions === '3d' && this.options.getFocusedNodeId() !== undefined) {
-      this.command(event, { type: 'orbit-by', deltaX: delta.x, deltaY: delta.y });
+      this.command(event, { type: 'orbit-by', deltaX: delta.x, deltaY: -delta.y });
       return;
     }
     this.command(event, { type: 'pan-by', deltaX: delta.x, deltaY: delta.y });
@@ -231,8 +242,13 @@ export class GraphInteractionInterpreter {
 
   private longPress(event: Extract<GraphInputEventV1, { type: 'long-press' }>): void {
     const hit = this.options.hitTest(event.point);
-    if (hit) this.command(event, { type: 'set-focus', nodeId: hit.nodeId });
-    else this.command(event, { type: 'reset-camera' });
+    if (this.mode.kind === 'press' && this.mode.pointerId === event.pointerId) this.mode = { kind: 'idle' };
+    if (hit) this.command(event, {
+      type: 'request-node-context',
+      nodeId: hit.nodeId,
+      point: event.point,
+      modality: event.pointerKind,
+    });
   }
 
   private keyDown(event: Extract<GraphInputEventV1, { type: 'key-down' }>): void {
@@ -272,19 +288,25 @@ export class GraphInteractionInterpreter {
   }
 
   private updateTouchGesture(event: GraphInputEventV1): void {
-    const next = this.readTouchGesture();
+    let next = this.readTouchGesture();
     if (!next || !this.touchGesture) return;
-    this.command(event, {
-      type: 'pan-by',
-      deltaX: this.touchGesture.centroid.x - next.centroid.x,
-      deltaY: this.touchGesture.centroid.y - next.centroid.y,
-    });
+    const panX = this.touchGesture.centroid.x - next.centroid.x;
+    const panY = this.touchGesture.centroid.y - next.centroid.y;
+    const totalPan = Math.hypot(
+      next.centroid.x - this.touchGesture.startCentroid.x,
+      next.centroid.y - this.touchGesture.startCentroid.y,
+    );
+    const panStarted = this.touchGesture.panStarted || totalPan > (this.options.dragThresholdPx ?? 6);
+    if (panStarted) {
+      if (!this.touchGesture.panStarted) {
+        this.command(event, { type: 'set-selection', nodeIds: [] });
+        this.command(event, { type: 'set-focus' });
+      }
+      this.command(event, { type: 'pan-by', deltaX: panX, deltaY: panY });
+    }
     const distanceDelta = next.distance - this.touchGesture.distance;
     if (Math.abs(distanceDelta) >= 1) this.command(event, { type: 'zoom-by', deltaY: -distanceDelta * 3 });
-    if (this.options.dimensions === '3d' && this.options.getFocusedNodeId() !== undefined) {
-      const angleDelta = wrapAngle(next.angle - this.touchGesture.angle);
-      if (Math.abs(angleDelta) > 0.002) this.command(event, { type: 'orbit-by', deltaX: angleDelta / 0.005, deltaY: 0 });
-    }
+    next = { ...next, startCentroid: this.touchGesture.startCentroid, panStarted };
     this.touchGesture = next;
   }
 
@@ -293,12 +315,15 @@ export class GraphInteractionInterpreter {
     if (!a || !b) return null;
     const dx = b.point.x - a.point.x;
     const dy = b.point.y - a.point.y;
+    const centroid = { x: (a.point.x + b.point.x) / 2, y: (a.point.y + b.point.y) / 2 };
     return {
       pointerA: a.id,
       pointerB: b.id,
-      centroid: { x: (a.point.x + b.point.x) / 2, y: (a.point.y + b.point.y) / 2 },
+      centroid,
       distance: Math.hypot(dx, dy),
       angle: Math.atan2(dy, dx),
+      startCentroid: centroid,
+      panStarted: false,
     };
   }
 
@@ -321,13 +346,6 @@ export class GraphInteractionInterpreter {
 
 function distanceSquared(a: GraphScreenPointV1, b: GraphScreenPointV1): number {
   return (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
-}
-
-function wrapAngle(value: number): number {
-  let result = value;
-  while (result > Math.PI) result -= Math.PI * 2;
-  while (result < -Math.PI) result += Math.PI * 2;
-  return result;
 }
 
 function clamp(value: number, min: number, max: number): number {

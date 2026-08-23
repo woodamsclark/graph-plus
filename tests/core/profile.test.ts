@@ -95,8 +95,12 @@ test('C-PROFILE-02 resolves settings in documented precedence order', () => {
     },
   });
   equal(effective.profileSettings.layer, 'session', 'session profile setting should win');
+  equal(effective.profileSettingSources.layer, 'session', 'effective profile settings should identify their winning layer');
   equal(effective.modules.render.settings.strength, 5, 'session module setting should win');
+  equal(effective.modules.render.settingSources.strength, 'session', 'effective module settings should identify their winning layer');
   equal(effective.modules.render.settings.fixed, 'module', 'untouched module default should survive');
+  equal(effective.modules.render.settingSources.fixed, 'engine-default', 'untouched module defaults should retain engine provenance');
+  equal(effective.modules.render.enabledSource, 'consumer-profile', 'required policy should own module enablement');
 });
 
 test('C-PROFILE-03 enforces required optional and forbidden module policies', () => {

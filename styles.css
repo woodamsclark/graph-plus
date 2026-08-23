@@ -75,6 +75,9 @@
 }
 
 .graphplus-controls-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   min-height: 38px;
   padding: 5px 6px 5px 12px;
   display: flex;
@@ -82,6 +85,7 @@
   justify-content: space-between;
   gap: 8px;
   border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
 }
 
 .graphplus-controls-title {
@@ -166,6 +170,15 @@
   margin-right: 8px;
 }
 
+.graphplus-control-section-body .setting-item-info,
+.graphplus-control-section-body .setting-item-name,
+.graphplus-control-section-body .setting-item-description {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .graphplus-control-section-body .setting-item-name {
   font-size: var(--font-ui-smaller);
 }
@@ -179,6 +192,44 @@
 
 .graphplus-control-section-body .setting-item-control {
   flex: 0 0 auto;
+}
+
+.graphplus-control-section-body .graphplus-slider-setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 4px 6px;
+}
+
+.graphplus-control-section-body .graphplus-slider-setting .setting-item-info {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.graphplus-control-section-body .graphplus-slider-setting .setting-item-control {
+  grid-column: 1 / -1;
+  width: 100%;
+  display: flex;
+  gap: 4px;
+}
+
+.graphplus-control-section-body .graphplus-slider-setting input[type='range'] {
+  min-width: 0;
+  width: 100%;
+  flex: 1 1 auto;
+}
+
+.graphplus-control-section-body .graphplus-reform-setting {
+  display: block;
+}
+
+.graphplus-control-section-body .graphplus-reform-setting .setting-item-info {
+  margin: 0 0 6px;
+}
+
+.graphplus-control-section-body .graphplus-reform-setting .setting-item-control,
+.graphplus-control-section-body .graphplus-reform-setting button {
+  width: 100%;
 }
 
 .graphplus-control-section-body .search-input-container,
@@ -252,6 +303,10 @@
 @media (max-width: 600px) {
   .graphplus-graph-controls {
     --graphplus-controls-width: min(240px, calc(100vw - 24px));
-    max-height: min(70vh, calc(100% - 24px));
+    top: max(var(--size-4-3, 12px), var(--safe-area-inset-top, env(safe-area-inset-top, 0px)));
+    right: max(var(--size-4-3, 12px), var(--safe-area-inset-right, env(safe-area-inset-right, 0px)));
+    bottom: max(var(--size-4-3, 12px), var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
+    max-height: none;
+    touch-action: pan-y;
   }
 }

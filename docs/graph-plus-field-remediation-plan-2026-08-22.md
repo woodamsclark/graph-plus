@@ -1,6 +1,6 @@
 # Graph+ Field Remediation Plan
 
-Status: Approved design and acceptance plan — implementation has not begun
+Status: Implemented and automated checks passing — Obsidian field smoke remains
 
 Date: 2026-08-22
 
@@ -188,3 +188,17 @@ defaults, product controls, and persistence.
 The remediation is complete only when the checklist passes in supported desktop and mobile
 Obsidian environments, the external-consumer smoke remains functional, and large-graph
 measurements demonstrate improvement rather than merely reduced visual density.
+
+## 6. Implementation verification — 2026-08-22
+
+- Graph+ contract/runtime/consumer suite: 89 tests passing, including the
+  1,400-node/2,600-link fixture, live settings, cached labels, stage timing export,
+  mobile orbit, context gestures, drag policy, and Mind Map root behavior.
+- Graph+ public client artifact, typecheck, and production build pass.
+- PatternSmith vendored-client check, typecheck, production build, and 131 tests pass.
+- Rendered fixture passes at 1,200 × 800 and 390 × 844. The mobile fixture simulates
+  47 px top and 34 px bottom safe areas; the header remains reachable and only the body
+  scrolls.
+- Remaining completion work is experiential smoke testing inside desktop and mobile
+  Obsidian: gesture feel, drag persistence after reopen, context-menu host behavior,
+  keyboard/host-chrome variants, and before/after timing capture on the user's actual vault.

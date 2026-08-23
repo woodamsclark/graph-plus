@@ -27,9 +27,13 @@ interface FormSettings {
 }
 
 export class FormModule implements GraphModuleInstanceV1 {
-  private readonly settings: FormSettings;
+  private settings: FormSettings;
 
   constructor(settings: Readonly<Record<string, JsonValue>>) {
+    this.settings = readSettings(settings);
+  }
+
+  updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
     this.settings = readSettings(settings);
   }
 
@@ -88,6 +92,8 @@ export class FormModule implements GraphModuleInstanceV1 {
       const childCount = childCounts.get(node.id) ?? 0;
       nodeContributions[node.id] = {
         radiusScale: node.id === rootId ? 1.35 : childCount ? 1.12 : 1,
+        labelPriority: node.id === rootId ? 1000 : Math.max(0, 100 - (depth.get(node.id) ?? 0) * 10),
+        labelAlwaysVisible: node.id === rootId,
         ...(this.settings.colorBranches && colorFor(node.id) ? { color: colorFor(node.id) } : {}),
       };
     }

@@ -6,6 +6,7 @@ import type {
   EngineModulePolicyV1,
   GraphDimensionsV1,
   GraphSettingsOverridesV1,
+  GraphSettingSourceV1,
   JsonValue,
   ModuleSettingConstraintV1,
 } from '../../contracts/v1/index.ts';
@@ -14,7 +15,9 @@ export interface EffectiveModuleProfileV1 {
   readonly id: string;
   readonly policy: EngineModulePolicyV1;
   readonly enabled: boolean;
+  readonly enabledSource: GraphSettingSourceV1;
   readonly settings: Readonly<Record<string, JsonValue>>;
+  readonly settingSources: Readonly<Record<string, GraphSettingSourceV1>>;
 }
 
 export interface EffectiveConsumerProfileV1 {
@@ -25,6 +28,7 @@ export interface EffectiveConsumerProfileV1 {
   readonly dimensions: GraphDimensionsV1;
   readonly requestedCapabilities: readonly string[];
   readonly profileSettings: Readonly<Record<string, JsonValue>>;
+  readonly profileSettingSources: Readonly<Record<string, GraphSettingSourceV1>>;
   readonly modules: Readonly<Record<string, EffectiveModuleProfileV1>>;
   readonly issues: readonly ProfileResolutionIssueV1[];
 }
@@ -211,21 +215,36 @@ export class ConsumerProfileRegistry {
       if (moduleProfile.policy === 'required') enabled = true;
       if (moduleProfile.policy === 'forbidden') enabled = false;
 
+      const enabledSource = resolveEnabledSource(
+        moduleProfile.policy,
+        global.modules?.[moduleId],
+        moduleProfile.defaultEnabled,
+        user.modules?.[moduleId],
+        session.modules?.[moduleId],
+      );
+
       const settings: Record<string, JsonValue> = {
         ...cloneJsonRecord(descriptor.defaultSettings),
         ...cloneJsonRecord(global.modules?.[moduleId]?.settings ?? {}),
         ...cloneJsonRecord(moduleProfile.defaults ?? {}),
       };
-      applyConstrainedSettings(settings, user.modules?.[moduleId]?.settings, moduleProfile.constraints, moduleId, 'user', issues);
-      applyConstrainedSettings(settings, session.modules?.[moduleId]?.settings, moduleProfile.constraints, moduleId, 'session', issues);
+      const settingSources: Record<string, GraphSettingSourceV1> = {};
+      assignSettingSources(settingSources, descriptor.defaultSettings, 'engine-default');
+      assignSettingSources(settingSources, global.modules?.[moduleId]?.settings, 'global');
+      assignSettingSources(settingSources, moduleProfile.defaults, 'consumer-profile');
+      applyConstrainedSettings(settings, user.modules?.[moduleId]?.settings, moduleProfile.constraints, moduleId, 'user', issues, settingSources, 'user-profile');
+      applyConstrainedSettings(settings, session.modules?.[moduleId]?.settings, moduleProfile.constraints, moduleId, 'session', issues, settingSources, 'session');
       for (const [key, value] of Object.entries(moduleProfile.lockedValues ?? {})) {
         settings[key] = cloneJsonValue(value);
+        settingSources[key] = 'locked';
       }
       effectiveModules[moduleId] = {
         id: moduleId,
         policy: moduleProfile.policy,
         enabled,
+        enabledSource,
         settings,
+        settingSources,
       };
     }
 
@@ -240,6 +259,11 @@ export class ConsumerProfileRegistry {
       ...cloneJsonRecord(user.profileSettings ?? {}),
       ...cloneJsonRecord(session.profileSettings ?? {}),
     };
+    const profileSettingSources: Record<string, GraphSettingSourceV1> = {};
+    assignSettingSources(profileSettingSources, global.profileSettings, 'global');
+    assignSettingSources(profileSettingSources, profile.profileSettings, 'consumer-profile');
+    assignSettingSources(profileSettingSources, user.profileSettings, 'user-profile');
+    assignSettingSources(profileSettingSources, session.profileSettings, 'session');
 
     return {
       consumerId,
@@ -249,6 +273,7 @@ export class ConsumerProfileRegistry {
       dimensions: profile.dimensions,
       requestedCapabilities: [...profile.requestedCapabilities],
       profileSettings,
+      profileSettingSources,
       modules: effectiveModules,
       issues,
     };
@@ -264,6 +289,29 @@ export class ConsumerProfileRegistry {
     if (!profile) throw new Error(`Unknown profile "${consumerId}/${profileId}".`);
     return { registration: stored.registration, profile };
   }
+}
+
+function resolveEnabledSource(
+  policy: EngineModulePolicyV1,
+  global: EngineModuleOverrideV1 | undefined,
+  profileDefault: boolean | undefined,
+  user: EngineModuleOverrideV1 | undefined,
+  session: EngineModuleOverrideV1 | undefined,
+): GraphSettingSourceV1 {
+  if (policy === 'required' || policy === 'forbidden') return 'consumer-profile';
+  if (session?.enabled !== undefined) return 'session';
+  if (user?.enabled !== undefined) return 'user-profile';
+  if (profileDefault !== undefined) return 'consumer-profile';
+  if (global?.enabled !== undefined) return 'global';
+  return 'engine-default';
+}
+
+function assignSettingSources(
+  target: Record<string, GraphSettingSourceV1>,
+  source: Readonly<Record<string, JsonValue>> | undefined,
+  layer: GraphSettingSourceV1,
+): void {
+  for (const key of Object.keys(source ?? {})) target[key] = layer;
 }
 
 function resolveEnabled(
@@ -311,6 +359,8 @@ function applyConstrainedSettings(
   moduleId: string,
   layer: string,
   issues: ProfileResolutionIssueV1[],
+  settingSources?: Record<string, GraphSettingSourceV1>,
+  settingSource?: GraphSettingSourceV1,
 ): void {
   for (const [key, value] of Object.entries(source ?? {})) {
     const constraint = constraints?.[key];
@@ -335,6 +385,7 @@ function applyConstrainedSettings(
       continue;
     }
     target[key] = cloneJsonValue(value);
+    if (settingSources && settingSource) settingSources[key] = settingSource;
   }
 }
 

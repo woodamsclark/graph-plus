@@ -4,7 +4,7 @@ import {
   GraphSessionProfileErrorV1,
   createSessionRuntimePlatformV1,
 } from '../../src/graph-engine/runtime/index.ts';
-import { graphDocument, graphNode } from '../support/contractFixtures.ts';
+import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import {
   runtimeFixture as fixture,
@@ -215,6 +215,69 @@ test('R-SHELL-04 suspends animation work and disposes every owned lifecycle reso
     disposedSuspensionError = error instanceof GraphSessionDisposedErrorV1;
   }
   equal(disposedSuspensionError, true, 'disposed suspension requests should fail structurally');
+});
+
+test('R-PROFILE-LIVE-01 refreshes mounted sessions without replacing their surface', async () => {
+  let globalOverrides = {};
+  const value = harness({ getGlobalOverrides: () => globalOverrides });
+  const session = await value.create();
+  const canvas = surface(value.container).querySelector('canvas');
+
+  equal((await session.exportEffectiveSettings()).modules.rendering?.settings.labelMode, 'adaptive', 'profile should begin with the module default');
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
+    modules: { rendering: { settings: { labelMode: 'all' } } },
+  });
+  value.factory.refreshActiveProfiles();
+  equal((await session.exportEffectiveSettings()).modules.rendering?.settings.labelMode, 'all', 'profile changes should reach the active session');
+  equal(surface(value.container).querySelector('canvas'), canvas, 'live profile changes must preserve the mounted canvas');
+
+  value.profiles.clearUserOverrides('synthetic-consumer', 'two-dimensional');
+  globalOverrides = { modules: { rendering: { settings: { labelMode: 'off' } } } };
+  value.factory.refreshActiveProfiles();
+  equal((await session.exportEffectiveSettings()).modules.rendering?.settings.labelMode, 'off', 'global changes should reach the active session');
+
+  await session.setSessionOverrides({ modules: { rendering: { settings: { labelMode: 'all' } } } });
+  globalOverrides = { modules: { rendering: { settings: { labelMode: 'adaptive' } } } };
+  value.factory.refreshActiveProfiles();
+  equal((await session.exportEffectiveSettings()).modules.rendering?.settings.labelMode, 'all', 'session overrides should continue to win after a live refresh');
+  equal(surface(value.container).querySelector('canvas'), canvas, 'session override changes must also preserve the mounted canvas');
+  await session.dispose();
+});
+
+test('adaptive labels reuse stable text measurements between frames', async () => {
+  const value = harness();
+  const session = await value.create();
+  const initialMeasurements = value.drawCalls.filter((call) => call === 'measureText').length;
+  assert(initialMeasurements > 0, 'initial adaptive layout should measure visible labels');
+  value.platform.flushFrame();
+  value.platform.flushFrame();
+  equal(value.drawCalls.filter((call) => call === 'measureText').length, initialMeasurements, 'stationary frames should reuse cached label widths');
+  await session.dispose();
+});
+
+test('large-graph fixture keeps adaptive labels bounded and exports stage timings', async () => {
+  const nodes = Array.from({ length: 1_400 }, (_, index) => graphNode(`large-${index}`, {
+    label: `Large fixture node ${index}`,
+    positionHint: { x: (index % 40) * 30, y: Math.floor(index / 40) * 30, z: 0 },
+  }));
+  const edges = Array.from({ length: 2_600 }, (_, index) => graphEdge(
+    `large-edge-${index}`,
+    `large-${index % nodes.length}`,
+    `large-${(index * 37 + 1) % nodes.length}`,
+  ));
+  const value = harness({ document: graphDocument({ documentId: 'large-fixture', nodes, edges }) });
+  const session = await value.create();
+  const initialLabelDraws = value.drawCalls.filter((call) => call === 'fillText').length;
+  assert(initialLabelDraws <= 120, 'adaptive mode should enforce its maximum normal label budget on the large fixture');
+  value.platform.flushFrame();
+  const performance = await session.exportPerformanceSnapshot();
+  equal(performance.frameCount, 1, 'performance snapshots should identify the measured frame');
+  deepEqual(Object.keys(performance.latestFrame).sort(), [
+    'compositionMs', 'edgeRenderMs', 'hitTestMs', 'interactionMs', 'labelDrawMs',
+    'labelLayoutMs', 'moduleTickMs', 'nodeRenderMs', 'projectionMs', 'totalMs',
+  ], 'performance snapshots should separate the accepted frame stages');
+  assert(Object.values(performance.latestFrame).every((value) => Number.isFinite(value) && value >= 0), 'every stage duration should be finite and non-negative');
+  await session.dispose();
 });
 
 test('R-SHELL-05 isolates sessions and leaves no DOM behind when activation fails', async () => {

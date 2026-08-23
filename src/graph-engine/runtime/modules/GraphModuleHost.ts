@@ -15,6 +15,7 @@ import type {
   ActiveGraphModuleV1,
   GraphModuleFailureV1,
   GraphModuleHookV1,
+  GraphModuleInstanceV1,
   GraphModulePipelineStateV1,
   GraphModuleProjectionPatchV1,
 } from './GraphModuleTypes.ts';
@@ -30,6 +31,11 @@ export class GraphRequiredModuleErrorV1 extends Error {
 
 export class GraphModuleHost {
   private readonly active: ActiveGraphModuleV1[] = [];
+  private readonly registry: GraphModuleRegistry;
+  private readonly sessionId: string;
+  private readonly themePalette: GraphRenderThemeV1;
+  private readonly getDocument: () => GraphDocumentV1;
+  private readonly getViewState: () => GraphViewStateV1;
   private fatal = false;
   private disposed = false;
 
@@ -43,6 +49,11 @@ export class GraphModuleHost {
     readonly getViewState: () => GraphViewStateV1;
     readonly onFailure: (failure: GraphModuleFailureV1) => void;
   }) {
+    this.registry = options.registry;
+    this.sessionId = options.sessionId;
+    this.themePalette = options.themePalette;
+    this.getDocument = options.getDocument;
+    this.getViewState = options.getViewState;
     this.failureListener = options.onFailure;
     const definitions = options.registry.resolve(options.profile);
     const enabled = Object.values(options.profile.modules).filter((module) => module.enabled);
@@ -92,7 +103,14 @@ export class GraphModuleHost {
         if (Object.prototype.hasOwnProperty.call(options.initialModuleState, module.id)) {
           instance.restoreState?.(options.initialModuleState[module.id]);
         }
-        this.active.push({ id: module.id, policy: module.policy, order: definition.order, definition, instance });
+        this.active.push({
+          id: module.id,
+          policy: module.policy,
+          order: definition.order,
+          definition,
+          instance,
+          settings: cloneJsonRecord(module.settings),
+        });
       } catch (error) {
         try { instance.dispose?.(); } catch (disposeError) {
           options.onFailure({ moduleId: module.id, policy: module.policy, hook: 'dispose', error: disposeError });
@@ -109,6 +127,76 @@ export class GraphModuleHost {
 
   has(moduleId: string): boolean {
     return this.active.some((module) => module.id === moduleId);
+  }
+
+  updateProfile(profile: EffectiveConsumerProfileV1): void {
+    if (this.fatal || this.disposed) return;
+    const definitions = this.registry.resolve(profile);
+    const desiredIds = new Set(definitions.map((definition) => definition.descriptor.id));
+    for (const module of [...this.active]) {
+      if (desiredIds.has(module.id)) continue;
+      const index = this.active.indexOf(module);
+      if (index >= 0) this.active.splice(index, 1);
+      try { module.instance.dispose?.(); } catch (error) {
+        this.onFailure({ moduleId: module.id, policy: module.policy, hook: 'dispose', error });
+      }
+    }
+    for (const definition of definitions) {
+      const desired = profile.modules[definition.descriptor.id];
+      if (!desired?.enabled) continue;
+      const currentIndex = this.active.findIndex((module) => module.id === desired.id);
+      const current = currentIndex >= 0 ? this.active[currentIndex] : undefined;
+      if (current && sameJson(current.settings, desired.settings)) continue;
+      if (current?.instance.updateSettings) {
+        try {
+          current.instance.updateSettings(cloneJsonRecord(desired.settings));
+          this.active[currentIndex] = { ...current, settings: cloneJsonRecord(desired.settings) };
+        } catch (error) {
+          this.failActiveModule(current, 'settings-changed', error);
+          if (this.fatal) return;
+        }
+        continue;
+      }
+      const previousState = current?.instance.exportState?.();
+      let replacement: GraphModuleInstanceV1 | undefined;
+      try {
+        replacement = definition.create({
+          sessionId: this.sessionId,
+          dimensions: profile.dimensions,
+          settings: desired.settings,
+          themePalette: this.themePalette,
+          getDocument: this.getDocument,
+          getViewState: this.getViewState,
+        });
+        replacement.setup?.();
+        if (previousState !== undefined) replacement.restoreState?.(cloneJson(previousState));
+      } catch (error) {
+        try { replacement?.dispose?.(); } catch (disposeError) {
+          this.onFailure({ moduleId: desired.id, policy: desired.policy, hook: 'dispose', error: disposeError });
+        }
+        if (current) this.failActiveModule(current, 'settings-changed', error);
+        else this.onFailure({ moduleId: desired.id, policy: desired.policy, hook: 'settings-changed', error });
+        if (desired.policy === 'required') this.fatal = true;
+        if (this.fatal) return;
+        continue;
+      }
+      if (current) {
+        try { current.instance.dispose?.(); } catch (error) {
+          this.onFailure({ moduleId: current.id, policy: current.policy, hook: 'dispose', error });
+        }
+      }
+      const active: ActiveGraphModuleV1 = {
+        id: desired.id,
+        policy: desired.policy,
+        order: definition.order,
+        definition,
+        instance: replacement,
+        settings: cloneJsonRecord(desired.settings),
+      };
+      if (currentIndex >= 0) this.active[currentIndex] = active;
+      else this.active.push(active);
+    }
+    this.active.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   }
 
   project(initial: GraphModulePipelineStateV1): GraphModulePipelineStateV1 {
@@ -290,6 +378,14 @@ function allOf(document: GraphDocumentV1) {
 
 function cloneJson(value: JsonValue): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue;
+}
+
+function cloneJsonRecord(value: Readonly<Record<string, JsonValue>>): Readonly<Record<string, JsonValue>> {
+  return JSON.parse(JSON.stringify(value)) as Readonly<Record<string, JsonValue>>;
+}
+
+function sameJson(a: Readonly<Record<string, JsonValue>>, b: Readonly<Record<string, JsonValue>>): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function errorMessage(error: unknown): string {

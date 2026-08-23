@@ -45,6 +45,7 @@ export class SessionFactory {
   private readonly modules: GraphModuleRegistry;
   private readonly resolveThemePalette: GraphThemePaletteResolverV1;
   private nextSessionNumber = 1;
+  private readonly activeSessions = new Set<GraphSessionRuntime>();
 
   constructor(options: SessionFactoryOptionsV1) {
     this.engineInstanceId = requireId(options.engineInstanceId, 'engine instance ID');
@@ -70,7 +71,8 @@ export class SessionFactory {
       throw new GraphSessionProfileErrorV1(fatalIssues.map((issue) => `${issue.path}: ${issue.message}`).join('; '));
     }
     const sessionId = requireId(this.createSessionId(), 'session ID');
-    return new GraphSessionRuntime({
+    let runtime!: GraphSessionRuntime;
+    runtime = new GraphSessionRuntime({
       sessionId,
       engineInstanceId: this.engineInstanceId,
       consumerId: options.consumerId,
@@ -78,11 +80,23 @@ export class SessionFactory {
       container: options.container,
       document: options.document,
       profile,
+      initialSessionOverrides: options.sessionOverrides,
+      resolveProfile: (sessionOverrides) => this.profiles.resolve(options.consumerId, options.profileId, {
+        globalOverrides: this.getGlobalOverrides(),
+        sessionOverrides,
+      }),
       modules: this.modules,
       themePalette: this.resolveThemePalette(options.container),
       restoreViewState: options.restoreViewState,
       platform: this.createPlatform(options.container),
+      onDisposed: () => this.activeSessions.delete(runtime),
     });
+    this.activeSessions.add(runtime);
+    return runtime;
+  }
+
+  refreshActiveProfiles(): void {
+    for (const session of [...this.activeSessions]) session.refreshResolvedProfile();
   }
 }
 

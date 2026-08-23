@@ -46,6 +46,13 @@
     .checkbox-container::after { content: ''; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px; border-radius: 50%; background: #ddd; }
     .checkbox-container.is-enabled { background: #7c5cff; }
     .checkbox-container.is-enabled::after { left: 18px; }
+    @media (max-width: 600px) {
+      :root {
+        --safe-area-inset-top: 47px;
+        --safe-area-inset-right: 0px;
+        --safe-area-inset-bottom: 34px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -82,36 +89,36 @@
       </header>
       <div class="graphplus-controls-body">
         <details class="graphplus-control-section" open>
-          <summary><span>Filter</span><span class="graphplus-section-chevron">⌄</span></summary>
+          <summary><span>Refine graph</span><span class="graphplus-section-chevron">⌄</span></summary>
           <div class="graphplus-control-section-body">
             <div class="setting-item">
               <div class="setting-item-info"><div class="setting-item-name">Search</div><div class="setting-item-description">path:, tag:, type:, [property:value], -term, OR</div></div>
               <div class="setting-item-control"><div class="search-input-container"><input type="search" placeholder="Filter nodes…" value="tag:ideas"></div></div>
             </div>
             <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Tags</div></div><div class="checkbox-container is-enabled"></div></div>
-            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Attachments</div></div><div class="checkbox-container"></div></div>
-            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Unresolved links</div></div><div class="checkbox-container"></div></div>
             <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Orphans</div></div><div class="checkbox-container is-enabled"></div></div>
+            <div class="setting-item"><div class="setting-item-info"></div><div class="setting-item-control"><button>Reset filters</button></div></div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Mind map</div><div class="setting-item-description">Root: Central idea</div></div><div class="checkbox-container is-enabled"></div></div>
+            <div class="setting-item graphplus-reform-setting"><div class="setting-item-info"><div class="setting-item-name">Selected node</div><div class="setting-item-description">Branch A</div></div><div class="setting-item-control"><button>Re-form from selected</button></div></div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Direction</div></div><div class="setting-item-control"><select><option>Both</option></select></div></div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Relation</div></div><div class="setting-item-control"><select><option>Any relation</option></select></div></div>
+            <div class="setting-item graphplus-slider-setting"><div class="setting-item-info"><div class="setting-item-name">Depth</div><div class="setting-item-description">Current: 3</div></div><div class="setting-item-control"><input type="range" min="1" max="8" value="3"><button class="clickable-icon" aria-label="Reset to profile default">↺</button></div></div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Branch colors</div></div><div class="checkbox-container is-enabled"></div></div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Cross-links</div></div><div class="checkbox-container"></div></div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Disconnected nodes</div></div><div class="checkbox-container"></div></div>
           </div>
         </details>
         <details class="graphplus-control-section" open>
-          <summary><span>Form</span><span class="graphplus-section-chevron">⌄</span></summary>
+          <summary><span>Display</span><span class="graphplus-section-chevron">⌄</span></summary>
           <div class="graphplus-control-section-body">
-            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Layout</div></div><div class="setting-item-control"><select><option>Mind map</option></select></div></div>
-            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Central idea</div><div class="setting-item-description">Blank chooses the most connected visible node.</div></div><div class="setting-item-control"><div class="search-input-container"><input type="search" value="Central idea.md"></div></div></div>
-            <div class="graphplus-root-actions"><button>Use focused</button><button>Use current note</button></div>
-            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Direction</div></div><div class="setting-item-control"><select><option>Both</option></select></div></div>
-            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Relation</div></div><div class="setting-item-control"><select><option>Any relation</option></select></div></div>
-            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Depth</div><div class="setting-item-description">Unlimited</div></div><div class="setting-item-control"><input type="range" min="0" max="8" value="0"></div></div>
-            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Branch colors</div></div><div class="checkbox-container is-enabled"></div></div>
-            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Cross-links</div></div><div class="checkbox-container is-enabled"></div></div>
+            <div class="setting-item"><div class="setting-item-info"><div class="setting-item-name">Labels</div></div><div class="setting-item-control"><select><option>Adaptive</option><option>All</option><option>Off</option></select></div></div>
+            <div class="setting-item graphplus-slider-setting"><div class="setting-item-info"><div class="setting-item-name">Node size</div><div class="setting-item-description">Current: 1.25</div></div><div class="setting-item-control"><input type="range" min="0.5" max="4" value="1.25"><button class="clickable-icon" aria-label="Reset to profile default">↺</button></div></div>
+            <div class="setting-item graphplus-slider-setting"><div class="setting-item-info"><div class="setting-item-name">Link thickness</div><div class="setting-item-description">Current: 1</div></div><div class="setting-item-control"><input type="range" min="0.25" max="4" value="1"></div></div>
           </div>
         </details>
-        <details class="graphplus-control-section"><summary><span>Groups</span><span class="graphplus-section-chevron">⌄</span></summary></details>
-        <details class="graphplus-control-section"><summary><span>Display</span><span class="graphplus-section-chevron">⌄</span></summary></details>
         <details class="graphplus-control-section"><summary><span>Forces</span><span class="graphplus-section-chevron">⌄</span></summary></details>
       </div>
-      <footer class="graphplus-controls-status">42/310 nodes · 47/628 links · center: Central idea</footer>
+      <footer class="graphplus-controls-status">42 nodes · 47 links</footer>
     </aside>
   </main>
 </body>

@@ -157,6 +157,43 @@ test('G-LAZY consumer mounts saved graph before vault reconciliation and flushes
   equal(runtime.container.querySelector('[data-graph-engine-session]'), null, 'close should dispose the mounted session');
 });
 
+test('Graph+ Mind Map snapshots selection as its root and pauses when filtering hides that root', async () => {
+  const fixture = snapshot();
+  const runtime = runtimeHarness({ registration: graphPlusRegistration });
+  const core = new GraphEngineProviderCoreV1({
+    engineVersion: '1.0.0', engineInstanceId: 'mind-map-test', capabilities: ['render'],
+    profiles: runtime.profiles, sessions: runtime.factory,
+  });
+  const leaseResult = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(leaseResult.ok, 'Graph+ should obtain a local lease');
+  const errors: string[] = [];
+  const consumer = new GraphPlusConsumerV1({
+    lease: leaseResult.lease,
+    container: runtime.container,
+    vaultId: fixture.value.vaultId,
+    source: { read: () => fixture.value },
+    checkpointStore: new MemoryStore(),
+    navigator: { openNote: async () => undefined, openTag: async () => undefined },
+    countDuplicateLinks: true,
+    onError: (error) => errors.push(error.message),
+  });
+  await consumer.open();
+  const rootId = noteNodeId('folder/Beta.md');
+  const otherId = noteNodeId('Alpha.md');
+  await consumer.mindMapFromNode(rootId);
+  equal(consumer.getLens().form.enabled, true, 'Mind Map should enable from the chosen node');
+  equal(consumer.getLens().form.rootNodeId, rootId, 'Mind Map should snapshot the chosen node as its root');
+  deepEqual((await consumer.getSession()?.exportViewState())?.selectedNodeIds, [rootId], 'starting Mind Map should select its root');
+
+  await consumer.getSession()?.setSelection([otherId]);
+  equal(consumer.getLens().form.rootNodeId, rootId, 'later selection should not silently re-root the active Mind Map');
+  await consumer.setLens({ ...consumer.getLens(), query: 'file:alpha' });
+  equal(consumer.getLens().form.enabled, false, 'hiding the root should pause Mind Map instead of inventing a replacement root');
+  assert(errors.some((message) => message.includes('selected root is hidden')), 'root removal should report an explicit recoverable explanation');
+  await consumer.close();
+  await core.dispose();
+});
+
 test('Graph+ source failure and close failure do not interrupt an external lease', async () => {
   const runtime = runtimeHarness({ registration: graphPlusRegistration });
   const core = new GraphEngineProviderCoreV1({

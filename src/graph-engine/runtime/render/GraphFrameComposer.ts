@@ -16,6 +16,7 @@ export function composeGraphRenderFrameV1(options: {
   readonly nodeContributions?: Readonly<Record<string, GraphNodeRenderContributionV1>>;
   readonly edgeContributions?: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
   readonly theme?: GraphRenderThemeV1;
+  readonly hoveredNodeId?: string;
 }): GraphRenderFrameV1 {
   const selected = new Set(options.viewState.selectedNodeIds);
   return {
@@ -30,8 +31,11 @@ export function composeGraphRenderFrameV1(options: {
           radius: 7 * finitePositive(contribution?.radiusScale, 1),
           selected: selected.has(node.id),
           focused: options.viewState.focusedNodeId === node.id,
+          hovered: options.hoveredNodeId === node.id,
           ...(contribution?.color === undefined ? {} : { color: contribution.color }),
           ...(contribution?.showLabel === undefined ? {} : { showLabel: contribution.showLabel }),
+          ...(contribution?.labelPriority === undefined ? {} : { labelPriority: contribution.labelPriority }),
+          ...(contribution?.labelAlwaysVisible === undefined ? {} : { labelAlwaysVisible: contribution.labelAlwaysVisible }),
         };
       }),
     edges: options.document.edges

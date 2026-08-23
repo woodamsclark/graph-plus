@@ -1,6 +1,7 @@
 import type {
   Disposable,
   GraphDocumentV1,
+  GraphEffectiveSettingsV1,
   GraphEngineLeaseV1,
   GraphSessionErrorV1,
   GraphSessionV1,
@@ -56,6 +57,7 @@ export class GraphPlusConsumerV1<TFile> {
   private readonly profileId: string;
   private readonly dimensions: '2d' | '3d';
   private lens: GraphPlusLensStateV1;
+  private effectiveSettings?: GraphEffectiveSettingsV1;
   private session?: GraphSessionV1;
   private lookup = new GraphPlusLookupV1<TFile>();
   private document?: GraphDocumentV1;
@@ -134,20 +136,19 @@ export class GraphPlusConsumerV1<TFile> {
     this.lens = clone(next);
     if (!this.session || !this.document) return;
     if (previousRuntimeSettings !== JSON.stringify(graphPlusSessionOverridesV1(this.lens))) {
-      const state = await this.session.exportViewState();
-      await this.checkpoint.flush();
-      this.checkpoint.detach();
-      this.sessionSubscriptions.splice(0).forEach((subscription) => subscription.dispose());
-      await this.session.dispose();
-      await this.mount(this.document, state);
-    } else {
-      await this.applyFilter();
+      await this.session.setSessionOverrides(graphPlusSessionOverridesV1(this.lens));
+      this.effectiveSettings = await this.session.exportEffectiveSettings();
     }
+    await this.applyFilter();
     this.checkpoint.schedule();
   }
 
   getLens(): GraphPlusLensStateV1 {
     return clone(this.lens);
+  }
+
+  getEffectiveSettings(): GraphEffectiveSettingsV1 | undefined {
+    return this.effectiveSettings ? clone(this.effectiveSettings) : undefined;
   }
 
   getDocument(): GraphDocumentV1 | undefined {
@@ -158,6 +159,37 @@ export class GraphPlusConsumerV1<TFile> {
     return this.session;
   }
 
+  async focusNode(nodeId: string): Promise<void> {
+    if (!this.session) return;
+    await this.session.setSelection([nodeId]);
+    await this.session.focusNode(nodeId);
+  }
+
+  async mindMapFromNode(nodeId: string): Promise<void> {
+    if (!this.document?.nodes.some((node) => node.id === nodeId)) return;
+    const next: GraphPlusLensStateV1 = {
+      ...clone(this.lens),
+      form: { ...this.lens.form, rootNodeId: nodeId, enabled: true },
+    };
+    await this.setLens(next);
+    await this.session?.setSelection([nodeId]);
+    await this.session?.fitNodes();
+  }
+
+  async openNode(nodeId: string): Promise<void> {
+    const entry = this.lookup.get(nodeId);
+    if (entry?.kind === 'note') await this.options.navigator.openNote(entry.file);
+    if (entry?.kind === 'tag') await this.options.navigator.openTag(entry.tag);
+  }
+
+  nodeKind(nodeId: string): 'note' | 'tag' | undefined {
+    return this.lookup.get(nodeId)?.kind;
+  }
+
+  async setNodePinned(nodeId: string, pinned: boolean): Promise<void> {
+    await this.session?.setNodePinned(nodeId, pinned);
+  }
+
   async close(): Promise<void> {
     this.opened = false;
     await this.lensQueue.catch(() => undefined);
@@ -166,6 +198,7 @@ export class GraphPlusConsumerV1<TFile> {
       await this.checkpoint.closeAndDispose();
     } finally {
       this.session = undefined;
+      this.effectiveSettings = undefined;
       this.document = undefined;
       this.lookup = new GraphPlusLookupV1<TFile>();
       if (!this.leaseReleased) {
@@ -186,6 +219,7 @@ export class GraphPlusConsumerV1<TFile> {
       sessionOverrides: graphPlusSessionOverridesV1(this.lens),
     });
     this.session = session;
+    this.effectiveSettings = await session.exportEffectiveSettings();
     this.document = document;
     this.checkpoint.attach(session);
     this.sessionSubscriptions.push(session.onIntent((intent) => {
@@ -215,6 +249,13 @@ export class GraphPlusConsumerV1<TFile> {
     if (!this.session || !this.document) return;
     const compiled = compileGraphPlusFilterV1(this.document, this.lens);
     if (compiled.error) this.options.onError?.(new Error(compiled.error));
+    const rootId = this.lens.form.rootNodeId;
+    if (this.lens.form.enabled && rootId && !compiled.visibleNodeIds.includes(rootId)) {
+      this.lens = { ...this.lens, form: { ...this.lens.form, enabled: false } };
+      await this.session.setSessionOverrides(graphPlusSessionOverridesV1(this.lens));
+      this.effectiveSettings = await this.session.exportEffectiveSettings();
+      this.options.onError?.(new Error('Mind Map paused because its selected root is hidden by the active filter.'));
+    }
     await this.session.applyFilter(compiled.request);
   }
 }

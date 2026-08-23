@@ -17,15 +17,15 @@ export interface GraphPlusLensStateV1 {
   readonly showTags: boolean;
   readonly showOrphans: boolean;
   readonly display: {
-    readonly showLabels: boolean;
-    readonly nodeRadiusScale: number;
-    readonly edgeThicknessScale: number;
+    readonly labelMode?: 'adaptive' | 'all' | 'off';
+    readonly nodeRadiusScale?: number;
+    readonly edgeThicknessScale?: number;
   };
   readonly force: {
-    readonly repulsionStrength: number;
-    readonly springStrength: number;
-    readonly springLength: number;
-    readonly centeringStrength: number;
+    readonly repulsionStrength?: number;
+    readonly springStrength?: number;
+    readonly springLength?: number;
+    readonly centeringStrength?: number;
   };
   readonly form: {
     readonly enabled: boolean;
@@ -41,6 +41,7 @@ export interface GraphPlusLensStateV1 {
 
 export interface CompiledGraphPlusFilterV1 {
   readonly request: GraphFilterRequestV1;
+  readonly visibleNodeIds: readonly string[];
   readonly error?: string;
 }
 
@@ -49,12 +50,12 @@ export function createDefaultGraphPlusLensV1(showTags = true): GraphPlusLensStat
     query: '',
     showTags,
     showOrphans: true,
-    display: { showLabels: true, nodeRadiusScale: 1, edgeThicknessScale: 1 },
-    force: { repulsionStrength: 18000, springStrength: 3.5, springLength: 80, centeringStrength: 0.45 },
+    display: {},
+    force: {},
     form: {
       enabled: false,
       direction: 'either',
-      showCrossLinks: true,
+      showCrossLinks: false,
       showDisconnected: false,
       colorBranches: true,
     },
@@ -79,10 +80,12 @@ export function compileGraphPlusFilterV1(
         scope: 'projection',
         node: { op: 'id-in', ids },
       },
+      visibleNodeIds: ids,
     };
   } catch (error) {
     return {
       request: { schemaVersion: 1, scope: 'projection', node: { op: 'all' } },
+      visibleNodeIds: document.nodes.map((node) => node.id),
       error: error instanceof Error ? error.message : 'Invalid filter.',
     };
   }
@@ -105,17 +108,17 @@ export function graphPlusSessionOverridesV1(lens: GraphPlusLensStateV1): GraphSe
       },
       rendering: {
         settings: {
-          showLabels: lens.display.showLabels,
-          nodeRadiusScale: lens.display.nodeRadiusScale,
-          edgeThicknessScale: lens.display.edgeThicknessScale,
+          ...(lens.display.labelMode === undefined ? {} : { labelMode: lens.display.labelMode }),
+          ...(lens.display.nodeRadiusScale === undefined ? {} : { nodeRadiusScale: lens.display.nodeRadiusScale }),
+          ...(lens.display.edgeThicknessScale === undefined ? {} : { edgeThicknessScale: lens.display.edgeThicknessScale }),
         },
       },
       'force-layout': {
         settings: {
-          repulsionStrength: lens.force.repulsionStrength,
-          springStrength: lens.force.springStrength,
-          springLength: lens.force.springLength,
-          centeringStrength: lens.force.centeringStrength,
+          ...(lens.force.repulsionStrength === undefined ? {} : { repulsionStrength: lens.force.repulsionStrength }),
+          ...(lens.force.springStrength === undefined ? {} : { springStrength: lens.force.springStrength }),
+          ...(lens.force.springLength === undefined ? {} : { springLength: lens.force.springLength }),
+          ...(lens.force.centeringStrength === undefined ? {} : { centeringStrength: lens.force.centeringStrength }),
         },
       },
     },

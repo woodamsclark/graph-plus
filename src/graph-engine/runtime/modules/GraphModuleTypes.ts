@@ -17,6 +17,7 @@ import type {
 export type GraphModuleHookV1 =
   | 'setup'
   | 'restore-state'
+  | 'settings-changed'
   | 'document-changed'
   | 'view-changed'
   | 'project-source'
@@ -74,6 +75,7 @@ export interface GraphModuleFactoryContextV1 {
 
 export interface GraphModuleInstanceV1 {
   setup?(): void;
+  updateSettings?(settings: Readonly<Record<string, JsonValue>>): void;
   restoreState?(state: JsonValue): void;
   onDocumentChanged?(document: GraphDocumentV1): void;
   onViewChanged?(state: GraphViewStateV1): void;
@@ -99,4 +101,5 @@ export interface ActiveGraphModuleV1 {
   readonly order: number;
   readonly definition: GraphModuleDefinitionV1;
   readonly instance: GraphModuleInstanceV1;
+  readonly settings: Readonly<Record<string, JsonValue>>;
 }

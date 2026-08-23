@@ -169,7 +169,7 @@ export class GraphCameraController {
 
     const radius = Math.max(1, ...positions.map((position) => distance(position, target)));
     const backwards = normalize(subtract(this.state.position, this.state.target));
-    const distanceForFit = Math.max(10, radius * 2.4 / Math.max(MIN_ZOOM, this.state.zoom));
+    const distanceForFit = Math.max(10, radius * 2.4 * Math.max(MIN_ZOOM, this.state.zoom));
     this.state = {
       ...this.state,
       target,

@@ -63,6 +63,8 @@ filters, intent subscription, view export/restore, disposal, and lease release.
 - The consumer translates its own query language into the generic filter AST or an ID list.
 - The consumer persists exported documents and view state; Graph Engine never writes them.
 - The consumer handles public intents and translates IDs back through its private lookup.
+- The consumer may update current-session settings atomically, inspect each effective
+  value's winning settings layer, and export separated latest-frame timing diagnostics.
 - Release a lease when the feature closes. Release disposes only sessions owned by that lease.
 - Treat an engine instance ID change as a reload; old leases are stale and must not be reused.
 

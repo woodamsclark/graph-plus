@@ -555,6 +555,10 @@ interface GraphSettingsOverridesV1 {
   readonly modules?: Readonly<Record<string, EngineModuleOverrideV1>>;
 }
 
+type GraphSettingSourceV1 =
+  | 'engine-default' | 'global' | 'consumer-profile'
+  | 'user-profile' | 'session' | 'locked';
+
 interface GraphSessionV1 {
   readonly sessionId: string;
   readonly engineInstanceId: string;
@@ -568,11 +572,16 @@ interface GraphSessionV1 {
 
   setSelection(nodeIds: readonly string[]): Promise<void>;
   focusNode(nodeId: string | null): Promise<void>;
+  setNodePinned(nodeId: string, pinned: boolean): Promise<void>;
   fitNodes(nodeIds?: readonly string[], options?: TransitionOptionsV1): Promise<void>;
   resetCamera(options?: TransitionOptionsV1): Promise<void>;
 
   exportViewState(): Promise<GraphViewStateV1>;
   restoreViewState(state: GraphViewStateV1): Promise<void>;
+
+  setSessionOverrides(overrides: GraphSettingsOverridesV1): Promise<void>;
+  exportEffectiveSettings(): Promise<GraphEffectiveSettingsV1>;
+  exportPerformanceSnapshot(): Promise<GraphPerformanceSnapshotV1>;
 
   onIntent(listener: (intent: GraphIntentV1) => void): Disposable;
   onGraphChanged(listener: (event: GraphChangedEventV1) => void): Disposable;
@@ -592,6 +601,12 @@ interface TransitionOptionsV1 {
 `applyFilter` replaces the active request for the supplied scope. Render and
 projection filters may therefore coexist. `clearFilter(scope)` clears one scope;
 omitting the scope clears both.
+
+`setSessionOverrides` updates live-capable modules in place and otherwise replaces only
+the affected module; it does not replace the session or its canvas. Effective-setting
+exports include parallel source maps identifying the winning layer for every value.
+Performance snapshots expose the latest frame's interaction, hit-test, module tick,
+composition, projection, edge, node, label-layout, label-draw, and total durations.
 
 ### 10.1 Mounting contract
 

@@ -10,7 +10,7 @@ import {
 } from '../../src/graph-engine/runtime/index.ts';
 import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
-import { runtimeHarness, runtimeRegistration, runtimeSurface } from '../support/runtimeHarness.ts';
+import { runtimeCanvas, runtimeHarness, runtimeRegistration, runtimeSurface } from '../support/runtimeHarness.ts';
 
 test('R-MODULE-01 keeps optional Anima inert and round-trips its empty state', async () => {
   const value = runtimeHarness();
@@ -181,6 +181,49 @@ test('R-MODULE-05 orders hooks deterministically and disposes modules in reverse
   log.length = 0;
   await session.dispose();
   deepEqual(log.filter((entry) => entry.endsWith(':dispose')), ['second:dispose', 'first:dispose'], 'disposal should reverse activation order');
+});
+
+test('R-MODULE-06 updates one module without remounting the graph session', async () => {
+  const registry = createShippedGraphModuleRegistryV1();
+  const updates: number[] = [];
+  let instances = 0;
+  registry.register({
+    order: 250,
+    descriptor: {
+      id: 'live-settings',
+      version: '1.0.0',
+      displayName: 'Live settings',
+      capabilities: ['live-settings'],
+      settingsSchemaVersion: 1,
+      defaultSettings: { strength: 1 },
+    },
+    create: ({ settings }) => {
+      instances += 1;
+      updates.push(settings.strength as number);
+      return { updateSettings: (next) => updates.push(next.strength as number) };
+    },
+  });
+  const value = runtimeHarness({
+    modules: registry,
+    registration: withModules({ 'live-settings': { policy: 'optional', defaultEnabled: true } }),
+  });
+  const session = await value.create();
+  const surface = runtimeSurface(value.container);
+  const canvas = runtimeCanvas(value.container);
+  await session.setSessionOverrides({ modules: { 'live-settings': { settings: { strength: 4 } } } });
+  equal(instances, 1, 'a live-capable module should retain its instance');
+  deepEqual(updates, [1, 4], 'the module should receive its effective setting update');
+  equal(runtimeSurface(value.container), surface, 'settings must preserve the mounted session surface');
+  equal(runtimeCanvas(value.container), canvas, 'settings must preserve the canvas identity');
+  const effective = await session.exportEffectiveSettings();
+  equal(effective.modules['live-settings']?.settings.strength, 4, 'the session should export its new effective value');
+  equal(effective.modules['live-settings']?.settingSources.strength, 'session', 'the effective snapshot should expose the winning settings layer');
+  await session.setSessionOverrides({ modules: { 'live-settings': { enabled: false } } });
+  equal((await session.exportEffectiveSettings()).modules['live-settings']?.enabled, false, 'module disable should update the effective snapshot');
+  await session.setSessionOverrides({ modules: { 'live-settings': { enabled: true, settings: { strength: 2 } } } });
+  equal(instances, 2, 're-enabling should construct only the affected module');
+  equal(runtimeCanvas(value.container), canvas, 'module replacement must still preserve the canvas');
+  await session.dispose();
 });
 
 test('shipped Filter, Form, force layout, and palette contributions stay domain-neutral', async () => {

@@ -16,8 +16,12 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   constructor(
     private readonly dimensions: GraphDimensionsV1,
-    private readonly settings: ForceSettings,
+    private settings: ForceSettings,
   ) {}
+
+  updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
+    this.settings = readForceSettings(settings);
+  }
 
   onDocumentChanged(): void {
     this.velocities.clear();

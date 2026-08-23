@@ -7,8 +7,11 @@ export interface GraphRenderNodeV1 {
   readonly radius: number;
   readonly selected: boolean;
   readonly focused: boolean;
+  readonly hovered: boolean;
   readonly color?: string;
   readonly showLabel?: boolean;
+  readonly labelPriority?: number;
+  readonly labelAlwaysVisible?: boolean;
 }
 
 export interface GraphRenderEdgeV1 {
@@ -25,6 +28,8 @@ export interface GraphNodeRenderContributionV1 {
   readonly color?: string;
   readonly radiusScale?: number;
   readonly showLabel?: boolean;
+  readonly labelPriority?: number;
+  readonly labelAlwaysVisible?: boolean;
 }
 
 export interface GraphEdgeRenderContributionV1 {
@@ -41,6 +46,7 @@ export interface GraphRenderThemeV1 {
   readonly edgeColor: string;
   readonly labelColor: string;
   readonly labelFont: string;
+  readonly labelMode?: 'adaptive' | 'all' | 'off';
 }
 
 export interface GraphRenderFrameV1 {
@@ -57,4 +63,5 @@ export const DEFAULT_GRAPH_RENDER_THEME_V1: GraphRenderThemeV1 = {
   edgeColor: '#7f849c',
   labelColor: '#cdd6f4',
   labelFont: '12px sans-serif',
+  labelMode: 'adaptive',
 };

@@ -93,6 +93,12 @@ export type GraphRuntimeCommandV1 =
       readonly activation: 'primary' | 'secondary' | 'keyboard';
     })
   | (GraphCommandBaseV1 & { readonly type: 'activate-background' })
+  | (GraphCommandBaseV1 & {
+      readonly type: 'request-node-context';
+      readonly nodeId: string;
+      readonly point: GraphScreenPointV1;
+      readonly modality: GraphPointerKindV1;
+    })
   | (GraphCommandBaseV1 & { readonly type: 'set-hover'; readonly nodeId?: string })
   | (GraphCommandBaseV1 & { readonly type: 'drag-start'; readonly nodeId: string; readonly point: GraphScreenPointV1 })
   | (GraphCommandBaseV1 & { readonly type: 'drag-update'; readonly nodeId: string; readonly point: GraphScreenPointV1 })
