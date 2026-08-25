@@ -1,4 +1,5 @@
 import type {
+  GraphDimensionsV1,
   GraphDocumentV1,
   GraphEdgeV1,
   JsonValue,
@@ -29,7 +30,10 @@ interface FormSettings {
 export class FormModule implements GraphModuleInstanceV1 {
   private settings: FormSettings;
 
-  constructor(settings: Readonly<Record<string, JsonValue>>) {
+  constructor(
+    private readonly dimensions: GraphDimensionsV1,
+    settings: Readonly<Record<string, JsonValue>>,
+  ) {
     this.settings = readSettings(settings);
   }
 
@@ -69,16 +73,25 @@ export class FormModule implements GraphModuleInstanceV1 {
     }
     const reachable = new Set(order);
     const nodes = this.settings.showDisconnected ? [...source.nodes] : source.nodes.filter((node) => reachable.has(node.id));
-    const positions = radialPositions(rootId, nodes.map((node) => node.id), parent, depth, this.settings.ringSpacing);
+    const topBranches = [...parent.entries()]
+      .filter(([, parentId]) => parentId === rootId)
+      .map(([nodeId]) => nodeId)
+      .sort();
+    const positions = radialPositions(
+      this.dimensions,
+      rootId,
+      nodes.map((node) => node.id),
+      parent,
+      depth,
+      branch,
+      topBranches,
+      this.settings.ringSpacing,
+    );
     const treeEdgeIds = new Set(parentEdge.values());
     const visibleIds = new Set(nodes.map((node) => node.id));
     const projectedEdges = edges
       .filter((edge) => visibleIds.has(edge.sourceId) && visibleIds.has(edge.targetId))
       .filter((edge) => this.settings.showCrossLinks || treeEdgeIds.has(edge.id));
-    const topBranches = [...parent.entries()]
-      .filter(([, parentId]) => parentId === rootId)
-      .map(([nodeId]) => nodeId)
-      .sort();
     const branchColors = new Map(topBranches.map((id, index) => [id, BRANCH_COLORS[index % BRANCH_COLORS.length]]));
     const colorFor = (id: string): string | undefined => {
       const branchId = branch.get(id);
@@ -155,10 +168,13 @@ function adjacencyFor(edges: readonly GraphEdgeV1[], direction: FormSettings['di
 }
 
 function radialPositions(
+  dimensions: GraphDimensionsV1,
   rootId: string,
   nodeIds: readonly string[],
   parent: ReadonlyMap<string, string>,
   depth: Map<string, number>,
+  branch: ReadonlyMap<string, string>,
+  topBranches: readonly string[],
   ringSpacing: number,
 ): Readonly<Record<string, Vec3>> {
   const children = new Map<string, string[]>();
@@ -175,6 +191,7 @@ function radialPositions(
     return value;
   };
   count(rootId);
+  const branchIndex = new Map(topBranches.map((id, index) => [id, index]));
   const positions: Record<string, Vec3> = { [rootId]: { x: 0, y: 0, z: 0 } };
   const place = (id: string, start: number, end: number): void => {
     const values = children.get(id) ?? [];
@@ -184,7 +201,13 @@ function radialPositions(
       const span = (end - start) * ((subtree.get(child) ?? 1) / total);
       const angle = cursor + span / 2;
       const ring = depth.get(child) ?? 1;
-      positions[child] = { x: Math.cos(angle) * ringSpacing * ring, y: Math.sin(angle) * ringSpacing * ring, z: 0 };
+      positions[child] = {
+        x: Math.cos(angle) * ringSpacing * ring,
+        y: Math.sin(angle) * ringSpacing * ring,
+        z: dimensions === '3d'
+          ? spatialDepth(child, branch.get(child), branchIndex, topBranches.length, ring, ringSpacing)
+          : 0,
+      };
       place(child, cursor, cursor + span);
       cursor += span;
     }
@@ -194,10 +217,33 @@ function radialPositions(
   const outer = Math.max(2, ...depth.values()) + 1;
   disconnected.forEach((id, index) => {
     const angle = -Math.PI / 2 + Math.PI * 2 * index / Math.max(1, disconnected.length);
-    positions[id] = { x: Math.cos(angle) * ringSpacing * outer, y: Math.sin(angle) * ringSpacing * outer, z: 0 };
+    positions[id] = {
+      x: Math.cos(angle) * ringSpacing * outer,
+      y: Math.sin(angle) * ringSpacing * outer,
+      z: dimensions === '3d' ? signedHash(id) * ringSpacing * outer * 0.35 : 0,
+    };
     depth.set(id, outer);
   });
   return positions;
+}
+
+function spatialDepth(
+  nodeId: string,
+  branchId: string | undefined,
+  branchIndex: ReadonlyMap<string, number>,
+  branchCount: number,
+  ring: number,
+  ringSpacing: number,
+): number {
+  const index = branchId === undefined ? 0 : branchIndex.get(branchId) ?? 0;
+  const branchAxis = branchCount <= 1 ? 0 : index / (branchCount - 1) * 2 - 1;
+  const branchSeparation = branchAxis * ringSpacing * ring * 0.55;
+  const localSeparation = signedHash(nodeId) * ringSpacing * Math.sqrt(ring) * 0.18;
+  return branchSeparation + localSeparation;
+}
+
+function signedHash(value: string): number {
+  return stableHash(value) / 0xffffffff * 2 - 1;
 }
 
 function weightedDegree(document: GraphDocumentV1, edges: readonly GraphEdgeV1[]): Map<string, number> {

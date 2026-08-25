@@ -60,7 +60,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
         colorBranches: true,
       },
     },
-    create: ({ settings }) => new FormModule(settings),
+    create: ({ dimensions, settings }) => new FormModule(dimensions, settings),
   });
   registry.register({
     order: 400,

@@ -286,6 +286,9 @@ test('R-DIM-02..04 switches dimensions on one resource-stable session and preser
   await session.setSelection(['b']);
   await session.focusNode('a');
   await session.setNodePinned('b', true);
+  await session.setSessionOverrides({
+    modules: { form: { enabled: true, settings: { rootNodeId: 'a' } } },
+  });
 
   value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', { dimensions: '3d' });
   value.factory.refreshActiveProfiles();
@@ -302,6 +305,8 @@ test('R-DIM-02..04 switches dimensions on one resource-stable session and preser
   equal(spatial.focusedNodeId, 'a', 'focus should survive live conversion');
   deepEqual(spatial.pinnedNodeIds, ['b'], 'pins should survive live conversion');
   equal(spatial.activeFilters.render?.scope, 'render', 'active filters should survive live conversion');
+  equal((await session.exportEffectiveSettings()).modules.form?.settings.rootNodeId, 'a', 'active Form should retain its selected root');
+  equal((await session.exportEffectiveSettings()).modules.form?.enabled, true, 'active Form should remain enabled');
   deepEqual(await session.exportDocument(), document, 'canonical graph data should be untouched by dimension conversion');
   equal(value.platform.pendingFrames, 1, 'a switch should retain exactly one scheduled frame');
   equal(value.platform.observedTargets.length, 1, 'a switch should retain exactly one resize observation');

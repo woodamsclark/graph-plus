@@ -531,7 +531,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       committed = true;
       this.moduleHost.viewChanged(this.viewState);
       this.recomputeView(false);
-      this.refreshFrame();
+      if (this.moduleView.formActive) this.fitPositions(Object.values(this.moduleView.positions));
+      else this.refreshFrame();
       previousHost.dispose();
       for (const failure of deferredFailures) this.handleModuleFailure(failure);
     } catch (error) {

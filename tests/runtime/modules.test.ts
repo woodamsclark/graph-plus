@@ -4,10 +4,12 @@ import type {
 } from '../../src/graph-engine/contracts/v1/index.ts';
 import {
   createShippedGraphModuleRegistryV1,
+  DEFAULT_GRAPH_RENDER_THEME_V1,
   GraphModuleRegistry,
   GraphRequiredModuleErrorV1,
   GraphSessionProfileErrorV1,
 } from '../../src/graph-engine/runtime/index.ts';
+import { FormModule } from '../../src/graph-engine/runtime/modules/shipped/FormModule.ts';
 import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import { runtimeCanvas, runtimeHarness, runtimeRegistration, runtimeSurface } from '../support/runtimeHarness.ts';
@@ -262,6 +264,75 @@ test('R-MOUNT-06 failed dimension construction rolls back to the active runtime'
   equal(disposals, 1, 'only the failed replacement instance should be disposed before session teardown');
   await session.dispose();
   equal(disposals, 2, 'the retained active instance should dispose with the session');
+});
+
+test('R-FORM-01..03 keeps 2d Form planar and gives 3d Form deterministic branch depth', () => {
+  const document = graphDocument({
+    nodes: ['root', 'left', 'right', 'left-child', 'right-child', 'right-leaf'].map((id) => graphNode(id)),
+    edges: [
+      graphEdge('root-left', 'root', 'left'),
+      graphEdge('root-right', 'root', 'right'),
+      graphEdge('left-child', 'left', 'left-child'),
+      graphEdge('right-child', 'right', 'right-child'),
+      graphEdge('right-leaf', 'right-child', 'right-leaf'),
+    ],
+  });
+  const positions = Object.fromEntries(document.nodes.map((node) => [node.id, { x: 0, y: 0, z: 0 }]));
+  const viewState = {
+    schemaVersion: 1 as const,
+    documentId: document.documentId,
+    documentRevision: document.revision,
+    consumerId: 'synthetic-consumer',
+    profileId: 'default',
+    dimensions: '2d' as const,
+    positions,
+    pinnedNodeIds: [],
+    camera: {
+      position: { x: 0, y: 0, z: 10 },
+      target: { x: 0, y: 0, z: 0 },
+      up: { x: 0, y: 1, z: 0 },
+      zoom: 1,
+      projection: 'orthographic' as const,
+    },
+    selectedNodeIds: ['root'],
+    focusedNodeId: 'root',
+    activeFilters: {},
+    moduleState: {},
+  };
+  const selection = {
+    nodeIds: new Set(document.nodes.map((node) => node.id)),
+    edgeIds: new Set(document.edges.map((edge) => edge.id)),
+  };
+  const pipeline = {
+    sourceDocument: document,
+    document,
+    viewState,
+    positions,
+    projectionSelection: selection,
+    renderSelection: selection,
+    formActive: false,
+    nodeContributions: {},
+    edgeContributions: {},
+    theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+  };
+  const settings = { rootNodeId: 'root', ringSpacing: 100, showCrossLinks: true } as const;
+  const planar = new FormModule('2d', settings).projectTopology(pipeline);
+  const spatial = new FormModule('3d', settings).projectTopology({
+    ...pipeline,
+    viewState: { ...viewState, dimensions: '3d', camera: { ...viewState.camera, projection: 'perspective' } },
+  });
+  const repeated = new FormModule('3d', settings).projectTopology({
+    ...pipeline,
+    viewState: { ...viewState, dimensions: '3d', camera: { ...viewState.camera, projection: 'perspective' } },
+  });
+  assert(planar?.positions && spatial?.positions && repeated?.positions, 'Form should produce positions in both dimensions');
+  equal(Object.values(planar.positions).every((position) => position.z === 0), true, '2d Form must remain planar');
+  const spatialDepths = Object.values(spatial.positions).map((position) => position.z);
+  assert(new Set(spatialDepths.map((value) => value.toFixed(6))).size >= 4, '3d Form should create several distinct depth planes');
+  assert(Math.max(...spatialDepths) - Math.min(...spatialDepths) > 50, '3d branch separation should be visually meaningful');
+  deepEqual(spatial.positions, repeated.positions, '3d Form placement should be deterministic');
+  deepEqual(spatial.document, planar.document, 'dimension should not alter the Form topology');
+  deepEqual(spatial.positions.root, { x: 0, y: 0, z: 0 }, 'the selected root should remain the Form origin');
 });
 
 test('shipped Filter, Form, force layout, and palette contributions stay domain-neutral', async () => {
