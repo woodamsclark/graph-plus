@@ -26,13 +26,12 @@ import { ThemeStyleResolver } from './themeStyleResolver.ts';
 import { ObsidianGraphEngineSessionUiHostV1 } from './graph-engine-ui/index.ts';
 import {
   migrateGraphPlusPluginDataV1,
-  readGraphPlusCheckpointV1,
   withEngineSettingsV1,
-  withGraphPlusCheckpointV1,
   withGraphPlusGenericLensMigratedV1,
   withGraphPlusSettingsV1,
   type GraphPlusPluginDataV1,
 } from './settings/GraphPlusPluginDataStore.ts';
+import { GraphPlusCheckpointFileStoreV1 } from './settings/GraphPlusCheckpointFileStore.ts';
 
 
 export default class GraphPlus extends Plugin {
@@ -43,12 +42,22 @@ export default class GraphPlus extends Plugin {
   private graphEngineCore?: GraphEngineProviderCoreV1;
   private graphEngineProvider?: GraphEngineWorkspaceProviderV1;
   private graphPlusLease?: GraphEngineLeaseV1;
+  private checkpointFileStore?: GraphPlusCheckpointFileStoreV1;
   private saveQueue: Promise<void> = Promise.resolve();
 
   async onload() {
     const migration = migrateGraphPlusPluginDataV1(await this.loadData());
     this.pluginData = migration.data;
     this.settings = this.pluginData.consumers.graphPlus.consumerSettings;
+    const pluginDirectory = this.manifest.dir
+      ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
+    this.checkpointFileStore = new GraphPlusCheckpointFileStoreV1({
+      adapter: this.app.vault.adapter,
+      directory: `${pluginDirectory}/graph-plus-checkpoints`,
+      getData: () => this.pluginData,
+      setData: (data) => { this.pluginData = data; },
+      persistData: () => this.persistPluginData(),
+    });
 
     const profiles = new ConsumerProfileRegistry();
     this.profiles = profiles;
@@ -172,11 +181,8 @@ export default class GraphPlus extends Plugin {
   }
 
   readonly graphPlusCheckpointStore: GraphPlusCheckpointStoreV1 = {
-    load: async (vaultId) => readGraphPlusCheckpointV1(this.pluginData, vaultId),
-    save: async (vaultId, checkpoint) => {
-      this.pluginData = withGraphPlusCheckpointV1(this.pluginData, vaultId, checkpoint);
-      await this.persistPluginData();
-    },
+    load: (vaultId) => this.requireCheckpointFileStore().load(vaultId),
+    save: (vaultId, checkpoint, options) => this.requireCheckpointFileStore().save(vaultId, checkpoint, options),
   };
 
   getLegacyGraphState(vaultId: string): unknown {
@@ -228,6 +234,11 @@ export default class GraphPlus extends Plugin {
     const snapshot = this.pluginData;
     this.saveQueue = this.saveQueue.catch(() => undefined).then(() => this.saveData(snapshot));
     return this.saveQueue;
+  }
+
+  private requireCheckpointFileStore(): GraphPlusCheckpointFileStoreV1 {
+    if (!this.checkpointFileStore) throw new Error('Graph+ checkpoint storage is unavailable before plugin load.');
+    return this.checkpointFileStore;
   }
 }
 

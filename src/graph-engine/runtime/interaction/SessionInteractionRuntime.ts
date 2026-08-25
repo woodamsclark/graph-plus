@@ -6,15 +6,12 @@ import type {
   GraphViewStateV1,
   Vec3,
 } from '../../contracts/v1/index.ts';
-import { cloneGraphViewStateV1 } from '../../core/state/index.ts';
 import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
 import type { GraphCameraController } from '../camera/index.ts';
 import type { SessionRuntimePlatformV1 } from '../platform/index.ts';
-import type { GraphFrameStore } from '../render/index.ts';
 import type { SessionSurfaceV1 } from '../surface/index.ts';
 import { BufferedQueue } from './BufferedQueue.ts';
 import { GraphCommander, GraphCommandRegistry } from './GraphCommander.ts';
-import { GraphHitTester } from './GraphHitTester.ts';
 import { GraphInput } from './GraphInput.ts';
 import { GraphInteractionInterpreter } from './GraphInteractionInterpreter.ts';
 import type {
@@ -23,16 +20,18 @@ import type {
   GraphScreenPointV1,
 } from './GraphInteractionTypes.ts';
 
+export type GraphRuntimeViewChangeV1 = 'camera' | 'interaction' | 'layout' | 'positions';
+
 export class SessionInteractionRuntime {
   private readonly inputEvents = new BufferedQueue<GraphInputEventV1>();
   private readonly commands = new BufferedQueue<GraphRuntimeCommandV1>();
   private readonly commandRegistry = new GraphCommandRegistry();
   private readonly commander = new GraphCommander(this.commands, this.commandRegistry);
-  private readonly hitTester: GraphHitTester;
   private readonly input: GraphInput;
   private readonly interpreter: GraphInteractionInterpreter;
   private hoveredNodeId: string | undefined;
   private hitTestMs = 0;
+  private hitTestCount = 0;
   private dragContext: {
     readonly nodeId: string;
     readonly depth: number;
@@ -46,7 +45,7 @@ export class SessionInteractionRuntime {
     readonly platform: SessionRuntimePlatformV1;
     readonly surface: SessionSurfaceV1;
     readonly camera: GraphCameraController;
-    readonly frames: GraphFrameStore;
+    readonly hitTest: (point: GraphScreenPointV1) => import('./GraphInteractionTypes.ts').GraphHitV1 | null;
     readonly getDocument: () => GraphDocumentV1;
     readonly getViewState: () => GraphViewStateV1;
     readonly getInteractivePositions: () => Readonly<Record<string, Vec3>>;
@@ -55,11 +54,10 @@ export class SessionInteractionRuntime {
     readonly getRenderSelection: () => GraphFilterSelectionV1;
     readonly getResetCamera: () => GraphCameraStateV1;
     readonly getDragReleasePolicy: () => 'pin' | 'dynamic';
-    readonly onViewStateChanged: () => void;
+    readonly onViewStateChanged: (change: GraphRuntimeViewChangeV1) => void;
     readonly onIntent: (intent: GraphIntentV1) => void;
     readonly onActivateNode: (nodeId: string) => boolean;
   }) {
-    this.hitTester = new GraphHitTester(this.options.camera, this.options.frames);
     this.registerCommandHandlers();
     this.input = new GraphInput({
       canvas: this.options.surface.canvas,
@@ -76,7 +74,8 @@ export class SessionInteractionRuntime {
       commands: this.commands,
       hitTest: (point) => {
         const start = this.options.platform.now();
-        const hit = this.hitTester.hit(point);
+        const hit = this.options.hitTest(point);
+        this.hitTestCount += 1;
         this.hitTestMs += Math.max(0, this.options.platform.now() - start);
         return hit;
       },
@@ -94,6 +93,12 @@ export class SessionInteractionRuntime {
   consumeHitTestDuration(): number {
     const value = this.hitTestMs;
     this.hitTestMs = 0;
+    return value;
+  }
+
+  consumeHitTestCount(): number {
+    const value = this.hitTestCount;
+    this.hitTestCount = 0;
     return value;
   }
 
@@ -195,9 +200,10 @@ export class SessionInteractionRuntime {
         });
         return;
       case 'set-hover':
+        if (this.hoveredNodeId === command.nodeId) return;
         this.hoveredNodeId = command.nodeId;
         this.updateCursor();
-        this.options.onViewStateChanged();
+        this.options.onViewStateChanged('interaction');
         return;
       case 'drag-start':
         this.beginNodeDrag(command.nodeId, command.point);
@@ -220,7 +226,7 @@ export class SessionInteractionRuntime {
 
   private cameraChanged(command: GraphRuntimeCommandV1): void {
     this.commitCamera();
-    this.options.onViewStateChanged();
+    this.options.onViewStateChanged('camera');
     this.emitViewportIntent(command);
   }
 
@@ -236,7 +242,7 @@ export class SessionInteractionRuntime {
     if (!positions.length) return;
     this.options.camera.fit(positions);
     this.commitCamera();
-    this.options.onViewStateChanged();
+    this.options.onViewStateChanged('camera');
   }
 
   private setSelection(nodeIds: readonly string[], command: GraphRuntimeCommandV1): void {
@@ -245,7 +251,7 @@ export class SessionInteractionRuntime {
     const selectedNodeIds = [...new Set(nodeIds)].filter((id) => known.has(id));
     if (sameIds(selectedNodeIds, state.selectedNodeIds)) return;
     this.commit({ ...state, selectedNodeIds });
-    this.options.onViewStateChanged();
+    this.options.onViewStateChanged('interaction');
     this.options.onIntent({
       ...this.intentBase(command),
       type: 'selection-changed',
@@ -267,7 +273,7 @@ export class SessionInteractionRuntime {
         this.commitCamera();
       }
     }
-    this.options.onViewStateChanged();
+    this.options.onViewStateChanged('interaction');
     this.options.onIntent({
       ...this.intentBase(command),
       type: 'focus-changed',
@@ -292,7 +298,7 @@ export class SessionInteractionRuntime {
     };
     if (!wasPinned) {
       this.commit({ ...state, pinnedNodeIds: [...state.pinnedNodeIds, nodeId] });
-      this.options.onViewStateChanged();
+      this.options.onViewStateChanged('layout');
     }
     this.updateCursor();
   }
@@ -305,7 +311,7 @@ export class SessionInteractionRuntime {
     this.commit({ ...state, positions: { ...state.positions, [nodeId]: position } });
     if (state.focusedNodeId === nodeId) this.options.camera.setTarget(position);
     this.commitCamera();
-    this.options.onViewStateChanged();
+    this.options.onViewStateChanged('positions');
   }
 
   private endNodeDrag(command: Extract<GraphRuntimeCommandV1, { type: 'drag-end' }>): void {
@@ -319,7 +325,7 @@ export class SessionInteractionRuntime {
     if (!wasPinned && this.options.getDragReleasePolicy() === 'dynamic') {
       const state = this.options.getViewState();
       this.commit({ ...state, pinnedNodeIds: state.pinnedNodeIds.filter((id) => id !== command.nodeId) });
-      this.options.onViewStateChanged();
+      this.options.onViewStateChanged('layout');
     }
     this.options.onIntent({
       ...this.intentBase(command),
@@ -360,7 +366,7 @@ export class SessionInteractionRuntime {
   }
 
   private commit(state: GraphViewStateV1): void {
-    this.options.setViewState(cloneGraphViewStateV1(state));
+    this.options.setViewState(state);
   }
 }
 

@@ -33,7 +33,7 @@ export class InstrumentedPlatform implements SessionRuntimePlatformV1 {
   private readonly timers = new Map<number, () => void>();
   private resizeCallback: ResizeObserverCallback | null = null;
 
-  constructor(window: Window) {
+  constructor(window: Window, private readonly realTime = false) {
     this.document = window.document as unknown as Document;
     this.window = window as unknown as globalThis.Window;
     const addEventListener = this.document.addEventListener.bind(this.document);
@@ -103,7 +103,7 @@ export class InstrumentedPlatform implements SessionRuntimePlatformV1 {
   }
 
   now(): number {
-    return this.currentTime;
+    return this.realTime ? performance.now() : this.currentTime;
   }
 
   advanceTime(milliseconds: number): void {
@@ -190,6 +190,7 @@ export function runtimeHarness(options: {
   getGlobalOverrides?: () => GraphSettingsOverridesV1;
   resolveThemePalette?: (container: HTMLElement) => GraphRenderThemeV1;
   nodeActions?: GraphNodeActionRuntimeV1;
+  realTime?: boolean;
 } = {}) {
   const window = new Window();
   const drawCalls: string[] = [];
@@ -214,7 +215,7 @@ export function runtimeHarness(options: {
     }),
   });
   document.body.append(container);
-  const platform = new InstrumentedPlatform(window);
+  const platform = new InstrumentedPlatform(window, options.realTime ?? false);
   const profiles = new ConsumerProfileRegistry();
   profiles.registerConsumer(options.registration ?? runtimeRegistration());
   const factory = new SessionFactory({

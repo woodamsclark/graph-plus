@@ -4,8 +4,13 @@ import { SessionFactory } from '../../src/graph-engine/runtime/index.ts';
 import { GraphEngineProviderCoreV1 } from '../../src/graph-engine/service/index.ts';
 import { VaultGraphAdapterV1, noteNodeId, tagNodeId } from '../../src/graph-plus/adapter/index.ts';
 import { GraphPlusConsumerV1 } from '../../src/graph-plus/consumer/index.ts';
-import type { GraphPlusCheckpointStoreV1, GraphPlusCheckpointV1 } from '../../src/graph-plus/persistence/index.ts';
+import {
+  GraphPlusCheckpointControllerV1,
+  type GraphPlusCheckpointStoreV1,
+  type GraphPlusCheckpointV1,
+} from '../../src/graph-plus/persistence/index.ts';
 import { compileGraphPlusFilterV1, createDefaultGraphPlusLensV1, graphPlusSessionOverridesV1 } from '../../src/graph-plus/query/index.ts';
+import { graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import { runtimeHarness, runtimeFixture, runtimeRegistration } from '../support/runtimeHarness.ts';
 
@@ -130,6 +135,39 @@ class MemoryStore implements GraphPlusCheckpointStoreV1 {
   async load(): Promise<GraphPlusCheckpointV1 | undefined> { return this.value; }
   async save(_vaultId: string, checkpoint: GraphPlusCheckpointV1): Promise<void> { this.value = checkpoint; this.saves += 1; }
 }
+
+test('V1.2 Graph+ checkpoints export graph data only after graph changes', async () => {
+  const runtime = runtimeHarness();
+  const document = runtimeFixture();
+  const session = await runtime.factory.createSession({
+    consumerId: 'synthetic-consumer',
+    profileId: 'two-dimensional',
+    container: runtime.container,
+    document,
+  });
+  const store = new MemoryStore();
+  const checkpoint = new GraphPlusCheckpointControllerV1('Test Vault', store, runtime.platform);
+  checkpoint.attach(session, document);
+  await session.resetPerformanceMeasurements();
+
+  await checkpoint.flush();
+  let performance = await session.exportPerformanceSnapshot();
+  equal(performance.counters?.documentExports, 0, 'view-only checkpointing should reuse the cached canonical document');
+  equal(performance.counters?.viewExports, 1, 'view-only checkpointing should export only view state');
+
+  await session.applyPatch({
+    schemaVersion: 1,
+    patchId: 'checkpoint-graph-change',
+    baseRevision: 0,
+    operations: [{ type: 'add-node', node: graphNode('checkpoint-added') }],
+  });
+  await checkpoint.flush();
+  performance = await session.exportPerformanceSnapshot();
+  equal(performance.counters?.documentExports, 1, 'one graph change should produce one fresh canonical document export');
+  equal(store.value?.document.revision, 1, 'the change-aware checkpoint should contain the changed graph');
+  checkpoint.detach();
+  await session.dispose();
+});
 
 test('G-LAZY consumer mounts saved graph before vault reconciliation and flushes before release', async () => {
   const fixture = snapshot();

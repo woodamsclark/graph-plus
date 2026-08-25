@@ -10,6 +10,7 @@
     "watch": "node esbuild.config.js --watch",
     "typecheck": "tsc --noEmit",
     "test": "node test.config.js",
+    "benchmark": "node scripts/benchmark-graph-engine.mjs",
     "dev": "npm run typecheck && npm run build"
   },
   "devDependencies": {

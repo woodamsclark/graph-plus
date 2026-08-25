@@ -56,6 +56,7 @@ export class GraphInteractionInterpreter {
   private mode: SinglePointerMode = { kind: 'idle' };
   private touchGesture: TouchGesture | null = null;
   private dimensions: GraphDimensionsV1;
+  private pendingHover: Extract<GraphInputEventV1, { type: 'pointer-move' }> | null = null;
 
   constructor(private readonly options: {
     readonly dimensions: GraphDimensionsV1;
@@ -77,12 +78,19 @@ export class GraphInteractionInterpreter {
 
   tick(): void {
     for (const event of this.options.events.drain()) this.ingest(event);
+    const hoverEvent = this.pendingHover;
+    this.pendingHover = null;
+    if (hoverEvent && this.mode.kind === 'idle' && this.pointers.size === 0 && !this.touchGesture) {
+      const hover = this.options.hitTest(hoverEvent.point);
+      this.command(hoverEvent, { type: 'set-hover', ...(hover ? { nodeId: hover.nodeId } : {}) });
+    }
   }
 
   reset(): void {
     this.pointers.clear();
     this.mode = { kind: 'idle' };
     this.touchGesture = null;
+    this.pendingHover = null;
   }
 
   private ingest(event: GraphInputEventV1): void {
@@ -118,8 +126,6 @@ export class GraphInteractionInterpreter {
   private pointerMove(event: Extract<GraphInputEventV1, { type: 'pointer-move' }>): void {
     const pointer = this.pointers.get(event.pointerId);
     if (pointer) pointer.point = event.point;
-    const hover = this.options.hitTest(event.point);
-    this.command(event, { type: 'set-hover', ...(hover ? { nodeId: hover.nodeId } : {}) });
 
     if (this.touchGesture && this.pointers.size === 2) {
       this.updateTouchGesture(event);
@@ -173,7 +179,9 @@ export class GraphInteractionInterpreter {
     if (this.mode.kind === 'drag' && this.mode.pointerId === event.pointerId) {
       this.command(event, { type: 'drag-update', nodeId: this.mode.nodeId, point: event.point });
       this.mode.lastPoint = event.point;
+      return;
     }
+    if (this.mode.kind === 'idle' && this.pointers.size === 0) this.pendingHover = event;
   }
 
   private pointerUp(event: Extract<GraphInputEventV1, { type: 'pointer-up' }>): void {

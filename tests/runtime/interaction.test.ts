@@ -56,6 +56,33 @@ test('R-INPUT-01 pans an unfocused wheel and orbits a focused 3d graph', async (
   await session.dispose();
 });
 
+test('V1.2 coalesces camera input and hover without graph-wide recomputation', async () => {
+  const value = runtimeHarness({ profileId: 'three-dimensional' });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  const intents: GraphIntentV1[] = [];
+  session.onIntent((intent) => intents.push(intent));
+  await session.resetPerformanceMeasurements();
+
+  for (let index = 0; index < 100; index += 1) wheel(value, canvas, { deltaX: 1, deltaY: 0 });
+  value.platform.flushFrame();
+  const camera = await session.exportPerformanceSnapshot();
+  equal(camera.counters?.projectionPasses, 0, 'camera input must not rerun the module projection pipeline');
+  equal(camera.counters?.frameCompositions, 0, 'camera input must reuse the existing render frame');
+  equal(camera.counters?.documentExports, 0, 'camera identity checks must not export the document');
+  equal(intents.filter((intent) => intent.type === 'viewport-changed').length, 1, 'adjacent camera deltas should coalesce into one committed camera command');
+
+  await session.resetPerformanceMeasurements();
+  for (let index = 0; index < 100; index += 1) {
+    pointer(value, canvas, 'pointermove', 320 + index / 100, 180, { pointerId: 500 });
+  }
+  value.platform.flushFrame();
+  const hover = await session.exportPerformanceSnapshot();
+  equal(hover.counters?.hitTests, 1, 'raw hover moves should perform at most one indexed hit test per frame');
+  equal(hover.counters?.projectionPasses, 0, 'hover must not rerun the module projection pipeline');
+  await session.dispose();
+});
+
 test('R-INPUT-03, R-INPUT-04, and R-INPUT-08 use focus-state consumer activation', async () => {
   let actionRuns = 0;
   const actions = new ConsumerNodeActionRegistryV1();

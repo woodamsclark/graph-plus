@@ -19,6 +19,10 @@ export interface GraphRenderTimingV1 {
 export class CanvasGraphRenderer {
   private readonly context: CanvasRenderingContext2D;
   private readonly textWidthCache = new Map<string, number>();
+  private readonly hitGrid = new Map<string, ProjectedNode[]>();
+  private readonly hitCellSize = 32;
+  private indexedFrame: GraphRenderFrameV1 | null = null;
+  private indexedCameraKey = '';
   private width = 0;
   private height = 0;
 
@@ -41,7 +45,12 @@ export class CanvasGraphRenderer {
 
   render(): GraphRenderTimingV1 {
     const frame = this.frames.get();
-    if (!frame) return emptyRenderTiming();
+    if (!frame) {
+      this.hitGrid.clear();
+      this.indexedFrame = null;
+      this.indexedCameraKey = '';
+      return emptyRenderTiming();
+    }
     this.clear(frame);
     const projectionStart = this.now();
     const projected = frame.nodes
@@ -53,6 +62,9 @@ export class CanvasGraphRenderer {
       .sort((a, b) => b.point.depth - a.point.depth);
     const byId = new Map(projected.map((value) => [value.node.id, value]));
     const visible = projected.filter(({ point, radius }) => circleIntersectsViewport(point.x, point.y, radius + 4, this.width, this.height));
+    this.rebuildHitGrid(visible);
+    this.indexedFrame = frame;
+    this.indexedCameraKey = this.cameraKey();
     const projectionMs = elapsed(projectionStart, this.now());
     const edgeStart = this.now();
     this.drawEdges(frame, byId);
@@ -62,6 +74,77 @@ export class CanvasGraphRenderer {
     const nodeRenderMs = elapsed(nodeStart, this.now());
     const labels = this.drawLabels(frame, visible);
     return { projectionMs, edgeRenderMs, nodeRenderMs, ...labels };
+  }
+
+  hitTest(point: { readonly x: number; readonly y: number }): {
+    readonly nodeId: string;
+    readonly position: import('../../contracts/v1/index.ts').Vec3;
+    readonly depth: number;
+  } | null {
+    const frame = this.frames.get();
+    const cameraKey = this.cameraKey();
+    if (frame && (frame !== this.indexedFrame || cameraKey !== this.indexedCameraKey)) {
+      const visible = frame.nodes
+        .map((node) => {
+          const projected = this.camera.worldToScreen(node.position);
+          return { node, point: projected, radius: node.radius * projected.scale };
+        })
+        .filter(({ point: projected, radius }) => projected.depth > 0
+          && circleIntersectsViewport(projected.x, projected.y, radius + 4, this.width, this.height));
+      this.rebuildHitGrid(visible);
+      this.indexedFrame = frame;
+      this.indexedCameraKey = cameraKey;
+    }
+    const candidates = this.hitGrid.get(this.hitGridKey(point.x, point.y)) ?? [];
+    let best: ProjectedNode | undefined;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const candidate of candidates) {
+      const distance = (point.x - candidate.point.x) ** 2 + (point.y - candidate.point.y) ** 2;
+      if (distance > candidate.radius ** 2) continue;
+      if (!best || candidate.point.depth < best.point.depth
+        || (candidate.point.depth === best.point.depth && distance < bestDistance)) {
+        best = candidate;
+        bestDistance = distance;
+      }
+    }
+    return best ? {
+      nodeId: best.node.id,
+      position: { ...best.node.position },
+      depth: best.point.depth,
+    } : null;
+  }
+
+  private rebuildHitGrid(nodes: readonly ProjectedNode[]): void {
+    this.hitGrid.clear();
+    for (const node of nodes) {
+      const minX = Math.floor((node.point.x - node.radius) / this.hitCellSize);
+      const maxX = Math.floor((node.point.x + node.radius) / this.hitCellSize);
+      const minY = Math.floor((node.point.y - node.radius) / this.hitCellSize);
+      const maxY = Math.floor((node.point.y + node.radius) / this.hitCellSize);
+      for (let x = minX; x <= maxX; x += 1) {
+        for (let y = minY; y <= maxY; y += 1) {
+          const key = `${x}:${y}`;
+          const bucket = this.hitGrid.get(key);
+          if (bucket) bucket.push(node);
+          else this.hitGrid.set(key, [node]);
+        }
+      }
+    }
+  }
+
+  private hitGridKey(x: number, y: number): string {
+    return `${Math.floor(x / this.hitCellSize)}:${Math.floor(y / this.hitCellSize)}`;
+  }
+
+  private cameraKey(): string {
+    const state = this.camera.getState();
+    const viewport = this.camera.getViewport();
+    return [
+      state.position.x, state.position.y, state.position.z,
+      state.target.x, state.target.y, state.target.z,
+      state.up.x, state.up.y, state.up.z,
+      state.zoom, state.projection, viewport.width, viewport.height,
+    ].join(':');
   }
 
   private clear(frame: GraphRenderFrameV1): void {

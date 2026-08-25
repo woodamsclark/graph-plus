@@ -1,9 +1,17 @@
 import type {
   ConsumerProfileRegistrySnapshotV1,
 } from '../../graph-engine/core/profile/index.ts';
-import type { GraphSettingsOverridesV1 } from '../../graph-engine/contracts/v1/index.ts';
+import {
+  type GraphSettingsOverridesV1,
+  type GraphViewStateV1,
+} from '../../graph-engine/contracts/v1/index.ts';
+import { assertGraphViewStateV1 } from '../../graph-engine/core/state/index.ts';
 import type { GraphPlusCheckpointV1 } from '../../graph-plus/persistence/index.ts';
 import { validateGraphPlusCheckpointV1 } from '../../graph-plus/persistence/index.ts';
+import {
+  coerceGraphPlusLensStateV1,
+  type GraphPlusLensStateV1,
+} from '../../graph-plus/query/index.ts';
 import {
   coerceGraphPlusConsumerSettingsV1,
   type GraphPlusConsumerSettingsV1,
@@ -37,6 +45,16 @@ export interface GraphPlusPluginDataMigrationV1 {
   readonly data: GraphPlusPluginDataV1;
   readonly engineRecovered: boolean;
   readonly graphPlusRecovered: boolean;
+}
+
+export interface GraphPlusCheckpointReferenceV1 {
+  readonly storageVersion: 'document-file-v1';
+  readonly documentPath: string;
+  readonly documentId: string;
+  readonly documentRevision: number;
+  readonly viewState?: GraphViewStateV1;
+  readonly lens?: GraphPlusLensStateV1;
+  readonly savedAt: number;
 }
 
 export function migrateGraphPlusPluginDataV1(raw: unknown): GraphPlusPluginDataMigrationV1 {
@@ -141,6 +159,13 @@ export function readGraphPlusCheckpointV1(
   return validateGraphPlusCheckpointV1({ document, viewState, savedAt: 0 });
 }
 
+export function readGraphPlusCheckpointReferenceV1(
+  data: GraphPlusPluginDataV1,
+  vaultId: string,
+): GraphPlusCheckpointReferenceV1 | undefined {
+  return validateGraphPlusCheckpointReferenceV1(data.consumers.graphPlus.checkpoints?.[vaultId]);
+}
+
 export function withGraphPlusCheckpointV1(
   data: GraphPlusPluginDataV1,
   vaultId: string,
@@ -148,6 +173,8 @@ export function withGraphPlusCheckpointV1(
 ): GraphPlusPluginDataV1 {
   const checked = validateGraphPlusCheckpointV1(checkpoint);
   if (!checked) throw new Error('Cannot persist an invalid Graph+ checkpoint.');
+  const graphDocuments = withoutKey(data.consumers.graphPlus.graphDocuments, vaultId);
+  const viewStates = withoutKey(data.consumers.graphPlus.viewStates, vaultId);
   return {
     ...data,
     consumers: {
@@ -158,16 +185,75 @@ export function withGraphPlusCheckpointV1(
           ...(data.consumers.graphPlus.checkpoints ?? {}),
           [vaultId]: cloneJson(checked),
         },
-        graphDocuments: {
-          ...(data.consumers.graphPlus.graphDocuments ?? {}),
-          [vaultId]: cloneJson(checked.document),
-        },
-        viewStates: checked.viewState
-          ? { ...(data.consumers.graphPlus.viewStates ?? {}), [vaultId]: cloneJson(checked.viewState) }
-          : data.consumers.graphPlus.viewStates,
+        graphDocuments,
+        viewStates,
       },
     },
   };
+}
+
+export function withGraphPlusCheckpointReferenceV1(
+  data: GraphPlusPluginDataV1,
+  vaultId: string,
+  reference: GraphPlusCheckpointReferenceV1,
+): GraphPlusPluginDataV1 {
+  const checked = validateGraphPlusCheckpointReferenceV1(reference);
+  if (!checked) throw new Error('Cannot persist an invalid Graph+ checkpoint reference.');
+  const graphDocuments = withoutKey(data.consumers.graphPlus.graphDocuments, vaultId);
+  const viewStates = withoutKey(data.consumers.graphPlus.viewStates, vaultId);
+  return {
+    ...data,
+    consumers: {
+      ...data.consumers,
+      graphPlus: {
+        ...data.consumers.graphPlus,
+        checkpoints: {
+          ...(data.consumers.graphPlus.checkpoints ?? {}),
+          [vaultId]: cloneJson(checked),
+        },
+        graphDocuments,
+        viewStates,
+      },
+    },
+  };
+}
+
+function validateGraphPlusCheckpointReferenceV1(value: unknown): GraphPlusCheckpointReferenceV1 | undefined {
+  if (!isRecord(value) || value.storageVersion !== 'document-file-v1'
+    || typeof value.documentPath !== 'string' || value.documentPath.length === 0
+    || typeof value.documentId !== 'string' || value.documentId.length === 0
+    || typeof value.documentRevision !== 'number' || !Number.isSafeInteger(value.documentRevision) || value.documentRevision < 0
+    || typeof value.savedAt !== 'number' || !Number.isFinite(value.savedAt)) return undefined;
+  let viewState: GraphViewStateV1 | undefined;
+  if (value.viewState !== undefined) {
+    try {
+      assertGraphViewStateV1(value.viewState);
+      if (value.viewState.documentId === value.documentId
+        && value.viewState.documentRevision === value.documentRevision) viewState = value.viewState;
+    } catch {
+      viewState = undefined;
+    }
+  }
+  const lens = coerceGraphPlusLensStateV1(value.lens);
+  return cloneJson({
+    storageVersion: 'document-file-v1' as const,
+    documentPath: value.documentPath,
+    documentId: value.documentId,
+    documentRevision: value.documentRevision,
+    ...(viewState ? { viewState } : {}),
+    ...(lens ? { lens } : {}),
+    savedAt: value.savedAt,
+  });
+}
+
+function withoutKey(
+  values: Readonly<Record<string, unknown>> | undefined,
+  key: string,
+): Readonly<Record<string, unknown>> | undefined {
+  if (!values || !Object.prototype.hasOwnProperty.call(values, key)) return values;
+  const next = { ...values };
+  delete next[key];
+  return Object.keys(next).length ? next : undefined;
 }
 
 function isProfileSnapshot(value: unknown): value is ConsumerProfileRegistrySnapshotV1 {

@@ -22,10 +22,12 @@ export interface CoreGraphChangedEventV1 {
 
 export class GraphDocumentStore {
   private document: GraphDocumentV1;
+  private nodeIds: Set<string>;
   private readonly listeners = new Set<(event: CoreGraphChangedEventV1) => void>();
 
   constructor(document: GraphDocumentV1) {
     this.document = cloneGraphDocumentV1(document);
+    this.nodeIds = new Set(this.document.nodes.map((node) => node.id));
   }
 
   get documentId(): string {
@@ -40,10 +42,23 @@ export class GraphDocumentStore {
     return cloneGraphDocumentV1(this.document);
   }
 
+  /**
+   * Returns the engine-owned canonical document for internal runtime work.
+   * This reference must never cross a public session or consumer boundary.
+   */
+  readDocument(): GraphDocumentV1 {
+    return this.document;
+  }
+
+  hasNode(nodeId: string): boolean {
+    return this.nodeIds.has(nodeId);
+  }
+
   replaceDocument(document: GraphDocumentV1): void {
     const next = cloneGraphDocumentV1(document);
     const previousRevision = this.document.revision;
     this.document = next;
+    this.nodeIds = new Set(next.nodes.map((node) => node.id));
     this.emit({
       documentId: next.documentId,
       previousRevision,
@@ -91,6 +106,7 @@ export class GraphDocumentStore {
 
     const storedPatch = clonePatch(patch);
     this.document = cloneGraphDocumentV1(next);
+    this.nodeIds = new Set(next.nodes.map((node) => node.id));
     this.emit({
       documentId: next.documentId,
       previousRevision,

@@ -242,7 +242,7 @@ export class GraphPlusConsumerV1<TFile> {
     this.session = session;
     this.effectiveSettings = await session.exportEffectiveSettings();
     this.document = document;
-    this.checkpoint.attach(session);
+    this.checkpoint.attach(session, document);
     this.sessionSubscriptions.push(session.onError((error) => this.options.onError?.(error)));
     await this.applyFilter();
   }

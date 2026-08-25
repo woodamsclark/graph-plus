@@ -402,6 +402,20 @@ test('large-graph fixture keeps adaptive labels bounded and exports stage timing
     'labelLayoutMs', 'moduleTickMs', 'nodeRenderMs', 'projectionMs', 'totalMs',
   ], 'performance snapshots should separate the accepted frame stages');
   assert(Object.values(performance.latestFrame).every((value) => Number.isFinite(value) && value >= 0), 'every stage duration should be finite and non-negative');
+  equal(performance.window?.totalMs.sampleCount, 1, 'rolling diagnostics should include the rendered sample');
+  equal(performance.counters?.renderedFrames, 1, 'work counters should identify the measured render');
+  assert((performance.counters?.moduleTicks ?? 0) >= 1, 'work counters should expose active module ticks');
+
+  await session.resetPerformanceMeasurements();
+  for (let index = 0; index < 300; index += 1) value.platform.flushFrame((index + 1) * (1_000 / 60));
+  const activeWindow = await session.exportPerformanceSnapshot();
+  equal(activeWindow.counters?.documentExports, 0, 'active layout frames must not export public documents');
+  equal(activeWindow.counters?.viewExports, 0, 'active layout frames must not export public view snapshots');
+  equal(activeWindow.counters?.projectionPasses, 0, 'physics-only frames must not rerun graph-wide projection');
+  equal(activeWindow.counters?.frameCompositions, 0, 'stable private position buffers must not rebuild static frames');
+  const settledRenderCount = activeWindow.counters?.renderedFrames ?? 0;
+  for (let index = 0; index < 10; index += 1) value.platform.flushFrame((index + 301) * (1_000 / 60));
+  equal((await session.exportPerformanceSnapshot()).counters?.renderedFrames, settledRenderCount, 'settled force should stop invalidating renders');
   await session.dispose();
 });
 

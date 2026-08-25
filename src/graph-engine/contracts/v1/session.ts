@@ -42,6 +42,7 @@ export interface GraphSessionV1 {
   setSessionOverrides(overrides: GraphSettingsOverridesV1): Promise<void>;
   exportEffectiveSettings(): Promise<GraphEffectiveSettingsV1>;
   exportPerformanceSnapshot(): Promise<GraphPerformanceSnapshotV1>;
+  resetPerformanceMeasurements(): Promise<void>;
 
   onIntent(listener: (intent: GraphIntentV1) => void): Disposable;
   onGraphChanged(listener: (event: GraphChangedEventV1) => void): Disposable;
@@ -67,6 +68,29 @@ export interface GraphFramePerformanceV1 {
 export interface GraphPerformanceSnapshotV1 {
   readonly frameCount: number;
   readonly latestFrame: GraphFramePerformanceV1;
+  readonly window?: GraphPerformanceWindowV1;
+  readonly counters?: GraphPerformanceCountersV1;
+}
+
+export interface GraphPerformanceDistributionV1 {
+  readonly sampleCount: number;
+  readonly p50: number;
+  readonly p95: number;
+  readonly p99: number;
+  readonly max: number;
+}
+
+export type GraphPerformanceWindowV1 = Readonly<Record<keyof GraphFramePerformanceV1, GraphPerformanceDistributionV1>>;
+
+export interface GraphPerformanceCountersV1 {
+  readonly documentExports: number;
+  readonly viewExports: number;
+  readonly projectionPasses: number;
+  readonly hitTests: number;
+  readonly moduleTicks: number;
+  readonly frameCompositions: number;
+  readonly renderedFrames: number;
+  readonly scheduledFrames: number;
 }
 
 export interface TransitionOptionsV1 {

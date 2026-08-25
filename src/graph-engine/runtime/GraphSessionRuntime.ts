@@ -28,7 +28,7 @@ import {
   reconcileGraphViewStateV1,
 } from '../core/state/index.ts';
 import { GraphCameraController } from './camera/index.ts';
-import { SessionInteractionRuntime } from './interaction/index.ts';
+import { SessionInteractionRuntime, type GraphRuntimeViewChangeV1 } from './interaction/index.ts';
 import {
   GraphModuleHost,
   GraphRequiredModuleErrorV1,
@@ -113,6 +113,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private frameCount = 0;
   private frameDirty = true;
   private latestFramePerformance = emptyFramePerformance();
+  private readonly performanceSamples: GraphPerformanceSnapshotV1['latestFrame'][] = [];
+  private performanceCounters = emptyPerformanceCounters();
   private lastFrameTimestamp: number | null = null;
   private manuallySuspended = false;
   private documentSuspended = false;
@@ -133,17 +135,20 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.interaction.tick();
     const interactionMs = duration(interactionStart, this.platform.now());
     const hitTestMs = this.interaction.consumeHitTestDuration();
+    this.performanceCounters.hitTests += this.interaction.consumeHitTestCount();
     const deltaSeconds = this.lastFrameTimestamp === null ? 1 / 60 : Math.max(0, (timestamp - this.lastFrameTimestamp) / 1000);
     this.lastFrameTimestamp = timestamp;
     const moduleStart = this.platform.now();
+    this.performanceCounters.moduleTicks += 1;
     const positions = this.moduleHost.tick(this.moduleView, deltaSeconds);
     const moduleTickMs = duration(moduleStart, this.platform.now());
     const compositionStart = this.platform.now();
     if (positions) {
-      this.viewState = cloneGraphViewStateV1({ ...this.viewState, positions });
-      this.moduleHost.viewChanged(this.viewState);
-      this.moduleView = { ...this.moduleView, positions };
-      this.refreshFrame();
+      const requiresComposition = positions !== this.moduleView.positions;
+      this.viewState = { ...this.viewState, positions };
+      this.moduleView = { ...this.moduleView, positions, viewState: this.viewState };
+      if (requiresComposition) this.refreshFrame();
+      else this.frameDirty = true;
     }
     const compositionMs = duration(compositionStart, this.platform.now());
     if (this.isSuspended()) return;
@@ -159,6 +164,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         ...render,
         totalMs: duration(frameStart, this.platform.now()),
       };
+      this.performanceSamples.push({ ...this.latestFramePerformance });
+      if (this.performanceSamples.length > 600) this.performanceSamples.shift();
+      this.performanceCounters.renderedFrames += 1;
       this.surface.recordFrame(this.frameCount);
     }
     this.scheduleFrame();
@@ -186,12 +194,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.viewState = normalizePerspectiveViewState(restoredViewState
       ? addMissingPositions(
           reconcileGraphViewStateV1(restoredViewState, this.restoreContext()),
-          this.store.exportDocument(),
+          this.store.readDocument(),
           this.profile.dimensions,
         )
       : this.createInitialViewState(), this.profile.dimensions, focalLengthMm(this.profile.profileSettings));
-    this.projectionSelection = allOf(this.store.exportDocument());
-    this.renderSelection = allOf(this.store.exportDocument());
+    this.projectionSelection = allOf(this.store.readDocument());
+    this.renderSelection = allOf(this.store.readDocument());
 
     let visibilityListenerInstalled = false;
     try {
@@ -219,8 +227,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         platform: this.platform,
         surface: this.surface,
         camera: this.camera,
-        frames: this.frames,
-        getDocument: () => this.store.exportDocument(),
+        hitTest: (point) => this.renderer.hitTest(point),
+        getDocument: () => this.store.readDocument(),
         getViewState: () => this.viewState,
         getInteractivePositions: () => this.moduleView?.positions ?? this.viewState.positions,
         isNodeDraggable: () => !this.moduleView?.formActive,
@@ -228,10 +236,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         getRenderSelection: () => this.renderSelection,
         getResetCamera: () => defaultCamera(this.profile.dimensions, focalLengthMm(this.profile.profileSettings)),
         getDragReleasePolicy: () => this.profile.profileSettings.dragRelease === 'pin' ? 'pin' : 'dynamic',
-        onViewStateChanged: () => {
-          this.moduleHost.viewChanged(this.viewState);
-          this.recomputeView(false);
-        },
+        onViewStateChanged: (change) => this.handleRuntimeViewChange(change),
         onIntent: (intent) => this.emitIntent(intent),
         onActivateNode: (nodeId) => this.invokePrimaryNodeAction(nodeId),
       });
@@ -261,10 +266,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   async replaceDocument(document: GraphDocumentV1): Promise<void> {
     this.requireActive();
-    const previous = this.store.exportDocument();
+    const previous = this.store.readDocument();
     try {
       const nextStore = new GraphDocumentStore(document);
-      const next = nextStore.exportDocument();
+      const next = nextStore.readDocument();
       this.store = nextStore;
       this.viewState = previous.documentId === next.documentId
         ? addMissingPositions(
@@ -310,10 +315,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     }
     this.viewState = addMissingPositions(
       reconcileGraphViewStateV1(this.viewState, this.restoreContext()),
-      this.store.exportDocument(),
+      this.store.readDocument(),
       this.profile.dimensions,
     );
-    this.moduleHost.documentChanged(this.store.exportDocument());
+    this.moduleHost.documentChanged(this.store.readDocument());
     this.moduleHost.viewChanged(this.viewState);
     this.recomputeView();
     this.emitGraphChanged({
@@ -329,6 +334,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   async exportDocument(): Promise<GraphDocumentV1> {
     this.requireActive();
+    this.performanceCounters.documentExports += 1;
     return this.store.exportDocument();
   }
 
@@ -337,7 +343,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (!this.moduleHost.has(SHIPPED_GRAPH_MODULE_IDS_V1.filtering)) {
       throw new Error('Filtering is unavailable in the active graph profile.');
     }
-    evaluateGraphFilterV1(this.store.exportDocument(), filter);
+    evaluateGraphFilterV1(this.store.readDocument(), filter);
     this.viewState = cloneGraphViewStateV1({
       ...this.viewState,
       activeFilters: {
@@ -370,7 +376,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   async focusNode(nodeId: string | null): Promise<void> {
     this.requireActive();
-    if (nodeId !== null && !this.store.exportDocument().nodes.some((node) => node.id === nodeId)) {
+    if (nodeId !== null && !this.store.hasNode(nodeId)) {
       throw new Error(`Cannot focus unknown node "${nodeId}".`);
     }
     this.setFocusState(nodeId ?? undefined);
@@ -378,7 +384,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   async setNodePinned(nodeId: string, pinned: boolean): Promise<void> {
     this.requireActive();
-    if (!this.store.exportDocument().nodes.some((node) => node.id === nodeId)) {
+    if (!this.store.hasNode(nodeId)) {
       throw new Error(`Cannot ${pinned ? 'pin' : 'unpin'} unknown node "${nodeId}".`);
     }
     const current = new Set(this.viewState.pinnedNodeIds);
@@ -386,15 +392,16 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     else current.delete(nodeId);
     const pinnedNodeIds = [...current];
     if (sameIds(pinnedNodeIds, this.viewState.pinnedNodeIds)) return;
-    this.viewState = cloneGraphViewStateV1({ ...this.viewState, pinnedNodeIds });
+    this.viewState = { ...this.viewState, pinnedNodeIds };
+    this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
-    this.recomputeView(false);
+    this.refreshFrame();
   }
 
   async fitNodes(nodeIds?: readonly string[], options?: TransitionOptionsV1): Promise<void> {
     this.requireActive();
     assertTransition(options);
-    const document = this.store.exportDocument();
+    const document = this.store.readDocument();
     const candidates = nodeIds ?? [...this.renderSelection.nodeIds];
     const positions = [...new Set(candidates)]
       .filter((id) => document.nodes.some((node) => node.id === id))
@@ -409,12 +416,14 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     assertTransition(options);
     this.camera.setState(defaultCamera(this.profile.dimensions, focalLengthMm(this.profile.profileSettings)));
     this.synchronizeCameraState();
+    this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame();
   }
 
   async exportViewState(): Promise<GraphViewStateV1> {
     this.requireActive();
+    this.performanceCounters.viewExports += 1;
     this.synchronizeModuleState();
     return cloneGraphViewStateV1(this.viewState);
   }
@@ -425,7 +434,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       const prepared = this.prepareRestoredViewState(state);
       this.viewState = normalizePerspectiveViewState(addMissingPositions(
         reconcileGraphViewStateV1(prepared, this.restoreContext()),
-        this.store.exportDocument(),
+        this.store.readDocument(),
         this.profile.dimensions,
       ), this.profile.dimensions, focalLengthMm(this.profile.profileSettings));
       this.camera.setState(this.viewState.camera);
@@ -570,7 +579,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       sessionId: this.sessionId,
       themePalette: this.themePalette,
       initialModuleState,
-      getDocument: () => this.store.exportDocument(),
+      getDocument: () => this.store.readDocument(),
       getViewState,
       onFailure,
     });
@@ -643,7 +652,19 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   async exportPerformanceSnapshot(): Promise<GraphPerformanceSnapshotV1> {
     this.requireActive();
-    return { frameCount: this.frameCount, latestFrame: { ...this.latestFramePerformance } };
+    return {
+      frameCount: this.frameCount,
+      latestFrame: { ...this.latestFramePerformance },
+      window: summarizePerformance(this.performanceSamples),
+      counters: { ...this.performanceCounters },
+    };
+  }
+
+  async resetPerformanceMeasurements(): Promise<void> {
+    this.requireActive();
+    this.performanceSamples.length = 0;
+    this.latestFramePerformance = emptyFramePerformance();
+    this.performanceCounters = emptyPerformanceCounters();
   }
 
   onIntent(listener: (intent: GraphIntentV1) => void): Disposable {
@@ -693,7 +714,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   private restoreContext() {
     return {
-      document: this.store.exportDocument(),
+      document: this.store.readDocument(),
       consumerId: this.consumerId,
       profileId: this.profileId,
       dimensions: this.profile.dimensions,
@@ -701,7 +722,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private createInitialViewState(): GraphViewStateV1 {
-    const document = this.store.exportDocument();
+    const document = this.store.readDocument();
     return {
       schemaVersion: 1,
       documentId: document.documentId,
@@ -725,7 +746,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   private recomputeView(resetInteraction = true): void {
     if (resetInteraction) this.interaction.reset();
-    const document = this.store.exportDocument();
+    this.performanceCounters.projectionPasses += 1;
+    const document = this.store.readDocument();
     this.moduleView = this.moduleHost.project({
       sourceDocument: document,
       document,
@@ -745,6 +767,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private refreshFrame(): void {
+    this.performanceCounters.frameCompositions += 1;
     this.frames.set(composeGraphRenderFrameV1({
       document: this.moduleView.document,
       viewState: this.viewState,
@@ -759,7 +782,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private updateSurface(): void {
-    const document = this.store.exportDocument();
+    const document = this.store.readDocument();
     this.surface.update({
       documentId: document.documentId,
       documentRevision: document.revision,
@@ -772,32 +795,50 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     });
   }
 
+  private handleRuntimeViewChange(change: GraphRuntimeViewChangeV1): void {
+    this.moduleView = {
+      ...this.moduleView,
+      viewState: this.viewState,
+      ...(change === 'positions' ? { positions: this.viewState.positions } : {}),
+    };
+    if (change === 'camera') {
+      this.moduleHost.viewChanged(this.viewState);
+      this.frameDirty = true;
+      return;
+    }
+    this.moduleHost.viewChanged(this.viewState);
+    this.refreshFrame();
+    if (change === 'interaction') this.updateSurface();
+  }
+
   private synchronizeCameraState(): void {
-    this.viewState = cloneGraphViewStateV1({ ...this.viewState, camera: this.camera.getState() });
+    this.viewState = { ...this.viewState, camera: this.camera.getState() };
   }
 
   private fitPositions(positions: readonly Vec3[]): void {
     if (!positions.length) return;
     this.camera.fit(positions);
     this.synchronizeCameraState();
+    this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame();
   }
 
   private setSelectionState(nodeIds: readonly string[]): void {
-    const known = new Set(this.store.exportDocument().nodes.map((node) => node.id));
-    const selectedNodeIds = [...new Set(nodeIds)].filter((id) => known.has(id));
+    const selectedNodeIds = [...new Set(nodeIds)].filter((id) => this.store.hasNode(id));
     if (sameIds(selectedNodeIds, this.viewState.selectedNodeIds)) return;
-    this.viewState = cloneGraphViewStateV1({ ...this.viewState, selectedNodeIds });
+    this.viewState = { ...this.viewState, selectedNodeIds };
+    this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
-    this.recomputeView(false);
+    this.refreshFrame();
+    this.updateSurface();
   }
 
   private setFocusState(nodeId: string | undefined): void {
-    if (nodeId !== undefined && !this.store.exportDocument().nodes.some((node) => node.id === nodeId)) return;
+    if (nodeId !== undefined && !this.store.hasNode(nodeId)) return;
     if (this.viewState.focusedNodeId === nodeId) return;
     const { focusedNodeId: _focusedNodeId, ...withoutFocus } = this.viewState;
-    this.viewState = cloneGraphViewStateV1(nodeId === undefined ? withoutFocus : { ...withoutFocus, focusedNodeId: nodeId });
+    this.viewState = nodeId === undefined ? withoutFocus : { ...withoutFocus, focusedNodeId: nodeId };
     if (nodeId) {
       const position = this.viewState.positions[nodeId];
       if (position) {
@@ -805,8 +846,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         this.synchronizeCameraState();
       }
     }
+    this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
-    this.recomputeView(false);
+    this.refreshFrame();
+    this.updateSurface();
   }
 
   private emitIntent(intent: GraphIntentV1): void {
@@ -862,7 +905,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private nodeActionContext(nodeId: string): GraphNodeActionContextV1 {
-    const document = this.store.exportDocument();
+    const document = this.store.readDocument();
     return {
       consumerId: this.consumerId,
       profileId: this.profileId,
@@ -876,7 +919,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private hasNode(nodeId: string): boolean {
-    return this.store.exportDocument().nodes.some((node) => node.id === nodeId);
+    return this.store.hasNode(nodeId);
   }
 
   private handleNodeActionFailure(failure: GraphNodeActionFailureV1): void {
@@ -905,6 +948,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   private scheduleFrame(): void {
     if (this.animationFrame === null && !this.isSuspended()) {
+      this.performanceCounters.scheduledFrames += 1;
       this.animationFrame = this.platform.requestAnimationFrame(this.onAnimationFrame);
     }
   }
@@ -968,6 +1012,49 @@ function emptyFramePerformance(): GraphPerformanceSnapshotV1['latestFrame'] {
     projectionMs: 0, edgeRenderMs: 0, nodeRenderMs: 0, labelLayoutMs: 0,
     labelDrawMs: 0, totalMs: 0,
   };
+}
+
+function emptyPerformanceCounters(): {
+  documentExports: number;
+  viewExports: number;
+  projectionPasses: number;
+  hitTests: number;
+  moduleTicks: number;
+  frameCompositions: number;
+  renderedFrames: number;
+  scheduledFrames: number;
+} {
+  return {
+    documentExports: 0,
+    viewExports: 0,
+    projectionPasses: 0,
+    hitTests: 0,
+    moduleTicks: 0,
+    frameCompositions: 0,
+    renderedFrames: 0,
+    scheduledFrames: 0,
+  };
+}
+
+function summarizePerformance(
+  samples: readonly GraphPerformanceSnapshotV1['latestFrame'][],
+): NonNullable<GraphPerformanceSnapshotV1['window']> {
+  const keys = Object.keys(emptyFramePerformance()) as (keyof GraphPerformanceSnapshotV1['latestFrame'])[];
+  return Object.fromEntries(keys.map((key) => {
+    const values = samples.map((sample) => sample[key]).sort((a, b) => a - b);
+    return [key, {
+      sampleCount: values.length,
+      p50: percentile(values, 0.5),
+      p95: percentile(values, 0.95),
+      p99: percentile(values, 0.99),
+      max: values.length ? values[values.length - 1] : 0,
+    }];
+  })) as NonNullable<GraphPerformanceSnapshotV1['window']>;
+}
+
+function percentile(values: readonly number[], fraction: number): number {
+  if (!values.length) return 0;
+  return values[Math.min(values.length - 1, Math.max(0, Math.ceil(values.length * fraction) - 1))];
 }
 
 function duration(start: number, end: number): number {

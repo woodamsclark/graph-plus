@@ -11,3 +11,8 @@ Graph+ is a better Obsidian graph and the installed host for a reusable Graph En
 
 See [Graph Engine V1 consumer guide](docs/graph-engine-consumer-guide.md) for the
 public boundary and a runnable neutral example.
+
+Current design artifacts:
+
+- [Graph Engine V1.2 scalability contract](docs/graph-engine-v1.2-scalability-contract.md)
+- [Graph Engine V1.2 scalability acceptance plan](docs/graph-engine-v1.2-scalability-acceptance.md)

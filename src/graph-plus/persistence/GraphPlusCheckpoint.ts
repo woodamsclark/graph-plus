@@ -20,7 +20,15 @@ export interface GraphPlusCheckpointV1 {
 
 export interface GraphPlusCheckpointStoreV1 {
   load(vaultId: string): Promise<GraphPlusCheckpointV1 | undefined>;
-  save(vaultId: string, checkpoint: GraphPlusCheckpointV1): Promise<void>;
+  save(
+    vaultId: string,
+    checkpoint: GraphPlusCheckpointV1,
+    options?: GraphPlusCheckpointSaveOptionsV1,
+  ): Promise<void>;
+}
+
+export interface GraphPlusCheckpointSaveOptionsV1 {
+  readonly documentChanged: boolean;
 }
 
 export interface GraphPlusCheckpointClockV1 {
@@ -34,6 +42,9 @@ export class GraphPlusCheckpointControllerV1 {
   private timer: unknown;
   private subscriptions: Disposable[] = [];
   private flushQueue: Promise<void> = Promise.resolve();
+  private cachedDocument?: GraphDocumentV1;
+  private documentGeneration = 0;
+  private savedDocumentGeneration = -1;
 
   constructor(
     private readonly vaultId: string,
@@ -43,10 +54,16 @@ export class GraphPlusCheckpointControllerV1 {
     private readonly getLens?: () => GraphPlusLensStateV1,
   ) {}
 
-  attach(session: GraphSessionV1): void {
+  attach(session: GraphSessionV1, document?: GraphDocumentV1): void {
     this.detach();
     this.session = session;
-    this.subscriptions.push(session.onGraphChanged(() => this.schedule()));
+    this.cachedDocument = document;
+    this.documentGeneration = 0;
+    this.savedDocumentGeneration = document ? 0 : -1;
+    this.subscriptions.push(session.onGraphChanged(() => {
+      this.documentGeneration += 1;
+      this.schedule();
+    }));
     this.subscriptions.push(session.onIntent((intent) => {
       if (intent.type === 'viewport-changed' || intent.type === 'node-drag-ended'
         || intent.type === 'selection-changed' || intent.type === 'focus-changed') this.schedule();
@@ -68,13 +85,23 @@ export class GraphPlusCheckpointControllerV1 {
     const session = this.session;
     if (!session) return this.flushQueue;
     this.flushQueue = this.flushQueue.catch(() => undefined).then(async () => {
-      const [document, viewState] = await Promise.all([session.exportDocument(), session.exportViewState()]);
+      const generation = this.documentGeneration;
+      const needsDocument = !this.cachedDocument || this.savedDocumentGeneration !== generation;
+      const documentPromise: Promise<GraphDocumentV1> = needsDocument
+        ? session.exportDocument()
+        : Promise.resolve(this.cachedDocument!);
+      const [document, viewState] = await Promise.all([
+        documentPromise,
+        session.exportViewState(),
+      ]);
       await this.store.save(this.vaultId, {
         document,
         viewState,
         ...(this.getLens ? { lens: this.getLens() } : {}),
         savedAt: this.clock.now(),
-      });
+      }, { documentChanged: needsDocument });
+      this.cachedDocument = document;
+      if (this.documentGeneration === generation) this.savedDocumentGeneration = generation;
     });
     return this.flushQueue;
   }
@@ -94,6 +121,9 @@ export class GraphPlusCheckpointControllerV1 {
     this.timer = undefined;
     this.subscriptions.splice(0).forEach((subscription) => subscription.dispose());
     this.session = undefined;
+    this.cachedDocument = undefined;
+    this.documentGeneration = 0;
+    this.savedDocumentGeneration = -1;
   }
 }
 

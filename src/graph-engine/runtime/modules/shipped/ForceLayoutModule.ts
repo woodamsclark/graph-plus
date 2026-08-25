@@ -14,17 +14,28 @@ interface ForceSettings {
   readonly maxSpeed: number;
 }
 
+interface MutableVec3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
 interface OctreeNode {
   readonly center: Vec3;
   readonly halfSize: number;
   mass: number;
-  centerOfMass: Vec3;
+  centerOfMass: MutableVec3;
   bodyId?: string;
   children?: Array<OctreeNode | undefined>;
 }
 
 export class ForceLayoutModule implements GraphModuleInstanceV1 {
-  private readonly velocities = new Map<string, Vec3>();
+  private readonly velocities = new Map<string, MutableVec3>();
+  private readonly forces = new Map<string, MutableVec3>();
+  private positions: Record<string, MutableVec3> = {};
+  private positionSource: Readonly<Record<string, Vec3>> | null = null;
+  private documentKey = '';
+  private pinned = new Set<string>();
   private suspended = false;
   private alpha = 1;
   private running = true;
@@ -41,15 +52,12 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   onDocumentChanged(): void {
-    this.velocities.clear();
+    this.documentKey = '';
     this.reheat();
   }
 
   onViewChanged(state: GraphModulePipelineStateV1['viewState']): void {
-    const nextPinnedKey = [...state.pinnedNodeIds].sort().join('\u0000');
-    if (nextPinnedKey === this.pinnedKey) return;
-    this.pinnedKey = nextPinnedKey;
-    this.reheat();
+    this.synchronizePinnedNodes(state);
   }
 
   setSuspended(suspended: boolean): void {
@@ -57,58 +65,114 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   tick(state: GraphModulePipelineStateV1, deltaSeconds: number) {
+    // A restored view can reach the first tick before a view lifecycle event. Keep
+    // pin state correct without requiring the session kernel to special-case force.
+    this.synchronizePinnedNodes(state.viewState);
     if (this.suspended || state.formActive || state.document.nodes.length < 2 || !this.running) return;
+    this.synchronizeBuffers(state);
     const dt = Math.min(1 / 20, Math.max(1 / 240, deltaSeconds || 1 / 60));
     this.alpha += (0 - this.alpha) * this.settings.alphaDecay;
-    const positions: Record<string, Vec3> = Object.fromEntries(
-      state.document.nodes.map((node) => [node.id, { ...(state.positions[node.id] ?? { x: 0, y: 0, z: 0 }) }]),
-    );
-    const forces = new Map(state.document.nodes.map((node) => [node.id, { x: 0, y: 0, z: 0 }]));
-    this.applyBarnesHutRepulsion(positions, forces);
+    for (const node of state.document.nodes) {
+      const force = this.forces.get(node.id)!;
+      force.x = 0; force.y = 0; force.z = 0;
+    }
+    this.applyBarnesHutRepulsion(this.positions, this.forces);
     for (const edge of state.document.edges) {
-      const source = positions[edge.sourceId];
-      const target = positions[edge.targetId];
+      const source = this.positions[edge.sourceId];
+      const target = this.positions[edge.targetId];
       if (!source || !target) continue;
-      const delta = subtract(target, source);
-      const length = Math.max(0.001, magnitude(delta));
+      const dx = target.x - source.x;
+      const dy = target.y - source.y;
+      const dz = target.z - source.z;
+      const length = Math.max(0.001, Math.hypot(dx, dy, dz));
       const strength = this.settings.springStrength * Math.max(0.1, Math.abs(edge.weight ?? 1));
-      const force = scale(delta, strength * Math.tanh((length - this.settings.springLength) / 50) * this.alpha / length);
-      addInto(forces.get(edge.sourceId)!, force);
-      addInto(forces.get(edge.targetId)!, scale(force, -1));
+      const amount = strength * Math.tanh((length - this.settings.springLength) / 50) * this.alpha / length;
+      const sourceForce = this.forces.get(edge.sourceId)!;
+      const targetForce = this.forces.get(edge.targetId)!;
+      sourceForce.x += dx * amount; sourceForce.y += dy * amount; sourceForce.z += dz * amount;
+      targetForce.x -= dx * amount; targetForce.y -= dy * amount; targetForce.z -= dz * amount;
     }
     for (const node of state.document.nodes) {
-      const position = positions[node.id];
-      addInto(forces.get(node.id)!, scale(position, -this.settings.centeringStrength * this.alpha));
+      const position = this.positions[node.id];
+      const force = this.forces.get(node.id)!;
+      const amount = -this.settings.centeringStrength * this.alpha;
+      force.x += position.x * amount;
+      force.y += position.y * amount;
+      force.z += position.z * amount;
     }
-    const pinned = new Set(state.viewState.pinnedNodeIds);
     let changed = false;
     for (const node of state.document.nodes) {
-      if (pinned.has(node.id)) {
-        this.velocities.set(node.id, { x: 0, y: 0, z: 0 });
+      const velocity = this.velocities.get(node.id)!;
+      if (this.pinned.has(node.id)) {
+        velocity.x = 0; velocity.y = 0; velocity.z = 0;
         continue;
       }
-      const previousVelocity = this.velocities.get(node.id) ?? { x: 0, y: 0, z: 0 };
-      const acceleration = forces.get(node.id)!;
-      let velocity = scale(add(previousVelocity, acceleration), 1 - this.settings.velocityDecay);
-      if (this.dimensions === '2d') velocity = { ...velocity, z: 0 };
+      const acceleration = this.forces.get(node.id)!;
+      const decay = 1 - this.settings.velocityDecay;
+      velocity.x = (velocity.x + acceleration.x) * decay;
+      velocity.y = (velocity.y + acceleration.y) * decay;
+      velocity.z = this.dimensions === '2d' ? 0 : (velocity.z + acceleration.z) * decay;
       const speed = magnitude(velocity);
-      if (speed > this.settings.maxSpeed) velocity = scale(velocity, this.settings.maxSpeed / speed);
-      this.velocities.set(node.id, velocity);
-      const movement = scale(velocity, dt * 60);
-      if (magnitude(movement) > 0.00001) changed = true;
-      const nextPosition = add(positions[node.id], movement);
-      positions[node.id] = this.dimensions === '2d' ? { ...nextPosition, z: 0 } : nextPosition;
+      if (speed > this.settings.maxSpeed) {
+        const scale = this.settings.maxSpeed / speed;
+        velocity.x *= scale; velocity.y *= scale; velocity.z *= scale;
+      }
+      const movementScale = dt * 60;
+      const movement = Math.hypot(velocity.x, velocity.y, velocity.z) * movementScale;
+      if (movement > 0.00001) changed = true;
+      const position = this.positions[node.id];
+      position.x += velocity.x * movementScale;
+      position.y += velocity.y * movementScale;
+      position.z = this.dimensions === '2d' ? 0 : position.z + velocity.z * movementScale;
     }
-    if (this.alpha < this.settings.alphaMin || this.isSettled(pinned)) {
+    if (this.alpha < this.settings.alphaMin || this.isSettled(this.pinned)) {
       this.running = false;
       this.alpha = 0;
-      for (const node of state.document.nodes) this.velocities.set(node.id, { x: 0, y: 0, z: 0 });
+      for (const velocity of this.velocities.values()) {
+        velocity.x = 0; velocity.y = 0; velocity.z = 0;
+      }
     }
-    return changed ? { positions: { ...state.viewState.positions, ...positions } } : undefined;
+    return changed ? { positions: this.positions } : undefined;
+  }
+
+  private synchronizePinnedNodes(state: GraphModulePipelineStateV1['viewState']): void {
+    const nextPinnedKey = [...state.pinnedNodeIds].sort().join('\u0000');
+    if (nextPinnedKey === this.pinnedKey) return;
+    this.pinnedKey = nextPinnedKey;
+    this.pinned = new Set(state.pinnedNodeIds);
+    this.reheat();
   }
 
   dispose(): void {
     this.velocities.clear();
+    this.forces.clear();
+    this.positions = {};
+    this.positionSource = null;
+  }
+
+  private synchronizeBuffers(state: GraphModulePipelineStateV1): void {
+    const key = `${state.document.documentId}\u0000${state.document.revision}`;
+    const topologyChanged = key !== this.documentKey;
+    const sourceChanged = state.positions !== this.positionSource && state.positions !== this.positions;
+    if (!topologyChanged && !sourceChanged) return;
+    const known = new Set(state.document.nodes.map((node) => node.id));
+    if (topologyChanged) {
+      for (const id of Object.keys(this.positions)) if (!known.has(id)) delete this.positions[id];
+      for (const id of [...this.velocities.keys()]) if (!known.has(id)) this.velocities.delete(id);
+      for (const id of [...this.forces.keys()]) if (!known.has(id)) this.forces.delete(id);
+    }
+    for (const node of state.document.nodes) {
+      const source = state.positions[node.id] ?? { x: 0, y: 0, z: 0 };
+      let position = this.positions[node.id];
+      if (!position) this.positions[node.id] = position = { ...source };
+      else if (sourceChanged) {
+        position.x = source.x; position.y = source.y; position.z = this.dimensions === '2d' ? 0 : source.z;
+      }
+      if (!this.velocities.has(node.id)) this.velocities.set(node.id, { x: 0, y: 0, z: 0 });
+      if (!this.forces.has(node.id)) this.forces.set(node.id, { x: 0, y: 0, z: 0 });
+    }
+    this.documentKey = key;
+    this.positionSource = this.positions;
   }
 
   private applyBarnesHutRepulsion(positions: Readonly<Record<string, Vec3>>, forces: Map<string, Vec3>): void {
@@ -125,22 +189,28 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     id: string,
     position: Vec3,
     cell: OctreeNode,
-    forceTarget: Vec3,
+    forceTarget: MutableVec3,
     minimumSquared: number,
     thetaSquared: number,
   ): void {
     if (cell.mass === 0 || (!cell.children && cell.bodyId === id)) return;
-    let delta = subtract(position, cell.centerOfMass);
-    let rawSquared = dot(delta, delta);
+    let dx = position.x - cell.centerOfMass.x;
+    let dy = position.y - cell.centerOfMass.y;
+    let dz = position.z - cell.centerOfMass.z;
+    let rawSquared = dx * dx + dy * dy + dz * dz;
     if (rawSquared < 0.0001) {
-      delta = deterministicDirection(id, cell.bodyId ?? `cell:${cell.center.x}:${cell.center.y}:${cell.center.z}`, this.dimensions);
+      const direction = deterministicDirection(id, cell.bodyId ?? `cell:${cell.center.x}:${cell.center.y}:${cell.center.z}`, this.dimensions);
+      dx = direction.x; dy = direction.y; dz = direction.z;
       rawSquared = 0.0001;
     }
     const size = cell.halfSize * 2;
     if (!cell.children || (size * size / rawSquared) < thetaSquared) {
       const distance = Math.sqrt(rawSquared);
       const strength = this.settings.repulsionStrength * cell.mass * this.alpha / Math.max(rawSquared, minimumSquared);
-      addInto(forceTarget, scale(delta, strength / distance));
+      const factor = strength / distance;
+      forceTarget.x += dx * factor;
+      forceTarget.y += dy * factor;
+      forceTarget.z += dz * factor;
       return;
     }
     for (const child of cell.children) {
@@ -203,7 +273,9 @@ function createOctreeNode(center: Vec3, halfSize: number): OctreeNode {
 function insertOctreeBody(cell: OctreeNode, id: string, position: Vec3, depth: number): void {
   const previousMass = cell.mass;
   cell.mass += 1;
-  cell.centerOfMass = scale(add(scale(cell.centerOfMass, previousMass), position), 1 / cell.mass);
+  cell.centerOfMass.x = (cell.centerOfMass.x * previousMass + position.x) / cell.mass;
+  cell.centerOfMass.y = (cell.centerOfMass.y * previousMass + position.y) / cell.mass;
+  cell.centerOfMass.z = (cell.centerOfMass.z * previousMass + position.z) / cell.mass;
   if (!cell.children && cell.bodyId === undefined) {
     cell.bodyId = id;
     return;
@@ -223,11 +295,21 @@ function insertOctreeBody(cell: OctreeNode, id: string, position: Vec3, depth: n
 // the tree finite without changing the consumer-owned view positions.
 function positionForExistingBody(cell: OctreeNode, id: string, fallback: Vec3): Vec3 {
   if (cell.mass <= 2) {
-    const prior = scale(subtract(scale(cell.centerOfMass, cell.mass), fallback), 1 / Math.max(1, cell.mass - 1));
+    const divisor = Math.max(1, cell.mass - 1);
+    const prior = {
+      x: (cell.centerOfMass.x * cell.mass - fallback.x) / divisor,
+      y: (cell.centerOfMass.y * cell.mass - fallback.y) / divisor,
+      z: (cell.centerOfMass.z * cell.mass - fallback.z) / divisor,
+    };
     if (Number.isFinite(prior.x) && Number.isFinite(prior.y) && Number.isFinite(prior.z)) return prior;
   }
   const direction = deterministicDirection(id, `${cell.center.x}:${cell.center.y}:${cell.center.z}`, '3d');
-  return add(cell.center, scale(direction, cell.halfSize * 0.25));
+  const amount = cell.halfSize * 0.25;
+  return {
+    x: cell.center.x + direction.x * amount,
+    y: cell.center.y + direction.y * amount,
+    z: cell.center.z + direction.z * amount,
+  };
 }
 
 function insertIntoOctreeChild(cell: OctreeNode, id: string, position: Vec3, depth: number): void {
@@ -255,28 +337,6 @@ function deterministicDirection(a: string, b: string, dimensions: GraphDimension
   }
   const angle = (hash >>> 0) / 0xffffffff * Math.PI * 2;
   return { x: Math.cos(angle), y: Math.sin(angle), z: dimensions === '3d' ? Math.sin(angle * 0.7) * 0.5 : 0 };
-}
-
-function add(a: Vec3, b: Vec3): Vec3 {
-  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
-}
-
-function subtract(a: Vec3, b: Vec3): Vec3 {
-  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
-}
-
-function scale(value: Vec3, amount: number): Vec3 {
-  return { x: value.x * amount, y: value.y * amount, z: value.z * amount };
-}
-
-function addInto(target: { x: number; y: number; z: number }, value: Vec3): void {
-  target.x += value.x;
-  target.y += value.y;
-  target.z += value.z;
-}
-
-function dot(a: Vec3, b: Vec3): number {
-  return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
 function magnitude(value: Vec3): number {
