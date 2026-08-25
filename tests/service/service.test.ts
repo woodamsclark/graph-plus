@@ -10,6 +10,8 @@ import {
   type GraphEngineClientClockV1,
   type GraphEngineEventBusV1,
 } from '../../src/graph-engine/service/index.ts';
+import { GraphCameraController } from '../../src/graph-engine/runtime/index.ts';
+import type { GraphSessionV1 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { assert, equal, test } from '../support/harness.ts';
 import { runtimeFixture, runtimeHarness, runtimeRegistration } from '../support/runtimeHarness.ts';
 
@@ -127,6 +129,41 @@ test('R-INPUT-15 node action registrations are disposable and lease-scoped', asy
   equal(staleRejected, true, 'released leases should not retain action registration authority');
 });
 
+test('S-CONNECT-10 provider leases route registered actions into their mounted sessions', async () => {
+  const value = provider();
+  const result = value.core.connectLocal({
+    consumerId: 'synthetic-consumer',
+    supportedProtocolVersions: [1],
+    requestedCapabilities: ['render'],
+  });
+  assert(result.ok, 'local connection should return a lease');
+  const base = runtimeRegistration();
+  await result.lease.registerConsumer({
+    ...base,
+    profiles: base.profiles.map((profile) => ({
+      ...profile,
+      interaction: { activationActionIds: ['primary'] },
+    })),
+  });
+  let runs = 0;
+  result.lease.registerNodeActions([{ id: 'primary', label: 'Primary', run: () => { runs += 1; } }]);
+  const session = await result.lease.createSession({
+    consumerId: 'synthetic-consumer',
+    profileId: 'two-dimensional',
+    container: value.runtime.container,
+    document: runtimeFixture(),
+  });
+  const canvas = value.runtime.container.querySelector<HTMLCanvasElement>('canvas');
+  assert(canvas, 'provider session should mount its canvas');
+  const point = await projectedNodePoint(session, 'a');
+  dispatchClick(value.runtime.window, canvas, point, 201);
+  value.runtime.platform.flushFrame();
+  dispatchClick(value.runtime.window, canvas, await projectedNodePoint(session, 'a'), 202);
+  value.runtime.platform.flushFrame();
+  equal(runs, 1, 'a session created through the lease should resolve that consumer action');
+  await result.lease.release();
+});
+
 test('S-CONNECT engine-first event discovery succeeds once and cleans client listeners', async () => {
   const bus = new EventBus();
   const clock = new Clock();
@@ -235,3 +272,41 @@ test('availability is announced only after the provider request listener exists'
   equal(listenerCountAtAnnouncement, 2, 'announcement observer and request listener should both exist');
   await host.stop();
 });
+
+async function projectedNodePoint(
+  session: GraphSessionV1,
+  nodeId: string,
+): Promise<{ readonly x: number; readonly y: number }> {
+  const state = await session.exportViewState();
+  const camera = new GraphCameraController(state.camera, state.dimensions);
+  camera.setViewport(640, 360);
+  const projected = camera.worldToScreen(state.positions[nodeId]);
+  return { x: projected.x, y: projected.y };
+}
+
+function dispatchClick(
+  window: ReturnType<typeof runtimeHarness>['window'],
+  canvas: HTMLCanvasElement,
+  point: { readonly x: number; readonly y: number },
+  pointerId: number,
+): void {
+  for (const type of ['pointerdown', 'pointerup'] as const) {
+    const event = new window.PointerEvent(type, {
+      clientX: point.x,
+      clientY: point.y,
+      pointerId,
+      pointerType: 'mouse',
+      button: 0,
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.defineProperties(event, {
+      clientX: { value: point.x },
+      clientY: { value: point.y },
+      pointerId: { value: pointerId },
+      pointerType: { value: 'mouse' },
+      button: { value: 0 },
+    });
+    canvas.dispatchEvent(event as unknown as Event);
+  }
+}

@@ -72,6 +72,9 @@ export type GraphInputEventV1 =
       readonly ctrl: boolean;
       readonly meta: boolean;
       readonly shift: boolean;
+      readonly alt: boolean;
+      readonly repeat: boolean;
+      readonly composing: boolean;
     });
 
 interface GraphCommandBaseV1 {

@@ -57,6 +57,7 @@ export class SessionInteractionRuntime {
     readonly getDragReleasePolicy: () => 'pin' | 'dynamic';
     readonly onViewStateChanged: () => void;
     readonly onIntent: (intent: GraphIntentV1) => void;
+    readonly onActivateNode: (nodeId: string) => boolean;
   }) {
     this.hitTester = new GraphHitTester(this.options.camera, this.options.frames);
     this.registerCommandHandlers();
@@ -167,6 +168,7 @@ export class SessionInteractionRuntime {
         return;
       case 'activate-node':
         if (!this.options.getRenderSelection().nodeIds.has(command.nodeId)) return;
+        if (!this.options.onActivateNode(command.nodeId)) return;
         this.options.onIntent({
           ...this.intentBase(command),
           type: 'node-activated',

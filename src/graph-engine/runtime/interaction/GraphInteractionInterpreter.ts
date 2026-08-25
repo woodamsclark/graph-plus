@@ -52,7 +52,6 @@ export class GraphInteractionInterpreter {
   private readonly pointers = new Map<number, PointerRecord>();
   private mode: SinglePointerMode = { kind: 'idle' };
   private touchGesture: TouchGesture | null = null;
-  private lastTap: { nodeId: string; timestamp: number } | null = null;
 
   constructor(private readonly options: {
     readonly dimensions: GraphDimensionsV1;
@@ -63,7 +62,6 @@ export class GraphInteractionInterpreter {
     readonly getSelectedNodeIds: () => readonly string[];
     readonly getViewport: () => { readonly width: number; readonly height: number };
     readonly dragThresholdPx?: number;
-    readonly doubleClickMs?: number;
   }) {}
 
   tick(): void {
@@ -207,10 +205,7 @@ export class GraphInteractionInterpreter {
       this.command(event, { type: 'activate-background' });
       return;
     }
-    const doubleClick = this.lastTap?.nodeId === hit.nodeId
-      && event.timestamp - this.lastTap.timestamp <= (this.options.doubleClickMs ?? 300);
-    this.lastTap = { nodeId: hit.nodeId, timestamp: event.timestamp };
-    if (doubleClick) {
+    if (this.options.getFocusedNodeId() === hit.nodeId) {
       this.command(event, { type: 'activate-node', nodeId: hit.nodeId, activation: 'primary' });
       return;
     }
@@ -282,7 +277,8 @@ export class GraphInteractionInterpreter {
       return;
     }
     if (event.key === 'Enter') {
-      const nodeId = this.options.getFocusedNodeId() ?? this.options.getSelectedNodeIds()[0];
+      if (event.repeat || event.composing || event.ctrl || event.meta || event.shift || event.alt) return;
+      const nodeId = this.options.getFocusedNodeId();
       if (nodeId) this.command(event, { type: 'activate-node', nodeId, activation: 'keyboard' });
     }
   }

@@ -10,6 +10,7 @@ import {
   GraphModuleRegistry,
   SessionFactory,
   type GraphRenderThemeV1,
+  type GraphNodeActionRuntimeV1,
   type SessionResizeObserverV1,
   type SessionRuntimePlatformV1,
 } from '../../src/graph-engine/runtime/index.ts';
@@ -188,6 +189,7 @@ export function runtimeHarness(options: {
   modules?: GraphModuleRegistry;
   getGlobalOverrides?: () => GraphSettingsOverridesV1;
   resolveThemePalette?: (container: HTMLElement) => GraphRenderThemeV1;
+  nodeActions?: GraphNodeActionRuntimeV1;
 } = {}) {
   const window = new Window();
   const drawCalls: string[] = [];
@@ -243,12 +245,12 @@ export function runtimeHarness(options: {
       platform.triggerResize();
     },
     create: (restoreViewState?: Parameters<typeof factory.createSession>[0]['restoreViewState']) => factory.createSession({
-      consumerId: 'synthetic-consumer',
-      profileId: options.profileId ?? 'two-dimensional',
-      container,
-      document: options.document ?? runtimeFixture(),
-      restoreViewState,
-    }),
+        consumerId: 'synthetic-consumer',
+        profileId: options.profileId ?? 'two-dimensional',
+        container,
+        document: options.document ?? runtimeFixture(),
+        restoreViewState,
+      }, { nodeActions: options.nodeActions }),
   };
 }
 

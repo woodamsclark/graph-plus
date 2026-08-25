@@ -9,6 +9,7 @@ import './runtime/interaction.test.ts';
 import './runtime/modules.test.ts';
 import './runtime/session.test.ts';
 import './service/service.test.ts';
+import './service/actions.test.ts';
 import './service/neutral-sample.test.ts';
 import './obsidian/persistence.test.ts';
 import './obsidian/settings-controller.test.ts';

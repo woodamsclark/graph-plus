@@ -8,6 +8,7 @@ import type {
   GraphFilterRequestV1,
   GraphFilterScopeV1,
   GraphIntentV1,
+  GraphNodeActionContextV1,
   GraphPatchV1,
   GraphPerformanceSnapshotV1,
   GraphSessionErrorV1,
@@ -42,6 +43,10 @@ import {
   type GraphRenderThemeV1,
 } from './render/index.ts';
 import { CanvasSessionSurface, type SessionSurfaceV1 } from './surface/index.ts';
+import type {
+  GraphNodeActionFailureV1,
+  GraphNodeActionRuntimeV1,
+} from './actions/index.ts';
 
 export interface GraphSessionRuntimeOptionsV1 {
   readonly sessionId: string;
@@ -58,6 +63,7 @@ export interface GraphSessionRuntimeOptionsV1 {
   readonly themePalette: GraphRenderThemeV1;
   readonly restoreViewState?: GraphViewStateV1;
   readonly platform: SessionRuntimePlatformV1;
+  readonly nodeActions?: GraphNodeActionRuntimeV1;
 }
 
 export class GraphSessionDisposedErrorV1 extends Error {
@@ -82,6 +88,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly container: HTMLElement;
   private readonly platform: SessionRuntimePlatformV1;
   private readonly themePalette: GraphRenderThemeV1;
+  private readonly nodeActions?: GraphNodeActionRuntimeV1;
   private surface!: SessionSurfaceV1;
   private camera!: GraphCameraController;
   private frames!: GraphFrameStore;
@@ -164,6 +171,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.container = options.container;
     this.platform = options.platform;
     this.themePalette = options.themePalette;
+    this.nodeActions = options.nodeActions;
     this.assertPlatformOwnership();
     this.store = new GraphDocumentStore(options.document);
     this.viewState = normalizePerspectiveViewState(options.restoreViewState
@@ -225,6 +233,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
           this.recomputeView(false);
         },
         onIntent: (intent) => this.emitIntent(intent),
+        onActivateNode: (nodeId) => this.invokePrimaryNodeAction(nodeId),
       });
       this.platform.document.addEventListener('visibilitychange', this.onVisibilityChange);
       visibilityListenerInstalled = true;
@@ -684,6 +693,40 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     }
     this.lastFrameTimestamp = null;
     this.interaction?.setEnabled(false);
+  }
+
+  private invokePrimaryNodeAction(nodeId: string): boolean {
+    const actionIds = this.profile.interaction?.activationActionIds ?? [];
+    if (!this.nodeActions || actionIds.length === 0) return false;
+    const context = this.nodeActionContext(nodeId);
+    return this.nodeActions.invokeFirst(
+      actionIds,
+      context,
+      (failure) => this.handleNodeActionFailure(failure),
+    );
+  }
+
+  private nodeActionContext(nodeId: string): GraphNodeActionContextV1 {
+    const document = this.store.exportDocument();
+    return {
+      consumerId: this.consumerId,
+      profileId: this.profileId,
+      session: this,
+      documentId: document.documentId,
+      documentRevision: document.revision,
+      nodeId,
+      selectedNodeIds: [...this.viewState.selectedNodeIds],
+      ...(this.viewState.focusedNodeId ? { focusedNodeId: this.viewState.focusedNodeId } : {}),
+    };
+  }
+
+  private handleNodeActionFailure(failure: GraphNodeActionFailureV1): void {
+    this.emitError({
+      code: 'consumer-action-failed',
+      actionId: failure.actionId,
+      message: `Consumer action "${failure.actionId}" failed during ${failure.phase}: ${errorMessage(failure.error)}`,
+      recoverable: true,
+    });
   }
 
   private synchronizeRuntimeActivity(): void {

@@ -3,6 +3,7 @@ import type {
   GraphSessionV1,
 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { GraphCameraController } from '../../src/graph-engine/runtime/index.ts';
+import { ConsumerNodeActionRegistryV1 } from '../../src/graph-engine/service/index.ts';
 import { graphDocument, graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import {
@@ -55,8 +56,25 @@ test('R-INPUT-01 pans an unfocused wheel and orbits a focused 3d graph', async (
   await session.dispose();
 });
 
-test('R-INPUT-03 and R-INPUT-04 emit one neutral intent for each selection, focus, and activation', async () => {
-  const value = runtimeHarness();
+test('R-INPUT-03, R-INPUT-04, and R-INPUT-08 use focus-state consumer activation', async () => {
+  let actionRuns = 0;
+  const actions = new ConsumerNodeActionRegistryV1();
+  actions.register('synthetic-consumer', {}, [{
+    id: 'open-node',
+    label: 'Open node',
+    run: () => { actionRuns += 1; },
+  }]);
+  const base = runtimeRegistration();
+  const value = runtimeHarness({
+    registration: {
+      ...base,
+      profiles: base.profiles.map((profile) => ({
+        ...profile,
+        interaction: { activationActionIds: ['open-node'] },
+      })),
+    },
+    nodeActions: actions.runtimeFor('synthetic-consumer'),
+  });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
   const intents: GraphIntentV1[] = [];
@@ -70,10 +88,11 @@ test('R-INPUT-03 and R-INPUT-04 emit one neutral intent for each selection, focu
   deepEqual((await session.exportViewState()).selectedNodeIds, ['a'], 'single click should select its neutral node ID');
   equal((await session.exportViewState()).focusedNodeId, 'a', 'single click should focus its neutral node ID');
 
-  value.platform.advanceTime(50);
+  value.platform.advanceTime(5_000);
   click(value, canvas, await nodePoint(session, 'a'), { pointerId: 2 });
   value.platform.flushFrame();
-  equal(intents.filter((intent) => intent.type === 'node-activated' && intent.activation === 'primary').length, 1, 'double click should emit one primary activation');
+  equal(actionRuns, 1, 'a later focused-node click should run the primary action without timing dependence');
+  equal(intents.filter((intent) => intent.type === 'node-activated' && intent.activation === 'primary').length, 1, 'focused-node action should emit one primary activation intent');
 
   value.platform.advanceTime(400);
   click(value, canvas, await nodePoint(session, 'a'), { pointerId: 3, button: 2 });
@@ -87,6 +106,7 @@ test('R-INPUT-03 and R-INPUT-04 emit one neutral intent for each selection, focu
 
   key(value, canvas, 'Enter');
   value.platform.flushFrame();
+  equal(actionRuns, 2, 'Enter should invoke the same resolved primary action');
   equal(intents.filter((intent) => intent.type === 'node-activated' && intent.activation === 'keyboard').length, 1, 'Enter should emit one keyboard activation');
   for (const intent of intents) {
     equal(intent.sessionId, session.sessionId, 'intent should identify its session');
@@ -94,6 +114,105 @@ test('R-INPUT-03 and R-INPUT-04 emit one neutral intent for each selection, focu
     equal(intent.documentRevision, 0, 'intent should carry the producing revision');
   }
   await session.dispose();
+  actions.dispose();
+});
+
+test('R-INPUT-10 has no view-action fallback when no consumer action resolves', async () => {
+  const value = runtimeHarness();
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  const point = await nodePoint(session, 'a');
+  const intents: GraphIntentV1[] = [];
+  session.onIntent((intent) => intents.push(intent));
+  click(value, canvas, point, { pointerId: 101 });
+  value.platform.flushFrame();
+  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 102 });
+  value.platform.flushFrame();
+  key(value, canvas, 'Enter');
+  value.platform.flushFrame();
+  equal(intents.filter((intent) => intent.type === 'node-activated').length, 0, 'unregistered actions should produce no activation intent or fallback');
+  equal((await session.exportViewState()).pinnedNodeIds.length, 0, 'activation must not fall through to pin');
+  await session.dispose();
+});
+
+test('R-INPUT-14 isolates busy and rejected consumer actions', async () => {
+  let actionRuns = 0;
+  let rejectRun: ((error: Error) => void) | undefined;
+  const actions = new ConsumerNodeActionRegistryV1();
+  actions.register('synthetic-consumer', {}, [{
+    id: 'async-action',
+    label: 'Async action',
+    run: () => {
+      actionRuns += 1;
+      if (actionRuns > 1) return;
+      return new Promise<void>((_resolve, reject) => { rejectRun = reject; });
+    },
+  }]);
+  const base = runtimeRegistration();
+  const value = runtimeHarness({
+    registration: {
+      ...base,
+      profiles: base.profiles.map((profile) => ({
+        ...profile,
+        interaction: { activationActionIds: ['async-action'] },
+      })),
+    },
+    nodeActions: actions.runtimeFor('synthetic-consumer'),
+  });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  const errors: Parameters<Parameters<typeof session.onError>[0]>[0][] = [];
+  const intents: GraphIntentV1[] = [];
+  session.onError((error) => errors.push(error));
+  session.onIntent((intent) => intents.push(intent));
+  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 111 });
+  value.platform.flushFrame();
+  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 112 });
+  value.platform.flushFrame();
+  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 113 });
+  value.platform.flushFrame();
+  equal(actionRuns, 1, 'a running action should suppress duplicate activation');
+  equal(intents.filter((intent) => intent.type === 'node-activated').length, 1, 'only the started action should emit activation');
+  assert(rejectRun, 'first action should expose its controlled rejection');
+  rejectRun(new Error('expected action failure'));
+  await Promise.resolve();
+  await Promise.resolve();
+  equal(errors.length, 1, 'rejection should report exactly one local session error');
+  equal(errors[0]?.code, 'consumer-action-failed', 'action failure should remain structurally distinct');
+  equal(errors[0]?.actionId, 'async-action', 'action failure should identify its consumer action');
+  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 114 });
+  value.platform.flushFrame();
+  equal(actionRuns, 2, 'the action should become available again after rejection cleanup');
+  await session.dispose();
+  actions.dispose();
+});
+
+test('R-INPUT-08 ignores repeated, composing, modified, and pre-cancelled Enter', async () => {
+  let actionRuns = 0;
+  const actions = new ConsumerNodeActionRegistryV1();
+  actions.register('synthetic-consumer', {}, [{ id: 'primary', label: 'Primary', run: () => { actionRuns += 1; } }]);
+  const base = runtimeRegistration();
+  const value = runtimeHarness({
+    registration: {
+      ...base,
+      profiles: base.profiles.map((profile) => ({ ...profile, interaction: { activationActionIds: ['primary'] } })),
+    },
+    nodeActions: actions.runtimeFor('synthetic-consumer'),
+  });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  await session.focusNode('a');
+  key(value, canvas, 'Enter', { repeat: true });
+  key(value, canvas, 'Enter', { composing: true });
+  key(value, canvas, 'Enter', { shift: true });
+  key(value, canvas, 'Enter', { prevented: true });
+  value.platform.flushFrame();
+  equal(actionRuns, 0, 'ineligible keyboard events must not invoke consumer actions');
+  key(value, canvas, 'Enter');
+  value.platform.flushFrame();
+  equal(actionRuns, 1, 'one ordinary Enter should invoke once');
+  await session.dispose();
+  actions.dispose();
 });
 
 test('R-INPUT-05 excludes render-filtered and projection-filtered nodes from hit testing', async () => {
@@ -470,8 +589,17 @@ function key(
   value: ReturnType<typeof runtimeHarness>,
   canvas: HTMLCanvasElement,
   keyValue: string,
+  options: { repeat?: boolean; composing?: boolean; shift?: boolean; prevented?: boolean } = {},
 ): void {
-  const event = new value.window.KeyboardEvent('keydown', { key: keyValue, bubbles: true, cancelable: true });
+  const event = new value.window.KeyboardEvent('keydown', {
+    key: keyValue,
+    repeat: options.repeat ?? false,
+    shiftKey: options.shift ?? false,
+    bubbles: true,
+    cancelable: true,
+  });
+  if (options.composing) Object.defineProperty(event, 'isComposing', { value: true });
+  if (options.prevented) event.preventDefault();
   canvas.dispatchEvent(event as unknown as Event);
 }
 

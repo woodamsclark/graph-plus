@@ -1,3 +1,4 @@
+export * from './ConsumerNodeActionRegistry.ts';
 export * from './GraphEngineProviderCore.ts';
 export * from './GraphEngineWorkspaceClient.ts';
 export * from './GraphEngineWorkspaceTransport.ts';

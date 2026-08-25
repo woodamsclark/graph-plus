@@ -1331,12 +1331,14 @@ interface GraphSessionErrorV1 {
     | "invalid-document"
     | "stale-revision"
     | "module-failed"
+    | "consumer-action-failed"
     | "required-module-failed"
     | "session-disposed"
     | "engine-unavailable"
     | "incompatible-view-state";
   readonly message: string;
   readonly moduleId?: string;
+  readonly actionId?: string;
   readonly recoverable: boolean;
 }
 

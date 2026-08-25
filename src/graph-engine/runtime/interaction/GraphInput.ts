@@ -162,6 +162,7 @@ export class GraphInput {
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     if (!this.enabled || this.disposed) return;
+    if (event.defaultPrevented) return;
     if (isGraphKeyboardCommand(event.key)) event.preventDefault();
     this.push({
       ...this.base(),
@@ -170,6 +171,9 @@ export class GraphInput {
       ctrl: event.ctrlKey,
       meta: event.metaKey,
       shift: event.shiftKey,
+      alt: event.altKey,
+      repeat: event.repeat,
+      composing: event.isComposing,
     });
   };
 

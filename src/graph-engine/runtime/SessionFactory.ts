@@ -15,6 +15,7 @@ import {
   type SessionRuntimePlatformFactoryV1,
 } from './platform/index.ts';
 import { DEFAULT_GRAPH_RENDER_THEME_V1, type GraphRenderThemeV1 } from './render/index.ts';
+import type { GraphNodeActionRuntimeV1 } from './actions/index.ts';
 
 export type GraphThemePaletteResolverV1 = (container: HTMLElement) => GraphRenderThemeV1;
 
@@ -27,6 +28,10 @@ export interface SessionFactoryOptionsV1 {
   readonly createPlatform?: SessionRuntimePlatformFactoryV1;
   readonly modules?: GraphModuleRegistry;
   readonly resolveThemePalette?: GraphThemePaletteResolverV1;
+}
+
+export interface GraphSessionHostServicesV1 {
+  readonly nodeActions?: GraphNodeActionRuntimeV1;
 }
 
 export class GraphSessionProfileErrorV1 extends Error {
@@ -58,7 +63,10 @@ export class SessionFactory {
     for (const descriptor of this.modules.descriptors()) this.profiles.registerModule(descriptor);
   }
 
-  async createSession(options: GraphSessionOptionsV1): Promise<GraphSessionV1> {
+  async createSession(
+    options: GraphSessionOptionsV1,
+    hostServices: GraphSessionHostServicesV1 = {},
+  ): Promise<GraphSessionV1> {
     const profile = this.profiles.resolve(options.consumerId, options.profileId, {
       globalOverrides: this.getGlobalOverrides(),
       sessionOverrides: options.sessionOverrides,
@@ -89,6 +97,7 @@ export class SessionFactory {
       themePalette: this.resolveThemePalette(options.container),
       restoreViewState: options.restoreViewState,
       platform: this.createPlatform(options.container),
+      nodeActions: hostServices.nodeActions,
       onDisposed: () => this.activeSessions.delete(runtime),
     });
     this.activeSessions.add(runtime);

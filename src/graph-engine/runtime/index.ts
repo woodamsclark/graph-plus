@@ -1,5 +1,6 @@
 export * from './GraphSessionRuntime.ts';
 export * from './SessionFactory.ts';
+export * from './actions/index.ts';
 export * from './camera/index.ts';
 export * from './interaction/index.ts';
 export * from './modules/index.ts';

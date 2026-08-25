@@ -2,7 +2,7 @@
   "artifact": "@graph-plus/graph-engine-client",
   "artifactVersion": "1.1.0",
   "protocolVersion": 1,
-  "contentSha256": "3ffd03a45ecb89e944ac28f1822f1667c5f4628b84750771936e210bde90525a",
+  "contentSha256": "6d6f613ec488eb4712feb9d219d7d3a3b0388042c0a321c80b6d701d1f0a649d",
   "generatedFrom": "src/graph-engine/public.ts",
   "publicFiles": [
     "src/graph-engine/public.ts",
