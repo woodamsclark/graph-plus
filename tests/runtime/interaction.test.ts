@@ -334,7 +334,7 @@ test('background pan clears selection and focus only after crossing its threshol
   await session.dispose();
 });
 
-test('mobile one-finger background drag orbits with and without a focused node', async () => {
+test('R-INPUT-17 mobile one-finger background drag pans and clears focus only after commitment', async () => {
   for (const focused of [false, true]) {
     const value = runtimeHarness({ profileId: 'three-dimensional' });
     const session = await value.create();
@@ -348,13 +348,65 @@ test('mobile one-finger background drag orbits with and without a focused node',
     pointer(value, canvas, 'pointermove', -40, -70, { pointerId: focused ? 34 : 33, pointerType: 'touch' });
     value.platform.flushFrame();
     const after = await session.exportViewState();
-    assert(!sameVector(after.camera.position, before.camera.position), `touch orbit should work when focused=${String(focused)}`);
+    assert(!sameVector(after.camera.target, before.camera.target), `touch pan should work when focused=${String(focused)}`);
     if (focused) {
-      equal(after.focusedNodeId, 'a', 'touch orbit should retain focus');
-      deepEqual(after.selectedNodeIds, ['a'], 'touch orbit should retain selection');
+      equal(after.focusedNodeId, undefined, 'committed background pan should clear focus');
+      deepEqual(after.selectedNodeIds, [], 'committed background pan should clear selection');
     }
     await session.dispose();
   }
+});
+
+test('R-INPUT-18 two-finger translation orbits 3d without clearing focus and pans 2d once', async () => {
+  const spatial = runtimeHarness({ profileId: 'three-dimensional' });
+  const spatialSession = await spatial.create();
+  const spatialCanvas = runtimeCanvas(spatial.container);
+  await spatialSession.setSelection(['a']);
+  await spatialSession.focusNode('a');
+  const spatialBefore = await spatialSession.exportViewState();
+  pointer(spatial, spatialCanvas, 'pointerdown', 100, 100, { pointerId: 70, pointerType: 'touch' });
+  pointer(spatial, spatialCanvas, 'pointerdown', 200, 100, { pointerId: 71, pointerType: 'touch' });
+  pointer(spatial, spatialCanvas, 'pointermove', 130, 100, { pointerId: 70, pointerType: 'touch' });
+  pointer(spatial, spatialCanvas, 'pointermove', 230, 100, { pointerId: 71, pointerType: 'touch' });
+  spatial.platform.flushFrame();
+  const spatialAfter = await spatialSession.exportViewState();
+  assert(!sameVector(spatialAfter.camera.position, spatialBefore.camera.position), 'two-finger translation should orbit a 3d camera');
+  deepEqual(spatialAfter.camera.target, spatialBefore.camera.target, '3d orbit should retain the focal target');
+  equal(spatialAfter.focusedNodeId, 'a', '3d two-finger orbit should retain focus');
+  deepEqual(spatialAfter.selectedNodeIds, ['a'], '3d two-finger orbit should retain selection');
+  const reference = runtimeHarness({ profileId: 'three-dimensional' });
+  const referenceSession = await reference.create();
+  const referenceCanvas = runtimeCanvas(reference.container);
+  await referenceSession.setSelection(['a']);
+  await referenceSession.focusNode('a');
+  pointer(reference, referenceCanvas, 'pointerdown', -100, -100, { pointerId: 74, button: 2 });
+  pointer(reference, referenceCanvas, 'pointermove', -70, -100, { pointerId: 74, button: 2 });
+  reference.platform.flushFrame();
+  const referenceAfter = await referenceSession.exportViewState();
+  assert(vectorDistance(spatialAfter.camera.position, referenceAfter.camera.position) < 0.000001, 'touch orbit direction should match secondary-drag desktop orbit');
+  await referenceSession.dispose();
+  await spatialSession.dispose();
+
+  const flat = runtimeHarness();
+  const flatSession = await flat.create();
+  const flatCanvas = runtimeCanvas(flat.container);
+  await flatSession.setSelection(['a']);
+  await flatSession.focusNode('a');
+  const flatBefore = await flatSession.exportViewState();
+  const intents: GraphIntentV1[] = [];
+  flatSession.onIntent((intent) => intents.push(intent));
+  pointer(flat, flatCanvas, 'pointerdown', 100, 100, { pointerId: 72, pointerType: 'touch' });
+  pointer(flat, flatCanvas, 'pointerdown', 200, 100, { pointerId: 73, pointerType: 'touch' });
+  pointer(flat, flatCanvas, 'pointermove', 130, 100, { pointerId: 72, pointerType: 'touch' });
+  pointer(flat, flatCanvas, 'pointermove', 230, 100, { pointerId: 73, pointerType: 'touch' });
+  flat.platform.flushFrame();
+  const flatAfter = await flatSession.exportViewState();
+  assert(!sameVector(flatAfter.camera.target, flatBefore.camera.target), 'two-finger translation should pan a 2d camera');
+  equal(flatAfter.focusedNodeId, undefined, 'committed 2d pan should clear focus');
+  deepEqual(flatAfter.selectedNodeIds, [], 'committed 2d pan should clear selection');
+  equal(intents.filter((intent) => intent.type === 'focus-changed').length, 1, '2d two-finger pan should clear focus once');
+  equal(intents.filter((intent) => intent.type === 'selection-changed').length, 1, '2d two-finger pan should clear selection once');
+  await flatSession.dispose();
 });
 
 test('stationary mobile long-press requests node context without selecting or focusing', async () => {
@@ -403,12 +455,21 @@ test('R-INPUT-02 handles keyboard and two-finger navigation within one session',
   pointer(touch, touchCanvas, 'pointerdown', 100, 100, { pointerId: 10, pointerType: 'touch' });
   pointer(touch, touchCanvas, 'pointerdown', 200, 100, { pointerId: 11, pointerType: 'touch' });
   equal(touch.platform.pendingTimers, 0, 'starting a multi-touch gesture should cancel the single-touch long-press timer');
-  pointer(touch, touchCanvas, 'pointermove', 75, 90, { pointerId: 10, pointerType: 'touch' });
-  pointer(touch, touchCanvas, 'pointermove', 235, 90, { pointerId: 11, pointerType: 'touch' });
+  pointer(touch, touchCanvas, 'pointermove', 125, 90, { pointerId: 10, pointerType: 'touch' });
+  pointer(touch, touchCanvas, 'pointermove', 225, 90, { pointerId: 11, pointerType: 'touch' });
   touch.platform.flushFrame();
-  const touchAfter = await touchSession.exportViewState();
-  assert(!sameVector(touchAfter.camera.target, touchBefore.camera.target), 'two-finger centroid movement should pan');
-  assert(touchAfter.camera.zoom > touchBefore.camera.zoom, 'two-finger spread should zoom in');
+  const touchAfterPan = await touchSession.exportViewState();
+  assert(!sameVector(touchAfterPan.camera.target, touchBefore.camera.target), 'two-finger centroid movement should pan 2d');
+  equal(touchAfterPan.camera.zoom, touchBefore.camera.zoom, 'translation should not accidentally zoom');
+  pointer(touch, touchCanvas, 'pointerup', 125, 90, { pointerId: 10, pointerType: 'touch' });
+  pointer(touch, touchCanvas, 'pointerup', 225, 90, { pointerId: 11, pointerType: 'touch' });
+  pointer(touch, touchCanvas, 'pointerdown', 100, 100, { pointerId: 13, pointerType: 'touch' });
+  pointer(touch, touchCanvas, 'pointerdown', 200, 100, { pointerId: 14, pointerType: 'touch' });
+  pointer(touch, touchCanvas, 'pointermove', 90, 100, { pointerId: 13, pointerType: 'touch' });
+  pointer(touch, touchCanvas, 'pointermove', 80, 100, { pointerId: 13, pointerType: 'touch' });
+  touch.platform.flushFrame();
+  const touchAfterPinch = await touchSession.exportViewState();
+  assert(touchAfterPinch.camera.zoom > touchAfterPan.camera.zoom, 'pinch spread should win and zoom in');
   await touchSession.dispose();
   equal(touch.platform.pendingTimers, 0, 'disposing input should clear its owning-window timer');
   pointer(touch, touchCanvas, 'pointerdown', 50, 50, { pointerId: 12, pointerType: 'touch' });

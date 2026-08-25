@@ -45,7 +45,10 @@ interface TouchGesture {
   distance: number;
   angle: number;
   readonly startCentroid: GraphScreenPointV1;
-  readonly panStarted: boolean;
+  readonly startDistance: number;
+  readonly mode: 'pending' | 'navigation' | 'pinch';
+  readonly samples: number;
+  readonly navigationStarted: boolean;
 }
 
 export class GraphInteractionInterpreter {
@@ -133,8 +136,7 @@ export class GraphInteractionInterpreter {
         this.mode = { kind: 'drag', pointerId: event.pointerId, nodeId: this.mode.hit.nodeId, lastPoint: event.point };
         return;
       }
-      const orbit = this.dimensions === '3d'
-        && (this.mode.button === 2 || (this.mode.pointerKind === 'touch' && !this.mode.hit));
+      const orbit = this.dimensions === '3d' && this.mode.button === 2;
       if (orbit) {
         this.command(event, {
           type: 'orbit-by',
@@ -292,26 +294,49 @@ export class GraphInteractionInterpreter {
   }
 
   private updateTouchGesture(event: GraphInputEventV1): void {
-    let next = this.readTouchGesture();
+    const next = this.readTouchGesture();
     if (!next || !this.touchGesture) return;
-    const panX = this.touchGesture.centroid.x - next.centroid.x;
-    const panY = this.touchGesture.centroid.y - next.centroid.y;
+    const previous = this.touchGesture;
     const totalPan = Math.hypot(
-      next.centroid.x - this.touchGesture.startCentroid.x,
-      next.centroid.y - this.touchGesture.startCentroid.y,
+      next.centroid.x - previous.startCentroid.x,
+      next.centroid.y - previous.startCentroid.y,
     );
-    const panStarted = this.touchGesture.panStarted || totalPan > (this.options.dragThresholdPx ?? 6);
-    if (panStarted) {
-      if (!this.touchGesture.panStarted) {
+    const totalDistance = Math.abs(next.distance - previous.startDistance);
+    const samples = previous.samples + 1;
+    const threshold = this.options.dragThresholdPx ?? 6;
+    let mode = previous.mode;
+    if (mode === 'pending' && samples >= 2) {
+      if (totalDistance > threshold && totalDistance > totalPan * 0.75) mode = 'pinch';
+      else if (totalPan > threshold) mode = 'navigation';
+    } else if (mode === 'navigation' && totalDistance > threshold * 2 && totalDistance > totalPan * 0.75) {
+      mode = 'pinch';
+    }
+    let navigationStarted = previous.navigationStarted;
+    if (mode === 'navigation') {
+      if (!navigationStarted && this.dimensions === '2d') {
         this.command(event, { type: 'set-selection', nodeIds: [] });
         this.command(event, { type: 'set-focus' });
       }
-      this.command(event, { type: 'pan-by', deltaX: panX, deltaY: panY });
+      navigationStarted = true;
+      const origin = previous.mode === 'pending' ? previous.startCentroid : previous.centroid;
+      const deltaX = origin.x - next.centroid.x;
+      const deltaY = origin.y - next.centroid.y;
+      this.command(event, this.dimensions === '3d'
+        ? { type: 'orbit-by', deltaX: -deltaX, deltaY }
+        : { type: 'pan-by', deltaX, deltaY });
+    } else if (mode === 'pinch') {
+      const originDistance = previous.mode === 'pending' ? previous.startDistance : previous.distance;
+      const distanceDelta = next.distance - originDistance;
+      if (Math.abs(distanceDelta) >= 1) this.command(event, { type: 'zoom-by', deltaY: -distanceDelta * 3 });
     }
-    const distanceDelta = next.distance - this.touchGesture.distance;
-    if (Math.abs(distanceDelta) >= 1) this.command(event, { type: 'zoom-by', deltaY: -distanceDelta * 3 });
-    next = { ...next, startCentroid: this.touchGesture.startCentroid, panStarted };
-    this.touchGesture = next;
+    this.touchGesture = {
+      ...next,
+      startCentroid: previous.startCentroid,
+      startDistance: previous.startDistance,
+      mode,
+      samples,
+      navigationStarted,
+    };
   }
 
   private readTouchGesture(): TouchGesture | null {
@@ -327,7 +352,10 @@ export class GraphInteractionInterpreter {
       distance: Math.hypot(dx, dy),
       angle: Math.atan2(dy, dx),
       startCentroid: centroid,
-      panStarted: false,
+      startDistance: Math.hypot(dx, dy),
+      mode: 'pending',
+      samples: 0,
+      navigationStarted: false,
     };
   }
 
