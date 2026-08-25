@@ -1,6 +1,6 @@
 # Graph Engine V1.1 Implementation Plan
 
-Status: Draft for review; implementation not started
+Status: Implemented through Slice 10; automated gates pass, physical smoke pending
 
 Date: 2026-08-25
 
@@ -740,9 +740,9 @@ The following do not enter V1.1 unless the contract is reopened:
 - file types beyond Graph+ V1 notes and tags;
 - a general performance/render-engine rewrite.
 
-## 12. Review gate before implementation
+## 12. Implemented review gate
 
-Implementation begins only after review confirms:
+Implementation proceeded after review confirmed:
 
 1. the eleven-slice order (Slice 0 through Slice 10) and commit boundaries;
 2. the internal UI control port rather than exposing engine internals publicly;
@@ -753,4 +753,6 @@ Implementation begins only after review confirms:
    behavior;
 7. the mobile mapping remains a trial evaluated with physical-device evidence.
 
-After approval, Slice 0 records the live baseline and Slice 1 begins implementation.
+Slices 0 through 10 were implemented in ordered commits. Automated verification is
+recorded in the acceptance plan; the remaining release decision depends on the named
+desktop, popout, and physical-mobile smoke checks.

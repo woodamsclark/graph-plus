@@ -1,6 +1,6 @@
 # Graph+ and Graph Engine V1.1 Architecture and Contracts
 
-Status: V1.1 additive contract revision in progress
+Status: Approved and implemented; physical-device release smoke pending
 
 Baseline: V1 extraction implemented; V1.1 adds shared UI and node-click actions
 

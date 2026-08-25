@@ -1,6 +1,6 @@
 # Graph Engine V1.1 Acceptance Plan
 
-Status: V1.1 acceptance revision in progress
+Status: Automated acceptance complete; desktop, popout, and mobile smoke pending
 
 Baseline: V1 extraction implemented; these scenarios cover the additive V1.1 contract
 
@@ -1074,3 +1074,22 @@ separate backlog of engine defects or V1.2 proposals; it does not weaken Gate G 
 PatternSmith learning semantics into Graph Engine.
 
 The Step 4 artifact is [Graph Engine V1 Migration Plan](graph-engine-v1-migration-plan.md).
+
+## 11. Release-candidate checkpoint — 2026-08-25
+
+Automated Gate G evidence is complete:
+
+- Graph Engine/Graph+ client build, typecheck, 120 contract/runtime/service/consumer
+  tests, and production build pass at `c3ace33`;
+- PatternSmith client vendoring, typecheck, 132 tests, and production build pass at
+  `a95f267`;
+- the PatternSmith vendor matches the Graph+ `1.1.0` public artifact byte-for-byte
+  except for PatternSmith's additive provenance record;
+- Graph+ consumes the engine-owned UI/action surfaces, while the external smoke
+  consumer proves hidden stock sections, a domain-owned node-ID filter shim, a
+  registered click action, and independent 2D/3D profile policy.
+
+Gate G remains a release candidate—not a completed physical-platform acceptance—until
+the desktop, popout, and mobile rows in the platform smoke matrix are exercised in
+Obsidian. Those checks require rendered host chrome, touch gestures, safe areas, and
+provider reload behavior that the automated harness does not emulate.
