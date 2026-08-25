@@ -80,6 +80,11 @@ export class CanvasSessionSurface implements SessionSurfaceV1 {
     return { dispose: () => this.resizeListeners.delete(listener) };
   }
 
+  setDimensions(dimensions: GraphDimensionsV1): void {
+    if (this.disposed) return;
+    this.root.dataset.dimensions = dimensions;
+  }
+
   update(state: SessionSurfaceStateV1): void {
     if (this.disposed) return;
     this.root.dataset.documentId = state.documentId;

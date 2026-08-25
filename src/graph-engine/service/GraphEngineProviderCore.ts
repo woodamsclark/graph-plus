@@ -226,12 +226,14 @@ export class GraphEngineProviderCoreV1 {
       getUserOverrides: () => this.profiles.getUserOverrides(consumerId, profileId),
       setModuleSetting: async (moduleId, key, value) => {
         const overrides = this.profiles.getUserOverrides(consumerId, profileId);
-        this.profiles.setUserOverrides(
-          consumerId,
-          profileId,
-          changeModuleSetting(overrides, moduleId, key, value),
-        );
-        await this.onProfilesChanged();
+        this.profiles.setUserOverrides(consumerId, profileId, changeModuleSetting(overrides, moduleId, key, value));
+        try {
+          await this.onProfilesChanged();
+        } catch (error) {
+          this.profiles.setUserOverrides(consumerId, profileId, overrides);
+          try { await this.onProfilesChanged(); } catch {}
+          throw error;
+        }
       },
     };
   }

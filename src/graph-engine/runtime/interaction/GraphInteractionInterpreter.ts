@@ -52,6 +52,7 @@ export class GraphInteractionInterpreter {
   private readonly pointers = new Map<number, PointerRecord>();
   private mode: SinglePointerMode = { kind: 'idle' };
   private touchGesture: TouchGesture | null = null;
+  private dimensions: GraphDimensionsV1;
 
   constructor(private readonly options: {
     readonly dimensions: GraphDimensionsV1;
@@ -62,7 +63,14 @@ export class GraphInteractionInterpreter {
     readonly getSelectedNodeIds: () => readonly string[];
     readonly getViewport: () => { readonly width: number; readonly height: number };
     readonly dragThresholdPx?: number;
-  }) {}
+  }) {
+    this.dimensions = options.dimensions;
+  }
+
+  setDimensions(dimensions: GraphDimensionsV1): void {
+    this.dimensions = dimensions;
+    this.reset();
+  }
 
   tick(): void {
     for (const event of this.options.events.drain()) this.ingest(event);
@@ -125,7 +133,7 @@ export class GraphInteractionInterpreter {
         this.mode = { kind: 'drag', pointerId: event.pointerId, nodeId: this.mode.hit.nodeId, lastPoint: event.point };
         return;
       }
-      const orbit = this.options.dimensions === '3d'
+      const orbit = this.dimensions === '3d'
         && (this.mode.button === 2 || (this.mode.pointerKind === 'touch' && !this.mode.hit));
       if (orbit) {
         this.command(event, {
@@ -228,7 +236,7 @@ export class GraphInteractionInterpreter {
       this.command(event, { type: 'zoom-by', deltaY: delta.y });
       return;
     }
-    if (this.options.dimensions === '3d' && this.options.getFocusedNodeId() !== undefined) {
+    if (this.dimensions === '3d' && this.options.getFocusedNodeId() !== undefined) {
       this.command(event, { type: 'orbit-by', deltaX: -delta.x, deltaY: delta.y });
       return;
     }
@@ -251,7 +259,7 @@ export class GraphInteractionInterpreter {
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown') {
       const deltaX = event.key === 'ArrowLeft' ? -amount : event.key === 'ArrowRight' ? amount : 0;
       const deltaY = event.key === 'ArrowUp' ? -amount : event.key === 'ArrowDown' ? amount : 0;
-      if (event.shift && this.options.dimensions === '3d') this.command(event, { type: 'orbit-by', deltaX, deltaY });
+      if (event.shift && this.dimensions === '3d') this.command(event, { type: 'orbit-by', deltaX, deltaY });
       else this.command(event, { type: 'pan-by', deltaX, deltaY });
       return;
     }

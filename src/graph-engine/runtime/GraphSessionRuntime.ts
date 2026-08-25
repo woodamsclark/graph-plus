@@ -24,6 +24,7 @@ import { evaluateGraphFilterV1, type GraphFilterSelectionV1 } from '../core/filt
 import type { EffectiveConsumerProfileV1 } from '../core/profile/index.ts';
 import {
   cloneGraphViewStateV1,
+  convertGraphViewStateDimensionsV1,
   reconcileGraphViewStateV1,
 } from '../core/state/index.ts';
 import { GraphCameraController } from './camera/index.ts';
@@ -91,6 +92,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly platform: SessionRuntimePlatformV1;
   private readonly themePalette: GraphRenderThemeV1;
   private readonly nodeActions?: GraphNodeActionRuntimeV1;
+  private readonly modules: GraphModuleRegistry;
   private surface!: SessionSurfaceV1;
   private camera!: GraphCameraController;
   private frames!: GraphFrameStore;
@@ -174,11 +176,15 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.platform = options.platform;
     this.themePalette = options.themePalette;
     this.nodeActions = options.nodeActions;
+    this.modules = options.modules;
     this.assertPlatformOwnership();
     this.store = new GraphDocumentStore(options.document);
-    this.viewState = normalizePerspectiveViewState(options.restoreViewState
+    const restoredViewState = options.restoreViewState
+      ? this.prepareRestoredViewState(options.restoreViewState)
+      : undefined;
+    this.viewState = normalizePerspectiveViewState(restoredViewState
       ? addMissingPositions(
-          reconcileGraphViewStateV1(options.restoreViewState, this.restoreContext()),
+          reconcileGraphViewStateV1(restoredViewState, this.restoreContext()),
           this.store.exportDocument(),
           this.profile.dimensions,
         )
@@ -205,16 +211,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         this.renderer.resize(next.width, next.height, next.devicePixelRatio);
         this.frameDirty = true;
       });
-      this.moduleHost = new GraphModuleHost({
-        registry: options.modules,
-        profile: this.profile,
-        sessionId: this.sessionId,
-        themePalette: options.themePalette,
-        initialModuleState: this.viewState.moduleState,
-        getDocument: () => this.store.exportDocument(),
-        getViewState: () => this.viewState,
-        onFailure: (failure) => this.handleModuleFailure(failure),
-      });
+      this.moduleHost = this.createModuleHost(this.profile, this.viewState.moduleState);
       this.interaction = new SessionInteractionRuntime({
         sessionId: this.sessionId,
         dimensions: this.profile.dimensions,
@@ -424,8 +421,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   async restoreViewState(state: GraphViewStateV1): Promise<void> {
     this.requireActive();
     try {
+      const prepared = this.prepareRestoredViewState(state);
       this.viewState = normalizePerspectiveViewState(addMissingPositions(
-        reconcileGraphViewStateV1(state, this.restoreContext()),
+        reconcileGraphViewStateV1(prepared, this.restoreContext()),
         this.store.exportDocument(),
         this.profile.dimensions,
       ), this.profile.dimensions, focalLengthMm(this.profile.profileSettings));
@@ -483,17 +481,103 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private applyResolvedProfile(next: EffectiveConsumerProfileV1): void {
     const fatalIssues = next.issues.filter((issue) => issue.fatal);
     if (fatalIssues.length) throw new Error(fatalIssues.map((issue) => `${issue.path}: ${issue.message}`).join('; '));
-    if (next.dimensions !== this.profile.dimensions) {
-      throw new Error('Session dimensions cannot be changed after mounting.');
-    }
     if (!next.modules[SHIPPED_GRAPH_MODULE_IDS_V1.rendering]?.enabled) {
       throw new Error('A mounted graph session requires the rendering module.');
+    }
+    if (next.dimensions !== this.profile.dimensions) {
+      this.reconfigureDimensions(next);
+      return;
     }
     this.moduleHost.updateProfile(next);
     this.camera.setPerspectiveZoom(focalLengthMm(next.profileSettings) / 24);
     this.synchronizeCameraState();
     this.profile = next;
     this.recomputeView(false);
+  }
+
+  private reconfigureDimensions(next: EffectiveConsumerProfileV1): void {
+    const previousProfile = this.profile;
+    this.synchronizeModuleState();
+    const previousViewState = cloneGraphViewStateV1(this.viewState);
+    const previousCamera = this.camera.getState();
+    const previousHost = this.moduleHost;
+    const viewport = this.surface.getViewport();
+    const converted = convertGraphViewStateDimensionsV1(this.viewState, {
+      dimensions: next.dimensions,
+      focalLengthMm: focalLengthMm(next.profileSettings),
+      viewportHeight: viewport.height,
+    });
+    const deferredFailures: GraphModuleFailureV1[] = [];
+    let committed = false;
+    const replacementHost = this.createModuleHost(
+      next,
+      converted.moduleState,
+      () => committed ? this.viewState : converted,
+      (failure) => deferredFailures.push(failure),
+    );
+    this.interaction.setEnabled(false);
+    if (this.animationFrame !== null) {
+      this.platform.cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = null;
+    }
+    this.lastFrameTimestamp = null;
+    try {
+      this.viewState = converted;
+      this.profile = next;
+      this.camera.reconfigure(converted.camera, next.dimensions);
+      this.interaction.setDimensions(next.dimensions);
+      this.surface.setDimensions(next.dimensions);
+      this.moduleHost = replacementHost;
+      committed = true;
+      this.moduleHost.viewChanged(this.viewState);
+      this.recomputeView(false);
+      this.refreshFrame();
+      previousHost.dispose();
+      for (const failure of deferredFailures) this.handleModuleFailure(failure);
+    } catch (error) {
+      this.moduleHost = previousHost;
+      this.profile = previousProfile;
+      this.viewState = previousViewState;
+      this.camera.reconfigure(previousCamera, previousProfile.dimensions);
+      this.interaction.setDimensions(previousProfile.dimensions);
+      this.surface.setDimensions(previousProfile.dimensions);
+      replacementHost.dispose();
+      this.moduleHost.viewChanged(this.viewState);
+      this.recomputeView(false);
+      this.refreshFrame();
+      throw error;
+    } finally {
+      this.synchronizeRuntimeActivity();
+    }
+  }
+
+  private createModuleHost(
+    profile: EffectiveConsumerProfileV1,
+    initialModuleState: Readonly<Record<string, JsonValue>>,
+    getViewState: () => GraphViewStateV1 = () => this.viewState,
+    onFailure: (failure: GraphModuleFailureV1) => void = (failure) => this.handleModuleFailure(failure),
+  ): GraphModuleHost {
+    return new GraphModuleHost({
+      registry: this.modules,
+      profile,
+      sessionId: this.sessionId,
+      themePalette: this.themePalette,
+      initialModuleState,
+      getDocument: () => this.store.exportDocument(),
+      getViewState,
+      onFailure,
+    });
+  }
+
+  private prepareRestoredViewState(state: GraphViewStateV1): GraphViewStateV1 {
+    if (state.dimensions === this.profile.dimensions) return state;
+    if (!this.profile.allowedDimensions.includes(state.dimensions)) return state;
+    const bounds = this.container.getBoundingClientRect();
+    return convertGraphViewStateDimensionsV1(state, {
+      dimensions: this.profile.dimensions,
+      focalLengthMm: focalLengthMm(this.profile.profileSettings),
+      viewportHeight: bounds.height,
+    });
   }
 
   private async patchModuleOverride(

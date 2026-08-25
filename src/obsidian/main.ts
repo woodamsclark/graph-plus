@@ -97,6 +97,7 @@ export default class GraphPlus extends Plugin {
         sessionFactory.refreshActiveProfiles();
         return this.persistEngineSettings();
       },
+      true,
     );
 
     const localLease = providerCore.connectLocal({

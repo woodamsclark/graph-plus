@@ -5,6 +5,7 @@ import type {
   GraphFilterRequestV1,
   GraphViewStateV1,
   JsonValue,
+  Vec3,
 } from '../../contracts/v1/index.ts';
 import { validateGraphFilterRequestV1 } from '../filter/index.ts';
 
@@ -90,6 +91,55 @@ export function cloneGraphViewStateV1(state: GraphViewStateV1): GraphViewStateV1
     ),
     moduleState: cloneJsonRecord(state.moduleState),
   };
+}
+
+export interface GraphViewDimensionConversionOptionsV1 {
+  readonly dimensions: GraphDimensionsV1;
+  readonly focalLengthMm?: number;
+  readonly viewportHeight?: number;
+}
+
+export function convertGraphViewStateDimensionsV1(
+  state: GraphViewStateV1,
+  options: GraphViewDimensionConversionOptionsV1,
+): GraphViewStateV1 {
+  assertGraphViewStateV1(state);
+  if (state.dimensions === options.dimensions) return cloneGraphViewStateV1(state);
+  const dimensions = options.dimensions;
+  const positions = Object.fromEntries(Object.entries(state.positions).map(([id, position], index) => [
+    id,
+    dimensions === '2d'
+      ? { x: position.x, y: position.y, z: 0 }
+      : { x: position.x, y: position.y, z: seededDepth(id, index) },
+  ]));
+  const focusedPosition = state.focusedNodeId ? positions[state.focusedNodeId] : undefined;
+  const targetZ = dimensions === '2d' ? 0 : focusedPosition?.z ?? averageDepth(Object.values(positions));
+  const target = { x: state.camera.target.x, y: state.camera.target.y, z: targetZ };
+  const viewportHeight = Math.max(1, finitePositive(options.viewportHeight, 360));
+  const previousDistance = Math.max(0.0001, distance(state.camera.position, state.camera.target));
+  const apparentScale = state.camera.projection === 'orthographic'
+    ? state.camera.zoom
+    : viewportHeight * state.camera.zoom / previousDistance;
+  const camera: GraphCameraStateV1 = dimensions === '2d'
+    ? {
+        position: { x: target.x, y: target.y, z: 10 },
+        target,
+        up: { x: 0, y: 1, z: 0 },
+        zoom: clamp(apparentScale, 0.02, 40),
+        projection: 'orthographic',
+      }
+    : (() => {
+        const zoom = clamp(finitePositive(options.focalLengthMm, 50) / 24, 0.02, 40);
+        const cameraDistance = clamp(viewportHeight * zoom / Math.max(0.02, apparentScale), 10, 10_000_000);
+        return {
+          position: { x: target.x, y: target.y, z: target.z + cameraDistance },
+          target,
+          up: { x: 0, y: 1, z: 0 },
+          zoom,
+          projection: 'perspective',
+        };
+      })();
+  return cloneGraphViewStateV1({ ...state, dimensions, positions, camera });
 }
 
 export function reconcileGraphViewStateV1(
@@ -225,6 +275,33 @@ function cloneCamera(camera: GraphCameraStateV1): GraphCameraStateV1 {
     zoom: camera.zoom,
     projection: camera.projection,
   };
+}
+
+function seededDepth(id: string, index: number): number {
+  let hash = 2166136261;
+  for (let offset = 0; offset < id.length; offset += 1) {
+    hash ^= id.charCodeAt(offset);
+    hash = Math.imul(hash, 16777619);
+  }
+  const bucket = ((hash >>> 0) + index * 47) % 121;
+  return bucket - 60;
+}
+
+function averageDepth(positions: readonly Vec3[]): number {
+  if (!positions.length) return 0;
+  return positions.reduce((total, position) => total + position.z, 0) / positions.length;
+}
+
+function distance(a: Vec3, b: Vec3): number {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+function finitePositive(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function cloneFilter(filter: GraphFilterRequestV1): GraphFilterRequestV1 {

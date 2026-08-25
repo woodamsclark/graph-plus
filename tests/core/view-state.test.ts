@@ -2,6 +2,7 @@ import type { GraphViewStateV1 } from '../../src/graph-engine/contracts/v1/index
 import {
   InvalidGraphViewStateErrorV1,
   cloneGraphViewStateV1,
+  convertGraphViewStateDimensionsV1,
   reconcileGraphViewStateV1,
   validateGraphViewStateV1,
 } from '../../src/graph-engine/core/state/index.ts';
@@ -97,6 +98,46 @@ test('C-VIEW-07 supports a generic consumer persistence round-trip', () => {
   });
   const nextExport = cloneGraphViewStateV1({ ...restored, selectedNodeIds: ['a'] });
   deepEqual(nextExport.selectedNodeIds, ['a'], 'consumer should be able to export updated state for its own storage');
+});
+
+test('C-VIEW-08 converts persisted 2d state into finite spatial 3d state without losing identity', () => {
+  const source = viewState();
+  const converted = convertGraphViewStateDimensionsV1(source, {
+    dimensions: '3d',
+    focalLengthMm: 50,
+    viewportHeight: 400,
+  });
+  equal(converted.dimensions, '3d', 'converted state should declare its destination dimension');
+  equal(converted.camera.projection, 'perspective', '3d state should use a perspective camera');
+  assert(Object.values(converted.positions).some((position) => position.z !== 0), '3d conversion should seed meaningful finite depth');
+  equal(converted.documentId, source.documentId, 'document identity should survive conversion');
+  deepEqual(converted.activeFilters, source.activeFilters, 'filter state should survive conversion');
+  deepEqual(converted.selectedNodeIds, source.selectedNodeIds, 'selection should survive conversion');
+  equal(converted.focusedNodeId, source.focusedNodeId, 'focus should survive conversion');
+  equal(validateGraphViewStateV1(converted).length, 0, 'converted state should remain contract-valid');
+});
+
+test('C-VIEW-09 flattens 3d state deterministically while preserving apparent target scale', () => {
+  const spatial = convertGraphViewStateDimensionsV1(viewState(), {
+    dimensions: '3d',
+    focalLengthMm: 50,
+    viewportHeight: 400,
+  });
+  const previousDistance = Math.hypot(
+    spatial.camera.position.x - spatial.camera.target.x,
+    spatial.camera.position.y - spatial.camera.target.y,
+    spatial.camera.position.z - spatial.camera.target.z,
+  );
+  const previousScale = 400 * spatial.camera.zoom / previousDistance;
+  const flat = convertGraphViewStateDimensionsV1(spatial, { dimensions: '2d', viewportHeight: 400 });
+  equal(flat.camera.projection, 'orthographic', '2d state should use an orthographic camera');
+  equal(Object.values(flat.positions).every((position) => position.z === 0), true, 'every 2d position should be flat');
+  assert(Math.abs(flat.camera.zoom - previousScale) < 0.000001, '2d zoom should preserve apparent target scale');
+  deepEqual(
+    convertGraphViewStateDimensionsV1(spatial, { dimensions: '2d', viewportHeight: 400 }),
+    flat,
+    'the same state conversion should be deterministic',
+  );
 });
 
 test('view-state validation rejects schemas, non-finite values, mismatched filters, and runtime fields', () => {

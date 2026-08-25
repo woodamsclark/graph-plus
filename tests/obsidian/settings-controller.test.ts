@@ -45,3 +45,19 @@ test('R-DIM-01 hidden or locked dimension policy exposes no editable settings co
   const stagedController = new GraphEngineSettingsControllerV1(profiles, {}, () => undefined);
   equal(stagedController.canEditProfileDimensions('locked-consumer', 'locked'), false, 'settings selector should remain staged until live runtime switching is enabled');
 });
+
+test('R-DIM-04 failed live activation rolls the persistent dimension override back', async () => {
+  const profiles = new ConsumerProfileRegistry();
+  profiles.registerConsumer(GRAPH_PLUS_CONSUMER_REGISTRATION_V1);
+  let attempts = 0;
+  const controller = new GraphEngineSettingsControllerV1(profiles, {}, () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error('runtime rejected dimension');
+  }, true);
+  let rejected = false;
+  try { await controller.setProfileDimensions('graph-plus', 'default', '2d'); } catch { rejected = true; }
+  equal(rejected, true, 'the failed live activation should reach the settings caller');
+  equal(controller.getProfileOverrides('graph-plus', 'default').dimensions, undefined, 'failed activation should not remain persisted in the profile namespace');
+  equal(controller.getEffectiveProfile('graph-plus', 'default').dimensions, '3d', 'rollback should restore the prior effective dimension');
+  equal(attempts, 2, 'rollback should run the change hook again to restore any sessions switched before the failure');
+});

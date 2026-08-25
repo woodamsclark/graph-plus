@@ -102,6 +102,11 @@ export class SessionInteractionRuntime {
     if (!enabled) this.resetTransientState();
   }
 
+  setDimensions(dimensions: GraphDimensionsV1): void {
+    this.interpreter.setDimensions(dimensions);
+    this.resetTransientState();
+  }
+
   reset(): void {
     this.input.reset();
     this.resetTransientState();

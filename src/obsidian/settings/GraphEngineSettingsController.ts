@@ -64,7 +64,13 @@ export class GraphEngineSettingsControllerV1 {
     const current = this.profiles.getUserOverrides(consumerId, profileId);
     const next = { ...clone(current), dimensions };
     this.profiles.setUserOverrides(consumerId, profileId, next);
-    await this.save();
+    try {
+      await this.save();
+    } catch (error) {
+      this.profiles.setUserOverrides(consumerId, profileId, current);
+      try { await this.save(); } catch {}
+      throw error;
+    }
   }
 
   async setGlobalModuleEnabled(moduleId: string, enabled: boolean | undefined): Promise<void> {

@@ -226,6 +226,44 @@ test('R-MODULE-06 updates one module without remounting the graph session', asyn
   await session.dispose();
 });
 
+test('R-MOUNT-06 failed dimension construction rolls back to the active runtime', async () => {
+  const registry = createShippedGraphModuleRegistryV1();
+  let disposals = 0;
+  registry.register({
+    order: 250,
+    descriptor: {
+      id: 'two-d-only-runtime',
+      version: '1.0.0',
+      displayName: 'Two dimensional runtime',
+      capabilities: ['two-d-only-runtime'],
+      settingsSchemaVersion: 1,
+      defaultSettings: {},
+    },
+    create: ({ dimensions }) => ({
+      setup: () => { if (dimensions === '3d') throw new Error('3d construction rejected'); },
+      dispose: () => { disposals += 1; },
+    }),
+  });
+  const value = runtimeHarness({
+    modules: registry,
+    registration: withModules({ 'two-d-only-runtime': { policy: 'required' } }),
+  });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', { dimensions: '3d' });
+  let failed = false;
+  try { value.factory.refreshActiveProfiles(); } catch (error) {
+    failed = error instanceof GraphRequiredModuleErrorV1;
+  }
+  equal(failed, true, 'required destination construction failure should reject the switch');
+  equal((await session.exportViewState()).dimensions, '2d', 'the active session should retain its prior dimension');
+  equal(runtimeCanvas(value.container), canvas, 'failed construction should preserve the active canvas');
+  equal(value.platform.pendingFrames, 1, 'failed construction should leave the prior runtime scheduled');
+  equal(disposals, 1, 'only the failed replacement instance should be disposed before session teardown');
+  await session.dispose();
+  equal(disposals, 2, 'the retained active instance should dispose with the session');
+});
+
 test('shipped Filter, Form, force layout, and palette contributions stay domain-neutral', async () => {
   const document = graphDocument({
     nodes: [

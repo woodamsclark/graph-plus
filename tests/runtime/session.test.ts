@@ -271,6 +271,96 @@ test('R-PROFILE-LIVE-01 refreshes mounted sessions without replacing their surfa
   await session.dispose();
 });
 
+test('R-DIM-02..04 switches dimensions on one resource-stable session and preserves graph state', async () => {
+  const value = harness();
+  const session = await value.create();
+  const root = surface(value.container);
+  const canvas = root.querySelector('canvas');
+  const sessionId = session.sessionId;
+  const document = await session.exportDocument();
+  await session.applyFilter({
+    schemaVersion: 1,
+    scope: 'render',
+    node: { op: 'has-token', token: 'keep' },
+  });
+  await session.setSelection(['b']);
+  await session.focusNode('a');
+  await session.setNodePinned('b', true);
+
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', { dimensions: '3d' });
+  value.factory.refreshActiveProfiles();
+  const spatial = await session.exportViewState();
+  equal(session.sessionId, sessionId, 'a dimension change should preserve the public session identity');
+  equal(surface(value.container), root, 'a dimension change should preserve the mounted surface');
+  equal(surface(value.container).querySelector('canvas'), canvas, 'a dimension change should preserve the canvas');
+  equal(root.dataset.dimensions, '3d', 'the existing surface should expose the active dimension');
+  equal(spatial.dimensions, '3d', 'exported view state should change dimension');
+  equal(spatial.camera.projection, 'perspective', '3d should reconfigure the camera to perspective');
+  assert(Object.values(spatial.positions).every((position) => Number.isFinite(position.x + position.y + position.z)), 'all converted positions should remain finite');
+  assert(Object.values(spatial.positions).some((position) => position.z !== 0), 'free 3d layout should gain finite depth');
+  deepEqual(spatial.selectedNodeIds, ['b'], 'selection should survive live conversion');
+  equal(spatial.focusedNodeId, 'a', 'focus should survive live conversion');
+  deepEqual(spatial.pinnedNodeIds, ['b'], 'pins should survive live conversion');
+  equal(spatial.activeFilters.render?.scope, 'render', 'active filters should survive live conversion');
+  deepEqual(await session.exportDocument(), document, 'canonical graph data should be untouched by dimension conversion');
+  equal(value.platform.pendingFrames, 1, 'a switch should retain exactly one scheduled frame');
+  equal(value.platform.observedTargets.length, 1, 'a switch should retain exactly one resize observation');
+  equal(value.platform.visibilityListenerAdds, 1, 'a switch should not add document listeners');
+
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', { dimensions: '2d' });
+  value.factory.refreshActiveProfiles();
+  const flat = await session.exportViewState();
+  equal(flat.camera.projection, 'orthographic', '2d should reconfigure the camera to orthographic');
+  equal(Object.values(flat.positions).every((position) => position.z === 0), true, '2d conversion should flatten every position');
+  deepEqual(flat.selectedNodeIds, ['b'], 'selection should survive the return conversion');
+  equal(flat.focusedNodeId, 'a', 'focus should survive the return conversion');
+  equal(value.platform.pendingFrames, 1, 'repeated switching should still retain one scheduled frame');
+  equal(value.platform.visibilityListenerAdds, 1, 'repeated switching should not multiply listeners');
+  await session.dispose();
+  equal(value.platform.disconnectedObservers, 1, 'the retained surface observer should dispose exactly once');
+});
+
+test('R-DIM-03 a valid session dimension override remains isolated from profile refresh', async () => {
+  const value = harness();
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', { dimensions: '3d' });
+  const session = await value.factory.createSession({
+    consumerId: 'synthetic-consumer',
+    profileId: 'two-dimensional',
+    container: value.container,
+    document: fixture(),
+    sessionOverrides: { dimensions: '2d' },
+  });
+  equal((await session.exportViewState()).dimensions, '2d', 'session override should win when the session is created');
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', { dimensions: '2d' });
+  value.factory.refreshActiveProfiles();
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', { dimensions: '3d' });
+  value.factory.refreshActiveProfiles();
+  equal((await session.exportViewState()).dimensions, '2d', 'later profile changes should not displace the session override');
+  equal(value.platform.pendingFrames, 1, 'an isolated session should keep one runtime loop');
+  await session.dispose();
+});
+
+test('R-MOUNT-07 restores a permitted saved view into the profile active dimension', async () => {
+  const first = harness();
+  const firstSession = await first.create();
+  await firstSession.setSelection(['b']);
+  await firstSession.focusNode('a');
+  await firstSession.setNodePinned('b', true);
+  const saved = await firstSession.exportViewState();
+  await firstSession.dispose();
+
+  const second = harness();
+  second.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', { dimensions: '3d' });
+  const restored = await second.create(saved);
+  const state = await restored.exportViewState();
+  equal(state.dimensions, '3d', 'restore should convert a saved allowed dimension into the active profile dimension');
+  equal(state.camera.projection, 'perspective', 'converted restore should use the destination projection');
+  deepEqual(state.selectedNodeIds, ['b'], 'restore conversion should preserve selection');
+  equal(state.focusedNodeId, 'a', 'restore conversion should preserve focus');
+  deepEqual(state.pinnedNodeIds, ['b'], 'restore conversion should preserve pins');
+  await restored.dispose();
+});
+
 test('adaptive labels reuse stable text measurements between frames', async () => {
   const value = harness();
   const session = await value.create();

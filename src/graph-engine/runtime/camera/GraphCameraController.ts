@@ -25,7 +25,7 @@ export class GraphCameraController {
   private state: GraphCameraStateV1;
   private viewport: GraphViewportV1 = { width: 0, height: 0 };
 
-  constructor(state: GraphCameraStateV1, private readonly dimensions: GraphDimensionsV1) {
+  constructor(state: GraphCameraStateV1, private dimensions: GraphDimensionsV1) {
     this.state = cloneCamera(state);
   }
 
@@ -35,6 +35,11 @@ export class GraphCameraController {
 
   setState(state: GraphCameraStateV1): void {
     this.state = cloneCamera(state);
+  }
+
+  reconfigure(state: GraphCameraStateV1, dimensions: GraphDimensionsV1): void {
+    this.state = cloneCamera(state);
+    this.dimensions = dimensions;
   }
 
   setViewport(width: number, height: number): void {
