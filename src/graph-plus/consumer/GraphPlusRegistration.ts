@@ -27,7 +27,22 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
     dimensions: '3d',
     allowedDimensions: ['2d', '3d'],
     requestedCapabilities: GRAPH_PLUS_REQUESTED_CAPABILITIES_V1,
-    uiDefaults: { dimensionControlVisible: true },
+    uiDefaults: {
+      dimensionControlVisible: true,
+      quickSettingsVisibility: 'shown',
+      quickSettingsSections: {
+        filter: { controls: { 'filter.clear': 'hidden' } },
+        form: { visibility: 'shown' },
+        display: { visibility: 'shown' },
+        camera: { visibility: 'shown' },
+        forces: { visibility: 'shown' },
+      },
+      contextMenuEnabled: true,
+    },
+    interaction: {
+      activationActionIds: ['open-node'],
+      contextActionIds: ['open-node'],
+    },
     profileSettings: { focalLengthMm: 50, dragRelease: 'pin' },
     modules: {
       rendering: {

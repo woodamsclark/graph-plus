@@ -4,7 +4,9 @@ import type {
   GraphEffectiveSettingsV1,
   GraphEngineLeaseV1,
   GraphSessionErrorV1,
+  GraphSessionUiOptionsV1,
   GraphSessionV1,
+  GraphSettingsOverridesV1,
   GraphViewStateV1,
 } from '../../graph-engine/contracts/v1/index.ts';
 import { reconcileGraphViewStateV1 } from '../../graph-engine/public.ts';
@@ -45,8 +47,10 @@ export interface GraphPlusConsumerOptionsV1<TFile> {
   readonly countDuplicateLinks: boolean;
   readonly legacyPositions?: unknown;
   readonly initialLens?: GraphPlusLensStateV1;
+  readonly restoreSavedLens?: boolean;
   readonly profileId?: string;
   readonly dimensions?: '2d' | '3d';
+  readonly ui?: GraphSessionUiOptionsV1;
   readonly clock?: GraphPlusCheckpointClockV1;
   readonly onError?: (error: GraphSessionErrorV1 | Error) => void;
 }
@@ -62,28 +66,39 @@ export class GraphPlusConsumerV1<TFile> {
   private lookup = new GraphPlusLookupV1<TFile>();
   private document?: GraphDocumentV1;
   private sessionSubscriptions: Disposable[] = [];
+  private actionRegistration?: Disposable;
   private opened = false;
   private leaseReleased = false;
   private lensQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: GraphPlusConsumerOptionsV1<TFile>) {
     this.adapter = new VaultGraphAdapterV1({ countDuplicateLinks: options.countDuplicateLinks });
+    this.lens = clone(options.initialLens ?? createDefaultGraphPlusLensV1());
     this.checkpoint = new GraphPlusCheckpointControllerV1(
       options.vaultId,
       options.checkpointStore,
       options.clock,
+      500,
+      () => clone(this.lens),
     );
     this.profileId = options.profileId ?? 'default';
     this.dimensions = options.dimensions ?? '3d';
-    this.lens = clone(options.initialLens ?? createDefaultGraphPlusLensV1());
   }
 
   async open(): Promise<void> {
     if (this.opened) return;
     this.opened = true;
     try {
+      this.actionRegistration = this.options.lease.registerNodeActions([{
+        id: 'open-node',
+        label: (context) => this.nodeKind(context.nodeId) === 'tag' ? 'Open tag' : 'Open note',
+        icon: 'file-text',
+        isAvailable: (context) => this.nodeKind(context.nodeId) !== undefined,
+        run: (context) => this.openNode(context.nodeId),
+      }]);
       const saved = await this.options.checkpointStore.load(this.options.vaultId);
       if (saved) {
+        if (saved.lens && this.options.restoreSavedLens !== false) this.lens = clone(saved.lens);
         const migrated = saved.viewState ?? migrateLegacyPositionsV1(saved.document, this.options.legacyPositions, {
           profileId: this.profileId,
           dimensions: this.dimensions,
@@ -103,6 +118,8 @@ export class GraphPlusConsumerV1<TFile> {
       }
     } catch (error) {
       this.opened = false;
+      this.actionRegistration?.dispose();
+      this.actionRegistration = undefined;
       this.options.onError?.(asError(error));
       throw error;
     }
@@ -194,6 +211,8 @@ export class GraphPlusConsumerV1<TFile> {
     this.opened = false;
     await this.lensQueue.catch(() => undefined);
     this.sessionSubscriptions.splice(0).forEach((subscription) => subscription.dispose());
+    this.actionRegistration?.dispose();
+    this.actionRegistration = undefined;
     try {
       await this.checkpoint.closeAndDispose();
     } finally {
@@ -217,19 +236,39 @@ export class GraphPlusConsumerV1<TFile> {
       document,
       restoreViewState: compatibleViewState,
       sessionOverrides: graphPlusSessionOverridesV1(this.lens),
+      ui: this.options.ui,
+      onSessionOverridesChanged: (overrides) => this.adoptSessionOverrides(overrides),
     });
     this.session = session;
     this.effectiveSettings = await session.exportEffectiveSettings();
     this.document = document;
     this.checkpoint.attach(session);
-    this.sessionSubscriptions.push(session.onIntent((intent) => {
-      if (intent.type !== 'node-activated') return;
-      const entry = this.lookup.get(intent.nodeId);
-      if (entry?.kind === 'note') void this.options.navigator.openNote(entry.file);
-      if (entry?.kind === 'tag') void this.options.navigator.openTag(entry.tag);
-    }));
     this.sessionSubscriptions.push(session.onError((error) => this.options.onError?.(error)));
     await this.applyFilter();
+  }
+
+  private adoptSessionOverrides(overrides: GraphSettingsOverridesV1): void {
+    const form = overrides.modules?.form;
+    const settings = form?.settings ?? {};
+    const direction = settings.direction;
+    const edgeToken = settings.edgeToken;
+    const maxDepth = settings.maxDepth;
+    this.lens = {
+      ...this.lens,
+      form: {
+        enabled: form?.enabled ?? this.lens.form.enabled,
+        ...(typeof settings.rootNodeId === 'string' ? { rootNodeId: settings.rootNodeId } : {}),
+        direction: direction === 'incoming' || direction === 'outgoing' ? direction : 'either',
+        ...(typeof edgeToken === 'string' && edgeToken.startsWith('relation:')
+          ? { relation: edgeToken.slice('relation:'.length) }
+          : {}),
+        ...(typeof maxDepth === 'number' && Number.isSafeInteger(maxDepth) ? { maxDepth } : {}),
+        showCrossLinks: settings.showCrossLinks !== false,
+        showDisconnected: settings.showDisconnected === true,
+        colorBranches: settings.colorBranches !== false,
+      },
+    };
+    this.checkpoint.schedule();
   }
 
   private compatibleViewState(document: GraphDocumentV1, state: GraphViewStateV1): GraphViewStateV1 | undefined {
@@ -238,7 +277,7 @@ export class GraphPlusConsumerV1<TFile> {
         document,
         consumerId: 'graph-plus',
         profileId: this.profileId,
-        dimensions: this.dimensions,
+        dimensions: state.dimensions,
       });
     } catch {
       return undefined;

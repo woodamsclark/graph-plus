@@ -15,6 +15,11 @@ export class ObsidianGraphEngineSessionUiHostV1 implements GraphEngineSessionUiH
     );
     const quickSettings = new GraphEngineQuickSettingsPanelV1(context, policy);
     const contextMenu = new GraphEngineContextMenuV1(context, policy);
+    const overrideSubscription = context.controls.onSessionOverridesChanged((overrides) => {
+      try {
+        void Promise.resolve(context.sessionOptions.onSessionOverridesChanged?.(overrides)).catch(() => undefined);
+      } catch {}
+    });
     quickSettings.mount();
     contextMenu.mount();
     let disposed = false;
@@ -22,6 +27,7 @@ export class ObsidianGraphEngineSessionUiHostV1 implements GraphEngineSessionUiH
       dispose: () => {
         if (disposed) return;
         disposed = true;
+        overrideSubscription.dispose();
         contextMenu.dispose();
         quickSettings.dispose();
       },

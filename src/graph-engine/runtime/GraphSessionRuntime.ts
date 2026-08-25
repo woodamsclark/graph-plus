@@ -108,6 +108,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly intentListeners = new Set<(intent: GraphIntentV1) => void>();
   private readonly graphChangedListeners = new Set<(event: GraphChangedEventV1) => void>();
   private readonly errorListeners = new Set<(error: GraphSessionErrorV1) => void>();
+  private readonly overrideListeners = new Set<(overrides: GraphSettingsOverridesV1) => void>();
   private animationFrame: number | null = null;
   private frameCount = 0;
   private frameDirty = true;
@@ -446,11 +447,16 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const requested = cloneOverrides(overrides);
     this.applyResolvedProfile(this.resolveProfile(requested));
     this.sessionOverrides = requested;
+    this.emitSessionOverridesChanged();
   }
 
   createControlPort(): GraphSessionControlPortV1 {
     return {
       getSessionOverrides: () => cloneOverrides(this.sessionOverrides),
+      onSessionOverridesChanged: (listener) => {
+        this.overrideListeners.add(listener);
+        return { dispose: () => this.overrideListeners.delete(listener) };
+      },
       setModuleEnabled: (moduleId, enabled) => this.patchModuleOverride(moduleId, { enabled }),
       setModuleSetting: (moduleId, key, value) => this.patchModuleSetting(moduleId, key, value),
       createNodeActionContext: (nodeId) => this.nodeActionContext(nodeId),
@@ -680,6 +686,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.intentListeners.clear();
     this.graphChangedListeners.clear();
     this.errorListeners.clear();
+    this.overrideListeners.clear();
     this.surface.dispose();
     this.onDisposed?.();
   }
@@ -944,6 +951,13 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       } catch {
         // Error listeners are isolated from the session and from one another.
       }
+    }
+  }
+
+  private emitSessionOverridesChanged(): void {
+    const overrides = cloneOverrides(this.sessionOverrides);
+    for (const listener of [...this.overrideListeners]) {
+      try { listener(cloneOverrides(overrides)); } catch {}
     }
   }
 }

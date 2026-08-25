@@ -6,10 +6,15 @@ import {
   type GraphSessionV1,
   type GraphViewStateV1,
 } from '../../graph-engine/public.ts';
+import {
+  coerceGraphPlusLensStateV1,
+  type GraphPlusLensStateV1,
+} from '../query/index.ts';
 
 export interface GraphPlusCheckpointV1 {
   readonly document: GraphDocumentV1;
   readonly viewState?: GraphViewStateV1;
+  readonly lens?: GraphPlusLensStateV1;
   readonly savedAt: number;
 }
 
@@ -35,6 +40,7 @@ export class GraphPlusCheckpointControllerV1 {
     private readonly store: GraphPlusCheckpointStoreV1,
     private readonly clock: GraphPlusCheckpointClockV1 = defaultClock,
     private readonly debounceMs = 500,
+    private readonly getLens?: () => GraphPlusLensStateV1,
   ) {}
 
   attach(session: GraphSessionV1): void {
@@ -63,7 +69,12 @@ export class GraphPlusCheckpointControllerV1 {
     if (!session) return this.flushQueue;
     this.flushQueue = this.flushQueue.catch(() => undefined).then(async () => {
       const [document, viewState] = await Promise.all([session.exportDocument(), session.exportViewState()]);
-      await this.store.save(this.vaultId, { document, viewState, savedAt: this.clock.now() });
+      await this.store.save(this.vaultId, {
+        document,
+        viewState,
+        ...(this.getLens ? { lens: this.getLens() } : {}),
+        savedAt: this.clock.now(),
+      });
     });
     return this.flushQueue;
   }
@@ -100,9 +111,11 @@ export function validateGraphPlusCheckpointV1(value: unknown): GraphPlusCheckpoi
         viewState = undefined;
       }
     }
+    const lens = coerceGraphPlusLensStateV1(value.lens);
     return JSON.parse(JSON.stringify({
       document: value.document,
       ...(viewState ? { viewState } : {}),
+      ...(lens ? { lens } : {}),
       savedAt: value.savedAt,
     })) as GraphPlusCheckpointV1;
   } catch {

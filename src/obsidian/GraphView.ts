@@ -2,9 +2,9 @@ import { ItemView, type Plugin, type TFile, type ViewStateResult, type Workspace
 import { mountGraphEngineUnavailableSurfaceV1, type Disposable } from '../graph-engine/public.ts';
 import { ObsidianVaultGraphSourceV1 } from '../graph-plus/adapter/index.ts';
 import { GraphPlusConsumerV1 } from '../graph-plus/consumer/index.ts';
-import { createDefaultGraphPlusLensV1, type GraphPlusLensStateV1 } from '../graph-plus/query/index.ts';
-import { GraphPlusControlsPanelV1 } from './GraphPlusControlsPanel.ts';
+import { coerceGraphPlusLensStateV1, createDefaultGraphPlusLensV1, type GraphPlusLensStateV1 } from '../graph-plus/query/index.ts';
 import { GraphPlusObsidianNavigatorV1 } from './GraphPlusObsidianNavigator.ts';
+import { createGraphPlusUiContributionsV1 } from './GraphPlusUiContributions.ts';
 import type GraphPlus from './main.ts';
 
 export const GRAPH_PLUS_TYPE = 'graph-plus';
@@ -12,7 +12,6 @@ export const GRAPH_PLUS_TYPE = 'graph-plus';
 export class GraphPlusView extends ItemView {
   private readonly plugin: GraphPlus;
   private consumer?: GraphPlusConsumerV1<TFile>;
-  private controls?: GraphPlusControlsPanelV1<TFile>;
   private fallback?: Disposable;
   private unregisters: Array<() => void> = [];
   private rebuildTimer: number | undefined;
@@ -29,8 +28,10 @@ export class GraphPlusView extends ItemView {
     const container = this.contentEl.createDiv({ cls: 'greater-graph-view graphplus-view' });
     if (!this.stateRestored) this.pendingLens = { ...this.pendingLens, showTags: this.plugin.settings.showTags };
     try {
+      this.pendingLens = await this.plugin.migrateLegacyLensSettings(this.pendingLens);
       const lease = this.plugin.acquireGraphPlusLease();
-      this.consumer = new GraphPlusConsumerV1({
+      let consumer!: GraphPlusConsumerV1<TFile>;
+      consumer = new GraphPlusConsumerV1({
         lease,
         container,
         vaultId: this.app.vault.getName(),
@@ -40,15 +41,15 @@ export class GraphPlusView extends ItemView {
         countDuplicateLinks: this.plugin.settings.countDuplicateLinks,
         legacyPositions: this.plugin.getLegacyGraphState(this.app.vault.getName()),
         initialLens: this.pendingLens,
+        restoreSavedLens: !this.stateRestored,
         clock: createWindowClock(container),
+        ui: {
+          quickSettings: { contributions: createGraphPlusUiContributionsV1(() => consumer) },
+        },
         onError: (error) => console.error('[Graph+] consumer error', error),
       });
-      await this.consumer.open();
-      this.controls = new GraphPlusControlsPanelV1(
-        container,
-        this.consumer,
-      );
-      this.controls.mount();
+      this.consumer = consumer;
+      await consumer.open();
       this.registerGraphRebuildEvents();
     } catch (error) {
       console.error('[Graph+] failed to open', error);
@@ -66,8 +67,6 @@ export class GraphPlusView extends ItemView {
     if (this.rebuildTimer !== undefined) window?.clearTimeout(this.rebuildTimer);
     this.rebuildTimer = undefined;
     this.unregisters.splice(0).forEach((unregister) => unregister());
-    this.controls?.unmount();
-    this.controls = undefined;
     await this.consumer?.close();
     this.consumer = undefined;
     this.fallback?.dispose();
@@ -83,11 +82,11 @@ export class GraphPlusView extends ItemView {
   }
 
   async setState(state: unknown, _result: ViewStateResult): Promise<void> {
-    const lens = coerceLens(isRecord(state) ? state.lens : undefined);
+    const lens = coerceGraphPlusLensStateV1(isRecord(state) ? state.lens : undefined);
     if (!lens) return;
-    this.pendingLens = lens;
+    this.pendingLens = await this.plugin.migrateLegacyLensSettings(lens);
     this.stateRestored = true;
-    await this.consumer?.setLens(lens);
+    await this.consumer?.setLens(this.pendingLens);
   }
 
   private registerGraphRebuildEvents(): void {
@@ -97,7 +96,7 @@ export class GraphPlusView extends ItemView {
       if (this.rebuildTimer !== undefined) window?.clearTimeout(this.rebuildTimer);
       this.rebuildTimer = window?.setTimeout(() => {
         this.rebuildTimer = undefined;
-        void this.consumer?.reconcile().then(() => this.controls?.refresh());
+        void this.consumer?.reconcile();
       }, 180);
     };
     const createRef = this.app.vault.on('create', schedule);
@@ -113,42 +112,6 @@ export class GraphPlusView extends ItemView {
   }
 }
 
-function coerceLens(value: unknown): GraphPlusLensStateV1 | undefined {
-  if (!isRecord(value)) return undefined;
-  const fallback = createDefaultGraphPlusLensV1();
-  const form = isRecord(value.form) ? value.form : {};
-  return {
-    query: typeof value.query === 'string' ? value.query : fallback.query,
-    showTags: typeof value.showTags === 'boolean' ? value.showTags : fallback.showTags,
-    showOrphans: typeof value.showOrphans === 'boolean' ? value.showOrphans : fallback.showOrphans,
-    display: isRecord(value.display) ? {
-      ...(value.display.labelMode === 'adaptive' || value.display.labelMode === 'all' || value.display.labelMode === 'off'
-        ? { labelMode: value.display.labelMode }
-        : typeof value.display.showLabels === 'boolean' && value.display.showLabels === false
-          ? { labelMode: 'off' as const }
-          : {}),
-      ...optionalLegacyNumber(value.display.nodeRadiusScale, 1, true, 'nodeRadiusScale'),
-      ...optionalLegacyNumber(value.display.edgeThicknessScale, 1, true, 'edgeThicknessScale'),
-    } : fallback.display,
-    force: isRecord(value.force) ? {
-      ...optionalLegacyNumber(value.force.repulsionStrength, 18000, false, 'repulsionStrength'),
-      ...optionalLegacyNumber(value.force.springStrength, 3.5, false, 'springStrength'),
-      ...optionalLegacyNumber(value.force.springLength, 80, true, 'springLength'),
-      ...optionalLegacyNumber(value.force.centeringStrength, 0.45, false, 'centeringStrength'),
-    } : fallback.force,
-    form: {
-      enabled: typeof form.enabled === 'boolean' ? form.enabled : fallback.form.enabled,
-      ...(typeof form.rootNodeId === 'string' && form.rootNodeId ? { rootNodeId: form.rootNodeId } : {}),
-      direction: form.direction === 'incoming' || form.direction === 'outgoing' ? form.direction : 'either',
-      ...(typeof form.relation === 'string' && form.relation ? { relation: form.relation } : {}),
-      ...(typeof form.maxDepth === 'number' ? { maxDepth: form.maxDepth } : {}),
-      showCrossLinks: typeof form.showCrossLinks === 'boolean' ? form.showCrossLinks : fallback.form.showCrossLinks,
-      showDisconnected: typeof form.showDisconnected === 'boolean' ? form.showDisconnected : fallback.form.showDisconnected,
-      colorBranches: typeof form.colorBranches === 'boolean' ? form.colorBranches : fallback.form.colorBranches,
-    },
-  };
-}
-
 function createWindowClock(container: HTMLElement) {
   const window = container.ownerDocument.defaultView;
   return {
@@ -160,23 +123,4 @@ function createWindowClock(container: HTMLElement) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function finitePositive(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-function finiteNonNegative(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
-}
-
-function optionalLegacyNumber(
-  value: unknown,
-  legacyDefault: number,
-  positive: boolean,
-  key: string,
-): Record<string, number> {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return {};
-  if (positive ? value <= 0 : value < 0) return {};
-  return value === legacyDefault ? {} : { [key]: value };
 }

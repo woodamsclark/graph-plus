@@ -15,6 +15,11 @@ export const GRAPH_QUICK_SETTINGS_SECTION_IDS_V1 = Object.freeze({
 export const GRAPH_QUICK_SETTINGS_CONTROL_IDS_V1 = Object.freeze({
   clearFilter: 'filter.clear',
   mindMap: 'form.mind-map',
+  formDirection: 'form.direction',
+  formDepth: 'form.depth',
+  formBranchColors: 'form.branch-colors',
+  formCrossLinks: 'form.cross-links',
+  formDisconnected: 'form.disconnected',
   labels: 'display.labels',
   nodeSize: 'display.node-size',
   linkThickness: 'display.link-thickness',

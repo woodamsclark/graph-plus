@@ -14,6 +14,9 @@ export interface GraphSessionOptionsV1 {
   readonly restoreViewState?: GraphViewStateV1;
   readonly sessionOverrides?: GraphSettingsOverridesV1;
   readonly ui?: GraphSessionUiOptionsV1;
+  readonly onSessionOverridesChanged?: (
+    overrides: GraphSettingsOverridesV1,
+  ) => void | Promise<void>;
 }
 
 export interface GraphSessionV1 {

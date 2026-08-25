@@ -29,6 +29,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
   private status?: HTMLDivElement;
   private layout?: ObsidianGraphUiLayoutV1;
   private intentSubscription?: Disposable;
+  private overrideSubscription?: Disposable;
   private contributionDisposables: Disposable[] = [];
   private collapsed: boolean;
   private disposed = false;
@@ -59,6 +60,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
         void this.render();
       }
     });
+    this.overrideSubscription = this.context.controls.onSessionOverridesChanged(() => { void this.render(); });
     void this.render();
   }
 
@@ -68,6 +70,8 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     this.disposeContributions();
     this.intentSubscription?.dispose();
     this.intentSubscription = undefined;
+    this.overrideSubscription?.dispose();
+    this.overrideSubscription = undefined;
     this.layout?.dispose();
     this.layout = undefined;
     this.root?.remove();
@@ -170,8 +174,28 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
             }
             await this.context.controls.setModuleEnabled('form', enabled);
             if (enabled) await this.context.session.fitNodes();
-            await this.render();
           }));
+      if (form?.enabled) {
+        if (graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.formDirection)) {
+          const direction = form.settings.direction;
+          new Setting(body).setName('Direction').addDropdown((dropdown) => dropdown
+            .addOptions({ either: 'Both', outgoing: 'Outgoing', incoming: 'Incoming' })
+            .setValue(direction === 'outgoing' || direction === 'incoming' ? direction : 'either')
+            .onChange((value) => void this.setTransientFormSetting('direction', value)));
+        }
+        if (graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.formDepth)) {
+          this.transientFormSlider(body, 'Depth', readNumber(form.settings.maxDepth, 3), 1, 8, 1, 'maxDepth');
+        }
+        if (graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.formBranchColors)) {
+          this.transientFormToggle(body, 'Branch colors', form.settings.colorBranches !== false, 'colorBranches');
+        }
+        if (graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.formCrossLinks)) {
+          this.transientFormToggle(body, 'Cross-links', form.settings.showCrossLinks !== false, 'showCrossLinks');
+        }
+        if (graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.formDisconnected)) {
+          this.transientFormToggle(body, 'Disconnected nodes', form.settings.showDisconnected === true, 'showDisconnected');
+        }
+      }
     }
     this.mountContributions(body, contributions);
   }
@@ -202,6 +226,42 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       }
     }
     this.mountContributions(body, contributions);
+  }
+
+  private async setTransientFormSetting(key: string, value: JsonValue | undefined): Promise<void> {
+    await this.context.controls.setModuleSetting('form', key, value);
+  }
+
+  private transientFormToggle(parent: HTMLElement, name: string, value: boolean, key: string): void {
+    new Setting(parent).setName(name).addToggle((toggle) => toggle
+      .setValue(value)
+      .onChange((next) => void this.setTransientFormSetting(key, next)));
+  }
+
+  private transientFormSlider(
+    parent: HTMLElement,
+    name: string,
+    value: number,
+    min: number,
+    max: number,
+    step: number,
+    key: string,
+  ): void {
+    const setting = new Setting(parent).setName(name).setDesc(`Current: ${formatNumber(value)}`);
+    setting.settingEl.classList.add('graphplus-slider-setting', 'graph-engine-slider-setting');
+    setting.addSlider((slider) => {
+      slider.setLimits(min, max, step).setValue(value).setDynamicTooltip().onChange((next) => {
+        void this.context.controls.setModuleSetting('form', key, next);
+      });
+      slider.sliderEl.addEventListener('dblclick', (event) => {
+        event.preventDefault();
+        void this.setTransientFormSetting(key, undefined);
+      });
+    });
+    if (this.context.controls.getSessionOverrides().modules?.form?.settings?.[key] !== undefined) {
+      setting.addExtraButton((control) => control.setIcon('rotate-ccw').setTooltip('Reset to profile default')
+        .onClick(() => this.setTransientFormSetting(key, undefined)));
+    }
   }
 
   private renderCamera(parent: HTMLElement, contributions: readonly GraphQuickSettingsContributionV1[]): void {

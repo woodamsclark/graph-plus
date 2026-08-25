@@ -5,7 +5,7 @@ import { GraphEngineProviderCoreV1 } from '../../src/graph-engine/service/index.
 import { VaultGraphAdapterV1, noteNodeId, tagNodeId } from '../../src/graph-plus/adapter/index.ts';
 import { GraphPlusConsumerV1 } from '../../src/graph-plus/consumer/index.ts';
 import type { GraphPlusCheckpointStoreV1, GraphPlusCheckpointV1 } from '../../src/graph-plus/persistence/index.ts';
-import { compileGraphPlusFilterV1, createDefaultGraphPlusLensV1 } from '../../src/graph-plus/query/index.ts';
+import { compileGraphPlusFilterV1, createDefaultGraphPlusLensV1, graphPlusSessionOverridesV1 } from '../../src/graph-plus/query/index.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import { runtimeHarness, runtimeFixture, runtimeRegistration } from '../support/runtimeHarness.ts';
 
@@ -22,6 +22,7 @@ const graphPlusRegistration: ConsumerRegistrationV1 = {
     descriptorVersion: 1,
     dimensions: '3d',
     requestedCapabilities: ['render'],
+    interaction: { activationActionIds: ['open-node'], contextActionIds: ['open-node'] },
     modules: {
       rendering: { policy: 'required' },
       filtering: { policy: 'required' },
@@ -111,6 +112,18 @@ test('Graph+ query translation selects IDs before invoking the generic AST filte
   deepEqual((compiled.request.node as { ids: readonly string[] }).ids, [noteNodeId('folder/Beta.md')], 'consumer should translate its vocabulary to opaque node IDs');
 });
 
+test('Graph+ leaves generic display and force settings in its engine profile namespace', () => {
+  const lens = createDefaultGraphPlusLensV1();
+  const overrides = graphPlusSessionOverridesV1({
+    ...lens,
+    display: { labelMode: 'all', nodeRadiusScale: 2 },
+    force: { repulsionStrength: 1234 },
+  });
+  equal(overrides.modules?.rendering, undefined, 'legacy display lens values should no longer shadow stock profile controls');
+  equal(overrides.modules?.['force-layout'], undefined, 'legacy force lens values should no longer shadow stock profile controls');
+  equal(overrides.modules?.form?.enabled, false, 'transient Form ownership should remain in Graph+ session state');
+});
+
 class MemoryStore implements GraphPlusCheckpointStoreV1 {
   value?: GraphPlusCheckpointV1;
   saves = 0;
@@ -136,7 +149,11 @@ test('G-LAZY consumer mounts saved graph before vault reconciliation and flushes
   await leaseResult.lease.registerConsumer(registration);
   const saved = new VaultGraphAdapterV1<FakeFile>({ countDuplicateLinks: true }).build(fixture.value).document;
   const store = new MemoryStore();
-  store.value = { document: saved, savedAt: 1 };
+  store.value = {
+    document: saved,
+    lens: { ...createDefaultGraphPlusLensV1(), query: 'file:beta', showTags: false },
+    savedAt: 1,
+  };
   let sawMountedBeforeScan = false;
   const consumer = new GraphPlusConsumerV1({
     lease: leaseResult.lease,
@@ -152,9 +169,127 @@ test('G-LAZY consumer mounts saved graph before vault reconciliation and flushes
   });
   await consumer.open();
   equal(sawMountedBeforeScan, true, 'saved document should mount before authoritative scan starts');
+  equal(consumer.getLens().query, 'file:beta', 'Graph+ should restore its consumer-owned lens from the checkpoint');
+  equal(consumer.getLens().showTags, false, 'restored lens toggles should remain consumer-owned');
   await consumer.close();
   assert(store.saves > 0, 'controlled close should checkpoint before session disposal');
+  equal(store.value?.lens?.query, 'file:beta', 'controlled close should persist the active lens with the graph');
   equal(runtime.container.querySelector('[data-graph-engine-session]'), null, 'close should dispose the mounted session');
+});
+
+test('G-PARITY engine host resolves Graph+ open-node once and hands transient Form state back', async () => {
+  const fixture = snapshot();
+  const runtime = runtimeHarness({ registration: graphPlusRegistration });
+  let actionLabel = '';
+  let actionInvoked = false;
+  let bridgeDisposals = 0;
+  const core = new GraphEngineProviderCoreV1({
+    engineVersion: '1.1.0',
+    engineInstanceId: 'graph-plus-ui-test',
+    capabilities: ['render'],
+    profiles: runtime.profiles,
+    sessions: runtime.factory,
+    sessionUiHost: {
+      mount: async (context) => {
+        const nodeId = noteNodeId('Alpha.md');
+        actionLabel = context.controls.resolveNodeActions(['open-node'], nodeId)[0]?.label ?? '';
+        actionInvoked = context.controls.invokeNodeAction('open-node', nodeId);
+        const bridge = context.controls.onSessionOverridesChanged((overrides) => {
+          void context.sessionOptions.onSessionOverridesChanged?.(overrides);
+        });
+        await context.controls.setModuleSetting('form', 'rootNodeId', nodeId);
+        await context.controls.setModuleSetting('form', 'direction', 'outgoing');
+        await context.controls.setModuleEnabled('form', true);
+        return { dispose: () => { bridge.dispose(); bridgeDisposals += 1; } };
+      },
+    },
+  });
+  const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(lease.ok, 'Graph+ should obtain its ordinary consumer lease');
+  let openedNotes = 0;
+  const store = new MemoryStore();
+  const consumer = new GraphPlusConsumerV1({
+    lease: lease.lease,
+    container: runtime.container,
+    vaultId: fixture.value.vaultId,
+    source: { read: () => fixture.value },
+    checkpointStore: store,
+    navigator: { openNote: async () => { openedNotes += 1; }, openTag: async () => undefined },
+    countDuplicateLinks: true,
+  });
+  await consumer.open();
+  await Promise.resolve();
+  equal(actionLabel, 'Open note', 'the registered primary action should use Graph+ domain language');
+  equal(actionInvoked, true, 'the engine resolver should invoke the Graph+ action');
+  equal(openedNotes, 1, 'one resolved action should open exactly once without an intent fallback duplicate');
+  equal(consumer.getLens().form.enabled, true, 'engine transient Form enable should be handed back to Graph+');
+  equal(consumer.getLens().form.rootNodeId, noteNodeId('Alpha.md'), 'engine Form root should be handed back by stable node ID');
+  equal(consumer.getLens().form.direction, 'outgoing', 'engine Form configuration should be handed back');
+  await consumer.close();
+  equal(store.value?.lens?.form.rootNodeId, noteNodeId('Alpha.md'), 'Graph+ should persist handed-back Form state in its own checkpoint');
+  equal(bridgeDisposals, 1, 'the engine UI bridge should dispose with the consumer session');
+  await core.dispose();
+});
+
+test('G-PARITY-09 Graph+ persists Form while its profile switches and restores dimensions', async () => {
+  const fixture = snapshot();
+  const store = new MemoryStore();
+  const first = runtimeHarness({ registration: graphPlusRegistration });
+  first.profiles.setUserOverrides('graph-plus', 'default', { dimensions: '2d' });
+  const firstCore = new GraphEngineProviderCoreV1({
+    engineVersion: '1.1.0', engineInstanceId: 'graph-plus-dim-first', capabilities: ['render'],
+    profiles: first.profiles, sessions: first.factory,
+  });
+  const firstLease = firstCore.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(firstLease.ok, 'Graph+ should connect in its 2d profile override');
+  const firstConsumer = new GraphPlusConsumerV1({
+    lease: firstLease.lease,
+    container: first.container,
+    vaultId: fixture.value.vaultId,
+    source: { read: () => fixture.value },
+    checkpointStore: store,
+    navigator: { openNote: async () => undefined, openTag: async () => undefined },
+    countDuplicateLinks: true,
+  });
+  await firstConsumer.open();
+  const session = firstConsumer.getSession();
+  assert(session, 'Graph+ should expose its leased session');
+  equal((await session.exportViewState()).dimensions, '2d', 'Graph+ should honor its persistent profile dimension');
+  const rootId = noteNodeId('Alpha.md');
+  await firstConsumer.mindMapFromNode(rootId);
+  first.profiles.setUserOverrides('graph-plus', 'default', { dimensions: '3d' });
+  first.factory.refreshActiveProfiles();
+  equal(firstConsumer.getSession(), session, 'live dimension switching should retain the Graph+ session handle');
+  equal((await session.exportViewState()).dimensions, '3d', 'Graph+ should switch its existing graph to 3d');
+  equal(firstConsumer.getLens().form.rootNodeId, rootId, 'Graph+ should retain the Form root through the switch');
+  await firstConsumer.close();
+  await firstCore.dispose();
+  equal(store.value?.viewState?.dimensions, '3d', 'Graph+ should checkpoint the active destination dimension');
+  equal(store.value?.lens?.form.rootNodeId, rootId, 'Graph+ should checkpoint its consumer-owned Form root');
+
+  const second = runtimeHarness({ registration: graphPlusRegistration });
+  second.profiles.setUserOverrides('graph-plus', 'default', { dimensions: '2d' });
+  const secondCore = new GraphEngineProviderCoreV1({
+    engineVersion: '1.1.0', engineInstanceId: 'graph-plus-dim-second', capabilities: ['render'],
+    profiles: second.profiles, sessions: second.factory,
+  });
+  const secondLease = secondCore.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(secondLease.ok, 'Graph+ should reconnect with the saved checkpoint');
+  const restored = new GraphPlusConsumerV1({
+    lease: secondLease.lease,
+    container: second.container,
+    vaultId: fixture.value.vaultId,
+    source: { read: () => fixture.value },
+    checkpointStore: store,
+    navigator: { openNote: async () => undefined, openTag: async () => undefined },
+    countDuplicateLinks: true,
+  });
+  await restored.open();
+  equal((await restored.getSession()?.exportViewState())?.dimensions, '2d', 'runtime restore should convert the permitted saved dimension');
+  equal(restored.getLens().form.enabled, true, 'restored Graph+ should retain active Form');
+  equal(restored.getLens().form.rootNodeId, rootId, 'restored Graph+ should retain the same root');
+  await restored.close();
+  await secondCore.dispose();
 });
 
 test('Graph+ Mind Map snapshots selection as its root and pauses when filtering hides that root', async () => {

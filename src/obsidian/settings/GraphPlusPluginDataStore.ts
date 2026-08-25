@@ -25,6 +25,7 @@ export interface GraphPlusPluginDataV1 {
       readonly viewStates?: Readonly<Record<string, unknown>>;
       readonly checkpoints?: Readonly<Record<string, unknown>>;
       readonly consumerSettings: GraphPlusConsumerSettingsV1;
+      readonly genericLensMigrated?: boolean;
       readonly legacySettings?: unknown;
     };
     readonly [consumerId: string]: unknown;
@@ -109,6 +110,21 @@ export function withGraphPlusSettingsV1(
         ...data.consumers.graphPlus,
         dataSchemaVersion: GRAPH_PLUS_CONSUMER_DATA_SCHEMA_VERSION,
         consumerSettings: cloneJson(consumerSettings),
+      },
+    },
+  };
+}
+
+export function withGraphPlusGenericLensMigratedV1(
+  data: GraphPlusPluginDataV1,
+): GraphPlusPluginDataV1 {
+  return {
+    ...data,
+    consumers: {
+      ...data.consumers,
+      graphPlus: {
+        ...data.consumers.graphPlus,
+        genericLensMigrated: true,
       },
     },
   };

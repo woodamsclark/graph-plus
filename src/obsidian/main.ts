@@ -16,6 +16,7 @@ import {
   type GraphPlusConsumerSettingsV1,
 } from '../graph-plus/consumer/index.ts';
 import type { GraphPlusCheckpointStoreV1 } from '../graph-plus/persistence/index.ts';
+import type { GraphPlusLensStateV1 } from '../graph-plus/query/index.ts';
 import {
   asObsidianWorkspaceEventsV1,
   ObsidianWorkspaceEventBusV1,
@@ -28,6 +29,7 @@ import {
   readGraphPlusCheckpointV1,
   withEngineSettingsV1,
   withGraphPlusCheckpointV1,
+  withGraphPlusGenericLensMigratedV1,
   withGraphPlusSettingsV1,
   type GraphPlusPluginDataV1,
 } from './settings/GraphPlusPluginDataStore.ts';
@@ -182,6 +184,34 @@ export default class GraphPlus extends Plugin {
     return legacy !== null && typeof legacy === 'object' && !Array.isArray(legacy)
       ? (legacy as Record<string, unknown>)[vaultId]
       : undefined;
+  }
+
+  async migrateLegacyLensSettings(lens: GraphPlusLensStateV1): Promise<GraphPlusLensStateV1> {
+    if (this.pluginData.consumers.graphPlus.genericLensMigrated !== true) {
+      const existing = this.engineSettings.getProfileOverrides('graph-plus', 'default');
+      const writes: Array<[string, string, number | string]> = [];
+      if (lens.display.labelMode !== undefined && existing.modules?.rendering?.settings?.labelMode === undefined) {
+        writes.push(['rendering', 'labelMode', lens.display.labelMode]);
+      }
+      if (lens.display.nodeRadiusScale !== undefined && existing.modules?.rendering?.settings?.nodeRadiusScale === undefined) {
+        writes.push(['rendering', 'nodeRadiusScale', lens.display.nodeRadiusScale]);
+      }
+      if (lens.display.edgeThicknessScale !== undefined && existing.modules?.rendering?.settings?.edgeThicknessScale === undefined) {
+        writes.push(['rendering', 'edgeThicknessScale', lens.display.edgeThicknessScale]);
+      }
+      for (const key of ['repulsionStrength', 'springStrength', 'springLength', 'centeringStrength'] as const) {
+        const value = lens.force[key];
+        if (value !== undefined && existing.modules?.['force-layout']?.settings?.[key] === undefined) {
+          writes.push(['force-layout', key, value]);
+        }
+      }
+      for (const [moduleId, key, value] of writes) {
+        await this.engineSettings.setProfileModuleSetting('graph-plus', 'default', moduleId, key, value);
+      }
+      this.pluginData = withGraphPlusGenericLensMigratedV1(this.pluginData);
+      await this.persistPluginData();
+    }
+    return { ...lens, display: {}, force: {} };
   }
 
   private async persistEngineSettings(): Promise<void> {
