@@ -5,6 +5,8 @@ import type {
   EngineModuleOverrideV1,
   EngineModulePolicyV1,
   GraphDimensionsV1,
+  GraphInteractionProfileV1,
+  GraphProfileUiDefaultsV1,
   GraphSettingsOverridesV1,
   GraphSettingSourceV1,
   JsonValue,
@@ -26,7 +28,11 @@ export interface EffectiveConsumerProfileV1 {
   readonly displayName: string;
   readonly descriptorVersion: number;
   readonly dimensions: GraphDimensionsV1;
+  readonly dimensionsSource: GraphSettingSourceV1;
+  readonly allowedDimensions: readonly GraphDimensionsV1[];
   readonly requestedCapabilities: readonly string[];
+  readonly uiDefaults?: GraphProfileUiDefaultsV1;
+  readonly interaction?: GraphInteractionProfileV1;
   readonly profileSettings: Readonly<Record<string, JsonValue>>;
   readonly profileSettingSources: Readonly<Record<string, GraphSettingSourceV1>>;
   readonly modules: Readonly<Record<string, EffectiveModuleProfileV1>>;
@@ -190,6 +196,31 @@ export class ConsumerProfileRegistry {
     validateSettingsOverrides(session);
 
     const issues: ProfileResolutionIssueV1[] = [];
+    const allowedDimensions = profile.allowedDimensions ?? ['2d', '3d'];
+    let dimensions = profile.dimensions;
+    let dimensionsSource: GraphSettingSourceV1 = allowedDimensions.length === 1
+      ? 'locked'
+      : 'consumer-profile';
+    const applyDimensionOverride = (
+      requested: GraphDimensionsV1 | undefined,
+      layer: 'user' | 'session',
+      source: GraphSettingSourceV1,
+    ): void => {
+      if (requested === undefined) return;
+      if (!allowedDimensions.includes(requested)) {
+        issues.push({
+          code: 'invalid-override',
+          path: `${layer}.dimensions`,
+          message: `Dimension "${requested}" is not permitted by this profile.`,
+          fatal: false,
+        });
+        return;
+      }
+      dimensions = requested;
+      dimensionsSource = source;
+    };
+    applyDimensionOverride(user.dimensions, 'user', 'user-profile');
+    applyDimensionOverride(session.dimensions, 'session', 'session');
     const effectiveModules: Record<string, EffectiveModuleProfileV1> = {};
     for (const [moduleId, moduleProfile] of Object.entries(profile.modules)) {
       const descriptor = this.modules.get(moduleId);
@@ -270,8 +301,12 @@ export class ConsumerProfileRegistry {
       profileId,
       displayName: profile.displayName,
       descriptorVersion: profile.descriptorVersion,
-      dimensions: profile.dimensions,
+      dimensions,
+      dimensionsSource,
+      allowedDimensions: [...allowedDimensions],
       requestedCapabilities: [...profile.requestedCapabilities],
+      uiDefaults: profile.uiDefaults ? cloneProfileUiDefaults(profile.uiDefaults) : undefined,
+      interaction: profile.interaction ? cloneInteractionProfile(profile.interaction) : undefined,
       profileSettings,
       profileSettingSources,
       modules: effectiveModules,
@@ -507,8 +542,22 @@ function validateConsumerRegistration(registration: ConsumerRegistrationV1): voi
     if (!Number.isSafeInteger(profile.descriptorVersion) || profile.descriptorVersion < 0) {
       throw new Error('Profile descriptor version must be a non-negative safe integer.');
     }
+    validateDimensions(profile.dimensions, 'profile dimensions');
+    const allowedDimensions = profile.allowedDimensions ?? ['2d', '3d'];
+    if (!Array.isArray(allowedDimensions) || allowedDimensions.length === 0) {
+      throw new Error('Allowed dimensions must contain at least one dimension.');
+    }
+    allowedDimensions.forEach((value) => validateDimensions(value, 'allowed dimension'));
+    if (new Set(allowedDimensions).size !== allowedDimensions.length) {
+      throw new Error('Allowed dimensions cannot contain duplicates.');
+    }
+    if (!allowedDimensions.includes(profile.dimensions)) {
+      throw new Error('Profile dimensions must be included in allowed dimensions.');
+    }
     validateStringArray(profile.requestedCapabilities, 'requested capabilities');
     cloneJsonRecord(profile.profileSettings ?? {});
+    validateProfileUiDefaults(profile.uiDefaults);
+    validateInteractionProfile(profile.interaction);
     for (const [moduleId, module] of Object.entries(profile.modules)) {
       requireId(moduleId, 'profile module id');
       if (module.policy !== 'required' && module.policy !== 'optional' && module.policy !== 'forbidden') {
@@ -545,6 +594,7 @@ function validateConstraint(moduleId: string, setting: string, constraint: Modul
 }
 
 function validateSettingsOverrides(overrides: GraphSettingsOverridesV1): void {
+  if (overrides.dimensions !== undefined) validateDimensions(overrides.dimensions, 'dimension override');
   cloneJsonRecord(overrides.profileSettings ?? {});
   for (const module of Object.values(overrides.modules ?? {})) {
     if (module.enabled !== undefined && typeof module.enabled !== 'boolean') throw new Error('Module enabled override must be boolean.');
@@ -573,8 +623,11 @@ function cloneConsumerRegistration(registration: ConsumerRegistrationV1): Consum
 function cloneConsumerProfile(profile: ConsumerProfileDescriptorV1): ConsumerProfileDescriptorV1 {
   return {
     ...profile,
+    allowedDimensions: profile.allowedDimensions ? [...profile.allowedDimensions] : undefined,
     requestedCapabilities: [...profile.requestedCapabilities],
     profileSettings: profile.profileSettings ? cloneJsonRecord(profile.profileSettings) : undefined,
+    uiDefaults: profile.uiDefaults ? cloneProfileUiDefaults(profile.uiDefaults) : undefined,
+    interaction: profile.interaction ? cloneInteractionProfile(profile.interaction) : undefined,
     modules: Object.fromEntries(Object.entries(profile.modules).map(([moduleId, module]) => [moduleId, {
       ...module,
       defaults: module.defaults ? cloneJsonRecord(module.defaults) : undefined,
@@ -588,6 +641,7 @@ function cloneConsumerProfile(profile: ConsumerProfileDescriptorV1): ConsumerPro
 
 function cloneOverrides(overrides: GraphSettingsOverridesV1): GraphSettingsOverridesV1 {
   return {
+    dimensions: overrides.dimensions,
     profileSettings: overrides.profileSettings ? cloneJsonRecord(overrides.profileSettings) : undefined,
     modules: overrides.modules
       ? Object.fromEntries(Object.entries(overrides.modules).map(([moduleId, module]) => [moduleId, {
@@ -595,6 +649,85 @@ function cloneOverrides(overrides: GraphSettingsOverridesV1): GraphSettingsOverr
           settings: module.settings ? cloneJsonRecord(module.settings) : undefined,
         }]))
       : undefined,
+  };
+}
+
+function validateProfileUiDefaults(value: GraphProfileUiDefaultsV1 | undefined): void {
+  if (!value) return;
+  if (value.quickSettingsVisibility !== undefined
+    && value.quickSettingsVisibility !== 'shown'
+    && value.quickSettingsVisibility !== 'collapsed'
+    && value.quickSettingsVisibility !== 'hidden') {
+    throw new Error('Invalid quick-settings visibility.');
+  }
+  if (value.contextMenuEnabled !== undefined && typeof value.contextMenuEnabled !== 'boolean') {
+    throw new Error('Context-menu enabled must be boolean.');
+  }
+  if (value.dimensionControlVisible !== undefined && typeof value.dimensionControlVisible !== 'boolean') {
+    throw new Error('Dimension-control visibility must be boolean.');
+  }
+  validateSectionOptions(value.quickSettingsSections);
+  validateVisibilityRecord(value.coreContextActions, 'core context action');
+}
+
+function validateSectionOptions(
+  sections: GraphProfileUiDefaultsV1['quickSettingsSections'],
+): void {
+  for (const [sectionId, section] of Object.entries(sections ?? {})) {
+    requireId(sectionId, 'quick-settings section id');
+    if (section.visibility !== undefined && section.visibility !== 'shown' && section.visibility !== 'hidden') {
+      throw new Error(`Invalid visibility for quick-settings section "${sectionId}".`);
+    }
+    validateVisibilityRecord(section.controls, `control in section "${sectionId}"`);
+  }
+}
+
+function validateVisibilityRecord(
+  values: Readonly<Record<string, 'shown' | 'hidden'>> | undefined,
+  label: string,
+): void {
+  for (const [id, visibility] of Object.entries(values ?? {})) {
+    requireId(id, label);
+    if (visibility !== 'shown' && visibility !== 'hidden') {
+      throw new Error(`Invalid visibility for ${label} "${id}".`);
+    }
+  }
+}
+
+function validateInteractionProfile(value: GraphInteractionProfileV1 | undefined): void {
+  if (!value) return;
+  validateUniqueStringArray(value.activationActionIds ?? [], 'activation action ids');
+  validateUniqueStringArray(value.contextActionIds ?? [], 'context action ids');
+}
+
+function validateUniqueStringArray(value: readonly string[], label: string): void {
+  validateStringArray(value, label);
+  if (new Set(value).size !== value.length) throw new Error(`${label} cannot contain duplicates.`);
+}
+
+function validateDimensions(value: unknown, label: string): asserts value is GraphDimensionsV1 {
+  if (value !== '2d' && value !== '3d') throw new Error(`${label} must be "2d" or "3d".`);
+}
+
+function cloneProfileUiDefaults(value: GraphProfileUiDefaultsV1): GraphProfileUiDefaultsV1 {
+  return {
+    quickSettingsVisibility: value.quickSettingsVisibility,
+    quickSettingsSections: value.quickSettingsSections
+      ? Object.fromEntries(Object.entries(value.quickSettingsSections).map(([sectionId, section]) => [sectionId, {
+          visibility: section.visibility,
+          controls: section.controls ? { ...section.controls } : undefined,
+        }]))
+      : undefined,
+    contextMenuEnabled: value.contextMenuEnabled,
+    coreContextActions: value.coreContextActions ? { ...value.coreContextActions } : undefined,
+    dimensionControlVisible: value.dimensionControlVisible,
+  };
+}
+
+function cloneInteractionProfile(value: GraphInteractionProfileV1): GraphInteractionProfileV1 {
+  return {
+    activationActionIds: value.activationActionIds ? [...value.activationActionIds] : undefined,
+    contextActionIds: value.contextActionIds ? [...value.contextActionIds] : undefined,
   };
 }
 

@@ -10,6 +10,7 @@ const legacyArtifactSourceRoot = join(artifactRoot, 'graph-engine');
 
 const publicFiles = [
   'src/graph-engine/public.ts',
+  'src/graph-engine/contracts/v1/action.ts',
   'src/graph-engine/contracts/v1/document.ts',
   'src/graph-engine/contracts/v1/filter.ts',
   'src/graph-engine/contracts/v1/index.ts',
@@ -17,6 +18,7 @@ const publicFiles = [
   'src/graph-engine/contracts/v1/profile.ts',
   'src/graph-engine/contracts/v1/service.ts',
   'src/graph-engine/contracts/v1/session.ts',
+  'src/graph-engine/contracts/v1/ui.ts',
   'src/graph-engine/contracts/v1/values.ts',
   'src/graph-engine/contracts/v1/view-state.ts',
   'src/graph-engine/core/document/GraphTopologyIndex.ts',

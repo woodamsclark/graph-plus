@@ -104,6 +104,29 @@ test('S-CONNECT local lease uses the provider core and release owns only its ses
   await session.dispose();
 });
 
+test('R-INPUT-15 node action registrations are disposable and lease-scoped', async () => {
+  const value = provider();
+  const result = value.core.connectLocal({
+    consumerId: 'synthetic-consumer',
+    supportedProtocolVersions: [1],
+    requestedCapabilities: ['render'],
+  });
+  assert(result.ok, 'local connection should return a lease');
+  const actions = [{ id: 'open-node', label: 'Open node', run: () => undefined }];
+  const registration = result.lease.registerNodeActions(actions);
+  let duplicateRejected = false;
+  try { result.lease.registerNodeActions(actions); } catch { duplicateRejected = true; }
+  equal(duplicateRejected, true, 'duplicate action IDs on one lease should reject');
+  registration.dispose();
+  result.lease.registerNodeActions(actions).dispose();
+  await result.lease.release();
+  let staleRejected = false;
+  try { result.lease.registerNodeActions(actions); } catch (error) {
+    staleRejected = error instanceof GraphEngineServiceErrorV1 && error.code === 'engine-unavailable';
+  }
+  equal(staleRejected, true, 'released leases should not retain action registration authority');
+});
+
 test('S-CONNECT engine-first event discovery succeeds once and cleans client listeners', async () => {
   const bus = new EventBus();
   const clock = new Clock();

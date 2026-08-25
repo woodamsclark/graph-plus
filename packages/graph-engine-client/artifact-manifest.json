@@ -1,11 +1,12 @@
 {
   "artifact": "@graph-plus/graph-engine-client",
-  "artifactVersion": "1.0.0",
+  "artifactVersion": "1.1.0",
   "protocolVersion": 1,
-  "contentSha256": "ad40c08f72aac750ea2ba83e9e661074b9f4cc20b301f688dcc2b489fb58555f",
+  "contentSha256": "3ffd03a45ecb89e944ac28f1822f1667c5f4628b84750771936e210bde90525a",
   "generatedFrom": "src/graph-engine/public.ts",
   "publicFiles": [
     "src/graph-engine/public.ts",
+    "src/graph-engine/contracts/v1/action.ts",
     "src/graph-engine/contracts/v1/document.ts",
     "src/graph-engine/contracts/v1/filter.ts",
     "src/graph-engine/contracts/v1/index.ts",
@@ -13,6 +14,7 @@
     "src/graph-engine/contracts/v1/profile.ts",
     "src/graph-engine/contracts/v1/service.ts",
     "src/graph-engine/contracts/v1/session.ts",
+    "src/graph-engine/contracts/v1/ui.ts",
     "src/graph-engine/contracts/v1/values.ts",
     "src/graph-engine/contracts/v1/view-state.ts",
     "src/graph-engine/core/document/GraphTopologyIndex.ts",

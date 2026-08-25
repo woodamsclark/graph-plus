@@ -465,6 +465,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     return {
       consumerId: this.consumerId,
       profileId: this.profileId,
+      dimensions: this.profile.dimensions,
+      dimensionsSource: this.profile.dimensionsSource,
       profileSettings: cloneJsonRecord(this.profile.profileSettings),
       profileSettingSources: { ...this.profile.profileSettingSources },
       modules: Object.fromEntries(Object.entries(this.profile.modules).map(([id, module]) => [id, {

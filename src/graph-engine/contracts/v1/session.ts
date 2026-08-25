@@ -4,6 +4,7 @@ import type { ApplyGraphPatchResultV1, GraphPatchV1 } from './patch.ts';
 import type { GraphEffectiveSettingsV1, GraphSettingsOverridesV1 } from './profile.ts';
 import type { GraphCameraStateV1, GraphViewStateV1 } from './view-state.ts';
 import type { Disposable, Vec3 } from './values.ts';
+import type { GraphSessionUiOptionsV1 } from './ui.ts';
 
 export interface GraphSessionOptionsV1 {
   readonly consumerId: string;
@@ -12,6 +13,7 @@ export interface GraphSessionOptionsV1 {
   readonly document: GraphDocumentV1;
   readonly restoreViewState?: GraphViewStateV1;
   readonly sessionOverrides?: GraphSettingsOverridesV1;
+  readonly ui?: GraphSessionUiOptionsV1;
 }
 
 export interface GraphSessionV1 {

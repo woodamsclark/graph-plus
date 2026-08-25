@@ -16,4 +16,8 @@ only `@graph-plus/graph-engine-client` and obtain the runtime through Workspace 
 
 Protocol version: 1
 
-Artifact version: 1.0.0
+Artifact version: 1.1.0
+
+V1.1 adds optional engine-owned session UI configuration, lease-scoped semantic node
+actions, consumer/profile UI policy, and constrained 2D/3D profile settings. These are
+additive capabilities: consumers using the original V1 fields remain source-compatible.

@@ -188,6 +188,81 @@ test('C-PROFILE-07 isolates identical profile IDs by consumer namespace', () => 
   equal(value.resolve('second', 'default').profileSettings.owner, 'second', 'second namespace should retain its override');
 });
 
+test('C-PROFILE-08 resolves only allowed dimension overrides in normal precedence', () => {
+  const value = registry();
+  value.registerConsumer(registration('xyz', [profile('default', {
+    dimensions: '2d',
+    allowedDimensions: ['2d', '3d'],
+  })]));
+  value.setUserOverrides('xyz', 'default', { dimensions: '3d' });
+  let effective = value.resolve('xyz', 'default');
+  equal(effective.dimensions, '3d', 'allowed user dimension should override the profile default');
+  equal(effective.dimensionsSource, 'user-profile', 'dimension source should identify the user profile');
+  effective = value.resolve('xyz', 'default', { sessionOverrides: { dimensions: '2d' } });
+  equal(effective.dimensions, '2d', 'allowed session dimension should win last');
+  equal(effective.dimensionsSource, 'session', 'dimension source should identify the session');
+});
+
+test('C-PROFILE-09 keeps a one-dimension profile locked', () => {
+  const value = registry();
+  value.registerConsumer(registration('xyz', [profile('default', {
+    dimensions: '2d',
+    allowedDimensions: ['2d'],
+  })]));
+  value.setUserOverrides('xyz', 'default', { dimensions: '3d' });
+  const effective = value.resolve('xyz', 'default', { sessionOverrides: { dimensions: '3d' } });
+  equal(effective.dimensions, '2d', 'disallowed overrides must not change a locked profile');
+  equal(effective.dimensionsSource, 'locked', 'one allowed dimension should report locked provenance');
+  equal(effective.issues.filter((issue) => issue.path.endsWith('.dimensions')).length, 2, 'each disallowed layer should report locally');
+});
+
+test('C-PROFILE-10 clones and isolates UI and interaction policy by profile namespace', () => {
+  const value = registry();
+  const actionIds = ['open-node'];
+  const controls: Record<string, 'shown' | 'hidden'> = { 'filter.clear': 'hidden' };
+  value.registerConsumer(registration('first', [profile('default', {
+    uiDefaults: {
+      quickSettingsVisibility: 'collapsed',
+      quickSettingsSections: { filter: { visibility: 'shown', controls } },
+      contextMenuEnabled: true,
+      dimensionControlVisible: true,
+    },
+    interaction: { activationActionIds: actionIds },
+  })]));
+  value.registerConsumer(registration('second', [profile('default', {
+    uiDefaults: { quickSettingsVisibility: 'hidden', contextMenuEnabled: false },
+    interaction: { activationActionIds: ['start-drill'] },
+  })]));
+  actionIds.push('caller-mutation');
+  controls['form.mind-map'] = 'shown';
+  const first = value.resolve('first', 'default');
+  const second = value.resolve('second', 'default');
+  deepEqual(first.interaction?.activationActionIds, ['open-node'], 'registered action ordering should not share caller arrays');
+  deepEqual(first.uiDefaults?.quickSettingsSections?.filter?.controls, { 'filter.clear': 'hidden' }, 'registered UI policy should not share caller records');
+  equal(second.uiDefaults?.quickSettingsVisibility, 'hidden', 'another consumer should retain its own UI policy');
+  deepEqual(second.interaction?.activationActionIds, ['start-drill'], 'another consumer should retain its own actions');
+});
+
+test('dimension and interaction registration rejects invalid policy shapes', () => {
+  const value = registry();
+  let rejectedDefault = false;
+  try {
+    value.registerConsumer(registration('bad-default', [profile('default', {
+      dimensions: '3d',
+      allowedDimensions: ['2d'],
+    })]));
+  } catch { rejectedDefault = true; }
+  equal(rejectedDefault, true, 'profile default must be included in allowed dimensions');
+
+  let rejectedActions = false;
+  try {
+    value.registerConsumer(registration('bad-actions', [profile('default', {
+      interaction: { activationActionIds: ['same', 'same'] },
+    })]));
+  } catch { rejectedActions = true; }
+  equal(rejectedActions, true, 'interaction action IDs must be unique');
+});
+
 test('opaque consumer and profile IDs cannot collide through display-key separators', () => {
   const value = registry();
   value.registerConsumer(registration('a/b', [profile('c')]));

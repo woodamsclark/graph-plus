@@ -1,9 +1,11 @@
 import type {
   ConsumerRegistrationV1,
+  Disposable,
   GraphEngineConnectionErrorV1,
   GraphEngineLeaseResultV1,
   GraphEngineLeaseV1,
   GraphEngineRequestV1,
+  GraphNodeActionRegistrationV1,
   GraphSessionOptionsV1,
   GraphSessionV1,
 } from '../contracts/v1/index.ts';
@@ -23,6 +25,8 @@ interface LeaseRecord {
   readonly id: number;
   readonly consumerId: string;
   readonly sessions: Set<GraphSessionV1>;
+  readonly actionIds: Set<string>;
+  readonly actionRegistrations: Set<Disposable>;
   released: boolean;
 }
 
@@ -114,6 +118,8 @@ export class GraphEngineProviderCoreV1 {
       id: this.nextLeaseId++,
       consumerId: options.consumerId,
       sessions: new Set(),
+      actionIds: new Set(),
+      actionRegistrations: new Set(),
       released: false,
     };
     this.leases.add(record);
@@ -136,6 +142,27 @@ export class GraphEngineProviderCoreV1 {
         }
         this.profiles.registerConsumer(registration);
         await this.onProfilesChanged();
+      },
+      registerNodeActions: (actions: readonly GraphNodeActionRegistrationV1[]): Disposable => {
+        this.assertLease(record);
+        const ids = validateNodeActions(actions);
+        for (const id of ids) {
+          if (record.actionIds.has(id)) {
+            throw new Error(`Duplicate node action "${id}" for consumer "${record.consumerId}".`);
+          }
+        }
+        ids.forEach((id) => record.actionIds.add(id));
+        let disposed = false;
+        const registration: Disposable = {
+          dispose: () => {
+            if (disposed) return;
+            disposed = true;
+            ids.forEach((id) => record.actionIds.delete(id));
+            record.actionRegistrations.delete(registration);
+          },
+        };
+        record.actionRegistrations.add(registration);
+        return registration;
       },
       createSession: async (options: GraphSessionOptionsV1): Promise<GraphSessionV1> => {
         this.assertLease(record);
@@ -174,6 +201,9 @@ export class GraphEngineProviderCoreV1 {
     this.leases.delete(record);
     const sessions = [...record.sessions];
     record.sessions.clear();
+    for (const registration of [...record.actionRegistrations]) registration.dispose();
+    record.actionRegistrations.clear();
+    record.actionIds.clear();
     await Promise.all(sessions.map((session) => session.dispose()));
     if (![...this.leases].some((lease) => !lease.released && lease.consumerId === record.consumerId)) {
       this.profiles.markConsumerInactive(record.consumerId);
@@ -211,4 +241,20 @@ function requireId(value: string, label: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function validateNodeActions(actions: readonly GraphNodeActionRegistrationV1[]): readonly string[] {
+  if (!Array.isArray(actions)) throw new Error('Node actions must be an array.');
+  const ids = actions.map((action) => {
+    requireId(action.id, 'node action ID');
+    if (typeof action.label !== 'function') requireId(action.label, 'node action label');
+    if (action.icon !== undefined) requireId(action.icon, 'node action icon');
+    if (action.isAvailable !== undefined && typeof action.isAvailable !== 'function') {
+      throw new Error(`Availability for node action "${action.id}" must be a function.`);
+    }
+    if (typeof action.run !== 'function') throw new Error(`Node action "${action.id}" must provide run().`);
+    return action.id;
+  });
+  if (new Set(ids).size !== ids.length) throw new Error('Node action IDs must be unique within one registration.');
+  return ids;
 }

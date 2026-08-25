@@ -1,5 +1,7 @@
 import type { GraphDimensionsV1 } from './view-state.ts';
 import type { JsonValue } from './values.ts';
+import type { GraphInteractionProfileV1 } from './action.ts';
+import type { GraphProfileUiDefaultsV1 } from './ui.ts';
 
 export type EngineModulePolicyV1 = 'required' | 'optional' | 'forbidden';
 
@@ -40,9 +42,12 @@ export interface ConsumerProfileDescriptorV1 {
   readonly displayName: string;
   readonly descriptorVersion: number;
   readonly dimensions: GraphDimensionsV1;
+  readonly allowedDimensions?: readonly GraphDimensionsV1[];
   readonly requestedCapabilities: readonly string[];
   readonly modules: Readonly<Record<string, EngineModuleProfileV1>>;
   readonly profileSettings?: Readonly<Record<string, JsonValue>>;
+  readonly uiDefaults?: GraphProfileUiDefaultsV1;
+  readonly interaction?: GraphInteractionProfileV1;
 }
 
 export interface EngineModuleOverrideV1 {
@@ -51,6 +56,7 @@ export interface EngineModuleOverrideV1 {
 }
 
 export interface GraphSettingsOverridesV1 {
+  readonly dimensions?: GraphDimensionsV1;
   readonly profileSettings?: Readonly<Record<string, JsonValue>>;
   readonly modules?: Readonly<Record<string, EngineModuleOverrideV1>>;
 }
@@ -73,6 +79,8 @@ export interface GraphEffectiveModuleSettingsV1 {
 export interface GraphEffectiveSettingsV1 {
   readonly consumerId: string;
   readonly profileId: string;
+  readonly dimensions: GraphDimensionsV1;
+  readonly dimensionsSource: GraphSettingSourceV1;
   readonly profileSettings: Readonly<Record<string, JsonValue>>;
   readonly profileSettingSources: Readonly<Record<string, GraphSettingSourceV1>>;
   readonly modules: Readonly<Record<string, GraphEffectiveModuleSettingsV1>>;
