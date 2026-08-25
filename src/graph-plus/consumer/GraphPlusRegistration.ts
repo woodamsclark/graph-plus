@@ -18,14 +18,16 @@ export const GRAPH_PLUS_REQUESTED_CAPABILITIES_V1 = [
 export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
   consumerId: GRAPH_PLUS_CONSUMER_ID_V1,
   displayName: 'Graph+',
-  consumerVersion: '1.0.0',
+  consumerVersion: '1.1.0',
   supportedProtocolVersions: [1],
   profiles: [{
     profileId: GRAPH_PLUS_PROFILE_ID_V1,
     displayName: 'Default',
-    descriptorVersion: 1,
+    descriptorVersion: 2,
     dimensions: '3d',
+    allowedDimensions: ['2d', '3d'],
     requestedCapabilities: GRAPH_PLUS_REQUESTED_CAPABILITIES_V1,
+    uiDefaults: { dimensionControlVisible: true },
     profileSettings: { focalLengthMm: 50, dragRelease: 'pin' },
     modules: {
       rendering: {

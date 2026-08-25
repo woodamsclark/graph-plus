@@ -1,6 +1,7 @@
 import type {
   ConsumerProfileDescriptorV1,
   EngineModuleDescriptorV1,
+  GraphDimensionsV1,
   GraphSettingsOverridesV1,
   JsonValue,
 } from '../../graph-engine/contracts/v1/index.ts';
@@ -15,6 +16,7 @@ export class GraphEngineSettingsControllerV1 {
     private readonly profiles: ConsumerProfileRegistry,
     private globalOverrides: GraphSettingsOverridesV1,
     private readonly save: () => void | Promise<void>,
+    private readonly dimensionControlEnabled = false,
   ) {}
 
   listProfiles(): readonly RegisteredProfileSummaryV1[] {
@@ -39,6 +41,30 @@ export class GraphEngineSettingsControllerV1 {
 
   getProfileOverrides(consumerId: string, profileId: string): GraphSettingsOverridesV1 {
     return this.profiles.getUserOverrides(consumerId, profileId);
+  }
+
+  canEditProfileDimensions(consumerId: string, profileId: string): boolean {
+    const descriptor = this.profiles.getProfileDescriptor(consumerId, profileId);
+    const allowed = descriptor.allowedDimensions ?? ['2d', '3d'];
+    return this.dimensionControlEnabled
+      && descriptor.uiDefaults?.dimensionControlVisible === true
+      && allowed.length > 1;
+  }
+
+  async setProfileDimensions(
+    consumerId: string,
+    profileId: string,
+    dimensions: GraphDimensionsV1 | undefined,
+  ): Promise<void> {
+    const descriptor = this.profiles.getProfileDescriptor(consumerId, profileId);
+    const allowed = descriptor.allowedDimensions ?? ['2d', '3d'];
+    if (dimensions !== undefined && !allowed.includes(dimensions)) {
+      throw new Error(`Dimension "${dimensions}" is not permitted for ${consumerId}/${profileId}.`);
+    }
+    const current = this.profiles.getUserOverrides(consumerId, profileId);
+    const next = { ...clone(current), dimensions };
+    this.profiles.setUserOverrides(consumerId, profileId, next);
+    await this.save();
   }
 
   async setGlobalModuleEnabled(moduleId: string, enabled: boolean | undefined): Promise<void> {

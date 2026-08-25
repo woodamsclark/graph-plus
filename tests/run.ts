@@ -11,6 +11,7 @@ import './runtime/session.test.ts';
 import './service/service.test.ts';
 import './service/neutral-sample.test.ts';
 import './obsidian/persistence.test.ts';
+import './obsidian/settings-controller.test.ts';
 import './graph-plus/adapter.test.ts';
 import { runTests } from './support/harness.ts';
 

@@ -76,10 +76,31 @@ export class GraphEngineSettingsPanelV1 {
     parent.createEl('h3', { text: `${summary?.consumerDisplayName ?? consumerId} — ${descriptor.displayName}` });
     parent.createEl('p', {
       text: summary?.active
-        ? 'Registered now. Changes affect new graph sessions for this profile.'
+        ? 'Registered now. Supported changes update active sessions for this profile.'
         : 'Inactive: the consumer is not currently registered. Its settings are retained for the next registration.',
       cls: 'setting-item-description',
     });
+    if (this.controller.canEditProfileDimensions(consumerId, profileId)) {
+      const allowed = descriptor.allowedDimensions ?? ['2d', '3d'];
+      new Setting(parent)
+        .setName('Graph dimensions')
+        .setDesc(`Persistent for this profile. Current source: ${humanize(effective.dimensionsSource)}.`)
+        .addDropdown((dropdown) => {
+          for (const dimensions of allowed) dropdown.addOption(dimensions, dimensions === '2d' ? '2D' : '3D');
+          dropdown.setValue(effective.dimensions);
+          dropdown.onChange(async (value) => {
+            await this.controller.setProfileDimensions(consumerId, profileId, value as '2d' | '3d');
+            refresh();
+          });
+        })
+        .addButton((button) => button
+          .setButtonText('Reset')
+          .setTooltip('Use the consumer profile default')
+          .onClick(async () => {
+            await this.controller.setProfileDimensions(consumerId, profileId, undefined);
+            refresh();
+          }));
+    }
     new Setting(parent).setName('Reset profile overrides').addButton((button) => button
       .setButtonText('Reset')
       .onClick(async () => { await this.controller.resetProfile(consumerId, profileId); refresh(); }));

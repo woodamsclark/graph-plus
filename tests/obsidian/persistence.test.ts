@@ -38,3 +38,16 @@ test('engine corruption recovers without replacing readable Graph+ consumer data
   equal(recovered.data.consumers.graphPlus.consumerSettings.showTags, false, 'consumer namespace should remain readable');
   deepEqual(recovered.data.engine.globalSettings, {}, 'only corrupt engine namespace should reset');
 });
+
+test('V1.1 profile dimension overrides round-trip through the existing additive snapshot', () => {
+  const profiles = new ConsumerProfileRegistry();
+  profiles.registerConsumer(runtimeRegistration());
+  profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', { dimensions: '3d' });
+  const initial = migrateGraphPlusPluginDataV1({}).data;
+  const stored = withEngineSettingsV1(initial, {}, profiles.exportSnapshot());
+  const migrated = migrateGraphPlusPluginDataV1(stored);
+  const restored = new ConsumerProfileRegistry();
+  restored.restoreSnapshot(migrated.data.engine.profileOverrides);
+  equal(restored.resolve('synthetic-consumer', 'two-dimensional').dimensions, '3d', 'additive V1.1 dimension field should survive storage');
+  equal(migrated.data.engine.settingsSchemaVersion, 1, 'additive storage should retain the independent V1 settings schema');
+});
