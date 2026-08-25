@@ -1,12 +1,16 @@
-# Graph+ and Graph Engine V1 Architecture and Contracts
+# Graph+ and Graph Engine V1.1 Architecture and Contracts
 
-Status: Approved for acceptance planning
+Status: V1.1 additive contract revision in progress
 
-Phase: Step 2 complete — specification approved before implementation
+Baseline: V1 extraction implemented; V1.1 adds shared UI and node-click actions
 
-Date: 2026-08-21
+Date: 2026-08-22
 
 ## 1. Purpose
+
+V1.1 is additive to the V1 service. Existing public type names retain their `V1`
+suffix where their shapes can be extended compatibly; a future breaking transport or
+service change still requires a new protocol major.
 
 Graph+ is the installed, user-facing Obsidian plugin. It is presented as a better
 Obsidian graph and includes Graph Engine as its reusable internal platform.
@@ -129,13 +133,16 @@ V1 includes:
 - neutral nodes and edges with opaque tokens and attributes;
 - full document replacement and atomic structural patches;
 - exportable documents and view state;
-- 2D and 3D profile configuration;
+- profile-backed, live-switchable 2D and 3D configuration;
 - camera, input, selection, focus, dragging, and hit testing;
 - node and edge filter ASTs;
 - render-scope and projection-scope filtering;
 - module policies and isolated optional-module failure;
 - an empty optional Anima module;
 - generic consumer intents;
+- consumer-registered node click actions and profile-selected activation behavior;
+- an optional engine-owned quick-settings surface and core node context menu;
+- per-consumer/profile UI exposure policies and consumer UI contributions;
 - missing, disabled, incompatible, unload, and reconnect behavior;
 - mobile, popout-window, resize, suspension, and disposal contracts.
 
@@ -169,6 +176,8 @@ V1 does not include:
 | Module | A shipped optional or required engine capability | Engine |
 | Command | An internal generic engine operation | Engine |
 | Intent | A domain-neutral event exposed to the consumer | Engine emits; consumer handles |
+| Quick settings | Optional engine-rendered controls for the active session and profile | Engine renders; consumer/profile configures exposure |
+| UI contribution | Consumer-provided control or context action mounted by the engine UI | Consumer supplies behavior; engine owns placement and lifecycle |
 
 Profiles are configuration archetypes, not user identities. A consumer may register
 multiple profiles such as `student` and `instructor`. Profile IDs remain opaque, so
@@ -533,6 +542,21 @@ The AST is the authoritative public representation. Generic text parsing may be
 provided as a convenience, while consumers remain free to compile their own product
 vocabulary or controls into the AST.
 
+### 9.4 Form respects active dimensions
+
+Form, including Mind Map, derives its layout from the session's effective
+`dimensions` setting. In `2d`, Form positions are planar and export `z: 0`. In `3d`,
+Form must create a genuinely spatial layout that uses all three axes; it must not place
+the complete mind map on a flat plane and merely view that plane with a perspective
+camera.
+
+The exact 3D layout algorithm remains an engine implementation detail, but depth,
+branch separation, root identity, direction, relation filtering, cross-link policy,
+and disconnected-node policy retain the same meanings in both dimensions. Changing
+between `2d` and `3d` while Form is enabled recomputes the derived Form positions from
+the same root and settings, then frames the result. It does not mutate the canonical
+document or clear active filters, selection, or focus.
+
 ## 10. Session contract
 
 ```ts
@@ -543,6 +567,7 @@ interface GraphSessionOptionsV1 {
   readonly document: GraphDocumentV1;
   readonly restoreViewState?: GraphViewStateV1;
   readonly sessionOverrides?: GraphSettingsOverridesV1;
+  readonly ui?: GraphSessionUiOptionsV1;
 }
 
 interface EngineModuleOverrideV1 {
@@ -551,6 +576,7 @@ interface EngineModuleOverrideV1 {
 }
 
 interface GraphSettingsOverridesV1 {
+  readonly dimensions?: GraphDimensionsV1;
   readonly profileSettings?: Readonly<Record<string, JsonValue>>;
   readonly modules?: Readonly<Record<string, EngineModuleOverrideV1>>;
 }
@@ -558,6 +584,16 @@ interface GraphSettingsOverridesV1 {
 type GraphSettingSourceV1 =
   | 'engine-default' | 'global' | 'consumer-profile'
   | 'user-profile' | 'session' | 'locked';
+
+interface GraphEffectiveSettingsV1 {
+  readonly consumerId: string;
+  readonly profileId: string;
+  readonly dimensions: GraphDimensionsV1;
+  readonly dimensionsSource: GraphSettingSourceV1;
+  readonly profileSettings: Readonly<Record<string, JsonValue>>;
+  readonly profileSettingSources: Readonly<Record<string, GraphSettingSourceV1>>;
+  readonly modules: Readonly<Record<string, GraphEffectiveModuleSettingsV1>>;
+}
 
 interface GraphSessionV1 {
   readonly sessionId: string;
@@ -628,6 +664,114 @@ Graph Engine must:
   disposal;
 - keep simultaneous sessions isolated.
 
+### 10.2 Optional engine-owned session UI
+
+Graph Engine may mount an optional quick-settings surface and node context menu as
+part of the session surface. A consumer does not have to reconstruct these interfaces
+to receive standard engine controls. Both surfaces are independently optional, and a
+consumer may instead provide an entirely product-owned interface that calls the same
+public session methods.
+
+```ts
+type GraphUiVisibilityV1 = "shown" | "collapsed" | "hidden";
+type GraphUiControlVisibilityV1 = "shown" | "hidden";
+
+interface GraphSessionUiOptionsV1 {
+  readonly quickSettings?: GraphQuickSettingsOptionsV1;
+  readonly contextMenu?: GraphContextMenuOptionsV1;
+}
+
+interface GraphQuickSettingsOptionsV1 {
+  readonly visibility?: GraphUiVisibilityV1;
+  readonly sections?: Readonly<Record<string, GraphQuickSettingsSectionOptionsV1>>;
+  readonly contributions?: readonly GraphQuickSettingsContributionV1[];
+}
+
+interface GraphQuickSettingsSectionOptionsV1 {
+  readonly visibility?: GraphUiControlVisibilityV1;
+  readonly controls?: Readonly<Record<string, GraphUiControlVisibilityV1>>;
+}
+
+interface GraphContextMenuOptionsV1 {
+  readonly enabled?: boolean;
+  readonly coreActions?: Readonly<Record<string, GraphUiControlVisibilityV1>>;
+}
+
+interface GraphQuickSettingsContributionV1 {
+  readonly id: string;
+  readonly sectionId: string;
+  readonly order?: number;
+  readonly mount: (
+    container: HTMLElement,
+    context: GraphUiContributionContextV1,
+  ) => void | Disposable;
+}
+
+interface GraphUiContributionContextV1 {
+  readonly consumerId: string;
+  readonly profileId: string;
+  readonly session: GraphSessionV1;
+}
+```
+
+The string IDs for engine sections, controls, and core context actions are published,
+versioned identifiers. Unknown IDs are ignored for forward compatibility. At minimum,
+the stock quick-settings surface can expose Filter, Form, Display, Camera, Forces, and
+enabled optional-module sections. Consumers may show or hide each stock section and
+each stock control independently.
+
+UI exposure and module availability are separate concerns:
+
+- `shown` exposes the stock engine control;
+- `hidden` omits the stock control while leaving its module and public API available;
+- disabling or forbidding a module is done through its existing profile module policy,
+  not by hiding its controls;
+- a required module may be hidden from users but cannot be disabled;
+- an optional disabled module has no active controls even if its section is marked
+  `shown`.
+
+The quick-settings surface itself may start shown, start collapsed, or be omitted
+entirely. These choices do not change rendering, interaction, filtering, Form, or any
+other session capability. The engine owns panel placement, responsive sizing, safe-area
+handling, accessibility, cleanup, and section chrome. Contributions are disposed with
+the panel or session and must not receive private engine objects.
+
+At narrow widths, stock controls reflow rather than compressing their labels into
+unreadable fragments. In particular, the stock Search control places its intact
+`Search` label and syntax hint above a full-width input when horizontal space is
+insufficient. Labels do not break inside words; published filter examples wrap only at
+reasonable token/separator boundaries and remain legible without horizontal scrolling.
+
+The expanded panel, collapsed launcher, context menu, and tooltips remain outside
+host-owned interactive chrome. The engine UI host layer derives usable bounds and
+safe-area insets from the owning container/window and may accept consumer-supplied
+host-occlusion information for embedded layouts. A collapsed launcher must not cover
+an Obsidian leaf action, view action, mobile navigation control, or a consumer-owned
+button. Layout is recomputed on resize, orientation, host-chrome, and keyboard changes.
+
+Profile UI defaults establish the consumer's normal surface. Per-session `ui` options
+may specialize that surface for a particular mount, but are still supplied by the
+consumer; user setting overrides cannot reveal stock controls that the consumer/profile
+has hidden. Contribution callbacks are runtime-only, are not persisted in profile
+storage, and must be supplied again when a consumer reconnects. A contribution using a
+new `sectionId` creates a consumer-labeled custom section; a contribution using a
+published engine section ID is appended within that section.
+
+Stock setting controls edit user overrides for the active
+`consumerId/profileId`, subject to profile constraints and locked values. Reset clears
+that profile override and reveals the next effective value in the settings precedence
+chain. Controls for transient operations instead update view state: active filter ASTs,
+the current Form projection/root, selection, focus, and camera position do not become
+profile settings merely because they are manipulated from the quick-settings surface.
+Profiles may still define defaults and policies for those modules.
+
+A contribution may present domain language while using only public engine operations.
+For example, PatternSmith may hide every stock quick-settings section, contribute a
+`Filter by due nodes` control, calculate due node IDs itself, and call `applyFilter`
+with a neutral AST. Graph Engine neither learns the meaning of `due` nor changes its
+Filter implementation. Consumers may augment the quick-settings surface, but cannot
+replace the semantics, validation, or lifecycle of engine Filter or Form modules.
+
 ## 11. Commands and intents
 
 Graph Engine preserves and generalizes Graph+'s existing buffered command pipeline.
@@ -670,12 +814,112 @@ change once, and applies the threshold-crossing pan movement immediately. The ca
 then pans with neither a focused nor selected node. A secondary-button 3D orbit is a
 different gesture and does not implicitly clear either state.
 
+V1.1 trials a consistent mobile primary gesture across dimensions:
+
+- one-finger background drag pans in both `2d` and `3d` and follows the normal
+  threshold-based focus/selection clearing contract;
+- one-finger drag beginning on a draggable node remains node drag rather than pan;
+- in `3d`, a two-finger drag with no qualifying pinch change orbits and retains focus
+  and selection, using the focused node as its target when one exists;
+- pinch changes zoom and takes precedence once its scale threshold is crossed;
+- in `2d`, orbit is unavailable; two-finger centroid movement may pan alongside pinch
+  handling but never introduces camera rotation.
+
+Desktop primary-pan and secondary-orbit mappings remain unchanged. This mobile mapping
+is an explicit V1.1 trial and must be evaluated on-device before becoming a long-term
+gesture invariant.
+
 Graph+-specific actions such as opening an Obsidian file or using the current note as
 a Form root remain in Graph+.
+
+### 11.1 Engine-owned node context menu
+
+Secondary click on desktop and stationary long-press on mobile are interpreted by
+Graph Engine. When the session context-menu surface is enabled, Graph Engine opens a
+safe-area-aware menu and supplies applicable generic actions such as `Focus node`,
+`Mind map from here`, and `Pin node` or `Unpin node`. Opening the menu does not itself
+change selection or focus.
+
+The consumer may hide individual core actions and may contribute additional
+domain-specific actions. Graph+ can contribute `Open note` or `Open tag`; PatternSmith
+could later contribute `Review pattern`. The engine renders these contributions in the
+same menu and owns gesture arbitration, placement, dismissal, accessibility, and
+lifecycle. A consumer contribution receives node identity and public session access,
+but no private renderer, scene, module, or settings-store object.
+
+The generic `node-context-requested` intent remains available for diagnostics and for
+consumers that disable the engine-owned menu and render their own interface. Enabling
+the stock menu does not require the consumer to subscribe to that intent.
+
+### 11.2 Consumer-registered node actions
+
+Graph Engine owns hit testing, click counting by focus state, gesture thresholds,
+keyboard equivalence, context-menu composition, and action invocation lifecycle.
+Consumers register semantic node actions; they do not receive raw DOM events or replace
+the input interpreter.
+
+```ts
+interface GraphNodeActionRegistrationV1 {
+  readonly id: string;
+  readonly label: string | ((context: GraphNodeActionContextV1) => string);
+  readonly icon?: string;
+  readonly isAvailable?: (context: GraphNodeActionContextV1) => boolean;
+  readonly run: (
+    context: GraphNodeActionContextV1,
+  ) => void | Promise<void>;
+}
+
+interface GraphNodeActionContextV1 {
+  readonly consumerId: string;
+  readonly profileId: string;
+  readonly session: GraphSessionV1;
+  readonly documentId: string;
+  readonly documentRevision: number;
+  readonly nodeId: string;
+  readonly selectedNodeIds: readonly string[];
+  readonly focusedNodeId?: string;
+}
+
+interface GraphInteractionProfileV1 {
+  readonly activationActionIds?: readonly string[];
+  readonly contextActionIds?: readonly string[];
+}
+```
+
+Action IDs are opaque and consumer-namespaced. Registration callbacks are runtime-only
+and are removed when their registration, lease, or provider instance is disposed. A
+profile stores only ordered action IDs. Duplicate IDs, unknown IDs, action exceptions,
+and stale document revisions fail or no-op locally without corrupting the session or
+another consumer.
+
+Node primary-click behavior is:
+
+1. A stationary primary click on an unfocused node selects and focuses that node.
+2. A later stationary primary click on that already-focused node resolves the first
+   available action in `activationActionIds` and invokes it once.
+3. The resolved activation action is also the first item in that node's context menu.
+4. Enter on the focused node invokes the same resolved action.
+5. If no registered activation action is available, the later click and Enter do
+   nothing; they never fall through to a generic view action.
+6. Crossing a drag or camera-gesture threshold cancels click activation.
+
+This is focus-state activation, not operating-system double-click timing. Graph+ may
+register `open-node` as its activation action; PatternSmith may register `start-drill`.
+Their callbacks own those domain behaviors. The engine context menu places the resolved
+activation action first, then other applicable consumer `contextActionIds`, then its
+applicable core view actions. Opening the menu still does not change focus or selection.
+
+V1.1 extensibility is deliberately limited to node click actions. It does not register
+edge actions, background actions, modifier mappings, raw pointer handlers, custom
+gesture recognizers, continuous drag callbacks, custom drag physics, or replacement
+camera controls. Node dragging retains the engine's existing profile-backed enablement
+and `pin`/`dynamic` release policies plus the `node-drag-ended` intent. Target-aware
+drop actions are deferred until a concrete consumer requires them.
 
 ```ts
 type GraphIntentV1 =
   | GraphNodeActivatedIntentV1
+  | GraphNodeContextRequestedIntentV1
   | GraphSelectionChangedIntentV1
   | GraphFocusChangedIntentV1
   | GraphBackgroundActivatedIntentV1
@@ -693,6 +937,13 @@ interface GraphNodeActivatedIntentV1 extends GraphIntentBaseV1 {
   readonly type: "node-activated";
   readonly nodeId: string;
   readonly activation: "primary" | "secondary" | "keyboard";
+}
+
+interface GraphNodeContextRequestedIntentV1 extends GraphIntentBaseV1 {
+  readonly type: "node-context-requested";
+  readonly nodeId: string;
+  readonly modality: "mouse" | "touch" | "pen";
+  readonly anchor: Readonly<{ x: number; y: number }>;
 }
 
 interface GraphSelectionChangedIntentV1 extends GraphIntentBaseV1 {
@@ -797,9 +1048,23 @@ interface ConsumerProfileDescriptorV1 {
   readonly displayName: string;
   readonly descriptorVersion: number;
   readonly dimensions: GraphDimensionsV1;
+  readonly allowedDimensions?: readonly GraphDimensionsV1[];
   readonly requestedCapabilities: readonly string[];
   readonly modules: Readonly<Record<string, EngineModuleProfileV1>>;
   readonly profileSettings?: Readonly<Record<string, JsonValue>>;
+  readonly uiDefaults?: GraphProfileUiDefaultsV1;
+  readonly interaction?: GraphInteractionProfileV1;
+}
+
+interface GraphProfileUiDefaultsV1 {
+  readonly quickSettingsVisibility?: GraphUiVisibilityV1;
+  readonly quickSettingsSections?: Readonly<
+    Record<string, GraphQuickSettingsSectionOptionsV1>
+  >;
+  readonly contextMenuEnabled?: boolean;
+  readonly coreContextActions?: Readonly<
+    Record<string, GraphUiControlVisibilityV1>
+  >;
 }
 ```
 
@@ -819,6 +1084,26 @@ Constraints and locked values govern whether later layers may override a value.
 Forbidden modules cannot be enabled. Required modules cannot be disabled. Optional
 modules use the profile default unless the user overrides it.
 
+`dimensions` follows the same precedence chain. The profile's `dimensions` is its
+default; `allowedDimensions` constrains later overrides. Omitting
+`allowedDimensions` permits both `2d` and `3d`; supplying one value locks the profile
+to that dimension. The persistent Graph Engine settings page writes or clears the user
+profile override for the selected `consumerId/profileId`. Dimension is intentionally
+absent from the quick-settings panel. A session override may select an allowed dimension
+for one mount without rewriting that profile preference.
+
+This is both selectable and consumer-enforceable: a consumer may expose the persistent
+settings control, hide it while still permitting programmatic selection, or constrain
+the profile to one dimension. UI, user-profile, and session attempts outside the
+consumer's allowed set are rejected consistently.
+
+Changing the effective dimension updates all active sessions affected by that setting
+layer without replacing their documents or canvases. The engine preserves filters,
+Form configuration/root, selection, focus, and pinned-node identity; recomputes the
+active layout/projection; converts or derives an appropriate camera; and exports the
+new active dimension in view state. A profile/session that allows only one dimension
+does not display an editable dimension control.
+
 Graph Engine persists user global settings and user profile overrides inside the
 installed Graph+ plugin's engine namespace. Consumers do not read or write that
 storage directly.
@@ -833,6 +1118,13 @@ storage directly.
   `PatternSmith — Student`, and `PatternSmith — Instructor`.
 - Locked values remain visible with an explanation.
 - Reset actions may target a setting, profile, or global settings.
+- When permitted by the profile, settings expose a `2D`/`3D` graph control. Resetting
+  it restores the profile default dimension.
+- UI defaults are namespaced by `consumerId/profileId` like other profile settings.
+  One consumer cannot reveal, hide, or reconfigure another consumer's session UI.
+- UI exposure is consumer-owned descriptor/session policy. User profile overrides may
+  edit settings that were exposed, but cannot reveal controls hidden by the consumer.
+  Hiding a control never revokes the corresponding public session capability.
 
 ## 14. Built-in Graph+ consumer contract
 
@@ -847,6 +1139,8 @@ Engine rather than as a privileged part of the kernel.
   validation, errors, sessions, and lifecycle as an external lease.
 - Graph+ submits `GraphDocumentV1`, `GraphPatchV1`, and `GraphFilterRequestV1` values.
 - Graph+ handles public intents and translates them into Obsidian actions.
+- Graph+ uses the engine-owned quick-settings surface and core context menu, then
+  contributes only Graph+-specific controls and actions.
 - Graph+ must not import private renderer, physics, scene-store, settings-store, or
   module implementation classes.
 - A neutral synthetic external consumer must be able to reproduce every Graph Engine
@@ -988,6 +1282,7 @@ interface GraphEngineLeaseV1 {
   readonly capabilities: readonly string[];
 
   registerConsumer(registration: ConsumerRegistrationV1): Promise<void>;
+  registerNodeActions(actions: readonly GraphNodeActionRegistrationV1[]): Disposable;
   createSession(options: GraphSessionOptionsV1): Promise<GraphSessionV1>;
   release(): Promise<void>;
 }
@@ -1149,6 +1444,7 @@ Graph Engine owns:
 - mounted surface, camera, gestures, hit testing, physics, rendering, and lifecycle;
 - generic filtering and Form projection;
 - generic settings/profile UI;
+- optional quick-settings and core context-menu UI, including safe-area behavior;
 - optional Anima lifecycle.
 
 Graph+'s existing InputBuffer, UIInterpreter, CommandBuffer, Commander,
@@ -1165,6 +1461,7 @@ Illustrative profile:
 ```text
 graph-plus/default
 dimensions: 3d
+allowed dimensions: 2d, 3d
 force-layout: required
 filtering: required
 form: optional
@@ -1193,18 +1490,27 @@ dimensions: 2d
 filtering: required
 form: forbidden initially
 anima: optional, disabled by default
+quick settings: hidden, or custom contributions only
+core context menu: enabled with profile-selected actions
 
 pattern-smith/instructor
 dimensions: 2d
 filtering: required
 form: optional
 anima: optional, disabled by default
+quick settings: consumer-selected sections and contributions
 ```
+
+PatternSmith may keep Filtering enabled while hiding the stock Filter section and
+exposing a consumer contribution such as `Filter by due nodes`. PatternSmith computes
+the due set and translates it to a neutral AST; the engine owns applying and clearing
+that AST. The contribution is a domain-facing shim, not a PatternSmith replacement for
+the Filter or Form module.
 
 The instructor profile is a supported archetype example, not a V1 commitment to an
 instructor product surface.
 
-## 19. Stage 3 handoff
+## 19. V1.1 handoff
 
 After this contract is approved, Step 3 must turn each promise into acceptance
 scenarios before implementation. At minimum, those scenarios cover:
@@ -1214,6 +1520,16 @@ scenarios before implementation. At minimum, those scenarios cover:
 - document and temporary view-state export/restore;
 - domain-neutral node and edge filters in both scopes;
 - profile registration, inheritance, constraints, and multiple profiles;
+- allowed and locked dimension profiles, profile/session dimension overrides, and
+  live `2D`/`3D` switching without canonical document replacement;
+- planar 2D Form and genuinely spatial 3D Form using the same root and policies;
+- first-click focus followed by focused-node activation through a registered primary
+  action, with matching Enter and first-context-item behavior;
+- action availability, ordering, disposal, stale revisions, and failure isolation;
+- engine-owned quick settings disabled, collapsed, fully shown, and selectively
+  exposed per consumer/profile;
+- consumer quick-setting contributions that call public Filter/Form/session APIs;
+- engine-owned core context actions plus isolated consumer context contributions;
 - optional-module failure isolation and required-module failure;
 - consumer-first and engine-first load order;
 - missing, incompatible, unload, reload, and stale-lease behavior;
@@ -1224,9 +1540,12 @@ scenarios before implementation. At minimum, those scenarios cover:
 - Graph+ consumer disable/failure without interruption to external engine leases;
 - local Graph+ lease parity with an external synthetic consumer;
 - Graph+ command-pipeline characterization and parity;
-- a neutral synthetic consumer before Graph+ extraction.
+- a neutral synthetic consumer exercising the same public V1.1 capabilities as Graph+.
 
-No production extraction or PatternSmith integration begins until this contract and
-the subsequent acceptance plan are reviewed.
+V1.1 implementation begins only after this revision and its acceptance plan are
+reviewed. After the V1.1 release gate passes, the next product focus is PatternSmith's
+real Graph Engine integration. PatternSmith may reveal additional engine needs, but
+any shared-contract expansion returns to a separate reviewed revision rather than
+silently entering PatternSmith domain code.
 
-The Step 3 artifact is [Graph Engine V1 Acceptance Plan](graph-engine-v1-acceptance-plan.md).
+The acceptance artifact is [Graph Engine V1.1 Acceptance Plan](graph-engine-v1-acceptance-plan.md).

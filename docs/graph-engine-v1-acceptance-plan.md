@@ -1,29 +1,30 @@
-# Graph Engine V1 Acceptance Plan
+# Graph Engine V1.1 Acceptance Plan
 
-Status: Approved for migration planning
+Status: V1.1 acceptance revision in progress
 
-Phase: Step 3 complete — observable behavior and migration gates approved before implementation
+Baseline: V1 extraction implemented; these scenarios cover the additive V1.1 contract
 
-Date: 2026-08-21
+Date: 2026-08-22
 
-Depends on: [Graph+ and Graph Engine V1 Architecture and Contracts](graph-engine-v1-contracts.md)
+Depends on: [Graph+ and Graph Engine V1.1 Architecture and Contracts](graph-engine-v1-contracts.md)
 
 ## 1. Purpose
 
-This plan translates the approved V1 contracts into observable scenarios. It defines
-what must remain true while Graph+ is inverted from a vault-specific graph runtime
-into:
+This plan translates the V1.1 contracts into observable scenarios. It retains the V1
+baseline and adds acceptance for engine-owned configurable UI, consumer-registered
+node click actions, profile-backed dimension switching, and dimension-aware Form. It
+defines what must remain true as the implemented V1 platform is revised so that:
 
 - a domain-neutral Graph Engine kernel;
 - a set of optional or required engine modules;
 - a public lease service;
 - and a bundled Graph+ consumer using the same session contract as external plugins.
 
-This is not an implementation sequence. The subsequent migration plan may choose
+This is not an implementation sequence. The subsequent remediation plan may choose
 different internal seams, but it may not weaken these outcomes without returning to
 contract review.
 
-PatternSmith integration is represented only by a neutral synthetic consumer in V1.
+PatternSmith integration is represented by a neutral synthetic consumer in V1.1.
 PatternSmith's learning behavior, persistence, qualification, curricula, and product
 UI remain outside this plan.
 
@@ -245,6 +246,19 @@ them; after accepted document or view changes, the consumer can export updated v
 for its own persistence. Graph Engine neither requires this policy nor performs the
 storage operation.
 
+#### C-VIEW-08 — Active dimension export
+
+Given a profile that allows both dimensions, when the effective dimension changes
+from `2d` to `3d` or from `3d` to `2d`, then exported view state identifies the new
+active dimension and contains a compatible camera and finite positions without
+changing the graph document.
+
+#### C-VIEW-09 — Dimension change preserves view identity
+
+Given active filters, Form root/settings, selection, focus, and pinned-node identity,
+when the effective dimension changes, then those identities and policies remain active
+while derived positions, projection, and camera are recomputed for the new dimension.
+
 ### C-PROFILE — Consumers, profiles, and settings
 
 #### C-PROFILE-01 — Multiple archetypes
@@ -286,6 +300,25 @@ then its saved profiles remain visible as inactive until explicitly deleted.
 
 Given two consumers use the same profile ID or setting names, when values are stored
 and resolved, then keys remain isolated by `consumerId/profileId`.
+
+#### C-PROFILE-08 — Allowed dimensions
+
+Given a profile default and `allowedDimensions`, when user-profile or session overrides
+are resolved, then an allowed `2d` or `3d` value wins according to normal precedence
+and a disallowed value is rejected without changing the prior effective setting.
+
+#### C-PROFILE-09 — Locked dimension
+
+Given a profile whose allowed-dimension list contains one value, when settings are
+listed or overrides are attempted, then the profile remains in that dimension and no
+editable dimension control is exposed.
+
+#### C-PROFILE-10 — UI policy namespace
+
+Given consumers with different quick-settings visibility, section/control exposure,
+core context actions, and interaction action IDs, when profiles resolve, then every
+UI policy remains isolated by `consumerId/profileId` and user overrides cannot reveal
+controls hidden by the consumer.
 
 ### C-VERSION — Structural and protocol versions
 
@@ -371,9 +404,11 @@ orbit does not implicitly clear either state.
 
 #### R-INPUT-04 — Activation
 
-Given a hit-tested node, when primary, secondary, or keyboard activation occurs, then
-a `node-activated` intent identifies the node and activation form without opening an
-Obsidian file or invoking a consumer action itself.
+Given an unfocused hit-tested node, when it receives a stationary primary click, then
+it becomes selected and focused without invoking a consumer action. Given that same
+node remains focused, when it receives a later stationary primary click, then the
+first available registered activation action runs exactly once and the corresponding
+revision-bearing activation intent identifies the node.
 
 #### R-INPUT-05 — Filtered hit testing
 
@@ -390,6 +425,225 @@ one `node-drag-ended` intent includes its neutral ID and position.
 Given the document revision changes between input collection and consumer handling,
 when an intent is delivered, then it carries the revision that produced it so the
 consumer can reject stale product actions.
+
+#### R-INPUT-08 — Keyboard activation parity
+
+Given a focused node with an available primary action, when Enter is pressed outside
+an editable/native control, then the same resolved action used by focused-node click
+runs exactly once. Repeated, composing, modified, or already-prevented key events do
+not invoke it.
+
+#### R-INPUT-09 — Primary action is first context item
+
+Given several applicable consumer and core actions, when the focused node's context
+menu opens, then the resolved primary activation action is the first enabled item,
+other configured consumer actions follow in declared order, and applicable engine
+view actions follow after a separator.
+
+#### R-INPUT-10 — No unsafe activation fallback
+
+Given every configured activation action is unavailable or unregistered, when an
+already-focused node is clicked or Enter is pressed, then no action runs. Pin, Mind
+Map, or another context-only action is never selected as an implicit fallback.
+
+#### R-INPUT-11 — Context gesture behavior
+
+Given a hit-tested node, when stationary secondary click, stationary long-press, or
+supported pen context input occurs, then exactly one context menu opens without
+changing selection or focus and one diagnostic `node-context-requested` intent remains
+available. Movement beyond the threshold cancels the menu gesture.
+
+#### R-INPUT-12 — Drag wins over click
+
+Given a node press begins, when movement crosses the node-drag threshold, then neither
+focus-state activation nor a context action runs, and the existing engine drag policy
+and single `node-drag-ended` intent remain authoritative.
+
+#### R-INPUT-13 — Action availability and dynamic labels
+
+Given registered actions whose labels or availability differ by node, when menus and
+activation resolve for those nodes, then the engine uses the current node context,
+shows only applicable actions, and never asks the engine to interpret consumer domain
+meaning.
+
+#### R-INPUT-14 — Action failure and busy isolation
+
+Given an asynchronous action is running, throws, rejects, or observes a stale document
+revision, when repeated activation or failure occurs, then duplicate invocation is
+guarded, the failure is reported against that consumer action, and the session, other
+actions, and other consumers remain usable.
+
+#### R-INPUT-15 — Action registration lifecycle
+
+Given two consumers register identical local action IDs, when their sessions resolve
+actions, then IDs remain consumer-namespaced. Disposing the registration, lease, or
+provider removes its callbacks, and no stale action can execute after reconnect.
+
+#### R-INPUT-16 — V1.1 click-only extension boundary
+
+Given the shipped public contract/client, when its API surface is inspected, then it
+offers node click-action registration but no edge/background action registration, raw
+DOM event subscription, modifier remapping, custom gesture recognizer, continuous drag
+callback, custom drag physics, or replacement camera-control hook.
+
+#### R-INPUT-17 — Mobile dimension-consistent primary pan trial
+
+Given either a `2d` or `3d` mobile session and a one-finger drag beginning on the
+background, when the pan threshold is crossed, then the camera pans, focus/selection
+clear exactly once, and no orbit occurs. A one-finger drag beginning on a draggable
+node continues to use node-drag arbitration.
+
+#### R-INPUT-18 — Mobile two-finger dimensional behavior
+
+Given a `3d` mobile session, when a two-finger drag crosses the translation threshold
+without qualifying as pinch, then the camera orbits with the same directional mapping
+whether or not a node is focused and retains focus/selection. Given a `2d` session, the
+same gesture never rotates the camera and may translate the pan centroid. In either
+dimension, crossing the pinch scale threshold gives zoom priority and does not also
+produce an accidental node drag or discontinuous orbit.
+
+### R-UI — Engine-owned configurable session UI
+
+#### R-UI-01 — Whole quick-settings visibility
+
+Given otherwise equivalent sessions configured as `shown`, `collapsed`, and `hidden`,
+when they mount, then the first exposes the panel, the second exposes its reopening
+control, and the third mounts no quick-settings UI while all three retain equivalent
+engine capabilities.
+
+#### R-UI-02 — Selective stock exposure
+
+Given a profile hides selected sections and individual controls, when quick settings
+render, then only declared stock controls appear. A hidden Filter or Form section does
+not disable its required module or prevent the consumer from using the corresponding
+public session API.
+
+#### R-UI-03 — Disabled module differs from hidden UI
+
+Given one session hides an enabled optional module's section and another disables that
+optional module while marking its section shown, when both mount, then the hidden
+module remains operational through public APIs while the disabled module has no active
+controls or lifecycle. Required and forbidden policies remain enforceable.
+
+#### R-UI-04 — Consumer quick-setting contribution
+
+Given a consumer contributes a control into a stock or custom section, when the panel
+mounts, rerenders, collapses, reopens, and disposes, then the engine owns its section
+placement and lifecycle, the contribution receives only public context, and its
+disposable runs exactly once per mount lifecycle.
+
+#### R-UI-05 — Profile setting edit and reset
+
+Given a stock display, camera, or force control, when the user changes it,
+then the user override is written only to the active `consumerId/profileId` and all
+sessions affected by that profile setting update coherently. Double-click/reset clears
+the override and immediately reveals the next effective value and source.
+
+#### R-UI-06 — Transient controls remain view state
+
+Given Filter, Form root/configuration, selection, focus, or camera-position controls,
+when they are manipulated from quick settings, then the active view changes but those
+values are not written as durable user-profile settings. They persist only if the
+consumer exports and saves compatible view state.
+
+#### R-UI-07 — Domain-facing filter shim
+
+Given a synthetic external consumer hides all stock sections, keeps Filtering enabled,
+and contributes only `Filter by due nodes`, when its callback supplies consumer-chosen
+node IDs through a neutral AST, then the engine applies and clears the filter without
+learning `due`, rendering any hidden stock Filter UI, or affecting another profile.
+
+#### R-UI-08 — Context menu opt-out
+
+Given the engine-owned context menu is disabled, when a context gesture occurs, then
+no stock menu mounts but the generic context-request intent still emits so the consumer
+may render its own surface. Disabling the menu does not disable registered actions or
+other session APIs.
+
+#### R-UI-09 — Responsive and safe-area ownership
+
+Given desktop, narrow sidebar, mobile safe-area, and popout containers, when the quick
+settings or context menu opens near every edge, then all actionable controls—including
+the close button—remain readable, reachable, and inside the owning container/window's
+usable area without changing the consumer's surrounding layout.
+
+#### R-UI-10 — Narrow Search control reflow
+
+Given the photographed narrow mobile Graph+ panel or an equivalently narrow fixture,
+when the Refine section renders, then `Search` remains one intact readable word, the
+syntax hint does not split words or filter tokens into arbitrary fragments, and the
+search input receives a full-width row beneath the label/description when necessary.
+The section introduces neither horizontal scrolling nor clipped text.
+
+#### R-UI-11 — Collapsed launcher avoids host actions
+
+Given an Obsidian mobile leaf with a host-owned top-right action and a collapsed Graph
+Engine quick-settings panel, when the launcher is positioned and the host chrome,
+orientation, or viewport changes, then the launcher and host action have disjoint hit
+targets and remain independently visible and operable. The same rule applies to
+desktop leaf actions and consumer-declared embedded-layout occlusions.
+
+### R-DIM — Live dimensional mode
+
+#### R-DIM-01 — Persistent profile setting
+
+Given a profile that permits `2d` and `3d` and exposes the dimension control in Graph
+Engine's persistent settings page, when the user changes it, then the effective profile
+value, source metadata, rendered projection, and exported view dimension update without
+replacing the session canvas or document. No dimension control appears in the session's
+quick-settings panel.
+
+The control is user-selectable only when the consumer permits both values and exposes
+it. A consumer may hide the control, set either default, or enforce one dimension; all
+UI and programmatic attempts outside `allowedDimensions` are rejected consistently.
+
+#### R-DIM-02 — Session override isolation
+
+Given two sessions share a consumer/profile and one supplies a session dimension
+override, when the user profile dimension changes, then ordinary sessions follow the
+profile while the valid session override remains isolated to its mount.
+
+#### R-DIM-03 — Camera and finite-layout conversion
+
+Given a settled graph in either dimension, when its dimension changes, then `2d` uses
+a coherent orthographic camera and planar positions, `3d` uses a coherent perspective
+camera and depth-capable positions, every exported number remains finite, and no node
+or edge identity changes.
+
+#### R-DIM-04 — Repeated switching stability
+
+Given selection, focus, pins, filters, and a settled layout, when `2d`/`3d` is switched
+repeatedly, then identities and policies remain stable, resources do not multiply,
+physics can settle after each recomputation, and switching does not accumulate camera
+or position corruption.
+
+### R-FORM — Dimension-aware Form and Mind Map
+
+#### R-FORM-01 — Planar 2D Form
+
+Given Form is enabled in a `2d` session, when a Mind Map is built from a valid root,
+then all derived positions use `z: 0` while root, traversal direction, relation, depth,
+cross-link, branch-color, and disconnected-node policies are honored.
+
+#### R-FORM-02 — Genuinely spatial 3D Form
+
+Given the same nontrivial fixture and Form settings in a `3d` session, when its Mind
+Map is built, then multiple eligible non-root nodes occupy meaningfully different
+finite z positions, branches remain distinguishable, and the result is not a planar
+2D layout viewed through a perspective camera.
+
+#### R-FORM-03 — Active Form dimension switch
+
+Given an active Mind Map with a selected root and active filters, when dimensions
+change, then the engine rebuilds Form in the new dimensional mode from the same root
+and policies, frames the result, preserves selection/focus where valid, and leaves the
+canonical document and filter ASTs unchanged.
+
+#### R-FORM-04 — Deterministic seeded invariants
+
+Given identical documents, roots, settings, dimensions, and seeded layout sources,
+when Form is rebuilt, then its branch/depth invariants and dimensional character are
+repeatable without requiring fragile unconstrained floating-point snapshots.
 
 ### R-MODULE — Module lifecycle and failure
 
@@ -476,6 +730,13 @@ Given repeated connect, fail, reconnect, and release cycles, when the cycles fin
 then Workspace Event listeners and pending reply callbacks return to their baseline
 counts.
 
+#### S-CONNECT-10 — Node-action transport parity
+
+Given equivalent node actions registered through local and Workspace Events leases,
+when action conformance scenarios run, then namespacing, ordering, availability,
+invocation, errors, disposal, release, and reconnect behavior are equivalent. No
+transport grants Graph+ private or additional action capabilities.
+
 ## 6. Graph+ bundled-consumer acceptance scenarios
 
 ### G-LAZY — Dormancy and activation
@@ -539,9 +800,11 @@ patch and keeps document revisions coherent.
 
 #### G-ADAPTER-05 — Product intent translation
 
-Given the engine emits node activation for a note or tag ID, when Graph+ handles it,
-then Graph+ uses its private lookup and Obsidian adapter to perform the product action;
-the engine does not know or invoke that action.
+Given Graph+ registers its `open-node` action and a focused note or tag node is clicked
+again or activated by Enter, when the engine invokes the registered callback, then
+Graph+ uses its private lookup and Obsidian adapter to open the corresponding note or
+tag. The engine invokes the opaque action but does not understand its domain meaning or
+receive an Obsidian object.
 
 #### G-ADAPTER-06 — Filter compilation boundary
 
@@ -652,21 +915,44 @@ Given Graph+ vault adapter or view initialization fails, when an external consum
 already holds a healthy lease, then its session continues and the Graph+ failure is
 reported only on the affected surface.
 
+#### G-PARITY-07 — Engine-owned controls parity
+
+Given Graph+ and a synthetic external consumer request the same UI exposure and
+dimension capabilities, when their sessions mount, then both receive the same engine
+quick-settings sections, profile-scoped edits, persistent profile dimension setting,
+core context actions, safe-area behavior, and lifecycle without importing Graph+ UI
+classes. Neither session quick-settings panel exposes the dimension selector.
+
+#### G-PARITY-08 — Consumer UI and action customization
+
+Given Graph+ contributes note/tag controls and `open-node` while a synthetic consumer
+hides stock controls and contributes `Filter by due nodes` plus `start-drill`, when both
+run simultaneously, then each surface shows and invokes only its own profile-selected
+contributions and neither consumer's callbacks or settings appear in the other.
+
+#### G-PARITY-09 — Graph+ dimensional Form
+
+Given the Graph+ profile permits both dimensions, when the user switches between `2d`
+and `3d` in free graph and Mind Map modes, then its canonical note/tag document remains
+unchanged, the effective profile value persists, and Mind Map satisfies the planar or
+spatial Form criteria for the selected mode.
+
 ## 7. Platform smoke matrix
 
 The final release candidate is exercised in these environments where available:
 
 | Environment | Required observations |
 | --- | --- |
-| Obsidian desktop, main window | Open/reveal, mount, resize, input, persistence, close/dispose |
-| Obsidian desktop, popout window | Owning-document DOM, input, RAF, theme, pixel ratio, disposal |
-| Obsidian mobile | Touch navigation, resize/orientation, suspension/resume, disposal |
-| Two simultaneous consumers | Profile/session isolation and independent failure |
+| Obsidian desktop, main window | Open/reveal, mount, resize, click actions, quick settings, 2D/3D, Form, persistence, close/dispose |
+| Obsidian desktop, popout window | Owning-document DOM, input, UI placement, RAF, theme, pixel ratio, disposal |
+| Obsidian mobile | Touch focus/activation, long-press menu, intact Search layout, non-overlapping collapsed launcher, safe areas, 2D/3D, resize/orientation, suspension/resume, disposal |
+| Two simultaneous consumers | UI/action/profile/session isolation and independent failure |
 | Plugin disable/re-enable | Fallback, invalidation, reconnect, no stale resources |
 
-2D is proven through normal rendering and interaction scenarios. The 3D profile is
-accepted when perspective projection, orbit, depth-aware hit testing, and exported
-camera/positions behave coherently; it need not introduce a separate product UI.
+2D and 3D are selected through the permitted persistent profile setting rather than
+session quick settings. The 3D mode is accepted when perspective projection, orbit,
+depth-aware hit testing, exported camera/positions, repeated switching, and spatial
+Mind Map behavior are coherent.
 
 ## 8. Required fixtures and harnesses
 
@@ -681,16 +967,24 @@ coverage:
 - a neutral synthetic external consumer using only the shipped client/contracts;
 - a small committed Obsidian fixture vault covering supported and deferred sources;
 - a local-lease and external-lease conformance suite sharing the same test vectors;
-- Graph+ command-pipeline characterization fixtures captured before extraction;
+- a consumer-action fixture covering dynamic availability, ordering, async failure,
+  disposal, stale revisions, and local/external lease parity;
+- instrumented quick-settings and context-menu hosts covering visibility, custom
+  contributions, profile writes, safe areas, and teardown;
+- seeded free-graph and Form fixtures with enough topology to distinguish planar 2D
+  output from genuinely spatial 3D output;
+- retained Graph+ command-pipeline characterization fixtures;
 - an import-boundary check preventing Graph+ from reaching engine internals.
 
-The current seven-test single-file runner is sufficient for initial characterization,
-but the migration plan must introduce test organization and browser/runtime support
-before extraction makes mounted-session behavior a critical dependency.
+The existing organized core/runtime/service/Graph+ suites remain the regression
+baseline. New V1.1 scenarios require equivalent automated placement plus repeatable
+desktop/mobile smoke evidence where Obsidian-native rendering or safe areas cannot be
+proved headlessly.
 
 ## 9. Migration gates
 
-These gates order proof, not source-file movement.
+These gates order proof, not source-file movement. Gates A through F remain regression
+requirements from V1; Gate G is the additive V1.1 release gate.
 
 ### Gate A — Contract baseline
 
@@ -702,7 +996,8 @@ These gates order proof, not source-file movement.
 ### Gate B — Runtime shell
 
 - A neutral synthetic consumer mounts a session without importing Obsidian.
-- R-MOUNT, R-INPUT, and R-MODULE scenarios pass for the new runtime shell.
+- R-MOUNT, R-INPUT, R-UI, R-DIM, R-FORM, and R-MODULE scenarios pass for the runtime
+  shell.
 - Anima is optional and empty; no current experimental Anima behavior is required.
 
 ### Gate C — Service and profile host
@@ -730,27 +1025,52 @@ These gates order proof, not source-file movement.
 - The public contracts/client artifact is documented and consumable without Graph+
   source imports.
 - A neutral consumer demonstrates document load, patches, both filter scopes,
-  intents, view export/restore, profiles, and disposal.
+  intents, view export/restore, profiles, configurable engine UI, custom quick-setting
+  and click actions, dimension policy, and disposal.
 - PatternSmith-specific projection work remains a separate reviewed change.
+
+### Gate G — V1.1 additive release
+
+- Additive public types compile for existing consumers that do not opt into V1.1 UI
+  or action registration.
+- All new C-PROFILE, C-VIEW, R-INPUT, R-UI, R-DIM, R-FORM, S-CONNECT, and G-PARITY
+  scenarios pass alongside the complete V1 regression suite.
+- Graph+ uses the engine-owned controls/context menu and registered `open-node` action;
+  no Graph+-specific UI class is required by an external consumer.
+- A synthetic external smoke consumer proves hidden stock UI, a domain-facing filter
+  shim, a registered primary action, and independent profile settings.
+- Desktop, popout, and mobile smoke checks pass for safe areas, click/keyboard action
+  parity, intact narrow Search layout, non-overlapping host/engine controls, live
+  dimension switching, and 3D Mind Map.
 
 No gate is satisfied by file movement alone. Each gate requires its relevant
 observable scenarios and the full previously satisfied suite.
 
-## 10. Review decisions for Step 3
+## 10. V1.1 review decisions
 
-Approval of this plan confirms:
+Approval of this revision confirms:
 
-1. These scenarios adequately express the V1 contract.
-2. Browser/DOM runtime behavior receives automated coverage rather than manual-only
-   confidence.
-3. The neutral synthetic consumer precedes Graph+ extraction.
-4. Graph+ command behavior is characterized before generic mechanics move.
-5. PatternSmith is not used as the extraction test bed.
-6. The migration gates may now be converted into an implementation sequence.
+1. Engine-owned UI can be omitted or selectively exposed without disabling hidden
+   capabilities.
+2. Consumer extensibility is limited to semantic node click actions in V1.1; drag,
+   edge, background, raw-input, and camera remapping remain deferred.
+3. Focused-node click and Enter invoke the same primary action displayed first in the
+   context menu.
+4. Dimensions are profile-backed, constrainable, live-switchable, and isolated by
+   consumer/profile/session precedence.
+5. Mind Map is planar in 2D and genuinely spatial in 3D while preserving the same
+   domain-neutral Form semantics.
+6. A synthetic external consumer—not PatternSmith domain implementation—is the
+   conformance proof for custom UI/actions before PatternSmith product integration.
+7. Automated core/runtime/service coverage and desktop/mobile visual smoke evidence
+   are both required before V1.1 release acceptance.
 
-After approval, Step 4 produces the concrete migration plan: target package/folder
-topology, dependency direction, source-to-destination seam map, ordered work slices,
-compatibility strategy, and commit/release checkpoints. Production code remains
-unchanged until that plan is reviewed.
+After approval, the V1.1 remediation plan maps these scenarios to ordered code slices,
+compatibility changes, checkpoints, and smoke-test updates before implementation.
+
+After Gate G passes, work shifts to PatternSmith's real consumer integration. That
+integration validates Graph Engine in a domain-rich external plugin and may produce a
+separate backlog of engine defects or V1.2 proposals; it does not weaken Gate G or fold
+PatternSmith learning semantics into Graph Engine.
 
 The Step 4 artifact is [Graph Engine V1 Migration Plan](graph-engine-v1-migration-plan.md).

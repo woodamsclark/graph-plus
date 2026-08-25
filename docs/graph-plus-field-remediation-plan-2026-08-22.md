@@ -72,8 +72,10 @@ defaults, product controls, and persistence.
    apparent target scale; retain consumer override support.
 3. On desktop, primary background drag pans and clears focus/selection only after threshold;
    secondary drag orbits without clearing either.
-4. On mobile, use one-finger background orbit, one-finger node drag, two-finger pan, and
-   pinch zoom. Two-finger pan clears focus/selection; orbit retains them.
+4. On mobile, trial one-finger background pan in both dimensions, retain one-finger node
+   drag, use two-finger drag for orbit in 3D, and retain pinch zoom priority. Background
+   pan clears focus/selection; orbit retains them. In 2D, two-finger input never rotates
+   and may pan by centroid movement.
 5. Emit a generic node context-request from stationary secondary click or long-press;
    movement beyond threshold cancels the request in favor of the mapped gesture.
 6. Make free-graph drag kinematic and pointer-locked. Graph+ pins on release and exposes
@@ -89,6 +91,10 @@ defaults, product controls, and persistence.
 4. Prevent panel gestures from reaching the graph.
 5. Build Graph+'s native context menu: Focus node, Mind map from here, Open note when
    applicable, and Pin/Unpin node.
+6. In V1.1, keep Search intact in a stacked narrow layout and keep the collapsed launcher
+   outside host-owned action regions.
+7. Put the consumer-profile `2D`/`3D` selector in persistent Graph Engine settings, not
+   session quick controls; enforce each consumer's `allowedDimensions`.
 
 ### Phase E — Adaptive rendering and performance
 
@@ -129,7 +135,9 @@ defaults, product controls, and persistence.
 
 - [ ] Vertical orbit direction matches the approved mapping on mouse, trackpad, and touch.
 - [ ] Horizontal orbit behavior is unchanged.
-- [ ] Primary/two-finger pan clears focus and selection once, only after threshold.
+- [ ] One-finger background pan clears focus and selection once, only after threshold,
+  in both 2D and 3D.
+- [ ] Two-finger drag orbits in 3D, never orbits in 2D, and pinch retains zoom priority.
 - [ ] Orbit works on mobile with and without a focused node and retains focus/selection.
 - [ ] Fresh Graph+ 3D profiles use a 50 mm-equivalent perspective.
 - [ ] Perspective migration preserves apparent target scale.
@@ -150,12 +158,16 @@ defaults, product controls, and persistence.
 - [ ] Module settings update without changing session identity or remounting the surface.
 - [ ] Camera, document, view state, filters, pins, subscriptions, and unaffected modules survive.
 - [ ] Effective values follow documented precedence and expose their source.
-- [ ] Quick controls create view overrides; reset deletes them.
+- [ ] Quick controls create view overrides; reset deletes them. Dimensions are excluded
+  and are changed through persistent profile settings.
 - [ ] Profile changes reach active views that lack a corresponding view override.
+- [ ] Consumers can permit both dimensions, hide the persistent selector, or enforce one.
 - [ ] `adaptive`, `all`, and `off` are valid profile defaults and honor constraints/locks.
 - [ ] Every label, help string, and value is readable at accepted panel widths.
 - [ ] The mobile header and close action remain reachable in portrait, landscape, keyboard,
       and host-navigation states.
+- [ ] Search never breaks inside its label/tokens, and the collapsed launcher never
+      overlaps Obsidian or consumer actions.
 
 ### Filter and Form
 
@@ -164,6 +176,7 @@ defaults, product controls, and persistence.
 - [ ] Later selection does not re-root without explicit Re-form from selected.
 - [ ] Filtering out the root produces explicit recoverable feedback and no silent fallback.
 - [ ] The same input/settings produce the same display-parent tree and branch allocation.
+- [ ] Mind Map is planar in 2D and uses meaningful finite z separation in 3D.
 - [ ] Free graph positions and behavior return unchanged when Mind Map is disabled.
 
 ### Labels and performance

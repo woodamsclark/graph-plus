@@ -53,15 +53,17 @@ without treating the ownership guess as diagnosis.
   view may pan, but the graph cannot be orbited in three dimensions. Selecting and
   focusing a node does not enable orbit, so the failure is not limited to the absence
   of a focused camera target.
-- **Approved fix:** Use one-finger background drag for orbit, one-finger node drag for
-  node movement, two-finger drag for pan, and pinch for zoom. Two-finger pan clears
-  focus and selection after its movement threshold; orbit retains both states and may
-  orbit around the focused node.
+- **Revised V1.1 trial 2026-08-25:** Use one-finger background drag for pan in both 2D
+  and 3D, preserving one-finger node drag when the gesture begins on a draggable node.
+  Use two-finger drag for orbit in 3D; retain focus/selection and orbit around the
+  focused node when present. Pinch retains zoom priority. In 2D, two-finger input never
+  rotates and may pan by centroid movement. This supersedes the earlier one-finger
+  orbit/two-finger pan proposal and remains subject to on-device trial.
 - **Likely ownership:** Shared Graph Engine touch-gesture recognition and camera intent
   mapping, with Graph+ responsible for any consumer-facing gesture guidance.
-- **Acceptance direction:** Verify the complete mapping both with and without a focused
-  node, including gesture transitions, node/background hit targets, Obsidian host event
-  interception, and accidental pan/orbit during pinch.
+- **Acceptance direction:** Verify both dimensions and the complete mapping with and
+  without a focused node, including gesture transitions, node/background hit targets,
+  Obsidian host event interception, and accidental pan/orbit during pinch.
 
 ## 2. Controls panel
 
@@ -110,6 +112,36 @@ without treating the ownership guess as diagnosis.
 - **Acceptance direction:** Verify reachable close and settings controls in portrait,
   landscape, filter-keyboard-open, and bottom-navigation states without accidental
   graph pan, orbit, zoom, or node drag.
+
+### UI-04 — Mobile Search label and syntax hint wrap incorrectly
+
+- **Observed 2026-08-25:** In the narrow mobile quick-settings panel, `Search` splits
+  inside the word as `Sea` / `rch`, while the syntax hint breaks into hard-to-parse
+  fragments above the input. The input itself remains usable, but the setting label and
+  grammar guidance are visually corrupted.
+- **Approved V1.1 direction:** Give Search a narrow-layout stack: intact label, readable
+  syntax hint, then a full-width input. Do not break inside setting names, ordinary
+  words, or published filter tokens; wrap examples at intentional separators.
+- **Likely ownership:** Engine-owned stock quick-settings layout and responsive control
+  primitives, inherited by Graph+ and any external consumer exposing the stock Filter
+  section.
+- **Acceptance direction:** Reproduce the photographed mobile width and adjacent narrow
+  widths; verify no mid-word/mid-token breaks, clipping, or horizontal scrolling.
+
+### UI-05 — Collapsed controls launcher overlaps Obsidian chrome
+
+- **Observed 2026-08-25:** When the quick-settings panel is minimized, its circular
+  launcher occupies the top-right Obsidian leaf-action area, visually and interactively
+  competing with the host button beneath or beside it.
+- **Approved V1.1 direction:** Position engine-owned expanded/collapsed controls within
+  host-aware usable bounds. Respect safe areas and host/consumer-declared occlusions,
+  and recompute placement when mobile chrome, orientation, viewport, or keyboard state
+  changes.
+- **Likely ownership:** Graph Engine session-UI layout plus the Obsidian host adapter's
+  usable-bounds/occlusion reporting—not the Graph+ vault consumer.
+- **Acceptance direction:** Both launcher and Obsidian action retain disjoint visible
+  hit targets in the photographed state, portrait/landscape, and desktop/popout leaf
+  variants.
 
 ## 3. Form and Mind Map
 
