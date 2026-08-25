@@ -8,10 +8,16 @@ import type {
   GraphNodeActionRegistrationV1,
   GraphSessionOptionsV1,
   GraphSessionV1,
+  GraphSettingsOverridesV1,
+  JsonValue,
 } from '../contracts/v1/index.ts';
 import { ConsumerProfileRegistry } from '../core/profile/index.ts';
 import { SessionFactory } from '../runtime/index.ts';
 import { ConsumerNodeActionRegistryV1 } from './ConsumerNodeActionRegistry.ts';
+import type {
+  GraphEngineProfileSettingsPortV1,
+  GraphEngineSessionUiHostV1,
+} from './GraphEngineSessionUiHost.ts';
 
 export interface GraphEngineProviderCoreOptionsV1 {
   readonly engineVersion: string;
@@ -20,6 +26,7 @@ export interface GraphEngineProviderCoreOptionsV1 {
   readonly profiles: ConsumerProfileRegistry;
   readonly sessions: SessionFactory;
   readonly onProfilesChanged?: () => void | Promise<void>;
+  readonly sessionUiHost?: GraphEngineSessionUiHostV1;
 }
 
 interface LeaseRecord {
@@ -48,6 +55,7 @@ export class GraphEngineProviderCoreV1 {
   private readonly profiles: ConsumerProfileRegistry;
   private readonly sessions: SessionFactory;
   private readonly onProfilesChanged: () => void | Promise<void>;
+  private readonly sessionUiHost?: GraphEngineSessionUiHostV1;
   private readonly nodeActions = new ConsumerNodeActionRegistryV1();
   private readonly leases = new Set<LeaseRecord>();
   private active = true;
@@ -60,6 +68,7 @@ export class GraphEngineProviderCoreV1 {
     this.profiles = options.profiles;
     this.sessions = options.sessions;
     this.onProfilesChanged = options.onProfilesChanged ?? (() => undefined);
+    this.sessionUiHost = options.sessionUiHost;
   }
 
   answerRequest(request: GraphEngineRequestV1): void {
@@ -162,17 +171,37 @@ export class GraphEngineProviderCoreV1 {
             message: `Lease for "${record.consumerId}" cannot create a session for "${options.consumerId}".`,
           });
         }
-        const session = await this.sessions.createSession(options, {
+        const hosted = await this.sessions.createHostedSession(options, {
           nodeActions: this.nodeActions.runtimeFor(record.consumerId),
         });
+        let ui: Disposable | undefined;
+        try {
+          ui = this.sessionUiHost
+            ? await this.sessionUiHost.mount({
+                consumerId: record.consumerId,
+                profileId: options.profileId,
+                container: options.container,
+                session: hosted.session,
+                sessionOptions: options,
+                controls: hosted.controls,
+                profileSettings: this.profileSettingsPort(record.consumerId, options.profileId),
+              })
+            : undefined;
+        } catch (error) {
+          await hosted.session.dispose();
+          throw error;
+        }
         try {
           this.assertLease(record);
         } catch (error) {
-          await session.dispose();
+          ui?.dispose();
+          await hosted.session.dispose();
           throw error;
         }
+        let session!: GraphSessionV1;
+        session = trackSession(hosted.session, () => record.sessions.delete(session), ui);
         record.sessions.add(session);
-        return trackSession(session, () => record.sessions.delete(session));
+        return session;
       },
       release: async (): Promise<void> => this.releaseLease(record),
     };
@@ -185,6 +214,26 @@ export class GraphEngineProviderCoreV1 {
         message: 'This Graph Engine lease is no longer available.',
       });
     }
+  }
+
+  private profileSettingsPort(
+    consumerId: string,
+    profileId: string,
+  ): GraphEngineProfileSettingsPortV1 {
+    return {
+      getDescriptor: () => this.profiles.getProfileDescriptor(consumerId, profileId),
+      getEffectiveProfile: () => this.profiles.resolve(consumerId, profileId),
+      getUserOverrides: () => this.profiles.getUserOverrides(consumerId, profileId),
+      setModuleSetting: async (moduleId, key, value) => {
+        const overrides = this.profiles.getUserOverrides(consumerId, profileId);
+        this.profiles.setUserOverrides(
+          consumerId,
+          profileId,
+          changeModuleSetting(overrides, moduleId, key, value),
+        );
+        await this.onProfilesChanged();
+      },
+    };
   }
 
   private async releaseLease(record: LeaseRecord): Promise<void> {
@@ -202,16 +251,45 @@ export class GraphEngineProviderCoreV1 {
   }
 }
 
-function trackSession(session: GraphSessionV1, onDispose: () => void): GraphSessionV1 {
+function trackSession(
+  session: GraphSessionV1,
+  onDispose: () => void,
+  ui?: Disposable,
+): GraphSessionV1 {
   let disposed = false;
   const originalDispose = session.dispose.bind(session);
   session.dispose = async (): Promise<void> => {
     if (disposed) return;
     disposed = true;
     onDispose();
+    ui?.dispose();
     await originalDispose();
   };
   return session;
+}
+
+function changeModuleSetting(
+  overrides: GraphSettingsOverridesV1,
+  moduleId: string,
+  key: string,
+  value: JsonValue | undefined,
+): GraphSettingsOverridesV1 {
+  const modules = { ...(overrides.modules ?? {}) };
+  const module = modules[moduleId] ?? {};
+  const settings = { ...(module.settings ?? {}) };
+  if (value === undefined) delete settings[key];
+  else settings[key] = value;
+  const next = { ...module, settings: Object.keys(settings).length ? settings : undefined };
+  if (next.enabled === undefined && next.settings === undefined) delete modules[moduleId];
+  else modules[moduleId] = next;
+  return {
+    ...cloneOverrides(overrides),
+    modules: Object.keys(modules).length ? modules : undefined,
+  };
+}
+
+function cloneOverrides(value: GraphSettingsOverridesV1): GraphSettingsOverridesV1 {
+  return JSON.parse(JSON.stringify(value)) as GraphSettingsOverridesV1;
 }
 
 function failure(code: GraphEngineConnectionErrorV1['code'], message: string): GraphEngineLeaseResultV1 {

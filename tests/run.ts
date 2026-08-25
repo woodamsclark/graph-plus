@@ -13,6 +13,7 @@ import './service/actions.test.ts';
 import './service/neutral-sample.test.ts';
 import './obsidian/persistence.test.ts';
 import './obsidian/settings-controller.test.ts';
+import './obsidian/ui-policy.test.ts';
 import './graph-plus/adapter.test.ts';
 import { runTests } from './support/harness.ts';
 

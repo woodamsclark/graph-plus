@@ -9,6 +9,7 @@ import {
   GraphEngineWorkspaceProviderV1,
   type GraphEngineClientClockV1,
   type GraphEngineEventBusV1,
+  type GraphEngineSessionUiHostV1,
 } from '../../src/graph-engine/service/index.ts';
 import { GraphCameraController } from '../../src/graph-engine/runtime/index.ts';
 import type { GraphSessionV1 } from '../../src/graph-engine/contracts/v1/index.ts';
@@ -56,7 +57,7 @@ class Clock implements GraphEngineClientClockV1 {
   }
 }
 
-function provider(instanceId = 'provider-one') {
+function provider(instanceId = 'provider-one', sessionUiHost?: GraphEngineSessionUiHostV1) {
   const runtime = runtimeHarness();
   const core = new GraphEngineProviderCoreV1({
     engineVersion: '1.0.0',
@@ -64,9 +65,53 @@ function provider(instanceId = 'provider-one') {
     capabilities: ['render'],
     profiles: runtime.profiles,
     sessions: runtime.factory,
+    sessionUiHost,
   });
   return { runtime, core };
 }
+
+test('R-UI-03 provider mounts one engine UI host per session and owns its disposal', async () => {
+  let mounts = 0;
+  let disposals = 0;
+  let preservedOverride = false;
+  const markerId = 'engine-ui-test-marker';
+  const uiHost: GraphEngineSessionUiHostV1 = {
+    mount: async (context) => {
+      mounts += 1;
+      equal(context.consumerId, 'synthetic-consumer', 'the host should receive the lease consumer namespace');
+      equal(context.profileId, 'two-dimensional', 'the host should receive the active profile namespace');
+      const marker = context.container.ownerDocument.createElement('div');
+      marker.id = markerId;
+      context.container.append(marker);
+      await context.controls.setModuleSetting('form', 'rootNodeId', 'a');
+      preservedOverride = context.controls.getSessionOverrides().modules?.rendering?.settings?.labelMode === 'all';
+      return { dispose: () => { disposals += 1; marker.remove(); } };
+    },
+  };
+  const value = provider('provider-ui', uiHost);
+  const result = value.core.connectLocal({
+    consumerId: 'synthetic-consumer',
+    supportedProtocolVersions: [1],
+    requestedCapabilities: ['render'],
+  });
+  assert(result.ok, 'local connection should return a lease');
+  await result.lease.registerConsumer(runtimeRegistration());
+  const session = await result.lease.createSession({
+    consumerId: 'synthetic-consumer',
+    profileId: 'two-dimensional',
+    container: value.runtime.container,
+    document: runtimeFixture(),
+    sessionOverrides: { modules: { rendering: { settings: { labelMode: 'all' } } } },
+  });
+  equal(mounts, 1, 'the provider should mount one UI host for the session');
+  equal(preservedOverride, true, 'engine controls should merge rather than clobber consumer session overrides');
+  assert(value.runtime.container.querySelector(`#${markerId}`), 'the UI host should be mounted beside the graph session');
+  await session.dispose();
+  equal(disposals, 1, 'session disposal should dispose its UI exactly once');
+  equal(value.runtime.container.querySelector(`#${markerId}`), null, 'UI disposal should remove only its owned surface');
+  await result.lease.release();
+  equal(disposals, 1, 'lease release should not repeat already-completed UI disposal');
+});
 
 function connect(client: GraphEngineWorkspaceClientV1, clock: Clock, options: Partial<Parameters<typeof client.connect>[0]> = {}) {
   const pending = client.connect({

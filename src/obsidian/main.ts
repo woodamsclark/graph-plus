@@ -22,6 +22,7 @@ import {
 } from './ObsidianWorkspaceEventBus.ts';
 import { GraphEngineSettingsControllerV1 } from './settings/GraphEngineSettingsController.ts';
 import { ThemeStyleResolver } from './themeStyleResolver.ts';
+import { ObsidianGraphEngineSessionUiHostV1 } from './graph-engine-ui/index.ts';
 import {
   migrateGraphPlusPluginDataV1,
   readGraphPlusCheckpointV1,
@@ -82,6 +83,7 @@ export default class GraphPlus extends Plugin {
       capabilities,
       profiles,
       sessions: sessionFactory,
+      sessionUiHost: new ObsidianGraphEngineSessionUiHostV1(),
       onProfilesChanged: () => {
         sessionFactory.refreshActiveProfiles();
         return this.persistEngineSettings();

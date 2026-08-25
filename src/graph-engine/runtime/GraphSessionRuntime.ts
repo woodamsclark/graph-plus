@@ -14,6 +14,7 @@ import type {
   GraphSessionErrorV1,
   GraphSessionV1,
   GraphSettingsOverridesV1,
+  JsonValue,
   GraphViewStateV1,
   TransitionOptionsV1,
   Vec3,
@@ -47,6 +48,7 @@ import type {
   GraphNodeActionFailureV1,
   GraphNodeActionRuntimeV1,
 } from './actions/index.ts';
+import type { GraphSessionControlPortV1 } from './host/index.ts';
 
 export interface GraphSessionRuntimeOptionsV1 {
   readonly sessionId: string;
@@ -448,6 +450,31 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.sessionOverrides = requested;
   }
 
+  createControlPort(): GraphSessionControlPortV1 {
+    return {
+      getSessionOverrides: () => cloneOverrides(this.sessionOverrides),
+      setModuleEnabled: (moduleId, enabled) => this.patchModuleOverride(moduleId, { enabled }),
+      setModuleSetting: (moduleId, key, value) => this.patchModuleSetting(moduleId, key, value),
+      createNodeActionContext: (nodeId) => this.nodeActionContext(nodeId),
+      resolveNodeActions: (actionIds, nodeId) => {
+        if (!this.nodeActions || !this.hasNode(nodeId)) return [];
+        return this.nodeActions.resolve(
+          actionIds,
+          this.nodeActionContext(nodeId),
+          (failure) => this.handleNodeActionFailure(failure),
+        );
+      },
+      invokeNodeAction: (actionId, nodeId) => {
+        if (!this.hasNode(nodeId)) return false;
+        return this.nodeActions?.invoke(
+          actionId,
+          this.nodeActionContext(nodeId),
+          (failure) => this.handleNodeActionFailure(failure),
+        ) ?? false;
+      },
+    };
+  }
+
   refreshResolvedProfile(): void {
     this.requireActive();
     this.applyResolvedProfile(this.resolveProfile(this.sessionOverrides));
@@ -467,6 +494,42 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.synchronizeCameraState();
     this.profile = next;
     this.recomputeView(false);
+  }
+
+  private async patchModuleOverride(
+    moduleId: string,
+    patch: { readonly enabled?: boolean },
+  ): Promise<void> {
+    const overrides = cloneOverrides(this.sessionOverrides);
+    const modules = { ...(overrides.modules ?? {}) };
+    const current = modules[moduleId] ?? {};
+    const next = { ...current, ...patch };
+    if (next.enabled === undefined && Object.keys(next.settings ?? {}).length === 0) delete modules[moduleId];
+    else modules[moduleId] = next;
+    await this.setSessionOverrides({
+      ...overrides,
+      modules: Object.keys(modules).length ? modules : undefined,
+    });
+  }
+
+  private async patchModuleSetting(
+    moduleId: string,
+    key: string,
+    value: JsonValue | undefined,
+  ): Promise<void> {
+    const overrides = cloneOverrides(this.sessionOverrides);
+    const modules = { ...(overrides.modules ?? {}) };
+    const current = modules[moduleId] ?? {};
+    const settings = { ...(current.settings ?? {}) };
+    if (value === undefined) delete settings[key];
+    else settings[key] = value;
+    const next = { ...current, settings: Object.keys(settings).length ? settings : undefined };
+    if (next.enabled === undefined && next.settings === undefined) delete modules[moduleId];
+    else modules[moduleId] = next;
+    await this.setSessionOverrides({
+      ...overrides,
+      modules: Object.keys(modules).length ? modules : undefined,
+    });
   }
 
   async exportEffectiveSettings(): Promise<GraphEffectiveSettingsV1> {
@@ -718,6 +781,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       selectedNodeIds: [...this.viewState.selectedNodeIds],
       ...(this.viewState.focusedNodeId ? { focusedNodeId: this.viewState.focusedNodeId } : {}),
     };
+  }
+
+  private hasNode(nodeId: string): boolean {
+    return this.store.exportDocument().nodes.some((node) => node.id === nodeId);
   }
 
   private handleNodeActionFailure(failure: GraphNodeActionFailureV1): void {

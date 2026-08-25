@@ -30,7 +30,7 @@
   --graphplus-controls-width: 240px;
   position: absolute;
   z-index: var(--layer-popover, 30);
-  top: var(--size-4-3, 12px);
+  top: var(--graph-engine-controls-top, var(--size-4-3, 12px));
   right: var(--size-4-3, 12px);
   width: var(--graphplus-controls-width);
   max-width: calc(100% - var(--size-4-6, 24px));
@@ -174,7 +174,8 @@
 .graphplus-control-section-body .setting-item-name,
 .graphplus-control-section-body .setting-item-description {
   overflow: visible;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
   text-overflow: clip;
   white-space: normal;
 }
@@ -188,6 +189,11 @@
   color: var(--text-faint);
   font-size: var(--font-ui-smallest);
   line-height: 1.25;
+  overflow-wrap: break-word;
+}
+
+.graph-engine-ui-contribution {
+  min-width: 0;
 }
 
 .graphplus-control-section-body .setting-item-control {
@@ -303,7 +309,7 @@
 @media (max-width: 600px) {
   .graphplus-graph-controls {
     --graphplus-controls-width: min(240px, calc(100vw - 24px));
-    top: max(var(--size-4-3, 12px), var(--safe-area-inset-top, env(safe-area-inset-top, 0px)));
+    top: max(var(--graph-engine-controls-top, var(--size-4-3, 12px)), var(--safe-area-inset-top, env(safe-area-inset-top, 0px)));
     right: max(var(--size-4-3, 12px), var(--safe-area-inset-right, env(safe-area-inset-right, 0px)));
     bottom: max(var(--size-4-3, 12px), var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
     max-height: none;
