@@ -14,5 +14,7 @@ public boundary and a runnable neutral example.
 
 Current design artifacts:
 
+- [Graph Engine V1.3 tag regions contract](docs/graph-engine-v1.3-tag-regions-contract.md)
+- [Graph Engine V1.3 tag regions acceptance plan](docs/graph-engine-v1.3-tag-regions-acceptance.md)
 - [Graph Engine V1.2 scalability contract](docs/graph-engine-v1.2-scalability-contract.md)
 - [Graph Engine V1.2 scalability acceptance plan](docs/graph-engine-v1.2-scalability-acceptance.md)
