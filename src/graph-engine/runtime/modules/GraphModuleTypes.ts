@@ -45,6 +45,8 @@ export interface GraphModulePipelineStateV1 {
   readonly projectionSelection: GraphFilterSelectionV1;
   readonly renderSelection: GraphFilterSelectionV1;
   readonly formActive: boolean;
+  /** Runtime-only interaction state. It is never persisted or exported as graph data. */
+  readonly draggedNodeId?: string;
   readonly nodeContributions: Readonly<Record<string, GraphNodeRenderContributionV1>>;
   readonly edgeContributions: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
   readonly regionLayouts: readonly GraphNodeRegionLayoutV1[];

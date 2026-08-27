@@ -1,7 +1,17 @@
-import type { GraphDimensionsV1, JsonValue, Vec3 } from '../../../contracts/v1/index.ts';
+import type { GraphDimensionsV1, GraphDocumentV1, JsonValue, Vec3 } from '../../../contracts/v1/index.ts';
+import {
+  analyzeGraphTopologyV1,
+  graphTopologyPairKeyV1,
+  type GraphTopologyAnalysisV1,
+  type GraphTopologyComponentV1,
+  type GraphTopologyPairV1,
+} from '../../../core/topology/index.ts';
 import type { GraphModuleInstanceV1, GraphModulePipelineStateV1 } from '../GraphModuleTypes.ts';
 
+export type GraphTopologyWeightingModeV1 = 'uniform' | 'topology-weighted';
+
 interface ForceSettings {
+  readonly weightingMode: GraphTopologyWeightingModeV1;
   readonly repulsionStrength: number;
   readonly springStrength: number;
   readonly springLength: number;
@@ -12,6 +22,16 @@ interface ForceSettings {
   readonly repulsionMinDistance: number;
   readonly barnesHutTheta: number;
   readonly maxSpeed: number;
+  readonly minimumAffinity: number;
+  readonly maximumAffinity: number;
+  readonly evidenceLogFactor: number;
+  readonly reciprocalBoost: number;
+  readonly hubDiscountExponent: number;
+  readonly minimumSpringStrengthScale: number;
+  readonly maximumSpringStrengthScale: number;
+  readonly minimumSpringLengthScale: number;
+  readonly maximumSpringLengthScale: number;
+  readonly componentPadding: number;
 }
 
 interface MutableVec3 {
@@ -29,11 +49,33 @@ interface OctreeNode {
   children?: Array<OctreeNode | undefined>;
 }
 
+export interface WeightedSpringParametersV1 {
+  readonly strength: number;
+  readonly targetLength: number;
+}
+
+export interface ForceLayoutDiagnosticsV1 {
+  readonly topologyAnalysisCount: number;
+  readonly physicalSpringCount: number;
+  readonly componentCount: number;
+  readonly coordinatedMembershipPairCount: number;
+  readonly alpha: number;
+  readonly running: boolean;
+}
+
+const ACTIVE_DRAG_ALPHA = 0.35;
+
 export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private readonly velocities = new Map<string, MutableVec3>();
   private readonly forces = new Map<string, MutableVec3>();
   private positions: Record<string, MutableVec3> = {};
   private positionSource: Readonly<Record<string, Vec3>> | null = null;
+  private bufferDocumentSource: GraphDocumentV1 | null = null;
+  private topologyDocumentSource: GraphDocumentV1 | null = null;
+  private topologyRegionKey = '';
+  private topology?: GraphTopologyAnalysisV1;
+  private membershipPairStrengths = new Map<string, number>();
+  private componentTargets: ReadonlyMap<string, Vec3> = new Map();
   private documentKey = '';
   private pinned = new Set<string>();
   private suspended = false;
@@ -41,6 +83,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private running = true;
   private pinnedKey = '';
   private regionLayoutKey = '';
+  private topologyAnalysisCount = 0;
 
   constructor(
     private readonly dimensions: GraphDimensionsV1,
@@ -49,11 +92,13 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
     this.settings = readForceSettings(settings);
+    this.topologyDocumentSource = null;
     this.reheat();
   }
 
   onDocumentChanged(): void {
     this.documentKey = '';
+    this.topologyDocumentSource = null;
     this.reheat();
   }
 
@@ -70,39 +115,27 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     // pin state correct without requiring the session kernel to special-case force.
     this.synchronizePinnedNodes(state.viewState);
     this.synchronizeRegionLayout(state);
-    if (this.suspended || state.formActive || state.document.nodes.length < 2 || !this.running) return;
+    if (state.document !== this.bufferDocumentSource) this.reheat();
+    if (this.suspended || state.formActive || state.document.nodes.length < 2) return;
+    const dragActive = state.draggedNodeId !== undefined
+      && state.document.nodes.some((node) => node.id === state.draggedNodeId);
+    if (dragActive) this.running = true;
+    if (!this.running) return;
     this.synchronizeBuffers(state);
+    this.synchronizeTopology(state);
     const dt = Math.min(1 / 20, Math.max(1 / 240, deltaSeconds || 1 / 60));
     this.alpha += (0 - this.alpha) * this.settings.alphaDecay;
+    if (dragActive) this.alpha = Math.max(this.alpha, ACTIVE_DRAG_ALPHA);
     for (const node of state.document.nodes) {
       const force = this.forces.get(node.id)!;
       force.x = 0; force.y = 0; force.z = 0;
     }
     this.applyBarnesHutRepulsion(this.positions, this.forces);
-    for (const edge of state.document.edges) {
-      const source = this.positions[edge.sourceId];
-      const target = this.positions[edge.targetId];
-      if (!source || !target) continue;
-      const dx = target.x - source.x;
-      const dy = target.y - source.y;
-      const dz = target.z - source.z;
-      const length = Math.max(0.001, Math.hypot(dx, dy, dz));
-      const strength = this.settings.springStrength * Math.max(0.1, Math.abs(edge.weight ?? 1));
-      const amount = strength * Math.tanh((length - this.settings.springLength) / 50) * this.alpha / length;
-      const sourceForce = this.forces.get(edge.sourceId)!;
-      const targetForce = this.forces.get(edge.targetId)!;
-      sourceForce.x += dx * amount; sourceForce.y += dy * amount; sourceForce.z += dz * amount;
-      targetForce.x -= dx * amount; targetForce.y -= dy * amount; targetForce.z -= dz * amount;
-    }
+    if (this.settings.weightingMode === 'topology-weighted') this.applyWeightedSprings();
+    else this.applyUniformSprings(state.document);
     this.applyRegionMembershipForces(state);
-    for (const node of state.document.nodes) {
-      const position = this.positions[node.id];
-      const force = this.forces.get(node.id)!;
-      const amount = -this.settings.centeringStrength * this.alpha;
-      force.x += position.x * amount;
-      force.y += position.y * amount;
-      force.z += position.z * amount;
-    }
+    if (this.settings.weightingMode === 'topology-weighted') this.applyComponentCentering();
+    else this.applyUniformCentering(state.document);
     let changed = false;
     for (const node of state.document.nodes) {
       const velocity = this.velocities.get(node.id)!;
@@ -128,7 +161,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       position.y += velocity.y * movementScale;
       position.z = this.dimensions === '2d' ? 0 : position.z + velocity.z * movementScale;
     }
-    if (this.alpha < this.settings.alphaMin || this.isSettled(this.pinned)) {
+    if (!dragActive && (this.alpha < this.settings.alphaMin || this.isSettled(this.pinned))) {
       this.running = false;
       this.alpha = 0;
       for (const velocity of this.velocities.values()) {
@@ -155,7 +188,128 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     ].join('\u0001')).join('\u0000');
     if (nextKey === this.regionLayoutKey) return;
     this.regionLayoutKey = nextKey;
+    this.topologyDocumentSource = null;
     this.reheat();
+  }
+
+  private synchronizeTopology(state: GraphModulePipelineStateV1): void {
+    if (this.settings.weightingMode !== 'topology-weighted') {
+      this.topology = undefined;
+      this.topologyDocumentSource = null;
+      this.membershipPairStrengths.clear();
+      this.componentTargets = new Map();
+      return;
+    }
+    if (state.document === this.topologyDocumentSource && this.regionLayoutKey === this.topologyRegionKey) return;
+    const membershipConnections = state.regionLayouts.flatMap((region) => region.directMemberNodeIds.map((memberId) => ({
+      sourceId: region.regionNodeId,
+      targetId: memberId,
+    })));
+    this.topology = analyzeGraphTopologyV1(state.document, membershipConnections, {
+      minimumAffinity: this.settings.minimumAffinity,
+      maximumAffinity: this.settings.maximumAffinity,
+      evidenceLogFactor: this.settings.evidenceLogFactor,
+      reciprocalBoost: this.settings.reciprocalBoost,
+      hubDiscountExponent: this.settings.hubDiscountExponent,
+    });
+    this.topologyAnalysisCount += 1;
+    this.membershipPairStrengths = new Map();
+    for (const region of state.regionLayouts) {
+      for (const memberId of region.directMemberNodeIds) {
+        const key = graphTopologyPairKeyV1(region.regionNodeId, memberId);
+        this.membershipPairStrengths.set(key, Math.max(
+          this.membershipPairStrengths.get(key) ?? 0,
+          region.membershipStrength,
+        ));
+      }
+    }
+    this.componentTargets = buildComponentPackingTargetsV1(
+      this.topology.components,
+      this.settings.springLength,
+      this.settings.componentPadding,
+      this.dimensions,
+    );
+    this.topologyDocumentSource = state.document;
+    this.topologyRegionKey = this.regionLayoutKey;
+  }
+
+  private applyWeightedSprings(): void {
+    for (const pair of this.topology?.pairs ?? []) {
+      if (pair.affinity <= 0) continue;
+      const parameters = deriveWeightedSpringParametersV1(pair, this.settings);
+      const membershipStrength = this.membershipPairStrengths.get(pair.key) ?? 0;
+      this.applySpring(
+        pair.sourceId,
+        pair.targetId,
+        coordinateWeightedSpringStrengthV1(parameters.strength, membershipStrength),
+        parameters.targetLength,
+      );
+    }
+  }
+
+  private applyUniformSprings(document: GraphDocumentV1): void {
+    for (const edge of document.edges) {
+      this.applySpring(
+        edge.sourceId,
+        edge.targetId,
+        this.settings.springStrength * Math.max(0.1, Math.abs(edge.weight ?? 1)),
+        this.settings.springLength,
+      );
+    }
+  }
+
+  private applySpring(sourceId: string, targetId: string, strength: number, targetLength: number): void {
+    if (strength <= 0 || sourceId === targetId) return;
+    const source = this.positions[sourceId];
+    const target = this.positions[targetId];
+    if (!source || !target) return;
+    const dx = target.x - source.x;
+    const dy = target.y - source.y;
+    const dz = this.dimensions === '2d' ? 0 : target.z - source.z;
+    const length = Math.max(0.001, Math.hypot(dx, dy, dz));
+    const amount = strength * Math.tanh((length - targetLength) / 50) * this.alpha / length;
+    const sourceForce = this.forces.get(sourceId)!;
+    const targetForce = this.forces.get(targetId)!;
+    sourceForce.x += dx * amount; sourceForce.y += dy * amount; sourceForce.z += dz * amount;
+    targetForce.x -= dx * amount; targetForce.y -= dy * amount; targetForce.z -= dz * amount;
+  }
+
+  private applyUniformCentering(document: GraphDocumentV1): void {
+    const amount = -this.settings.centeringStrength * this.alpha;
+    for (const node of document.nodes) {
+      const position = this.positions[node.id];
+      const force = this.forces.get(node.id)!;
+      force.x += position.x * amount;
+      force.y += position.y * amount;
+      force.z += position.z * amount;
+    }
+  }
+
+  private applyComponentCentering(): void {
+    const amount = this.settings.centeringStrength * this.alpha;
+    if (amount <= 0) return;
+    for (const component of this.topology?.components ?? []) {
+      if (component.nodeIds.some((nodeId) => this.pinned.has(nodeId))) continue;
+      const centroid = { x: 0, y: 0, z: 0 };
+      let count = 0;
+      for (const nodeId of component.nodeIds) {
+        const position = this.positions[nodeId];
+        if (!position) continue;
+        centroid.x += position.x; centroid.y += position.y; centroid.z += position.z;
+        count += 1;
+      }
+      if (!count) continue;
+      centroid.x /= count; centroid.y /= count; centroid.z /= count;
+      const target = this.componentTargets.get(component.id) ?? { x: 0, y: 0, z: 0 };
+      const dx = (target.x - centroid.x) * amount;
+      const dy = (target.y - centroid.y) * amount;
+      const dz = this.dimensions === '2d' ? 0 : (target.z - centroid.z) * amount;
+      for (const nodeId of component.nodeIds) {
+        const force = this.forces.get(nodeId);
+        if (!force) continue;
+        force.x += dx; force.y += dy; force.z += dz;
+      }
+    }
   }
 
   private applyRegionMembershipForces(state: GraphModulePipelineStateV1): void {
@@ -199,12 +353,30 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.forces.clear();
     this.positions = {};
     this.positionSource = null;
+    this.bufferDocumentSource = null;
+    this.topologyDocumentSource = null;
+    this.topology = undefined;
+    this.membershipPairStrengths.clear();
+    this.componentTargets = new Map();
     this.regionLayoutKey = '';
+  }
+
+  getDiagnostics(): ForceLayoutDiagnosticsV1 {
+    return {
+      topologyAnalysisCount: this.topologyAnalysisCount,
+      physicalSpringCount: this.settings.weightingMode === 'topology-weighted'
+        ? this.topology?.pairs.filter((pair) => pair.affinity > 0).length ?? 0
+        : 0,
+      componentCount: this.topology?.components.length ?? 0,
+      coordinatedMembershipPairCount: this.membershipPairStrengths.size,
+      alpha: this.alpha,
+      running: this.running,
+    };
   }
 
   private synchronizeBuffers(state: GraphModulePipelineStateV1): void {
     const key = `${state.document.documentId}\u0000${state.document.revision}`;
-    const topologyChanged = key !== this.documentKey;
+    const topologyChanged = key !== this.documentKey || state.document !== this.bufferDocumentSource;
     const sourceChanged = state.positions !== this.positionSource && state.positions !== this.positions;
     if (!topologyChanged && !sourceChanged) return;
     const known = new Set(state.document.nodes.map((node) => node.id));
@@ -224,6 +396,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       if (!this.forces.has(node.id)) this.forces.set(node.id, { x: 0, y: 0, z: 0 });
     }
     this.documentKey = key;
+    this.bufferDocumentSource = state.document;
     this.positionSource = this.positions;
   }
 
@@ -284,10 +457,23 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 }
 
 export function readForceSettings(settings: Readonly<Record<string, JsonValue>>): ForceSettings {
+  const minimumAffinity = finitePositive(settings.minimumAffinity, 0.2);
+  const maximumAffinity = Math.max(minimumAffinity, finitePositive(settings.maximumAffinity, 2.5));
+  const minimumSpringStrengthScale = finiteNonNegative(settings.minimumSpringStrengthScale, 0.35);
+  const maximumSpringStrengthScale = Math.max(
+    minimumSpringStrengthScale,
+    finitePositive(settings.maximumSpringStrengthScale, 2),
+  );
+  const minimumSpringLengthScale = finitePositive(settings.minimumSpringLengthScale, 0.55);
+  const maximumSpringLengthScale = Math.max(
+    minimumSpringLengthScale,
+    finitePositive(settings.maximumSpringLengthScale, 1.85),
+  );
   return {
+    weightingMode: settings.weightingMode === 'uniform' ? 'uniform' : 'topology-weighted',
     repulsionStrength: finiteNonNegative(settings.repulsionStrength, 7000),
     springStrength: finiteNonNegative(settings.springStrength, 0.25),
-    springLength: finitePositive(settings.springLength, 100),
+    springLength: finitePositive(settings.springLength, 120),
     centeringStrength: finiteNonNegative(settings.centeringStrength, 0.002),
     velocityDecay: clampNumber(settings.velocityDecay ?? settings.damping, 0, 1, 0.4),
     alphaDecay: clampNumber(settings.alphaDecay, 0, 1, 0.035),
@@ -295,7 +481,83 @@ export function readForceSettings(settings: Readonly<Record<string, JsonValue>>)
     repulsionMinDistance: finitePositive(settings.repulsionMinDistance, 40),
     barnesHutTheta: finitePositive(settings.barnesHutTheta, 0.8),
     maxSpeed: finitePositive(settings.maxSpeed, 260),
+    minimumAffinity,
+    maximumAffinity,
+    evidenceLogFactor: finiteNonNegative(settings.evidenceLogFactor, 0.35),
+    reciprocalBoost: finitePositive(settings.reciprocalBoost, 1.25),
+    hubDiscountExponent: finiteNonNegative(settings.hubDiscountExponent, 0.25),
+    minimumSpringStrengthScale,
+    maximumSpringStrengthScale,
+    minimumSpringLengthScale,
+    maximumSpringLengthScale,
+    componentPadding: finiteNonNegative(settings.componentPadding, 80),
   };
+}
+
+export function deriveWeightedSpringParametersV1(
+  pair: Pick<GraphTopologyPairV1, 'affinity'>,
+  settings: ForceSettings,
+): WeightedSpringParametersV1 {
+  const strengthScale = clampNumber(
+    Math.pow(Math.max(0, pair.affinity), 0.65),
+    settings.minimumSpringStrengthScale,
+    settings.maximumSpringStrengthScale,
+    1,
+  );
+  const lengthScale = clampNumber(
+    Math.pow(Math.max(0.001, pair.affinity), -0.55),
+    settings.minimumSpringLengthScale,
+    settings.maximumSpringLengthScale,
+    1,
+  );
+  return {
+    strength: settings.springStrength * strengthScale,
+    targetLength: settings.springLength * lengthScale,
+  };
+}
+
+export function coordinateWeightedSpringStrengthV1(
+  ordinaryStrength: number,
+  membershipStrength: number,
+): number {
+  return Math.max(0, ordinaryStrength - Math.max(0, membershipStrength));
+}
+
+export function buildComponentPackingTargetsV1(
+  components: readonly GraphTopologyComponentV1[],
+  springLength: number,
+  padding: number,
+  dimensions: GraphDimensionsV1,
+): ReadonlyMap<string, Vec3> {
+  const targets = new Map<string, Vec3>();
+  if (!components.length) return targets;
+  const radii = components.map((component) => Math.max(
+    springLength * 0.35,
+    Math.sqrt(component.nodeIds.length) * springLength * 0.65,
+  ));
+  targets.set(components[0].id, { x: 0, y: 0, z: 0 });
+  let ringRadius = radii[0] + padding;
+  let angle = 0;
+  let ringMaximumRadius = 0;
+  for (let index = 1; index < components.length; index += 1) {
+    const radius = radii[index];
+    ringRadius = Math.max(ringRadius, radii[0] + radius + padding);
+    const angularSpan = 2 * Math.asin(Math.min(0.95, (radius + padding / 2) / Math.max(radius + padding, ringRadius)));
+    if (angle > 0 && angle + angularSpan > Math.PI * 2) {
+      ringRadius += ringMaximumRadius * 2 + padding;
+      angle = 0;
+      ringMaximumRadius = 0;
+    }
+    const centerAngle = angle + angularSpan / 2;
+    targets.set(components[index].id, {
+      x: Math.cos(centerAngle) * ringRadius,
+      y: Math.sin(centerAngle) * ringRadius,
+      z: dimensions === '3d' ? Math.sin(centerAngle * 0.7) * ringRadius * 0.25 : 0,
+    });
+    angle += angularSpan;
+    ringMaximumRadius = Math.max(ringMaximumRadius, radius);
+  }
+  return targets;
 }
 
 function buildOctree(

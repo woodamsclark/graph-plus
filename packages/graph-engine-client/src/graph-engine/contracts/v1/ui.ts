@@ -27,6 +27,7 @@ export const GRAPH_QUICK_SETTINGS_CONTROL_IDS_V1 = Object.freeze({
   resetCamera: 'camera.reset',
   centerForce: 'forces.center',
   radialForce: 'forces.radial',
+  weightingMode: 'force-layout.weighting-mode',
   linkForce: 'forces.link',
   linkDistance: 'forces.link-distance',
   regionBoundaries: 'node-regions.boundaries-visible',

@@ -141,7 +141,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.lastFrameTimestamp = timestamp;
     const moduleStart = this.platform.now();
     this.performanceCounters.moduleTicks += 1;
-    const positions = this.moduleHost.tick(this.moduleView, deltaSeconds);
+    const positions = this.moduleHost.tick({
+      ...this.moduleView,
+      draggedNodeId: this.interaction.getDraggedNodeId(),
+    }, deltaSeconds);
     const moduleTickMs = duration(moduleStart, this.platform.now());
     const compositionStart = this.platform.now();
     if (positions) {

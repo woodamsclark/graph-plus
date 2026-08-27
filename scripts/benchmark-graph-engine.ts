@@ -14,6 +14,7 @@ interface BenchmarkScenario {
   readonly warmupFrames: number;
   readonly measuredFrames: number;
   readonly regions?: { readonly count: number; readonly memberships: number };
+  readonly topology?: 'weighted-stress';
 }
 
 const scenarios: readonly BenchmarkScenario[] = [
@@ -25,13 +26,17 @@ const scenarios: readonly BenchmarkScenario[] = [
   },
   { id: 'scale-5000-2d', nodes: 5_000, edges: 10_000, dimensions: '2d', warmupFrames: 10, measuredFrames: 180 },
   { id: 'scale-5000-3d', nodes: 5_000, edges: 10_000, dimensions: '3d', warmupFrames: 10, measuredFrames: 180 },
+  {
+    id: 'weighted-stress-10000-2d', nodes: 10_000, edges: 30_000, dimensions: '2d',
+    warmupFrames: 5, measuredFrames: 60, topology: 'weighted-stress',
+  },
 ];
 
 async function main(): Promise<void> {
   const results = [];
   for (const scenario of scenarios) results.push(await runScenario(scenario));
   console.log(JSON.stringify({
-    benchmark: 'graph-engine-v1.3-headless',
+    benchmark: 'graph-engine-v1.4-headless',
     runtime: process.version,
     platform: `${process.platform}-${process.arch}`,
     results,
@@ -43,11 +48,13 @@ async function runScenario(scenario: BenchmarkScenario) {
     label: `Vault node ${index}`,
     positionHint: seededPosition(index, scenario.dimensions),
   }));
-  const edges = Array.from({ length: scenario.edges }, (_, index) => graphEdge(
-    `vault-edge-${index}`,
-    `vault-${index % nodes.length}`,
-    `vault-${(index * 37 + 17) % nodes.length}`,
-  ));
+  const edges = scenario.topology === 'weighted-stress'
+    ? createWeightedStressEdges(scenario.nodes, scenario.edges)
+    : Array.from({ length: scenario.edges }, (_, index) => graphEdge(
+      `vault-edge-${index}`,
+      `vault-${index % nodes.length}`,
+      `vault-${(index * 37 + 17) % nodes.length}`,
+    ));
   const profileId = scenario.dimensions === '2d' ? 'two-dimensional' : 'three-dimensional';
   const nodeRegions = scenario.regions
     ? createNodeRegions(scenario.nodes, scenario.regions.count, scenario.regions.memberships)
@@ -98,6 +105,7 @@ async function runScenario(scenario: BenchmarkScenario) {
         (total, definition) => total + definition.directMemberNodeIds.length,
         0,
       ) ?? 0,
+      topology: scenario.topology ?? 'regular',
     },
     mountMs,
     requestedFrames: scenario.measuredFrames,
@@ -109,6 +117,57 @@ async function runScenario(scenario: BenchmarkScenario) {
     regionRenderMs: snapshot.window?.regionRenderMs,
     counters: snapshot.counters,
   };
+}
+
+function createWeightedStressEdges(nodeCount: number, edgeCount: number) {
+  const ranges = createComponentRanges(nodeCount, 500, 2_000);
+  const edges = [];
+  for (let index = 1; index <= 1_500 && edges.length < edgeCount; index += 1) {
+    edges.push(graphEdge(`weighted-edge-${edges.length}`, 'vault-0', `vault-${index}`, {
+      directed: true,
+      tokens: [`relation:channel-${index % 20}`],
+    }));
+  }
+  let cursor = 0;
+  while (edges.length < edgeCount) {
+    const range = ranges[cursor % ranges.length];
+    const size = range.end - range.start;
+    let source = range.start + ((cursor * 37 + 3) % size);
+    let target = range.start + ((cursor * 97 + 11) % size);
+    if (cursor % 997 === 0) target = source;
+    else if (target === source) target = range.start + ((target - range.start + 1) % size);
+    if (cursor % 41 === 0 && edges.length) {
+      const previous = edges[edges.length - 1];
+      source = Number(previous.sourceId.slice('vault-'.length));
+      target = Number(previous.targetId.slice('vault-'.length));
+    }
+    const relation = `relation:channel-${cursor % 20}`;
+    edges.push(graphEdge(`weighted-edge-${edges.length}`, `vault-${source}`, `vault-${target}`, {
+      directed: cursor % 7 !== 0,
+      weight: cursor % 29 === 0 ? 3 : 1,
+      tokens: [relation],
+    }));
+    if (cursor % 31 === 0 && source !== target && edges.length < edgeCount) {
+      edges.push(graphEdge(`weighted-edge-${edges.length}`, `vault-${target}`, `vault-${source}`, {
+        directed: true,
+        tokens: [relation],
+      }));
+    }
+    cursor += 1;
+  }
+  return edges;
+}
+
+function createComponentRanges(nodeCount: number, componentCount: number, firstSize: number) {
+  const ranges = [{ start: 0, end: Math.min(nodeCount, firstSize) }];
+  let cursor = ranges[0].end;
+  for (let component = 1; component < componentCount && cursor < nodeCount; component += 1) {
+    const remainingComponents = componentCount - component;
+    const size = Math.max(2, Math.ceil((nodeCount - cursor) / remainingComponents));
+    ranges.push({ start: cursor, end: Math.min(nodeCount, cursor + size) });
+    cursor += size;
+  }
+  return ranges;
 }
 
 function createNodeRegions(

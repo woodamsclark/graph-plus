@@ -123,6 +123,10 @@ export class SessionInteractionRuntime {
     return this.hoveredNodeId;
   }
 
+  getDraggedNodeId(): string | undefined {
+    return this.dragContext?.nodeId;
+  }
+
   dispose(): void {
     this.input.dispose();
     this.resetTransientState();

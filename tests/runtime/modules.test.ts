@@ -414,6 +414,49 @@ test('shipped Filter, Form, force layout, and palette contributions stay domain-
   await withoutFilterSession.dispose();
 });
 
+test('C-SETTING-02 topology weighting is the shipped free-layout default', () => {
+  const descriptor = createShippedGraphModuleRegistryV1().descriptors()
+    .find((candidate) => candidate.id === 'force-layout');
+  equal(descriptor?.defaultSettings.weightingMode, 'topology-weighted', 'all consumers should receive the engine-owned weighted default');
+  equal(descriptor?.defaultSettings.springLength, 120, 'the weighted baseline should use the documented ordinary distance');
+});
+
+test('L-COMPONENT-01 weighted component centering separates islands and mode switching preserves state', async () => {
+  const document = graphDocument({
+    nodes: ['a', 'b', 'c'].map((id) => graphNode(id, { positionHint: { x: 0, y: 0, z: 0 } })),
+    edges: [],
+  });
+  const value = runtimeHarness({ document });
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
+    modules: {
+      'force-layout': {
+        enabled: true,
+        settings: {
+          weightingMode: 'topology-weighted',
+          repulsionStrength: 0,
+          springStrength: 0,
+          centeringStrength: 0.02,
+          alphaDecay: 0.02,
+        },
+      },
+    },
+  });
+  const session = await value.create();
+  for (let index = 1; index <= 40; index += 1) value.platform.flushFrame(index * 16);
+  const packed = await session.exportViewState();
+  assert(Math.hypot(packed.positions.b.x, packed.positions.b.y) > 20, 'a disconnected component should move toward its own packing target');
+  assert(Math.hypot(packed.positions.c.x, packed.positions.c.y) > 20, 'each isolated node should remain a packable component');
+  const camera = packed.camera;
+  await session.setSessionOverrides({
+    modules: { 'force-layout': { settings: { weightingMode: 'uniform' } } },
+  });
+  const switched = await session.exportViewState();
+  deepEqual(switched.positions, packed.positions, 'switching mode should retain current positions as starting state');
+  deepEqual(switched.camera, camera, 'switching mode should not reset the camera');
+  equal((await session.exportEffectiveSettings()).modules['force-layout']?.settings.weightingMode, 'uniform', 'the session should expose the selected engine mode');
+  await session.dispose();
+});
+
 test('R-REGION-01 renders live 2d boundaries and hides only the visual layer', async () => {
   const document = graphDocument({
     nodes: [

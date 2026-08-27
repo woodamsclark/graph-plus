@@ -20,6 +20,10 @@ const MIN_ZOOM = 0.02;
 const MAX_ZOOM = 40;
 const MIN_PERSPECTIVE_DISTANCE = 10;
 const MAX_PERSPECTIVE_DISTANCE = 10_000_000;
+const DEFAULT_PERSPECTIVE_DISTANCE = 100;
+const DEFAULT_PERSPECTIVE_ZOOM = 50 / 24;
+const MIN_PROJECTED_SCALE = 0.02;
+const MAX_PROJECTED_SCALE = 40;
 
 export class GraphCameraController {
   private state: GraphCameraStateV1;
@@ -67,18 +71,22 @@ export class GraphCameraController {
         x: centerX + viewX * this.state.zoom,
         y: centerY + viewY * this.state.zoom,
         depth,
-        scale: 1,
+        scale: clamp(this.state.zoom, MIN_PROJECTED_SCALE, MAX_PROJECTED_SCALE),
       };
     }
 
     const focal = Math.max(1, this.viewport.height) * this.state.zoom;
     const safeDepth = Math.max(0.0001, depth);
-    const targetDepth = Math.max(0.0001, distance(this.state.position, this.state.target));
     return {
       x: centerX + viewX * focal / safeDepth,
       y: centerY + viewY * focal / safeDepth,
       depth,
-      scale: clamp(targetDepth / safeDepth, 0.35, 2.5),
+      scale: clamp(
+        (this.state.zoom / DEFAULT_PERSPECTIVE_ZOOM)
+          * (DEFAULT_PERSPECTIVE_DISTANCE / safeDepth),
+        MIN_PROJECTED_SCALE,
+        MAX_PROJECTED_SCALE,
+      ),
     };
   }
 

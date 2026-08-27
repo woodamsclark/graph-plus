@@ -285,6 +285,18 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     const body = this.section(parent, SECTION_TITLES[SECTIONS.forces], false);
     const forces = effective.modules['force-layout'];
     if (forces?.enabled) {
+      if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.weightingMode)) {
+        new Setting(body)
+          .setName('Layout weighting')
+          .setDesc('Use graph topology to form neighborhoods and loosen hub-mediated bridges.')
+          .addDropdown((dropdown) => dropdown
+            .addOptions({ 'topology-weighted': 'Topology weighted', uniform: 'Uniform' })
+            .setValue(forces.settings.weightingMode === 'uniform' ? 'uniform' : 'topology-weighted')
+            .onChange(async (mode) => {
+              await this.context.profileSettings.setModuleSetting('force-layout', 'weightingMode', mode);
+              await this.render();
+            }));
+      }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.centerForce)) {
         this.slider(body, 'Center force', readNumber(forces.settings.centeringStrength, 0.002), 0, 0.05, 0.001, 'force-layout', 'centeringStrength');
       }
@@ -295,7 +307,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
         this.slider(body, 'Link force', readNumber(forces.settings.springStrength, 0.25), 0, 5, 0.05, 'force-layout', 'springStrength');
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.linkDistance)) {
-        this.slider(body, 'Link distance', readNumber(forces.settings.springLength, 100), 20, 500, 5, 'force-layout', 'springLength');
+        this.slider(body, 'Link distance', readNumber(forces.settings.springLength, 120), 20, 500, 5, 'force-layout', 'springLength');
       }
     }
     this.mountContributions(body, contributions);

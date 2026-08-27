@@ -81,3 +81,21 @@ test('I-UI-02 region-boundary preference persists per consumer profile and reset
   equal(controller.getEffectiveProfile('graph-plus', 'default').modules['node-regions']?.settings.boundariesVisible, true, 'reset should reveal the Graph+ profile default');
   equal(controller.getProfileOverrides('other-consumer', 'default').modules?.['node-regions']?.settings?.boundariesVisible, true, 'resetting Graph+ should not change another consumer namespace');
 });
+
+test('C-SETTING-01 topology weighting is an engine-owned profile setting', async () => {
+  const profiles = new ConsumerProfileRegistry();
+  for (const descriptor of createShippedGraphModuleRegistryV1().descriptors()) profiles.registerModule(descriptor);
+  profiles.registerConsumer(GRAPH_PLUS_CONSUMER_REGISTRATION_V1);
+  profiles.registerConsumer({
+    ...GRAPH_PLUS_CONSUMER_REGISTRATION_V1,
+    consumerId: 'other-consumer',
+    displayName: 'Other consumer',
+  });
+  const controller = new GraphEngineSettingsControllerV1(profiles, {}, () => undefined, true);
+  equal(controller.getEffectiveProfile('graph-plus', 'default').modules['force-layout']?.settings.weightingMode, 'topology-weighted', 'the shipped free-layout default should be topology weighted');
+  await controller.setProfileModuleSetting('graph-plus', 'default', 'force-layout', 'weightingMode', 'uniform');
+  equal(controller.getEffectiveProfile('graph-plus', 'default').modules['force-layout']?.settings.weightingMode, 'uniform', 'Graph+ should persist the engine mode through its profile namespace');
+  equal(controller.getEffectiveProfile('other-consumer', 'default').modules['force-layout']?.settings.weightingMode, 'topology-weighted', 'another consumer should retain an independent engine default');
+  await controller.setProfileModuleSetting('graph-plus', 'default', 'force-layout', 'weightingMode', undefined);
+  equal(controller.getEffectiveProfile('graph-plus', 'default').modules['force-layout']?.settings.weightingMode, 'topology-weighted', 'reset should reveal the engine-backed profile default');
+});
