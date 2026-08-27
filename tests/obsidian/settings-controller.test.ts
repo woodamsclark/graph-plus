@@ -1,6 +1,7 @@
 import type { ConsumerRegistrationV1 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { ConsumerProfileRegistry } from '../../src/graph-engine/core/profile/index.ts';
 import { GRAPH_PLUS_CONSUMER_REGISTRATION_V1 } from '../../src/graph-plus/consumer/index.ts';
+import { createShippedGraphModuleRegistryV1 } from '../../src/graph-engine/runtime/index.ts';
 import { GraphEngineSettingsControllerV1 } from '../../src/obsidian/settings/GraphEngineSettingsController.ts';
 import { assert, equal, test } from '../support/harness.ts';
 
@@ -18,7 +19,7 @@ test('R-DIM-01 profile dimension edits persist in one namespace and reset indepe
   await controller.setProfileDimensions('graph-plus', 'default', undefined);
   equal(controller.getProfileOverrides('graph-plus', 'default').dimensions, undefined, 'reset should remove the dimension override');
   equal(controller.getProfileOverrides('graph-plus', 'default').profileSettings?.retained, true, 'dimension reset should preserve sibling overrides');
-  equal(controller.getEffectiveProfile('graph-plus', 'default').dimensions, '3d', 'reset should reveal the consumer default');
+  equal(controller.getEffectiveProfile('graph-plus', 'default').dimensions, '2d', 'reset should reveal the consumer default');
   equal(saves, 2, 'each user edit should request one persistence cycle');
 });
 
@@ -58,6 +59,25 @@ test('R-DIM-04 failed live activation rolls the persistent dimension override ba
   try { await controller.setProfileDimensions('graph-plus', 'default', '2d'); } catch { rejected = true; }
   equal(rejected, true, 'the failed live activation should reach the settings caller');
   equal(controller.getProfileOverrides('graph-plus', 'default').dimensions, undefined, 'failed activation should not remain persisted in the profile namespace');
-  equal(controller.getEffectiveProfile('graph-plus', 'default').dimensions, '3d', 'rollback should restore the prior effective dimension');
+  equal(controller.getEffectiveProfile('graph-plus', 'default').dimensions, '2d', 'rollback should restore the prior effective dimension');
   equal(attempts, 2, 'rollback should run the change hook again to restore any sessions switched before the failure');
+});
+
+test('I-UI-02 region-boundary preference persists per consumer profile and resets to its default', async () => {
+  const profiles = new ConsumerProfileRegistry();
+  for (const descriptor of createShippedGraphModuleRegistryV1().descriptors()) profiles.registerModule(descriptor);
+  profiles.registerConsumer(GRAPH_PLUS_CONSUMER_REGISTRATION_V1);
+  profiles.registerConsumer({
+    ...GRAPH_PLUS_CONSUMER_REGISTRATION_V1,
+    consumerId: 'other-consumer',
+    displayName: 'Other consumer',
+  });
+  const controller = new GraphEngineSettingsControllerV1(profiles, {}, () => undefined, true);
+  await controller.setProfileModuleSetting('graph-plus', 'default', 'node-regions', 'boundariesVisible', false);
+  await controller.setProfileModuleSetting('other-consumer', 'default', 'node-regions', 'boundariesVisible', true);
+  equal(controller.getEffectiveProfile('graph-plus', 'default').modules['node-regions']?.settings.boundariesVisible, false, 'Graph+ should retain its own hidden-boundary choice');
+  equal(controller.getEffectiveProfile('other-consumer', 'default').modules['node-regions']?.settings.boundariesVisible, true, 'another consumer should retain an independent choice');
+  await controller.setProfileModuleSetting('graph-plus', 'default', 'node-regions', 'boundariesVisible', undefined);
+  equal(controller.getEffectiveProfile('graph-plus', 'default').modules['node-regions']?.settings.boundariesVisible, true, 'reset should reveal the Graph+ profile default');
+  equal(controller.getProfileOverrides('other-consumer', 'default').modules?.['node-regions']?.settings?.boundariesVisible, true, 'resetting Graph+ should not change another consumer namespace');
 });

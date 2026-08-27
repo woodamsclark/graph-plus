@@ -88,6 +88,13 @@ export class SessionFactory {
     if (!profile.modules[SHIPPED_GRAPH_MODULE_IDS_V1.rendering]?.enabled) {
       throw new GraphSessionProfileErrorV1('modules.rendering: A mounted graph session requires the shipped rendering, camera, and input capability.');
     }
+    if (
+      profile.dimensions === '3d'
+      && profile.modules[SHIPPED_GRAPH_MODULE_IDS_V1.nodeRegions]?.enabled
+      && profile.modules[SHIPPED_GRAPH_MODULE_IDS_V1.nodeRegions]?.policy === 'required'
+    ) {
+      throw new GraphSessionProfileErrorV1('modules.node-regions: Required node regions are available only in 2D.');
+    }
     if (fatalIssues.length) {
       throw new GraphSessionProfileErrorV1(fatalIssues.map((issue) => `${issue.path}: ${issue.message}`).join('; '));
     }

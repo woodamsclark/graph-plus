@@ -4,12 +4,14 @@ import { FilteringModule } from './FilteringModule.ts';
 import { ForceLayoutModule, readForceSettings } from './ForceLayoutModule.ts';
 import { FormModule } from './FormModule.ts';
 import { RenderingModule } from './RenderingModule.ts';
+import { NodeRegionsModule, readNodeRegionSettingsV1 } from './NodeRegionsModule.ts';
 
 export const SHIPPED_GRAPH_MODULE_IDS_V1 = {
   rendering: 'rendering',
   filtering: 'filtering',
   form: 'form',
   forceLayout: 'force-layout',
+  nodeRegions: 'node-regions',
   anima: 'anima',
 } as const;
 
@@ -61,6 +63,24 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       },
     },
     create: ({ dimensions, settings }) => new FormModule(dimensions, settings),
+  });
+  registry.register({
+    order: 350,
+    descriptor: {
+      id: SHIPPED_GRAPH_MODULE_IDS_V1.nodeRegions,
+      version: '1.0.0',
+      displayName: 'Node regions',
+      capabilities: ['node-regions'],
+      dependencies: ['rendering'],
+      settingsSchemaVersion: 1,
+      defaultSettings: {
+        boundariesVisible: true,
+        membershipStrength: 0.18,
+        membershipDistance: 64,
+        boundaryPadding: 28,
+      },
+    },
+    create: ({ dimensions, settings }) => new NodeRegionsModule(dimensions, readNodeRegionSettingsV1(settings)),
   });
   registry.register({
     order: 400,

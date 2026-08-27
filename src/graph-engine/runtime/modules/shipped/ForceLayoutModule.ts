@@ -40,6 +40,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private alpha = 1;
   private running = true;
   private pinnedKey = '';
+  private regionLayoutKey = '';
 
   constructor(
     private readonly dimensions: GraphDimensionsV1,
@@ -68,6 +69,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     // A restored view can reach the first tick before a view lifecycle event. Keep
     // pin state correct without requiring the session kernel to special-case force.
     this.synchronizePinnedNodes(state.viewState);
+    this.synchronizeRegionLayout(state);
     if (this.suspended || state.formActive || state.document.nodes.length < 2 || !this.running) return;
     this.synchronizeBuffers(state);
     const dt = Math.min(1 / 20, Math.max(1 / 240, deltaSeconds || 1 / 60));
@@ -92,6 +94,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       sourceForce.x += dx * amount; sourceForce.y += dy * amount; sourceForce.z += dz * amount;
       targetForce.x -= dx * amount; targetForce.y -= dy * amount; targetForce.z -= dz * amount;
     }
+    this.applyRegionMembershipForces(state);
     for (const node of state.document.nodes) {
       const position = this.positions[node.id];
       const force = this.forces.get(node.id)!;
@@ -143,11 +146,60 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.reheat();
   }
 
+  private synchronizeRegionLayout(state: GraphModulePipelineStateV1): void {
+    const nextKey = state.regionLayouts.map((region) => [
+      region.regionNodeId,
+      region.membershipStrength,
+      region.membershipDistance,
+      ...region.directMemberNodeIds,
+    ].join('\u0001')).join('\u0000');
+    if (nextKey === this.regionLayoutKey) return;
+    this.regionLayoutKey = nextKey;
+    this.reheat();
+  }
+
+  private applyRegionMembershipForces(state: GraphModulePipelineStateV1): void {
+    if (!state.regionLayouts.length) return;
+    const memberCounts = new Map<string, number>();
+    for (const region of state.regionLayouts) {
+      for (const memberId of region.directMemberNodeIds) {
+        memberCounts.set(memberId, (memberCounts.get(memberId) ?? 0) + 1);
+      }
+    }
+    for (const region of state.regionLayouts) {
+      const owner = this.positions[region.regionNodeId];
+      if (!owner) continue;
+      const ownerForce = this.forces.get(region.regionNodeId);
+      if (!ownerForce) continue;
+      const ownerDivisor = Math.max(1, region.directMemberNodeIds.length);
+      for (const memberId of region.directMemberNodeIds) {
+        const member = this.positions[memberId];
+        const memberForce = this.forces.get(memberId);
+        if (!member || !memberForce) continue;
+        const dx = member.x - owner.x;
+        const dy = member.y - owner.y;
+        const dz = this.dimensions === '2d' ? 0 : member.z - owner.z;
+        const length = Math.max(0.001, Math.hypot(dx, dy, dz));
+        const amount = region.membershipStrength
+          * Math.tanh((length - region.membershipDistance) / 36)
+          * this.alpha / length;
+        const memberDivisor = Math.max(1, memberCounts.get(memberId) ?? 1);
+        ownerForce.x += dx * amount / ownerDivisor;
+        ownerForce.y += dy * amount / ownerDivisor;
+        ownerForce.z += dz * amount / ownerDivisor;
+        memberForce.x -= dx * amount / memberDivisor;
+        memberForce.y -= dy * amount / memberDivisor;
+        memberForce.z -= dz * amount / memberDivisor;
+      }
+    }
+  }
+
   dispose(): void {
     this.velocities.clear();
     this.forces.clear();
     this.positions = {};
     this.positionSource = null;
+    this.regionLayoutKey = '';
   }
 
   private synchronizeBuffers(state: GraphModulePipelineStateV1): void {

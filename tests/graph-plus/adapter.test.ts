@@ -88,6 +88,16 @@ test('G-ADAPTER projects only notes and tags with stable IDs and private file lo
   const noteLink = projection.document.edges.find((edge) => edge.sourceId === noteNodeId('Alpha.md') && edge.targetId === noteNodeId('folder/Beta.md'));
   equal(noteLink?.weight, 3, 'duplicate link count should become neutral edge weight');
   assert(noteLink?.tokens?.includes('relation:teacher'), 'frontmatter relation should annotate the supported resolved edge');
+  deepEqual(projection.document.nodeRegions?.definitions, [
+    {
+      regionNodeId: tagNodeId('course'),
+      directMemberNodeIds: [noteNodeId('Alpha.md'), tagNodeId('course/greek')],
+    },
+    {
+      regionNodeId: tagNodeId('course/greek'),
+      directMemberNodeIds: [noteNodeId('folder/Beta.md')],
+    },
+  ], 'tag regions should encode exact note membership and one-level tag hierarchy');
 });
 
 test('G-ADAPTER reconciliation is stable and increments only changed documents', () => {

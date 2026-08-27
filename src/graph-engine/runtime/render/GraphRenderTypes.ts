@@ -24,6 +24,19 @@ export interface GraphRenderEdgeV1 {
   readonly dashed?: boolean;
 }
 
+export interface GraphRenderRegionV1 {
+  readonly id: string;
+  readonly regionNodeId: string;
+  readonly memberNodeIds: readonly string[];
+  readonly directMemberNodeIds: readonly string[];
+  readonly connections: readonly {
+    readonly sourceId: string;
+    readonly targetId: string;
+  }[];
+  readonly color: string;
+  readonly padding: number;
+}
+
 export interface GraphNodeRenderContributionV1 {
   readonly color?: string;
   readonly radiusScale?: number;
@@ -50,6 +63,7 @@ export interface GraphRenderThemeV1 {
 }
 
 export interface GraphRenderFrameV1 {
+  readonly regions: readonly GraphRenderRegionV1[];
   readonly nodes: readonly GraphRenderNodeV1[];
   readonly edges: readonly GraphRenderEdgeV1[];
   readonly theme: GraphRenderThemeV1;

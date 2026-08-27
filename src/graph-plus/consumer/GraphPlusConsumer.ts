@@ -82,7 +82,7 @@ export class GraphPlusConsumerV1<TFile> {
       () => clone(this.lens),
     );
     this.profileId = options.profileId ?? 'default';
-    this.dimensions = options.dimensions ?? '3d';
+    this.dimensions = options.dimensions ?? '2d';
   }
 
   async open(): Promise<void> {

@@ -49,6 +49,7 @@ export class SessionInteractionRuntime {
     readonly getDocument: () => GraphDocumentV1;
     readonly getViewState: () => GraphViewStateV1;
     readonly getInteractivePositions: () => Readonly<Record<string, Vec3>>;
+    readonly getNodeSelection: (nodeId: string) => readonly string[];
     readonly isNodeDraggable: (nodeId: string) => boolean;
     readonly setViewState: (state: GraphViewStateV1) => void;
     readonly getRenderSelection: () => GraphFilterSelectionV1;
@@ -81,6 +82,7 @@ export class SessionInteractionRuntime {
       },
       getFocusedNodeId: () => this.options.getViewState().focusedNodeId,
       getSelectedNodeIds: () => this.options.getViewState().selectedNodeIds,
+      getNodeSelection: (nodeId) => this.options.getNodeSelection(nodeId),
       getViewport: () => this.options.surface.getViewport(),
     });
   }
@@ -167,7 +169,7 @@ export class SessionInteractionRuntime {
         this.cameraChanged(command);
         return;
       case 'fit-camera':
-        this.fitVisibleNodes();
+        this.fitVisibleNodes(command.nodeIds);
         this.emitViewportIntent(command);
         return;
       case 'set-selection':
@@ -234,10 +236,11 @@ export class SessionInteractionRuntime {
     this.commit({ ...this.options.getViewState(), camera: this.options.camera.getState() });
   }
 
-  private fitVisibleNodes(): void {
-    const state = this.options.getViewState();
-    const positions = [...this.options.getRenderSelection().nodeIds]
-      .map((id) => state.positions[id])
+  private fitVisibleNodes(nodeIds?: readonly string[]): void {
+    const positionsById = this.options.getInteractivePositions();
+    const candidates = nodeIds ?? [...this.options.getRenderSelection().nodeIds];
+    const positions = [...new Set(candidates)]
+      .map((id) => positionsById[id])
       .filter(isVec3);
     if (!positions.length) return;
     this.options.camera.fit(positions);

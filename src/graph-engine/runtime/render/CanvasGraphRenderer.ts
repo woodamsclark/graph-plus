@@ -1,6 +1,10 @@
 import type { GraphCameraController, ProjectedGraphPointV1 } from '../camera/index.ts';
 import type { GraphFrameStore } from './GraphFrameStore.ts';
-import type { GraphRenderFrameV1, GraphRenderNodeV1 } from './GraphRenderTypes.ts';
+import type {
+  GraphRenderFrameV1,
+  GraphRenderNodeV1,
+  GraphRenderRegionV1,
+} from './GraphRenderTypes.ts';
 
 interface ProjectedNode {
   readonly node: GraphRenderNodeV1;
@@ -10,6 +14,7 @@ interface ProjectedNode {
 
 export interface GraphRenderTimingV1 {
   readonly projectionMs: number;
+  readonly regionRenderMs: number;
   readonly edgeRenderMs: number;
   readonly nodeRenderMs: number;
   readonly labelLayoutMs: number;
@@ -23,6 +28,10 @@ export class CanvasGraphRenderer {
   private readonly hitCellSize = 32;
   private indexedFrame: GraphRenderFrameV1 | null = null;
   private indexedCameraKey = '';
+  private readonly regionContourCache = new Map<string, {
+    readonly signature: string;
+    readonly points: readonly import('../../contracts/v1/index.ts').Vec3[];
+  }>();
   private width = 0;
   private height = 0;
 
@@ -61,11 +70,15 @@ export class CanvasGraphRenderer {
       .filter(({ point }) => point.depth > 0)
       .sort((a, b) => b.point.depth - a.point.depth);
     const byId = new Map(projected.map((value) => [value.node.id, value]));
+    const renderNodeById = new Map(frame.nodes.map((node) => [node.id, node] as const));
     const visible = projected.filter(({ point, radius }) => circleIntersectsViewport(point.x, point.y, radius + 4, this.width, this.height));
     this.rebuildHitGrid(visible);
     this.indexedFrame = frame;
     this.indexedCameraKey = this.cameraKey();
     const projectionMs = elapsed(projectionStart, this.now());
+    const regionStart = this.now();
+    this.drawRegions(frame, renderNodeById);
+    const regionRenderMs = elapsed(regionStart, this.now());
     const edgeStart = this.now();
     this.drawEdges(frame, byId);
     const edgeRenderMs = elapsed(edgeStart, this.now());
@@ -73,7 +86,7 @@ export class CanvasGraphRenderer {
     this.drawNodes(frame, visible);
     const nodeRenderMs = elapsed(nodeStart, this.now());
     const labels = this.drawLabels(frame, visible);
-    return { projectionMs, edgeRenderMs, nodeRenderMs, ...labels };
+    return { projectionMs, regionRenderMs, edgeRenderMs, nodeRenderMs, ...labels };
   }
 
   hitTest(point: { readonly x: number; readonly y: number }): {
@@ -185,6 +198,89 @@ export class CanvasGraphRenderer {
     this.context.restore();
   }
 
+  private drawRegions(
+    frame: GraphRenderFrameV1,
+    nodes: ReadonlyMap<string, GraphRenderNodeV1>,
+  ): void {
+    const active = new Set(frame.regions.map((region) => region.id));
+    for (const id of [...this.regionContourCache.keys()]) {
+      if (!active.has(id)) this.regionContourCache.delete(id);
+    }
+    this.context.save();
+    for (const region of [...frame.regions].sort((left, right) =>
+      right.memberNodeIds.length - left.memberNodeIds.length || left.id.localeCompare(right.id))) {
+      const contour = this.regionContour(region, nodes);
+      const projected = contour
+        .map((position) => this.camera.worldToScreen(position))
+        .filter((point) => point.depth > 0);
+      if (projected.length < 3) continue;
+      this.traceSmoothClosedPath(projected);
+      this.context.globalAlpha = 0.12;
+      this.context.fillStyle = region.color;
+      this.context.fill();
+      this.traceSmoothClosedPath(projected);
+      this.context.globalAlpha = 0.52;
+      this.context.strokeStyle = region.color;
+      this.context.lineWidth = 1.5;
+      this.context.setLineDash([]);
+      this.context.stroke();
+    }
+    this.context.restore();
+  }
+
+  private regionContour(
+    region: GraphRenderRegionV1,
+    nodes: ReadonlyMap<string, GraphRenderNodeV1>,
+  ) {
+    const owner = nodes.get(region.regionNodeId);
+    if (!owner) return [];
+    const members = [owner, ...region.memberNodeIds.map((id) => nodes.get(id)).filter(isRenderNode)];
+    const signature = members.map((node) =>
+      `${node.id}:${node.position.x.toFixed(3)}:${node.position.y.toFixed(3)}`).join('|') + `:${region.padding}`;
+    const cached = this.regionContourCache.get(region.id);
+    if (cached?.signature === signature) return cached.points;
+    const center = owner.position;
+    const sampleCount = 48;
+    const points = Array.from({ length: sampleCount }, (_, index) => {
+      const angle = index / sampleCount * Math.PI * 2;
+      const direction = { x: Math.cos(angle), y: Math.sin(angle) };
+      let radius = region.padding;
+      for (const member of members) {
+        const dx = member.position.x - center.x;
+        const dy = member.position.y - center.y;
+        const along = dx * direction.x + dy * direction.y;
+        const perpendicular = Math.abs(dx * -direction.y + dy * direction.x);
+        if (perpendicular > region.padding) continue;
+        const cap = Math.sqrt(Math.max(0, region.padding ** 2 - perpendicular ** 2));
+        radius = Math.max(radius, along + cap);
+      }
+      return {
+        x: center.x + direction.x * radius,
+        y: center.y + direction.y * radius,
+        z: 0,
+      };
+    });
+    this.regionContourCache.set(region.id, { signature, points });
+    return points;
+  }
+
+  private traceSmoothClosedPath(points: readonly ProjectedGraphPointV1[]): void {
+    const midpoint = (a: ProjectedGraphPointV1, b: ProjectedGraphPointV1) => ({
+      x: (a.x + b.x) / 2,
+      y: (a.y + b.y) / 2,
+    });
+    const start = midpoint(points[points.length - 1], points[0]);
+    this.context.beginPath();
+    this.context.moveTo(start.x, start.y);
+    for (let index = 0; index < points.length; index += 1) {
+      const point = points[index];
+      const next = points[(index + 1) % points.length];
+      const end = midpoint(point, next);
+      this.context.quadraticCurveTo(point.x, point.y, end.x, end.y);
+    }
+    this.context.closePath();
+  }
+
   private drawNodes(frame: GraphRenderFrameV1, nodes: readonly ProjectedNode[]): void {
     this.context.save();
     for (const { node, point, radius } of nodes) {
@@ -264,7 +360,18 @@ export class CanvasGraphRenderer {
 }
 
 function emptyRenderTiming(): GraphRenderTimingV1 {
-  return { projectionMs: 0, edgeRenderMs: 0, nodeRenderMs: 0, labelLayoutMs: 0, labelDrawMs: 0 };
+  return {
+    projectionMs: 0,
+    regionRenderMs: 0,
+    edgeRenderMs: 0,
+    nodeRenderMs: 0,
+    labelLayoutMs: 0,
+    labelDrawMs: 0,
+  };
+}
+
+function isRenderNode(value: GraphRenderNodeV1 | undefined): value is GraphRenderNodeV1 {
+  return value !== undefined;
 }
 
 function elapsed(start: number, end: number): number {

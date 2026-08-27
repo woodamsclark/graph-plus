@@ -313,6 +313,8 @@ test('R-FORM-01..03 keeps 2d Form planar and gives 3d Form deterministic branch 
     formActive: false,
     nodeContributions: {},
     edgeContributions: {},
+    regionLayouts: [],
+    regionContributions: [],
     theme: DEFAULT_GRAPH_RENDER_THEME_V1,
   };
   const settings = { rootNodeId: 'root', ringSpacing: 100, showCrossLinks: true } as const;
@@ -410,6 +412,107 @@ test('shipped Filter, Form, force layout, and palette contributions stay domain-
   }
   equal(filteringUnavailable, true, 'public filtering should be governed by the active module profile');
   await withoutFilterSession.dispose();
+});
+
+test('R-REGION-01 renders live 2d boundaries and hides only the visual layer', async () => {
+  const document = graphDocument({
+    nodes: [
+      graphNode('tag', { positionHint: { x: 0, y: 0, z: 0 } }),
+      graphNode('left', { positionHint: { x: -80, y: 30, z: 0 } }),
+      graphNode('right', { positionHint: { x: 90, y: -20, z: 0 } }),
+    ],
+    edges: [],
+    nodeRegions: {
+      version: 1,
+      definitions: [{ regionNodeId: 'tag', directMemberNodeIds: ['left', 'right'] }],
+    },
+  });
+  const value = runtimeHarness({ document });
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
+    modules: { 'node-regions': { enabled: true } },
+  });
+  const session = await value.create();
+  assert(value.drawCalls.includes('quadraticCurveTo'), 'an enabled 2d region should draw a non-circular smooth boundary');
+
+  value.drawCalls.length = 0;
+  await session.setSessionOverrides({
+    modules: { 'node-regions': { enabled: true, settings: { boundariesVisible: false } } },
+  });
+  value.platform.flushFrame();
+  equal(value.drawCalls.includes('quadraticCurveTo'), false, 'the boundary setting should remove only region drawing');
+  equal((await session.exportEffectiveSettings()).modules['node-regions']?.settings.boundariesVisible, false, 'the effective profile should retain the quick-setting value');
+
+  value.drawCalls.length = 0;
+  await session.setSessionOverrides({
+    modules: { 'node-regions': { enabled: true, settings: { boundariesVisible: true } } },
+  });
+  value.platform.flushFrame();
+  assert(value.drawCalls.includes('quadraticCurveTo'), 'restoring boundaries should derive a fresh contour from current graph state');
+  await session.dispose();
+});
+
+test('R-REGION-02 membership forces remain active when boundaries are hidden', async () => {
+  const document = graphDocument({
+    nodes: [
+      graphNode('tag', { positionHint: { x: -120, y: 0, z: 0 } }),
+      graphNode('note', { positionHint: { x: 120, y: 0, z: 0 } }),
+    ],
+    edges: [],
+    nodeRegions: {
+      version: 1,
+      definitions: [{ regionNodeId: 'tag', directMemberNodeIds: ['note'] }],
+    },
+  });
+  const value = runtimeHarness({ document });
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
+    modules: {
+      'node-regions': {
+        enabled: true,
+        settings: { boundariesVisible: false, membershipStrength: 1, membershipDistance: 30 },
+      },
+      'force-layout': {
+        enabled: true,
+        settings: { repulsionStrength: 0, springStrength: 0, centeringStrength: 0 },
+      },
+    },
+  });
+  const session = await value.create();
+  const before = await session.exportViewState();
+  for (let index = 1; index <= 20; index += 1) value.platform.flushFrame(index * 16);
+  const after = await session.exportViewState();
+  const beforeDistance = Math.abs(before.positions.note.x - before.positions.tag.x);
+  const afterDistance = Math.abs(after.positions.note.x - after.positions.tag.x);
+  assert(afterDistance < beforeDistance, 'direct membership should pull the tag and its member closer together');
+  equal(value.drawCalls.includes('quadraticCurveTo'), false, 'hidden boundaries should stay absent while membership forces run');
+  await session.dispose();
+});
+
+test('R-REGION-03 optional regions are inert in 3d and required regions reject clearly', async () => {
+  const document = graphDocument({
+    nodes: [graphNode('tag'), graphNode('note')],
+    edges: [],
+    nodeRegions: {
+      version: 1,
+      definitions: [{ regionNodeId: 'tag', directMemberNodeIds: ['note'] }],
+    },
+  });
+  const optional = runtimeHarness({ profileId: 'three-dimensional', document });
+  optional.profiles.setUserOverrides('synthetic-consumer', 'three-dimensional', {
+    modules: { 'node-regions': { enabled: true } },
+  });
+  const optionalSession = await optional.create();
+  equal(optional.drawCalls.includes('quadraticCurveTo'), false, 'optional regions should contribute no 3d boundary');
+  await optionalSession.dispose();
+
+  const required = runtimeHarness({
+    profileId: 'three-dimensional',
+    document,
+    registration: withModules({ 'node-regions': { policy: 'required' } }),
+  });
+  let failure: unknown;
+  try { await required.create(); } catch (error) { failure = error; }
+  assert(failure instanceof GraphSessionProfileErrorV1, 'a required 3d node-region profile should fail before mounting');
+  assert(String(failure).includes('available only in 2D'), 'the policy failure should explain the dimensional boundary');
 });
 
 function withModules(

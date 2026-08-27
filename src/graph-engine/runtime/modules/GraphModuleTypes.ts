@@ -11,6 +11,7 @@ import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
 import type {
   GraphEdgeRenderContributionV1,
   GraphNodeRenderContributionV1,
+  GraphRenderRegionV1,
   GraphRenderThemeV1,
 } from '../render/index.ts';
 
@@ -46,6 +47,8 @@ export interface GraphModulePipelineStateV1 {
   readonly formActive: boolean;
   readonly nodeContributions: Readonly<Record<string, GraphNodeRenderContributionV1>>;
   readonly edgeContributions: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
+  readonly regionLayouts: readonly GraphNodeRegionLayoutV1[];
+  readonly regionContributions: readonly GraphRenderRegionV1[];
   readonly theme: GraphRenderThemeV1;
 }
 
@@ -57,7 +60,16 @@ export interface GraphModuleProjectionPatchV1 {
   readonly formActive?: boolean;
   readonly nodeContributions?: Readonly<Record<string, GraphNodeRenderContributionV1>>;
   readonly edgeContributions?: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
+  readonly regionLayouts?: readonly GraphNodeRegionLayoutV1[];
+  readonly regionContributions?: readonly GraphRenderRegionV1[];
   readonly theme?: GraphRenderThemeV1;
+}
+
+export interface GraphNodeRegionLayoutV1 {
+  readonly regionNodeId: string;
+  readonly directMemberNodeIds: readonly string[];
+  readonly membershipStrength: number;
+  readonly membershipDistance: number;
 }
 
 export interface GraphModuleTickResultV1 {

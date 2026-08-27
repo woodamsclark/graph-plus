@@ -15,11 +15,13 @@ export function composeGraphRenderFrameV1(options: {
   readonly positions?: Readonly<Record<string, Vec3>>;
   readonly nodeContributions?: Readonly<Record<string, GraphNodeRenderContributionV1>>;
   readonly edgeContributions?: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
+  readonly regionContributions?: GraphRenderFrameV1['regions'];
   readonly theme?: GraphRenderThemeV1;
   readonly hoveredNodeId?: string;
 }): GraphRenderFrameV1 {
   const selected = new Set(options.viewState.selectedNodeIds);
   return {
+    regions: options.regionContributions ?? [],
     nodes: options.document.nodes
       .filter((node) => options.selection.nodeIds.has(node.id))
       .map((node) => {

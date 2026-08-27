@@ -2,6 +2,7 @@ import type {
   GraphAttributeValue,
   GraphDocumentV1,
   GraphEdgeV1,
+  GraphNodeRegionDefinitionV1,
   GraphNodeV1,
 } from '../../graph-engine/contracts/v1/index.ts';
 import { assertGraphDocumentV1 } from '../../graph-engine/contracts/v1/index.ts';
@@ -74,15 +75,20 @@ export class VaultGraphAdapterV1<TFile> {
 
     const nodeIds = new Set(nodes.map((node) => node.id));
     const edges = new Map<string, MutableEdge>();
+    const regionMembers = new Map<string, Set<string>>(
+      [...tags].map((tag) => [tagNodeId(tag), new Set<string>()]),
+    );
     for (const note of notes) {
       for (const tag of [...new Set(note.tags.map(normalizeTag).filter(Boolean))]) {
         addEdge(edges, noteNodeId(note.path), tagNodeId(tag), 1, 'tag');
+        regionMembers.get(tagNodeId(tag))?.add(noteNodeId(note.path));
       }
     }
     for (const tag of tags) {
       const chain = expandTagPath(tag);
       for (let index = 1; index < chain.length; index += 1) {
         addEdge(edges, tagNodeId(chain[index - 1]), tagNodeId(chain[index]), 1, 'tag-parent');
+        regionMembers.get(tagNodeId(chain[index - 1]))?.add(tagNodeId(chain[index]));
       }
     }
     for (const [sourcePath, targets] of Object.entries(snapshot.resolvedLinks)) {
@@ -121,6 +127,15 @@ export class VaultGraphAdapterV1<TFile> {
       revision,
       nodes,
       edges: documentEdges,
+      nodeRegions: {
+        version: 1,
+        definitions: [...regionMembers.entries()]
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([regionNodeId, members]): GraphNodeRegionDefinitionV1 => ({
+            regionNodeId,
+            directMemberNodeIds: [...members].sort(),
+          })),
+      },
     };
     assertGraphDocumentV1(document);
     return { document, lookup };
@@ -230,5 +245,6 @@ function unitFromHash(seed: number): number {
 function sameDocumentContent(left: GraphDocumentV1, right: GraphDocumentV1): boolean {
   return left.documentId === right.documentId
     && JSON.stringify(left.nodes) === JSON.stringify(right.nodes)
-    && JSON.stringify(left.edges) === JSON.stringify(right.edges);
+    && JSON.stringify(left.edges) === JSON.stringify(right.edges)
+    && JSON.stringify(left.nodeRegions) === JSON.stringify(right.nodeRegions);
 }

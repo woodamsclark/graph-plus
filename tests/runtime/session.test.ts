@@ -399,7 +399,7 @@ test('large-graph fixture keeps adaptive labels bounded and exports stage timing
   equal(performance.frameCount, 1, 'performance snapshots should identify the measured frame');
   deepEqual(Object.keys(performance.latestFrame).sort(), [
     'compositionMs', 'edgeRenderMs', 'hitTestMs', 'interactionMs', 'labelDrawMs',
-    'labelLayoutMs', 'moduleTickMs', 'nodeRenderMs', 'projectionMs', 'totalMs',
+    'labelLayoutMs', 'moduleTickMs', 'nodeRenderMs', 'projectionMs', 'regionRenderMs', 'totalMs',
   ], 'performance snapshots should separate the accepted frame stages');
   assert(Object.values(performance.latestFrame).every((value) => Number.isFinite(value) && value >= 0), 'every stage duration should be finite and non-negative');
   equal(performance.window?.totalMs.sampleCount, 1, 'rolling diagnostics should include the rendered sample');

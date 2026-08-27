@@ -22,6 +22,7 @@ const SECTION_TITLES: Readonly<Record<string, string>> = {
   [SECTIONS.display]: 'Display',
   [SECTIONS.camera]: 'Camera',
   [SECTIONS.forces]: 'Forces',
+  [SECTIONS.regions]: 'Regions',
 };
 
 export class GraphEngineQuickSettingsPanelV1 implements Disposable {
@@ -123,6 +124,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     this.renderDisplay(body, effective, contributions.get(SECTIONS.display) ?? []);
     this.renderCamera(body, contributions.get(SECTIONS.camera) ?? []);
     this.renderForces(body, effective, contributions.get(SECTIONS.forces) ?? []);
+    this.renderRegions(body, effective, contributions.get(SECTIONS.regions) ?? []);
     for (const [sectionId, values] of contributions) {
       if (Object.values(SECTIONS).includes(sectionId as typeof SECTIONS[keyof typeof SECTIONS])) continue;
       if (!graphUiSectionIsShownV1(this.policy, sectionId)) continue;
@@ -295,6 +297,31 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.linkDistance)) {
         this.slider(body, 'Link distance', readNumber(forces.settings.springLength, 100), 20, 500, 5, 'force-layout', 'springLength');
       }
+    }
+    this.mountContributions(body, contributions);
+  }
+
+  private renderRegions(
+    parent: HTMLElement,
+    effective: GraphEffectiveSettingsV1,
+    contributions: readonly GraphQuickSettingsContributionV1[],
+  ): void {
+    const regions = effective.modules['node-regions'];
+    if (!regions?.enabled || !graphUiSectionIsShownV1(this.policy, SECTIONS.regions)) return;
+    const body = this.section(parent, SECTION_TITLES[SECTIONS.regions], false);
+    if (graphUiControlIsShownV1(this.policy, SECTIONS.regions, CONTROLS.regionBoundaries)) {
+      new Setting(body)
+        .setName('Show region boundaries')
+        .setDesc(effective.dimensions === '2d'
+          ? 'Draw live visual boundaries without changing membership forces.'
+          : 'Region boundaries are available in 2D only.')
+        .addToggle((toggle) => toggle
+          .setValue(regions.settings.boundariesVisible !== false)
+          .setDisabled(effective.dimensions !== '2d')
+          .onChange(async (visible) => {
+            await this.context.profileSettings.setModuleSetting('node-regions', 'boundariesVisible', visible);
+            await this.render();
+          }));
     }
     this.mountContributions(body, contributions);
   }

@@ -65,6 +65,7 @@ export class GraphInteractionInterpreter {
     readonly hitTest: (point: GraphScreenPointV1) => GraphHitV1 | null;
     readonly getFocusedNodeId: () => string | undefined;
     readonly getSelectedNodeIds: () => readonly string[];
+    readonly getNodeSelection: (nodeId: string) => readonly string[];
     readonly getViewport: () => { readonly width: number; readonly height: number };
     readonly dragThresholdPx?: number;
   }) {
@@ -227,8 +228,10 @@ export class GraphInteractionInterpreter {
       this.command(event, { type: 'activate-node', nodeId: hit.nodeId, activation: 'primary' });
       return;
     }
-    this.command(event, { type: 'set-selection', nodeIds: [hit.nodeId] });
+    const nodeIds = this.options.getNodeSelection(hit.nodeId);
+    this.command(event, { type: 'set-selection', nodeIds });
     this.command(event, { type: 'set-focus', nodeId: hit.nodeId });
+    this.command(event, { type: 'fit-camera', nodeIds });
   }
 
   private pointerCancel(event: Extract<GraphInputEventV1, { type: 'pointer-cancel' }>): void {

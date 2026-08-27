@@ -1,6 +1,6 @@
 # Graph Engine V1.3 Tag Regions Contract
 
-Status: Proposed; design and acceptance only
+Status: Approved; implementation candidate complete, release acceptance pending
 
 Baseline: Graph Engine V1.2
 

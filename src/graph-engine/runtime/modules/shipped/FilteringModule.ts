@@ -21,12 +21,24 @@ export class FilteringModule implements GraphModuleInstanceV1 {
 }
 
 function selectDocument(document: GraphDocumentV1, selection: GraphFilterSelectionV1): GraphDocumentV1 {
+  const nodeRegions = document.nodeRegions
+    ? {
+        version: 1 as const,
+        definitions: document.nodeRegions.definitions
+          .filter((definition) => selection.nodeIds.has(definition.regionNodeId))
+          .map((definition) => ({
+            regionNodeId: definition.regionNodeId,
+            directMemberNodeIds: definition.directMemberNodeIds.filter((nodeId) => selection.nodeIds.has(nodeId)),
+          })),
+      }
+    : undefined;
   return {
     schemaVersion: 1,
     documentId: document.documentId,
     revision: document.revision,
     nodes: document.nodes.filter((node) => selection.nodeIds.has(node.id)),
     edges: document.edges.filter((edge) => selection.edgeIds.has(edge.id)),
+    ...(nodeRegions ? { nodeRegions } : {}),
   };
 }
 

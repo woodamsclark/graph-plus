@@ -1,6 +1,7 @@
 import {
   assertGraphDocumentV1,
   cloneGraphDocumentV1,
+  cloneGraphNodeRegionsDocumentV1,
   validateGraphDocumentV1,
   type ApplyGraphPatchResultV1,
   type Disposable,
@@ -79,10 +80,15 @@ export class GraphDocumentStore {
 
     const nodes = new Map(this.document.nodes.map((node) => [node.id, cloneNode(node)] as const));
     const edges = new Map(this.document.edges.map((edge) => [edge.id, cloneEdge(edge)] as const));
+    const regionState: { value: GraphDocumentV1['nodeRegions'] } = {
+      value: this.document.nodeRegions
+        ? cloneGraphNodeRegionsDocumentV1(this.document.nodeRegions)
+        : undefined,
+    };
 
     for (let index = 0; index < patch.operations.length; index += 1) {
       const operation = patch.operations[index];
-      const operationError = applyOperation(operation, nodes, edges);
+      const operationError = applyOperation(operation, nodes, edges, regionState);
       if (operationError) {
         return rejected(this.document.revision, patch.patchId, { ...operationError, operationIndex: index });
       }
@@ -95,6 +101,9 @@ export class GraphDocumentStore {
       revision: previousRevision + 1,
       nodes: [...nodes.values()],
       edges: [...edges.values()],
+      ...(regionState.value === undefined ? {} : {
+        nodeRegions: cloneGraphNodeRegionsDocumentV1(regionState.value),
+      }),
     };
     const validation = validateGraphDocumentV1(next);
     if (!validation.valid) {
@@ -136,6 +145,7 @@ function applyOperation(
   operation: GraphPatchOperationV1,
   nodes: Map<string, GraphNodeV1>,
   edges: Map<string, GraphEdgeV1>,
+  regionState: { value: GraphDocumentV1['nodeRegions'] },
 ): GraphPatchErrorV1 | null {
   if (!operation || typeof operation !== 'object' || typeof (operation as { type?: unknown }).type !== 'string') {
     return { code: 'invalid-operation', message: 'Patch operation must be an object with a type.' };
@@ -197,6 +207,18 @@ function applyOperation(
       if (!edges.has(operation.edgeId)) return missing('edge', operation.edgeId);
       edges.delete(operation.edgeId);
       return null;
+    }
+    case 'replace-node-regions': {
+      if (operation.nodeRegions === undefined) {
+        regionState.value = undefined;
+        return null;
+      }
+      try {
+        regionState.value = cloneGraphNodeRegionsDocumentV1(operation.nodeRegions);
+        return null;
+      } catch {
+        return { code: 'invalid-value', message: 'replace-node-regions requires a valid node-regions document.' };
+      }
     }
     default:
       return { code: 'invalid-operation', message: `Unknown patch operation "${String((operation as { type?: unknown }).type)}".` };
@@ -272,6 +294,9 @@ function clonePatch(patch: GraphPatchV1): GraphPatchV1 {
         case 'add-edge': return { type: 'add-edge', edge: cloneEdge(operation.edge) };
         case 'replace-edge': return { type: 'replace-edge', edge: cloneEdge(operation.edge) };
         case 'remove-edge': return { ...operation };
+        case 'replace-node-regions': return operation.nodeRegions === undefined
+          ? { type: 'replace-node-regions' }
+          : { type: 'replace-node-regions', nodeRegions: cloneGraphNodeRegionsDocumentV1(operation.nodeRegions) };
       }
     }),
   };

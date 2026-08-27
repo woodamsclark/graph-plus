@@ -142,6 +142,87 @@ test('R-INPUT-03, R-INPUT-04, and R-INPUT-08 use focus-state consumer activation
   }
   await session.dispose();
   actions.dispose();
+
+});
+
+test('R-REGION-04 first tag click selects visible recursive children and second click activates the tag', async () => {
+  let actionContext: { nodeId: string; selectedNodeIds: readonly string[]; focusedNodeId?: string } | undefined;
+  const actions = new ConsumerNodeActionRegistryV1();
+  actions.register('synthetic-consumer', {}, [{
+    id: 'study-region',
+    label: 'Study region',
+    run: (context) => {
+      actionContext = {
+        nodeId: context.nodeId,
+        selectedNodeIds: context.selectedNodeIds,
+        ...(context.focusedNodeId ? { focusedNodeId: context.focusedNodeId } : {}),
+      };
+    },
+  }]);
+  const base = runtimeRegistration();
+  const document = graphDocument({
+    nodes: [
+      graphNode('tag', { positionHint: { x: 0, y: 0, z: 0 } }),
+      graphNode('subtag', { positionHint: { x: -100, y: 0, z: 0 } }),
+      graphNode('nested', { positionHint: { x: -160, y: 0, z: 0 } }),
+      graphNode('direct', { positionHint: { x: 140, y: 0, z: 0 } }),
+      graphNode('hidden', { positionHint: { x: 0, y: 120, z: 0 }, tokens: ['hide'] }),
+    ],
+    edges: [],
+    nodeRegions: {
+      version: 1,
+      definitions: [
+        { regionNodeId: 'tag', directMemberNodeIds: ['subtag', 'direct', 'hidden'] },
+        { regionNodeId: 'subtag', directMemberNodeIds: ['nested'] },
+      ],
+    },
+  });
+  const value = runtimeHarness({
+    document,
+    registration: {
+      ...base,
+      profiles: base.profiles.map((profile) => ({
+        ...profile,
+        interaction: { activationActionIds: ['study-region'] },
+      })),
+    },
+    nodeActions: actions.runtimeFor('synthetic-consumer'),
+  });
+  const session = await value.create();
+  await session.applyFilter({
+    schemaVersion: 1,
+    scope: 'render',
+    node: { op: 'not', operand: { op: 'has-token', token: 'hide' } },
+  });
+  const canvas = runtimeCanvas(value.container);
+  click(value, canvas, await nodePoint(session, 'tag'), { pointerId: 201 });
+  value.platform.flushFrame();
+  const selected = await session.exportViewState();
+  deepEqual(selected.selectedNodeIds, ['subtag', 'nested', 'direct'], 'first click should select visible descendants through child tags and exclude the owner');
+  equal(selected.focusedNodeId, 'tag', 'the clicked tag node should own focus');
+
+  click(value, canvas, await nodePoint(session, 'tag'), { pointerId: 202 });
+  value.platform.flushFrame();
+  deepEqual(actionContext, {
+    nodeId: 'tag',
+    selectedNodeIds: ['subtag', 'nested', 'direct'],
+    focusedNodeId: 'tag',
+  }, 'second click should invoke the consumer action with the selected region context');
+  await session.dispose();
+  actions.dispose();
+
+  const projectionValue = runtimeHarness({ document });
+  const projectionSession = await projectionValue.create();
+  await projectionSession.applyFilter({
+    schemaVersion: 1,
+    scope: 'projection',
+    node: { op: 'not', operand: { op: 'has-token', token: 'hide' } },
+  });
+  const projectionCanvas = runtimeCanvas(projectionValue.container);
+  click(projectionValue, projectionCanvas, await nodePoint(projectionSession, 'tag'), { pointerId: 203 });
+  projectionValue.platform.flushFrame();
+  deepEqual((await projectionSession.exportViewState()).selectedNodeIds, ['subtag', 'nested', 'direct'], 'projection filtering should preserve filtered region definitions and visible recursive selection');
+  await projectionSession.dispose();
 });
 
 test('R-INPUT-10 has no view-action fallback when no consumer action resolves', async () => {

@@ -6,6 +6,17 @@ export interface GraphDocumentV1 {
   readonly revision: number;
   readonly nodes: readonly GraphNodeV1[];
   readonly edges: readonly GraphEdgeV1[];
+  readonly nodeRegions?: GraphNodeRegionsDocumentV1;
+}
+
+export interface GraphNodeRegionDefinitionV1 {
+  readonly regionNodeId: string;
+  readonly directMemberNodeIds: readonly string[];
+}
+
+export interface GraphNodeRegionsDocumentV1 {
+  readonly version: 1;
+  readonly definitions: readonly GraphNodeRegionDefinitionV1[];
 }
 
 export interface GraphNodeV1 {
@@ -35,6 +46,11 @@ export type GraphDocumentValidationCodeV1 =
   | 'duplicate-node-id'
   | 'duplicate-edge-id'
   | 'dangling-edge'
+  | 'invalid-node-regions'
+  | 'duplicate-region-node-id'
+  | 'duplicate-region-member'
+  | 'dangling-region-node'
+  | 'region-membership-cycle'
   | 'invalid-value';
 
 export interface GraphDocumentValidationErrorV1 {
@@ -50,6 +66,7 @@ export type GraphDocumentValidationResultV1 =
 export interface GraphDocumentBuilderV1 {
   addNode(node: GraphNodeV1): this;
   addEdge(edge: GraphEdgeV1): this;
+  setNodeRegions(nodeRegions: GraphNodeRegionsDocumentV1): this;
   build(options: { documentId: string; revision?: number }): GraphDocumentV1;
 }
 
@@ -68,7 +85,7 @@ export function validateGraphDocumentV1(value: unknown): GraphDocumentValidation
   if (!isRecord(value)) {
     return invalid('invalid-value', '$', 'Graph document must be an object.');
   }
-  validateKnownKeys(value, ['schemaVersion', 'documentId', 'revision', 'nodes', 'edges'], '$', errors);
+  validateKnownKeys(value, ['schemaVersion', 'documentId', 'revision', 'nodes', 'edges', 'nodeRegions'], '$', errors);
 
   if (value.schemaVersion !== 1) {
     errors.push(error('invalid-schema-version', '$.schemaVersion', 'Expected schema version 1.'));
@@ -144,6 +161,10 @@ export function validateGraphDocumentV1(value: unknown): GraphDocumentValidation
     }
   }
 
+  if (value.nodeRegions !== undefined) {
+    validateNodeRegions(value.nodeRegions, nodeIds, '$.nodeRegions', errors);
+  }
+
   return errors.length ? { valid: false, errors } : { valid: true };
 }
 
@@ -160,12 +181,14 @@ export function cloneGraphDocumentV1(document: GraphDocumentV1): GraphDocumentV1
     revision: document.revision,
     nodes: document.nodes.map(cloneNode),
     edges: document.edges.map(cloneEdge),
+    ...(document.nodeRegions === undefined ? {} : { nodeRegions: cloneGraphNodeRegionsDocumentV1(document.nodeRegions) }),
   };
 }
 
 export function createGraphDocumentBuilderV1(): GraphDocumentBuilderV1 {
   const nodes: GraphNodeV1[] = [];
   const edges: GraphEdgeV1[] = [];
+  let nodeRegions: GraphNodeRegionsDocumentV1 | undefined;
   return {
     addNode(node) {
       nodes.push(cloneNode(node));
@@ -175,6 +198,10 @@ export function createGraphDocumentBuilderV1(): GraphDocumentBuilderV1 {
       edges.push(cloneEdge(edge));
       return this;
     },
+    setNodeRegions(value) {
+      nodeRegions = cloneGraphNodeRegionsDocumentV1(value);
+      return this;
+    },
     build(options) {
       const document: GraphDocumentV1 = {
         schemaVersion: 1,
@@ -182,11 +209,133 @@ export function createGraphDocumentBuilderV1(): GraphDocumentBuilderV1 {
         revision: options.revision ?? 0,
         nodes: nodes.map(cloneNode),
         edges: edges.map(cloneEdge),
+        ...(nodeRegions === undefined ? {} : { nodeRegions: cloneGraphNodeRegionsDocumentV1(nodeRegions) }),
       };
       assertGraphDocumentV1(document);
       return document;
     },
   };
+}
+
+export function cloneGraphNodeRegionsDocumentV1(
+  nodeRegions: GraphNodeRegionsDocumentV1,
+): GraphNodeRegionsDocumentV1 {
+  return {
+    version: 1,
+    definitions: nodeRegions.definitions.map((definition) => ({
+      regionNodeId: definition.regionNodeId,
+      directMemberNodeIds: [...definition.directMemberNodeIds],
+    })),
+  };
+}
+
+function validateNodeRegions(
+  value: unknown,
+  nodeIds: ReadonlySet<string>,
+  path: string,
+  errors: GraphDocumentValidationErrorV1[],
+): void {
+  if (!isRecord(value)) {
+    errors.push(error('invalid-node-regions', path, 'Node regions must be an object.'));
+    return;
+  }
+  validateKnownKeys(value, ['version', 'definitions'], path, errors);
+  if (value.version !== 1) {
+    errors.push(error('invalid-node-regions', `${path}.version`, 'Expected node-regions version 1.'));
+  }
+  if (!Array.isArray(value.definitions)) {
+    errors.push(error('invalid-node-regions', `${path}.definitions`, 'Definitions must be an array.'));
+    return;
+  }
+  const definitions = new Map<string, { readonly members: readonly string[]; readonly path: string }>();
+  for (let index = 0; index < value.definitions.length; index += 1) {
+    const definition = value.definitions[index];
+    const definitionPath = `${path}.definitions[${index}]`;
+    if (!isRecord(definition)) {
+      errors.push(error('invalid-node-regions', definitionPath, 'Region definition must be an object.'));
+      continue;
+    }
+    validateKnownKeys(definition, ['regionNodeId', 'directMemberNodeIds'], definitionPath, errors);
+    const regionValid = validateId(
+      definition.regionNodeId,
+      `${definitionPath}.regionNodeId`,
+      'invalid-node-regions',
+      errors,
+    );
+    if (!Array.isArray(definition.directMemberNodeIds)) {
+      errors.push(error(
+        'invalid-node-regions',
+        `${definitionPath}.directMemberNodeIds`,
+        'Direct member node IDs must be an array.',
+      ));
+      continue;
+    }
+    const members: string[] = [];
+    const seenMembers = new Set<string>();
+    for (let memberIndex = 0; memberIndex < definition.directMemberNodeIds.length; memberIndex += 1) {
+      const member = definition.directMemberNodeIds[memberIndex];
+      const memberPath = `${definitionPath}.directMemberNodeIds[${memberIndex}]`;
+      if (!validateId(member, memberPath, 'invalid-node-regions', errors)) continue;
+      const memberId = member as string;
+      if (seenMembers.has(memberId)) {
+        errors.push(error('duplicate-region-member', memberPath, `Duplicate direct member "${memberId}".`));
+        continue;
+      }
+      seenMembers.add(memberId);
+      members.push(memberId);
+      if (!nodeIds.has(memberId)) {
+        errors.push(error('dangling-region-node', memberPath, `Missing member node "${memberId}".`));
+      }
+    }
+    if (!regionValid) continue;
+    const regionNodeId = definition.regionNodeId as string;
+    if (!nodeIds.has(regionNodeId)) {
+      errors.push(error(
+        'dangling-region-node',
+        `${definitionPath}.regionNodeId`,
+        `Missing region node "${regionNodeId}".`,
+      ));
+    }
+    if (seenMembers.has(regionNodeId)) {
+      errors.push(error(
+        'region-membership-cycle',
+        `${definitionPath}.directMemberNodeIds`,
+        `Region "${regionNodeId}" cannot contain itself.`,
+      ));
+    }
+    if (definitions.has(regionNodeId)) {
+      errors.push(error(
+        'duplicate-region-node-id',
+        `${definitionPath}.regionNodeId`,
+        `Duplicate region definition for "${regionNodeId}".`,
+      ));
+      continue;
+    }
+    definitions.set(regionNodeId, { members, path: definitionPath });
+  }
+
+  const visited = new Set<string>();
+  const active = new Set<string>();
+  const visit = (regionNodeId: string): void => {
+    if (visited.has(regionNodeId)) return;
+    if (active.has(regionNodeId)) return;
+    active.add(regionNodeId);
+    for (const memberId of definitions.get(regionNodeId)?.members ?? []) {
+      if (!definitions.has(memberId)) continue;
+      if (active.has(memberId)) {
+        errors.push(error(
+          'region-membership-cycle',
+          definitions.get(regionNodeId)!.path,
+          `Region membership cycle reaches "${memberId}".`,
+        ));
+        continue;
+      }
+      visit(memberId);
+    }
+    active.delete(regionNodeId);
+    visited.add(regionNodeId);
+  };
+  for (const regionNodeId of definitions.keys()) visit(regionNodeId);
 }
 
 function cloneNode(node: GraphNodeV1): GraphNodeV1 {

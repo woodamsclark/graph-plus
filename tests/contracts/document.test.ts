@@ -137,6 +137,49 @@ test('C-DOC-07 cloned documents do not share mutable public containers', () => {
   deepEqual(clone.nodes[0].attributes!.values, ['one'], 'attribute array should not be shared');
 });
 
+test('C-REGION-01 validates, builds, and clones nested and overlapping node regions', () => {
+  const nodes = ['quotes', 'quotes/jung', 'quotes/watts', 'shared', 'jung-note', 'watts-note']
+    .map((id) => graphNode(id));
+  const nodeRegions = {
+    version: 1 as const,
+    definitions: [
+      { regionNodeId: 'quotes', directMemberNodeIds: ['quotes/jung', 'quotes/watts', 'shared'] },
+      { regionNodeId: 'quotes/jung', directMemberNodeIds: ['jung-note', 'shared'] },
+      { regionNodeId: 'quotes/watts', directMemberNodeIds: ['watts-note', 'shared'] },
+    ],
+  };
+  const document = graphDocument({ nodes, edges: [], nodeRegions });
+  deepEqual(validateGraphDocumentV1(document), { valid: true }, 'nested and overlapping membership should validate');
+  const built = createGraphDocumentBuilderV1();
+  for (const node of nodes) built.addNode(node);
+  const output = built.setNodeRegions(nodeRegions).build({ documentId: 'regions' });
+  deepEqual(output.nodeRegions, nodeRegions, 'the builder should retain explicit direct membership');
+  const clone = cloneGraphDocumentV1(document);
+  assert(clone.nodeRegions !== document.nodeRegions, 'region containers should be defensively cloned');
+  assert(clone.nodeRegions?.definitions[0].directMemberNodeIds !== nodeRegions.definitions[0].directMemberNodeIds, 'member arrays should not be shared');
+});
+
+test('C-REGION-02 rejects duplicate, dangling, self, and recursive region membership', () => {
+  const result = validateGraphDocumentV1(graphDocument({
+    nodes: ['a', 'b', 'leaf'].map((id) => graphNode(id)),
+    edges: [],
+    nodeRegions: {
+      version: 1,
+      definitions: [
+        { regionNodeId: 'a', directMemberNodeIds: ['b', 'b', 'missing'] },
+        { regionNodeId: 'b', directMemberNodeIds: ['a'] },
+        { regionNodeId: 'a', directMemberNodeIds: ['a', 'leaf'] },
+      ],
+    },
+  }));
+  assert(!result.valid, 'invalid region membership should fail');
+  const codes = new Set(result.errors.map((entry) => entry.code));
+  assert(codes.has('duplicate-region-node-id'), 'duplicate definitions should be identified');
+  assert(codes.has('duplicate-region-member'), 'duplicate direct members should be identified');
+  assert(codes.has('dangling-region-node'), 'missing member nodes should be identified');
+  assert(codes.has('region-membership-cycle'), 'membership cycles should be identified');
+});
+
 test('C-VERSION-01 rejects unsupported document schemas independently', () => {
   const unsupported = { ...graphDocument(), schemaVersion: 2 };
   const result = validateGraphDocumentV1(unsupported);

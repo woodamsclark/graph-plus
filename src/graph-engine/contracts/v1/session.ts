@@ -58,6 +58,7 @@ export interface GraphFramePerformanceV1 {
   readonly moduleTickMs: number;
   readonly compositionMs: number;
   readonly projectionMs: number;
+  readonly regionRenderMs?: number;
   readonly edgeRenderMs: number;
   readonly nodeRenderMs: number;
   readonly labelLayoutMs: number;

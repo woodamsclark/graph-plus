@@ -1,4 +1,4 @@
-import type { GraphEdgeV1, GraphNodeV1 } from './document.ts';
+import type { GraphEdgeV1, GraphNodeRegionsDocumentV1, GraphNodeV1 } from './document.ts';
 
 export interface GraphPatchV1 {
   readonly schemaVersion: 1;
@@ -17,7 +17,8 @@ export type GraphPatchOperationV1 =
     }
   | { readonly type: 'add-edge'; readonly edge: GraphEdgeV1 }
   | { readonly type: 'replace-edge'; readonly edge: GraphEdgeV1 }
-  | { readonly type: 'remove-edge'; readonly edgeId: string };
+  | { readonly type: 'remove-edge'; readonly edgeId: string }
+  | { readonly type: 'replace-node-regions'; readonly nodeRegions?: GraphNodeRegionsDocumentV1 };
 
 export type ApplyGraphPatchResultV1 =
   | {

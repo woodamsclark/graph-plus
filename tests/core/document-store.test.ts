@@ -142,3 +142,44 @@ test('invalid patch shapes reject structurally instead of throwing', () => {
   equal(result.error.operationIndex, 0, 'malformed operation index should be included');
   equal(store.revision, 0, 'malformed operation should not advance revision');
 });
+
+test('C-REGION-03 replaces node regions atomically and preserves them across unrelated patches', () => {
+  const source = graphDocument({
+    nodes: [graphNode('tag'), graphNode('note'), graphNode('other')],
+    edges: [],
+  });
+  const store = new GraphDocumentStore(source);
+  const added = store.applyPatch({
+    schemaVersion: 1,
+    patchId: 'add-regions',
+    baseRevision: 0,
+    operations: [{
+      type: 'replace-node-regions',
+      nodeRegions: { version: 1, definitions: [{ regionNodeId: 'tag', directMemberNodeIds: ['note'] }] },
+    }],
+  });
+  assert(added.applied, 'valid node regions should patch in');
+  const unrelated = store.applyPatch({
+    schemaVersion: 1,
+    patchId: 'unrelated',
+    baseRevision: 1,
+    operations: [{ type: 'replace-node', node: graphNode('other', { label: 'updated' }) }],
+  });
+  assert(unrelated.applied, 'unrelated patch should apply');
+  deepEqual(store.exportDocument().nodeRegions?.definitions, [
+    { regionNodeId: 'tag', directMemberNodeIds: ['note'] },
+  ], 'unrelated changes should preserve node regions');
+
+  const before = store.exportDocument();
+  const rejected = store.applyPatch({
+    schemaVersion: 1,
+    patchId: 'invalid-regions',
+    baseRevision: 2,
+    operations: [{
+      type: 'replace-node-regions',
+      nodeRegions: { version: 1, definitions: [{ regionNodeId: 'tag', directMemberNodeIds: ['missing'] }] },
+    }],
+  });
+  assert(!rejected.applied, 'dangling region membership should reject the whole patch');
+  deepEqual(store.exportDocument(), before, 'rejected region patch should leave the canonical document unchanged');
+});

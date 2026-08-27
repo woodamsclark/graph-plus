@@ -10,6 +10,7 @@ export const GRAPH_QUICK_SETTINGS_SECTION_IDS_V1 = Object.freeze({
   display: 'display',
   camera: 'camera',
   forces: 'forces',
+  regions: 'regions',
 } as const);
 
 export const GRAPH_QUICK_SETTINGS_CONTROL_IDS_V1 = Object.freeze({
@@ -28,6 +29,7 @@ export const GRAPH_QUICK_SETTINGS_CONTROL_IDS_V1 = Object.freeze({
   radialForce: 'forces.radial',
   linkForce: 'forces.link',
   linkDistance: 'forces.link-distance',
+  regionBoundaries: 'node-regions.boundaries-visible',
 } as const);
 
 export const GRAPH_CORE_CONTEXT_ACTION_IDS_V1 = Object.freeze({

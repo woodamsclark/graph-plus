@@ -21,6 +21,7 @@ import type {
 } from '../contracts/v1/index.ts';
 import { GraphDocumentStore } from '../core/document/index.ts';
 import { evaluateGraphFilterV1, type GraphFilterSelectionV1 } from '../core/filter/index.ts';
+import { GraphNodeRegionIndexV1 } from '../core/regions/index.ts';
 import type { EffectiveConsumerProfileV1 } from '../core/profile/index.ts';
 import {
   cloneGraphViewStateV1,
@@ -231,6 +232,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         getDocument: () => this.store.readDocument(),
         getViewState: () => this.viewState,
         getInteractivePositions: () => this.moduleView?.positions ?? this.viewState.positions,
+        getNodeSelection: (nodeId) => this.resolveNodeSelection(nodeId),
         isNodeDraggable: () => !this.moduleView?.formActive,
         setViewState: (state) => { this.viewState = state; },
         getRenderSelection: () => this.renderSelection,
@@ -499,6 +501,13 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (!next.modules[SHIPPED_GRAPH_MODULE_IDS_V1.rendering]?.enabled) {
       throw new Error('A mounted graph session requires the rendering module.');
     }
+    if (
+      next.dimensions === '3d'
+      && next.modules[SHIPPED_GRAPH_MODULE_IDS_V1.nodeRegions]?.enabled
+      && next.modules[SHIPPED_GRAPH_MODULE_IDS_V1.nodeRegions]?.policy === 'required'
+    ) {
+      throw new Error('modules.node-regions: Required node regions are available only in 2D.');
+    }
     if (next.dimensions !== this.profile.dimensions) {
       this.reconfigureDimensions(next);
       return;
@@ -758,6 +767,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       formActive: false,
       nodeContributions: {},
       edgeContributions: {},
+      regionLayouts: [],
+      regionContributions: [],
       theme: this.themePalette,
     });
     this.projectionSelection = this.moduleView.projectionSelection;
@@ -775,6 +786,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       positions: this.moduleView.positions,
       nodeContributions: this.moduleView.nodeContributions,
       edgeContributions: this.moduleView.edgeContributions,
+      regionContributions: this.moduleView.regionContributions,
       theme: this.moduleView.theme,
       hoveredNodeId: this.interaction?.getHoveredNodeId(),
     }));
@@ -922,6 +934,13 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     return this.store.hasNode(nodeId);
   }
 
+  private resolveNodeSelection(nodeId: string): readonly string[] {
+    const regions = new GraphNodeRegionIndexV1(this.store.readDocument());
+    if (!regions.isRegionNode(nodeId)) return [nodeId];
+    const visibleMembers = regions.recursiveMembers(nodeId, this.renderSelection.nodeIds);
+    return visibleMembers.length ? visibleMembers : [nodeId];
+  }
+
   private handleNodeActionFailure(failure: GraphNodeActionFailureV1): void {
     this.emitError({
       code: 'consumer-action-failed',
@@ -1009,7 +1028,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 function emptyFramePerformance(): GraphPerformanceSnapshotV1['latestFrame'] {
   return {
     interactionMs: 0, hitTestMs: 0, moduleTickMs: 0, compositionMs: 0,
-    projectionMs: 0, edgeRenderMs: 0, nodeRenderMs: 0, labelLayoutMs: 0,
+    projectionMs: 0, regionRenderMs: 0, edgeRenderMs: 0, nodeRenderMs: 0, labelLayoutMs: 0,
     labelDrawMs: 0, totalMs: 0,
   };
 }
@@ -1041,7 +1060,7 @@ function summarizePerformance(
 ): NonNullable<GraphPerformanceSnapshotV1['window']> {
   const keys = Object.keys(emptyFramePerformance()) as (keyof GraphPerformanceSnapshotV1['latestFrame'])[];
   return Object.fromEntries(keys.map((key) => {
-    const values = samples.map((sample) => sample[key]).sort((a, b) => a - b);
+    const values = samples.map((sample) => sample[key] ?? 0).sort((a, b) => a - b);
     return [key, {
       sampleCount: values.length,
       p50: percentile(values, 0.5),

@@ -1,5 +1,8 @@
 import { performance } from 'node:perf_hooks';
-import type { GraphDimensionsV1 } from '../src/graph-engine/contracts/v1/index.ts';
+import type {
+  GraphDimensionsV1,
+  GraphNodeRegionsDocumentV1,
+} from '../src/graph-engine/contracts/v1/index.ts';
 import { graphDocument, graphEdge, graphNode } from '../tests/support/contractFixtures.ts';
 import { runtimeHarness } from '../tests/support/runtimeHarness.ts';
 
@@ -10,11 +13,16 @@ interface BenchmarkScenario {
   readonly dimensions: GraphDimensionsV1;
   readonly warmupFrames: number;
   readonly measuredFrames: number;
+  readonly regions?: { readonly count: number; readonly memberships: number };
 }
 
 const scenarios: readonly BenchmarkScenario[] = [
   { id: 'vault-1500-2d', nodes: 1_500, edges: 3_000, dimensions: '2d', warmupFrames: 20, measuredFrames: 180 },
   { id: 'vault-1500-3d', nodes: 1_500, edges: 3_000, dimensions: '3d', warmupFrames: 20, measuredFrames: 180 },
+  {
+    id: 'regions-stress-1500-2d', nodes: 1_500, edges: 3_000, dimensions: '2d',
+    warmupFrames: 20, measuredFrames: 180, regions: { count: 100, memberships: 1_000 },
+  },
   { id: 'scale-5000-2d', nodes: 5_000, edges: 10_000, dimensions: '2d', warmupFrames: 10, measuredFrames: 180 },
   { id: 'scale-5000-3d', nodes: 5_000, edges: 10_000, dimensions: '3d', warmupFrames: 10, measuredFrames: 180 },
 ];
@@ -23,7 +31,7 @@ async function main(): Promise<void> {
   const results = [];
   for (const scenario of scenarios) results.push(await runScenario(scenario));
   console.log(JSON.stringify({
-    benchmark: 'graph-engine-v1.2-headless',
+    benchmark: 'graph-engine-v1.3-headless',
     runtime: process.version,
     platform: `${process.platform}-${process.arch}`,
     results,
@@ -41,14 +49,23 @@ async function runScenario(scenario: BenchmarkScenario) {
     `vault-${(index * 37 + 17) % nodes.length}`,
   ));
   const profileId = scenario.dimensions === '2d' ? 'two-dimensional' : 'three-dimensional';
+  const nodeRegions = scenario.regions
+    ? createNodeRegions(scenario.nodes, scenario.regions.count, scenario.regions.memberships)
+    : undefined;
   const harness = runtimeHarness({
     profileId,
-    document: graphDocument({ documentId: `benchmark-${scenario.id}`, nodes, edges }),
+    document: graphDocument({
+      documentId: `benchmark-${scenario.id}`,
+      nodes,
+      edges,
+      ...(nodeRegions ? { nodeRegions } : {}),
+    }),
     realTime: true,
   });
   harness.profiles.setUserOverrides('synthetic-consumer', profileId, {
     modules: {
       'force-layout': { enabled: true },
+      'node-regions': { enabled: nodeRegions !== undefined },
       rendering: { settings: { labelMode: 'off' } },
     },
   });
@@ -76,6 +93,11 @@ async function runScenario(scenario: BenchmarkScenario) {
       edges: edges.length,
       dimensions: scenario.dimensions,
       labels: 'off',
+      regions: nodeRegions?.definitions.length ?? 0,
+      directMemberships: nodeRegions?.definitions.reduce(
+        (total, definition) => total + definition.directMemberNodeIds.length,
+        0,
+      ) ?? 0,
     },
     mountMs,
     requestedFrames: scenario.measuredFrames,
@@ -84,7 +106,38 @@ async function runScenario(scenario: BenchmarkScenario) {
     totalMs: snapshot.window?.totalMs,
     moduleTickMs: snapshot.window?.moduleTickMs,
     renderProjectionMs: snapshot.window?.projectionMs,
+    regionRenderMs: snapshot.window?.regionRenderMs,
     counters: snapshot.counters,
+  };
+}
+
+function createNodeRegions(
+  nodeCount: number,
+  regionCount: number,
+  membershipCount: number,
+): GraphNodeRegionsDocumentV1 {
+  const members = Array.from({ length: regionCount }, () => new Set<string>());
+  let relationships = 0;
+  for (let child = 1; child < regionCount && relationships < membershipCount; child += 1) {
+    const parent = Math.floor((child - 1) / 3);
+    members[parent].add(`vault-${child}`);
+    relationships += 1;
+  }
+  let cursor = 0;
+  while (relationships < membershipCount) {
+    const region = cursor % regionCount;
+    const leaf = regionCount + ((cursor * 37 + Math.floor(cursor / regionCount) * 17) % (nodeCount - regionCount));
+    const before = members[region].size;
+    members[region].add(`vault-${leaf}`);
+    if (members[region].size > before) relationships += 1;
+    cursor += 1;
+  }
+  return {
+    version: 1,
+    definitions: members.map((directMembers, region) => ({
+      regionNodeId: `vault-${region}`,
+      directMemberNodeIds: [...directMembers].sort(),
+    })),
   };
 }
 

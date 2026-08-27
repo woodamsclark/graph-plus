@@ -1,6 +1,6 @@
 # Graph Engine V1.3 Tag Regions Acceptance Plan
 
-Status: Proposed; no implementation evidence yet
+Status: In progress; deterministic implementation evidence present, platform and release evidence pending
 
 Baseline: Graph Engine V1.2
 
@@ -33,6 +33,21 @@ registered activation action from Graph+.
 | S — Scale | Bounded live and settled region work | V1.2 real-clock benchmark harness |
 | G — Graph+ | Obsidian tag mapping and product behavior | Fixture vault and live Obsidian |
 | P — Platform | Desktop, popout, mobile, accessibility | Physical or representative smoke |
+
+### Current implementation evidence
+
+The V1.3 implementation candidate passes 134 deterministic tests plus typecheck,
+production build, client-artifact synchronization, and `git diff --check`. A rendered
+browser fixture confirmed nested non-circular regions, Venn-like overlap at one shared
+canonical node, behind-node layering, and live contour response while that node moved.
+
+The repeatable `regions-stress-1500-2d` characterization uses 1,500 nodes, 3,000 edges,
+100 active regions, and 1,000 direct memberships with labels off. On the 2026-08-26
+darwin-arm64 Node v25.1.0 run, 174 measured active-layout frames reported total frame
+time p50 10.40 ms, p95 15.71 ms, p99 17.63 ms, and max 18.09 ms; the region-render
+stage reported p50 3.54 ms, p95 6.41 ms, p99 11.01 ms, and max 11.30 ms. This is
+characterization evidence, not an approved release budget. Live Obsidian desktop,
+popout, mobile, theme, accessibility, and reduced-motion evidence remains outstanding.
 
 ## 3. Required fixtures
 
