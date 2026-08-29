@@ -100,11 +100,13 @@ export class GraphPlusView extends ItemView {
       }, 180);
     };
     const createRef = this.app.vault.on('create', schedule);
+    const modifyRef = this.app.vault.on('modify', schedule);
     const deleteRef = this.app.vault.on('delete', schedule);
     const renameRef = this.app.vault.on('rename', schedule);
     const metadataRef = this.app.metadataCache.on('changed', schedule);
     this.unregisters.push(
       () => this.app.vault.offref(createRef),
+      () => this.app.vault.offref(modifyRef),
       () => this.app.vault.offref(deleteRef),
       () => this.app.vault.offref(renameRef),
       () => this.app.metadataCache.offref(metadataRef),

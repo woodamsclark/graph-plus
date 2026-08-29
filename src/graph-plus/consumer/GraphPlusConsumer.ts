@@ -26,6 +26,7 @@ import {
   createDefaultGraphPlusLensV1,
   graphPlusSessionOverridesV1,
   type GraphPlusLensStateV1,
+  type ObsidianSearchIndexV1,
 } from '../query/index.ts';
 
 export interface GraphPlusVaultSourceV1<TFile> {
@@ -64,6 +65,7 @@ export class GraphPlusConsumerV1<TFile> {
   private effectiveSettings?: GraphEffectiveSettingsV1;
   private session?: GraphSessionV1;
   private lookup = new GraphPlusLookupV1<TFile>();
+  private searchIndex: ObsidianSearchIndexV1 = new Map();
   private document?: GraphDocumentV1;
   private sessionSubscriptions: Disposable[] = [];
   private actionRegistration?: Disposable;
@@ -109,6 +111,7 @@ export class GraphPlusConsumerV1<TFile> {
         const snapshot = await this.options.source.read();
         const projection = this.adapter.build(snapshot);
         this.lookup = projection.lookup;
+        this.searchIndex = projection.searchIndex;
         const migrated = migrateLegacyPositionsV1(projection.document, this.options.legacyPositions, {
           profileId: this.profileId,
           dimensions: this.dimensions,
@@ -131,6 +134,7 @@ export class GraphPlusConsumerV1<TFile> {
       const snapshot = await this.options.source.read();
       const projection = this.adapter.reconcile(this.document, snapshot);
       this.lookup = projection.lookup;
+      this.searchIndex = projection.searchIndex;
       if (projection.document !== this.document) {
         await this.session.replaceDocument(projection.document);
         this.document = projection.document;
@@ -220,6 +224,7 @@ export class GraphPlusConsumerV1<TFile> {
       this.effectiveSettings = undefined;
       this.document = undefined;
       this.lookup = new GraphPlusLookupV1<TFile>();
+      this.searchIndex = new Map();
       if (!this.leaseReleased) {
         this.leaseReleased = true;
         await this.options.lease.release();
@@ -286,7 +291,7 @@ export class GraphPlusConsumerV1<TFile> {
 
   private async applyFilter(): Promise<void> {
     if (!this.session || !this.document) return;
-    const compiled = compileGraphPlusFilterV1(this.document, this.lens);
+    const compiled = compileGraphPlusFilterV1(this.document, this.lens, this.searchIndex);
     if (compiled.error) this.options.onError?.(new Error(compiled.error));
     const rootId = this.lens.form.rootNodeId;
     if (this.lens.form.enabled && rootId && !compiled.visibleNodeIds.includes(rootId)) {

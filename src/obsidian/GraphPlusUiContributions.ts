@@ -28,9 +28,7 @@ function mountRefineVault<TFile>(container: HTMLElement, consumer: GraphPlusCons
   const lens = consumer.getLens();
   const window = container.ownerDocument.defaultView;
   let timer: number | undefined;
-  const searchSetting = new Setting(container)
-    .setName('Search')
-    .setDesc('path:, tag:, type:, [property:value], -term, OR');
+  const searchSetting = new Setting(container);
   searchSetting.settingEl.classList.add('graphplus-domain-search');
   searchSetting.addSearch((search) => {
     search.setPlaceholder('Filter nodes…').setValue(lens.query).onChange((query) => {

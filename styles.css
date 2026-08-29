@@ -251,6 +251,10 @@
   margin: 0 0 6px;
 }
 
+.graphplus-control-section-body .graphplus-domain-search .setting-item-info {
+  display: none;
+}
+
 .graphplus-control-section-body .setting-item:has(.search-input-container) .setting-item-control {
   width: 100%;
 }

@@ -6,6 +6,7 @@ import type {
   GraphNodeV1,
 } from '../../graph-engine/contracts/v1/index.ts';
 import { assertGraphDocumentV1 } from '../../graph-engine/contracts/v1/index.ts';
+import type { ObsidianSearchDocumentV1, ObsidianSearchIndexV1 } from '../query/index.ts';
 import { GraphPlusLookupV1 } from './GraphPlusLookup.ts';
 
 export interface VaultGraphNoteV1<TFile> {
@@ -13,6 +14,7 @@ export interface VaultGraphNoteV1<TFile> {
   readonly path: string;
   readonly basename: string;
   readonly extension: string;
+  readonly content?: string;
   readonly tags: readonly string[];
   readonly properties: Readonly<Record<string, readonly string[]>>;
   readonly frontmatterLinks?: readonly { readonly relation: string; readonly targetPath: string }[];
@@ -27,6 +29,7 @@ export interface VaultGraphSnapshotV1<TFile> {
 export interface VaultGraphProjectionV1<TFile> {
   readonly document: GraphDocumentV1;
   readonly lookup: GraphPlusLookupV1<TFile>;
+  readonly searchIndex: ObsidianSearchIndexV1;
 }
 
 export class VaultGraphAdapterV1<TFile> {
@@ -34,6 +37,7 @@ export class VaultGraphAdapterV1<TFile> {
 
   build(snapshot: VaultGraphSnapshotV1<TFile>, revision = 0): VaultGraphProjectionV1<TFile> {
     const lookup = new GraphPlusLookupV1<TFile>();
+    const searchIndex = new Map<string, ObsidianSearchDocumentV1>();
     const tags = new Set<string>();
     const notes = [...snapshot.notes].sort((left, right) => left.path.localeCompare(right.path));
     const nodes: GraphNodeV1[] = notes.map((note) => {
@@ -42,17 +46,28 @@ export class VaultGraphAdapterV1<TFile> {
       for (const tag of note.tags) for (const expanded of expandTagPath(normalizeTag(tag))) tags.add(expanded);
       const propertyTokens = Object.entries(note.properties).flatMap(([key, values]) =>
         values.map((value) => `property:${key.toLowerCase()}:${value.toLowerCase()}`));
-      const searchText = [note.path, note.basename, note.extension, ...note.tags, ...propertyTokens].join(' ').toLowerCase();
       const attributes: Record<string, GraphAttributeValue> = {
         kind: 'note',
         path: note.path,
         extension: note.extension.toLowerCase(),
         tags: note.tags.map(normalizeTag).filter(Boolean),
-        searchText,
       };
       for (const [key, values] of Object.entries(note.properties)) {
         attributes[`property:${key.toLowerCase()}`] = values.map((value) => value.toLowerCase());
       }
+      searchIndex.set(id, {
+        nodeId: id,
+        kind: 'note',
+        path: note.path,
+        basename: note.basename,
+        extension: note.extension.toLowerCase(),
+        content: note.content ?? '',
+        tags: note.tags.map(normalizeTag).filter(Boolean),
+        properties: Object.fromEntries(Object.entries(note.properties).map(([key, values]) => [
+          key.toLowerCase(),
+          values.map(String),
+        ])),
+      });
       return {
         id,
         label: note.basename,
@@ -64,11 +79,21 @@ export class VaultGraphAdapterV1<TFile> {
     for (const tag of [...tags].sort()) {
       const id = tagNodeId(tag);
       lookup.setTag(id, tag);
+      searchIndex.set(id, {
+        nodeId: id,
+        kind: 'tag',
+        path: `#${tag}`,
+        basename: `#${tag}`,
+        extension: '',
+        content: '',
+        tags: [tag],
+        properties: {},
+      });
       nodes.push({
         id,
         label: `#${tag}`,
         tokens: ['kind:tag', `tag:${tag}`],
-        attributes: { kind: 'tag', tags: [tag], searchText: `#${tag} ${tag}` },
+        attributes: { kind: 'tag', tags: [tag] },
         positionHint: stablePosition(id),
       });
     }
@@ -138,13 +163,13 @@ export class VaultGraphAdapterV1<TFile> {
       },
     };
     assertGraphDocumentV1(document);
-    return { document, lookup };
+    return { document, lookup, searchIndex };
   }
 
   reconcile(previous: GraphDocumentV1, snapshot: VaultGraphSnapshotV1<TFile>): VaultGraphProjectionV1<TFile> {
     const next = this.build(snapshot, previous.revision + 1);
     if (sameDocumentContent(previous, next.document)) {
-      return { document: previous, lookup: next.lookup };
+      return { document: previous, lookup: next.lookup, searchIndex: next.searchIndex };
     }
     return next;
   }

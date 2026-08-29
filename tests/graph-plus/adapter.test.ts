@@ -2,7 +2,12 @@ import type { ConsumerRegistrationV1 } from '../../src/graph-engine/contracts/v1
 import { ConsumerProfileRegistry } from '../../src/graph-engine/core/profile/index.ts';
 import { SessionFactory } from '../../src/graph-engine/runtime/index.ts';
 import { GraphEngineProviderCoreV1 } from '../../src/graph-engine/service/index.ts';
-import { VaultGraphAdapterV1, noteNodeId, tagNodeId } from '../../src/graph-plus/adapter/index.ts';
+import {
+  ObsidianVaultGraphSourceV1,
+  VaultGraphAdapterV1,
+  noteNodeId,
+  tagNodeId,
+} from '../../src/graph-plus/adapter/index.ts';
 import { GraphPlusConsumerV1 } from '../../src/graph-plus/consumer/index.ts';
 import {
   GraphPlusCheckpointControllerV1,
@@ -52,6 +57,7 @@ function snapshot() {
           path: beta.path,
           basename: 'Beta',
           extension: 'md',
+          content: 'Faith is an unreserved opening of the mind to the truth.',
           tags: ['course/greek'],
           properties: { status: ['Due'] },
         },
@@ -60,6 +66,7 @@ function snapshot() {
           path: alpha.path,
           basename: 'Alpha',
           extension: 'md',
+          content: 'A journal entry about faith and hope.',
           tags: ['course'],
           properties: {},
           frontmatterLinks: [{ relation: 'teacher', targetPath: beta.path }],
@@ -120,11 +127,85 @@ test('Graph+ query translation selects IDs before invoking the generic AST filte
   const lens = createDefaultGraphPlusLensV1();
   const compiled = compileGraphPlusFilterV1(projection.document, {
     ...lens,
-    query: 'tag:course [status:due] -file:alpha',
+    query: 'tag:course/greek [status:due] -file:alpha',
     showTags: false,
-  });
+  }, projection.searchIndex);
   equal(compiled.error, undefined, 'consumer query should parse');
   deepEqual((compiled.request.node as { ids: readonly string[] }).ids, [noteNodeId('folder/Beta.md')], 'consumer should translate its vocabulary to opaque node IDs');
+});
+
+test('Graph+ compatibility search matches note bodies with Obsidian boolean and exclusion syntax', () => {
+  const projection = new VaultGraphAdapterV1<FakeFile>({ countDuplicateLinks: true }).build(snapshot().value);
+  const lens = createDefaultGraphPlusLensV1();
+  const bodySearch = compileGraphPlusFilterV1(projection.document, {
+    ...lens,
+    query: '-journal faith',
+    showTags: false,
+  }, projection.searchIndex);
+  deepEqual(
+    bodySearch.visibleNodeIds,
+    [noteNodeId('folder/Beta.md')],
+    'bare search terms should include note content while exclusions apply to the same searchable note',
+  );
+
+  const phraseSearch = compileGraphPlusFilterV1(projection.document, {
+    ...lens,
+    query: 'content:"unreserved opening"',
+    showTags: false,
+  }, projection.searchIndex);
+  deepEqual(phraseSearch.visibleNodeIds, [noteNodeId('folder/Beta.md')], 'content phrases should match note bodies');
+
+  const groupedSearch = compileGraphPlusFilterV1(projection.document, {
+    ...lens,
+    query: '(file:alpha OR file:beta) -[status:due]',
+    showTags: false,
+  }, projection.searchIndex);
+  deepEqual(groupedSearch.visibleNodeIds, [noteNodeId('Alpha.md')], 'groups, OR, and property exclusions should compose');
+});
+
+test('Graph+ keeps note content transient and refreshes search without revising an unchanged graph', () => {
+  const fixture = snapshot();
+  const adapter = new VaultGraphAdapterV1<FakeFile>({ countDuplicateLinks: true });
+  const first = adapter.build(fixture.value, 7);
+  assert(!JSON.stringify(first.document).includes('unreserved opening'), 'note bodies must stay out of graph documents and checkpoints');
+  const changedContent = adapter.reconcile(first.document, {
+    ...fixture.value,
+    notes: fixture.value.notes.map((note) => note.path === 'Alpha.md'
+      ? { ...note, content: 'A private reflection with no matching keyword.' }
+      : note),
+  });
+  equal(changedContent.document, first.document, 'content-only changes should not revise canonical graph topology');
+  equal(changedContent.searchIndex.get(noteNodeId('Alpha.md'))?.content.includes('private reflection'), true, 'content-only changes should refresh the transient search index');
+});
+
+test('Graph+ reads note bodies through the supported Obsidian vault API and caches unchanged files', async () => {
+  const file = {
+    path: 'Faith.md',
+    basename: 'Faith',
+    extension: 'md',
+    stat: { mtime: 10 },
+  };
+  let reads = 0;
+  const source = new ObsidianVaultGraphSourceV1({
+    vault: {
+      getMarkdownFiles: () => [file],
+      getName: () => 'Test Vault',
+      cachedRead: async () => {
+        reads += 1;
+        return 'Faith comes by hearing.';
+      },
+    },
+    metadataCache: {
+      resolvedLinks: {},
+      getFileCache: () => undefined,
+      getFirstLinkpathDest: () => null,
+    },
+  } as never);
+  const first = await source.read();
+  const second = await source.read();
+  equal(first.notes[0]?.content, 'Faith comes by hearing.', 'supported cachedRead content should populate the search snapshot');
+  equal(second.notes[0]?.content, 'Faith comes by hearing.', 'cached content should remain available on later snapshots');
+  equal(reads, 1, 'unchanged file mtimes should not trigger duplicate content reads');
 });
 
 test('Graph+ leaves generic display and force settings in its engine profile namespace', () => {
