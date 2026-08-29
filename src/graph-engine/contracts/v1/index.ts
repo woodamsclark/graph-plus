@@ -1,6 +1,7 @@
 export * from './action.ts';
 export * from './document.ts';
 export * from './filter.ts';
+export * from './layout.ts';
 export * from './patch.ts';
 export * from './profile.ts';
 export * from './service.ts';

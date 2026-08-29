@@ -1,14 +1,15 @@
 {
   "artifact": "@graph-plus/graph-engine-client",
-  "artifactVersion": "1.4.0",
+  "artifactVersion": "1.5.0",
   "protocolVersion": 1,
-  "contentSha256": "d6ff5a6d95afa914302a4a4d141f99c68a782c9b67bf01e7631f0ecded3420ff",
+  "contentSha256": "e00f27a40ee21b38555cd68159f7d8207adbfa07d1120f756cfcc9209718b085",
   "generatedFrom": "src/graph-engine/public.ts",
   "publicFiles": [
     "src/graph-engine/public.ts",
     "src/graph-engine/contracts/v1/action.ts",
     "src/graph-engine/contracts/v1/document.ts",
     "src/graph-engine/contracts/v1/filter.ts",
+    "src/graph-engine/contracts/v1/layout.ts",
     "src/graph-engine/contracts/v1/index.ts",
     "src/graph-engine/contracts/v1/patch.ts",
     "src/graph-engine/contracts/v1/profile.ts",

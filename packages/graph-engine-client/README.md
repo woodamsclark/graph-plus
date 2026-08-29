@@ -16,7 +16,7 @@ only `@graph-plus/graph-engine-client` and obtain the runtime through Workspace 
 
 Protocol version: 1
 
-Artifact version: 1.4.0
+Artifact version: 1.5.0
 
 V1.1 adds optional engine-owned session UI configuration, lease-scoped semantic node
 actions, consumer/profile UI policy, and constrained 2D/3D profile settings. These are
@@ -31,3 +31,7 @@ control while preserving canonical node and edge identity.
 
 V1.4 adds the stock topology-weighting mode control. Effective affinity, hub
 discounting, spring mapping, and component packing remain private provider behavior.
+
+V1.5 adds the public Linear build-out direction contract. Consumers may request the
+shipped `linear-layout` capability and choose `up`, `down`, `left`, `right`, `in`, or
+`out`; depth-axis directions require a 3D profile.

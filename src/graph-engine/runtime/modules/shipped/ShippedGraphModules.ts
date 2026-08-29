@@ -3,6 +3,7 @@ import { AnimaModule } from './AnimaModule.ts';
 import { FilteringModule } from './FilteringModule.ts';
 import { ForceLayoutModule, readForceSettings } from './ForceLayoutModule.ts';
 import { FormModule } from './FormModule.ts';
+import { LinearBuildOutLayoutModule } from './LinearBuildOutLayoutModule.ts';
 import { RenderingModule } from './RenderingModule.ts';
 import { NodeRegionsModule, readNodeRegionSettingsV1 } from './NodeRegionsModule.ts';
 
@@ -10,6 +11,7 @@ export const SHIPPED_GRAPH_MODULE_IDS_V1 = {
   rendering: 'rendering',
   filtering: 'filtering',
   form: 'form',
+  linearLayout: 'linear-layout',
   forceLayout: 'force-layout',
   nodeRegions: 'node-regions',
   anima: 'anima',
@@ -81,6 +83,24 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       },
     },
     create: ({ dimensions, settings }) => new NodeRegionsModule(dimensions, readNodeRegionSettingsV1(settings)),
+  });
+  registry.register({
+    order: 375,
+    descriptor: {
+      id: SHIPPED_GRAPH_MODULE_IDS_V1.linearLayout,
+      version: '1.0.0',
+      displayName: 'Linear build-out',
+      capabilities: ['layout', 'linear-layout'],
+      conflicts: ['form', 'force-layout'],
+      settingsSchemaVersion: 1,
+      defaultSettings: {
+        buildDirection: 'right',
+        layerSpacing: 180,
+        branchSpacing: 160,
+        componentSpacing: 320,
+      },
+    },
+    create: ({ dimensions, settings }) => new LinearBuildOutLayoutModule(dimensions, settings),
   });
   registry.register({
     order: 400,

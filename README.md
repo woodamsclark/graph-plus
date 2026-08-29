@@ -14,6 +14,8 @@ public boundary and a runnable neutral example.
 
 Current design artifacts:
 
+- [Graph Engine V1.5 Linear build-out layout contract](docs/graph-engine-v1.5-linear-build-out-layout-contract.md)
+- [Graph Engine V1.5 Linear build-out acceptance plan](docs/graph-engine-v1.5-linear-build-out-layout-acceptance.md)
 - [Graph Engine V1.4 topology-weighted layout contract](docs/graph-engine-v1.4-topology-weighted-layout-contract.md)
 - [Graph Engine V1.4 topology-weighted layout acceptance plan](docs/graph-engine-v1.4-topology-weighted-layout-acceptance.md)
 - [Graph Engine V1.3 tag regions contract](docs/graph-engine-v1.3-tag-regions-contract.md)

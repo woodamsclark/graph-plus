@@ -10,6 +10,10 @@ import {
   GraphSessionProfileErrorV1,
 } from '../../src/graph-engine/runtime/index.ts';
 import { FormModule } from '../../src/graph-engine/runtime/modules/shipped/FormModule.ts';
+import {
+  buildLinearBuildOutPositionsV1,
+  readLinearBuildOutLayoutSettingsV1,
+} from '../../src/graph-engine/runtime/modules/shipped/LinearBuildOutLayoutModule.ts';
 import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import { runtimeCanvas, runtimeHarness, runtimeRegistration, runtimeSurface } from '../support/runtimeHarness.ts';
@@ -335,6 +339,95 @@ test('R-FORM-01..03 keeps 2d Form planar and gives 3d Form deterministic branch 
   deepEqual(spatial.positions, repeated.positions, '3d Form placement should be deterministic');
   deepEqual(spatial.document, planar.document, 'dimension should not alter the Form topology');
   deepEqual(spatial.positions.root, { x: 0, y: 0, z: 0 }, 'the selected root should remain the Form origin');
+});
+
+test('L-LINEAR-01 builds a deterministic directed branch from the first node at the origin', () => {
+  const document = graphDocument({
+    nodes: ['root', 'left', 'right', 'join', 'tail'].map((id) => graphNode(id)),
+    edges: [
+      graphEdge('root-left', 'root', 'left', { directed: true }),
+      graphEdge('root-right', 'root', 'right', { directed: true }),
+      graphEdge('left-join', 'left', 'join', { directed: true }),
+      graphEdge('right-join', 'right', 'join', { directed: true }),
+      graphEdge('join-tail', 'join', 'tail', { directed: true }),
+    ],
+  });
+  const settings = {
+    buildDirection: 'up' as const,
+    layerSpacing: 100,
+    branchSpacing: 80,
+    componentSpacing: 300,
+  };
+  const first = buildLinearBuildOutPositionsV1(document, '2d', settings);
+  const repeated = buildLinearBuildOutPositionsV1(document, '2d', settings);
+  deepEqual(first.root, { x: 0, y: 0, z: 0 }, 'the first supplied node should be the origin');
+  deepEqual(first.left, { x: -40, y: -100, z: 0 }, 'the first branch should occupy the first outward layer');
+  deepEqual(first.right, { x: 40, y: -100, z: 0 }, 'siblings should straddle the build axis');
+  deepEqual(first.join, { x: 0, y: -200, z: 0 }, 'a join should follow the deepest prerequisite layer');
+  deepEqual(first.tail, { x: 0, y: -300, z: 0 }, 'later nodes should continue along the selected axis');
+  deepEqual(repeated, first, 'unchanged documents should receive byte-stable positions');
+});
+
+test('L-LINEAR-02 supports every planar direction plus 3d in and out', () => {
+  const document = graphDocument({
+    nodes: ['origin', 'next'].map((id) => graphNode(id)),
+    edges: [graphEdge('origin-next', 'origin', 'next', { directed: true })],
+  });
+  const position = (dimensions: '2d' | '3d', buildDirection: 'up' | 'down' | 'left' | 'right' | 'in' | 'out') =>
+    buildLinearBuildOutPositionsV1(document, dimensions, {
+      buildDirection,
+      layerSpacing: 90,
+      branchSpacing: 60,
+      componentSpacing: 240,
+    });
+  deepEqual(position('2d', 'up').next, { x: 0, y: -90, z: 0 }, 'up should use negative screen Y');
+  deepEqual(position('2d', 'down').next, { x: 0, y: 90, z: 0 }, 'down should use positive screen Y');
+  deepEqual(position('2d', 'left').next, { x: -90, y: 0, z: 0 }, 'left should use negative X');
+  deepEqual(position('2d', 'right').next, { x: 90, y: 0, z: 0 }, 'right should use positive X');
+  deepEqual(position('3d', 'in').next, { x: 0, y: 0, z: -90 }, 'in should build away from the camera');
+  deepEqual(position('3d', 'out').next, { x: 0, y: 0, z: 90 }, 'out should build toward the camera');
+  let invalid: unknown;
+  try { readLinearBuildOutLayoutSettingsV1('2d', { buildDirection: 'in' }); } catch (error) { invalid = error; }
+  assert(String(invalid).includes('requires a 3D profile'), '2d profiles should reject depth-axis directions clearly');
+});
+
+test('L-LINEAR-03 ships Linear build-out as a force- and Form-exclusive layout capability', () => {
+  const descriptor = createShippedGraphModuleRegistryV1().descriptors()
+    .find((candidate) => candidate.id === 'linear-layout');
+  equal(descriptor?.displayName, 'Linear build-out', 'the shipped layout should use the public product name');
+  deepEqual(descriptor?.capabilities, ['layout', 'linear-layout'], 'consumers should request a neutral linear capability');
+  deepEqual(descriptor?.conflicts, ['form', 'force-layout'], 'derived linear positions should not mix with other position owners');
+  equal(descriptor?.defaultSettings.buildDirection, 'right', 'the generic default should build in reading direction');
+});
+
+test('L-LINEAR-04 mounts as the sole position owner and fits the derived build-out', async () => {
+  const document = graphDocument({
+    nodes: ['root', 'left', 'right', 'join'].map((id) => graphNode(id)),
+    edges: [
+      graphEdge('root-left', 'root', 'left', { directed: true }),
+      graphEdge('root-right', 'root', 'right', { directed: true }),
+      graphEdge('left-join', 'left', 'join', { directed: true }),
+      graphEdge('right-join', 'right', 'join', { directed: true }),
+    ],
+  });
+  const value = runtimeHarness({
+    document,
+    registration: withModules({
+      form: { policy: 'forbidden' },
+      'linear-layout': {
+        policy: 'required',
+        defaults: { buildDirection: 'up', layerSpacing: 100, branchSpacing: 80 },
+      },
+      'force-layout': { policy: 'forbidden' },
+    }),
+  });
+  const session = await value.create();
+  await session.fitNodes();
+  const fitted = await session.exportViewState();
+  equal(fitted.camera.target.x, 0, 'a balanced branch should fit on the build axis');
+  equal(fitted.camera.target.y, -100, 'camera fitting should use derived origin-to-join positions');
+  equal(fitted.camera.target.z, 0, 'a 2d Linear build-out should remain planar');
+  await session.dispose();
 });
 
 test('shipped Filter, Form, force layout, and palette contributions stay domain-neutral', async () => {

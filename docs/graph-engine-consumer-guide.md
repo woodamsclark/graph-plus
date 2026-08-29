@@ -68,6 +68,20 @@ filters, intent subscription, view export/restore, disposal, and lease release.
 - Release a lease when the feature closes. Release disposes only sessions owned by that lease.
 - Treat an engine instance ID change as a reload; old leases are stale and must not be reused.
 
+## Choosing a layout
+
+Consumers that need a deterministic directed sequence can request the shipped
+`linear-layout` capability. Its module is also named `linear-layout`, and its
+`buildDirection` setting accepts `up`, `down`, `left`, `right`, `in`, or `out`.
+The first node supplied by the consumer is placed at the origin. Successive
+directed layers build away from it, branches share a layer, and joins are placed
+after their deepest prerequisite.
+
+For example, an upward two-dimensional syllabus profile should require
+`linear-layout`, set and lock `buildDirection` to `up`, and forbid both
+`force-layout` and `form`. The `in` and `out` directions require a
+three-dimensional renderer.
+
 PatternSmith integration begins as a separate change against this public artifact.
 It should not import Graph+ vault-adapter code or private Graph Engine implementations.
 

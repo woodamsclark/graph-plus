@@ -19,7 +19,7 @@ test('external client artifact is synchronized with its reviewed public sources'
     readFileSync(join(artifactRoot, 'artifact-manifest.json'), 'utf8'),
   ) as ArtifactManifest;
   equal(manifest.artifact, '@graph-plus/graph-engine-client', 'artifact name');
-  equal(manifest.artifactVersion, '1.4.0', 'artifact version');
+  equal(manifest.artifactVersion, '1.5.0', 'artifact version');
   equal(manifest.protocolVersion, 1, 'artifact protocol');
 
   const drift: string[] = [];
