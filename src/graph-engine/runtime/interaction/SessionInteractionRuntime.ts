@@ -274,7 +274,7 @@ export class SessionInteractionRuntime {
     const { focusedNodeId: _focusedNodeId, ...withoutFocus } = state;
     this.commit(nodeId === undefined ? withoutFocus : { ...withoutFocus, focusedNodeId: nodeId });
     if (nodeId) {
-      const position = this.options.getViewState().positions[nodeId];
+      const position = this.options.getInteractivePositions()[nodeId];
       if (position) {
         this.options.camera.setTarget(position);
         this.commitCamera();

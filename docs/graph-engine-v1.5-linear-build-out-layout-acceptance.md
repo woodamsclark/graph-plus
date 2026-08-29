@@ -17,6 +17,10 @@ Depends on: [Linear Build-out Layout Contract](graph-engine-v1.5-linear-build-ou
 - A 2D profile requesting `in` or `out` fails clearly.
 - The shipped descriptor exposes `layout` and `linear-layout` and conflicts with Form
   and force layout.
+- Initial coordinates become editable view state; dragging one node preserves every
+  other position without leaving the dragged node pinned.
+- Manual adjustments survive view-state restore without reapplying the initial layout.
+- Node focus targets the active projected position.
 - The V1.5 public client artifact contains the direction contract and remains free of
   provider implementation code.
 

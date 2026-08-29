@@ -52,6 +52,8 @@ export interface GraphModulePipelineStateV1 {
   readonly regionLayouts: readonly GraphNodeRegionLayoutV1[];
   readonly regionContributions: readonly GraphRenderRegionV1[];
   readonly theme: GraphRenderThemeV1;
+  /** Internal signal that a derived position set should become the session's editable position state. */
+  readonly commitPositions?: boolean;
 }
 
 export interface GraphModuleProjectionPatchV1 {
@@ -65,6 +67,7 @@ export interface GraphModuleProjectionPatchV1 {
   readonly regionLayouts?: readonly GraphNodeRegionLayoutV1[];
   readonly regionContributions?: readonly GraphRenderRegionV1[];
   readonly theme?: GraphRenderThemeV1;
+  readonly commitPositions?: boolean;
 }
 
 export interface GraphNodeRegionLayoutV1 {

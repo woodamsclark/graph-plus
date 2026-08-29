@@ -774,6 +774,19 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       regionContributions: [],
       theme: this.themePalette,
     });
+    if (this.moduleView.commitPositions) {
+      this.viewState = cloneGraphViewStateV1({
+        ...this.viewState,
+        positions: this.moduleView.positions,
+      });
+      this.moduleView = {
+        ...this.moduleView,
+        positions: this.viewState.positions,
+        viewState: this.viewState,
+        commitPositions: false,
+      };
+      this.moduleHost.viewChanged(this.viewState);
+    }
     this.projectionSelection = this.moduleView.projectionSelection;
     this.renderSelection = this.moduleView.renderSelection;
     this.refreshFrame();
@@ -811,10 +824,16 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private handleRuntimeViewChange(change: GraphRuntimeViewChangeV1): void {
+    const draggedNodeId = change === 'positions' ? this.interaction.getDraggedNodeId() : undefined;
+    const draggedPosition = draggedNodeId ? this.viewState.positions[draggedNodeId] : undefined;
     this.moduleView = {
       ...this.moduleView,
       viewState: this.viewState,
-      ...(change === 'positions' ? { positions: this.viewState.positions } : {}),
+      ...(change === 'positions' ? {
+        positions: draggedNodeId && draggedPosition
+          ? { ...this.moduleView.positions, [draggedNodeId]: draggedPosition }
+          : this.viewState.positions,
+      } : {}),
     };
     if (change === 'camera') {
       this.moduleHost.viewChanged(this.viewState);
@@ -855,7 +874,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const { focusedNodeId: _focusedNodeId, ...withoutFocus } = this.viewState;
     this.viewState = nodeId === undefined ? withoutFocus : { ...withoutFocus, focusedNodeId: nodeId };
     if (nodeId) {
-      const position = this.viewState.positions[nodeId];
+      const position = this.moduleView.positions[nodeId];
       if (position) {
         this.camera.setTarget(position);
         this.synchronizeCameraState();

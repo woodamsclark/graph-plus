@@ -23,6 +23,7 @@ interface LayoutComponent {
 
 export class LinearBuildOutLayoutModule implements GraphModuleInstanceV1 {
   private settings: LinearBuildOutLayoutSettingsV1;
+  private placedDocumentId: string | undefined;
 
   constructor(
     private readonly dimensions: GraphDimensionsV1,
@@ -33,15 +34,34 @@ export class LinearBuildOutLayoutModule implements GraphModuleInstanceV1 {
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
     this.settings = readLinearBuildOutLayoutSettingsV1(this.dimensions, settings);
+    this.placedDocumentId = undefined;
+  }
+
+  restoreState(state: JsonValue): void {
+    if (!state || typeof state !== 'object' || Array.isArray(state)) {
+      throw new Error('Linear build-out state must identify its placed document.');
+    }
+    const placedDocumentId = (state as Readonly<Record<string, JsonValue>>).placedDocumentId;
+    if (typeof placedDocumentId !== 'string' || !placedDocumentId) {
+      throw new Error('Linear build-out state must identify its placed document.');
+    }
+    this.placedDocumentId = placedDocumentId;
+  }
+
+  exportState(): JsonValue {
+    return this.placedDocumentId ? { placedDocumentId: this.placedDocumentId } : null;
   }
 
   projectTopology(state: GraphModulePipelineStateV1) {
+    if (this.placedDocumentId === state.document.documentId) return;
+    this.placedDocumentId = state.document.documentId;
     return {
       positions: buildLinearBuildOutPositionsV1(
         state.document,
         this.dimensions,
         this.settings,
       ),
+      commitPositions: true,
     };
   }
 }
@@ -70,7 +90,7 @@ export function buildLinearBuildOutPositionsV1(
   document: GraphDocumentV1,
   dimensions: GraphDimensionsV1,
   settings: LinearBuildOutLayoutSettingsV1,
-): Readonly<Record<string, Vec3>> {
+): Record<string, Vec3> {
   if (!document.nodes.length) return {};
   const orderByNodeId = new Map(document.nodes.map((node, index) => [node.id, index]));
   const components = resolveComponents(document, orderByNodeId);

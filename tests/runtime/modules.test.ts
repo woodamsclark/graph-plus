@@ -5,6 +5,7 @@ import type {
 import {
   createShippedGraphModuleRegistryV1,
   DEFAULT_GRAPH_RENDER_THEME_V1,
+  GraphCameraController,
   GraphModuleRegistry,
   GraphRequiredModuleErrorV1,
   GraphSessionProfileErrorV1,
@@ -400,7 +401,7 @@ test('L-LINEAR-03 ships Linear build-out as a force- and Form-exclusive layout c
   equal(descriptor?.defaultSettings.buildDirection, 'right', 'the generic default should build in reading direction');
 });
 
-test('L-LINEAR-04 mounts as the sole position owner and fits the derived build-out', async () => {
+test('L-LINEAR-04 initializes an editable build-out without pinning or reflowing later', async () => {
   const document = graphDocument({
     nodes: ['root', 'left', 'right', 'join'].map((id) => graphNode(id)),
     edges: [
@@ -410,16 +411,17 @@ test('L-LINEAR-04 mounts as the sole position owner and fits the derived build-o
       graphEdge('right-join', 'right', 'join', { directed: true }),
     ],
   });
-  const value = runtimeHarness({
-    document,
-    registration: withModules({
+  const registration = withModules({
       form: { policy: 'forbidden' },
       'linear-layout': {
         policy: 'required',
         defaults: { buildDirection: 'up', layerSpacing: 100, branchSpacing: 80 },
       },
       'force-layout': { policy: 'forbidden' },
-    }),
+    });
+  const value = runtimeHarness({
+    document,
+    registration,
   });
   const session = await value.create();
   await session.fitNodes();
@@ -427,6 +429,47 @@ test('L-LINEAR-04 mounts as the sole position owner and fits the derived build-o
   equal(fitted.camera.target.x, 0, 'a balanced branch should fit on the build axis');
   equal(fitted.camera.target.y, -100, 'camera fitting should use derived origin-to-join positions');
   equal(fitted.camera.target.z, 0, 'a 2d Linear build-out should remain planar');
+
+  await session.focusNode('join');
+  deepEqual(
+    (await session.exportViewState()).camera.target,
+    { x: 0, y: -200, z: 0 },
+    'focus should target the projected Linear build-out position',
+  );
+  await session.focusNode(null);
+  await session.fitNodes();
+
+  const beforeDrag = await session.exportViewState();
+  const camera = new GraphCameraController(beforeDrag.camera, '2d');
+  camera.setViewport(640, 360);
+  const branchPoint = camera.worldToScreen({ x: -40, y: -100, z: 0 });
+  const canvas = runtimeCanvas(value.container);
+  pointer(value, canvas, 'pointerdown', branchPoint.x, branchPoint.y, 41);
+  pointer(value, canvas, 'pointermove', branchPoint.x + 36, branchPoint.y + 24, 41);
+  value.platform.flushFrame();
+  pointer(value, canvas, 'pointerup', branchPoint.x + 36, branchPoint.y + 24, 41);
+  value.platform.flushFrame();
+
+  const dragged = await session.exportViewState();
+  assert(!dragged.pinnedNodeIds.includes('left'), 'initial Linear build-out placement should not leave dragged nodes pinned');
+  deepEqual(
+    dragged.positions.join,
+    beforeDrag.positions.join,
+    'dragging one node should not alter any other editable position',
+  );
+  await session.fitNodes(['join']);
+  deepEqual(
+    (await session.exportViewState()).camera.target,
+    { x: 0, y: -200, z: 0 },
+    'dragging one node must not replace the remaining projected layout',
+  );
+  await session.restoreViewState(dragged);
+  await session.fitNodes(['left']);
+  deepEqual(
+    (await session.exportViewState()).camera.target,
+    dragged.positions.left,
+    'a manual adjustment should survive restore without reapplying the initial layout',
+  );
   await session.dispose();
 });
 
@@ -692,4 +735,29 @@ function lifecycle(id: string, log: string[]) {
     setSuspended: (suspended: boolean) => log.push(`${id}:suspend:${String(suspended)}`),
     dispose: () => log.push(`${id}:dispose`),
   };
+}
+
+function pointer(
+  value: ReturnType<typeof runtimeHarness>,
+  canvas: HTMLCanvasElement,
+  type: 'pointerdown' | 'pointermove' | 'pointerup',
+  clientX: number,
+  clientY: number,
+  pointerId: number,
+): void {
+  const event = new value.window.PointerEvent(type, {
+    clientX,
+    clientY,
+    pointerId,
+    pointerType: 'mouse',
+    button: 0,
+    bubbles: true,
+    cancelable: true,
+  });
+  Object.defineProperty(event, 'clientX', { value: clientX });
+  Object.defineProperty(event, 'clientY', { value: clientY });
+  Object.defineProperty(event, 'pointerId', { value: pointerId });
+  Object.defineProperty(event, 'pointerType', { value: 'mouse' });
+  Object.defineProperty(event, 'button', { value: 0 });
+  canvas.dispatchEvent(event as unknown as Event);
 }

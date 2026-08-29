@@ -70,12 +70,16 @@ filters, intent subscription, view export/restore, disposal, and lease release.
 
 ## Choosing a layout
 
-Consumers that need a deterministic directed sequence can request the shipped
-`linear-layout` capability. Its module is also named `linear-layout`, and its
+Consumers that need deterministic initial placement for a directed sequence can
+request the shipped `linear-layout` capability. Its module is also named
+`linear-layout`, and its
 `buildDirection` setting accepts `up`, `down`, `left`, `right`, `in`, or `out`.
 The first node supplied by the consumer is placed at the origin. Successive
 directed layers build away from it, branches share a layer, and joins are placed
 after their deepest prerequisite.
+
+The resulting coordinates become ordinary editable view positions. Linear build-out
+does not keep nodes attached to lanes or reapply itself when the same view is restored.
 
 For example, an upward two-dimensional syllabus profile should require
 `linear-layout`, set and lock `buildDirection` to `up`, and forbid both
