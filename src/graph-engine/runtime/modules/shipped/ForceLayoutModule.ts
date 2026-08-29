@@ -19,6 +19,7 @@ interface ForceSettings {
   readonly velocityDecay: number;
   readonly alphaDecay: number;
   readonly alphaMin: number;
+  readonly settlingSpeed: number;
   readonly repulsionMinDistance: number;
   readonly barnesHutTheta: number;
   readonly maxSpeed: number;
@@ -126,40 +127,46 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     const dt = Math.min(1 / 20, Math.max(1 / 240, deltaSeconds || 1 / 60));
     this.alpha += (0 - this.alpha) * this.settings.alphaDecay;
     if (dragActive) this.alpha = Math.max(this.alpha, ACTIVE_DRAG_ALPHA);
-    for (const node of state.document.nodes) {
-      const force = this.forces.get(node.id)!;
-      force.x = 0; force.y = 0; force.z = 0;
-    }
-    this.applyBarnesHutRepulsion(this.positions, this.forces);
-    if (this.settings.weightingMode === 'topology-weighted') this.applyWeightedSprings();
-    else this.applyUniformSprings(state.document);
-    this.applyRegionMembershipForces(state);
-    if (this.settings.weightingMode === 'topology-weighted') this.applyComponentCentering();
-    else this.applyUniformCentering(state.document);
     let changed = false;
-    for (const node of state.document.nodes) {
-      const velocity = this.velocities.get(node.id)!;
-      if (this.pinned.has(node.id)) {
-        velocity.x = 0; velocity.y = 0; velocity.z = 0;
-        continue;
+    const stepCount = Math.max(1, Math.ceil(this.settings.settlingSpeed));
+    const simulationScale = this.settings.settlingSpeed / stepCount;
+    const movementScale = dt * 60 * simulationScale;
+    const velocityRetention = Math.pow(1 - this.settings.velocityDecay, simulationScale);
+    for (let step = 0; step < stepCount; step += 1) {
+      for (const node of state.document.nodes) {
+        const force = this.forces.get(node.id)!;
+        force.x = 0; force.y = 0; force.z = 0;
       }
-      const acceleration = this.forces.get(node.id)!;
-      const decay = 1 - this.settings.velocityDecay;
-      velocity.x = (velocity.x + acceleration.x) * decay;
-      velocity.y = (velocity.y + acceleration.y) * decay;
-      velocity.z = this.dimensions === '2d' ? 0 : (velocity.z + acceleration.z) * decay;
-      const speed = magnitude(velocity);
-      if (speed > this.settings.maxSpeed) {
-        const scale = this.settings.maxSpeed / speed;
-        velocity.x *= scale; velocity.y *= scale; velocity.z *= scale;
+      this.applyBarnesHutRepulsion(this.positions, this.forces);
+      if (this.settings.weightingMode === 'topology-weighted') this.applyWeightedSprings();
+      else this.applyUniformSprings(state.document);
+      this.applyRegionMembershipForces(state);
+      if (this.settings.weightingMode === 'topology-weighted') this.applyComponentCentering();
+      else this.applyUniformCentering(state.document);
+      for (const node of state.document.nodes) {
+        const velocity = this.velocities.get(node.id)!;
+        if (this.pinned.has(node.id)) {
+          velocity.x = 0; velocity.y = 0; velocity.z = 0;
+          continue;
+        }
+        const acceleration = this.forces.get(node.id)!;
+        velocity.x = (velocity.x + acceleration.x * simulationScale) * velocityRetention;
+        velocity.y = (velocity.y + acceleration.y * simulationScale) * velocityRetention;
+        velocity.z = this.dimensions === '2d'
+          ? 0
+          : (velocity.z + acceleration.z * simulationScale) * velocityRetention;
+        const speed = magnitude(velocity);
+        if (speed > this.settings.maxSpeed) {
+          const scale = this.settings.maxSpeed / speed;
+          velocity.x *= scale; velocity.y *= scale; velocity.z *= scale;
+        }
+        const movement = Math.hypot(velocity.x, velocity.y, velocity.z) * movementScale;
+        if (movement > 0.00001) changed = true;
+        const position = this.positions[node.id];
+        position.x += velocity.x * movementScale;
+        position.y += velocity.y * movementScale;
+        position.z = this.dimensions === '2d' ? 0 : position.z + velocity.z * movementScale;
       }
-      const movementScale = dt * 60;
-      const movement = Math.hypot(velocity.x, velocity.y, velocity.z) * movementScale;
-      if (movement > 0.00001) changed = true;
-      const position = this.positions[node.id];
-      position.x += velocity.x * movementScale;
-      position.y += velocity.y * movementScale;
-      position.z = this.dimensions === '2d' ? 0 : position.z + velocity.z * movementScale;
     }
     if (!dragActive && (this.alpha < this.settings.alphaMin || this.isSettled(this.pinned))) {
       this.running = false;
@@ -478,6 +485,7 @@ export function readForceSettings(settings: Readonly<Record<string, JsonValue>>)
     velocityDecay: clampNumber(settings.velocityDecay ?? settings.damping, 0, 1, 0.4),
     alphaDecay: clampNumber(settings.alphaDecay, 0, 1, 0.035),
     alphaMin: finitePositive(settings.alphaMin, 0.001),
+    settlingSpeed: clampNumber(settings.settlingSpeed, 0.25, 4, 1),
     repulsionMinDistance: finitePositive(settings.repulsionMinDistance, 40),
     barnesHutTheta: finitePositive(settings.barnesHutTheta, 0.8),
     maxSpeed: finitePositive(settings.maxSpeed, 260),

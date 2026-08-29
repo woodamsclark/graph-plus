@@ -24,7 +24,7 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
   profiles: [{
     profileId: GRAPH_PLUS_PROFILE_ID_V1,
     displayName: 'Default',
-    descriptorVersion: 3,
+    descriptorVersion: 4,
     dimensions: '2d',
     allowedDimensions: ['2d', '3d'],
     requestedCapabilities: GRAPH_PLUS_REQUESTED_CAPABILITIES_V1,
@@ -45,7 +45,7 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
       activationActionIds: ['open-node'],
       contextActionIds: ['open-node'],
     },
-    profileSettings: { focalLengthMm: 50, dragRelease: 'pin' },
+    profileSettings: { focalLengthMm: 50, dragRelease: 'dynamic' },
     modules: {
       rendering: {
         policy: 'required',
@@ -64,7 +64,7 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
           colorBranches: true,
         },
       },
-      'force-layout': { policy: 'optional', defaultEnabled: true },
+      'force-layout': { policy: 'optional', defaultEnabled: true, defaults: { settlingSpeed: 2 } },
       'node-regions': {
         policy: 'optional',
         defaultEnabled: true,

@@ -5,6 +5,14 @@ import { createShippedGraphModuleRegistryV1 } from '../../src/graph-engine/runti
 import { GraphEngineSettingsControllerV1 } from '../../src/obsidian/settings/GraphEngineSettingsController.ts';
 import { assert, equal, test } from '../support/harness.ts';
 
+test('Graph+ releases dragged nodes while retaining explicit context-menu pinning', () => {
+  const profile = GRAPH_PLUS_CONSUMER_REGISTRATION_V1.profiles[0];
+  equal(profile?.profileSettings?.dragRelease, 'dynamic', 'drag release should return an unpinned node to the active layout');
+  equal(profile?.uiDefaults?.contextMenuEnabled, true, 'the right-click menu should remain available for explicit pinning');
+  equal(profile?.uiDefaults?.coreContextActions?.['toggle-pin'], undefined, 'the core Pin node action should remain visible by default');
+  equal(profile?.modules['force-layout']?.defaults?.settlingSpeed, 2, 'Graph+ should perform two layout steps inside each visible cooling frame');
+});
+
 test('R-DIM-01 profile dimension edits persist in one namespace and reset independently', async () => {
   const profiles = new ConsumerProfileRegistry();
   profiles.registerConsumer(GRAPH_PLUS_CONSUMER_REGISTRATION_V1);

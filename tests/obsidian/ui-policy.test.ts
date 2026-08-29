@@ -8,6 +8,7 @@ import {
   graphUiSectionIsShownV1,
   resolveGraphSessionUiPolicyV1,
 } from '../../src/obsidian/graph-engine-ui/GraphEngineUiPolicy.ts';
+import { GraphEngineQuickSettingsDisclosureStateV1 } from '../../src/obsidian/graph-engine-ui/GraphEngineQuickSettingsDisclosureState.ts';
 import { equal, test } from '../support/harness.ts';
 
 function descriptor(): ConsumerProfileDescriptorV1 {
@@ -63,4 +64,13 @@ test('R-UI-02 hiding UI controls is independent of engine module policy', () => 
   });
   equal(graphUiSectionIsShownV1(policy, SECTIONS.form), false, 'the Form UI section should be hidden');
   equal(value.modules.form, undefined, 'resolving visibility must not synthesize or mutate module policy');
+});
+
+test('R-UI-04 quick-setting disclosures retain their user state across panel renders', () => {
+  const disclosures = new GraphEngineQuickSettingsDisclosureStateV1();
+  equal(disclosures.resolve(SECTIONS.forces, false), false, 'a section should begin at its declared default');
+  disclosures.remember(SECTIONS.forces, true);
+  equal(disclosures.resolve(SECTIONS.forces, false), true, 'an opened section should remain open after controls rerender');
+  disclosures.remember(SECTIONS.filter, false);
+  equal(disclosures.resolve(SECTIONS.filter, true), false, 'a closed default-open section should remain closed after controls rerender');
 });

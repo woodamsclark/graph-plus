@@ -119,6 +119,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
         velocityDecay: 0.4,
         alphaDecay: 0.035,
         alphaMin: 0.001,
+        settlingSpeed: 1,
         repulsionMinDistance: 40,
         barnesHutTheta: 0.8,
         maxSpeed: 260,

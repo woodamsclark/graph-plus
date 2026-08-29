@@ -14,6 +14,7 @@ import {
   graphUiSectionIsShownV1,
   type EffectiveGraphSessionUiPolicyV1,
 } from './GraphEngineUiPolicy.ts';
+import { GraphEngineQuickSettingsDisclosureStateV1 } from './GraphEngineQuickSettingsDisclosureState.ts';
 import { ObsidianGraphUiLayoutV1 } from './ObsidianGraphUiLayout.ts';
 
 const SECTION_TITLES: Readonly<Record<string, string>> = {
@@ -32,6 +33,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
   private intentSubscription?: Disposable;
   private overrideSubscription?: Disposable;
   private contributionDisposables: Disposable[] = [];
+  private readonly disclosureState = new GraphEngineQuickSettingsDisclosureStateV1();
   private collapsed: boolean;
   private disposed = false;
 
@@ -128,7 +130,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     for (const [sectionId, values] of contributions) {
       if (Object.values(SECTIONS).includes(sectionId as typeof SECTIONS[keyof typeof SECTIONS])) continue;
       if (!graphUiSectionIsShownV1(this.policy, sectionId)) continue;
-      const sectionBody = this.section(body, humanize(sectionId), false);
+      const sectionBody = this.section(body, sectionId, humanize(sectionId), false);
       this.mountContributions(sectionBody, values);
     }
     this.status = div(root, 'graphplus-controls-status graph-engine-controls-status');
@@ -137,7 +139,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
 
   private renderFilter(parent: HTMLElement, contributions: readonly GraphQuickSettingsContributionV1[]): void {
     if (!graphUiSectionIsShownV1(this.policy, SECTIONS.filter)) return;
-    const body = this.section(parent, SECTION_TITLES[SECTIONS.filter], true);
+    const body = this.section(parent, SECTIONS.filter, SECTION_TITLES[SECTIONS.filter], true);
     if (graphUiControlIsShownV1(this.policy, SECTIONS.filter, CONTROLS.clearFilter)) {
       new Setting(body).setName('Active filters').setDesc('Consumers supply neutral filter ASTs.')
         .addButton((button) => button.setButtonText('Clear filters').onClick(() => this.context.session.clearFilter()));
@@ -152,7 +154,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     contributions: readonly GraphQuickSettingsContributionV1[],
   ): Promise<void> {
     if (!graphUiSectionIsShownV1(this.policy, SECTIONS.form)) return;
-    const body = this.section(parent, SECTION_TITLES[SECTIONS.form], true);
+    const body = this.section(parent, SECTIONS.form, SECTION_TITLES[SECTIONS.form], true);
     if (graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.mindMap)) {
       const form = effective.modules.form;
       const selectedId = viewState.selectedNodeIds.length === 1 ? viewState.selectedNodeIds[0] : undefined;
@@ -208,7 +210,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     contributions: readonly GraphQuickSettingsContributionV1[],
   ): void {
     if (!graphUiSectionIsShownV1(this.policy, SECTIONS.display)) return;
-    const body = this.section(parent, SECTION_TITLES[SECTIONS.display], false);
+    const body = this.section(parent, SECTIONS.display, SECTION_TITLES[SECTIONS.display], false);
     const rendering = effective.modules.rendering;
     if (rendering) {
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labels)) {
@@ -268,7 +270,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
 
   private renderCamera(parent: HTMLElement, contributions: readonly GraphQuickSettingsContributionV1[]): void {
     if (!graphUiSectionIsShownV1(this.policy, SECTIONS.camera)) return;
-    const body = this.section(parent, SECTION_TITLES[SECTIONS.camera], false);
+    const body = this.section(parent, SECTIONS.camera, SECTION_TITLES[SECTIONS.camera], false);
     if (graphUiControlIsShownV1(this.policy, SECTIONS.camera, CONTROLS.resetCamera)) {
       new Setting(body).setName('Camera').setDesc('Reset framing without changing the graph document.')
         .addButton((button) => button.setButtonText('Reset camera').onClick(() => this.context.session.resetCamera()));
@@ -282,7 +284,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     contributions: readonly GraphQuickSettingsContributionV1[],
   ): void {
     if (!graphUiSectionIsShownV1(this.policy, SECTIONS.forces)) return;
-    const body = this.section(parent, SECTION_TITLES[SECTIONS.forces], false);
+    const body = this.section(parent, SECTIONS.forces, SECTION_TITLES[SECTIONS.forces], false);
     const forces = effective.modules['force-layout'];
     if (forces?.enabled) {
       if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.weightingMode)) {
@@ -320,7 +322,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
   ): void {
     const regions = effective.modules['node-regions'];
     if (!regions?.enabled || !graphUiSectionIsShownV1(this.policy, SECTIONS.regions)) return;
-    const body = this.section(parent, SECTION_TITLES[SECTIONS.regions], false);
+    const body = this.section(parent, SECTIONS.regions, SECTION_TITLES[SECTIONS.regions], false);
     if (graphUiControlIsShownV1(this.policy, SECTIONS.regions, CONTROLS.regionBoundaries)) {
       new Setting(body)
         .setName('Show region boundaries')
@@ -370,10 +372,11 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       }));
   }
 
-  private section(parent: HTMLElement, title: string, open: boolean): HTMLElement {
+  private section(parent: HTMLElement, sectionId: string, title: string, defaultOpen: boolean): HTMLElement {
     const details = this.context.container.ownerDocument.createElement('details');
     details.className = 'graphplus-control-section graph-engine-control-section';
-    details.open = open;
+    details.open = this.disclosureState.resolve(sectionId, defaultOpen);
+    details.addEventListener('toggle', () => this.disclosureState.remember(sectionId, details.open));
     const summary = this.context.container.ownerDocument.createElement('summary');
     const label = this.context.container.ownerDocument.createElement('span');
     label.textContent = title;

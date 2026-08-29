@@ -555,6 +555,45 @@ test('C-SETTING-02 topology weighting is the shipped free-layout default', () =>
     .find((candidate) => candidate.id === 'force-layout');
   equal(descriptor?.defaultSettings.weightingMode, 'topology-weighted', 'all consumers should receive the engine-owned weighted default');
   equal(descriptor?.defaultSettings.springLength, 120, 'the weighted baseline should use the documented ordinary distance');
+  equal(descriptor?.defaultSettings.settlingSpeed, 1, 'the neutral engine should expose one simulation step per cooling frame');
+});
+
+test('L-SETTLE-01 settling speed advances convergence without shortening alpha decay', async () => {
+  const document = graphDocument({
+    nodes: [
+      graphNode('left', { positionHint: { x: -200, y: 0, z: 0 } }),
+      graphNode('right', { positionHint: { x: 200, y: 0, z: 0 } }),
+    ],
+    edges: [graphEdge('join', 'left', 'right')],
+  });
+  const distanceAfterOneFrame = async (settlingSpeed: number): Promise<number> => {
+    const value = runtimeHarness({ document });
+    value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
+      modules: {
+        'force-layout': {
+          enabled: true,
+          settings: {
+            settlingSpeed,
+            repulsionStrength: 0,
+            centeringStrength: 0,
+          },
+        },
+      },
+    });
+    const session = await value.create();
+    value.platform.flushFrame(16);
+    const positions = (await session.exportViewState()).positions;
+    const distance = Math.hypot(
+      positions.right.x - positions.left.x,
+      positions.right.y - positions.left.y,
+      positions.right.z - positions.left.z,
+    );
+    await session.dispose();
+    return distance;
+  };
+  const ordinary = await distanceAfterOneFrame(1);
+  const accelerated = await distanceAfterOneFrame(2);
+  assert(accelerated < ordinary, 'extra simulation progress should move linked nodes closer to equilibrium in the same cooling frame');
 });
 
 test('L-COMPONENT-01 weighted component centering separates islands and mode switching preserves state', async () => {
