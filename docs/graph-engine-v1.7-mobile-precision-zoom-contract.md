@@ -1,4 +1,4 @@
-# Graph Engine V1.7 Mobile Precision Zoom Contract
+# Graph Engine V1.7 Interaction, Runtime, and Recovery Contract
 
 Status: Draft; product intent recorded, implementation not started.
 
@@ -11,10 +11,10 @@ Depends on:
 
 ## 1. Purpose
 
-V1.7 adds a one-finger precision zoom gesture for mobile use without replacing the
-accepted two-finger pinch gesture or Graph+'s focus-first interaction model. The
-gesture is intended for situations where the user is holding the device in one hand
-or where a second touch is inconvenient.
+V1.7 adds a one-finger precision zoom gesture for mobile use, a bounded graph update
+pipeline, Graph+ recovery and settings cleanup, and direct Obsidian-to-Graph+
+navigation. These additions preserve the accepted two-finger pinch gesture and
+Graph+'s focus-first interaction model.
 
 ## 2. Normative gesture
 
@@ -145,13 +145,55 @@ Automated pointer traces must prove:
 15. After a layout reset and reconnect, every visible document node receives a safe
     initial position, the camera fits the regenerated graph, and the reset state
     replaces rather than races with the prior live session checkpoint.
+16. Invoking **Show in Graph+** from a Markdown file tab opens or reveals Graph+ and
+    focuses the stable note node for that exact vault-relative path.
+17. A filtered target receives a temporary reveal without mutating the persisted
+    Filter query; clearing or transferring focus removes the exception.
+18. The command uses ordinary selection and focus state, so camera targeting and
+    Anima neighborhood highlighting cannot diverge from direct node focus.
 
 Manual acceptance requires physical iOS testing in portrait and landscape, beginning
 over both nodes and background, at near and far zoom limits, in focused and unfocused
 2D and 3D graphs. The chosen sensitivity must permit useful one-thumb control without
 requiring large travel or causing abrupt scale jumps.
 
-## 8. Settings cleanup and layout recovery
+Desktop acceptance requires invoking **Show in Graph+** from an already open graph,
+with no graph open, and with the target excluded by an active Filter. Each case must
+reveal the correct node without opening a duplicate Graph+ leaf or changing the saved
+Filter query.
+
+## 8. Show in Graph+ host navigation
+
+Graph+ registers a **Show in Graph+** item with Obsidian's file context-menu event.
+The item is required for Markdown file-tab context menus and may also appear in other
+single-file contexts, such as the File Explorer, when Obsidian supplies the same
+unambiguous `TFile` target. It is absent or disabled while the bundled Graph+ consumer
+is disabled.
+
+Invoking the item:
+
+1. resolves the target from the supplied file object and its vault-relative path;
+2. reuses and reveals an existing Graph+ leaf, or creates exactly one when none exists;
+3. waits for the Graph+ consumer and its initial reconciliation to become ready;
+4. resolves the path through the same stable note-ID adapter used to construct the
+   canonical graph;
+5. applies ordinary Graph+ selection and focus to that node; and
+6. lets the existing focus controller target the camera and Anima derive all neighbor
+   and incident-link presentation from that focus state.
+
+The command does not maintain a second navigation highlight or camera-focus state.
+Focus remains the single source of truth, and normal background defocus or focus
+transfer clears the result exactly as if the node had been clicked in Graph+.
+
+If the note is absent from the current canonical snapshot, Graph+ performs one normal
+reconciliation before reporting that the node is unavailable. If the note exists but
+the projection Filter excludes it, Graph+ adds a transient reveal exception for only
+the target node. Existing neighbors and links remain visible only when permitted by
+the active Filter. The exception is neither written into the Filter query nor stored
+in the checkpoint, and it ends when focus clears, moves to another node, the file is
+deleted, or the graph session closes.
+
+## 9. Settings cleanup and layout recovery
 
 V1.7 reorganizes Graph+ settings into concise, purpose-based sections and places
 destructive recovery actions in a visually separate **Danger zone** at the end. The
@@ -180,7 +222,7 @@ coordinates or velocities must still be rejected automatically during ordinary l
 the user should not need to discover and operate the Danger zone after the same class
 of corruption occurs again.
 
-## 9. Non-goals
+## 10. Non-goals
 
 V1.7 does not require:
 
@@ -188,5 +230,7 @@ V1.7 does not require:
 - assigning an action to a stationary double tap;
 - zoom inertia;
 - platform-specific automatic sensitivity;
+- replacing Obsidian's native file-menu behavior or changing the active Markdown file;
+- clearing or rewriting a Filter merely to reveal a context-menu target;
 - changing desktop wheel, trackpad pan, pinch, or Cmd-scroll behavior; or
 - changing focus, selection, node-drag, or activation semantics.
