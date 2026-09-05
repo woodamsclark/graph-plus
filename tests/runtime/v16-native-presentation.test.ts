@@ -304,6 +304,48 @@ test('V1.6 D3-compatible mechanics remain finite and spatial in 3D', () => {
   assert(result.positions.a.z !== -100 || result.positions.b.z !== 100, 'Z should participate in native force integration');
 });
 
+test('V1.6 force integration rejects hostile restored motion and enforces maxSpeed', () => {
+  const document = graphDocument({
+    nodes: [
+      graphNode('left', { positionHint: { x: -200, y: 0, z: 0 } }),
+      graphNode('right', { positionHint: { x: 200, y: 0, z: 0 } }),
+    ],
+    edges: [graphEdge('join', 'left', 'right')],
+  });
+  const maxSpeed = 10;
+  const force = new ForceLayoutModule('2d', readForceSettings({
+    weightingMode: 'uniform', repulsionStrength: 0, centeringStrength: 0,
+    collisionRadius: 0, springStrength: 1000, springLength: 1, maxSpeed,
+  }));
+  force.restoreState({
+    schemaVersion: 1,
+    alpha: 0,
+    alphaTarget: 0,
+    running: false,
+    velocities: {
+      left: { x: 1e42, y: 0, z: 0 },
+      right: { x: -1e42, y: 0, z: 0 },
+    },
+  });
+  const state = pipeline(document, {
+    nodeIds: new Set(['left', 'right']), edgeIds: new Set(['join']),
+  });
+  const result = force.tick(state, 1 / 60);
+  assert(result?.positions, 'rejected hostile motion should reheat from safe positions');
+  const leftMovement = Math.hypot(
+    result.positions.left.x - state.positions.left.x,
+    result.positions.left.y - state.positions.left.y,
+    result.positions.left.z - state.positions.left.z,
+  );
+  const rightMovement = Math.hypot(
+    result.positions.right.x - state.positions.right.x,
+    result.positions.right.y - state.positions.right.y,
+    result.positions.right.z - state.positions.right.z,
+  );
+  assert(leftMovement <= maxSpeed + 1e-10 && rightMovement <= maxSpeed + 1e-10,
+    'every integrated node movement should obey the configured maximum speed');
+});
+
 test('V1.6 retirement migration promotes the accepted settings and removes comparison banks', () => {
   const migrated = migrateGraphPlusProfileOverridesV16({
     profileSettings: { graphSystem: 'legacy', graphSystemMigrationVersion: 1 },

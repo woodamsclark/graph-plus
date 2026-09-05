@@ -161,6 +161,32 @@ test('R-SHELL-03 round-trips consumer-owned view state and supports camera comma
   await restored.dispose();
 });
 
+test('restored positions outside safe numerical bounds regenerate before rendering', async () => {
+  const source = harness();
+  const sourceSession = await source.create();
+  const saved = await sourceSession.exportViewState();
+  await sourceSession.dispose();
+  const hostile = {
+    ...saved,
+    positions: {
+      ...saved.positions,
+      a: { x: 1e46, y: -1e46, z: 0 },
+    },
+  };
+  const target = harness();
+  const session = await target.create(hostile);
+  const errors: string[] = [];
+  session.onError((error) => errors.push(error.code));
+  const recovered = await session.exportViewState();
+  assert(Object.values(recovered.positions).every((position) =>
+    Math.abs(position.x) < 1_000_000
+    && Math.abs(position.y) < 1_000_000
+    && Math.abs(position.z) < 1_000_000),
+  'hostile restored coordinates should be replaced with a safe generated layout');
+  deepEqual(errors, ['incompatible-view-state'], 'numerical recovery should remain observable to the consumer');
+  await session.dispose();
+});
+
 test('restored 3d views migrate zoom into fixed focal length without changing apparent scale', async () => {
   const value = harness({ profileId: 'three-dimensional' });
   const session = await value.create();

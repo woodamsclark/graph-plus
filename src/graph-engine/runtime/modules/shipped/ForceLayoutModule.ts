@@ -68,6 +68,7 @@ export interface ForceLayoutDiagnosticsV1 {
 const NATIVE_ACTIVE_DRAG_ALPHA = 0.3;
 const FIXED_STEP_SECONDS = 1 / 60;
 const MAX_CATCH_UP_STEPS = 8;
+const RESTORED_SPEED_REJECTION_MULTIPLIER = 4;
 
 export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private readonly velocities = new Map<string, MutableVec3>();
@@ -122,11 +123,26 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       throw new Error('Force layout state is not a valid V1 snapshot.');
     }
     if (state.forceModel !== undefined && state.forceModel !== 'd3-compatible') return;
-    this.velocities.clear();
+    const restoredVelocities = new Map<string, MutableVec3>();
+    let hostileMotion = false;
     for (const [id, value] of Object.entries(state.velocities)) {
       if (!isRecord(value) || !finiteCoordinate(value.x) || !finiteCoordinate(value.y) || !finiteCoordinate(value.z)) continue;
-      this.velocities.set(id, { x: value.x, y: value.y, z: this.dimensions === '2d' ? 0 : value.z });
+      const velocity = { x: value.x, y: value.y, z: this.dimensions === '2d' ? 0 : value.z };
+      if (Math.hypot(velocity.x, velocity.y, velocity.z) > this.settings.maxSpeed * RESTORED_SPEED_REJECTION_MULTIPLIER) {
+        hostileMotion = true;
+        break;
+      }
+      restoredVelocities.set(id, velocity);
     }
+    this.velocities.clear();
+    if (hostileMotion) {
+      this.alpha = 1;
+      this.alphaTarget = 0;
+      this.running = true;
+      this.restoredStatePending = false;
+      return;
+    }
+    for (const [id, velocity] of restoredVelocities) this.velocities.set(id, velocity);
     this.alpha = Math.max(0, state.alpha);
     this.alphaTarget = finiteCoordinate(state.alphaTarget) ? Math.max(0, state.alphaTarget) : 0;
     this.running = state.running;
@@ -324,6 +340,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
         velocity.x *= 1 - this.settings.velocityDecay;
         velocity.y *= 1 - this.settings.velocityDecay;
         velocity.z = this.dimensions === '2d' ? 0 : velocity.z * (1 - this.settings.velocityDecay);
+        clampVelocity(velocity, this.settings.maxSpeed, this.dimensions);
         const position = this.positions[node.id];
         const movement = Math.hypot(velocity.x, velocity.y, velocity.z);
         if (movement > 0.00001) changed = true;
@@ -417,6 +434,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       dx *= amount; dy *= amount; dz *= amount;
       targetVelocity.x -= dx * bias; targetVelocity.y -= dy * bias; targetVelocity.z -= dz * bias;
       sourceVelocity.x += dx * (1 - bias); sourceVelocity.y += dy * (1 - bias); sourceVelocity.z += dz * (1 - bias);
+      clampVelocity(sourceVelocity, this.settings.maxSpeed, this.dimensions);
+      clampVelocity(targetVelocity, this.settings.maxSpeed, this.dimensions);
     }
   }
 
@@ -455,6 +474,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       velocity.x += dx * factor;
       velocity.y += dy * factor;
       velocity.z += dz * factor;
+      clampVelocity(velocity, this.settings.maxSpeed, this.dimensions);
       return;
     }
     for (const child of cell.children) if (child) {
@@ -471,6 +491,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       const force = this.forces.get(node.id)!;
       const velocity = this.velocities.get(node.id)!;
       velocity.x += force.x; velocity.y += force.y; velocity.z += force.z;
+      clampVelocity(velocity, this.settings.maxSpeed, this.dimensions);
     }
   }
 
@@ -517,6 +538,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
           const bv = this.velocities.get(otherId)!;
           av.x += dx * amount; av.y += dy * amount; av.z += dz * amount;
           bv.x -= dx * amount; bv.y -= dy * amount; bv.z -= dz * amount;
+          clampVelocity(av, this.settings.maxSpeed, this.dimensions);
+          clampVelocity(bv, this.settings.maxSpeed, this.dimensions);
         }
       }
     }
@@ -640,6 +663,20 @@ function collisionCell(position: Vec3, size: number): { x: number; y: number; z:
     y: Math.floor(position.y / size),
     z: Math.floor(position.z / size),
   };
+}
+
+function clampVelocity(velocity: MutableVec3, maxSpeed: number, dimensions: GraphDimensionsV1): void {
+  if (![velocity.x, velocity.y, velocity.z].every(Number.isFinite)) {
+    velocity.x = 0; velocity.y = 0; velocity.z = 0;
+    return;
+  }
+  if (dimensions === '2d') velocity.z = 0;
+  const speed = Math.hypot(velocity.x, velocity.y, velocity.z);
+  if (speed <= maxSpeed || speed === 0) return;
+  const scale = maxSpeed / speed;
+  velocity.x *= scale;
+  velocity.y *= scale;
+  velocity.z *= scale;
 }
 
 function collisionCellKey(position: Vec3, size: number, dimensions: GraphDimensionsV1): string {

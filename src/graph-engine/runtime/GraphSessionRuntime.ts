@@ -72,6 +72,7 @@ export interface GraphSessionRuntimeOptionsV1 {
 }
 
 const RETIRED_GRAPH_SYSTEM_STATE_KEY_V1 = 'graph-system-states-v1';
+const MAX_RESTORED_POSITION_COORDINATE = 1_000_000_000;
 
 export class GraphSessionDisposedErrorV1 extends Error {
   readonly code = 'session-disposed' as const;
@@ -211,8 +212,18 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const restored = options.restoreViewState
       ? withoutRetiredGraphSystemState(options.restoreViewState)
       : undefined;
-    const restoredViewState = restored
-      ? this.prepareRestoredViewState(restored)
+    const plausibleRestored = restored && hasPlausibleRestoredPositions(restored)
+      ? restored
+      : undefined;
+    if (restored && !plausibleRestored) {
+      this.deferredErrors.push({
+        code: 'incompatible-view-state',
+        message: 'Saved graph positions exceeded safe numerical bounds. Graph Engine regenerated the layout.',
+        recoverable: true,
+      });
+    }
+    const restoredViewState = plausibleRestored
+      ? this.prepareRestoredViewState(plausibleRestored)
       : undefined;
     this.viewState = normalizePerspectiveViewState(restoredViewState
       ? addMissingPositions(
@@ -272,7 +283,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       visibilityListenerInstalled = true;
       this.documentSuspended = this.platform.document.hidden;
       this.recomputeView();
-      if (!options.restoreViewState) this.fitPositions(Object.values(this.moduleView.positions));
+      if (!restoredViewState) this.fitPositions(Object.values(this.moduleView.positions));
       this.refreshFrame();
       this.renderer.render();
       this.synchronizeRuntimeActivity();
@@ -464,6 +475,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.requireActive();
     try {
       const source = withoutRetiredGraphSystemState(state);
+      if (!hasPlausibleRestoredPositions(source)) {
+        throw new Error('Saved graph positions exceed safe numerical bounds.');
+      }
       const prepared = this.prepareRestoredViewState(source);
       const restoredViewState = normalizePerspectiveViewState(addMissingPositions(
         reconcileGraphViewStateV1(prepared, this.restoreContext()),
@@ -1180,6 +1194,13 @@ function focalLengthMm(settings: Readonly<Record<string, import('../contracts/v1
 
 function usesGeneratedInitialPositions(settings: Readonly<Record<string, JsonValue>>): boolean {
   return settings.initialPositionStrategy === 'generated';
+}
+
+function hasPlausibleRestoredPositions(state: GraphViewStateV1): boolean {
+  return Object.values(state.positions).every((position) =>
+    Math.abs(position.x) <= MAX_RESTORED_POSITION_COORDINATE
+    && Math.abs(position.y) <= MAX_RESTORED_POSITION_COORDINATE
+    && Math.abs(position.z) <= MAX_RESTORED_POSITION_COORDINATE);
 }
 
 function withoutRetiredGraphSystemState(state: GraphViewStateV1): GraphViewStateV1 {
