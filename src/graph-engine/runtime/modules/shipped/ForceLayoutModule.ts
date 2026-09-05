@@ -11,6 +11,7 @@ import type { GraphModuleInstanceV1, GraphModulePipelineStateV1 } from '../Graph
 export type GraphTopologyWeightingModeV1 = 'uniform' | 'topology-weighted';
 
 interface ForceSettings {
+  readonly forceModel: 'legacy' | 'd3-compatible';
   readonly weightingMode: GraphTopologyWeightingModeV1;
   readonly repulsionStrength: number;
   readonly springStrength: number;
@@ -33,6 +34,8 @@ interface ForceSettings {
   readonly minimumSpringLengthScale: number;
   readonly maximumSpringLengthScale: number;
   readonly componentPadding: number;
+  readonly collisionRadius: number;
+  readonly collisionStrength: number;
 }
 
 interface MutableVec3 {
@@ -64,7 +67,10 @@ export interface ForceLayoutDiagnosticsV1 {
   readonly running: boolean;
 }
 
-const ACTIVE_DRAG_ALPHA = 0.35;
+const LEGACY_ACTIVE_DRAG_ALPHA = 0.35;
+const NATIVE_ACTIVE_DRAG_ALPHA = 0.3;
+const FIXED_STEP_SECONDS = 1 / 60;
+const MAX_CATCH_UP_STEPS = 8;
 
 export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private readonly velocities = new Map<string, MutableVec3>();
@@ -85,26 +91,78 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private pinnedKey = '';
   private regionLayoutKey = '';
   private topologyAnalysisCount = 0;
+  private accumulatorSeconds = 0;
+  private alphaTarget = 0;
+  private dragWasActive = false;
+  private restoredStatePending = false;
+  private rawSettings?: Readonly<Record<string, JsonValue>>;
+  private graphSystem: 'new' | 'legacy' = 'legacy';
 
   constructor(
     private readonly dimensions: GraphDimensionsV1,
     private settings: ForceSettings,
-  ) {}
+    rawSettings?: Readonly<Record<string, JsonValue>>,
+    profileSettings: Readonly<Record<string, JsonValue>> = {},
+  ) {
+    this.rawSettings = rawSettings;
+    this.graphSystem = profileSettings.graphSystem === 'new' ? 'new' : 'legacy';
+  }
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
-    this.settings = readForceSettings(settings);
+    this.rawSettings = settings;
+    this.settings = readForceSettings(modeSettings(settings, this.graphSystem));
     this.topologyDocumentSource = null;
-    this.reheat();
+    this.reheatForChange();
+  }
+
+  updateProfileSettings(settings: Readonly<Record<string, JsonValue>>): void {
+    const graphSystem = settings.graphSystem === 'new' ? 'new' : 'legacy';
+    if (graphSystem === this.graphSystem) return;
+    this.graphSystem = graphSystem;
+    if (this.rawSettings) this.settings = readForceSettings(modeSettings(this.rawSettings, this.graphSystem));
+    this.accumulatorSeconds = 0;
+    this.reheatForChange();
   }
 
   onDocumentChanged(): void {
     this.documentKey = '';
     this.topologyDocumentSource = null;
-    this.reheat();
+    this.reheatForChange();
   }
 
   onViewChanged(state: GraphModulePipelineStateV1['viewState']): void {
     this.synchronizePinnedNodes(state);
+  }
+
+  restoreState(state: JsonValue): void {
+    if (state === null) return;
+    if (!isRecord(state) || state.schemaVersion !== 1
+      || (state.forceModel !== 'legacy' && state.forceModel !== 'd3-compatible')
+      || typeof state.alpha !== 'number' || !Number.isFinite(state.alpha)
+      || typeof state.running !== 'boolean' || !isRecord(state.velocities)) {
+      throw new Error('Force layout state is not a valid V1 snapshot.');
+    }
+    if (state.forceModel !== this.settings.forceModel) return;
+    this.velocities.clear();
+    for (const [id, value] of Object.entries(state.velocities)) {
+      if (!isRecord(value) || !finiteCoordinate(value.x) || !finiteCoordinate(value.y) || !finiteCoordinate(value.z)) continue;
+      this.velocities.set(id, { x: value.x, y: value.y, z: this.dimensions === '2d' ? 0 : value.z });
+    }
+    this.alpha = Math.max(0, state.alpha);
+    this.alphaTarget = finiteCoordinate(state.alphaTarget) ? Math.max(0, state.alphaTarget) : 0;
+    this.running = state.running;
+    this.restoredStatePending = true;
+  }
+
+  exportState(): JsonValue {
+    return {
+      schemaVersion: 1,
+      forceModel: this.settings.forceModel,
+      alpha: this.alpha,
+      alphaTarget: this.alphaTarget,
+      running: this.running,
+      velocities: Object.fromEntries([...this.velocities].map(([id, value]) => [id, { ...value }])),
+    };
   }
 
   setSuspended(suspended: boolean): void {
@@ -116,17 +174,23 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     // pin state correct without requiring the session kernel to special-case force.
     this.synchronizePinnedNodes(state.viewState);
     this.synchronizeRegionLayout(state);
-    if (state.document !== this.bufferDocumentSource) this.reheat();
+    if (state.document !== this.bufferDocumentSource) {
+      if (this.restoredStatePending) this.restoredStatePending = false;
+      else this.reheatForChange();
+    }
     if (this.suspended || state.formActive || state.document.nodes.length < 2) return;
     const dragActive = state.draggedNodeId !== undefined
       && state.document.nodes.some((node) => node.id === state.draggedNodeId);
     if (dragActive) this.running = true;
-    if (!this.running) return;
     this.synchronizeBuffers(state);
     this.synchronizeTopology(state);
+    if (!this.running) return;
+    if (this.settings.forceModel === 'd3-compatible') {
+      return this.tickD3Compatible(state, deltaSeconds, dragActive);
+    }
     const dt = Math.min(1 / 20, Math.max(1 / 240, deltaSeconds || 1 / 60));
     this.alpha += (0 - this.alpha) * this.settings.alphaDecay;
-    if (dragActive) this.alpha = Math.max(this.alpha, ACTIVE_DRAG_ALPHA);
+    if (dragActive) this.alpha = Math.max(this.alpha, LEGACY_ACTIVE_DRAG_ALPHA);
     let changed = false;
     const stepCount = Math.max(1, Math.ceil(this.settings.settlingSpeed));
     const simulationScale = this.settings.settlingSpeed / stepCount;
@@ -145,7 +209,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       else this.applyUniformCentering(state.document);
       for (const node of state.document.nodes) {
         const velocity = this.velocities.get(node.id)!;
-        if (this.pinned.has(node.id)) {
+        if (this.pinned.has(node.id) || node.id === state.draggedNodeId) {
           velocity.x = 0; velocity.y = 0; velocity.z = 0;
           continue;
         }
@@ -183,7 +247,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     if (nextPinnedKey === this.pinnedKey) return;
     this.pinnedKey = nextPinnedKey;
     this.pinned = new Set(state.pinnedNodeIds);
-    this.reheat();
+    this.reheatForChange();
   }
 
   private synchronizeRegionLayout(state: GraphModulePipelineStateV1): void {
@@ -196,7 +260,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     if (nextKey === this.regionLayoutKey) return;
     this.regionLayoutKey = nextKey;
     this.topologyDocumentSource = null;
-    this.reheat();
+    this.reheatForChange();
   }
 
   private synchronizeTopology(state: GraphModulePipelineStateV1): void {
@@ -355,6 +419,237 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     }
   }
 
+  private tickD3Compatible(
+    state: GraphModulePipelineStateV1,
+    deltaSeconds: number,
+    dragActive: boolean,
+  ): { positions: Readonly<Record<string, Vec3>> } | undefined {
+    this.alphaTarget = dragActive ? NATIVE_ACTIVE_DRAG_ALPHA : 0;
+    if (dragActive && !this.dragWasActive) this.alpha = Math.max(this.alpha, NATIVE_ACTIVE_DRAG_ALPHA);
+    this.dragWasActive = dragActive;
+    this.accumulatorSeconds = Math.min(
+      FIXED_STEP_SECONDS * MAX_CATCH_UP_STEPS,
+      this.accumulatorSeconds + Math.max(0, Math.min(0.25, deltaSeconds || FIXED_STEP_SECONDS)),
+    );
+    const availableSteps = Math.floor((this.accumulatorSeconds + 1e-12) / FIXED_STEP_SECONDS);
+    const steps = Math.min(MAX_CATCH_UP_STEPS, availableSteps);
+    if (steps <= 0) return undefined;
+    this.accumulatorSeconds -= steps * FIXED_STEP_SECONDS;
+    let changed = false;
+    for (let step = 0; step < steps; step += 1) {
+      this.alpha += (this.alphaTarget - this.alpha) * this.settings.alphaDecay;
+      this.applyD3Origin(state);
+      this.applyD3Links(state);
+      this.applyD3ManyBody();
+      this.applyD3RegionAndComponentForces(state);
+      this.applyD3Collision(state.document);
+      for (const node of state.document.nodes) {
+        const velocity = this.velocities.get(node.id)!;
+        if (this.pinned.has(node.id) || node.id === state.draggedNodeId) {
+          velocity.x = 0; velocity.y = 0; velocity.z = 0;
+          continue;
+        }
+        velocity.x *= 1 - this.settings.velocityDecay;
+        velocity.y *= 1 - this.settings.velocityDecay;
+        velocity.z = this.dimensions === '2d' ? 0 : velocity.z * (1 - this.settings.velocityDecay);
+        const position = this.positions[node.id];
+        const movement = Math.hypot(velocity.x, velocity.y, velocity.z);
+        if (movement > 0.00001) changed = true;
+        position.x += velocity.x;
+        position.y += velocity.y;
+        position.z = this.dimensions === '2d' ? 0 : position.z + velocity.z;
+      }
+    }
+    if (!dragActive && this.alpha < this.settings.alphaMin) {
+      this.running = false;
+      this.alpha = 0;
+      this.accumulatorSeconds = 0;
+    }
+    return changed ? { positions: this.positions } : undefined;
+  }
+
+  private applyD3Origin(state: GraphModulePipelineStateV1): void {
+    const strength = this.settings.centeringStrength * this.alpha;
+    for (const node of state.document.nodes) {
+      const position = this.positions[node.id];
+      const velocity = this.velocities.get(node.id)!;
+      if (strength > 0) {
+        velocity.x += -position.x * strength;
+        velocity.y += -position.y * strength;
+        if (this.dimensions === '3d') velocity.z += -position.z * strength;
+      }
+      const target = state.motionTargets?.nodePositions?.[node.id];
+      const offset = state.motionTargets?.nodePositionOffsets?.[node.id];
+      if (target) {
+        const targetStrength = clampNumber(state.motionTargets?.nodePositionStrength, 0, 1, 0.1) * this.alpha;
+        velocity.x += (target.x - position.x) * targetStrength;
+        velocity.y += (target.y - position.y) * targetStrength;
+        if (this.dimensions === '3d') velocity.z += (target.z - position.z) * targetStrength;
+      } else if (offset) {
+        const targetStrength = clampNumber(state.motionTargets?.nodePositionStrength, 0, 1, 0.1) * this.alpha;
+        velocity.x += offset.x * targetStrength;
+        velocity.y += offset.y * targetStrength;
+        if (this.dimensions === '3d') velocity.z += offset.z * targetStrength;
+      }
+    }
+  }
+
+  private applyD3Links(state: GraphModulePipelineStateV1): void {
+    const pairs = this.settings.weightingMode === 'topology-weighted'
+      ? (this.topology?.pairs ?? []).filter((pair) => pair.affinity > 0).map((pair) => ({
+          sourceId: pair.sourceId,
+          targetId: pair.targetId,
+          edgeIds: pair.edgeIds,
+          parameters: deriveWeightedSpringParametersV1(pair, this.settings),
+        }))
+      : physicalDocumentPairs(state.document).map((pair) => ({
+          ...pair,
+          parameters: { strength: this.settings.springStrength, targetLength: this.settings.springLength },
+        }));
+    const degree = new Map<string, number>();
+    for (const pair of pairs) {
+      degree.set(pair.sourceId, (degree.get(pair.sourceId) ?? 0) + 1);
+      degree.set(pair.targetId, (degree.get(pair.targetId) ?? 0) + 1);
+    }
+    for (const pair of pairs) {
+      if (pair.sourceId === pair.targetId) continue;
+      const source = this.positions[pair.sourceId];
+      const target = this.positions[pair.targetId];
+      const sourceVelocity = this.velocities.get(pair.sourceId);
+      const targetVelocity = this.velocities.get(pair.targetId);
+      if (!source || !target || !sourceVelocity || !targetVelocity) continue;
+      let dx = target.x + targetVelocity.x - source.x - sourceVelocity.x;
+      let dy = target.y + targetVelocity.y - source.y - sourceVelocity.y;
+      let dz = this.dimensions === '2d' ? 0 : target.z + targetVelocity.z - source.z - sourceVelocity.z;
+      let length = Math.hypot(dx, dy, dz);
+      if (length < 1e-6) {
+        const jitter = deterministicDirection(pair.sourceId, pair.targetId, this.dimensions);
+        dx = jitter.x * 1e-6; dy = jitter.y * 1e-6; dz = jitter.z * 1e-6;
+        length = Math.hypot(dx, dy, dz);
+      }
+      const sourceDegree = Math.max(1, degree.get(pair.sourceId) ?? 1);
+      const targetDegree = Math.max(1, degree.get(pair.targetId) ?? 1);
+      const bias = sourceDegree / (sourceDegree + targetDegree);
+      const declaredStrengths = pair.edgeIds
+        .map((id) => state.motionTargets?.edgeStrengthScales?.[id])
+        .filter((value): value is number => value !== undefined && Number.isFinite(value) && value >= 0);
+      const strength = pair.parameters.strength / Math.min(sourceDegree, targetDegree)
+        * finiteNonNegative(declaredStrengths[0], 1)
+        * finiteNonNegative(state.motionTargets?.linkStrengthScale, 1);
+      const declaredLengths = pair.edgeIds
+        .map((id) => state.motionTargets?.edgeLengths?.[id])
+        .filter((value): value is number => value !== undefined && Number.isFinite(value) && value > 0);
+      const targetLength = (declaredLengths[0] ?? pair.parameters.targetLength)
+        * finitePositive(state.motionTargets?.linkLengthScale, 1);
+      const amount = (length - targetLength) / length * this.alpha * strength;
+      dx *= amount; dy *= amount; dz *= amount;
+      targetVelocity.x -= dx * bias; targetVelocity.y -= dy * bias; targetVelocity.z -= dz * bias;
+      sourceVelocity.x += dx * (1 - bias); sourceVelocity.y += dy * (1 - bias); sourceVelocity.z += dz * (1 - bias);
+    }
+  }
+
+  private applyD3ManyBody(): void {
+    const root = buildOctree(this.positions, this.dimensions);
+    if (!root) return;
+    const minimumSquared = this.settings.repulsionMinDistance ** 2;
+    const thetaSquared = this.settings.barnesHutTheta ** 2;
+    for (const [id, position] of Object.entries(this.positions)) {
+      this.accumulateD3Repulsion(id, position, root, this.velocities.get(id)!, minimumSquared, thetaSquared);
+    }
+  }
+
+  private accumulateD3Repulsion(
+    id: string,
+    position: Vec3,
+    cell: OctreeNode,
+    velocity: MutableVec3,
+    minimumSquared: number,
+    thetaSquared: number,
+  ): void {
+    if (cell.mass === 0 || (!cell.children && cell.bodyId === id)) return;
+    let dx = position.x - cell.centerOfMass.x;
+    let dy = position.y - cell.centerOfMass.y;
+    let dz = this.dimensions === '2d' ? 0 : position.z - cell.centerOfMass.z;
+    let squared = dx * dx + dy * dy + dz * dz;
+    if (squared < 1e-12) {
+      const direction = deterministicDirection(id, cell.bodyId ?? `cell:${cell.center.x}:${cell.center.y}:${cell.center.z}`, this.dimensions);
+      dx = direction.x * 1e-6; dy = direction.y * 1e-6; dz = direction.z * 1e-6;
+      squared = dx * dx + dy * dy + dz * dz;
+    }
+    const size = cell.halfSize * 2;
+    if (!cell.children || size * size / squared < thetaSquared) {
+      if (squared < minimumSquared) squared = Math.sqrt(minimumSquared * squared);
+      const factor = this.settings.repulsionStrength * cell.mass * this.alpha / squared;
+      velocity.x += dx * factor;
+      velocity.y += dy * factor;
+      velocity.z += dz * factor;
+      return;
+    }
+    for (const child of cell.children) if (child) {
+      this.accumulateD3Repulsion(id, position, child, velocity, minimumSquared, thetaSquared);
+    }
+  }
+
+  private applyD3RegionAndComponentForces(state: GraphModulePipelineStateV1): void {
+    if (!state.regionLayouts.length && this.settings.weightingMode !== 'topology-weighted') return;
+    for (const force of this.forces.values()) { force.x = 0; force.y = 0; force.z = 0; }
+    this.applyRegionMembershipForces(state);
+    if (this.settings.weightingMode === 'topology-weighted') this.applyComponentCentering();
+    for (const node of state.document.nodes) {
+      const force = this.forces.get(node.id)!;
+      const velocity = this.velocities.get(node.id)!;
+      velocity.x += force.x; velocity.y += force.y; velocity.z += force.z;
+    }
+  }
+
+  private applyD3Collision(document: GraphDocumentV1): void {
+    const radius = this.settings.collisionRadius;
+    const minimum = radius * 2;
+    if (radius <= 0 || this.settings.collisionStrength <= 0) return;
+    const cells = new Map<string, string[]>();
+    const predicted = new Map<string, Vec3>();
+    for (const node of document.nodes) {
+      const position = this.positions[node.id];
+      const velocity = this.velocities.get(node.id)!;
+      const next = { x: position.x + velocity.x, y: position.y + velocity.y, z: this.dimensions === '2d' ? 0 : position.z + velocity.z };
+      predicted.set(node.id, next);
+      const key = collisionCellKey(next, minimum, this.dimensions);
+      const bucket = cells.get(key);
+      if (bucket) bucket.push(node.id); else cells.set(key, [node.id]);
+    }
+    const offsets = collisionOffsets(this.dimensions);
+    const visited = new Set<string>();
+    for (const node of document.nodes) {
+      const a = predicted.get(node.id)!;
+      const cell = collisionCell(a, minimum);
+      for (const offset of offsets) {
+        const key = `${cell.x + offset.x}:${cell.y + offset.y}:${this.dimensions === '2d' ? 0 : cell.z + offset.z}`;
+        for (const otherId of cells.get(key) ?? []) {
+          if (otherId === node.id) continue;
+          const pairKey = node.id < otherId ? `${node.id}\u0000${otherId}` : `${otherId}\u0000${node.id}`;
+          if (visited.has(pairKey)) continue;
+          visited.add(pairKey);
+          const b = predicted.get(otherId)!;
+          let dx = a.x - b.x;
+          let dy = a.y - b.y;
+          let dz = this.dimensions === '2d' ? 0 : a.z - b.z;
+          let distance = Math.hypot(dx, dy, dz);
+          if (distance >= minimum) continue;
+          if (distance < 1e-6) {
+            const jitter = deterministicDirection(node.id, otherId, this.dimensions);
+            dx = jitter.x * 1e-6; dy = jitter.y * 1e-6; dz = jitter.z * 1e-6;
+            distance = Math.hypot(dx, dy, dz);
+          }
+          const amount = (minimum - distance) / distance * this.settings.collisionStrength * 0.5;
+          const av = this.velocities.get(node.id)!;
+          const bv = this.velocities.get(otherId)!;
+          av.x += dx * amount; av.y += dy * amount; av.z += dz * amount;
+          bv.x -= dx * amount; bv.y -= dy * amount; bv.z -= dz * amount;
+        }
+      }
+    }
+  }
+
   dispose(): void {
     this.velocities.clear();
     this.forces.clear();
@@ -457,8 +752,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     return true;
   }
 
-  private reheat(): void {
-    this.alpha = 1;
+  private reheatForChange(): void {
+    this.alpha = this.settings.forceModel === 'd3-compatible' ? Math.max(this.alpha, 0.3) : 1;
     this.running = true;
   }
 }
@@ -477,6 +772,7 @@ export function readForceSettings(settings: Readonly<Record<string, JsonValue>>)
     finitePositive(settings.maximumSpringLengthScale, 1.85),
   );
   return {
+    forceModel: settings.forceModel === 'd3-compatible' ? 'd3-compatible' : 'legacy',
     weightingMode: settings.weightingMode === 'uniform' ? 'uniform' : 'topology-weighted',
     repulsionStrength: finiteNonNegative(settings.repulsionStrength, 7000),
     springStrength: finiteNonNegative(settings.springStrength, 0.25),
@@ -499,7 +795,52 @@ export function readForceSettings(settings: Readonly<Record<string, JsonValue>>)
     minimumSpringLengthScale,
     maximumSpringLengthScale,
     componentPadding: finiteNonNegative(settings.componentPadding, 80),
+    collisionRadius: finiteNonNegative(settings.collisionRadius, 60),
+    collisionStrength: clampNumber(settings.collisionStrength, 0, 1, 0.5),
   };
+}
+
+function modeSettings(settings: Readonly<Record<string, JsonValue>>, mode: 'new' | 'legacy') {
+  const value = settings[`${mode}Settings`];
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Readonly<Record<string, JsonValue>>
+    : settings;
+}
+
+function physicalDocumentPairs(document: GraphDocumentV1): Array<{ sourceId: string; targetId: string; edgeIds: string[] }> {
+  const pairs = new Map<string, { sourceId: string; targetId: string; edgeIds: string[] }>();
+  for (const edge of document.edges) {
+    if (edge.sourceId === edge.targetId) continue;
+    const sourceId = edge.sourceId < edge.targetId ? edge.sourceId : edge.targetId;
+    const targetId = edge.sourceId < edge.targetId ? edge.targetId : edge.sourceId;
+    const key = `${sourceId}\u0000${targetId}`;
+    const pair = pairs.get(key);
+    if (pair) pair.edgeIds.push(edge.id);
+    else pairs.set(key, { sourceId, targetId, edgeIds: [edge.id] });
+  }
+  return [...pairs.values()].sort((a, b) => a.sourceId.localeCompare(b.sourceId) || a.targetId.localeCompare(b.targetId));
+}
+
+function collisionCell(position: Vec3, size: number): { x: number; y: number; z: number } {
+  return {
+    x: Math.floor(position.x / size),
+    y: Math.floor(position.y / size),
+    z: Math.floor(position.z / size),
+  };
+}
+
+function collisionCellKey(position: Vec3, size: number, dimensions: GraphDimensionsV1): string {
+  const cell = collisionCell(position, size);
+  return `${cell.x}:${cell.y}:${dimensions === '2d' ? 0 : cell.z}`;
+}
+
+function collisionOffsets(dimensions: GraphDimensionsV1): readonly Vec3[] {
+  const values: Vec3[] = [];
+  for (let x = -1; x <= 1; x += 1) for (let y = -1; y <= 1; y += 1) {
+    if (dimensions === '2d') values.push({ x, y, z: 0 });
+    else for (let z = -1; z <= 1; z += 1) values.push({ x, y, z });
+  }
+  return values;
 }
 
 export function deriveWeightedSpringParametersV1(
@@ -671,6 +1012,14 @@ function finitePositive(value: JsonValue | undefined, fallback: number): number 
 
 function finiteNonNegative(value: JsonValue | undefined, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function finiteCoordinate(value: JsonValue | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function clampNumber(value: JsonValue | undefined, min: number, max: number, fallback: number): number {

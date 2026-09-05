@@ -224,6 +224,17 @@ export class GraphEngineProviderCoreV1 {
       getDescriptor: () => this.profiles.getProfileDescriptor(consumerId, profileId),
       getEffectiveProfile: () => this.profiles.resolve(consumerId, profileId),
       getUserOverrides: () => this.profiles.getUserOverrides(consumerId, profileId),
+      setProfileSetting: async (key, value) => {
+        const overrides = this.profiles.getUserOverrides(consumerId, profileId);
+        this.profiles.setUserOverrides(consumerId, profileId, changeProfileSetting(overrides, key, value));
+        try {
+          await this.onProfilesChanged();
+        } catch (error) {
+          this.profiles.setUserOverrides(consumerId, profileId, overrides);
+          try { await this.onProfilesChanged(); } catch {}
+          throw error;
+        }
+      },
       setModuleSetting: async (moduleId, key, value) => {
         const overrides = this.profiles.getUserOverrides(consumerId, profileId);
         this.profiles.setUserOverrides(consumerId, profileId, changeModuleSetting(overrides, moduleId, key, value));
@@ -251,6 +262,17 @@ export class GraphEngineProviderCoreV1 {
       this.profiles.markConsumerInactive(record.consumerId);
     }
   }
+}
+
+function changeProfileSetting(
+  overrides: GraphSettingsOverridesV1,
+  key: string,
+  value: JsonValue | undefined,
+): GraphSettingsOverridesV1 {
+  const profileSettings = { ...(overrides.profileSettings ?? {}) };
+  if (value === undefined) delete profileSettings[key];
+  else profileSettings[key] = value;
+  return { ...cloneOverrides(overrides), profileSettings: Object.keys(profileSettings).length ? profileSettings : undefined };
 }
 
 function trackSession(

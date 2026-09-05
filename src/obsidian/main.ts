@@ -13,6 +13,7 @@ import {
 import {
   GRAPH_PLUS_CONSUMER_REGISTRATION_V1,
   GRAPH_PLUS_REQUESTED_CAPABILITIES_V1,
+  migrateGraphPlusProfileOverridesV16,
   type GraphPlusConsumerSettingsV1,
 } from '../graph-plus/consumer/index.ts';
 import type { GraphPlusCheckpointStoreV1 } from '../graph-plus/persistence/index.ts';
@@ -79,14 +80,19 @@ export default class GraphPlus extends Plugin {
         return {
           backgroundColor: palette.backgroundColor,
           nodeColor: palette.nodeColor,
+          tagNodeColor: palette.tagColor,
+          highlightNodeColor: palette.highlightColor,
+          nodeOutlineColor: palette.outlineColor,
           selectedNodeColor: palette.tagColor,
-          focusedNodeColor: palette.tagColor,
+          focusedNodeColor: palette.highlightColor,
           edgeColor: palette.linkColor,
+          arrowColor: palette.arrowColor,
           labelColor: palette.labelColor,
           labelFont: container.ownerDocument.defaultView?.getComputedStyle(container).font || '12px sans-serif',
         };
       },
     });
+    this.registerEvent(this.app.workspace.on('css-change', () => sessionFactory.refreshActiveThemes()));
     const capabilities = [...new Set(modules.descriptors().flatMap((module) => module.capabilities))];
     const providerCore = new GraphEngineProviderCoreV1({
       engineVersion: this.manifest.version,
@@ -119,6 +125,12 @@ export default class GraphPlus extends Plugin {
     if (localLease.ok) {
       this.graphPlusLease = localLease.lease;
       await localLease.lease.registerConsumer(GRAPH_PLUS_CONSUMER_REGISTRATION_V1);
+      const previous = profiles.getUserOverrides('graph-plus', 'default');
+      const migrated = migrateGraphPlusProfileOverridesV16(previous);
+      if (JSON.stringify(previous) !== JSON.stringify(migrated)) {
+        profiles.setUserOverrides('graph-plus', 'default', migrated);
+        await this.persistEngineSettings();
+      }
     }
     const eventBus = new ObsidianWorkspaceEventBusV1(asObsidianWorkspaceEventsV1(this.app.workspace));
     this.graphEngineProvider = new GraphEngineWorkspaceProviderV1(eventBus, providerCore);
@@ -196,23 +208,32 @@ export default class GraphPlus extends Plugin {
     if (this.pluginData.consumers.graphPlus.genericLensMigrated !== true) {
       const existing = this.engineSettings.getProfileOverrides('graph-plus', 'default');
       const writes: Array<[string, string, number | string]> = [];
-      if (lens.display.labelMode !== undefined && existing.modules?.rendering?.settings?.labelMode === undefined) {
+      const renderingLegacy = jsonRecord(existing.modules?.rendering?.settings?.legacySettings);
+      const forceLegacy = jsonRecord(existing.modules?.['force-layout']?.settings?.legacySettings);
+      if (lens.display.labelMode !== undefined && renderingLegacy.labelMode === undefined) {
         writes.push(['rendering', 'labelMode', lens.display.labelMode]);
       }
-      if (lens.display.nodeRadiusScale !== undefined && existing.modules?.rendering?.settings?.nodeRadiusScale === undefined) {
+      if (lens.display.nodeRadiusScale !== undefined && renderingLegacy.nodeRadiusScale === undefined) {
         writes.push(['rendering', 'nodeRadiusScale', lens.display.nodeRadiusScale]);
       }
-      if (lens.display.edgeThicknessScale !== undefined && existing.modules?.rendering?.settings?.edgeThicknessScale === undefined) {
+      if (lens.display.edgeThicknessScale !== undefined && renderingLegacy.edgeThicknessScale === undefined) {
         writes.push(['rendering', 'edgeThicknessScale', lens.display.edgeThicknessScale]);
       }
       for (const key of ['repulsionStrength', 'springStrength', 'springLength', 'centeringStrength'] as const) {
         const value = lens.force[key];
-        if (value !== undefined && existing.modules?.['force-layout']?.settings?.[key] === undefined) {
+        if (value !== undefined && forceLegacy[key] === undefined) {
           writes.push(['force-layout', key, value]);
         }
       }
+      const grouped = new Map<string, Record<string, import('../graph-engine/contracts/v1/index.ts').JsonValue>>();
       for (const [moduleId, key, value] of writes) {
-        await this.engineSettings.setProfileModuleSetting('graph-plus', 'default', moduleId, key, value);
+        const base = grouped.get(moduleId)
+          ?? { ...(moduleId === 'rendering' ? renderingLegacy : forceLegacy) };
+        base[key] = value;
+        grouped.set(moduleId, base);
+      }
+      for (const [moduleId, legacySettings] of grouped) {
+        await this.engineSettings.setProfileModuleSetting('graph-plus', 'default', moduleId, 'legacySettings', legacySettings);
       }
       this.pluginData = withGraphPlusGenericLensMigratedV1(this.pluginData);
       await this.persistPluginData();
@@ -240,6 +261,14 @@ export default class GraphPlus extends Plugin {
     if (!this.checkpointFileStore) throw new Error('Graph+ checkpoint storage is unavailable before plugin load.');
     return this.checkpointFileStore;
   }
+}
+
+function jsonRecord(
+  value: import('../graph-engine/contracts/v1/index.ts').JsonValue | undefined,
+): Record<string, import('../graph-engine/contracts/v1/index.ts').JsonValue> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? { ...(value as Record<string, import('../graph-engine/contracts/v1/index.ts').JsonValue>) }
+    : {};
 }
 
 function createEngineInstanceId(): string {

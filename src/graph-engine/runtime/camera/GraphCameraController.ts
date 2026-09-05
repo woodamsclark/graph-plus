@@ -188,7 +188,7 @@ export class GraphCameraController {
     };
   }
 
-  fit(positions: readonly Vec3[], paddingPx = 48): void {
+  fit(positions: readonly Vec3[], paddingPx = 48, maxMagnification?: number): void {
     if (!positions.length || this.viewport.width <= 0 || this.viewport.height <= 0) return;
     const bounds = graphBounds(positions);
     const target = {
@@ -199,10 +199,13 @@ export class GraphCameraController {
     if (this.state.projection === 'orthographic') {
       const width = Math.max(1, bounds.max.x - bounds.min.x);
       const height = Math.max(1, bounds.max.y - bounds.min.y);
-      const zoom = clamp(Math.min(
+      let zoom = clamp(Math.min(
         Math.max(1, this.viewport.width - paddingPx * 2) / width,
         Math.max(1, this.viewport.height - paddingPx * 2) / height,
       ), MIN_ZOOM, MAX_ZOOM);
+      if (maxMagnification !== undefined && Number.isFinite(maxMagnification) && maxMagnification > 0) {
+        zoom = Math.min(zoom, this.state.zoom * maxMagnification);
+      }
       const offset = subtract(this.state.position, this.state.target);
       this.state = { ...this.state, target, position: add(target, offset), zoom };
       return;
@@ -210,7 +213,11 @@ export class GraphCameraController {
 
     const radius = Math.max(1, ...positions.map((position) => distance(position, target)));
     const backwards = normalize(subtract(this.state.position, this.state.target));
-    const distanceForFit = Math.max(10, radius * 2.4 * Math.max(MIN_ZOOM, this.state.zoom));
+    let distanceForFit = Math.max(10, radius * 2.4 * Math.max(MIN_ZOOM, this.state.zoom));
+    if (maxMagnification !== undefined && Number.isFinite(maxMagnification) && maxMagnification > 0) {
+      const currentDistance = Math.max(MIN_PERSPECTIVE_DISTANCE, distance(this.state.position, this.state.target));
+      distanceForFit = Math.max(distanceForFit, currentDistance / maxMagnification);
+    }
     this.state = {
       ...this.state,
       target,

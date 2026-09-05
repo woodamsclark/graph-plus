@@ -105,7 +105,12 @@ export type GraphRuntimeCommandV1 =
   | (GraphCommandBaseV1 & { readonly type: 'set-hover'; readonly nodeId?: string })
   | (GraphCommandBaseV1 & { readonly type: 'drag-start'; readonly nodeId: string; readonly point: GraphScreenPointV1 })
   | (GraphCommandBaseV1 & { readonly type: 'drag-update'; readonly nodeId: string; readonly point: GraphScreenPointV1 })
-  | (GraphCommandBaseV1 & { readonly type: 'drag-end'; readonly nodeId: string; readonly point: GraphScreenPointV1 });
+  | (GraphCommandBaseV1 & {
+      readonly type: 'drag-end';
+      readonly nodeId: string;
+      readonly point: GraphScreenPointV1;
+      readonly pointerKind: GraphPointerKindV1;
+    });
 
 export type GraphRuntimeCommandPayloadV1 = GraphRuntimeCommandV1 extends infer Command
   ? Command extends GraphRuntimeCommandV1

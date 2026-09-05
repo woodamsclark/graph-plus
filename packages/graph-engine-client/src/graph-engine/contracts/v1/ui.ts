@@ -22,14 +22,17 @@ export const GRAPH_QUICK_SETTINGS_CONTROL_IDS_V1 = Object.freeze({
   formCrossLinks: 'form.cross-links',
   formDisconnected: 'form.disconnected',
   labels: 'display.labels',
+  labelPosition: 'display.label-position',
   nodeSize: 'display.node-size',
   linkThickness: 'display.link-thickness',
+  showArrows: 'display.show-arrows',
   resetCamera: 'camera.reset',
   centerForce: 'forces.center',
   radialForce: 'forces.radial',
   weightingMode: 'force-layout.weighting-mode',
   linkForce: 'forces.link',
   linkDistance: 'forces.link-distance',
+  regionAttraction: 'node-regions.attraction',
   regionBoundaries: 'node-regions.boundaries-visible',
 } as const);
 

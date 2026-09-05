@@ -80,6 +80,18 @@ export class GraphEngineSettingsPanelV1 {
         : 'Inactive: the consumer is not currently registered. Its settings are retained for the next registration.',
       cls: 'setting-item-description',
     });
+    if (consumerId === 'graph-plus' && profileId === 'default') {
+      new Setting(parent)
+        .setName('Graph system')
+        .setDesc('Switch the complete presentation and motion system. Each mode keeps its own view state and tuning.')
+        .addDropdown((dropdown) => dropdown
+          .addOptions({ new: 'New (Anima + native motion)', legacy: 'Legacy comparison' })
+          .setValue(effective.profileSettings.graphSystem === 'legacy' ? 'legacy' : 'new')
+          .onChange(async (value) => {
+            await this.controller.setProfileSetting(consumerId, profileId, 'graphSystem', value);
+            refresh();
+          }));
+    }
     if (this.controller.canEditProfileDimensions(consumerId, profileId)) {
       const allowed = descriptor.allowedDimensions ?? ['2d', '3d'];
       new Setting(parent)

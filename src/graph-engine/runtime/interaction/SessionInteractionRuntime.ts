@@ -45,7 +45,10 @@ export class SessionInteractionRuntime {
     readonly platform: SessionRuntimePlatformV1;
     readonly surface: SessionSurfaceV1;
     readonly camera: GraphCameraController;
-    readonly hitTest: (point: GraphScreenPointV1) => import('./GraphInteractionTypes.ts').GraphHitV1 | null;
+    readonly hitTest: (
+      point: GraphScreenPointV1,
+      pointerKind?: 'mouse' | 'touch' | 'pen',
+    ) => import('./GraphInteractionTypes.ts').GraphHitV1 | null;
     readonly getDocument: () => GraphDocumentV1;
     readonly getViewState: () => GraphViewStateV1;
     readonly getInteractivePositions: () => Readonly<Record<string, Vec3>>;
@@ -55,6 +58,7 @@ export class SessionInteractionRuntime {
     readonly getRenderSelection: () => GraphFilterSelectionV1;
     readonly getResetCamera: () => GraphCameraStateV1;
     readonly getDragReleasePolicy: () => 'pin' | 'dynamic';
+    readonly getDragConstraintPolicy?: () => 'persistent-pin' | 'transient';
     readonly onViewStateChanged: (change: GraphRuntimeViewChangeV1) => void;
     readonly onIntent: (intent: GraphIntentV1) => void;
     readonly onActivateNode: (nodeId: string) => boolean;
@@ -73,9 +77,9 @@ export class SessionInteractionRuntime {
       dimensions: this.options.dimensions,
       events: this.inputEvents,
       commands: this.commands,
-      hitTest: (point) => {
+      hitTest: (point, pointerKind) => {
         const start = this.options.platform.now();
-        const hit = this.options.hitTest(point);
+        const hit = this.options.hitTest(point, pointerKind);
         this.hitTestCount += 1;
         this.hitTestMs += Math.max(0, this.options.platform.now() - start);
         return hit;
@@ -247,7 +251,7 @@ export class SessionInteractionRuntime {
       .map((id) => positionsById[id])
       .filter(isVec3);
     if (!positions.length) return;
-    this.options.camera.fit(positions);
+    this.options.camera.fit(positions, 48, nodeIds === undefined ? undefined : 1.75);
     this.commitCamera();
     this.options.onViewStateChanged('camera');
   }
@@ -270,17 +274,24 @@ export class SessionInteractionRuntime {
     const document = this.options.getDocument();
     if (nodeId !== undefined && !document.nodes.some((node) => node.id === nodeId)) return;
     const state = this.options.getViewState();
-    if (state.focusedNodeId === nodeId) return;
-    const { focusedNodeId: _focusedNodeId, ...withoutFocus } = state;
-    this.commit(nodeId === undefined ? withoutFocus : { ...withoutFocus, focusedNodeId: nodeId });
-    if (nodeId) {
-      const position = this.options.getInteractivePositions()[nodeId];
-      if (position) {
-        this.options.camera.setTarget(position);
-        this.commitCamera();
+    const focusChanged = state.focusedNodeId !== nodeId;
+    const hoverChanged = this.hoveredNodeId !== undefined;
+    if (!focusChanged && !hoverChanged) return;
+    this.hoveredNodeId = undefined;
+    this.updateCursor();
+    if (focusChanged) {
+      const { focusedNodeId: _focusedNodeId, ...withoutFocus } = state;
+      this.commit(nodeId === undefined ? withoutFocus : { ...withoutFocus, focusedNodeId: nodeId });
+      if (nodeId) {
+        const position = this.options.getInteractivePositions()[nodeId];
+        if (position) {
+          this.options.camera.setTarget(position);
+          this.commitCamera();
+        }
       }
     }
     this.options.onViewStateChanged('interaction');
+    if (!focusChanged) return;
     this.options.onIntent({
       ...this.intentBase(command),
       type: 'focus-changed',
@@ -303,7 +314,7 @@ export class SessionInteractionRuntime {
       offset: subtract(position, underPointer),
       wasPinned,
     };
-    if (!wasPinned) {
+    if (!wasPinned && this.options.getDragConstraintPolicy?.() !== 'transient') {
       this.commit({ ...state, pinnedNodeIds: [...state.pinnedNodeIds, nodeId] });
       this.options.onViewStateChanged('layout');
     }
@@ -326,10 +337,11 @@ export class SessionInteractionRuntime {
     const position = this.options.getViewState().positions[command.nodeId];
     const wasPinned = this.dragContext.wasPinned;
     this.dragContext = null;
-    this.hoveredNodeId = command.nodeId;
+    this.hoveredNodeId = command.pointerKind === 'touch' ? undefined : command.nodeId;
     this.updateCursor();
     if (!position) return;
-    if (!wasPinned && this.options.getDragReleasePolicy() === 'dynamic') {
+    if (!wasPinned && this.options.getDragConstraintPolicy?.() !== 'transient'
+      && this.options.getDragReleasePolicy() === 'dynamic') {
       const state = this.options.getViewState();
       this.commit({ ...state, pinnedNodeIds: state.pinnedNodeIds.filter((id) => id !== command.nodeId) });
       this.options.onViewStateChanged('layout');

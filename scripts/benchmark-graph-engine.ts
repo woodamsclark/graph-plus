@@ -4,7 +4,7 @@ import type {
   GraphNodeRegionsDocumentV1,
 } from '../src/graph-engine/contracts/v1/index.ts';
 import { graphDocument, graphEdge, graphNode } from '../tests/support/contractFixtures.ts';
-import { runtimeHarness } from '../tests/support/runtimeHarness.ts';
+import { runtimeHarness, runtimeRegistration } from '../tests/support/runtimeHarness.ts';
 
 interface BenchmarkScenario {
   readonly id: string;
@@ -15,9 +15,11 @@ interface BenchmarkScenario {
   readonly measuredFrames: number;
   readonly regions?: { readonly count: number; readonly memberships: number };
   readonly topology?: 'weighted-stress';
+  readonly system?: 'legacy' | 'new';
 }
 
 const scenarios: readonly BenchmarkScenario[] = [
+  { id: 'v16-new-1500-2d', nodes: 1_500, edges: 3_000, dimensions: '2d', warmupFrames: 20, measuredFrames: 180, system: 'new' },
   { id: 'vault-1500-2d', nodes: 1_500, edges: 3_000, dimensions: '2d', warmupFrames: 20, measuredFrames: 180 },
   { id: 'vault-1500-3d', nodes: 1_500, edges: 3_000, dimensions: '3d', warmupFrames: 20, measuredFrames: 180 },
   {
@@ -36,7 +38,7 @@ async function main(): Promise<void> {
   const results = [];
   for (const scenario of scenarios) results.push(await runScenario(scenario));
   console.log(JSON.stringify({
-    benchmark: 'graph-engine-v1.4-headless',
+    benchmark: 'graph-engine-v1.6-headless',
     runtime: process.version,
     platform: `${process.platform}-${process.arch}`,
     results,
@@ -67,6 +69,7 @@ async function runScenario(scenario: BenchmarkScenario) {
       edges,
       ...(nodeRegions ? { nodeRegions } : {}),
     }),
+    ...(scenario.system === 'new' ? { registration: newModeRegistration() } : {}),
     realTime: true,
   });
   harness.profiles.setUserOverrides('synthetic-consumer', profileId, {
@@ -106,6 +109,7 @@ async function runScenario(scenario: BenchmarkScenario) {
         0,
       ) ?? 0,
       topology: scenario.topology ?? 'regular',
+      system: scenario.system ?? 'legacy',
     },
     mountMs,
     requestedFrames: scenario.measuredFrames,
@@ -116,6 +120,37 @@ async function runScenario(scenario: BenchmarkScenario) {
     renderProjectionMs: snapshot.window?.projectionMs,
     regionRenderMs: snapshot.window?.regionRenderMs,
     counters: snapshot.counters,
+  };
+}
+
+function newModeRegistration() {
+  const registration = runtimeRegistration();
+  return {
+    ...registration,
+    profiles: registration.profiles.map((profile) => ({
+      ...profile,
+      profileSettings: { ...(profile.profileSettings ?? {}), graphSystem: 'new' },
+      modules: {
+        ...profile.modules,
+        rendering: {
+          ...profile.modules.rendering,
+          defaults: { labelMode: 'off', nodeRadiusScale: 1, edgeThicknessScale: 1, showArrows: false },
+        },
+        'force-layout': {
+          ...profile.modules['force-layout'],
+          defaultEnabled: true,
+          defaults: {
+            forceModel: 'd3-compatible', weightingMode: 'topology-weighted',
+            repulsionStrength: 1000, springStrength: 1, springLength: 250,
+            centeringStrength: 0.1, velocityDecay: 0.4,
+            alphaDecay: 0.02276277904418933, alphaMin: 0.001,
+            repulsionMinDistance: 30, barnesHutTheta: 0.9,
+            collisionRadius: 60, collisionStrength: 0.5,
+          },
+        },
+        anima: { ...profile.modules.anima, defaultEnabled: true },
+      },
+    })),
   };
 }
 

@@ -5,7 +5,7 @@ import { ForceLayoutModule, readForceSettings } from './ForceLayoutModule.ts';
 import { FormModule } from './FormModule.ts';
 import { LinearBuildOutLayoutModule } from './LinearBuildOutLayoutModule.ts';
 import { RenderingModule } from './RenderingModule.ts';
-import { NodeRegionsModule, readNodeRegionSettingsV1 } from './NodeRegionsModule.ts';
+import { NodeRegionsModule } from './NodeRegionsModule.ts';
 
 export const SHIPPED_GRAPH_MODULE_IDS_V1 = {
   rendering: 'rendering',
@@ -34,7 +34,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
         tokenColors: {},
       },
     },
-    create: ({ themePalette, settings }) => new RenderingModule(themePalette, settings),
+    create: ({ themePalette, settings, profileSettings }) => new RenderingModule(themePalette, settings, profileSettings),
   });
   registry.register({
     order: 200,
@@ -82,7 +82,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
         boundaryPadding: 28,
       },
     },
-    create: ({ dimensions, settings }) => new NodeRegionsModule(dimensions, readNodeRegionSettingsV1(settings)),
+    create: ({ dimensions, settings, profileSettings }) => new NodeRegionsModule(dimensions, settings, profileSettings),
   });
   registry.register({
     order: 375,
@@ -112,6 +112,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       settingsSchemaVersion: 1,
       defaultSettings: {
         weightingMode: 'topology-weighted',
+        forceModel: 'legacy',
         repulsionStrength: 7000,
         springStrength: 0.25,
         springLength: 120,
@@ -133,9 +134,18 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
         minimumSpringLengthScale: 0.55,
         maximumSpringLengthScale: 1.85,
         componentPadding: 80,
+        collisionRadius: 60,
+        collisionStrength: 0.5,
       },
     },
-    create: ({ dimensions, settings }) => new ForceLayoutModule(dimensions, readForceSettings(settings)),
+    create: ({ dimensions, settings, profileSettings }) => {
+      const mode = profileSettings.graphSystem === 'new' ? 'new' : 'legacy';
+      const selected = settings[`${mode}Settings`];
+      const effective = selected !== null && typeof selected === 'object' && !Array.isArray(selected)
+        ? selected as typeof settings
+        : settings;
+      return new ForceLayoutModule(dimensions, readForceSettings(effective), settings, profileSettings);
+    },
   });
   registry.register({
     order: 500,
@@ -145,9 +155,9 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       displayName: 'Anima',
       capabilities: ['animation'],
       settingsSchemaVersion: 1,
-      defaultSettings: {},
+      defaultSettings: { labelPosition: 'below' },
     },
-    create: () => new AnimaModule(),
+    create: ({ themePalette, settings, profileSettings }) => new AnimaModule(themePalette, settings, profileSettings),
   });
   return registry;
 }

@@ -185,6 +185,7 @@ export function runtimeFixture(): GraphDocumentV1 {
 }
 
 export function runtimeHarness(options: {
+  consumerId?: string;
   profileId?: string;
   document?: GraphDocumentV1;
   registration?: ConsumerRegistrationV1;
@@ -248,7 +249,7 @@ export function runtimeHarness(options: {
       platform.triggerResize();
     },
     create: (restoreViewState?: Parameters<typeof factory.createSession>[0]['restoreViewState']) => factory.createSession({
-        consumerId: 'synthetic-consumer',
+        consumerId: options.consumerId ?? 'synthetic-consumer',
         profileId: options.profileId ?? 'two-dimensional',
         container,
         document: options.document ?? runtimeFixture(),

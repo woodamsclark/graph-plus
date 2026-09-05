@@ -73,6 +73,23 @@ export class GraphEngineSettingsControllerV1 {
     }
   }
 
+  async setProfileSetting(
+    consumerId: string,
+    profileId: string,
+    key: string,
+    value: JsonValue | undefined,
+  ): Promise<void> {
+    const current = this.profiles.getUserOverrides(consumerId, profileId);
+    const profileSettings = { ...(current.profileSettings ?? {}) };
+    if (value === undefined) delete profileSettings[key];
+    else profileSettings[key] = value;
+    this.profiles.setUserOverrides(consumerId, profileId, {
+      ...clone(current),
+      profileSettings: Object.keys(profileSettings).length ? profileSettings : undefined,
+    });
+    await this.save();
+  }
+
   async setGlobalModuleEnabled(moduleId: string, enabled: boolean | undefined): Promise<void> {
     this.globalOverrides = changeModule(this.globalOverrides, moduleId, (module) => ({ ...module, enabled }));
     await this.save();

@@ -26,6 +26,7 @@ export type GraphModuleHookV1 =
   | 'select-render'
   | 'tick'
   | 'contribute-frame'
+  | 'choreograph'
   | 'export-state'
   | 'suspend'
   | 'dispose';
@@ -47,11 +48,15 @@ export interface GraphModulePipelineStateV1 {
   readonly formActive: boolean;
   /** Runtime-only interaction state. It is never persisted or exported as graph data. */
   readonly draggedNodeId?: string;
+  /** Runtime-only hover state supplied to presentation modules. */
+  readonly hoveredNodeId?: string;
   readonly nodeContributions: Readonly<Record<string, GraphNodeRenderContributionV1>>;
   readonly edgeContributions: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
   readonly regionLayouts: readonly GraphNodeRegionLayoutV1[];
   readonly regionContributions: readonly GraphRenderRegionV1[];
   readonly theme: GraphRenderThemeV1;
+  /** Declarative Anima/layout/camera targets; mechanisms remain owned by their runtimes. */
+  readonly motionTargets?: GraphMotionTargetsV1;
   /** Internal signal that a derived position set should become the session's editable position state. */
   readonly commitPositions?: boolean;
 }
@@ -67,6 +72,7 @@ export interface GraphModuleProjectionPatchV1 {
   readonly regionLayouts?: readonly GraphNodeRegionLayoutV1[];
   readonly regionContributions?: readonly GraphRenderRegionV1[];
   readonly theme?: GraphRenderThemeV1;
+  readonly motionTargets?: GraphMotionTargetsV1;
   readonly commitPositions?: boolean;
 }
 
@@ -79,12 +85,25 @@ export interface GraphNodeRegionLayoutV1 {
 
 export interface GraphModuleTickResultV1 {
   readonly positions?: Readonly<Record<string, Vec3>>;
+  readonly camera?: import('../../contracts/v1/index.ts').GraphCameraStateV1;
+}
+
+export interface GraphMotionTargetsV1 {
+  readonly nodePositions?: Readonly<Record<string, Vec3>>;
+  readonly nodePositionOffsets?: Readonly<Record<string, Vec3>>;
+  readonly nodePositionStrength?: number;
+  readonly edgeLengths?: Readonly<Record<string, number>>;
+  readonly linkLengthScale?: number;
+  readonly edgeStrengthScales?: Readonly<Record<string, number>>;
+  readonly linkStrengthScale?: number;
+  readonly camera?: import('../../contracts/v1/index.ts').GraphCameraStateV1;
 }
 
 export interface GraphModuleFactoryContextV1 {
   readonly sessionId: string;
   readonly dimensions: GraphDimensionsV1;
   readonly settings: Readonly<Record<string, JsonValue>>;
+  readonly profileSettings: Readonly<Record<string, JsonValue>>;
   readonly themePalette: GraphRenderThemeV1;
   readonly getDocument: () => GraphDocumentV1;
   readonly getViewState: () => GraphViewStateV1;
@@ -93,12 +112,14 @@ export interface GraphModuleFactoryContextV1 {
 export interface GraphModuleInstanceV1 {
   setup?(): void;
   updateSettings?(settings: Readonly<Record<string, JsonValue>>): void;
+  updateProfileSettings?(settings: Readonly<Record<string, JsonValue>>): void;
   restoreState?(state: JsonValue): void;
   onDocumentChanged?(document: GraphDocumentV1): void;
   onViewChanged?(state: GraphViewStateV1): void;
   projectSource?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
   projectTopology?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
   selectRender?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
+  choreograph?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
   tick?(state: GraphModulePipelineStateV1, deltaSeconds: number): GraphModuleTickResultV1 | void;
   contributeFrame?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
   exportState?(): JsonValue;

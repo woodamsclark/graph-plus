@@ -13,6 +13,7 @@ export interface GraphEngineProfileSettingsPortV1 {
   getDescriptor(): ConsumerProfileDescriptorV1;
   getEffectiveProfile(): EffectiveConsumerProfileV1;
   getUserOverrides(): GraphSettingsOverridesV1;
+  setProfileSetting(key: string, value: JsonValue | undefined): Promise<void>;
   setModuleSetting(moduleId: string, key: string, value: JsonValue | undefined): Promise<void>;
 }
 

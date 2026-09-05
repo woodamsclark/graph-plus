@@ -65,7 +65,7 @@ export class CanvasGraphRenderer {
     const projected = frame.nodes
       .map((node) => {
         const point = this.camera.worldToScreen(node.position);
-        return { node, point, radius: node.radius * point.scale };
+        return { node, point, radius: projectedRadius(frame, node.radius, point.scale, this.camera.getState().projection) };
       })
       .filter(({ point }) => point.depth > 0)
       .sort((a, b) => b.point.depth - a.point.depth);
@@ -89,7 +89,7 @@ export class CanvasGraphRenderer {
     return { projectionMs, regionRenderMs, edgeRenderMs, nodeRenderMs, ...labels };
   }
 
-  hitTest(point: { readonly x: number; readonly y: number }): {
+  hitTest(point: { readonly x: number; readonly y: number }, pointerKind: 'mouse' | 'touch' | 'pen' = 'mouse'): {
     readonly nodeId: string;
     readonly position: import('../../contracts/v1/index.ts').Vec3;
     readonly depth: number;
@@ -100,7 +100,7 @@ export class CanvasGraphRenderer {
       const visible = frame.nodes
         .map((node) => {
           const projected = this.camera.worldToScreen(node.position);
-          return { node, point: projected, radius: node.radius * projected.scale };
+          return { node, point: projected, radius: projectedRadius(frame, node.radius, projected.scale, this.camera.getState().projection) };
         })
         .filter(({ point: projected, radius }) => projected.depth > 0
           && circleIntersectsViewport(projected.x, projected.y, radius + 4, this.width, this.height));
@@ -108,23 +108,54 @@ export class CanvasGraphRenderer {
       this.indexedFrame = frame;
       this.indexedCameraKey = cameraKey;
     }
-    const candidates = this.hitGrid.get(this.hitGridKey(point.x, point.y)) ?? [];
-    let best: ProjectedNode | undefined;
-    let bestDistance = Number.POSITIVE_INFINITY;
+    const minimumTouchRadius = pointerKind === 'touch' && frame?.theme.minimumPerspectiveTouchHitRadius !== undefined
+      && this.camera.getState().projection === 'perspective'
+      ? frame.theme.minimumPerspectiveTouchHitRadius
+      : 0;
+    const candidates = this.hitCandidates(point.x, point.y, minimumTouchRadius);
+    let bestVisible: ProjectedNode | undefined;
+    let bestVisibleDistance = Number.POSITIVE_INFINITY;
+    let bestTouch: ProjectedNode | undefined;
+    let bestTouchDistance = Number.POSITIVE_INFINITY;
     for (const candidate of candidates) {
       const distance = (point.x - candidate.point.x) ** 2 + (point.y - candidate.point.y) ** 2;
-      if (distance > candidate.radius ** 2) continue;
-      if (!best || candidate.point.depth < best.point.depth
-        || (candidate.point.depth === best.point.depth && distance < bestDistance)) {
-        best = candidate;
-        bestDistance = distance;
+      if (distance <= candidate.radius ** 2) {
+        if (!bestVisible || candidate.point.depth < bestVisible.point.depth
+          || (candidate.point.depth === bestVisible.point.depth && distance < bestVisibleDistance)) {
+          bestVisible = candidate;
+          bestVisibleDistance = distance;
+        }
+        continue;
+      }
+      if (minimumTouchRadius > 0 && distance <= minimumTouchRadius ** 2
+        && (distance < bestTouchDistance
+          || (distance === bestTouchDistance && candidate.point.depth < (bestTouch?.point.depth ?? Number.POSITIVE_INFINITY)))) {
+        bestTouch = candidate;
+        bestTouchDistance = distance;
       }
     }
+    const best = bestVisible ?? bestTouch;
     return best ? {
       nodeId: best.node.id,
       position: { ...best.node.position },
       depth: best.point.depth,
     } : null;
+  }
+
+  private hitCandidates(x: number, y: number, searchRadius: number): readonly ProjectedNode[] {
+    if (searchRadius <= 0) return this.hitGrid.get(this.hitGridKey(x, y)) ?? [];
+    const centerX = Math.floor(x / this.hitCellSize);
+    const centerY = Math.floor(y / this.hitCellSize);
+    const cellRadius = Math.ceil(searchRadius / this.hitCellSize) + 1;
+    const candidates = new Set<ProjectedNode>();
+    for (let offsetX = -cellRadius; offsetX <= cellRadius; offsetX += 1) {
+      for (let offsetY = -cellRadius; offsetY <= cellRadius; offsetY += 1) {
+        for (const candidate of this.hitGrid.get(`${centerX + offsetX}:${centerY + offsetY}`) ?? []) {
+          candidates.add(candidate);
+        }
+      }
+    }
+    return [...candidates];
   }
 
   private rebuildHitGrid(nodes: readonly ProjectedNode[]): void {
@@ -186,14 +217,17 @@ export class CanvasGraphRenderer {
       const endX = target.point.x - unitX * target.radius;
       const endY = target.point.y - unitY * target.radius;
       this.context.strokeStyle = edge.color ?? frame.theme.edgeColor;
-      this.context.fillStyle = edge.color ?? frame.theme.edgeColor;
+      this.context.globalAlpha = clampOpacity(edge.opacity);
       this.context.lineWidth = edge.thickness;
       this.context.setLineDash(edge.dashed ? [4, 5] : []);
       this.context.beginPath();
       this.context.moveTo(startX, startY);
       this.context.lineTo(endX, endY);
       this.context.stroke();
-      if (edge.directed) drawArrow(this.context, endX, endY, unitX, unitY, Math.max(5, edge.thickness * 3));
+      this.context.fillStyle = edge.arrowColor ?? frame.theme.arrowColor ?? edge.color ?? frame.theme.edgeColor;
+      this.context.globalAlpha = clampOpacity(edge.arrowOpacity ?? edge.opacity);
+      if (edge.arrowAtTarget ?? edge.directed) drawArrow(this.context, endX, endY, unitX, unitY, Math.max(5, edge.thickness * 3));
+      if (edge.arrowAtSource === true) drawArrow(this.context, startX, startY, -unitX, -unitY, Math.max(5, edge.thickness * 3));
     }
     this.context.restore();
   }
@@ -215,13 +249,13 @@ export class CanvasGraphRenderer {
         .filter((point) => point.depth > 0);
       if (projected.length < 3) continue;
       this.traceSmoothClosedPath(projected);
-      this.context.globalAlpha = 0.12;
-      this.context.fillStyle = region.color;
+      this.context.globalAlpha = clampOpacity(region.fillOpacity ?? 0.12);
+      this.context.fillStyle = region.fillColor ?? region.color;
       this.context.fill();
       this.traceSmoothClosedPath(projected);
-      this.context.globalAlpha = 0.52;
-      this.context.strokeStyle = region.color;
-      this.context.lineWidth = 1.5;
+      this.context.globalAlpha = clampOpacity(region.strokeOpacity ?? 0.52);
+      this.context.strokeStyle = region.strokeColor ?? region.color;
+      this.context.lineWidth = region.strokeWidth ?? 1.5;
       this.context.setLineDash([]);
       this.context.stroke();
     }
@@ -284,17 +318,18 @@ export class CanvasGraphRenderer {
   private drawNodes(frame: GraphRenderFrameV1, nodes: readonly ProjectedNode[]): void {
     this.context.save();
     for (const { node, point, radius } of nodes) {
-      this.context.fillStyle = node.focused
+      this.context.globalAlpha = clampOpacity(node.opacity);
+      this.context.fillStyle = node.finalColor ?? (node.focused
         ? frame.theme.focusedNodeColor
         : node.selected
           ? frame.theme.selectedNodeColor
-          : node.color ?? frame.theme.nodeColor;
+          : node.color ?? frame.theme.nodeColor);
       this.context.beginPath();
       this.context.arc(point.x, point.y, radius, 0, Math.PI * 2);
       this.context.fill();
-      if (node.focused || node.selected) {
-        this.context.strokeStyle = frame.theme.labelColor;
-        this.context.lineWidth = node.focused ? 2 : 1;
+      if (node.focused || node.selected || node.strokeWidth !== undefined) {
+        this.context.strokeStyle = node.strokeColor ?? frame.theme.labelColor;
+        this.context.lineWidth = node.strokeWidth ?? (node.focused ? 2 : 1);
         this.context.stroke();
       }
     }
@@ -328,7 +363,7 @@ export class CanvasGraphRenderer {
           || candidate.node.hovered
           || candidate.node.labelAlwaysVisible === true;
         if (!forced && accepted.length >= budget) continue;
-        const bounds = this.labelBounds(candidate);
+        const bounds = this.labelBounds(frame, candidate);
         if (!forced && occupied.some((other) => overlaps(bounds, other))) continue;
         occupied.push(bounds);
         accepted.push(candidate);
@@ -337,13 +372,21 @@ export class CanvasGraphRenderer {
     }
     const labelLayoutMs = elapsed(layoutStart, this.now());
     const drawStart = this.now();
-    for (const { node, point, radius } of acceptedCandidates) this.context.fillText(node.label, point.x, point.y + radius + 4);
+    for (const { node, point, radius } of acceptedCandidates) {
+      const offset = node.labelOffset ?? { x: 0, y: 0 };
+      this.context.globalAlpha = clampOpacity(node.labelOpacity ?? node.opacity);
+      this.context.fillStyle = node.labelColor ?? frame.theme.labelColor;
+      const font = nodeFont(frame, node, this.camera.getState().zoom, this.camera.getState().projection);
+      this.context.font = font;
+      this.context.fillText(node.label, point.x + offset.x, labelTop(frame, point.y, radius, font) + offset.y);
+    }
     const labelDrawMs = elapsed(drawStart, this.now());
     this.context.restore();
     return { labelLayoutMs, labelDrawMs };
   }
 
-  private labelBounds(value: ProjectedNode): LabelBounds {
+  private labelBounds(frame: GraphRenderFrameV1, value: ProjectedNode): LabelBounds {
+    this.context.font = nodeFont(frame, value.node, this.camera.getState().zoom, this.camera.getState().projection);
     const cacheKey = `${this.context.font}\u0000${value.node.label}`;
     let width = this.textWidthCache.get(cacheKey);
     if (width === undefined) {
@@ -353,8 +396,9 @@ export class CanvasGraphRenderer {
       this.textWidthCache.set(cacheKey, width);
     }
     const height = fontPixelHeight(this.context.font);
-    const centerX = value.point.x;
-    const top = value.point.y + value.radius + 4;
+    const offset = value.node.labelOffset ?? { x: 0, y: 0 };
+    const centerX = value.point.x + offset.x;
+    const top = labelTop(frame, value.point.y, value.radius, this.context.font) + offset.y;
     return { left: centerX - width / 2 - 2, right: centerX + width / 2 + 2, top, bottom: top + height + 2 };
   }
 }
@@ -416,8 +460,55 @@ function fontPixelHeight(font: string): number {
   return match ? Number(match[1]) : 12;
 }
 
+function labelTop(
+  frame: GraphRenderFrameV1,
+  nodeY: number,
+  radius: number,
+  font: string,
+): number {
+  return frame.theme.labelPosition === 'above'
+    ? nodeY - radius - 4 - fontPixelHeight(font)
+    : nodeY + radius + 4;
+}
+
 function clampInteger(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function projectedRadius(
+  frame: GraphRenderFrameV1,
+  radius: number,
+  scale: number,
+  projection: 'orthographic' | 'perspective',
+): number {
+  if (frame.theme.nodeScaleMode === 'sqrt-orthographic' && projection === 'orthographic') {
+    return radius * Math.sqrt(Math.max(0, scale));
+  }
+  const projected = radius * scale;
+  return projection === 'perspective'
+    ? Math.max(frame.theme.minimumPerspectiveNodeRadius ?? 0, projected)
+    : projected;
+}
+
+function nodeFont(
+  frame: GraphRenderFrameV1,
+  node: GraphRenderNodeV1,
+  zoom: number,
+  projection: 'orthographic' | 'perspective',
+): string {
+  if (node.labelFontSize === undefined) return frame.theme.labelFont;
+  const scale = frame.theme.labelScaleMode === 'sqrt-orthographic' && projection === 'orthographic'
+    ? Math.sqrt(Math.max(0, zoom))
+    : 1;
+  const size = Math.max(1, node.labelFontSize * scale);
+  const shorthand = /\b[0-9]+(?:\.[0-9]+)?px(?:\/[^\s]+)?\s+(.+)$/.exec(frame.theme.labelFont);
+  const family = shorthand?.[1]
+    ?? frame.theme.labelFont.replace(/^\s*[0-9]+(?:\.[0-9]+)?px\s*/, '');
+  return `${size}px ${family || 'sans-serif'}`;
+}
+
+function clampOpacity(value: number | undefined): number {
+  return value === undefined || !Number.isFinite(value) ? 1 : Math.max(0, Math.min(1, value));
 }
 
 function drawArrow(

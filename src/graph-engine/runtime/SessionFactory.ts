@@ -115,6 +115,7 @@ export class SessionFactory {
       }),
       modules: this.modules,
       themePalette: this.resolveThemePalette(options.container),
+      resolveThemePalette: () => this.resolveThemePalette(options.container),
       restoreViewState: options.restoreViewState,
       platform: this.createPlatform(options.container),
       nodeActions: hostServices.nodeActions,
@@ -126,6 +127,10 @@ export class SessionFactory {
 
   refreshActiveProfiles(): void {
     for (const session of [...this.activeSessions]) session.refreshResolvedProfile();
+  }
+
+  refreshActiveThemes(): void {
+    for (const session of [...this.activeSessions]) session.refreshThemePalette();
   }
 }
 

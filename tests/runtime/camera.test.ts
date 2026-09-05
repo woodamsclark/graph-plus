@@ -52,3 +52,35 @@ test('R-CAMERA-02 perspective dolly scales nodes without changing the default si
   camera.setState({ ...state, position: { x: 0, y: 0, z: 50 } });
   equal(camera.worldToScreen({ x: 0, y: 0, z: 0 }).scale, 2, 'dollying to half the depth should double projected node radius');
 });
+
+test('focus fitting caps magnification in orthographic and perspective cameras', () => {
+  const orthographic = new GraphCameraController({
+    position: { x: 0, y: 0, z: 1000 },
+    target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 },
+    zoom: 1,
+    projection: 'orthographic',
+  }, '2d');
+  orthographic.setViewport(640, 360);
+  orthographic.fit([{ x: 100, y: 50, z: 0 }], 48, 1.75);
+  equal(orthographic.getState().zoom, 1.75,
+    'single-node focus should not magnify a 2D view by more than the supplied cap');
+
+  const perspective = new GraphCameraController({
+    position: { x: 0, y: 0, z: 1000 },
+    target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 },
+    zoom: 50 / 24,
+    projection: 'perspective',
+  }, '3d');
+  perspective.setViewport(640, 360);
+  perspective.fit([{ x: 100, y: 50, z: 0 }], 48, 1.75);
+  const state = perspective.getState();
+  const fittedDistance = Math.hypot(
+    state.position.x - state.target.x,
+    state.position.y - state.target.y,
+    state.position.z - state.target.z,
+  );
+  assert(Math.abs(fittedDistance - (1000 / 1.75)) < 1e-9,
+    'single-node focus should not dolly a 3D camera closer than the supplied cap');
+});

@@ -82,6 +82,7 @@ export class GraphModuleHost {
           sessionId: options.sessionId,
           dimensions: options.profile.dimensions,
           settings: module.settings,
+          profileSettings: options.profile.profileSettings,
           themePalette: options.themePalette,
           getDocument: options.getDocument,
           getViewState: options.getViewState,
@@ -146,10 +147,19 @@ export class GraphModuleHost {
       if (!desired?.enabled) continue;
       const currentIndex = this.active.findIndex((module) => module.id === desired.id);
       const current = currentIndex >= 0 ? this.active[currentIndex] : undefined;
-      if (current && sameJson(current.settings, desired.settings)) continue;
+      if (current && sameJson(current.settings, desired.settings)) {
+        try {
+          current.instance.updateProfileSettings?.(cloneJsonRecord(profile.profileSettings));
+        } catch (error) {
+          this.failActiveModule(current, 'settings-changed', error);
+          if (this.fatal) return;
+        }
+        continue;
+      }
       if (current?.instance.updateSettings) {
         try {
           current.instance.updateSettings(cloneJsonRecord(desired.settings));
+          current.instance.updateProfileSettings?.(cloneJsonRecord(profile.profileSettings));
           this.active[currentIndex] = { ...current, settings: cloneJsonRecord(desired.settings) };
         } catch (error) {
           this.failActiveModule(current, 'settings-changed', error);
@@ -164,6 +174,7 @@ export class GraphModuleHost {
           sessionId: this.sessionId,
           dimensions: profile.dimensions,
           settings: desired.settings,
+          profileSettings: profile.profileSettings,
           themePalette: this.themePalette,
           getDocument: this.getDocument,
           getViewState: this.getViewState,
@@ -206,18 +217,22 @@ export class GraphModuleHost {
     state = this.runProjectionHook(state, 'projectTopology', 'project-topology');
     state = { ...state, renderSelection: allOf(state.document) };
     state = this.runProjectionHook(state, 'selectRender', 'select-render');
-    state = this.runProjectionHook(state, 'contributeFrame', 'contribute-frame');
     return state;
   }
 
-  tick(state: GraphModulePipelineStateV1, deltaSeconds: number): Readonly<Record<string, Vec3>> | undefined {
+  contribute(state: GraphModulePipelineStateV1): GraphModulePipelineStateV1 {
+    return this.runProjectionHook(state, 'contributeFrame', 'contribute-frame');
+  }
+
+  tick(state: GraphModulePipelineStateV1, deltaSeconds: number): import('./GraphModuleTypes.ts').GraphModuleTickResultV1 | undefined {
     if (this.fatal || this.disposed) return undefined;
-    let positions = state.positions;
+    const choreographed = this.runProjectionHook(state, 'choreograph', 'choreograph');
+    let positions = choreographed.positions;
     let changed = false;
     for (const module of [...this.active]) {
       if (!module.instance.tick) continue;
       try {
-        const result = module.instance.tick({ ...state, positions }, deltaSeconds);
+        const result = module.instance.tick({ ...choreographed, positions }, deltaSeconds);
         if (result?.positions) {
           positions = result.positions;
           changed = true;
@@ -227,7 +242,8 @@ export class GraphModuleHost {
         if (this.fatal) break;
       }
     }
-    return changed ? positions : undefined;
+    const camera = choreographed.motionTargets?.camera;
+    return changed || camera ? { ...(changed ? { positions } : {}), ...(camera ? { camera } : {}) } : undefined;
   }
 
   documentChanged(document: GraphDocumentV1): void {
@@ -283,7 +299,7 @@ export class GraphModuleHost {
 
   private runProjectionHook(
     initial: GraphModulePipelineStateV1,
-    method: 'projectSource' | 'projectTopology' | 'selectRender' | 'contributeFrame',
+    method: 'projectSource' | 'projectTopology' | 'selectRender' | 'contributeFrame' | 'choreograph',
     hook: GraphModuleHookV1,
   ): GraphModulePipelineStateV1 {
     if (this.fatal || this.disposed) return initial;
@@ -355,6 +371,33 @@ function applyProjectionPatch(
     edgeContributions: patch.edgeContributions
       ? mergeContributions(state.edgeContributions, patch.edgeContributions)
       : state.edgeContributions,
+    motionTargets: patch.motionTargets
+      ? mergeMotionTargets(state.motionTargets ?? {}, patch.motionTargets)
+      : state.motionTargets,
+  };
+}
+
+function mergeMotionTargets(
+  base: import('./GraphModuleTypes.ts').GraphMotionTargetsV1,
+  override: import('./GraphModuleTypes.ts').GraphMotionTargetsV1,
+): import('./GraphModuleTypes.ts').GraphMotionTargetsV1 {
+  return {
+    ...base,
+    ...override,
+    nodePositions: override.nodePositions
+      ? { ...(base.nodePositions ?? {}), ...override.nodePositions }
+      : base.nodePositions,
+    nodePositionOffsets: override.nodePositionOffsets
+      ? { ...(base.nodePositionOffsets ?? {}), ...override.nodePositionOffsets }
+      : base.nodePositionOffsets,
+    edgeLengths: override.edgeLengths
+      ? { ...(base.edgeLengths ?? {}), ...override.edgeLengths }
+      : base.edgeLengths,
+    edgeStrengthScales: override.edgeStrengthScales
+      ? { ...(base.edgeStrengthScales ?? {}), ...override.edgeStrengthScales }
+      : base.edgeStrengthScales,
+    linkLengthScale: (base.linkLengthScale ?? 1) * (override.linkLengthScale ?? 1),
+    linkStrengthScale: (base.linkStrengthScale ?? 1) * (override.linkStrengthScale ?? 1),
   };
 }
 

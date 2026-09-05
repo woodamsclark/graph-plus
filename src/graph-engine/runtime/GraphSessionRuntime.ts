@@ -65,10 +65,23 @@ export interface GraphSessionRuntimeOptionsV1 {
   readonly onDisposed?: () => void;
   readonly modules: GraphModuleRegistry;
   readonly themePalette: GraphRenderThemeV1;
+  readonly resolveThemePalette?: () => GraphRenderThemeV1;
   readonly restoreViewState?: GraphViewStateV1;
   readonly platform: SessionRuntimePlatformV1;
   readonly nodeActions?: GraphNodeActionRuntimeV1;
 }
+
+type GraphSystemModeV1 = 'new' | 'legacy';
+
+interface GraphSystemViewSnapshotV1 {
+  readonly dimensions: '2d' | '3d';
+  readonly positions: Readonly<Record<string, Vec3>>;
+  readonly pinnedNodeIds: readonly string[];
+  readonly camera: GraphCameraStateV1;
+  readonly moduleState: Readonly<Record<string, JsonValue>>;
+}
+
+const GRAPH_SYSTEM_STATE_KEY_V1 = 'graph-system-states-v1';
 
 export class GraphSessionDisposedErrorV1 extends Error {
   readonly code = 'session-disposed' as const;
@@ -92,6 +105,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly container: HTMLElement;
   private readonly platform: SessionRuntimePlatformV1;
   private readonly themePalette: GraphRenderThemeV1;
+  private readonly resolveThemePalette?: () => GraphRenderThemeV1;
   private readonly nodeActions?: GraphNodeActionRuntimeV1;
   private readonly modules: GraphModuleRegistry;
   private surface!: SessionSurfaceV1;
@@ -100,6 +114,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private renderer!: CanvasGraphRenderer;
   private interaction!: SessionInteractionRuntime;
   private moduleHost!: GraphModuleHost;
+  private projectionView!: GraphModulePipelineStateV1;
   private moduleView!: GraphModulePipelineStateV1;
   private surfaceResizeSubscription: Disposable | null = null;
   private store: GraphDocumentStore;
@@ -122,6 +137,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private disposed = false;
   private fatalModuleError: GraphRequiredModuleErrorV1 | null = null;
   private readonly deferredErrors: GraphSessionErrorV1[] = [];
+  private readonly systemBankingEnabled: boolean;
+  private systemMode: GraphSystemModeV1;
+  private systemViewStates: Partial<Record<GraphSystemModeV1, GraphSystemViewSnapshotV1>> = {};
 
   private readonly onVisibilityChange = (): void => {
     this.documentSuspended = this.platform.document.hidden;
@@ -141,18 +159,28 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.lastFrameTimestamp = timestamp;
     const moduleStart = this.platform.now();
     this.performanceCounters.moduleTicks += 1;
-    const positions = this.moduleHost.tick({
+    const tickResult = this.moduleHost.tick({
       ...this.moduleView,
       draggedNodeId: this.interaction.getDraggedNodeId(),
+      hoveredNodeId: this.interaction.getHoveredNodeId(),
     }, deltaSeconds);
+    const positions = tickResult?.positions;
     const moduleTickMs = duration(moduleStart, this.platform.now());
     const compositionStart = this.platform.now();
     if (positions) {
       const requiresComposition = positions !== this.moduleView.positions;
       this.viewState = { ...this.viewState, positions };
+      this.projectionView = { ...this.projectionView, positions, viewState: this.viewState };
       this.moduleView = { ...this.moduleView, positions, viewState: this.viewState };
       if (requiresComposition) this.refreshFrame();
       else this.frameDirty = true;
+    }
+    if (tickResult?.camera) {
+      this.camera.setState(tickResult.camera);
+      this.synchronizeCameraState();
+      this.projectionView = { ...this.projectionView, viewState: this.viewState };
+      this.moduleView = { ...this.moduleView, viewState: this.viewState };
+      this.frameDirty = true;
     }
     const compositionMs = duration(compositionStart, this.platform.now());
     if (this.isSuspended()) return;
@@ -182,24 +210,34 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.consumerId = options.consumerId;
     this.profileId = options.profileId;
     this.profile = options.profile;
+    this.systemBankingEnabled = hasGraphSystemMode(options.profile.profileSettings);
+    this.systemMode = graphSystemMode(options.profile.profileSettings);
     this.sessionOverrides = cloneOverrides(options.initialSessionOverrides ?? {});
     this.resolveProfile = options.resolveProfile;
     this.onDisposed = options.onDisposed;
     this.container = options.container;
     this.platform = options.platform;
     this.themePalette = options.themePalette;
+    this.resolveThemePalette = options.resolveThemePalette;
     this.nodeActions = options.nodeActions;
     this.modules = options.modules;
     this.assertPlatformOwnership();
     this.store = new GraphDocumentStore(options.document);
-    const restoredViewState = options.restoreViewState
-      ? this.prepareRestoredViewState(options.restoreViewState)
+    const restoration = prepareGraphSystemRestoration(
+      options.restoreViewState,
+      this.systemMode,
+      this.systemBankingEnabled,
+    );
+    this.systemViewStates = restoration.states;
+    const restoredViewState = restoration.active
+      ? this.prepareRestoredViewState(restoration.active)
       : undefined;
     this.viewState = normalizePerspectiveViewState(restoredViewState
       ? addMissingPositions(
           reconcileGraphViewStateV1(restoredViewState, this.restoreContext()),
           this.store.readDocument(),
           this.profile.dimensions,
+          this.systemMode === 'new',
         )
       : this.createInitialViewState(), this.profile.dimensions, focalLengthMm(this.profile.profileSettings));
     this.projectionSelection = allOf(this.store.readDocument());
@@ -231,7 +269,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         platform: this.platform,
         surface: this.surface,
         camera: this.camera,
-        hitTest: (point) => this.renderer.hitTest(point),
+        hitTest: (point, pointerKind) => this.renderer.hitTest(point, pointerKind),
         getDocument: () => this.store.readDocument(),
         getViewState: () => this.viewState,
         getInteractivePositions: () => this.moduleView?.positions ?? this.viewState.positions,
@@ -241,6 +279,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         getRenderSelection: () => this.renderSelection,
         getResetCamera: () => defaultCamera(this.profile.dimensions, focalLengthMm(this.profile.profileSettings)),
         getDragReleasePolicy: () => this.profile.profileSettings.dragRelease === 'pin' ? 'pin' : 'dynamic',
+        getDragConstraintPolicy: () => this.profile.profileSettings.graphSystem === 'new' ? 'transient' : 'persistent-pin',
         onViewStateChanged: (change) => this.handleRuntimeViewChange(change),
         onIntent: (intent) => this.emitIntent(intent),
         onActivateNode: (nodeId) => this.invokePrimaryNodeAction(nodeId),
@@ -281,6 +320,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
             reconcileGraphViewStateV1(this.viewState, this.restoreContext()),
             next,
             this.profile.dimensions,
+            this.systemMode === 'new',
           )
         : this.createInitialViewState();
       this.camera.setState(this.viewState.camera);
@@ -322,6 +362,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       reconcileGraphViewStateV1(this.viewState, this.restoreContext()),
       this.store.readDocument(),
       this.profile.dimensions,
+      this.systemMode === 'new',
     );
     this.moduleHost.documentChanged(this.store.readDocument());
     this.moduleHost.viewChanged(this.viewState);
@@ -398,6 +439,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const pinnedNodeIds = [...current];
     if (sameIds(pinnedNodeIds, this.viewState.pinnedNodeIds)) return;
     this.viewState = { ...this.viewState, pinnedNodeIds };
+    this.projectionView = { ...this.projectionView, viewState: this.viewState };
     this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame();
@@ -421,6 +463,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     assertTransition(options);
     this.camera.setState(defaultCamera(this.profile.dimensions, focalLengthMm(this.profile.profileSettings)));
     this.synchronizeCameraState();
+    this.projectionView = { ...this.projectionView, viewState: this.viewState };
     this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame();
@@ -430,18 +473,33 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.requireActive();
     this.performanceCounters.viewExports += 1;
     this.synchronizeModuleState();
-    return cloneGraphViewStateV1(this.viewState);
+    if (!this.systemBankingEnabled) return cloneGraphViewStateV1(this.viewState);
+    this.systemViewStates[this.systemMode] = snapshotGraphSystemView(this.viewState);
+    const moduleState = {
+      ...withoutGraphSystemState(this.viewState.moduleState),
+      [GRAPH_SYSTEM_STATE_KEY_V1]: graphSystemStateValue(this.systemMode, this.systemViewStates),
+    };
+    return cloneGraphViewStateV1({ ...this.viewState, moduleState });
   }
 
   async restoreViewState(state: GraphViewStateV1): Promise<void> {
     this.requireActive();
     try {
-      const prepared = this.prepareRestoredViewState(state);
-      this.viewState = normalizePerspectiveViewState(addMissingPositions(
+      const restoration = prepareGraphSystemRestoration(
+        state,
+        this.systemMode,
+        this.systemBankingEnabled,
+      );
+      const source = restoration.active ?? this.createInitialViewState(this.profile, this.systemMode);
+      const prepared = this.prepareRestoredViewState(source);
+      const restoredViewState = normalizePerspectiveViewState(addMissingPositions(
         reconcileGraphViewStateV1(prepared, this.restoreContext()),
         this.store.readDocument(),
         this.profile.dimensions,
+        this.systemMode === 'new',
       ), this.profile.dimensions, focalLengthMm(this.profile.profileSettings));
+      this.systemViewStates = restoration.states;
+      this.viewState = restoredViewState;
       this.camera.setState(this.viewState.camera);
       this.moduleHost.restoreState(this.viewState.moduleState);
       this.moduleHost.viewChanged(this.viewState);
@@ -498,6 +556,15 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.applyResolvedProfile(this.resolveProfile(this.sessionOverrides));
   }
 
+  refreshThemePalette(): void {
+    this.requireActive();
+    const next = this.resolveThemePalette?.();
+    if (!next) return;
+    Object.assign(this.themePalette as unknown as Record<string, unknown>, next);
+    this.moduleHost.updateProfile(this.profile);
+    this.recomputeView(false);
+  }
+
   private applyResolvedProfile(next: EffectiveConsumerProfileV1): void {
     const fatalIssues = next.issues.filter((issue) => issue.fatal);
     if (fatalIssues.length) throw new Error(fatalIssues.map((issue) => `${issue.path}: ${issue.message}`).join('; '));
@@ -511,6 +578,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     ) {
       throw new Error('modules.node-regions: Required node regions are available only in 2D.');
     }
+    const nextSystemMode = graphSystemMode(next.profileSettings);
+    if (nextSystemMode !== this.systemMode) {
+      this.reconfigureGraphSystem(next, nextSystemMode);
+      return;
+    }
     if (next.dimensions !== this.profile.dimensions) {
       this.reconfigureDimensions(next);
       return;
@@ -520,6 +592,84 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.synchronizeCameraState();
     this.profile = next;
     this.recomputeView(false);
+  }
+
+  private reconfigureGraphSystem(next: EffectiveConsumerProfileV1, nextMode: GraphSystemModeV1): void {
+    this.synchronizeModuleState();
+    this.systemViewStates[this.systemMode] = snapshotGraphSystemView(this.viewState);
+    const shared = this.viewState;
+    const saved = this.systemViewStates[nextMode];
+    let destination = saved
+      ? viewStateFromGraphSystemSnapshot(shared, saved)
+      : this.createInitialViewState(next, nextMode);
+    const { focusedNodeId: _destinationFocus, ...destinationWithoutFocus } = destination;
+    destination = {
+      ...destinationWithoutFocus,
+      selectedNodeIds: [...shared.selectedNodeIds],
+      activeFilters: cloneGraphViewStateV1(shared).activeFilters,
+      ...(shared.focusedNodeId === undefined ? {} : { focusedNodeId: shared.focusedNodeId }),
+    };
+    if (destination.dimensions !== next.dimensions) {
+      const viewport = this.surface.getViewport();
+      destination = convertGraphViewStateDimensionsV1(destination, {
+        dimensions: next.dimensions,
+        focalLengthMm: focalLengthMm(next.profileSettings),
+        viewportHeight: viewport.height,
+      });
+    }
+    destination = normalizePerspectiveViewState(addMissingPositions(
+      reconcileGraphViewStateV1(destination, {
+        document: this.store.readDocument(),
+        consumerId: this.consumerId,
+        profileId: this.profileId,
+        dimensions: next.dimensions,
+      }),
+      this.store.readDocument(),
+      next.dimensions,
+      nextMode === 'new',
+    ), next.dimensions, focalLengthMm(next.profileSettings));
+    const previousHost = this.moduleHost;
+    const previousProfile = this.profile;
+    const previousMode = this.systemMode;
+    const previousViewState = cloneGraphViewStateV1(this.viewState);
+    const previousCamera = this.camera.getState();
+    const deferredFailures: GraphModuleFailureV1[] = [];
+    let committed = false;
+    const replacementHost = this.createModuleHost(
+      next,
+      withoutGraphSystemState(destination.moduleState),
+      () => committed ? this.viewState : destination,
+      (failure) => deferredFailures.push(failure),
+    );
+    this.interaction.setEnabled(false);
+    try {
+      this.profile = next;
+      this.systemMode = nextMode;
+      this.viewState = destination;
+      this.camera.reconfigure(destination.camera, next.dimensions);
+      this.interaction.setDimensions(next.dimensions);
+      this.surface.setDimensions(next.dimensions);
+      this.moduleHost = replacementHost;
+      committed = true;
+      this.moduleHost.viewChanged(this.viewState);
+      this.recomputeView(false);
+      previousHost.dispose();
+      for (const failure of deferredFailures) this.handleModuleFailure(failure);
+    } catch (error) {
+      replacementHost.dispose();
+      this.moduleHost = previousHost;
+      this.profile = previousProfile;
+      this.systemMode = previousMode;
+      this.viewState = previousViewState;
+      this.camera.reconfigure(previousCamera, previousProfile.dimensions);
+      this.interaction.setDimensions(previousProfile.dimensions);
+      this.surface.setDimensions(previousProfile.dimensions);
+      this.moduleHost.viewChanged(this.viewState);
+      this.recomputeView(false);
+      throw error;
+    } finally {
+      this.synchronizeRuntimeActivity();
+    }
   }
 
   private reconfigureDimensions(next: EffectiveConsumerProfileV1): void {
@@ -733,7 +883,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     } as const;
   }
 
-  private createInitialViewState(): GraphViewStateV1 {
+  private createInitialViewState(
+    profile: EffectiveConsumerProfileV1 = this.profile,
+    systemMode: GraphSystemModeV1 = this.systemMode,
+  ): GraphViewStateV1 {
     const document = this.store.readDocument();
     return {
       schemaVersion: 1,
@@ -741,15 +894,17 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       documentRevision: document.revision,
       consumerId: this.consumerId,
       profileId: this.profileId,
-      dimensions: this.profile.dimensions,
+      dimensions: profile.dimensions,
       positions: Object.fromEntries(
         document.nodes.map((node, index) => [
           node.id,
-          node.positionHint ? { ...node.positionHint } : defaultNodePosition(index, this.profile.dimensions),
+          systemMode === 'legacy' && node.positionHint
+            ? { ...node.positionHint }
+            : defaultNodePosition(index, profile.dimensions),
         ]),
       ),
       pinnedNodeIds: [],
-      camera: defaultCamera(this.profile.dimensions, focalLengthMm(this.profile.profileSettings)),
+      camera: defaultCamera(profile.dimensions, focalLengthMm(profile.profileSettings)),
       selectedNodeIds: [],
       activeFilters: {},
       moduleState: {},
@@ -760,7 +915,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (resetInteraction) this.interaction.reset();
     this.performanceCounters.projectionPasses += 1;
     const document = this.store.readDocument();
-    this.moduleView = this.moduleHost.project({
+    this.projectionView = this.moduleHost.project({
       sourceDocument: document,
       document,
       viewState: this.viewState,
@@ -768,12 +923,15 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       projectionSelection: allOf(document),
       renderSelection: allOf(document),
       formActive: false,
+      hoveredNodeId: this.interaction?.getHoveredNodeId(),
       nodeContributions: {},
       edgeContributions: {},
       regionLayouts: [],
       regionContributions: [],
       theme: this.themePalette,
+      motionTargets: {},
     });
+    this.moduleView = this.projectionView;
     if (this.moduleView.commitPositions) {
       this.viewState = cloneGraphViewStateV1({
         ...this.viewState,
@@ -785,6 +943,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         viewState: this.viewState,
         commitPositions: false,
       };
+      this.projectionView = this.moduleView;
       this.moduleHost.viewChanged(this.viewState);
     }
     this.projectionSelection = this.moduleView.projectionSelection;
@@ -795,6 +954,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   private refreshFrame(): void {
     this.performanceCounters.frameCompositions += 1;
+    this.moduleView = this.moduleHost.contribute({
+      ...this.projectionView,
+      draggedNodeId: this.interaction?.getDraggedNodeId(),
+      hoveredNodeId: this.interaction?.getHoveredNodeId(),
+    });
     this.frames.set(composeGraphRenderFrameV1({
       document: this.moduleView.document,
       viewState: this.viewState,
@@ -826,15 +990,16 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private handleRuntimeViewChange(change: GraphRuntimeViewChangeV1): void {
     const draggedNodeId = change === 'positions' ? this.interaction.getDraggedNodeId() : undefined;
     const draggedPosition = draggedNodeId ? this.viewState.positions[draggedNodeId] : undefined;
-    this.moduleView = {
-      ...this.moduleView,
+    this.projectionView = {
+      ...this.projectionView,
       viewState: this.viewState,
       ...(change === 'positions' ? {
         positions: draggedNodeId && draggedPosition
-          ? { ...this.moduleView.positions, [draggedNodeId]: draggedPosition }
+          ? { ...this.projectionView.positions, [draggedNodeId]: draggedPosition }
           : this.viewState.positions,
       } : {}),
     };
+    this.moduleView = { ...this.moduleView, viewState: this.viewState, positions: this.projectionView.positions };
     if (change === 'camera') {
       this.moduleHost.viewChanged(this.viewState);
       this.frameDirty = true;
@@ -853,6 +1018,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (!positions.length) return;
     this.camera.fit(positions);
     this.synchronizeCameraState();
+    this.projectionView = { ...this.projectionView, viewState: this.viewState };
     this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame();
@@ -862,6 +1028,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const selectedNodeIds = [...new Set(nodeIds)].filter((id) => this.store.hasNode(id));
     if (sameIds(selectedNodeIds, this.viewState.selectedNodeIds)) return;
     this.viewState = { ...this.viewState, selectedNodeIds };
+    this.projectionView = { ...this.projectionView, viewState: this.viewState };
     this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame();
@@ -880,6 +1047,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         this.synchronizeCameraState();
       }
     }
+    this.projectionView = { ...this.projectionView, viewState: this.viewState };
     this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame();
@@ -1124,6 +1292,121 @@ function focalLengthMm(settings: Readonly<Record<string, import('../contracts/v1
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 50;
 }
 
+function graphSystemMode(settings: Readonly<Record<string, JsonValue>>): GraphSystemModeV1 {
+  return settings.graphSystem === 'new' ? 'new' : 'legacy';
+}
+
+function hasGraphSystemMode(settings: Readonly<Record<string, JsonValue>>): boolean {
+  return settings.graphSystem === 'new' || settings.graphSystem === 'legacy';
+}
+
+function prepareGraphSystemRestoration(
+  restored: GraphViewStateV1 | undefined,
+  activeMode: GraphSystemModeV1,
+  isolateModes: boolean,
+): {
+  active?: GraphViewStateV1;
+  states: Partial<Record<GraphSystemModeV1, GraphSystemViewSnapshotV1>>;
+} {
+  if (!restored || !isolateModes) return { active: restored, states: {} };
+  const bundle = readGraphSystemState(restored.moduleState[GRAPH_SYSTEM_STATE_KEY_V1]);
+  if (bundle) {
+    const base = { ...restored, moduleState: withoutGraphSystemState(restored.moduleState) };
+    const snapshot = bundle.states[activeMode];
+    return {
+      active: snapshot ? viewStateFromGraphSystemSnapshot(base, snapshot) : undefined,
+      states: { ...bundle.states },
+    };
+  }
+  const legacy = snapshotGraphSystemView(restored);
+  return {
+    active: activeMode === 'legacy'
+      ? { ...restored, moduleState: withoutGraphSystemState(restored.moduleState) }
+      : undefined,
+    states: { legacy },
+  };
+}
+
+function snapshotGraphSystemView(state: GraphViewStateV1): GraphSystemViewSnapshotV1 {
+  return {
+    dimensions: state.dimensions,
+    positions: Object.fromEntries(Object.entries(state.positions).map(([id, value]) => [id, { ...value }])),
+    pinnedNodeIds: [...state.pinnedNodeIds],
+    camera: JSON.parse(JSON.stringify(state.camera)) as GraphCameraStateV1,
+    moduleState: withoutGraphSystemState(state.moduleState),
+  };
+}
+
+function viewStateFromGraphSystemSnapshot(
+  base: GraphViewStateV1,
+  snapshot: GraphSystemViewSnapshotV1,
+): GraphViewStateV1 {
+  const { focusedNodeId: _focusedNodeId, ...withoutFocus } = base;
+  return cloneGraphViewStateV1({
+    ...withoutFocus,
+    dimensions: snapshot.dimensions,
+    positions: snapshot.positions,
+    pinnedNodeIds: snapshot.pinnedNodeIds,
+    camera: snapshot.camera,
+    moduleState: snapshot.moduleState,
+    ...(base.focusedNodeId === undefined ? {} : { focusedNodeId: base.focusedNodeId }),
+  });
+}
+
+function withoutGraphSystemState(
+  state: Readonly<Record<string, JsonValue>>,
+): Readonly<Record<string, JsonValue>> {
+  const result = { ...state };
+  delete result[GRAPH_SYSTEM_STATE_KEY_V1];
+  return result;
+}
+
+function graphSystemStateValue(
+  activeMode: GraphSystemModeV1,
+  states: Partial<Record<GraphSystemModeV1, GraphSystemViewSnapshotV1>>,
+): JsonValue {
+  return JSON.parse(JSON.stringify({ schemaVersion: 1, activeMode, states })) as JsonValue;
+}
+
+function readGraphSystemState(value: JsonValue | undefined): {
+  activeMode: GraphSystemModeV1;
+  states: Partial<Record<GraphSystemModeV1, GraphSystemViewSnapshotV1>>;
+} | undefined {
+  if (!isJsonRecord(value) || value.schemaVersion !== 1
+    || (value.activeMode !== 'new' && value.activeMode !== 'legacy')
+    || !isJsonRecord(value.states)) return undefined;
+  const states: Partial<Record<GraphSystemModeV1, GraphSystemViewSnapshotV1>> = {};
+  for (const mode of ['new', 'legacy'] as const) {
+    const candidate = value.states[mode];
+    if (!isJsonRecord(candidate) || (candidate.dimensions !== '2d' && candidate.dimensions !== '3d')
+      || !isJsonRecord(candidate.positions) || !Array.isArray(candidate.pinnedNodeIds)
+      || !isJsonRecord(candidate.camera) || !isJsonRecord(candidate.moduleState)) continue;
+    try {
+      const shell = {
+        schemaVersion: 1 as const,
+        documentId: 'validation',
+        documentRevision: 0,
+        consumerId: 'validation',
+        profileId: 'validation',
+        dimensions: candidate.dimensions,
+        positions: candidate.positions,
+        pinnedNodeIds: candidate.pinnedNodeIds,
+        camera: candidate.camera,
+        selectedNodeIds: [],
+        activeFilters: {},
+        moduleState: candidate.moduleState,
+      };
+      const cloned = cloneGraphViewStateV1(shell as unknown as GraphViewStateV1);
+      states[mode] = snapshotGraphSystemView(cloned);
+    } catch {}
+  }
+  return { activeMode: value.activeMode, states };
+}
+
+function isJsonRecord(value: unknown): value is Record<string, JsonValue> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function normalizePerspectiveViewState(
   state: GraphViewStateV1,
   dimensions: '2d' | '3d',
@@ -1174,21 +1457,58 @@ function addMissingPositions(
   state: GraphViewStateV1,
   document: GraphDocumentV1,
   dimensions: '2d' | '3d',
+  nativePlacement = false,
 ): GraphViewStateV1 {
   const additions = document.nodes
     .map((node, index) => ({ node, index }))
     .filter(({ node }) => state.positions[node.id] === undefined);
   if (!additions.length) return state;
+  const additionsById = new Set(additions.map(({ node }) => node.id));
+  const positions = { ...state.positions };
+  const adjacency = new Map<string, string[]>();
+  for (const edge of document.edges) {
+    const source = adjacency.get(edge.sourceId) ?? [];
+    source.push(edge.targetId); adjacency.set(edge.sourceId, source);
+    const target = adjacency.get(edge.targetId) ?? [];
+    target.push(edge.sourceId); adjacency.set(edge.targetId, target);
+  }
+  const cloudRadius = Math.max(120, ...Object.values(positions).map((position) => Math.hypot(position.x, position.y, position.z))) + 120;
+  for (const { node, index } of additions) {
+    if (!nativePlacement) {
+      positions[node.id] = node.positionHint ? { ...node.positionHint } : defaultNodePosition(index, dimensions);
+      continue;
+    }
+    const neighbors = (adjacency.get(node.id) ?? [])
+      .filter((id) => !additionsById.has(id) || positions[id] !== undefined)
+      .map((id) => positions[id])
+      .filter((position): position is Vec3 => position !== undefined);
+    const jitter = deterministicPlacementDirection(node.id, dimensions);
+    if (neighbors.length) {
+      positions[node.id] = {
+        x: neighbors.reduce((sum, value) => sum + value.x, 0) / neighbors.length + jitter.x * 24,
+        y: neighbors.reduce((sum, value) => sum + value.y, 0) / neighbors.length + jitter.y * 24,
+        z: dimensions === '2d' ? 0 : neighbors.reduce((sum, value) => sum + value.z, 0) / neighbors.length + jitter.z * 24,
+      };
+    } else {
+      positions[node.id] = {
+        x: jitter.x * cloudRadius,
+        y: jitter.y * cloudRadius,
+        z: dimensions === '2d' ? 0 : jitter.z * cloudRadius,
+      };
+    }
+    additionsById.delete(node.id);
+  }
   return cloneGraphViewStateV1({
     ...state,
-    positions: {
-      ...state.positions,
-      ...Object.fromEntries(additions.map(({ node, index }) => [
-        node.id,
-        node.positionHint ? { ...node.positionHint } : defaultNodePosition(index, dimensions),
-      ])),
-    },
+    positions,
   });
+}
+
+function deterministicPlacementDirection(id: string, dimensions: '2d' | '3d'): Vec3 {
+  let hash = 2166136261;
+  for (const character of id) { hash ^= character.charCodeAt(0); hash = Math.imul(hash, 16777619); }
+  const angle = (hash >>> 0) / 0xffffffff * Math.PI * 2;
+  return { x: Math.cos(angle), y: Math.sin(angle), z: dimensions === '3d' ? Math.sin(angle * 0.73) * 0.6 : 0 };
 }
 
 function defaultNodePosition(index: number, dimensions: '2d' | '3d'): Vec3 {

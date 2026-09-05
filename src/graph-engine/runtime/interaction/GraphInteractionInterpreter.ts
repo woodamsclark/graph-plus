@@ -34,6 +34,7 @@ type SinglePointerMode =
   | {
       readonly kind: 'drag';
       readonly pointerId: number;
+      readonly pointerKind: 'mouse' | 'touch' | 'pen';
       readonly nodeId: string;
       lastPoint: GraphScreenPointV1;
     };
@@ -62,7 +63,7 @@ export class GraphInteractionInterpreter {
     readonly dimensions: GraphDimensionsV1;
     readonly events: BufferedQueue<GraphInputEventV1>;
     readonly commands: BufferedQueue<GraphRuntimeCommandV1>;
-    readonly hitTest: (point: GraphScreenPointV1) => GraphHitV1 | null;
+    readonly hitTest: (point: GraphScreenPointV1, pointerKind?: 'mouse' | 'touch' | 'pen') => GraphHitV1 | null;
     readonly getFocusedNodeId: () => string | undefined;
     readonly getSelectedNodeIds: () => readonly string[];
     readonly getNodeSelection: (nodeId: string) => readonly string[];
@@ -81,7 +82,8 @@ export class GraphInteractionInterpreter {
     for (const event of this.options.events.drain()) this.ingest(event);
     const hoverEvent = this.pendingHover;
     this.pendingHover = null;
-    if (hoverEvent && this.mode.kind === 'idle' && this.pointers.size === 0 && !this.touchGesture) {
+    if (hoverEvent && hoverEvent.pointerKind !== 'touch'
+      && this.mode.kind === 'idle' && this.pointers.size === 0 && !this.touchGesture) {
       const hover = this.options.hitTest(hoverEvent.point);
       this.command(hoverEvent, { type: 'set-hover', ...(hover ? { nodeId: hover.nodeId } : {}) });
     }
@@ -120,7 +122,7 @@ export class GraphInteractionInterpreter {
       button: event.button,
       downPoint: event.point,
       lastPoint: event.point,
-      hit: this.options.hitTest(event.point),
+      hit: this.options.hitTest(event.point, event.pointerKind),
     };
   }
 
@@ -135,15 +137,24 @@ export class GraphInteractionInterpreter {
     if (this.mode.kind === 'press' && this.mode.pointerId === event.pointerId) {
       const threshold = this.options.dragThresholdPx ?? 6;
       if (distanceSquared(this.mode.downPoint, event.point) <= threshold ** 2) return;
-      if (this.mode.hit && this.mode.button === 0) {
+      const focusedThreeDimensionalOrbit = this.dimensions === '3d'
+        && this.mode.button === 0
+        && this.options.getFocusedNodeId() !== undefined;
+      if (this.mode.hit && this.mode.button === 0 && !focusedThreeDimensionalOrbit) {
         this.command(event, { type: 'set-focus' });
         this.command(event, { type: 'set-selection', nodeIds: [this.mode.hit.nodeId] });
         this.command(event, { type: 'drag-start', nodeId: this.mode.hit.nodeId, point: this.mode.downPoint });
         this.command(event, { type: 'drag-update', nodeId: this.mode.hit.nodeId, point: event.point });
-        this.mode = { kind: 'drag', pointerId: event.pointerId, nodeId: this.mode.hit.nodeId, lastPoint: event.point };
+        this.mode = {
+          kind: 'drag', pointerId: event.pointerId, pointerKind: this.mode.pointerKind,
+          nodeId: this.mode.hit.nodeId, lastPoint: event.point,
+        };
         return;
       }
-      const orbit = this.dimensions === '3d' && this.mode.button === 2;
+      const orbit = this.dimensions === '3d' && (
+        this.mode.button === 2
+        || focusedThreeDimensionalOrbit
+      );
       if (orbit) {
         this.command(event, {
           type: 'orbit-by',
@@ -193,7 +204,10 @@ export class GraphInteractionInterpreter {
       return;
     }
     if (this.mode.kind === 'drag' && this.mode.pointerId === event.pointerId) {
-      this.command(event, { type: 'drag-end', nodeId: this.mode.nodeId, point: event.point });
+      this.command(event, {
+        type: 'drag-end', nodeId: this.mode.nodeId, point: event.point,
+        pointerKind: this.mode.pointerKind,
+      });
       this.mode = { kind: 'idle' };
       return;
     }
@@ -237,7 +251,10 @@ export class GraphInteractionInterpreter {
   private pointerCancel(event: Extract<GraphInputEventV1, { type: 'pointer-cancel' }>): void {
     this.pointers.delete(event.pointerId);
     if (this.mode.kind === 'drag' && this.mode.pointerId === event.pointerId) {
-      this.command(event, { type: 'drag-end', nodeId: this.mode.nodeId, point: event.point });
+      this.command(event, {
+        type: 'drag-end', nodeId: this.mode.nodeId, point: event.point,
+        pointerKind: this.mode.pointerKind,
+      });
     }
     this.mode = { kind: 'idle' };
     if (this.pointers.size < 2) this.touchGesture = null;
@@ -257,7 +274,7 @@ export class GraphInteractionInterpreter {
   }
 
   private longPress(event: Extract<GraphInputEventV1, { type: 'long-press' }>): void {
-    const hit = this.options.hitTest(event.point);
+    const hit = this.options.hitTest(event.point, event.pointerKind);
     if (this.mode.kind === 'press' && this.mode.pointerId === event.pointerId) this.mode = { kind: 'idle' };
     if (hit) this.command(event, {
       type: 'request-node-context',
@@ -332,7 +349,9 @@ export class GraphInteractionInterpreter {
       const origin = previous.mode === 'pending' ? previous.startCentroid : previous.centroid;
       const deltaX = origin.x - next.centroid.x;
       const deltaY = origin.y - next.centroid.y;
-      this.command(event, this.dimensions === '3d'
+      const focusedThreeDimensional = this.dimensions === '3d'
+        && this.options.getFocusedNodeId() !== undefined;
+      this.command(event, this.dimensions === '3d' && !focusedThreeDimensional
         ? { type: 'orbit-by', deltaX: -deltaX, deltaY }
         : { type: 'pan-by', deltaX, deltaY });
     } else if (mode === 'pinch') {
