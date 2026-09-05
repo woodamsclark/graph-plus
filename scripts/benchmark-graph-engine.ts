@@ -15,11 +15,10 @@ interface BenchmarkScenario {
   readonly measuredFrames: number;
   readonly regions?: { readonly count: number; readonly memberships: number };
   readonly topology?: 'weighted-stress';
-  readonly system?: 'legacy' | 'new';
 }
 
 const scenarios: readonly BenchmarkScenario[] = [
-  { id: 'v16-new-1500-2d', nodes: 1_500, edges: 3_000, dimensions: '2d', warmupFrames: 20, measuredFrames: 180, system: 'new' },
+  { id: 'v16-native-1500-2d', nodes: 1_500, edges: 3_000, dimensions: '2d', warmupFrames: 20, measuredFrames: 180 },
   { id: 'vault-1500-2d', nodes: 1_500, edges: 3_000, dimensions: '2d', warmupFrames: 20, measuredFrames: 180 },
   { id: 'vault-1500-3d', nodes: 1_500, edges: 3_000, dimensions: '3d', warmupFrames: 20, measuredFrames: 180 },
   {
@@ -69,7 +68,7 @@ async function runScenario(scenario: BenchmarkScenario) {
       edges,
       ...(nodeRegions ? { nodeRegions } : {}),
     }),
-    ...(scenario.system === 'new' ? { registration: newModeRegistration() } : {}),
+    registration: benchmarkRegistration(),
     realTime: true,
   });
   harness.profiles.setUserOverrides('synthetic-consumer', profileId, {
@@ -109,7 +108,7 @@ async function runScenario(scenario: BenchmarkScenario) {
         0,
       ) ?? 0,
       topology: scenario.topology ?? 'regular',
-      system: scenario.system ?? 'legacy',
+      system: 'anima-native',
     },
     mountMs,
     requestedFrames: scenario.measuredFrames,
@@ -123,13 +122,12 @@ async function runScenario(scenario: BenchmarkScenario) {
   };
 }
 
-function newModeRegistration() {
+function benchmarkRegistration() {
   const registration = runtimeRegistration();
   return {
     ...registration,
     profiles: registration.profiles.map((profile) => ({
       ...profile,
-      profileSettings: { ...(profile.profileSettings ?? {}), graphSystem: 'new' },
       modules: {
         ...profile.modules,
         rendering: {
@@ -140,7 +138,7 @@ function newModeRegistration() {
           ...profile.modules['force-layout'],
           defaultEnabled: true,
           defaults: {
-            forceModel: 'd3-compatible', weightingMode: 'topology-weighted',
+            weightingMode: 'topology-weighted',
             repulsionStrength: 1000, springStrength: 1, springLength: 250,
             centeringStrength: 0.1, velocityDecay: 0.4,
             alphaDecay: 0.02276277904418933, alphaMin: 0.001,

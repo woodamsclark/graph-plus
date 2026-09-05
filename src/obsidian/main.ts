@@ -206,35 +206,6 @@ export default class GraphPlus extends Plugin {
 
   async migrateLegacyLensSettings(lens: GraphPlusLensStateV1): Promise<GraphPlusLensStateV1> {
     if (this.pluginData.consumers.graphPlus.genericLensMigrated !== true) {
-      const existing = this.engineSettings.getProfileOverrides('graph-plus', 'default');
-      const writes: Array<[string, string, number | string]> = [];
-      const renderingLegacy = jsonRecord(existing.modules?.rendering?.settings?.legacySettings);
-      const forceLegacy = jsonRecord(existing.modules?.['force-layout']?.settings?.legacySettings);
-      if (lens.display.labelMode !== undefined && renderingLegacy.labelMode === undefined) {
-        writes.push(['rendering', 'labelMode', lens.display.labelMode]);
-      }
-      if (lens.display.nodeRadiusScale !== undefined && renderingLegacy.nodeRadiusScale === undefined) {
-        writes.push(['rendering', 'nodeRadiusScale', lens.display.nodeRadiusScale]);
-      }
-      if (lens.display.edgeThicknessScale !== undefined && renderingLegacy.edgeThicknessScale === undefined) {
-        writes.push(['rendering', 'edgeThicknessScale', lens.display.edgeThicknessScale]);
-      }
-      for (const key of ['repulsionStrength', 'springStrength', 'springLength', 'centeringStrength'] as const) {
-        const value = lens.force[key];
-        if (value !== undefined && forceLegacy[key] === undefined) {
-          writes.push(['force-layout', key, value]);
-        }
-      }
-      const grouped = new Map<string, Record<string, import('../graph-engine/contracts/v1/index.ts').JsonValue>>();
-      for (const [moduleId, key, value] of writes) {
-        const base = grouped.get(moduleId)
-          ?? { ...(moduleId === 'rendering' ? renderingLegacy : forceLegacy) };
-        base[key] = value;
-        grouped.set(moduleId, base);
-      }
-      for (const [moduleId, legacySettings] of grouped) {
-        await this.engineSettings.setProfileModuleSetting('graph-plus', 'default', moduleId, 'legacySettings', legacySettings);
-      }
       this.pluginData = withGraphPlusGenericLensMigratedV1(this.pluginData);
       await this.persistPluginData();
     }
@@ -261,14 +232,6 @@ export default class GraphPlus extends Plugin {
     if (!this.checkpointFileStore) throw new Error('Graph+ checkpoint storage is unavailable before plugin load.');
     return this.checkpointFileStore;
   }
-}
-
-function jsonRecord(
-  value: import('../graph-engine/contracts/v1/index.ts').JsonValue | undefined,
-): Record<string, import('../graph-engine/contracts/v1/index.ts').JsonValue> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? { ...(value as Record<string, import('../graph-engine/contracts/v1/index.ts').JsonValue>) }
-    : {};
 }
 
 function createEngineInstanceId(): string {

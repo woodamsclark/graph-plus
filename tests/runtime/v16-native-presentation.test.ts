@@ -27,7 +27,7 @@ test('V1.6 Anima owns the exact visible-degree radius and composable structural 
   const document = graphDocument({ nodes, edges });
   const selection = { nodeIds: new Set(nodes.map((node) => node.id)), edgeIds: new Set(edges.map((edge) => edge.id)) };
   const state = pipeline(document, selection);
-  const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, {}, { graphSystem: 'new' });
+  const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, {});
   const patch = anima.contributeFrame({
     ...state,
     nodeContributions: { hub: { baseRadiusScale: 2, radiusScale: 1.35 } },
@@ -47,7 +47,7 @@ test('V1.6 Anima neighborhood highlighting follows focus changes and clears with
   });
   const selection = { nodeIds: new Set(['a', 'b', 'c']), edgeIds: new Set(['a-b', 'b-c']) };
   const state = pipeline(document, selection);
-  const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, {}, { graphSystem: 'new' });
+  const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, {});
   const focusedA = anima.contributeFrame({
     ...state,
     viewState: { ...state.viewState, focusedNodeId: 'a' },
@@ -75,7 +75,7 @@ test('V1.6 Anima neighborhood highlighting follows focus changes and clears with
 test('V1.6 Anima owns live above and below label placement', () => {
   const document = graphDocument({ nodes: [graphNode('a')], edges: [] });
   const state = pipeline(document, { nodeIds: new Set(['a']), edgeIds: new Set() });
-  const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, { labelPosition: 'above' }, { graphSystem: 'new' });
+  const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, { labelPosition: 'above' });
   equal(anima.contributeFrame(state)?.theme?.labelPosition, 'above',
     'Anima should publish the configured above placement');
   anima.updateSettings({ labelPosition: 'below' });
@@ -231,7 +231,7 @@ test('V1.6 D3-compatible integration is fixed-step and refresh-rate independent'
     edges: [graphEdge('join', 'left', 'right')],
   });
   const settings = readForceSettings({
-    forceModel: 'd3-compatible', weightingMode: 'uniform', repulsionStrength: 0,
+    weightingMode: 'uniform', repulsionStrength: 0,
     centeringStrength: 0, collisionRadius: 0, springStrength: 1, springLength: 250,
   });
   const one = new ForceLayoutModule('2d', settings);
@@ -258,7 +258,7 @@ test('V1.6 D3-compatible link integration matches the reviewed one-tick equation
   });
   const alphaDecay = 1 - Math.pow(0.001, 1 / 300);
   const force = new ForceLayoutModule('2d', readForceSettings({
-    forceModel: 'd3-compatible', weightingMode: 'uniform', repulsionStrength: 0,
+    weightingMode: 'uniform', repulsionStrength: 0,
     centeringStrength: 0, collisionRadius: 0, springStrength: 1, springLength: 250,
     velocityDecay: 0.4, alphaDecay,
   }));
@@ -284,7 +284,7 @@ test('V1.6 D3-compatible mechanics remain finite and spatial in 3D', () => {
     edges: [graphEdge('a-b', 'a', 'b')],
   });
   const force = new ForceLayoutModule('3d', readForceSettings({
-    forceModel: 'd3-compatible', weightingMode: 'uniform', repulsionStrength: 1000,
+    weightingMode: 'uniform', repulsionStrength: 1000,
     centeringStrength: 0.1, collisionRadius: 60, collisionStrength: 0.5,
     springStrength: 1, springLength: 250, velocityDecay: 0.4,
     alphaDecay: 1 - Math.pow(0.001, 1 / 300),
@@ -304,18 +304,42 @@ test('V1.6 D3-compatible mechanics remain finite and spatial in 3D', () => {
   assert(result.positions.a.z !== -100 || result.positions.b.z !== 100, 'Z should participate in native force integration');
 });
 
-test('V1.6 migration makes prior tuning legacy-only and new the idempotent default', () => {
+test('V1.6 retirement migration promotes the accepted settings and removes comparison banks', () => {
   const migrated = migrateGraphPlusProfileOverridesV16({
+    profileSettings: { graphSystem: 'legacy', graphSystemMigrationVersion: 1 },
     modules: {
-      rendering: { settings: { nodeRadiusScale: 4, edgeThicknessScale: 0.25 } },
-      'force-layout': { settings: { springLength: 20, springStrength: 4.3 } },
+      rendering: { settings: {
+        nodeRadiusScale: 4,
+        newSettings: { nodeRadiusScale: 1.5, edgeThicknessScale: 0.75 },
+        legacySettings: { nodeRadiusScale: 8 },
+      } },
     },
   });
-  equal(migrated.profileSettings?.graphSystem, 'new', 'migration should select the intended new system');
-  const legacyRendering = migrated.modules?.rendering?.settings?.legacySettings as Record<string, unknown>;
-  equal(legacyRendering.nodeRadiusScale, 4, 'old node tuning should move intact into legacy');
-  equal(legacyRendering.edgeThicknessScale, 0.25, 'old link tuning should move intact into legacy');
+  equal(migrated.profileSettings?.graphSystem, undefined, 'the retired selector should be removed');
+  const rendering = migrated.modules?.rendering?.settings as Record<string, unknown>;
+  equal(rendering.nodeRadiusScale, 1.5, 'the accepted bank should override obsolete direct tuning');
+  equal(rendering.edgeThicknessScale, 0.75, 'the accepted bank should become directly editable');
+  equal(rendering.newSettings, undefined, 'the accepted bank wrapper should be removed');
+  equal(rendering.legacySettings, undefined, 'the comparison bank should be removed');
   deepEqual(migrateGraphPlusProfileOverridesV16(migrated), migrated, 'migration should be idempotent');
+});
+
+test('V1.6 restore/export discards retired whole-system state-bank metadata', async () => {
+  const document = graphDocument({ nodes: [graphNode('a')], edges: [] });
+  const value = runtimeHarness({
+    consumerId: 'graph-plus', profileId: 'default',
+    registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1, document,
+  });
+  const restored = {
+    ...viewState(document),
+    consumerId: 'graph-plus',
+    profileId: 'default',
+    moduleState: { 'graph-system-states-v1': { schemaVersion: 1, activeMode: 'new', states: {} } },
+  };
+  const session = await value.create(restored);
+  equal((await session.exportViewState()).moduleState['graph-system-states-v1'], undefined,
+    'the single-system runtime should not preserve or recreate a comparison state bank');
+  await session.dispose();
 });
 
 test('V1.6 Graph+ defaults Anima label placement above and accepts a live below override', async () => {
@@ -325,7 +349,7 @@ test('V1.6 Graph+ defaults Anima label placement above and accepts a live below 
   });
   const session = await value.create();
   equal((await session.exportEffectiveSettings()).modules.anima?.settings.labelPosition, 'above',
-    'Graph+ new mode should begin with mobile-friendly labels above nodes');
+    'Graph+ should begin with mobile-friendly labels above nodes');
   value.profiles.setUserOverrides('graph-plus', 'default', {
     modules: { anima: { settings: { labelPosition: 'below' } } },
   });
@@ -335,48 +359,7 @@ test('V1.6 Graph+ defaults Anima label placement above and accepts a live below 
   await session.dispose();
 });
 
-test('V1.6 graphSystem restores separate new and legacy position and camera state', async () => {
-  const document = graphDocument({
-    nodes: [graphNode('a'), graphNode('b')],
-    edges: [graphEdge('join', 'a', 'b')],
-  });
-  const value = runtimeHarness({
-    consumerId: 'graph-plus',
-    profileId: 'default',
-    registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1,
-    document,
-  });
-  const legacyState = {
-    ...viewState(document),
-    consumerId: 'graph-plus',
-    profileId: 'default',
-    positions: { a: { x: 410, y: 20, z: 0 }, b: { x: 510, y: 20, z: 0 } },
-    camera: { ...viewState(document).camera, target: { x: 460, y: 20, z: 0 } },
-  };
-  const session = await value.create(legacyState);
-  const freshNew = await session.exportViewState();
-  assert(freshNew.positions.a.x !== 410, 'a pre-V1.6 checkpoint should not overwrite the fresh new layout');
-  value.profiles.setUserOverrides('graph-plus', 'default', { profileSettings: { graphSystem: 'legacy' } });
-  value.factory.refreshActiveProfiles();
-  const restoredLegacy = await session.exportViewState();
-  deepEqual(restoredLegacy.positions, legacyState.positions, 'legacy mode should restore the migrated legacy positions');
-  deepEqual(restoredLegacy.camera, legacyState.camera, 'legacy mode should restore the migrated legacy camera');
-  value.profiles.setUserOverrides('graph-plus', 'default', { profileSettings: { graphSystem: 'new' } });
-  value.factory.refreshActiveProfiles();
-  deepEqual((await session.exportViewState()).positions, freshNew.positions, 'returning to new should restore its separate position bank');
-  const checkpoint = await session.exportViewState();
-  await session.dispose();
-
-  const reloaded = await value.create();
-  await reloaded.restoreViewState(checkpoint);
-  value.profiles.setUserOverrides('graph-plus', 'default', { profileSettings: { graphSystem: 'legacy' } });
-  value.factory.refreshActiveProfiles();
-  deepEqual((await reloaded.exportViewState()).positions, legacyState.positions,
-    'explicit restore should unpack and retain the inactive legacy bank');
-  await reloaded.dispose();
-});
-
-test('V1.6 a first switch creates the destination with that mode\'s placement policy', async () => {
+test('V1.6 uses generated initial placement instead of adapter position hints', async () => {
   const document = graphDocument({
     nodes: [
       graphNode('a', { positionHint: { x: 910, y: 920, z: 0 } }),
@@ -388,14 +371,10 @@ test('V1.6 a first switch creates the destination with that mode\'s placement po
     consumerId: 'graph-plus', profileId: 'default',
     registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1, document,
   });
-  value.profiles.setUserOverrides('graph-plus', 'default', { profileSettings: { graphSystem: 'legacy' } });
   const session = await value.create();
-  equal((await session.exportViewState()).positions.a.x, 910, 'legacy should honor the adapter position hint');
-  value.profiles.setUserOverrides('graph-plus', 'default', { profileSettings: { graphSystem: 'new' } });
-  value.factory.refreshActiveProfiles();
-  const freshNew = await session.exportViewState();
-  assert(freshNew.positions.a.x !== 910 && freshNew.positions.b.x !== 1010,
-    'a fresh new bank should use native placement instead of legacy hints');
+  const initial = await session.exportViewState();
+  assert(initial.positions.a.x !== 910 && initial.positions.b.x !== 1010,
+    'the single system should use generated placement instead of adapter hints');
   await session.dispose();
 });
 
@@ -419,7 +398,7 @@ test('V1.6 keeps Canvas-like pan, Cmd-scroll zoom, and transient drag separate f
   wheel(value, canvas, { deltaY: -30, metaKey: true });
   value.platform.flushFrame(32);
   const zoomed = await session.exportViewState();
-  assert(zoomed.camera.zoom > panned.camera.zoom, 'Cmd-scroll should remain a zoom gesture in new mode');
+  assert(zoomed.camera.zoom > panned.camera.zoom, 'Cmd-scroll should remain a zoom gesture');
 
   const camera = new GraphCameraController(zoomed.camera, '2d');
   camera.setViewport(640, 360);

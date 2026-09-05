@@ -71,17 +71,7 @@ export interface GraphSessionRuntimeOptionsV1 {
   readonly nodeActions?: GraphNodeActionRuntimeV1;
 }
 
-type GraphSystemModeV1 = 'new' | 'legacy';
-
-interface GraphSystemViewSnapshotV1 {
-  readonly dimensions: '2d' | '3d';
-  readonly positions: Readonly<Record<string, Vec3>>;
-  readonly pinnedNodeIds: readonly string[];
-  readonly camera: GraphCameraStateV1;
-  readonly moduleState: Readonly<Record<string, JsonValue>>;
-}
-
-const GRAPH_SYSTEM_STATE_KEY_V1 = 'graph-system-states-v1';
+const RETIRED_GRAPH_SYSTEM_STATE_KEY_V1 = 'graph-system-states-v1';
 
 export class GraphSessionDisposedErrorV1 extends Error {
   readonly code = 'session-disposed' as const;
@@ -137,9 +127,6 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private disposed = false;
   private fatalModuleError: GraphRequiredModuleErrorV1 | null = null;
   private readonly deferredErrors: GraphSessionErrorV1[] = [];
-  private readonly systemBankingEnabled: boolean;
-  private systemMode: GraphSystemModeV1;
-  private systemViewStates: Partial<Record<GraphSystemModeV1, GraphSystemViewSnapshotV1>> = {};
 
   private readonly onVisibilityChange = (): void => {
     this.documentSuspended = this.platform.document.hidden;
@@ -210,8 +197,6 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.consumerId = options.consumerId;
     this.profileId = options.profileId;
     this.profile = options.profile;
-    this.systemBankingEnabled = hasGraphSystemMode(options.profile.profileSettings);
-    this.systemMode = graphSystemMode(options.profile.profileSettings);
     this.sessionOverrides = cloneOverrides(options.initialSessionOverrides ?? {});
     this.resolveProfile = options.resolveProfile;
     this.onDisposed = options.onDisposed;
@@ -223,21 +208,18 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.modules = options.modules;
     this.assertPlatformOwnership();
     this.store = new GraphDocumentStore(options.document);
-    const restoration = prepareGraphSystemRestoration(
-      options.restoreViewState,
-      this.systemMode,
-      this.systemBankingEnabled,
-    );
-    this.systemViewStates = restoration.states;
-    const restoredViewState = restoration.active
-      ? this.prepareRestoredViewState(restoration.active)
+    const restored = options.restoreViewState
+      ? withoutRetiredGraphSystemState(options.restoreViewState)
+      : undefined;
+    const restoredViewState = restored
+      ? this.prepareRestoredViewState(restored)
       : undefined;
     this.viewState = normalizePerspectiveViewState(restoredViewState
       ? addMissingPositions(
           reconcileGraphViewStateV1(restoredViewState, this.restoreContext()),
           this.store.readDocument(),
           this.profile.dimensions,
-          this.systemMode === 'new',
+          usesGeneratedInitialPositions(this.profile.profileSettings),
         )
       : this.createInitialViewState(), this.profile.dimensions, focalLengthMm(this.profile.profileSettings));
     this.projectionSelection = allOf(this.store.readDocument());
@@ -279,7 +261,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         getRenderSelection: () => this.renderSelection,
         getResetCamera: () => defaultCamera(this.profile.dimensions, focalLengthMm(this.profile.profileSettings)),
         getDragReleasePolicy: () => this.profile.profileSettings.dragRelease === 'pin' ? 'pin' : 'dynamic',
-        getDragConstraintPolicy: () => this.profile.profileSettings.graphSystem === 'new' ? 'transient' : 'persistent-pin',
+        getDragConstraintPolicy: () => this.profile.profileSettings.dragConstraint === 'transient'
+          ? 'transient'
+          : 'persistent-pin',
         onViewStateChanged: (change) => this.handleRuntimeViewChange(change),
         onIntent: (intent) => this.emitIntent(intent),
         onActivateNode: (nodeId) => this.invokePrimaryNodeAction(nodeId),
@@ -320,7 +304,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
             reconcileGraphViewStateV1(this.viewState, this.restoreContext()),
             next,
             this.profile.dimensions,
-            this.systemMode === 'new',
+            usesGeneratedInitialPositions(this.profile.profileSettings),
           )
         : this.createInitialViewState();
       this.camera.setState(this.viewState.camera);
@@ -362,7 +346,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       reconcileGraphViewStateV1(this.viewState, this.restoreContext()),
       this.store.readDocument(),
       this.profile.dimensions,
-      this.systemMode === 'new',
+      usesGeneratedInitialPositions(this.profile.profileSettings),
     );
     this.moduleHost.documentChanged(this.store.readDocument());
     this.moduleHost.viewChanged(this.viewState);
@@ -473,32 +457,20 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.requireActive();
     this.performanceCounters.viewExports += 1;
     this.synchronizeModuleState();
-    if (!this.systemBankingEnabled) return cloneGraphViewStateV1(this.viewState);
-    this.systemViewStates[this.systemMode] = snapshotGraphSystemView(this.viewState);
-    const moduleState = {
-      ...withoutGraphSystemState(this.viewState.moduleState),
-      [GRAPH_SYSTEM_STATE_KEY_V1]: graphSystemStateValue(this.systemMode, this.systemViewStates),
-    };
-    return cloneGraphViewStateV1({ ...this.viewState, moduleState });
+    return cloneGraphViewStateV1(withoutRetiredGraphSystemState(this.viewState));
   }
 
   async restoreViewState(state: GraphViewStateV1): Promise<void> {
     this.requireActive();
     try {
-      const restoration = prepareGraphSystemRestoration(
-        state,
-        this.systemMode,
-        this.systemBankingEnabled,
-      );
-      const source = restoration.active ?? this.createInitialViewState(this.profile, this.systemMode);
+      const source = withoutRetiredGraphSystemState(state);
       const prepared = this.prepareRestoredViewState(source);
       const restoredViewState = normalizePerspectiveViewState(addMissingPositions(
         reconcileGraphViewStateV1(prepared, this.restoreContext()),
         this.store.readDocument(),
         this.profile.dimensions,
-        this.systemMode === 'new',
+        usesGeneratedInitialPositions(this.profile.profileSettings),
       ), this.profile.dimensions, focalLengthMm(this.profile.profileSettings));
-      this.systemViewStates = restoration.states;
       this.viewState = restoredViewState;
       this.camera.setState(this.viewState.camera);
       this.moduleHost.restoreState(this.viewState.moduleState);
@@ -578,11 +550,6 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     ) {
       throw new Error('modules.node-regions: Required node regions are available only in 2D.');
     }
-    const nextSystemMode = graphSystemMode(next.profileSettings);
-    if (nextSystemMode !== this.systemMode) {
-      this.reconfigureGraphSystem(next, nextSystemMode);
-      return;
-    }
     if (next.dimensions !== this.profile.dimensions) {
       this.reconfigureDimensions(next);
       return;
@@ -592,84 +559,6 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.synchronizeCameraState();
     this.profile = next;
     this.recomputeView(false);
-  }
-
-  private reconfigureGraphSystem(next: EffectiveConsumerProfileV1, nextMode: GraphSystemModeV1): void {
-    this.synchronizeModuleState();
-    this.systemViewStates[this.systemMode] = snapshotGraphSystemView(this.viewState);
-    const shared = this.viewState;
-    const saved = this.systemViewStates[nextMode];
-    let destination = saved
-      ? viewStateFromGraphSystemSnapshot(shared, saved)
-      : this.createInitialViewState(next, nextMode);
-    const { focusedNodeId: _destinationFocus, ...destinationWithoutFocus } = destination;
-    destination = {
-      ...destinationWithoutFocus,
-      selectedNodeIds: [...shared.selectedNodeIds],
-      activeFilters: cloneGraphViewStateV1(shared).activeFilters,
-      ...(shared.focusedNodeId === undefined ? {} : { focusedNodeId: shared.focusedNodeId }),
-    };
-    if (destination.dimensions !== next.dimensions) {
-      const viewport = this.surface.getViewport();
-      destination = convertGraphViewStateDimensionsV1(destination, {
-        dimensions: next.dimensions,
-        focalLengthMm: focalLengthMm(next.profileSettings),
-        viewportHeight: viewport.height,
-      });
-    }
-    destination = normalizePerspectiveViewState(addMissingPositions(
-      reconcileGraphViewStateV1(destination, {
-        document: this.store.readDocument(),
-        consumerId: this.consumerId,
-        profileId: this.profileId,
-        dimensions: next.dimensions,
-      }),
-      this.store.readDocument(),
-      next.dimensions,
-      nextMode === 'new',
-    ), next.dimensions, focalLengthMm(next.profileSettings));
-    const previousHost = this.moduleHost;
-    const previousProfile = this.profile;
-    const previousMode = this.systemMode;
-    const previousViewState = cloneGraphViewStateV1(this.viewState);
-    const previousCamera = this.camera.getState();
-    const deferredFailures: GraphModuleFailureV1[] = [];
-    let committed = false;
-    const replacementHost = this.createModuleHost(
-      next,
-      withoutGraphSystemState(destination.moduleState),
-      () => committed ? this.viewState : destination,
-      (failure) => deferredFailures.push(failure),
-    );
-    this.interaction.setEnabled(false);
-    try {
-      this.profile = next;
-      this.systemMode = nextMode;
-      this.viewState = destination;
-      this.camera.reconfigure(destination.camera, next.dimensions);
-      this.interaction.setDimensions(next.dimensions);
-      this.surface.setDimensions(next.dimensions);
-      this.moduleHost = replacementHost;
-      committed = true;
-      this.moduleHost.viewChanged(this.viewState);
-      this.recomputeView(false);
-      previousHost.dispose();
-      for (const failure of deferredFailures) this.handleModuleFailure(failure);
-    } catch (error) {
-      replacementHost.dispose();
-      this.moduleHost = previousHost;
-      this.profile = previousProfile;
-      this.systemMode = previousMode;
-      this.viewState = previousViewState;
-      this.camera.reconfigure(previousCamera, previousProfile.dimensions);
-      this.interaction.setDimensions(previousProfile.dimensions);
-      this.surface.setDimensions(previousProfile.dimensions);
-      this.moduleHost.viewChanged(this.viewState);
-      this.recomputeView(false);
-      throw error;
-    } finally {
-      this.synchronizeRuntimeActivity();
-    }
   }
 
   private reconfigureDimensions(next: EffectiveConsumerProfileV1): void {
@@ -883,10 +772,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     } as const;
   }
 
-  private createInitialViewState(
-    profile: EffectiveConsumerProfileV1 = this.profile,
-    systemMode: GraphSystemModeV1 = this.systemMode,
-  ): GraphViewStateV1 {
+  private createInitialViewState(profile: EffectiveConsumerProfileV1 = this.profile): GraphViewStateV1 {
     const document = this.store.readDocument();
     return {
       schemaVersion: 1,
@@ -898,7 +784,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       positions: Object.fromEntries(
         document.nodes.map((node, index) => [
           node.id,
-          systemMode === 'legacy' && node.positionHint
+          profile.profileSettings.initialPositionStrategy !== 'generated' && node.positionHint
             ? { ...node.positionHint }
             : defaultNodePosition(index, profile.dimensions),
         ]),
@@ -1292,119 +1178,15 @@ function focalLengthMm(settings: Readonly<Record<string, import('../contracts/v1
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 50;
 }
 
-function graphSystemMode(settings: Readonly<Record<string, JsonValue>>): GraphSystemModeV1 {
-  return settings.graphSystem === 'new' ? 'new' : 'legacy';
+function usesGeneratedInitialPositions(settings: Readonly<Record<string, JsonValue>>): boolean {
+  return settings.initialPositionStrategy === 'generated';
 }
 
-function hasGraphSystemMode(settings: Readonly<Record<string, JsonValue>>): boolean {
-  return settings.graphSystem === 'new' || settings.graphSystem === 'legacy';
-}
-
-function prepareGraphSystemRestoration(
-  restored: GraphViewStateV1 | undefined,
-  activeMode: GraphSystemModeV1,
-  isolateModes: boolean,
-): {
-  active?: GraphViewStateV1;
-  states: Partial<Record<GraphSystemModeV1, GraphSystemViewSnapshotV1>>;
-} {
-  if (!restored || !isolateModes) return { active: restored, states: {} };
-  const bundle = readGraphSystemState(restored.moduleState[GRAPH_SYSTEM_STATE_KEY_V1]);
-  if (bundle) {
-    const base = { ...restored, moduleState: withoutGraphSystemState(restored.moduleState) };
-    const snapshot = bundle.states[activeMode];
-    return {
-      active: snapshot ? viewStateFromGraphSystemSnapshot(base, snapshot) : undefined,
-      states: { ...bundle.states },
-    };
-  }
-  const legacy = snapshotGraphSystemView(restored);
-  return {
-    active: activeMode === 'legacy'
-      ? { ...restored, moduleState: withoutGraphSystemState(restored.moduleState) }
-      : undefined,
-    states: { legacy },
-  };
-}
-
-function snapshotGraphSystemView(state: GraphViewStateV1): GraphSystemViewSnapshotV1 {
-  return {
-    dimensions: state.dimensions,
-    positions: Object.fromEntries(Object.entries(state.positions).map(([id, value]) => [id, { ...value }])),
-    pinnedNodeIds: [...state.pinnedNodeIds],
-    camera: JSON.parse(JSON.stringify(state.camera)) as GraphCameraStateV1,
-    moduleState: withoutGraphSystemState(state.moduleState),
-  };
-}
-
-function viewStateFromGraphSystemSnapshot(
-  base: GraphViewStateV1,
-  snapshot: GraphSystemViewSnapshotV1,
-): GraphViewStateV1 {
-  const { focusedNodeId: _focusedNodeId, ...withoutFocus } = base;
-  return cloneGraphViewStateV1({
-    ...withoutFocus,
-    dimensions: snapshot.dimensions,
-    positions: snapshot.positions,
-    pinnedNodeIds: snapshot.pinnedNodeIds,
-    camera: snapshot.camera,
-    moduleState: snapshot.moduleState,
-    ...(base.focusedNodeId === undefined ? {} : { focusedNodeId: base.focusedNodeId }),
-  });
-}
-
-function withoutGraphSystemState(
-  state: Readonly<Record<string, JsonValue>>,
-): Readonly<Record<string, JsonValue>> {
-  const result = { ...state };
-  delete result[GRAPH_SYSTEM_STATE_KEY_V1];
-  return result;
-}
-
-function graphSystemStateValue(
-  activeMode: GraphSystemModeV1,
-  states: Partial<Record<GraphSystemModeV1, GraphSystemViewSnapshotV1>>,
-): JsonValue {
-  return JSON.parse(JSON.stringify({ schemaVersion: 1, activeMode, states })) as JsonValue;
-}
-
-function readGraphSystemState(value: JsonValue | undefined): {
-  activeMode: GraphSystemModeV1;
-  states: Partial<Record<GraphSystemModeV1, GraphSystemViewSnapshotV1>>;
-} | undefined {
-  if (!isJsonRecord(value) || value.schemaVersion !== 1
-    || (value.activeMode !== 'new' && value.activeMode !== 'legacy')
-    || !isJsonRecord(value.states)) return undefined;
-  const states: Partial<Record<GraphSystemModeV1, GraphSystemViewSnapshotV1>> = {};
-  for (const mode of ['new', 'legacy'] as const) {
-    const candidate = value.states[mode];
-    if (!isJsonRecord(candidate) || (candidate.dimensions !== '2d' && candidate.dimensions !== '3d')
-      || !isJsonRecord(candidate.positions) || !Array.isArray(candidate.pinnedNodeIds)
-      || !isJsonRecord(candidate.camera) || !isJsonRecord(candidate.moduleState)) continue;
-    try {
-      const shell = {
-        schemaVersion: 1 as const,
-        documentId: 'validation',
-        documentRevision: 0,
-        consumerId: 'validation',
-        profileId: 'validation',
-        dimensions: candidate.dimensions,
-        positions: candidate.positions,
-        pinnedNodeIds: candidate.pinnedNodeIds,
-        camera: candidate.camera,
-        selectedNodeIds: [],
-        activeFilters: {},
-        moduleState: candidate.moduleState,
-      };
-      const cloned = cloneGraphViewStateV1(shell as unknown as GraphViewStateV1);
-      states[mode] = snapshotGraphSystemView(cloned);
-    } catch {}
-  }
-  return { activeMode: value.activeMode, states };
-}
-
-function isJsonRecord(value: unknown): value is Record<string, JsonValue> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+function withoutRetiredGraphSystemState(state: GraphViewStateV1): GraphViewStateV1 {
+  if (state.moduleState[RETIRED_GRAPH_SYSTEM_STATE_KEY_V1] === undefined) return state;
+  const moduleState = { ...state.moduleState };
+  delete moduleState[RETIRED_GRAPH_SYSTEM_STATE_KEY_V1];
+  return { ...state, moduleState };
 }
 
 function normalizePerspectiveViewState(

@@ -49,25 +49,20 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
       activationActionIds: ['open-node'],
       contextActionIds: ['open-node'],
     },
-    profileSettings: { focalLengthMm: 50, dragRelease: 'dynamic', graphSystem: 'new' },
+    profileSettings: {
+      focalLengthMm: 50,
+      dragRelease: 'dynamic',
+      dragConstraint: 'transient',
+      initialPositionStrategy: 'generated',
+    },
     modules: {
       rendering: {
         policy: 'required',
         defaults: {
-          newSettings: {
-            labelMode: 'adaptive',
-            nodeRadiusScale: 1,
-            edgeThicknessScale: 1,
-            showArrows: false,
-            tokenColors: { 'kind:tag': '#a78bfa' },
-          },
-          legacySettings: {
-            labelMode: 'adaptive',
-            nodeRadiusScale: 1,
-            edgeThicknessScale: 1,
-            showArrows: true,
-            tokenColors: { 'kind:tag': '#a78bfa' },
-          },
+          labelMode: 'adaptive',
+          nodeRadiusScale: 1,
+          edgeThicknessScale: 1,
+          showArrows: false,
         },
         constraints: { labelMode: { type: 'enum', allowed: ['adaptive', 'all', 'off'] } },
       },
@@ -87,42 +82,28 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
         policy: 'optional',
         defaultEnabled: true,
         defaults: {
-          settlingSpeed: 2,
-          newSettings: {
-            forceModel: 'd3-compatible',
-            weightingMode: 'topology-weighted',
-            repulsionStrength: 1000,
-            springStrength: 1,
-            springLength: 250,
-            centeringStrength: 0.1,
-            velocityDecay: 0.4,
-            alphaDecay: 0.02276277904418933,
-            alphaMin: 0.001,
-            settlingSpeed: 1,
-            repulsionMinDistance: 30,
-            barnesHutTheta: 0.9,
-            collisionRadius: 60,
-            collisionStrength: 0.5,
-          },
-          legacySettings: { forceModel: 'legacy', settlingSpeed: 2 },
+          weightingMode: 'topology-weighted',
+          repulsionStrength: 1000,
+          springStrength: 1,
+          springLength: 250,
+          centeringStrength: 0.1,
+          velocityDecay: 0.4,
+          alphaDecay: 0.02276277904418933,
+          alphaMin: 0.001,
+          repulsionMinDistance: 30,
+          barnesHutTheta: 0.9,
+          collisionRadius: 60,
+          collisionStrength: 0.5,
         },
       },
       'node-regions': {
         policy: 'optional',
         defaultEnabled: true,
         defaults: {
-          newSettings: {
-            boundariesVisible: false,
-            membershipStrength: 0.18,
-            membershipDistance: 64,
-            boundaryPadding: 28,
-          },
-          legacySettings: {
-            boundariesVisible: true,
-            membershipStrength: 0.18,
-            membershipDistance: 64,
-            boundaryPadding: 28,
-          },
+          boundariesVisible: false,
+          membershipStrength: 0.18,
+          membershipDistance: 64,
+          boundaryPadding: 28,
         },
         constraints: {
           boundariesVisible: { type: 'enum', allowed: [true, false] },
@@ -140,25 +121,23 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
   }],
 };
 
-/** Explicit, idempotent V1.6 migration: existing tuning becomes legacy-only. */
+/**
+ * Explicit, idempotent retirement migration. V1.6 briefly stored two complete
+ * setting banks; the accepted Anima/native bank is now the direct setting set.
+ */
 export function migrateGraphPlusProfileOverridesV16(
   value: GraphSettingsOverridesV1,
 ): GraphSettingsOverridesV1 {
-  if (value.profileSettings?.graphSystemMigrationVersion === 1) return clone(value);
+  const cloned = clone(value);
   const modules = { ...(value.modules ?? {}) };
   for (const moduleId of ['rendering', 'force-layout', 'node-regions']) {
     const module = modules[moduleId];
     if (!module?.settings) continue;
     const settings = { ...module.settings };
-    const direct: Record<string, JsonValue> = {};
-    for (const [key, setting] of Object.entries(settings)) {
-      if (key === 'newSettings' || key === 'legacySettings') continue;
-      direct[key] = setting;
-      delete settings[key];
-    }
-    const priorLegacy = isRecord(settings.legacySettings) ? settings.legacySettings : {};
-    settings.legacySettings = { ...legacyModeDefaults(moduleId), ...direct, ...priorLegacy };
-    modules[moduleId] = { ...module, settings: Object.keys(settings).length ? settings : undefined };
+    const accepted = isRecord(settings.newSettings) ? settings.newSettings : {};
+    delete settings.newSettings;
+    delete settings.legacySettings;
+    modules[moduleId] = { ...module, settings: { ...settings, ...accepted } };
   }
   const anima = modules.anima;
   if (anima?.enabled === false) {
@@ -166,34 +145,14 @@ export function migrateGraphPlusProfileOverridesV16(
     if (rest.settings) modules.anima = rest;
     else delete modules.anima;
   }
+  const profileSettings = { ...(value.profileSettings ?? {}) };
+  delete profileSettings.graphSystem;
+  delete profileSettings.graphSystemMigrationVersion;
   return {
-    ...clone(value),
-    profileSettings: {
-      ...(value.profileSettings ?? {}),
-      graphSystem: 'new',
-      graphSystemMigrationVersion: 1,
-    },
+    ...cloned,
+    profileSettings: Object.keys(profileSettings).length ? profileSettings : undefined,
     modules: Object.keys(modules).length ? modules : undefined,
   };
-}
-
-function legacyModeDefaults(moduleId: string): Record<string, JsonValue> {
-  if (moduleId === 'rendering') return {
-    labelMode: 'adaptive', nodeRadiusScale: 1, edgeThicknessScale: 1,
-    showArrows: true, tokenColors: { 'kind:tag': '#a78bfa' },
-  };
-  if (moduleId === 'force-layout') return {
-    forceModel: 'legacy', weightingMode: 'topology-weighted', repulsionStrength: 7000,
-    springStrength: 0.25, springLength: 120, centeringStrength: 0.002,
-    velocityDecay: 0.4, alphaDecay: 0.035, alphaMin: 0.001, settlingSpeed: 2,
-    repulsionMinDistance: 40, barnesHutTheta: 0.8, maxSpeed: 260,
-    minimumAffinity: 0.2, maximumAffinity: 2.5, evidenceLogFactor: 0.35,
-    reciprocalBoost: 1.25, hubDiscountExponent: 0.25,
-    minimumSpringStrengthScale: 0.35, maximumSpringStrengthScale: 2,
-    minimumSpringLengthScale: 0.55, maximumSpringLengthScale: 1.85,
-    componentPadding: 80, collisionRadius: 60, collisionStrength: 0.5,
-  };
-  return { boundariesVisible: true, membershipStrength: 0.18, membershipDistance: 64, boundaryPadding: 28 };
 }
 
 function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {

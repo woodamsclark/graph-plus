@@ -31,10 +31,11 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
         labelMode: 'adaptive',
         nodeRadiusScale: 1,
         edgeThicknessScale: 1,
+        showArrows: true,
         tokenColors: {},
       },
     },
-    create: ({ themePalette, settings, profileSettings }) => new RenderingModule(themePalette, settings, profileSettings),
+    create: ({ themePalette, settings }) => new RenderingModule(themePalette, settings),
   });
   registry.register({
     order: 200,
@@ -82,7 +83,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
         boundaryPadding: 28,
       },
     },
-    create: ({ dimensions, settings, profileSettings }) => new NodeRegionsModule(dimensions, settings, profileSettings),
+    create: ({ dimensions, settings }) => new NodeRegionsModule(dimensions, settings),
   });
   registry.register({
     order: 375,
@@ -112,17 +113,15 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       settingsSchemaVersion: 1,
       defaultSettings: {
         weightingMode: 'topology-weighted',
-        forceModel: 'legacy',
-        repulsionStrength: 7000,
-        springStrength: 0.25,
-        springLength: 120,
-        centeringStrength: 0.002,
+        repulsionStrength: 1000,
+        springStrength: 1,
+        springLength: 250,
+        centeringStrength: 0.1,
         velocityDecay: 0.4,
-        alphaDecay: 0.035,
+        alphaDecay: 0.02276277904418933,
         alphaMin: 0.001,
-        settlingSpeed: 1,
-        repulsionMinDistance: 40,
-        barnesHutTheta: 0.8,
+        repulsionMinDistance: 30,
+        barnesHutTheta: 0.9,
         maxSpeed: 260,
         minimumAffinity: 0.2,
         maximumAffinity: 2.5,
@@ -138,14 +137,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
         collisionStrength: 0.5,
       },
     },
-    create: ({ dimensions, settings, profileSettings }) => {
-      const mode = profileSettings.graphSystem === 'new' ? 'new' : 'legacy';
-      const selected = settings[`${mode}Settings`];
-      const effective = selected !== null && typeof selected === 'object' && !Array.isArray(selected)
-        ? selected as typeof settings
-        : settings;
-      return new ForceLayoutModule(dimensions, readForceSettings(effective), settings, profileSettings);
-    },
+    create: ({ dimensions, settings }) => new ForceLayoutModule(dimensions, readForceSettings(settings)),
   });
   registry.register({
     order: 500,
@@ -157,7 +149,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       settingsSchemaVersion: 1,
       defaultSettings: { labelPosition: 'below' },
     },
-    create: ({ themePalette, settings, profileSettings }) => new AnimaModule(themePalette, settings, profileSettings),
+    create: ({ themePalette, settings }) => new AnimaModule(themePalette, settings),
   });
   return registry;
 }

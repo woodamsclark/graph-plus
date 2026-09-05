@@ -1,6 +1,6 @@
 # Graph Engine V1.6 Anima Presentation and Native Motion Contract
 
-Status: Approved; implementation candidate complete, live desktop/mobile acceptance pending.
+Status: Accepted in live desktop/mobile use; legacy comparison retired.
 
 Date: 2026-09-05
 
@@ -24,8 +24,7 @@ It preserves the accepted Graph Engine and Graph+ design intent:
   opening the node;
 - topology weighting, tag regions, reversible Filter and Form, explicit pins, 3D,
   checkpoint persistence, and adaptive rendering remain available;
-- the new system is Graph+'s default, while the complete legacy system remains
-  selectable for in-app comparison; and
+- the Anima/native-motion system is Graph+'s sole presentation and motion path; and
 - new attachment, unresolved-node, and other graph-content types are deferred.
 
 V1.6 assigns presentation policy and future choreography to Anima. It also introduces
@@ -37,58 +36,29 @@ The governing rule is:
 > Anima decides how the graph should look and change; the renderer, camera, and force
 > solver remain authoritative mechanisms that realize those declarative targets.
 
-## 2. Compatibility and mode boundary
+## 2. Compatibility and system boundary
 
-The stable consumer/profile key remains `graph-plus/default`.
-
-Graph+ adds one profile setting with two values:
-
-```text
-graphSystem: new | legacy
-```
-
-- `new` is the declared and effective default for fresh and existing installations.
-- `legacy` restores the complete pre-V1.6 presentation, force, contribution,
-  interaction, and camera behavior for comparison.
-- Switching modes changes no canonical graph document and does not change the stable
-  consumer/profile identity.
-- The setting is profile-backed and may be exposed in both the plugin settings page
-  and the Graph+ quick-settings surface.
-- Graph Engine's generic fallback behavior and other consumer profiles remain legacy
-  unless their own profile explicitly selects new V1.6 capabilities.
+The stable consumer/profile key remains `graph-plus/default`. Graph+ has one active
+presentation and motion system: Anima owns presentation policy and the force module
+uses the dimension-generic D3-compatible solver. No whole-system selector is exposed.
+Neutral consumers retain their own profile policies for initial placement, drag
+constraints, module enablement, and presentation without selecting a historical
+Graph+ implementation.
 
 V1.6 is intentionally allowed to change Graph+'s active default because Graph+ is a
 local pre-release product. It may not silently change PatternSmith or an unregistered
 external consumer.
 
-### 2.1 Mode isolation
+### 2.1 State ownership
 
-The two modes share:
-
-- the canonical graph document and document revision;
-- Graph+ query text and Filter configuration;
-- tag and orphan visibility choices;
-- Form configuration and root identity; and
-- consumer-owned node actions and vault semantics.
-
-The two modes retain separate:
-
-- node positions and velocities;
-- camera state;
-- explicit pins;
-- force and presentation settings;
-- module state; and
-- settled/running state.
-
-When switching modes, the destination mode restores its last compatible view state.
-On its first activation it derives its own defaults. Current focus and selection may
-be reconciled by stable node ID when those nodes remain visible, but one mode never
-overwrites the other mode's positions, pins, or camera.
+The canonical graph document, Filter/Form configuration, positions, camera, explicit
+pins, focus, selection, and module state remain under their existing owners. Retired
+comparison-bank metadata is discarded during restore/export and never recreated.
 
 ## 3. Anima ownership
 
-Anima is required and enabled in Graph+'s `new` mode. It remains optional for legacy
-and other consumer profiles.
+Anima is required and enabled for Graph+. It remains optional for other consumer
+profiles.
 
 Anima owns the declarative, time-varying presentation and choreography policy for:
 
@@ -271,7 +241,7 @@ This is presentation scaling, not a change to wheel/pinch behavior, camera bound
 node positions, force mass, collision radius, or topology.
 
 Perspective 3D retains depth-aware camera projection and therefore preserves the
-relative size difference between near and distant nodes. In Graph+ new mode, Anima
+relative size difference between near and distant nodes. In Graph+, Anima
 declares a `4` CSS-pixel minimum visible radius so a distant node never collapses into
 an imperceptible speck. This floor affects drawing, culling, edge clipping, and exact
 hit testing but does not affect force or collision geometry.
@@ -283,7 +253,7 @@ wins, with depth as the tie-breaker. Orthographic and mouse behavior are unchang
 
 ### 6.3 Labels
 
-New-mode label sizing begins with:
+Graph+ label sizing begins with:
 
 ```text
 fontSize = 14 + worldRadius / 4
@@ -297,7 +267,7 @@ Anima owns a two-value `labelPosition` presentation setting:
 
 - `above` anchors the label four CSS pixels beyond the top node boundary;
 - `below` anchors it four CSS pixels beyond the bottom node boundary; and
-- Graph+ new mode defaults to `above` and exposes both values in quick settings.
+- Graph+ defaults to `above` and exposes both values in quick settings.
 
 The label's resolved height is included in the above anchor, and the existing Anima
 label offset applies after placement. The choice is profile-backed and works in both
@@ -415,16 +385,9 @@ influences include:
 The precise equations matter more than similarly named sliders. Two solvers can both
 offer “Repel,” “Link force,” and “Link distance” while producing very different motion.
 
-### 10.2 Why the current solver differs
+### 10.2 Why the retired solver differed
 
-The legacy Graph Engine solver is a reasonable custom, dimension-generic foundation.
-It provides deterministic directions, bounded `tanh` springs, Barnes-Hut acceleration,
-speed limiting, topology-affinity mapping, component targets, and common 2D/3D vector
-handling. Those choices favor boundedness, implementation control, and a direct path
-for Graph Engine's topology work.
-
-They were not sufficiently characterized against the later product goal of native
-Obsidian motion. In particular, the legacy solver has:
+The retired custom solver used:
 
 - a saturating `tanh` link response rather than a linear displacement spring;
 - inverse-square repulsion magnitude rather than D3-style inverse-distance magnitude;
@@ -433,8 +396,8 @@ Obsidian motion. In particular, the legacy solver has:
 - render-frame-dependent cooling/integration; and
 - a temporary-drag path coupled to the persistent pin collection.
 
-The result is not a bad solver; it is a different solver. Extreme saved Graph+ force
-values are evidence of trying to tune one mathematical model to resemble another.
+Those equations produced a different interaction feel and were removed after live
+acceptance of the D3-compatible path.
 
 ### 10.3 Alternatives considered
 
@@ -503,7 +466,7 @@ long suspension.
 - Drag release clears the transient constraint and returns alpha target to `0` without
   reheating to `1`.
 - An explicitly pinned node remains pinned after drag.
-- New mode stops when alpha falls below the configured minimum; a single low-velocity
+- The solver stops when alpha falls below the configured minimum; a single low-velocity
   frame does not end it early.
 
 ### 11.3 Incremental placement
@@ -521,7 +484,7 @@ session positions. Consumers continue to provide stable IDs and neutral graph ev
 The native Obsidian graph solver is two-dimensional. Its force model can be generalized
 to 3D, but the result is a Graph Engine 3D solver, not literal native Obsidian behavior.
 
-Graph Engine's new solver supports 3D by extending the same mechanics:
+Graph Engine's solver supports 3D by extending the same mechanics:
 
 - X, Y, and Z origin forces use the configured baseline strength;
 - link distance is Euclidean in three axes;
@@ -536,10 +499,10 @@ explicitly overrides them. Because a third degree of freedom changes equilibrium
 3D acceptance tests verify invariants and qualitative response rather than identical
 2D coordinates.
 
-Graph+'s default dimension remains 2D. Switching dimension does not switch
-`graphSystem` and does not discard either mode's separately saved view state.
+Graph+'s default dimension remains 2D. Switching dimensions preserves compatible
+graph state through the ordinary view-state conversion path.
 
-## 13. Topology, regions, and Form in new mode
+## 13. Topology, regions, and Form
 
 The new Graph+ defaults are:
 
@@ -552,7 +515,7 @@ The new Graph+ defaults are:
 - Anima: required and enabled; and
 - dimension: 2D.
 
-Uniform mode within the new force model is the exact numerical comparison baseline.
+Uniform weighting within the force model is the exact numerical comparison baseline.
 Topology-weighted mode composes bounded affinity over the new link force:
 
 - affinity `1` reproduces the uniform pair's baseline target and strength;
@@ -574,12 +537,10 @@ transition, but V1.6 requires no Form animation.
 
 ## 14. Settings and controls
 
-Graph+ new mode exposes familiar display and force settings whose values affect only
-the new-mode namespace.
+Graph+ exposes familiar display and force settings in its profile namespace.
 
 At minimum:
 
-- Graph system: `New` or `Legacy`;
 - Node size multiplier;
 - Link thickness multiplier;
 - Show arrows;
@@ -592,37 +553,20 @@ At minimum:
 - show region boundaries; and
 - existing Filter, Form, camera, and dimension controls.
 
-The new force controls use user-facing ranges compatible with the intended native
-baseline while the engine stores explicit effective values. A reset in new mode
-restores new defaults only. A reset in legacy mode restores legacy defaults only.
-
-The whole-system switch must be clearly separated from individual tuning controls so
-a comparison does not accidentally rewrite one mode using the other's units.
+The force controls use user-facing ranges compatible with the intended native
+baseline while the engine stores explicit effective values. Reset restores the
+single profile's declared defaults.
 
 ## 15. Persistence and migration
 
-On first V1.6 load:
-
-1. Persist the existing pre-V1.6 Graph+ profile overrides and compatible view state in
-   the `legacy` namespace.
-2. Create the `new` namespace from V1.6 defaults.
-3. Set `graphSystem` to `new`.
-4. Preserve the canonical external graph document and shared Filter/Form configuration.
-5. Do not reinterpret legacy force numbers as new-solver values.
-
-The migration is idempotent. Re-running it does not duplicate state, reset either
-mode, or touch another consumer namespace.
+On upgrade, the explicit idempotent migration promotes values from the accepted V1.6
+settings bank into direct module settings, removes the retired selector and comparison
+bank, preserves canonical external documents and shared Filter/Form configuration,
+and does not touch another consumer namespace. Retired view-state bank metadata is
+discarded during restore/export.
 
 The descriptor version and module settings schema version are evidence, not a migration
 mechanism by themselves. V1.6 requires an explicit version-aware migration path.
-
-Switching modes after migration:
-
-- restores the destination positions, camera, pins, and module state;
-- preserves shared Filter/Form configuration;
-- reconciles focus and selection by stable visible node ID;
-- schedules only the work required by the destination mode; and
-- never deletes the inactive mode's state.
 
 Importing `.obsidian/graph.json`, automatic parity with future Obsidian releases, and a
 general profile-management UI are deferred.
@@ -657,7 +601,7 @@ V1.6 does not include:
 - identical 2D and 3D final coordinates;
 - identical final coordinates to Obsidian when topology weighting or regions are active;
 - consumer-specific semantics inside Graph Engine or Anima; or
-- deleting the legacy Graph+ implementation.
+- reintroducing a whole-system comparison toggle.
 
 ## 18. Review decisions
 
@@ -666,25 +610,23 @@ Approval of this contract confirms:
 1. Graph+ seeks native-inspired presentation and motion, not full native behavior.
 2. Current Canvas-like wheel/pinch navigation and focus-first activation remain.
 3. `graph-plus/default` remains the stable profile ID.
-4. `graphSystem` switches the complete Graph+ system between separately persisted
-   `new` and `legacy` modes.
-5. `new` is the default for both fresh and existing local installations.
-6. Anima is required in new mode and owns static and future time-varying presentation,
+4. Graph+ has one Anima/native-motion presentation and solver path.
+5. Anima is required and owns static and future time-varying presentation,
    including geometric sizing, force targets, and camera targets.
 7. Renderer, force-layout, and camera remain authoritative mechanisms; Anima reaches
    them through declarative contributions and commands.
 8. The host adapter reads Obsidian CSS; Anima interprets the resulting neutral palette.
 9. Node prominence uses the exact degree formula and 2D square-root zoom compensation.
 10. Baseline edge width is screen-space and independent of topology evidence.
-11. The new solver uses D3-compatible 2D mechanics and a dimension-generic 3D
+10. The solver uses D3-compatible 2D mechanics and a dimension-generic 3D
     generalization.
-12. Topology weighting, component handling, and region attraction compose over the new
+11. Topology weighting, component handling, and region attraction compose over the
     solver rather than replacing its collision, cooling, degree bias, or drag lifecycle.
-13. V1.6 defaults to 2D, topology weighting on, regions active with hidden boundaries,
+12. V1.6 defaults to 2D, topology weighting on, regions active with hidden boundaries,
     adaptive labels on, Form off, and Anima on.
-14. Existing state becomes the legacy comparison state; new mode starts from new
-    defaults and becomes active automatically.
-15. New graph-content types and general Anima animation authoring remain deferred.
+13. Retired comparison settings are promoted or discarded idempotently without
+    changing canonical graph documents.
+14. New graph-content types and general Anima animation authoring remain deferred.
 
 Implementation begins only after this contract and its acceptance plan are reviewed
 and approved.

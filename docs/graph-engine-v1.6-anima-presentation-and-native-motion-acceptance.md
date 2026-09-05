@@ -1,6 +1,6 @@
 # Graph Engine V1.6 Anima Presentation and Native Motion Acceptance
 
-Status: Automated implementation gates pass; live desktop/mobile acceptance pending.
+Status: Automated gates pass; live desktop/mobile behavior accepted.
 
 Date: 2026-09-05
 
@@ -8,13 +8,13 @@ Depends on: [V1.6 Anima Presentation and Native Motion Contract](graph-engine-v1
 
 ## 1. Acceptance principle
 
-V1.6 succeeds when Graph+'s new 2D free graph has the restrained presentation and
+V1.6 succeeds when Graph+'s 2D free graph has the restrained presentation and
 elastic response of Obsidian's native graph while retaining Graph+'s current
 navigation, focus model, topology weighting, regions, reversible lenses, persistence,
 and optional 3D behavior.
 
 The comparison target is observable behavior, not identical final coordinates.
-Uniform new mode is the numerical native-motion control. Topology-weighted new mode is
+Uniform weighting is the numerical native-motion control. Topology weighting is
 accepted when it preserves the control's lifecycle and interaction feel while changing
 relative graph geography in the ways already contracted by V1.4.
 
@@ -37,9 +37,9 @@ except for explicit cross-references or amendments approved as part of V1.6.
 Graph+ continues to register `graph-plus/default`. Existing compatible checkpoint and
 view-state profile identities are not invalidated by a renamed profile.
 
-### A-V16-COMPAT-02 — Other consumers retain legacy behavior
+### A-V16-COMPAT-02 — Other consumers retain declared behavior
 
-Synthetic legacy profiles and PatternSmith produce unchanged:
+Synthetic profiles and PatternSmith preserve their declared:
 
 - effective settings;
 - render frames;
@@ -50,47 +50,39 @@ Synthetic legacy profiles and PatternSmith produce unchanged:
 - module lifecycle behavior.
 
 The external client artifact remains source-compatible for consumers that do not
-request new V1.6 modes.
+do not require Anima.
 
-## 3. Whole-system mode acceptance
+## 3. Single-system acceptance
 
-### A-V16-MODE-01 — New default
+### A-V16-MODE-01 — Sole active system
 
-Given a fresh Graph+ registration or the first migrated local installation, the
-effective `graphSystem` is `new`.
+Given a fresh or migrated Graph+ registration, Anima presentation and the
+D3-compatible dimension-generic solver are active with no whole-system selector.
 
-### A-V16-MODE-02 — Complete legacy comparison
+### A-V16-MODE-02 — Retired code is unreachable
 
-Given `graphSystem: legacy`, Graph+ reproduces the pre-V1.6:
+No profile or quick setting can select the retired renderer, solver, Anima-disabled
+path, or comparison state bank. Source and built artifacts contain no executable
+branch for those behaviors.
 
-- constant node sizing and linear projection scaling;
-- edge-weight thickness and direction rendering;
-- legacy force equations and settings;
-- existing contribution composition;
-- current camera/input behavior; and
-- legacy Anima-disabled behavior.
+### A-V16-MODE-03 — One coherent state
 
-Legacy mode is not partially backed by new solver or new presentation values.
-
-### A-V16-MODE-03 — Separate state
-
-Create visibly different new and legacy positions, cameras, pins, and module settings.
-Switch modes repeatedly. Each mode restores its own values exactly while canonical
-document identity and shared Filter/Form configuration remain unchanged.
+Positions, camera, pins, focus, selection, and module settings round-trip through one
+view state while canonical document identity and Filter/Form configuration remain
+unchanged.
 
 ### A-V16-MODE-04 — Focus reconciliation
 
-Focus and selection reconcile by stable node ID when visible in the destination mode.
-Invisible or removed IDs clear through the normal reconciliation path without
-changing the other mode's persisted state.
+Focus and selection reconcile by stable node ID. Invisible or removed IDs clear
+through the normal reconciliation path.
 
 ## 4. Anima ownership and safety
 
-### A-V16-ANIMA-01 — Required new-mode module
+### A-V16-ANIMA-01 — Required Graph+ module
 
-Graph+ new mode cannot mount without a healthy Anima module. A required-module failure
-uses the existing recoverable/fatal error contract and never falls through to a
-partially styled new graph.
+Graph+ cannot mount without a healthy Anima module. A required-module failure uses the
+existing recoverable/fatal error contract and never falls through to a partially
+styled graph.
 
 ### A-V16-ANIMA-02 — Presentation reach
 
@@ -217,7 +209,7 @@ Form-required labels survive the adaptive candidate budget.
 
 ### A-V16-LABEL-02 — Anima placement and quick setting
 
-Graph+ new mode defaults `labelPosition` to `above`. Switching the Display quick
+Graph+ defaults `labelPosition` to `above`. Switching the Display quick
 setting between Above and Below updates the mounted session without remounting or
 changing graph, force, focus, or camera state. Drawing and collision bounds share the
 same anchor: four CSS pixels above or below the resolved node boundary, including the
@@ -421,16 +413,14 @@ does not require 3D final positions to match a flattened 2D run or native Obsidi
 
 ## 12. Migration acceptance
 
-### A-V16-MIG-01 — Legacy capture
+### A-V16-MIG-01 — Accepted-bank promotion
 
-Starting from the current local Graph+ data, migration stores the existing presentation,
-force, camera, positions, pins, and module state under legacy without reinterpreting
-their numeric units.
+Starting from dual-bank V1.6 profile data, migration promotes the accepted presentation
+and force values into direct module settings and removes both wrappers.
 
-### A-V16-MIG-02 — New activation
+### A-V16-MIG-02 — Retired-state cleanup
 
-The same migration creates new-mode defaults and selects `new`. The first new-mode
-layout starts from its own state and does not overwrite the saved legacy comparison.
+Restore/export drops retired comparison-bank module metadata and never recreates it.
 
 ### A-V16-MIG-03 — Shared state
 
@@ -440,17 +430,17 @@ configuration survive migration and remain shared according to the contract.
 ### A-V16-MIG-04 — Idempotence and namespace isolation
 
 Run migration twice and compare serialized state byte-for-byte after normalization.
-No duplicate state appears, no mode resets, and no other consumer/profile namespace
+No duplicate state appears, no stale bank returns, and no other consumer/profile namespace
 changes.
 
-### A-V16-MIG-05 — Independent resets
+### A-V16-MIG-05 — Direct-setting reset
 
-Reset new mode and verify legacy is unchanged. Reset legacy and verify new is unchanged.
-Switching modes after either reset restores the expected destination state.
+Reset a migrated presentation or force setting and verify the single profile default
+returns without affecting another consumer namespace.
 
 ## 13. Visual acceptance
 
-Use the same representative vault graph and frozen canonical revision for both systems.
+Use the same representative vault graph and frozen canonical revision across themes.
 
 ### Desktop matrix
 
@@ -461,7 +451,7 @@ Use the same representative vault graph and frozen canonical revision for both s
 - narrow and wide desktop panes;
 - settled, actively cooling, hovered, focused, selected, dragged, pinned, and Form
   states; and
-- new uniform, new topology-weighted, and legacy modes.
+- uniform and topology-weighted force settings.
 
 Inspect at several zoom levels, including a whole-vault overview and a close local
 cluster. Verify degree prominence, square-root node scaling, line width, label
@@ -472,7 +462,7 @@ absence of perpetual movement.
 
 - portrait and landscape;
 - touch pan, pinch, drag, focus, second-click/tap activation, long-press context, and
-  mode switching;
+  dimension switching;
 - safe-area and quick-settings behavior; and
 - usable hit targets despite small rendered nodes.
 
@@ -502,8 +492,8 @@ requested.
 V1.6 is ready for implementation acceptance only when:
 
 - the contract's ownership boundaries are preserved;
-- new mode is the effective Graph+ default;
-- legacy remains a complete independent comparison;
+- Anima/native motion is Graph+'s sole active system;
+- retired comparison code is unreachable;
 - Anima controls the declared visual, geometry, force-target, and camera-target seams;
 - uniform 2D matches the numerical compatibility oracle;
 - topology-weighted mode retains V1.4 semantics over the new solver;

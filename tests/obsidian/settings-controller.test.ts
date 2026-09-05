@@ -10,7 +10,7 @@ test('Graph+ releases dragged nodes while retaining explicit context-menu pinnin
   equal(profile?.profileSettings?.dragRelease, 'dynamic', 'drag release should return an unpinned node to the active layout');
   equal(profile?.uiDefaults?.contextMenuEnabled, true, 'the right-click menu should remain available for explicit pinning');
   equal(profile?.uiDefaults?.coreContextActions?.['toggle-pin'], undefined, 'the core Pin node action should remain visible by default');
-  equal(profile?.modules['force-layout']?.defaults?.settlingSpeed, 2, 'Graph+ should perform two layout steps inside each visible cooling frame');
+  equal(profile?.profileSettings?.dragConstraint, 'transient', 'Graph+ should use a temporary drag constraint instead of implicit pinning');
 });
 
 test('R-DIM-01 profile dimension edits persist in one namespace and reset independently', async () => {
@@ -86,7 +86,7 @@ test('I-UI-02 region-boundary preference persists per consumer profile and reset
   equal(controller.getEffectiveProfile('graph-plus', 'default').modules['node-regions']?.settings.boundariesVisible, false, 'Graph+ should retain its own hidden-boundary choice');
   equal(controller.getEffectiveProfile('other-consumer', 'default').modules['node-regions']?.settings.boundariesVisible, true, 'another consumer should retain an independent choice');
   await controller.setProfileModuleSetting('graph-plus', 'default', 'node-regions', 'boundariesVisible', undefined);
-  equal(controller.getEffectiveProfile('graph-plus', 'default').modules['node-regions']?.settings.boundariesVisible, true, 'reset should reveal the Graph+ profile default');
+  equal(controller.getEffectiveProfile('graph-plus', 'default').modules['node-regions']?.settings.boundariesVisible, false, 'reset should reveal the Graph+ hidden-boundary default');
   equal(controller.getProfileOverrides('other-consumer', 'default').modules?.['node-regions']?.settings?.boundariesVisible, true, 'resetting Graph+ should not change another consumer namespace');
 });
 

@@ -15,28 +15,17 @@ interface NodeRegionSettingsV1 {
 }
 
 export class NodeRegionsModule implements GraphModuleInstanceV1 {
-  private rawSettings: Readonly<Record<string, JsonValue>>;
-  private graphSystem: 'new' | 'legacy';
   constructor(
     private readonly dimensions: GraphDimensionsV1,
     settings: Readonly<Record<string, JsonValue>>,
-    profileSettings: Readonly<Record<string, JsonValue>> = {},
   ) {
-    this.rawSettings = settings;
-    this.graphSystem = profileSettings.graphSystem === 'new' ? 'new' : 'legacy';
-    this.settings = readNodeRegionSettingsV1(modeSettings(settings, this.graphSystem));
+    this.settings = readNodeRegionSettingsV1(settings);
   }
 
   private settings: NodeRegionSettingsV1;
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
-    this.rawSettings = settings;
-    this.settings = readNodeRegionSettingsV1(modeSettings(settings, this.graphSystem));
-  }
-
-  updateProfileSettings(settings: Readonly<Record<string, JsonValue>>): void {
-    this.graphSystem = settings.graphSystem === 'new' ? 'new' : 'legacy';
-    this.settings = readNodeRegionSettingsV1(modeSettings(this.rawSettings, this.graphSystem));
+    this.settings = readNodeRegionSettingsV1(settings);
   }
 
   selectRender(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 {
@@ -65,13 +54,6 @@ export class NodeRegionsModule implements GraphModuleInstanceV1 {
       regionContributions: this.settings.boundariesVisible ? regionContributions : [],
     };
   }
-}
-
-function modeSettings(settings: Readonly<Record<string, JsonValue>>, mode: 'new' | 'legacy') {
-  const value = settings[`${mode}Settings`];
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Readonly<Record<string, JsonValue>>
-    : settings;
 }
 
 export function readNodeRegionSettingsV1(

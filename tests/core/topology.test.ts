@@ -148,8 +148,8 @@ test('L-SPRING-01 maps affinity to bounded length and stiffness', () => {
   const strong = deriveWeightedSpringParametersV1({ affinity: 2.5 }, settings);
   assert(weak.strength < ordinary.strength && ordinary.strength < strong.strength, 'stronger affinity should create a stiffer spring');
   assert(weak.targetLength > ordinary.targetLength && ordinary.targetLength > strong.targetLength, 'stronger affinity should create a shorter spring');
-  equal(ordinary.targetLength, 120, 'ordinary affinity should retain the profile baseline');
-  assert(strong.targetLength >= 60 && weak.targetLength <= 222, 'default length mapping should remain in its characterized bounds');
+  equal(ordinary.targetLength, 250, 'ordinary affinity should retain the native-motion baseline');
+  assert(strong.targetLength >= 137.5 && weak.targetLength <= 462.5, 'default length mapping should remain in its characterized bounds');
 });
 
 test('S-ANALYSIS-01 topology analysis is event-driven rather than frame-driven', () => {
@@ -261,11 +261,11 @@ test('R-DRAG-01 active node drag keeps the force layout responsive until release
   }
   const held = force.getDiagnostics();
   equal(held.running, true, 'a held drag should prevent force settlement');
-  assert(held.alpha >= 0.35, 'a held drag should retain the interaction heat floor');
+  assert(held.alpha >= 0.3, 'a held drag should retain the native interaction heat floor');
 
   force.tick({ ...state, draggedNodeId: undefined }, 1 / 60);
   const released = force.getDiagnostics();
-  equal(released.running, false, 'release should restore the ordinary settlement lifecycle');
-  equal(released.alpha, 0, 'a settled released layout should cool completely');
+  equal(released.running, true, 'release should begin the ordinary native cooling lifecycle');
+  assert(released.alpha < held.alpha, 'a released layout should immediately begin cooling');
   force.dispose();
 });

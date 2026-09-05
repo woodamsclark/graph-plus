@@ -3,7 +3,6 @@ import type { GraphRenderThemeV1 } from '../../render/index.ts';
 import type { GraphModuleInstanceV1, GraphModuleProjectionPatchV1 } from '../GraphModuleTypes.ts';
 
 export class AnimaModule implements GraphModuleInstanceV1 {
-  private graphSystem: 'new' | 'legacy';
   private labelPosition: 'above' | 'below';
   private topologyCache?: {
     readonly document: Parameters<NonNullable<GraphModuleInstanceV1['contributeFrame']>>[0]['document'];
@@ -17,18 +16,12 @@ export class AnimaModule implements GraphModuleInstanceV1 {
   constructor(
     private readonly palette: GraphRenderThemeV1,
     settings: Readonly<Record<string, JsonValue>>,
-    profileSettings: Readonly<Record<string, JsonValue>>,
   ) {
-    this.graphSystem = readGraphSystem(profileSettings);
     this.labelPosition = readLabelPosition(settings.labelPosition);
   }
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
     this.labelPosition = readLabelPosition(settings.labelPosition);
-  }
-
-  updateProfileSettings(settings: Readonly<Record<string, JsonValue>>): void {
-    this.graphSystem = readGraphSystem(settings);
   }
 
   restoreState(state: JsonValue): void {
@@ -42,7 +35,6 @@ export class AnimaModule implements GraphModuleInstanceV1 {
   contributeFrame(
     state: Parameters<NonNullable<GraphModuleInstanceV1['contributeFrame']>>[0],
   ): GraphModuleProjectionPatchV1 | void {
-    if (this.graphSystem === 'legacy') return;
     const visibleNodes = state.renderSelection.nodeIds;
     const { visibleEdges, relationships, degree } = this.presentationTopology(state);
     const activeId = state.draggedNodeId ?? state.viewState.focusedNodeId ?? state.hoveredNodeId;
@@ -144,10 +136,6 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     this.topologyCache = next;
     return next;
   }
-}
-
-function readGraphSystem(settings: Readonly<Record<string, JsonValue>>): 'new' | 'legacy' {
-  return settings.graphSystem === 'new' ? 'new' : 'legacy';
 }
 
 function readLabelPosition(value: JsonValue | undefined): 'above' | 'below' {

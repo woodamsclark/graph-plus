@@ -120,18 +120,6 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     }));
 
     const body = div(root, 'graphplus-controls-body graph-engine-controls-body');
-    if (this.context.consumerId === 'graph-plus' && this.context.profileId === 'default') {
-      new Setting(body)
-        .setName('Graph system')
-        .setDesc('New is the intended Anima and native-motion path; legacy remains available for comparison.')
-        .addDropdown((dropdown) => dropdown
-          .addOptions({ new: 'New', legacy: 'Legacy' })
-          .setValue(effective.profileSettings.graphSystem === 'legacy' ? 'legacy' : 'new')
-          .onChange(async (value) => {
-            await this.context.profileSettings.setProfileSetting('graphSystem', value);
-            await this.render();
-          }));
-    }
     const contributions = groupContributions(this.policy.quickSettings.contributions);
     this.renderFilter(body, contributions.get(SECTIONS.filter) ?? []);
     await this.renderForm(body, viewState, effective, contributions.get(SECTIONS.form) ?? []);
@@ -223,36 +211,35 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
   ): void {
     if (!graphUiSectionIsShownV1(this.policy, SECTIONS.display)) return;
     const body = this.section(parent, SECTIONS.display, SECTION_TITLES[SECTIONS.display], false);
-    const mode = graphSystem(effective);
     const rendering = effective.modules.rendering;
     if (rendering) {
-      const settings = modeSettings(rendering.settings, mode);
+      const settings = rendering.settings;
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labels)) {
         new Setting(body).setName('Labels').addDropdown((dropdown) => dropdown
           .addOptions({ adaptive: 'Adaptive', all: 'All', off: 'Off' })
           .setValue(readLabelMode(settings.labelMode))
           .onChange(async (value) => {
-            await this.setModeModuleSetting('rendering', mode, 'labelMode', value);
+            await this.context.profileSettings.setModuleSetting('rendering', 'labelMode', value);
             await this.render();
           }));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.nodeSize)) {
-        this.slider(body, 'Node size', readNumber(settings.nodeRadiusScale, 1), 0.5, 4, 0.1, 'rendering', 'nodeRadiusScale', mode);
+        this.slider(body, 'Node size', readNumber(settings.nodeRadiusScale, 1), 0.5, 4, 0.1, 'rendering', 'nodeRadiusScale');
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.linkThickness)) {
-        this.slider(body, 'Link thickness', readNumber(settings.edgeThicknessScale, 1), 0.1, 5, 0.05, 'rendering', 'edgeThicknessScale', mode);
+        this.slider(body, 'Link thickness', readNumber(settings.edgeThicknessScale, 1), 0.1, 5, 0.05, 'rendering', 'edgeThicknessScale');
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.showArrows)) {
         new Setting(body).setName('Show arrows').addToggle((toggle) => toggle
-          .setValue(mode === 'new' ? settings.showArrows === true : settings.showArrows !== false)
+          .setValue(settings.showArrows === true)
           .onChange(async (visible) => {
-            await this.setModeModuleSetting('rendering', mode, 'showArrows', visible);
+            await this.context.profileSettings.setModuleSetting('rendering', 'showArrows', visible);
             await this.render();
           }));
       }
     }
     const anima = effective.modules.anima;
-    if (mode === 'new' && anima?.enabled
+    if (anima?.enabled
       && graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labelPosition)) {
       new Setting(body).setName('Label position').addDropdown((dropdown) => dropdown
         .addOptions({ above: 'Above', below: 'Below' })
@@ -320,8 +307,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     const body = this.section(parent, SECTIONS.forces, SECTION_TITLES[SECTIONS.forces], false);
     const forces = effective.modules['force-layout'];
     if (forces?.enabled) {
-      const mode = graphSystem(effective);
-      const settings = modeSettings(forces.settings, mode);
+      const settings = forces.settings;
       if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.weightingMode)) {
         new Setting(body)
           .setName('Layout weighting')
@@ -330,21 +316,21 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
             .addOptions({ 'topology-weighted': 'Topology weighted', uniform: 'Uniform' })
             .setValue(settings.weightingMode === 'uniform' ? 'uniform' : 'topology-weighted')
             .onChange(async (mode) => {
-              await this.setModeModuleSetting('force-layout', graphSystem(effective), 'weightingMode', mode);
+              await this.context.profileSettings.setModuleSetting('force-layout', 'weightingMode', mode);
               await this.render();
             }));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.centerForce)) {
-        this.slider(body, 'Center force', readNumber(settings.centeringStrength, mode === 'new' ? 0.1 : 0.002), 0, mode === 'new' ? 1 : 0.05, 0.001, 'force-layout', 'centeringStrength', mode);
+        this.slider(body, 'Center force', readNumber(settings.centeringStrength, 0.1), 0, 1, 0.001, 'force-layout', 'centeringStrength');
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.radialForce)) {
-        this.slider(body, 'Repel force', readNumber(settings.repulsionStrength, mode === 'new' ? 1000 : 7000), 0, 50000, 250, 'force-layout', 'repulsionStrength', mode);
+        this.slider(body, 'Repel force', readNumber(settings.repulsionStrength, 1000), 0, 50000, 250, 'force-layout', 'repulsionStrength');
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.linkForce)) {
-        this.slider(body, 'Link force', readNumber(settings.springStrength, mode === 'new' ? 1 : 0.25), 0, 5, 0.05, 'force-layout', 'springStrength', mode);
+        this.slider(body, 'Link force', readNumber(settings.springStrength, 1), 0, 5, 0.05, 'force-layout', 'springStrength');
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.linkDistance)) {
-        this.slider(body, 'Link distance', readNumber(settings.springLength, mode === 'new' ? 250 : 120), 20, 500, 5, 'force-layout', 'springLength', mode);
+        this.slider(body, 'Link distance', readNumber(settings.springLength, 250), 20, 500, 5, 'force-layout', 'springLength');
       }
     }
     this.mountContributions(body, contributions);
@@ -358,11 +344,10 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     const regions = effective.modules['node-regions'];
     if (!regions?.enabled || !graphUiSectionIsShownV1(this.policy, SECTIONS.regions)) return;
     const body = this.section(parent, SECTIONS.regions, SECTION_TITLES[SECTIONS.regions], false);
-    const mode = graphSystem(effective);
-    const settings = modeSettings(regions.settings, mode);
+    const settings = regions.settings;
     if (graphUiControlIsShownV1(this.policy, SECTIONS.regions, CONTROLS.regionAttraction)) {
       this.slider(body, 'Region attraction', readNumber(settings.membershipStrength, 0.18), 0, 2, 0.01,
-        'node-regions', 'membershipStrength', mode);
+        'node-regions', 'membershipStrength');
     }
     if (graphUiControlIsShownV1(this.policy, SECTIONS.regions, CONTROLS.regionBoundaries)) {
       new Setting(body)
@@ -374,7 +359,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
           .setValue(settings.boundariesVisible !== false)
           .setDisabled(effective.dimensions !== '2d')
           .onChange(async (visible) => {
-            await this.setModeModuleSetting('node-regions', mode, 'boundariesVisible', visible);
+            await this.context.profileSettings.setModuleSetting('node-regions', 'boundariesVisible', visible);
             await this.render();
           }));
     }
@@ -390,58 +375,28 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     step: number,
     moduleId: string,
     key: string,
-    mode?: 'new' | 'legacy',
   ): void {
     const setting = new Setting(parent).setName(name).setDesc(`Current: ${formatNumber(value)}`);
     setting.settingEl.classList.add('graphplus-slider-setting', 'graph-engine-slider-setting');
     setting.addSlider((slider) => {
       slider.setLimits(min, max, step).setValue(value).setDynamicTooltip().onChange((next) => {
-        void (mode
-          ? this.setModeModuleSetting(moduleId, mode, key, next)
-          : this.context.profileSettings.setModuleSetting(moduleId, key, next));
+        void this.context.profileSettings.setModuleSetting(moduleId, key, next);
       });
       slider.sliderEl.addEventListener('dblclick', async (event) => {
         event.preventDefault();
-        if (mode) await this.setModeModuleSetting(moduleId, mode, key, undefined);
-        else await this.context.profileSettings.setModuleSetting(moduleId, key, undefined);
+        await this.context.profileSettings.setModuleSetting(moduleId, key, undefined);
         await this.render();
       });
     });
     const rawOverrides = this.context.profileSettings.getUserOverrides().modules?.[moduleId]?.settings;
-    const modeOverride = mode && isRecord(rawOverrides?.[`${mode}Settings`])
-      ? rawOverrides?.[`${mode}Settings`] as Readonly<Record<string, JsonValue>>
-      : undefined;
-    const descriptorDefaults = mode
-      ? modeSettings(this.context.profileSettings.getDescriptor().modules[moduleId]?.defaults ?? {}, mode)
-      : {};
-    const overridden = mode
-      ? modeOverride?.[key] !== undefined && !sameJson(modeOverride[key], descriptorDefaults[key])
-      : rawOverrides?.[key] !== undefined;
+    const overridden = rawOverrides?.[key] !== undefined;
     if (overridden) setting.addExtraButton((control) => control
       .setIcon('rotate-ccw')
       .setTooltip('Reset to profile default')
       .onClick(async () => {
-        if (mode) await this.setModeModuleSetting(moduleId, mode, key, undefined);
-        else await this.context.profileSettings.setModuleSetting(moduleId, key, undefined);
+        await this.context.profileSettings.setModuleSetting(moduleId, key, undefined);
         await this.render();
       }));
-  }
-
-  private async setModeModuleSetting(
-    moduleId: string,
-    mode: 'new' | 'legacy',
-    key: string,
-    value: JsonValue | undefined,
-  ): Promise<void> {
-    const effective = this.context.profileSettings.getEffectiveProfile().modules[moduleId]?.settings ?? {};
-    const selected = { ...modeSettings(effective, mode) };
-    if (value === undefined) {
-      const defaults = modeSettings(this.context.profileSettings.getDescriptor().modules[moduleId]?.defaults ?? {}, mode);
-      if (defaults[key] === undefined) delete selected[key];
-      else selected[key] = defaults[key];
-    }
-    else selected[key] = value;
-    await this.context.profileSettings.setModuleSetting(moduleId, `${mode}Settings`, selected);
   }
 
   private section(parent: HTMLElement, sectionId: string, title: string, defaultOpen: boolean): HTMLElement {
@@ -531,25 +486,6 @@ function readLabelPosition(value: JsonValue | undefined): 'above' | 'below' {
   return value === 'below' ? 'below' : 'above';
 }
 
-function graphSystem(effective: GraphEffectiveSettingsV1): 'new' | 'legacy' {
-  return effective.profileSettings.graphSystem === 'legacy' ? 'legacy' : 'new';
-}
-
-function modeSettings(
-  settings: Readonly<Record<string, JsonValue>>,
-  mode: 'new' | 'legacy',
-): Record<string, JsonValue> {
-  const value = settings[`${mode}Settings`];
-  return isRecord(value) ? { ...value } as Record<string, JsonValue> : { ...settings };
-}
-
-function isRecord(value: unknown): value is Record<string, JsonValue> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function sameJson(left: JsonValue | undefined, right: JsonValue | undefined): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
 
 function formatNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
