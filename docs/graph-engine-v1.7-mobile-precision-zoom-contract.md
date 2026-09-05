@@ -84,7 +84,40 @@ No new GraphDocument or GraphViewState field is required. Sensitivity and thresh
 may initially be engine constants. A later version may expose them through an input
 profile if on-device evaluation demonstrates a real need.
 
-## 6. Acceptance requirements
+## 6. Graph pipeline frequency ceiling
+
+V1.7 caps active Graph Engine work at 60 updates per second on every platform,
+including displays whose `requestAnimationFrame` callback runs at 90, 120, 144, or
+more hertz. Sixty hertz is a ceiling, not an idle target: settled or suspended graphs
+continue to schedule no unnecessary work.
+
+The cap covers:
+
+- force integration and Anima advancement;
+- camera gesture and choreography advancement;
+- frame contribution and composition;
+- Canvas rendering;
+- hover and hit-test work that can be coalesced safely; and
+- persistence invalidation caused only by intermediate animated frames.
+
+The runtime uses a monotonic clock and a minimum presentation interval of `1 / 60`
+second. Input received between eligible frames is coalesced to the latest complete
+state without dropping the final semantic result. Discrete commands, focus changes,
+document mutations, and accessibility state may update immediately, but their
+expensive graph-wide presentation work is coalesced into the next eligible frame.
+
+Physics advances by at most one fixed `1 / 60`-second integration step per eligible
+frame. A delayed callback does not execute a multi-step catch-up burst. Excess backlog
+is bounded and discarded so a temporarily blocked host cannot create a spiral of
+death, abrupt layout jump, or long recovery frame. The solver's cooling schedule is
+defined in simulation ticks and therefore remains deterministic under the cap.
+
+The frequency ceiling is independent from numerical safety. Every force step and
+restored force snapshot must also enforce finite coordinate, velocity, and magnitude
+bounds; invalid or implausible saved motion state is discarded and reheated from safe
+positions. Frame throttling may not be treated as protection against solver overflow.
+
+## 7. Acceptance requirements
 
 Automated pointer traces must prove:
 
@@ -100,13 +133,20 @@ Automated pointer traces must prove:
    or scheduled frame behind.
 9. Existing single tap, focus transfer, background defocus, one-finger pan/orbit,
    two-finger pan, pinch, node drag, and long-press tests remain passing.
+10. A synthetic 120 Hz and 144 Hz callback stream produces no more than 60 physics,
+    Anima, composition, render, or coalescible hit-test updates per second.
+11. A delayed callback advances physics at most once and does not burst through saved
+    elapsed time.
+12. Settled, hidden, and suspended sessions remain idle rather than waking at 60 Hz.
+13. Extreme finite restored velocities and coordinates are rejected or normalized
+    before they can reach rendering, camera fitting, or checkpoint persistence.
 
 Manual acceptance requires physical iOS testing in portrait and landscape, beginning
 over both nodes and background, at near and far zoom limits, in focused and unfocused
 2D and 3D graphs. The chosen sensitivity must permit useful one-thumb control without
 requiring large travel or causing abrupt scale jumps.
 
-## 7. Non-goals
+## 8. Non-goals
 
 V1.7 does not require:
 
@@ -116,4 +156,3 @@ V1.7 does not require:
 - platform-specific automatic sensitivity;
 - changing desktop wheel, trackpad pan, pinch, or Cmd-scroll behavior; or
 - changing focus, selection, node-drag, or activation semantics.
-
