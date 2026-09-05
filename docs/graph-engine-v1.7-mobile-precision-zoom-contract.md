@@ -140,13 +140,47 @@ Automated pointer traces must prove:
 12. Settled, hidden, and suspended sessions remain idle rather than waking at 60 Hz.
 13. Extreme finite restored velocities and coordinates are rejected or normalized
     before they can reach rendering, camera fitting, or checkpoint persistence.
+14. Resetting layout data removes only the named vault's disposable view state and
+    cannot delete or rewrite its canonical graph document.
+15. After a layout reset and reconnect, every visible document node receives a safe
+    initial position, the camera fits the regenerated graph, and the reset state
+    replaces rather than races with the prior live session checkpoint.
 
 Manual acceptance requires physical iOS testing in portrait and landscape, beginning
 over both nodes and background, at near and far zoom limits, in focused and unfocused
 2D and 3D graphs. The chosen sensitivity must permit useful one-thumb control without
 requiring large travel or causing abrupt scale jumps.
 
-## 8. Non-goals
+## 8. Settings cleanup and layout recovery
+
+V1.7 reorganizes Graph+ settings into concise, purpose-based sections and places
+destructive recovery actions in a visually separate **Danger zone** at the end. The
+Danger zone includes **Reset graph layout data for this vault**.
+
+The reset action:
+
+- closes or suspends the current Graph+ session before persistence changes;
+- requires an explicit confirmation naming the affected vault;
+- removes saved positions, velocities, force heat, pins, camera placement, focus,
+  selection, hover, and other transient interaction state;
+- preserves the canonical graph document, notes, tags, links, Graph+ preferences,
+  engine/profile settings, Filter query, Form configuration, palette, and label
+  placement preference;
+- reconnects from the preserved canonical document, generates safe initial positions,
+  reheats the solver, and fits the camera; and
+- writes the fresh view state before reporting success, preventing the discarded live
+  session from checkpointing stale data over the reset.
+
+The confirmation explains that node placement, camera framing, pins, focus, and
+selection will be lost, while vault content and graph filtering remain unchanged. The
+control is unavailable while no Graph+ vault session can be resolved unambiguously.
+
+This recovery action is distinct from numerical self-healing. Implausible saved
+coordinates or velocities must still be rejected automatically during ordinary load;
+the user should not need to discover and operate the Danger zone after the same class
+of corruption occurs again.
+
+## 9. Non-goals
 
 V1.7 does not require:
 
