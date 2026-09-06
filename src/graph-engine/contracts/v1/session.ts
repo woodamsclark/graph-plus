@@ -33,7 +33,7 @@ export interface GraphSessionV1 {
   setSelection(nodeIds: readonly string[]): Promise<void>;
   focusNode(nodeId: string | null): Promise<void>;
   setNodePinned(nodeId: string, pinned: boolean): Promise<void>;
-  fitNodes(nodeIds?: readonly string[], options?: TransitionOptionsV1): Promise<void>;
+  fitNodes(nodeIds?: readonly string[], options?: FitNodesOptionsV1): Promise<void>;
   resetCamera(options?: TransitionOptionsV1): Promise<void>;
 
   exportViewState(): Promise<GraphViewStateV1>;
@@ -100,6 +100,11 @@ export interface TransitionOptionsV1 {
   readonly signal?: AbortSignal;
 }
 
+export interface FitNodesOptionsV1 extends TransitionOptionsV1 {
+  /** Keep this node at the viewport center while sizing the camera for all fitted nodes. */
+  readonly centerNodeId?: string;
+}
+
 export type GraphIntentV1 =
   | GraphNodeActivatedIntentV1
   | GraphSelectionChangedIntentV1
@@ -107,6 +112,7 @@ export type GraphIntentV1 =
   | GraphBackgroundActivatedIntentV1
   | GraphNodeDragEndedIntentV1
   | GraphNodeContextRequestedIntentV1
+  | GraphNodeHoverChangedIntentV1
   | GraphViewportChangedIntentV1;
 
 export interface GraphIntentBaseV1 {
@@ -147,6 +153,13 @@ export interface GraphNodeContextRequestedIntentV1 extends GraphIntentBaseV1 {
   readonly nodeId: string;
   readonly anchor: { readonly x: number; readonly y: number };
   readonly modality: 'mouse' | 'touch' | 'pen';
+}
+
+export interface GraphNodeHoverChangedIntentV1 extends GraphIntentBaseV1 {
+  readonly type: 'node-hover-changed';
+  readonly nodeId?: string;
+  readonly anchor?: { readonly x: number; readonly y: number };
+  readonly mod: boolean;
 }
 
 export interface GraphViewportChangedIntentV1 extends GraphIntentBaseV1 {

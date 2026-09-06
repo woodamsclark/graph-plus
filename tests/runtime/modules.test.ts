@@ -69,7 +69,7 @@ test('R-MODULE-02 isolates optional setup and tick failures to one session', asy
   first.platform.flushFrame();
   equal(firstErrors.filter((error) => error.moduleId === 'fragile').length, 1, 'optional tick failure should emit once');
   equal(firstErrors.every((error) => error.recoverable), true, 'optional failures should remain recoverable');
-  equal(first.platform.pendingFrames, 1, 'optional failure should leave the required runtime active');
+  equal(first.platform.pendingFrames, 0, 'an optional tick failure should not prevent the remaining idle runtime from sleeping');
   first.platform.flushFrame();
   equal(firstErrors.filter((error) => error.moduleId === 'fragile').length, 1, 'disabled optional module should not run again');
 
@@ -79,7 +79,7 @@ test('R-MODULE-02 isolates optional setup and tick failures to one session', asy
   secondSession.onError((error) => secondErrors.push(error));
   second.platform.flushFrame();
   assert(!secondErrors.some((error) => error.moduleId === 'fragile'), 'one session failure must not disable another module instance');
-  equal(second.platform.pendingFrames, 1, 'unaffected session should continue rendering');
+  equal(second.platform.pendingFrames, 0, 'an unaffected session with no active animation should sleep normally');
   await firstSession.dispose();
   await secondSession.dispose();
 });
@@ -516,13 +516,13 @@ test('shipped Filter, Form, force layout, and palette contributions stay domain-
   });
   const forceSession = await force.create();
   const before = await forceSession.exportViewState();
-  for (let index = 1; index <= 5; index += 1) force.platform.flushFrame(index * 16);
+  for (let index = 1; index <= 5; index += 1) force.platform.flushFrame(index * 17);
   const after = await forceSession.exportViewState();
   assert(JSON.stringify(before.positions) !== JSON.stringify(after.positions), 'force layout should evolve generic positions without Anima');
-  for (let index = 6; index <= 360; index += 1) force.platform.flushFrame(index * 16);
+  for (let index = 6; index <= 360; index += 1) force.platform.flushFrame(index * 17);
   const settled = await forceSession.exportViewState();
   const settledDrawCount = force.drawCalls.length;
-  for (let index = 361; index <= 380; index += 1) force.platform.flushFrame(index * 16);
+  for (let index = 361; index <= 380; index += 1) force.platform.flushFrame(index * 17);
   deepEqual((await forceSession.exportViewState()).positions, settled.positions, 'cooled force layout should stop changing positions');
   equal(force.drawCalls.length, settledDrawCount, 'settled graphs should not redraw unchanged frames');
   const forceDescriptor = createShippedGraphModuleRegistryV1().descriptors().find((descriptor) => descriptor.id === 'force-layout');
@@ -550,14 +550,14 @@ test('shipped Filter, Form, force layout, and palette contributions stay domain-
   await withoutFilterSession.dispose();
 });
 
-test('C-SETTING-02 topology weighting is the shipped free-layout default', () => {
+test('C-SETTING-02 topology weighting is the only shipped free-layout mode', () => {
   const descriptor = createShippedGraphModuleRegistryV1().descriptors()
     .find((candidate) => candidate.id === 'force-layout');
-  equal(descriptor?.defaultSettings.weightingMode, 'topology-weighted', 'all consumers should receive the engine-owned weighted default');
+  equal(descriptor?.defaultSettings.weightingMode, undefined, 'the retired mode selector should not remain in shipped settings');
   equal(descriptor?.defaultSettings.springLength, 250, 'the weighted baseline should use the native-motion ordinary distance');
 });
 
-test('L-COMPONENT-01 weighted component centering separates islands and mode switching preserves state', async () => {
+test('L-COMPONENT-01 weighted component centering separates islands', async () => {
   const document = graphDocument({
     nodes: ['a', 'b', 'c'].map((id) => graphNode(id, { positionHint: { x: 0, y: 0, z: 0 } })),
     edges: [],
@@ -568,7 +568,6 @@ test('L-COMPONENT-01 weighted component centering separates islands and mode swi
       'force-layout': {
         enabled: true,
         settings: {
-          weightingMode: 'topology-weighted',
           repulsionStrength: 0,
           springStrength: 0,
           centeringStrength: 0.02,
@@ -578,18 +577,10 @@ test('L-COMPONENT-01 weighted component centering separates islands and mode swi
     },
   });
   const session = await value.create();
-  for (let index = 1; index <= 40; index += 1) value.platform.flushFrame(index * 16);
+  for (let index = 1; index <= 40; index += 1) value.platform.flushFrame(index * 17);
   const packed = await session.exportViewState();
   assert(Math.hypot(packed.positions.b.x, packed.positions.b.y) > 20, 'a disconnected component should move toward its own packing target');
   assert(Math.hypot(packed.positions.c.x, packed.positions.c.y) > 20, 'each isolated node should remain a packable component');
-  const camera = packed.camera;
-  await session.setSessionOverrides({
-    modules: { 'force-layout': { settings: { weightingMode: 'uniform' } } },
-  });
-  const switched = await session.exportViewState();
-  deepEqual(switched.positions, packed.positions, 'switching mode should retain current positions as starting state');
-  deepEqual(switched.camera, camera, 'switching mode should not reset the camera');
-  equal((await session.exportEffectiveSettings()).modules['force-layout']?.settings.weightingMode, 'uniform', 'the session should expose the selected engine mode');
   await session.dispose();
 });
 
@@ -608,7 +599,7 @@ test('R-REGION-01 renders live 2d boundaries and hides only the visual layer', a
   });
   const value = runtimeHarness({ document });
   value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
-    modules: { 'node-regions': { enabled: true } },
+    modules: { 'node-regions': { enabled: true, settings: { boundariesVisible: true } } },
   });
   const session = await value.create();
   assert(value.drawCalls.includes('quadraticCurveTo'), 'an enabled 2d region should draw a non-circular smooth boundary');
@@ -657,7 +648,7 @@ test('R-REGION-02 membership forces remain active when boundaries are hidden', a
   });
   const session = await value.create();
   const before = await session.exportViewState();
-  for (let index = 1; index <= 20; index += 1) value.platform.flushFrame(index * 16);
+  for (let index = 1; index <= 20; index += 1) value.platform.flushFrame(index * 17);
   const after = await session.exportViewState();
   const beforeDistance = Math.abs(before.positions.note.x - before.positions.tag.x);
   const afterDistance = Math.abs(after.positions.note.x - after.positions.tag.x);

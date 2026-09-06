@@ -1,6 +1,7 @@
-import { Plugin } from 'obsidian';
+import { Notice, Plugin, TFile, type WorkspaceLeaf } from 'obsidian';
 import { GraphPlusView, GRAPH_PLUS_TYPE } from './GraphView.ts';
-import { GraphPlusSettingTab } from './settings/SettingsTab.ts';
+import { LocalGraphPlusView, LOCAL_GRAPH_PLUS_TYPE } from './LocalGraphView.ts';
+import { GraphEngineSettingTab } from './settings/SettingsTab.ts';
 import type { GraphEngineLeaseV1 } from '../graph-engine/contracts/v1/index.ts';
 import { ConsumerProfileRegistry } from '../graph-engine/core/profile/index.ts';
 import { SessionFactory } from '../graph-engine/runtime/index.ts';
@@ -13,11 +14,12 @@ import {
 import {
   GRAPH_PLUS_CONSUMER_REGISTRATION_V1,
   GRAPH_PLUS_REQUESTED_CAPABILITIES_V1,
-  migrateGraphPlusProfileOverridesV16,
+  migrateGraphPlusProfileOverridesV17,
   type GraphPlusConsumerSettingsV1,
 } from '../graph-plus/consumer/index.ts';
 import type { GraphPlusCheckpointStoreV1 } from '../graph-plus/persistence/index.ts';
 import type { GraphPlusLensStateV1 } from '../graph-plus/query/index.ts';
+import { ObsidianVaultGraphSourceV1 } from '../graph-plus/adapter/index.ts';
 import {
   asObsidianWorkspaceEventsV1,
   ObsidianWorkspaceEventBusV1,
@@ -35,7 +37,7 @@ import {
 import { GraphPlusCheckpointFileStoreV1 } from './settings/GraphPlusCheckpointFileStore.ts';
 
 
-export default class GraphPlus extends Plugin {
+export default class GraphEnginePlugin extends Plugin {
   settings!: GraphPlusConsumerSettingsV1;
   engineSettings!: GraphEngineSettingsControllerV1;
   private pluginData!: GraphPlusPluginDataV1;
@@ -44,12 +46,14 @@ export default class GraphPlus extends Plugin {
   private graphEngineProvider?: GraphEngineWorkspaceProviderV1;
   private graphPlusLease?: GraphEngineLeaseV1;
   private checkpointFileStore?: GraphPlusCheckpointFileStoreV1;
+  private vaultGraphSource?: ObsidianVaultGraphSourceV1;
   private saveQueue: Promise<void> = Promise.resolve();
 
   async onload() {
     const migration = migrateGraphPlusPluginDataV1(await this.loadData());
     this.pluginData = migration.data;
     this.settings = this.pluginData.consumers.graphPlus.consumerSettings;
+    this.vaultGraphSource = new ObsidianVaultGraphSourceV1(this.app);
     const pluginDirectory = this.manifest.dir
       ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
     this.checkpointFileStore = new GraphPlusCheckpointFileStoreV1({
@@ -76,7 +80,7 @@ export default class GraphPlus extends Plugin {
       modules,
       getGlobalOverrides: () => this.pluginData.engine.globalSettings,
       resolveThemePalette: (container) => {
-        const palette = new ThemeStyleResolver(() => container.ownerDocument.body).getPalette();
+        const palette = new ThemeStyleResolver(() => container).getPalette();
         return {
           backgroundColor: palette.backgroundColor,
           nodeColor: palette.nodeColor,
@@ -126,7 +130,7 @@ export default class GraphPlus extends Plugin {
       this.graphPlusLease = localLease.lease;
       await localLease.lease.registerConsumer(GRAPH_PLUS_CONSUMER_REGISTRATION_V1);
       const previous = profiles.getUserOverrides('graph-plus', 'default');
-      const migrated = migrateGraphPlusProfileOverridesV16(previous);
+      const migrated = migrateGraphPlusProfileOverridesV17(previous);
       if (JSON.stringify(previous) !== JSON.stringify(migrated)) {
         profiles.setUserOverrides('graph-plus', 'default', migrated);
         await this.persistEngineSettings();
@@ -137,17 +141,32 @@ export default class GraphPlus extends Plugin {
     this.graphEngineProvider.start();
 
     this.registerView(GRAPH_PLUS_TYPE, (leaf) => new GraphPlusView(leaf, this));
+    this.registerView(LOCAL_GRAPH_PLUS_TYPE, (leaf) => new LocalGraphPlusView(leaf, this));
+    this.registerHoverLinkSource(GRAPH_PLUS_TYPE, { display: 'graph+', defaultMod: true });
+    this.registerHoverLinkSource(LOCAL_GRAPH_PLUS_TYPE, { display: 'local graph+', defaultMod: true });
+    this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
+      if (!this.settings.enabled || !(file instanceof TFile) || file.extension !== 'md') return;
+      menu.addItem((item) => item
+        .setTitle('show in graph+')
+        .setIcon('dot-network')
+        .onClick(() => void this.showInGraphPlus(file)));
+    }));
     this.addCommand({
       id  : 'open-graph+',
       name: 'open graph+',
       callback: () => this.activateView(),
     });
+    this.addCommand({
+      id: 'open-local-graph+',
+      name: 'open local graph+',
+      callback: () => this.activateLocalView(),
+    });
 
-    this.addSettingTab(new GraphPlusSettingTab(this.app, this));
+    this.addSettingTab(new GraphEngineSettingTab(this.app, this));
   }
 
-  async activateView() {
-    if (!this.settings.enabled) return;
+  async activateView(): Promise<WorkspaceLeaf | undefined> {
+    if (!this.settings.enabled) return undefined;
     const leaves = this.app.workspace.getLeavesOfType(GRAPH_PLUS_TYPE);
     if (leaves.length === 0) {
       const leaf = this.app.workspace.getLeaf(true);
@@ -155,10 +174,48 @@ export default class GraphPlus extends Plugin {
         type: GRAPH_PLUS_TYPE,
         active: true,
       });
-      this.app.workspace.revealLeaf(leaf);
+      await this.app.workspace.revealLeaf(leaf);
+      return leaf;
     } else {
-      this.app.workspace.revealLeaf(leaves[0]);
+      await this.app.workspace.revealLeaf(leaves[0]);
+      return leaves[0];
     }
+  }
+
+  async activateLocalView(): Promise<WorkspaceLeaf | undefined> {
+    if (!this.settings.enabled) return undefined;
+    const leaves = this.app.workspace.getLeavesOfType(LOCAL_GRAPH_PLUS_TYPE);
+    if (leaves.length > 0) {
+      await this.app.workspace.revealLeaf(leaves[0]);
+      return leaves[0];
+    }
+    const leaf = this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getRightLeaf(true);
+    if (!leaf) return undefined;
+    await leaf.setViewState({ type: LOCAL_GRAPH_PLUS_TYPE, active: true });
+    await this.app.workspace.revealLeaf(leaf);
+    return leaf;
+  }
+
+  private async showInGraphPlus(file: TFile): Promise<void> {
+    const leaf = await this.activateView();
+    if (!leaf) return;
+    await leaf.loadIfDeferred();
+    const view = leaf.view;
+    const shown = view instanceof GraphPlusView && await view.showFile(file);
+    if (!shown) new Notice(`graph+ could not find ${file.path}.`);
+  }
+
+  canResetGraphLayoutData(): boolean {
+    return this.app.workspace.getLeavesOfType(GRAPH_PLUS_TYPE).length === 1;
+  }
+
+  async resetGraphLayoutData(): Promise<boolean> {
+    const leaves = this.app.workspace.getLeavesOfType(GRAPH_PLUS_TYPE);
+    if (leaves.length !== 1) return false;
+    await leaves[0].loadIfDeferred();
+    return leaves[0].view instanceof GraphPlusView
+      ? leaves[0].view.resetGraphLayoutData()
+      : false;
   }
 
   onunload() {
@@ -167,18 +224,22 @@ export default class GraphPlus extends Plugin {
     this.graphPlusLease = undefined;
     this.graphEngineProvider = undefined;
     this.graphEngineCore = undefined;
+    this.vaultGraphSource = undefined;
   }
 
   async updateGraphPlusSettings(settings: GraphPlusConsumerSettingsV1) {
     this.settings = { ...settings };
     this.pluginData = withGraphPlusSettingsV1(this.pluginData, this.settings);
     await this.persistPluginData();
-    if (!settings.enabled) this.app.workspace.detachLeavesOfType(GRAPH_PLUS_TYPE);
+    if (!settings.enabled) {
+      this.app.workspace.detachLeavesOfType(GRAPH_PLUS_TYPE);
+      this.app.workspace.detachLeavesOfType(LOCAL_GRAPH_PLUS_TYPE);
+    }
   }
 
   acquireGraphPlusLease(): GraphEngineLeaseV1 {
     if (!this.settings.enabled) {
-      throw new GraphEngineServiceErrorV1({ code: 'engine-unavailable', message: 'The bundled Graph+ consumer is disabled.' });
+      throw new GraphEngineServiceErrorV1({ code: 'engine-unavailable', message: 'The bundled graph+ consumer is disabled.' });
     }
     const result = this.graphEngineCore?.connectLocal({
       consumerId: 'graph-plus',
@@ -186,10 +247,15 @@ export default class GraphPlus extends Plugin {
       requestedCapabilities: GRAPH_PLUS_REQUESTED_CAPABILITIES_V1,
     }) ?? {
       ok: false as const,
-      error: { code: 'engine-unavailable' as const, message: 'Graph Engine is unavailable.' },
+      error: { code: 'engine-unavailable' as const, message: 'graph-engine is unavailable.' },
     };
     if (!result.ok) throw new GraphEngineServiceErrorV1(result.error);
     return result.lease;
+  }
+
+  get graphPlusVaultSource(): ObsidianVaultGraphSourceV1 {
+    if (!this.vaultGraphSource) throw new Error('graph+ vault source is unavailable.');
+    return this.vaultGraphSource;
   }
 
   readonly graphPlusCheckpointStore: GraphPlusCheckpointStoreV1 = {
@@ -229,11 +295,11 @@ export default class GraphPlus extends Plugin {
   }
 
   private requireCheckpointFileStore(): GraphPlusCheckpointFileStoreV1 {
-    if (!this.checkpointFileStore) throw new Error('Graph+ checkpoint storage is unavailable before plugin load.');
+    if (!this.checkpointFileStore) throw new Error('graph+ checkpoint storage is unavailable before plugin load.');
     return this.checkpointFileStore;
   }
 }
 
 function createEngineInstanceId(): string {
-  return `graph-plus:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`;
+  return `graph-engine:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`;
 }

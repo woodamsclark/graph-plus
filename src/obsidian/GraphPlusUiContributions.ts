@@ -3,12 +3,31 @@ import {
   GRAPH_QUICK_SETTINGS_SECTION_IDS_V1 as SECTIONS,
   type GraphQuickSettingsContributionV1,
 } from '../graph-engine/contracts/v1/index.ts';
-import type { GraphPlusConsumerV1 } from '../graph-plus/consumer/index.ts';
+import type { GraphDocumentV1 } from '../graph-engine/contracts/v1/index.ts';
+import type { GraphPlusLensStateV1 } from '../graph-plus/query/index.ts';
 
-export function createGraphPlusUiContributionsV1<TFile>(
-  getConsumer: () => GraphPlusConsumerV1<TFile>,
+interface GraphPlusUiConsumerV1 {
+  getLens(): GraphPlusLensStateV1;
+  setLens(next: GraphPlusLensStateV1): Promise<void>;
+  getDocument(): GraphDocumentV1 | undefined;
+}
+
+interface LocalGraphDepthControllerV1 {
+  getLocalDepth(): number;
+  setLocalDepth(depth: number): Promise<void>;
+}
+
+export function createGraphPlusUiContributionsV1(
+  getConsumer: () => GraphPlusUiConsumerV1,
+  getLocalDepth?: () => LocalGraphDepthControllerV1,
 ): readonly GraphQuickSettingsContributionV1[] {
   return [
+    ...(getLocalDepth ? [{
+      id: 'graph-plus.local-depth',
+      sectionId: SECTIONS.filter,
+      order: 5,
+      mount: (container: HTMLElement) => mountLocalDepth(container, getLocalDepth()),
+    }] : []),
     {
       id: 'graph-plus.refine-vault',
       sectionId: SECTIONS.filter,
@@ -24,7 +43,7 @@ export function createGraphPlusUiContributionsV1<TFile>(
   ];
 }
 
-function mountRefineVault<TFile>(container: HTMLElement, consumer: GraphPlusConsumerV1<TFile>) {
+function mountRefineVault(container: HTMLElement, consumer: GraphPlusUiConsumerV1) {
   const lens = consumer.getLens();
   const window = container.ownerDocument.defaultView;
   let timer: number | undefined;
@@ -56,7 +75,7 @@ function mountRefineVault<TFile>(container: HTMLElement, consumer: GraphPlusCons
   };
 }
 
-function mountRelation<TFile>(container: HTMLElement, consumer: GraphPlusConsumerV1<TFile>): void {
+function mountRelation(container: HTMLElement, consumer: GraphPlusUiConsumerV1): void {
   const lens = consumer.getLens();
   if (!lens.form.enabled) return;
   const relationOptions: Record<string, string> = { '': 'Any relation' };
@@ -72,4 +91,12 @@ function mountRelation<TFile>(container: HTMLElement, consumer: GraphPlusConsume
       ...consumer.getLens(),
       form: { ...consumer.getLens().form, relation: relation || undefined },
     })));
+}
+
+function mountLocalDepth(container: HTMLElement, controller: LocalGraphDepthControllerV1): void {
+  new Setting(container).setName('Depth').addSlider((slider) => slider
+    .setLimits(1, 8, 1)
+    .setDynamicTooltip()
+    .setValue(controller.getLocalDepth())
+    .onChange((depth) => controller.setLocalDepth(depth)));
 }

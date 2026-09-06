@@ -1,4 +1,4 @@
-# Graph+ and Graph Engine V1.1 Architecture and Contracts
+# Graph Engine and Graph+ V1.1 Architecture and Contracts
 
 Status: Approved and implemented; physical-device release smoke pending
 
@@ -12,13 +12,13 @@ V1.1 is additive to the V1 service. Existing public type names retain their `V1`
 suffix where their shapes can be extended compatibly; a future breaking transport or
 service change still requires a new protocol major.
 
-Graph+ is the installed, user-facing Obsidian plugin. It is presented as a better
-Obsidian graph and includes Graph Engine as its reusable internal platform.
+Graph Engine is the installed Obsidian plugin and reusable platform. It includes
+Graph+ as its bundled, user-facing graph application.
 
 Graph Engine provides domain-neutral graph construction, manipulation,
 visualization, interaction, layout, filtering, profiles, and module infrastructure.
 It is publicly leaseable by PatternSmith and other installed plugins through a
-versioned service exposed by Graph+.
+versioned service exposed by the Graph Engine plugin.
 
 Graph Engine does not own the durable meaning of a consumer's graph. A consumer
 supplies a neutral graph document, mounts a live graph session into an HTML element,
@@ -33,7 +33,7 @@ owns its graph and view persistence.
 The intended topology is:
 
 ```text
-Installed Graph+ plugin
+Installed Graph Engine plugin
 ├── Graph+ built-in consumer module
 │   └── local lease ───────────────┐
 ├── Graph Engine kernel            │
@@ -52,8 +52,8 @@ additional installed Obsidian plugins.
 
 The user-facing explanation is:
 
-> Graph+ is a better graph for Obsidian. It also provides a graph engine that other
-> plugins can lease and mount inside their own interfaces.
+> Graph Engine is a reusable graph platform for Obsidian. It includes Graph+ as a
+> better graph experience and lets other plugins lease the same engine.
 
 The internal architecture runs in the opposite direction: Graph Engine is the
 platform, and Graph+ is its bundled reference consumer. User-facing product framing
@@ -78,7 +78,7 @@ Graph Engine does persist its own global settings, registered profile descriptor
 and user profile overrides.
 
 The bundled Graph+ consumer owns its state logically, even though its namespaced
-storage physically shares the installed Graph+ plugin's data file.
+storage physically shares the installed Graph Engine plugin's data file.
 
 ### 2.2 Semantic ignorance
 
@@ -123,7 +123,7 @@ stale document operations fail explicitly.
 
 V1 includes:
 
-- one installed, user-facing Graph+ plugin;
+- one installed Graph Engine plugin with a user-facing Graph+ application;
 - a bundled Graph+ consumer module activated by `Open: graph+` or saved-view restore;
 - a Graph+ V1 vault adapter for notes, tags, and relationships derived between them;
 - namespaced Graph+ graph and view persistence;
@@ -157,8 +157,8 @@ V1 does not include:
 - the current experimental Graph+ Anima visuals;
 - Graph+ attachment, Canvas, unresolved-link, or other non-note/non-tag node types;
 - arbitrary third-party executable module registration across the service boundary;
-- a separately installed Graph Engine plugin;
-- automatic installation or enabling of Graph+ by external consumers;
+- a separately installed Graph+ plugin;
+- automatic installation or enabling of Graph Engine by external consumers;
 - PatternSmith qualification, unlocking, or radial-session redesign.
 
 ## 4. Terminology and ownership
@@ -166,7 +166,7 @@ V1 does not include:
 | Term | Definition | Owner |
 | --- | --- | --- |
 | Consumer | An application layer using Graph Engine | Product plugin or bundled consumer module |
-| Built-in consumer | A consumer shipped inside Graph+ but restricted to public engine contracts | Graph+ plugin |
+| Built-in consumer | A consumer shipped inside Graph Engine but restricted to public engine contracts | Graph+ application |
 | Domain model | The consumer's meaningful source data | Consumer |
 | Graph document | Neutral nodes and edges used by one session | Consumer persists; engine holds a copy |
 | Graph patch | Atomic structural update to a graph document | Consumer submits; engine applies |
@@ -1105,7 +1105,7 @@ new active dimension in view state. A profile/session that allows only one dimen
 does not display an editable dimension control.
 
 Graph Engine persists user global settings and user profile overrides inside the
-installed Graph+ plugin's engine namespace. Consumers do not read or write that
+installed Graph Engine plugin's engine namespace. Consumers do not read or write that
 storage directly.
 
 ### 13.2 Profile lifecycle and settings UI
@@ -1197,7 +1197,7 @@ They never enter the public graph document.
 
 ### 14.4 Persistence and migration
 
-The installed Graph+ plugin has one physical plugin data store. Logical ownership is
+The installed Graph Engine plugin has one physical plugin data store. Logical ownership is
 kept explicit through namespaced schemas:
 
 ```ts
@@ -1250,7 +1250,7 @@ state.
 
 Obsidian has no documented plugin-dependency field or public plugin-manager lookup.
 The primary connection mechanism therefore uses the public Workspace Events API.
-The V1 provider is the installed plugin whose manifest ID is `graph-plus`; consumers
+The V1 provider is the installed plugin whose manifest ID is `graph-engine`; consumers
 discover the `graph-engine` capability rather than looking up that plugin through an
 undocumented plugin manager.
 
@@ -1300,7 +1300,7 @@ interface GraphEngineLeaseV1 {
 
 ### 15.2 Missing or incompatible engine
 
-If the installed Graph+ plugin is missing, disabled, initializing, or exposes an
+If the installed Graph Engine plugin is missing, disabled, initializing, or exposes an
 incompatible Graph Engine protocol, an external consumer or bundled client helper
 renders a fallback inside the consumer-owned container. The unavailable provider
 cannot render its own message because it is not running.
@@ -1308,10 +1308,10 @@ cannot render its own message because it is not running.
 Suggested copy:
 
 ```text
-Graph+ is unavailable or not installed. This feature requires its Graph Engine.
+Graph Engine is unavailable or not installed. This feature requires Graph Engine.
 ```
 
-Consumers do not attempt to install or enable Graph+ automatically. Unrelated
+Consumers do not attempt to install or enable Graph Engine automatically. Unrelated
 consumer functionality remains available where possible.
 
 ## 16. Errors and events
@@ -1360,7 +1360,7 @@ instances.
 
 These versions evolve independently:
 
-- installed Graph+ Obsidian plugin version;
+- installed Graph Engine Obsidian plugin version;
 - bundled Graph+ consumer-module version and data schema;
 - public service protocol version;
 - graph document schema version;

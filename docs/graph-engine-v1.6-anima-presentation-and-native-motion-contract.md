@@ -241,10 +241,20 @@ This is presentation scaling, not a change to wheel/pinch behavior, camera bound
 node positions, force mass, collision radius, or topology.
 
 Perspective 3D retains depth-aware camera projection and therefore preserves the
-relative size difference between near and distant nodes. In Graph+, Anima
-declares a `4` CSS-pixel minimum visible radius so a distant node never collapses into
-an imperceptible speck. This floor affects drawing, culling, edge clipping, and exact
-hit testing but does not affect force or collision geometry.
+relative size difference between near and distant nodes. To prevent perspective from
+flattening degree prominence when the whole graph is framed, Anima declares both a
+`4` CSS-pixel absolute minimum and a `0.5` minimum scale of each node's resolved world
+radius:
+
+```text
+screenRadius = max(worldRadius * perspectiveScale, 4, worldRadius * 0.5)
+```
+
+The relative floor means a minimum-degree node bottoms out at `4` CSS pixels while a
+larger hub retains the same degree-derived size ratio instead of collapsing onto the
+same fixed floor. Above the floor, ordinary perspective depth still distinguishes
+near and distant nodes. These floors affect drawing, culling, edge clipping, and exact
+hit testing but do not affect force or collision geometry.
 
 For perspective touch input only, Anima declares a `22` CSS-pixel minimum hit radius,
 providing a `44` CSS-pixel finger target without enlarging the rendered disc. Exact
@@ -259,9 +269,47 @@ Graph+ label sizing begins with:
 fontSize = 14 + worldRadius / 4
 ```
 
-In 2D the label receives the same square-root zoom compensation as its node. Adaptive
-collision rejection and budgeting remain enabled as a Graph+ enhancement. Focused,
-hovered, selected, dragged, and Form-required labels remain forced candidates.
+Labels use their resolved font size in fixed CSS pixels in both 2D and 3D. They remain
+readable while the graph recedes, matching the accepted 3D overview treatment rather
+than shrinking with orthographic zoom. Adaptive collision rejection and budgeting
+remain enabled as a Graph+ enhancement. Focused, hovered, selected, dragged, and
+Form-required labels remain forced candidates.
+
+Adaptive label collision slots are resolved in this stable order:
+
+1. forced interaction and required labels;
+2. explicit structural label priority, including Form roles;
+3. resolved Anima world radius, largest first;
+4. perspective proximity; and
+5. stable node ID.
+
+World radius intentionally precedes perspective proximity so a structural hub reserves
+label space before a nearby low-degree node and does not change rank merely because
+the camera orbits. Only onscreen nodes are candidates.
+
+The base adaptive label budget is bounded from `12` through `120` before the active
+threshold adjustment and grows with viewport area and effective zoom. In 2D effective
+zoom is the orthographic camera zoom with the existing lower bound. In 3D it is the
+perspective scale at the camera target, so dollying closer reveals progressively more
+ordinary labels and dollying away returns to the hub-first overview. Collision
+rejection remains active at every budget.
+
+Graph+ exposes **Label threshold** in Display while label mode is Adaptive. The value
+is stored independently as `adaptiveLabelThreshold2d` and
+`adaptiveLabelThreshold3d`, each from `0` through `100`. Higher values delay ordinary
+labels; forced labels are unaffected. Graph+ defaults to `65` in 2D and `50` in 3D.
+For threshold `t`, the renderer applies:
+
+```text
+thresholdFactor = 2 ^ ((50 - t) / 50)
+minimumBudget = clamp(round(12 * thresholdFactor), 4, 24)
+budget = clamp(round(baseAdaptiveBudget * thresholdFactor), minimumBudget, 120)
+```
+
+Thus `50` preserves the accepted curve, `100` halves its ordinary-label budget at a
+given zoom, and `0` doubles it subject to the bounds. Changing the slider updates the
+mounted session without changing label rank, graph state, or the other dimension's
+value.
 
 Anima owns a two-value `labelPosition` presentation setting:
 

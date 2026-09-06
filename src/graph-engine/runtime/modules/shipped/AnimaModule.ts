@@ -4,6 +4,8 @@ import type { GraphModuleInstanceV1, GraphModuleProjectionPatchV1 } from '../Gra
 
 export class AnimaModule implements GraphModuleInstanceV1 {
   private labelPosition: 'above' | 'below';
+  private adaptiveLabelThreshold2d: number;
+  private adaptiveLabelThreshold3d: number;
   private topologyCache?: {
     readonly document: Parameters<NonNullable<GraphModuleInstanceV1['contributeFrame']>>[0]['document'];
     readonly nodeIds: ReadonlySet<string>;
@@ -18,10 +20,14 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     settings: Readonly<Record<string, JsonValue>>,
   ) {
     this.labelPosition = readLabelPosition(settings.labelPosition);
+    this.adaptiveLabelThreshold2d = readThreshold(settings.adaptiveLabelThreshold2d, 50);
+    this.adaptiveLabelThreshold3d = readThreshold(settings.adaptiveLabelThreshold3d, 50);
   }
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
     this.labelPosition = readLabelPosition(settings.labelPosition);
+    this.adaptiveLabelThreshold2d = readThreshold(settings.adaptiveLabelThreshold2d, 50);
+    this.adaptiveLabelThreshold3d = readThreshold(settings.adaptiveLabelThreshold3d, 50);
   }
 
   restoreState(state: JsonValue): void {
@@ -89,9 +95,13 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       theme: {
         ...state.theme,
         nodeScaleMode: 'sqrt-orthographic',
-        labelScaleMode: 'sqrt-orthographic',
+        labelScaleMode: 'fixed',
         labelPosition: this.labelPosition,
+        adaptiveLabelThreshold: state.viewState.dimensions === '3d'
+          ? this.adaptiveLabelThreshold3d
+          : this.adaptiveLabelThreshold2d,
         minimumPerspectiveNodeRadius: 4,
+        minimumPerspectiveNodeScale: 0.5,
         minimumPerspectiveTouchHitRadius: 22,
         edgeAggregation: 'unordered-pair',
         showArrows: state.theme.showArrows === true,
@@ -140,6 +150,12 @@ export class AnimaModule implements GraphModuleInstanceV1 {
 
 function readLabelPosition(value: JsonValue | undefined): 'above' | 'below' {
   return value === 'above' ? 'above' : 'below';
+}
+
+function readThreshold(value: JsonValue | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? clamp(value, 0, 100)
+    : fallback;
 }
 
 function positive(value: JsonValue | number | undefined, fallback: number): number {

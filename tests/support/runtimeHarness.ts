@@ -28,6 +28,7 @@ export class InstrumentedPlatform implements SessionRuntimePlatformV1 {
   visibilityListenerRemoves = 0;
   failObservation = false;
   private currentTime = 100;
+  private frameTimestamp = 0;
   private nextHandle = 1;
   private readonly frames = new Map<number, FrameRequestCallback>();
   private readonly timers = new Map<number, () => void>();
@@ -110,11 +111,12 @@ export class InstrumentedPlatform implements SessionRuntimePlatformV1 {
     this.currentTime += milliseconds;
   }
 
-  flushFrame(timestamp = 16): void {
+  flushFrame(timestamp?: number): void {
     const entry = this.frames.entries().next().value as [number, FrameRequestCallback] | undefined;
     if (!entry) return;
     this.frames.delete(entry[0]);
-    entry[1](timestamp);
+    this.frameTimestamp = timestamp ?? this.frameTimestamp + 1_000 / 60;
+    entry[1](this.frameTimestamp);
   }
 
   flushTimer(): void {
@@ -197,10 +199,11 @@ export function runtimeHarness(options: {
 } = {}) {
   const window = new Window();
   const drawCalls: string[] = [];
+  const drawArguments: Array<{ readonly method: string; readonly args: readonly unknown[] }> = [];
   const styleAssignments: string[] = [];
   const Canvas = (window as unknown as { HTMLCanvasElement: { prototype: HTMLCanvasElement } }).HTMLCanvasElement;
   Canvas.prototype.getContext = function getContext(contextId: string) {
-    return contextId === '2d' ? fakeCanvasContext(drawCalls, styleAssignments) : null;
+    return contextId === '2d' ? fakeCanvasContext(drawCalls, styleAssignments, drawArguments) : null;
   } as HTMLCanvasElement['getContext'];
   const document = window.document as unknown as Document;
   const container = document.createElement('section');
@@ -241,6 +244,7 @@ export function runtimeHarness(options: {
     profiles,
     factory,
     drawCalls,
+    drawArguments,
     styleAssignments,
     resize: (width: number, height: number, pixelRatio: number) => {
       size.width = width;
@@ -270,7 +274,11 @@ export function runtimeCanvas(container: HTMLElement): HTMLCanvasElement {
   return value;
 }
 
-function fakeCanvasContext(calls: string[], styleAssignments: string[]): CanvasRenderingContext2D {
+function fakeCanvasContext(
+  calls: string[],
+  styleAssignments: string[],
+  drawArguments: Array<{ readonly method: string; readonly args: readonly unknown[] }>,
+): CanvasRenderingContext2D {
   const methods = [
     'arc',
     'beginPath',
@@ -297,7 +305,10 @@ function fakeCanvasContext(calls: string[], styleAssignments: string[]): CanvasR
         };
       }
       if (typeof property === 'string' && methods.includes(property)) {
-        return (..._args: unknown[]) => calls.push(property);
+        return (...args: unknown[]) => {
+          calls.push(property);
+          drawArguments.push({ method: property, args });
+        };
       }
       return Reflect.get(target, property);
     },

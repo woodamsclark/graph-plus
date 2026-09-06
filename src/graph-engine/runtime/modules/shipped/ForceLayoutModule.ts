@@ -6,12 +6,15 @@ import {
   type GraphTopologyComponentV1,
   type GraphTopologyPairV1,
 } from '../../../core/topology/index.ts';
-import type { GraphModuleInstanceV1, GraphModulePipelineStateV1 } from '../GraphModuleTypes.ts';
+import type {
+  GraphModuleInstanceV1,
+  GraphModulePipelineStateV1,
+  GraphModuleTickResultV1,
+} from '../GraphModuleTypes.ts';
 
-export type GraphTopologyWeightingModeV1 = 'uniform' | 'topology-weighted';
+export type GraphAxialSpringAxisV1 = 'off' | 'x' | 'y' | 'z';
 
 interface ForceSettings {
-  readonly weightingMode: GraphTopologyWeightingModeV1;
   readonly repulsionStrength: number;
   readonly springStrength: number;
   readonly springLength: number;
@@ -34,6 +37,8 @@ interface ForceSettings {
   readonly componentPadding: number;
   readonly collisionRadius: number;
   readonly collisionStrength: number;
+  readonly axialSpringAxis: GraphAxialSpringAxisV1;
+  readonly axialSpringStiffness: number;
 }
 
 interface MutableVec3 {
@@ -67,7 +72,6 @@ export interface ForceLayoutDiagnosticsV1 {
 
 const NATIVE_ACTIVE_DRAG_ALPHA = 0.3;
 const FIXED_STEP_SECONDS = 1 / 60;
-const MAX_CATCH_UP_STEPS = 8;
 const RESTORED_SPEED_REJECTION_MULTIPLIER = 4;
 
 export class ForceLayoutModule implements GraphModuleInstanceV1 {
@@ -204,13 +208,6 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   private synchronizeTopology(state: GraphModulePipelineStateV1): void {
-    if (this.settings.weightingMode !== 'topology-weighted') {
-      this.topology = undefined;
-      this.topologyDocumentSource = null;
-      this.membershipPairStrengths.clear();
-      this.componentTargets = new Map();
-      return;
-    }
     if (state.document === this.topologyDocumentSource && this.regionLayoutKey === this.topologyRegionKey) return;
     const membershipConnections = state.regionLayouts.flatMap((region) => region.directMemberNodeIds.map((memberId) => ({
       sourceId: region.regionNodeId,
@@ -311,25 +308,24 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     state: GraphModulePipelineStateV1,
     deltaSeconds: number,
     dragActive: boolean,
-  ): { positions: Readonly<Record<string, Vec3>> } | undefined {
+  ): GraphModuleTickResultV1 | undefined {
     this.alphaTarget = dragActive ? NATIVE_ACTIVE_DRAG_ALPHA : 0;
     if (dragActive && !this.dragWasActive) this.alpha = Math.max(this.alpha, NATIVE_ACTIVE_DRAG_ALPHA);
     this.dragWasActive = dragActive;
+    this.accumulatorSeconds += Math.max(0, Math.min(0.25, deltaSeconds || FIXED_STEP_SECONDS));
+    if (this.accumulatorSeconds + 1e-12 < FIXED_STEP_SECONDS) return { requestNextFrame: true };
     this.accumulatorSeconds = Math.min(
-      FIXED_STEP_SECONDS * MAX_CATCH_UP_STEPS,
-      this.accumulatorSeconds + Math.max(0, Math.min(0.25, deltaSeconds || FIXED_STEP_SECONDS)),
+      FIXED_STEP_SECONDS - 1e-12,
+      Math.max(0, this.accumulatorSeconds - FIXED_STEP_SECONDS),
     );
-    const availableSteps = Math.floor((this.accumulatorSeconds + 1e-12) / FIXED_STEP_SECONDS);
-    const steps = Math.min(MAX_CATCH_UP_STEPS, availableSteps);
-    if (steps <= 0) return undefined;
-    this.accumulatorSeconds -= steps * FIXED_STEP_SECONDS;
     let changed = false;
-    for (let step = 0; step < steps; step += 1) {
+    {
       this.alpha += (this.alphaTarget - this.alpha) * this.settings.alphaDecay;
       this.applyD3Origin(state);
       this.applyD3Links(state);
       this.applyD3ManyBody();
       this.applyD3RegionAndComponentForces(state);
+      this.applyAxialSpring();
       this.applyD3Collision(state.document);
       for (const node of state.document.nodes) {
         const velocity = this.velocities.get(node.id)!;
@@ -354,7 +350,10 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       this.alpha = 0;
       this.accumulatorSeconds = 0;
     }
-    return changed ? { positions: this.positions } : undefined;
+    return {
+      ...(changed ? { positions: this.positions } : {}),
+      requestNextFrame: this.running,
+    };
   }
 
   private applyD3Origin(state: GraphModulePipelineStateV1): void {
@@ -384,17 +383,12 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   private applyD3Links(state: GraphModulePipelineStateV1): void {
-    const pairs = this.settings.weightingMode === 'topology-weighted'
-      ? (this.topology?.pairs ?? []).filter((pair) => pair.affinity > 0).map((pair) => ({
-          sourceId: pair.sourceId,
-          targetId: pair.targetId,
-          edgeIds: pair.edgeIds,
-          parameters: deriveWeightedSpringParametersV1(pair, this.settings),
-        }))
-      : physicalDocumentPairs(state.document).map((pair) => ({
-          ...pair,
-          parameters: { strength: this.settings.springStrength, targetLength: this.settings.springLength },
-        }));
+    const pairs = (this.topology?.pairs ?? []).filter((pair) => pair.affinity > 0).map((pair) => ({
+      sourceId: pair.sourceId,
+      targetId: pair.targetId,
+      edgeIds: pair.edgeIds,
+      parameters: deriveWeightedSpringParametersV1(pair, this.settings),
+    }));
     const degree = new Map<string, number>();
     for (const pair of pairs) {
       degree.set(pair.sourceId, (degree.get(pair.sourceId) ?? 0) + 1);
@@ -483,14 +477,27 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   private applyD3RegionAndComponentForces(state: GraphModulePipelineStateV1): void {
-    if (!state.regionLayouts.length && this.settings.weightingMode !== 'topology-weighted') return;
     for (const force of this.forces.values()) { force.x = 0; force.y = 0; force.z = 0; }
     this.applyRegionMembershipForces(state);
-    if (this.settings.weightingMode === 'topology-weighted') this.applyComponentCentering();
+    this.applyComponentCentering();
     for (const node of state.document.nodes) {
       const force = this.forces.get(node.id)!;
       const velocity = this.velocities.get(node.id)!;
       velocity.x += force.x; velocity.y += force.y; velocity.z += force.z;
+      clampVelocity(velocity, this.settings.maxSpeed, this.dimensions);
+    }
+  }
+
+  private applyAxialSpring(): void {
+    if (this.dimensions !== '3d' || this.settings.axialSpringAxis === 'off') return;
+    const amount = this.settings.axialSpringStiffness * 0.1 * this.alpha;
+    if (amount <= 0) return;
+    const axis = this.settings.axialSpringAxis;
+    for (const [nodeId, position] of Object.entries(this.positions)) {
+      if (this.pinned.has(nodeId)) continue;
+      const velocity = this.velocities.get(nodeId);
+      if (!velocity) continue;
+      velocity[axis] += -position[axis] * amount;
       clampVelocity(velocity, this.settings.maxSpeed, this.dimensions);
     }
   }
@@ -510,39 +517,52 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       const bucket = cells.get(key);
       if (bucket) bucket.push(node.id); else cells.set(key, [node.id]);
     }
-    const offsets = collisionOffsets(this.dimensions);
-    const visited = new Set<string>();
-    for (const node of document.nodes) {
-      const a = predicted.get(node.id)!;
-      const cell = collisionCell(a, minimum);
+    const offsets = collisionForwardOffsets(this.dimensions);
+    for (const bucket of cells.values()) {
+      for (let index = 0; index < bucket.length; index += 1) {
+        for (let otherIndex = index + 1; otherIndex < bucket.length; otherIndex += 1) {
+          this.applyCollisionPair(bucket[index], bucket[otherIndex], predicted, minimum);
+        }
+      }
+      const anchor = predicted.get(bucket[0]);
+      if (!anchor) continue;
+      const cell = collisionCell(anchor, minimum);
       for (const offset of offsets) {
         const key = `${cell.x + offset.x}:${cell.y + offset.y}:${this.dimensions === '2d' ? 0 : cell.z + offset.z}`;
-        for (const otherId of cells.get(key) ?? []) {
-          if (otherId === node.id) continue;
-          const pairKey = node.id < otherId ? `${node.id}\u0000${otherId}` : `${otherId}\u0000${node.id}`;
-          if (visited.has(pairKey)) continue;
-          visited.add(pairKey);
-          const b = predicted.get(otherId)!;
-          let dx = a.x - b.x;
-          let dy = a.y - b.y;
-          let dz = this.dimensions === '2d' ? 0 : a.z - b.z;
-          let distance = Math.hypot(dx, dy, dz);
-          if (distance >= minimum) continue;
-          if (distance < 1e-6) {
-            const jitter = deterministicDirection(node.id, otherId, this.dimensions);
-            dx = jitter.x * 1e-6; dy = jitter.y * 1e-6; dz = jitter.z * 1e-6;
-            distance = Math.hypot(dx, dy, dz);
-          }
-          const amount = (minimum - distance) / distance * this.settings.collisionStrength * 0.5;
-          const av = this.velocities.get(node.id)!;
-          const bv = this.velocities.get(otherId)!;
-          av.x += dx * amount; av.y += dy * amount; av.z += dz * amount;
-          bv.x -= dx * amount; bv.y -= dy * amount; bv.z -= dz * amount;
-          clampVelocity(av, this.settings.maxSpeed, this.dimensions);
-          clampVelocity(bv, this.settings.maxSpeed, this.dimensions);
+        const neighbor = cells.get(key);
+        if (!neighbor) continue;
+        for (const nodeId of bucket) for (const otherId of neighbor) {
+          this.applyCollisionPair(nodeId, otherId, predicted, minimum);
         }
       }
     }
+  }
+
+  private applyCollisionPair(
+    nodeId: string,
+    otherId: string,
+    predicted: ReadonlyMap<string, Vec3>,
+    minimum: number,
+  ): void {
+    const a = predicted.get(nodeId)!;
+    const b = predicted.get(otherId)!;
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    let dz = this.dimensions === '2d' ? 0 : a.z - b.z;
+    let distance = Math.hypot(dx, dy, dz);
+    if (distance >= minimum) return;
+    if (distance < 1e-6) {
+      const jitter = deterministicDirection(nodeId, otherId, this.dimensions);
+      dx = jitter.x * 1e-6; dy = jitter.y * 1e-6; dz = jitter.z * 1e-6;
+      distance = Math.hypot(dx, dy, dz);
+    }
+    const amount = (minimum - distance) / distance * this.settings.collisionStrength * 0.5;
+    const av = this.velocities.get(nodeId)!;
+    const bv = this.velocities.get(otherId)!;
+    av.x += dx * amount; av.y += dy * amount; av.z += dz * amount;
+    bv.x -= dx * amount; bv.y -= dy * amount; bv.z -= dz * amount;
+    clampVelocity(av, this.settings.maxSpeed, this.dimensions);
+    clampVelocity(bv, this.settings.maxSpeed, this.dimensions);
   }
 
   dispose(): void {
@@ -561,9 +581,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   getDiagnostics(): ForceLayoutDiagnosticsV1 {
     return {
       topologyAnalysisCount: this.topologyAnalysisCount,
-      physicalSpringCount: this.settings.weightingMode === 'topology-weighted'
-        ? this.topology?.pairs.filter((pair) => pair.affinity > 0).length ?? 0
-        : 0,
+      physicalSpringCount: this.topology?.pairs.filter((pair) => pair.affinity > 0).length ?? 0,
       componentCount: this.topology?.components.length ?? 0,
       coordinatedMembershipPairCount: this.membershipPairStrengths.size,
       alpha: this.alpha,
@@ -617,7 +635,6 @@ export function readForceSettings(settings: Readonly<Record<string, JsonValue>>)
     finitePositive(settings.maximumSpringLengthScale, 1.85),
   );
   return {
-    weightingMode: settings.weightingMode === 'uniform' ? 'uniform' : 'topology-weighted',
     repulsionStrength: finiteNonNegative(settings.repulsionStrength, 1000),
     springStrength: finiteNonNegative(settings.springStrength, 1),
     springLength: finitePositive(settings.springLength, 250),
@@ -640,21 +657,13 @@ export function readForceSettings(settings: Readonly<Record<string, JsonValue>>)
     componentPadding: finiteNonNegative(settings.componentPadding, 80),
     collisionRadius: finiteNonNegative(settings.collisionRadius, 60),
     collisionStrength: clampNumber(settings.collisionStrength, 0, 1, 0.5),
+    axialSpringAxis: readAxialSpringAxis(settings.axialSpringAxis),
+    axialSpringStiffness: clampNumber(settings.axialSpringStiffness, 0, 0.9, 0),
   };
 }
 
-function physicalDocumentPairs(document: GraphDocumentV1): Array<{ sourceId: string; targetId: string; edgeIds: string[] }> {
-  const pairs = new Map<string, { sourceId: string; targetId: string; edgeIds: string[] }>();
-  for (const edge of document.edges) {
-    if (edge.sourceId === edge.targetId) continue;
-    const sourceId = edge.sourceId < edge.targetId ? edge.sourceId : edge.targetId;
-    const targetId = edge.sourceId < edge.targetId ? edge.targetId : edge.sourceId;
-    const key = `${sourceId}\u0000${targetId}`;
-    const pair = pairs.get(key);
-    if (pair) pair.edgeIds.push(edge.id);
-    else pairs.set(key, { sourceId, targetId, edgeIds: [edge.id] });
-  }
-  return [...pairs.values()].sort((a, b) => a.sourceId.localeCompare(b.sourceId) || a.targetId.localeCompare(b.targetId));
+function readAxialSpringAxis(value: JsonValue | undefined): GraphAxialSpringAxisV1 {
+  return value === 'x' || value === 'y' || value === 'z' ? value : 'off';
 }
 
 function collisionCell(position: Vec3, size: number): { x: number; y: number; z: number } {
@@ -684,11 +693,14 @@ function collisionCellKey(position: Vec3, size: number, dimensions: GraphDimensi
   return `${cell.x}:${cell.y}:${dimensions === '2d' ? 0 : cell.z}`;
 }
 
-function collisionOffsets(dimensions: GraphDimensionsV1): readonly Vec3[] {
+function collisionForwardOffsets(dimensions: GraphDimensionsV1): readonly Vec3[] {
   const values: Vec3[] = [];
   for (let x = -1; x <= 1; x += 1) for (let y = -1; y <= 1; y += 1) {
-    if (dimensions === '2d') values.push({ x, y, z: 0 });
-    else for (let z = -1; z <= 1; z += 1) values.push({ x, y, z });
+    if (dimensions === '2d') {
+      if (x > 0 || (x === 0 && y > 0)) values.push({ x, y, z: 0 });
+    } else for (let z = -1; z <= 1; z += 1) {
+      if (x > 0 || (x === 0 && y > 0) || (x === 0 && y === 0 && z > 0)) values.push({ x, y, z });
+    }
   }
   return values;
 }

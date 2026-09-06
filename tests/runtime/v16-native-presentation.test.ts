@@ -37,7 +37,8 @@ test('V1.6 Anima owns the exact visible-degree radius and composable structural 
   assert(Math.abs((patch.nodeContributions.hub.radius ?? 0) - expected) < 1e-10,
     'hub radius should use the exact formula and ignore duplicate ordered relationships');
   equal(patch.nodeContributions['leaf-0'].radius, 8, 'low-degree nodes should use the exact lower clamp');
-  equal(patch.theme?.nodeScaleMode, 'sqrt-orthographic', 'Anima should request native-style 2d visual scaling');
+  equal(patch.theme?.nodeScaleMode, 'sqrt-orthographic', 'Anima should request native-style 2d node scaling');
+  equal(patch.theme?.labelScaleMode, 'fixed', 'Anima labels should remain screen-readable in both dimensions');
 });
 
 test('V1.6 Anima neighborhood highlighting follows focus changes and clears with focus', () => {
@@ -81,6 +82,43 @@ test('V1.6 Anima owns live above and below label placement', () => {
   anima.updateSettings({ labelPosition: 'below' });
   equal(anima.contributeFrame(state)?.theme?.labelPosition, 'below',
     'Anima should update label placement without remounting');
+});
+
+test('V1.6 Anima labels retain their CSS size across orthographic zoom', () => {
+  const value = runtimeHarness();
+  const canvas = value.document.createElement('canvas');
+  const camera = new GraphCameraController({
+    position: { x: 0, y: 0, z: 10 },
+    target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 },
+    zoom: 0.25,
+    projection: 'orthographic',
+  }, '2d');
+  camera.setViewport(640, 360);
+  const frames = new GraphFrameStore();
+  frames.set({
+    regions: [], edges: [],
+    nodes: [{
+      id: 'hub', label: 'hub', position: { x: 0, y: 0, z: 0 }, radius: 24,
+      selected: false, focused: false, hovered: false, labelFontSize: 20,
+    }],
+    theme: {
+      ...DEFAULT_GRAPH_RENDER_THEME_V1,
+      labelMode: 'all',
+      labelScaleMode: 'fixed',
+    },
+  });
+  const renderer = new CanvasGraphRenderer(canvas, camera, frames, () => 0);
+  renderer.resize(640, 360, 1);
+  renderer.render();
+  assert(value.styleAssignments.includes('font:20px sans-serif'),
+    'zoomed-out 2D should keep the resolved label font size');
+
+  value.styleAssignments.length = 0;
+  camera.setState({ ...camera.getState(), zoom: 4 });
+  renderer.render();
+  assert(value.styleAssignments.includes('font:20px sans-serif'),
+    'zoomed-in 2D should keep the same resolved label font size');
 });
 
 test('V1.6 renderer anchors labels above or below the resolved node boundary', () => {
@@ -201,13 +239,20 @@ test('V1.6 new-mode 3D preserves depth while keeping nodes visible and finger-se
   const frames = new GraphFrameStore();
   frames.set({
     regions: [], edges: [],
-    nodes: [{
-      id: 'a', label: 'a', position: { x: 0, y: 0, z: 0 }, radius: 8,
-      selected: false, focused: false, hovered: false,
-    }],
+    nodes: [
+      {
+        id: 'a', label: 'a', position: { x: 0, y: 0, z: 0 }, radius: 8,
+        selected: false, focused: false, hovered: false,
+      },
+      {
+        id: 'hub', label: 'hub', position: { x: 1_000, y: 0, z: 0 }, radius: 24,
+        selected: false, focused: false, hovered: false,
+      },
+    ],
     theme: {
       ...DEFAULT_GRAPH_RENDER_THEME_V1,
       minimumPerspectiveNodeRadius: 4,
+      minimumPerspectiveNodeScale: 0.5,
       minimumPerspectiveTouchHitRadius: 22,
     },
   });
@@ -220,9 +265,109 @@ test('V1.6 new-mode 3D preserves depth while keeping nodes visible and finger-se
     'mouse hit testing should still follow the visible node geometry');
   equal(renderer.hitTest({ x: 335, y: 180 }, 'touch')?.nodeId, 'a',
     'perspective touch should receive a 44-pixel finger target without enlarging the disc');
+  const radii = value.drawArguments
+    .filter((call) => call.method === 'arc')
+    .map((call) => call.args[2]);
+  assert(radii.includes(4), 'a minimum-size node should retain the four-pixel base floor');
+  assert(radii.includes(12), 'a hub should retain its degree-relative radius at long range');
 });
 
-test('V1.6 D3-compatible integration is fixed-step and refresh-rate independent', () => {
+test('V1.6 adaptive labels reserve overlap space for structural hubs before nearer leaves', () => {
+  const value = runtimeHarness();
+  const canvas = value.document.createElement('canvas');
+  const camera = new GraphCameraController({
+    position: { x: 0, y: 0, z: 5_000 },
+    target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 },
+    zoom: 50 / 24,
+    projection: 'perspective',
+  }, '3d');
+  camera.setViewport(640, 360);
+  const frames = new GraphFrameStore();
+  frames.set({
+    regions: [], edges: [],
+    nodes: [
+      {
+        id: 'z-hub', label: 'hub', position: { x: 0, y: 0, z: 0 }, radius: 24,
+        selected: false, focused: false, hovered: false, labelFontSize: 14,
+        labelOffset: { x: 0, y: -8 },
+      },
+      {
+        id: 'a-leaf', label: 'leaf', position: { x: 0, y: 0, z: 4_500 }, radius: 8,
+        selected: false, focused: false, hovered: false, labelFontSize: 14,
+      },
+    ],
+    theme: {
+      ...DEFAULT_GRAPH_RENDER_THEME_V1,
+      labelMode: 'adaptive',
+      labelPosition: 'below',
+      minimumPerspectiveNodeRadius: 4,
+      minimumPerspectiveNodeScale: 0.5,
+    },
+  });
+  const renderer = new CanvasGraphRenderer(canvas, camera, frames, () => 0);
+  renderer.resize(640, 360, 1);
+  renderer.render();
+  deepEqual(value.drawArguments
+    .filter((call) => call.method === 'fillText')
+    .map((call) => call.args[0]), ['hub'],
+  'world-space node prominence should win label collisions before perspective proximity');
+});
+
+test('V1.6 adaptive label budget follows perspective distance and the active threshold', () => {
+  const renderAtDistance = (distance: number, threshold = 50): number => {
+    const value = runtimeHarness();
+    const canvas = value.document.createElement('canvas');
+    const camera = new GraphCameraController({
+      position: { x: 0, y: 0, z: distance },
+      target: { x: 0, y: 0, z: 0 },
+      up: { x: 0, y: 1, z: 0 },
+      zoom: 50 / 24,
+      projection: 'perspective',
+    }, '3d');
+    camera.setViewport(640, 360);
+    const coordinateScale = 360 * (50 / 24) / distance;
+    const frames = new GraphFrameStore();
+    frames.set({
+      regions: [], edges: [],
+      nodes: Array.from({ length: 30 }, (_, index) => ({
+        id: `node-${index}`,
+        label: `${index}`,
+        position: {
+          x: ((index % 5) - 2) * 50 / coordinateScale,
+          y: (Math.floor(index / 5) - 2.5) * 40 / coordinateScale,
+          z: 0,
+        },
+        radius: 8,
+        selected: false,
+        focused: false,
+        hovered: false,
+        labelFontSize: 10,
+      })),
+      theme: {
+        ...DEFAULT_GRAPH_RENDER_THEME_V1,
+        labelMode: 'adaptive',
+        labelPosition: 'below',
+        adaptiveLabelThreshold: threshold,
+        minimumPerspectiveNodeRadius: 4,
+        minimumPerspectiveNodeScale: 0.5,
+      },
+    });
+    const renderer = new CanvasGraphRenderer(canvas, camera, frames, () => 0);
+    renderer.resize(640, 360, 1);
+    renderer.render();
+    return value.drawArguments.filter((call) => call.method === 'fillText').length;
+  };
+
+  const far = renderAtDistance(5_000);
+  const near = renderAtDistance(100);
+  const stricter = renderAtDistance(100, 100);
+  equal(far, 12, 'a distant perspective overview should begin at the minimum label budget');
+  assert(near > far, 'dollying closer should reveal additional adaptive labels');
+  assert(stricter < near, 'raising the active label threshold should reduce ordinary labels at the same zoom');
+});
+
+test('V1.7 D3-compatible integration advances at most once after a delayed frame', () => {
   const document = graphDocument({
     nodes: [
       graphNode('left', { positionHint: { x: -200, y: 0, z: 0 } }),
@@ -239,13 +384,12 @@ test('V1.6 D3-compatible integration is fixed-step and refresh-rate independent'
   const initial = pipeline(document, {
     nodeIds: new Set(['left', 'right']), edgeIds: new Set(['join']),
   });
-  const oneResult = one.tick(initial, 1 / 30);
-  assert(oneResult?.positions, 'one 30Hz frame should advance two fixed simulation steps');
-  const first = two.tick(initial, 1 / 60);
-  assert(first?.positions, 'the first 60Hz frame should advance one fixed step');
-  const second = two.tick({ ...initial, positions: first.positions }, 1 / 60);
-  assert(second?.positions, 'the second 60Hz frame should advance the second fixed step');
-  deepEqual(oneResult.positions, second.positions, 'equal elapsed time should produce identical positions at different refresh rates');
+  const delayed = one.tick(initial, 1 / 30);
+  assert(delayed?.positions, 'a delayed frame should still advance one fixed simulation step');
+  const ordinary = two.tick(initial, 1 / 60);
+  assert(ordinary?.positions, 'an ordinary 60Hz frame should advance one fixed simulation step');
+  deepEqual(delayed.positions, ordinary.positions,
+    'a delayed callback must discard catch-up backlog instead of bursting through multiple simulation steps');
 });
 
 test('V1.6 D3-compatible link integration matches the reviewed one-tick equation', () => {
@@ -346,6 +490,51 @@ test('V1.6 force integration rejects hostile restored motion and enforces maxSpe
     'every integrated node movement should obey the configured maximum speed');
 });
 
+test('V1.7 axial spring flattens only the selected 3D coordinate and respects pins', () => {
+  const document = graphDocument({
+    nodes: [
+      graphNode('pinned', { positionHint: { x: -40, y: 100, z: -30 } }),
+      graphNode('free', { positionHint: { x: 50, y: 100, z: 40 } }),
+    ],
+    edges: [],
+  });
+  const baseState = pipeline(document, {
+    nodeIds: new Set(['pinned', 'free']), edgeIds: new Set(),
+  });
+  const state = { ...baseState, viewState: { ...baseState.viewState, pinnedNodeIds: ['pinned'] } };
+  const force = new ForceLayoutModule('3d', readForceSettings({
+    repulsionStrength: 0,
+    springStrength: 0,
+    centeringStrength: 0,
+    collisionRadius: 0,
+    velocityDecay: 0,
+    alphaDecay: 0,
+    axialSpringAxis: 'y',
+    axialSpringStiffness: 0.9,
+  }));
+  const result = force.tick(state, 1 / 60);
+  assert(result?.positions, 'active axial spring should advance layout');
+  equal(result.positions.pinned.y, 100, 'explicit pins should remain authoritative');
+  assert(Math.abs(result.positions.free.y) < 100, 'the selected coordinate should move toward zero');
+  equal(result.positions.free.x, 50, 'flattening Y should preserve X without another force');
+  equal(result.positions.free.z, 40, 'flattening Y should preserve Z without another force');
+
+  const planar = new ForceLayoutModule('2d', readForceSettings({
+    repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionRadius: 0,
+    velocityDecay: 0, alphaDecay: 0, axialSpringAxis: 'y', axialSpringStiffness: 0.9,
+  }));
+  const planarResult = planar.tick(pipeline(document, {
+    nodeIds: new Set(['pinned', 'free']), edgeIds: new Set(),
+  }), 1 / 60);
+  const planarOff = new ForceLayoutModule('2d', readForceSettings({
+    repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionRadius: 0,
+    velocityDecay: 0, alphaDecay: 0, axialSpringAxis: 'off', axialSpringStiffness: 0,
+  })).tick(pipeline(document, {
+    nodeIds: new Set(['pinned', 'free']), edgeIds: new Set(),
+  }), 1 / 60);
+  deepEqual(planarResult, planarOff, '2D axial settings should be behaviorally identical to Off');
+});
+
 test('V1.6 retirement migration promotes the accepted settings and removes comparison banks', () => {
   const migrated = migrateGraphPlusProfileOverridesV16({
     profileSettings: { graphSystem: 'legacy', graphSystemMigrationVersion: 1 },
@@ -392,6 +581,10 @@ test('V1.6 Graph+ defaults Anima label placement above and accepts a live below 
   const session = await value.create();
   equal((await session.exportEffectiveSettings()).modules.anima?.settings.labelPosition, 'above',
     'Graph+ should begin with mobile-friendly labels above nodes');
+  equal((await session.exportEffectiveSettings()).modules.anima?.settings.adaptiveLabelThreshold2d, 65,
+    'Graph+ should begin with the quieter 2D adaptive-label threshold');
+  equal((await session.exportEffectiveSettings()).modules.anima?.settings.adaptiveLabelThreshold3d, 50,
+    'Graph+ should retain the accepted 3D adaptive-label threshold');
   value.profiles.setUserOverrides('graph-plus', 'default', {
     modules: { anima: { settings: { labelPosition: 'below' } } },
   });
@@ -433,12 +626,12 @@ test('V1.6 keeps Canvas-like pan, Cmd-scroll zoom, and transient drag separate f
   const canvas = runtimeCanvas(value.container);
   const initial = await session.exportViewState();
   wheel(value, canvas, { deltaX: 20, deltaY: 10 });
-  value.platform.flushFrame(16);
+  value.platform.flushFrame(17);
   const panned = await session.exportViewState();
   equal(panned.camera.zoom, initial.camera.zoom, 'unmodified trackpad wheel should pan without zooming');
   assert(JSON.stringify(panned.camera.target) !== JSON.stringify(initial.camera.target), 'unmodified wheel should move the camera target');
   wheel(value, canvas, { deltaY: -30, metaKey: true });
-  value.platform.flushFrame(32);
+  value.platform.flushFrame(34);
   const zoomed = await session.exportViewState();
   assert(zoomed.camera.zoom > panned.camera.zoom, 'Cmd-scroll should remain a zoom gesture');
 
@@ -447,11 +640,11 @@ test('V1.6 keeps Canvas-like pan, Cmd-scroll zoom, and transient drag separate f
   const point = camera.worldToScreen(zoomed.positions.a);
   pointer(value, canvas, 'pointerdown', point.x, point.y, 9);
   pointer(value, canvas, 'pointermove', point.x + 30, point.y + 15, 9);
-  value.platform.flushFrame(48);
+  value.platform.flushFrame(51);
   equal((await session.exportViewState()).pinnedNodeIds.includes('a'), false,
     'new-mode drag should use a transient kinematic constraint, not the persistent pin set');
   pointer(value, canvas, 'pointerup', point.x + 30, point.y + 15, 9);
-  value.platform.flushFrame(64);
+  value.platform.flushFrame(68);
   equal((await session.exportViewState()).pinnedNodeIds.includes('a'), false,
     'releasing an ordinary drag should return the node to the solver');
 
@@ -486,7 +679,9 @@ test('V1.6 a background finger tap clears focus in 3D', async () => {
   const canvas = runtimeCanvas(value.container);
   pointer(value, canvas, 'pointerdown', -100, -100, 31, 'touch');
   pointer(value, canvas, 'pointerup', -100, -100, 31, 'touch');
-  value.platform.flushFrame(16);
+  value.platform.flushFrame(17);
+  value.platform.flushTimer();
+  value.platform.flushFrame(34);
   const cleared = await session.exportViewState();
   equal(cleared.focusedNodeId, undefined, 'a 3D background finger tap should release focus');
   deepEqual(cleared.selectedNodeIds, [], 'background release should also clear selection');

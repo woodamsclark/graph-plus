@@ -1,221 +1,223 @@
-import { Setting } from 'obsidian';
-import type {
-  EngineModuleDescriptorV1,
-  EngineModuleProfileV1,
-  JsonValue,
-  ModuleSettingConstraintV1,
-} from '../../graph-engine/contracts/v1/index.ts';
+import { App, Modal, Setting } from 'obsidian';
+import type { GraphDimensionsV1, GraphSettingSourceV1, JsonValue } from '../../graph-engine/contracts/v1/index.ts';
 import { GraphEngineSettingsControllerV1 } from './GraphEngineSettingsController.ts';
+import {
+  GRAPH_SETTING_PRESENTATIONS_V1,
+  graphSettingDisplayValueV1,
+  graphSettingStoredValueV1,
+  type GraphSettingCategoryV1,
+  type GraphSettingPresentationV1,
+} from './GraphEngineSettingsCatalog.ts';
+import { preserveSettingsScrollV1 } from './SettingsScroll.ts';
 
-export const GRAPH_ENGINE_GLOBAL_PANE = 'engine:global';
-export const GRAPH_PLUS_CONSUMER_PANE = 'consumer:graph-plus';
+const CATEGORY_TITLES: Readonly<Record<GraphSettingCategoryV1, string>> = {
+  appearance: 'Appearance',
+  'layout-motion': 'Layout and motion',
+};
 
 export class GraphEngineSettingsPanelV1 {
   constructor(private readonly controller: GraphEngineSettingsControllerV1) {}
 
-  addPaneSelector(
-    parent: HTMLElement,
-    selected: string,
-    onChange: (value: string) => void,
-  ): void {
-    new Setting(parent)
-      .setName('Settings for')
-      .setDesc('Global Graph Engine defaults or one consumer profile.')
-      .addDropdown((dropdown) => {
-        dropdown.addOption(GRAPH_ENGINE_GLOBAL_PANE, 'Global');
-        for (const profile of this.controller.listProfiles()) {
-          dropdown.addOption(
-            profileKey(profile.consumerId, profile.profileId),
-            `${profile.consumerDisplayName} — ${profile.profileDisplayName}${profile.active ? '' : ' (inactive)'}`,
-          );
-        }
-        dropdown.addOption(GRAPH_PLUS_CONSUMER_PANE, 'Graph+ product');
-        dropdown.setValue(selected);
-        dropdown.onChange(onChange);
-      });
-  }
-
-  render(parent: HTMLElement, selected: string, refresh: () => void): void {
-    if (selected === GRAPH_ENGINE_GLOBAL_PANE) {
-      this.renderGlobal(parent, refresh);
-      return;
-    }
-    const parsed = parseProfileKey(selected);
-    if (parsed) this.renderProfile(parent, parsed.consumerId, parsed.profileId, refresh);
-  }
-
-  private renderGlobal(parent: HTMLElement, refresh: () => void): void {
-    parent.createEl('h3', { text: 'Global Graph Engine defaults' });
-    parent.createEl('p', {
-      text: 'These values are the baseline for every consumer. A consumer profile can refine or lock them.',
-      cls: 'setting-item-description',
-    });
-    new Setting(parent).setName('Reset global settings').addButton((button) => button
-      .setButtonText('Reset')
-      .onClick(async () => { await this.controller.resetGlobal(); refresh(); }));
-    const overrides = this.controller.getGlobalOverrides();
-    for (const descriptor of this.controller.listModules()) {
-      this.renderModule(parent, descriptor, undefined, {
-        enabled: overrides.modules?.[descriptor.id]?.enabled,
-        settings: overrides.modules?.[descriptor.id]?.settings,
-        effectiveSettings: {
-          ...descriptor.defaultSettings,
-          ...(overrides.modules?.[descriptor.id]?.settings ?? {}),
-        },
-        setEnabled: async (value) => this.controller.setGlobalModuleEnabled(descriptor.id, value),
-        setSetting: async (key, value) => this.controller.setGlobalModuleSetting(descriptor.id, key, value),
-      }, refresh);
+  renderGlobal(parent: HTMLElement, refresh: () => void): void {
+    for (const category of ['appearance', 'layout-motion'] as const) {
+      parent.createEl('h3', { text: CATEGORY_TITLES[category] });
+      for (const presentation of presentations(category, 'global')) {
+        const descriptor = this.controller.listModules().find((module) => module.id === presentation.moduleId);
+        if (!descriptor) continue;
+        const override = this.controller.getGlobalOverrides().modules?.[presentation.moduleId]?.settings?.[presentation.key];
+        const value = override ?? descriptor.defaultSettings[presentation.key];
+        renderCatalogSetting(parent, presentation, value, override !== undefined, {
+          source: override === undefined ? 'Engine default' : 'Global override',
+          save: async (next) => {
+            await this.controller.setGlobalModuleSetting(presentation.moduleId, presentation.key, next);
+            refresh();
+          },
+        });
+      }
     }
   }
 
-  private renderProfile(parent: HTMLElement, consumerId: string, profileId: string, refresh: () => void): void {
-    const summary = this.controller.listProfiles().find((profile) => profile.consumerId === consumerId && profile.profileId === profileId);
-    const descriptor = this.controller.getProfileDescriptor(consumerId, profileId);
-    const effective = this.controller.getEffectiveProfile(consumerId, profileId);
-    const overrides = this.controller.getProfileOverrides(consumerId, profileId);
-    parent.createEl('h3', { text: `${summary?.consumerDisplayName ?? consumerId} — ${descriptor.displayName}` });
+  renderProfiles(parent: HTMLElement, app: App, refresh: () => void): void {
+    parent.createEl('h3', { text: 'Profiles' });
     parent.createEl('p', {
-      text: summary?.active
-        ? 'Registered now. Supported changes update active sessions for this profile.'
-        : 'Inactive: the consumer is not currently registered. Its settings are retained for the next registration.',
+      text: 'Profiles inherit these settings and keep only their intentional differences.',
       cls: 'setting-item-description',
     });
-    if (this.controller.canEditProfileDimensions(consumerId, profileId)) {
-      const allowed = descriptor.allowedDimensions ?? ['2d', '3d'];
+    for (const profile of this.controller.listProfiles()) {
       new Setting(parent)
-        .setName('Graph dimensions')
-        .setDesc(`Persistent for this profile. Current source: ${humanize(effective.dimensionsSource)}.`)
-        .addDropdown((dropdown) => {
-          for (const dimensions of allowed) dropdown.addOption(dimensions, dimensions === '2d' ? '2D' : '3D');
-          dropdown.setValue(effective.dimensions);
-          dropdown.onChange(async (value) => {
-            await this.controller.setProfileDimensions(consumerId, profileId, value as '2d' | '3d');
-            refresh();
-          });
-        })
+        .setName(`${profile.consumerDisplayName} — ${profile.profileDisplayName}`)
+        .setDesc(profile.active ? 'Active' : 'Available when its consumer is active')
         .addButton((button) => button
-          .setButtonText('Reset')
-          .setTooltip('Use the consumer profile default')
+          .setButtonText('Customize…')
+          .onClick(() => new GraphEngineProfileSettingsModalV1(
+            app,
+            this.controller,
+            profile.consumerId,
+            profile.profileId,
+            refresh,
+          ).open()));
+    }
+  }
+}
+
+class GraphEngineProfileSettingsModalV1 extends Modal {
+  constructor(
+    app: App,
+    private readonly controller: GraphEngineSettingsControllerV1,
+    private readonly consumerId: string,
+    private readonly profileId: string,
+    private readonly onChanged: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.render();
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+    this.onChanged();
+  }
+
+  private render(): void {
+    const content = this.contentEl;
+    preserveSettingsScrollV1(content, () => {
+      content.empty();
+      const summary = this.controller.listProfiles().find((profile) =>
+        profile.consumerId === this.consumerId && profile.profileId === this.profileId);
+      const descriptor = this.controller.getProfileDescriptor(this.consumerId, this.profileId);
+      const effective = this.controller.getEffectiveProfile(this.consumerId, this.profileId);
+      const overrides = this.controller.getProfileOverrides(this.consumerId, this.profileId);
+      content.createEl('h2', { text: `${summary?.consumerDisplayName ?? this.consumerId} — ${descriptor.displayName}` });
+      content.createEl('p', {
+        text: 'Only values changed here override the global graph settings.',
+        cls: 'setting-item-description',
+      });
+
+      if (this.controller.canEditProfileDimensions(this.consumerId, this.profileId)) {
+        const dimensionsOverridden = overrides.dimensions !== undefined;
+        const setting = new Setting(content)
+          .setName('Graph dimensions')
+          .setDesc(dimensionsOverridden ? 'Profile override' : sourceLabel(effective.dimensionsSource));
+        setting.addDropdown((dropdown) => {
+          for (const dimensions of descriptor.allowedDimensions ?? ['2d', '3d']) {
+            dropdown.addOption(dimensions, dimensions === '2d' ? '2D' : '3D');
+          }
+          dropdown.setValue(effective.dimensions).onChange(async (value) => {
+            await this.controller.setProfileDimensions(
+              this.consumerId,
+              this.profileId,
+              value as GraphDimensionsV1,
+            );
+            this.render();
+          });
+        });
+        if (dimensionsOverridden) setting.addExtraButton((button) => button
+          .setIcon('rotate-ccw')
+          .setTooltip('Use inherited value')
           .onClick(async () => {
-            await this.controller.setProfileDimensions(consumerId, profileId, undefined);
-            refresh();
+            await this.controller.setProfileDimensions(this.consumerId, this.profileId, undefined);
+            this.render();
           }));
-    }
-    new Setting(parent).setName('Reset profile overrides').addButton((button) => button
-      .setButtonText('Reset')
-      .onClick(async () => { await this.controller.resetProfile(consumerId, profileId); refresh(); }));
-    for (const [moduleId, profileModule] of Object.entries(descriptor.modules)) {
-      const moduleDescriptor = this.controller.listModules().find((module) => module.id === moduleId);
-      if (!moduleDescriptor) continue;
-      this.renderModule(parent, moduleDescriptor, profileModule, {
-        enabled: overrides.modules?.[moduleId]?.enabled,
-        settings: overrides.modules?.[moduleId]?.settings,
-        effectiveSettings: effective.modules[moduleId]?.settings ?? {},
-        setEnabled: async (value) => this.controller.setProfileModuleEnabled(consumerId, profileId, moduleId, value),
-        setSetting: async (key, value) => this.controller.setProfileModuleSetting(consumerId, profileId, moduleId, key, value),
-      }, refresh);
-    }
-    for (const issue of effective.issues) {
-      parent.createEl('p', { text: issue.message, cls: 'mod-warning' });
-    }
-  }
+      }
 
-  private renderModule(
-    parent: HTMLElement,
-    descriptor: EngineModuleDescriptorV1,
-    profile: EngineModuleProfileV1 | undefined,
-    state: {
-      readonly enabled?: boolean;
-      readonly settings?: Readonly<Record<string, JsonValue>>;
-      readonly effectiveSettings: Readonly<Record<string, JsonValue>>;
-      readonly setEnabled: (value: boolean | undefined) => Promise<void>;
-      readonly setSetting: (key: string, value: JsonValue | undefined) => Promise<void>;
-    },
-    refresh: () => void,
-  ): void {
-    const policy = profile?.policy;
-    const enabledSetting = new Setting(parent)
-      .setName(descriptor.displayName)
-      .setDesc(policy === 'required' ? 'Required by the consumer author.'
-        : policy === 'forbidden' ? 'Disabled by the consumer author.'
-          : 'Optional Graph Engine module.');
-    enabledSetting.addToggle((toggle) => {
-      const fallback = profile?.defaultEnabled ?? false;
-      toggle.setValue(policy === 'required' ? true : policy === 'forbidden' ? false : state.enabled ?? fallback);
-      toggle.setDisabled(policy === 'required' || policy === 'forbidden');
-      toggle.onChange(async (value) => { await state.setEnabled(value); refresh(); });
-    });
-    const keys = new Set([
-      ...Object.keys(descriptor.defaultSettings),
-      ...Object.keys(profile?.defaults ?? {}),
-      ...Object.keys(profile?.lockedValues ?? {}),
-      ...Object.keys(state.effectiveSettings),
-    ]);
-    for (const key of keys) {
-      const constraint = profile?.constraints?.[key];
-      const locked = key in (profile?.lockedValues ?? {}) || constraint?.type === 'readonly';
-      this.renderValue(parent, `${descriptor.displayName}: ${humanize(key)}`, state.effectiveSettings[key], constraint, locked,
-        async (value) => { await state.setSetting(key, value); refresh(); });
-    }
-  }
+      new Setting(content)
+        .setName('Profile overrides')
+        .setDesc('Return every customized value in this profile to its inherited value.')
+        .addButton((button) => button.setButtonText('Reset all').onClick(async () => {
+          await this.controller.resetProfile(this.consumerId, this.profileId);
+          this.render();
+        }));
 
-  private renderValue(
-    parent: HTMLElement,
-    name: string,
-    value: JsonValue,
-    constraint: ModuleSettingConstraintV1 | undefined,
-    locked: boolean,
-    save: (value: JsonValue) => Promise<void>,
-  ): void {
-    const setting = new Setting(parent).setName(name).setDesc(locked ? 'Locked by the consumer author.' : '');
-    if (constraint?.type === 'enum') {
-      setting.addDropdown((dropdown) => {
-        for (const allowed of constraint.allowed) dropdown.addOption(JSON.stringify(allowed), String(allowed));
-        dropdown.setValue(JSON.stringify(value));
-        dropdown.setDisabled(locked);
-        dropdown.onChange(async (raw) => save(JSON.parse(raw) as JsonValue));
-      });
-      return;
-    }
-    if (typeof value === 'boolean') {
-      setting.addToggle((toggle) => toggle.setValue(value).setDisabled(locked).onChange(async (next) => save(next)));
-      return;
-    }
-    setting.addText((text) => {
-      text.setValue(formatValue(value));
-      text.setDisabled(locked);
-      text.onChange(async (raw) => {
-        const parsed = parseValue(raw, value);
-        if (constraint?.type === 'number' && typeof parsed === 'number') {
-          await save(Math.min(constraint.max ?? parsed, Math.max(constraint.min ?? parsed, parsed)));
-        } else await save(parsed);
-      });
+      for (const category of ['appearance', 'layout-motion'] as const) {
+        const values = presentations(category, 'profile').filter((presentation) => descriptor.modules[presentation.moduleId]);
+        if (values.length === 0) continue;
+        content.createEl('h3', { text: CATEGORY_TITLES[category] });
+        for (const presentation of values) {
+          const moduleProfile = descriptor.modules[presentation.moduleId];
+          const locked = moduleProfile?.lockedValues?.[presentation.key] !== undefined
+            || moduleProfile?.constraints?.[presentation.key]?.type === 'readonly';
+          const override = overrides.modules?.[presentation.moduleId]?.settings?.[presentation.key];
+          const module = effective.modules[presentation.moduleId];
+          if (!module || module.settings[presentation.key] === undefined) continue;
+          renderCatalogSetting(content, presentation, module.settings[presentation.key], override !== undefined, {
+            locked,
+            source: locked ? 'Locked by consumer' : sourceLabel(module.settingSources[presentation.key]),
+            save: async (next) => {
+              await this.controller.setProfileModuleSetting(
+                this.consumerId,
+                this.profileId,
+                presentation.moduleId,
+                presentation.key,
+                next,
+              );
+              this.render();
+            },
+          });
+        }
+      }
+      for (const issue of effective.issues) content.createEl('p', { text: issue.message, cls: 'mod-warning' });
     });
   }
 }
 
-function profileKey(consumerId: string, profileId: string): string {
-  return `profile:${encodeURIComponent(consumerId)}:${encodeURIComponent(profileId)}`;
+function presentations(category: GraphSettingCategoryV1, scope: 'global' | 'profile') {
+  return GRAPH_SETTING_PRESENTATIONS_V1.filter((value) => value.category === category && value.scopes.includes(scope));
 }
 
-function parseProfileKey(value: string): { consumerId: string; profileId: string } | undefined {
-  const match = /^profile:([^:]+):([^:]+)$/.exec(value);
-  return match ? { consumerId: decodeURIComponent(match[1]), profileId: decodeURIComponent(match[2]) } : undefined;
-}
-
-function humanize(value: string): string {
-  return value.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
-}
-
-function formatValue(value: JsonValue): string {
-  return typeof value === 'string' || typeof value === 'number' ? String(value) : JSON.stringify(value);
-}
-
-function parseValue(raw: string, previous: JsonValue): JsonValue {
-  if (typeof previous === 'number') {
-    const number = Number(raw);
-    return Number.isFinite(number) ? number : previous;
+function renderCatalogSetting(
+  parent: HTMLElement,
+  presentation: GraphSettingPresentationV1,
+  rawValue: JsonValue | undefined,
+  overridden: boolean,
+  options: {
+    readonly source: string;
+    readonly locked?: boolean;
+    readonly save: (value: JsonValue | undefined) => Promise<void>;
+  },
+): void {
+  const { control } = presentation;
+  const displayValue = graphSettingDisplayValueV1(presentation, rawValue);
+  const setting = new Setting(parent)
+    .setName(presentation.name)
+    .setDesc(`${presentation.description} ${options.source}.`);
+  if (control.type === 'toggle') {
+    setting.addToggle((toggle) => toggle
+      .setValue(displayValue === true)
+      .setDisabled(options.locked === true)
+      .onChange(async (value) => options.save(value)));
+  } else if (control.type === 'select') {
+    setting.addDropdown((dropdown) => dropdown
+      .addOptions(control.options)
+      .setValue(typeof displayValue === 'string' ? displayValue : Object.keys(control.options)[0] ?? '')
+      .setDisabled(options.locked === true)
+      .onChange(async (value) => options.save(value)));
+  } else {
+    const value = typeof displayValue === 'number' && Number.isFinite(displayValue)
+      ? displayValue
+      : control.min;
+    setting.settingEl.classList.add('graph-engine-slider-setting');
+    setting.addSlider((slider) => slider
+      .setLimits(control.min, control.max, control.step)
+      .setValue(value)
+      .setDynamicTooltip()
+      .setDisabled(options.locked === true)
+      .onChange(async (next) => options.save(graphSettingStoredValueV1(presentation, next))));
   }
-  if (typeof previous === 'string') return raw;
-  try { return JSON.parse(raw) as JsonValue; } catch { return previous; }
+  if (overridden && !options.locked) setting.addExtraButton((button) => button
+    .setIcon('rotate-ccw')
+    .setTooltip('Use inherited value')
+    .onClick(async () => options.save(undefined)));
+}
+
+function sourceLabel(source: GraphSettingSourceV1 | undefined): string {
+  switch (source) {
+    case 'global': return 'Inherited from Global';
+    case 'consumer-profile': return 'Consumer default';
+    case 'user-profile': return 'Profile override';
+    case 'session': return 'Current session override';
+    case 'locked': return 'Locked by consumer';
+    default: return 'Engine default';
+  }
 }

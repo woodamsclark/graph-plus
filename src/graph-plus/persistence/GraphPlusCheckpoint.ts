@@ -52,6 +52,7 @@ export class GraphPlusCheckpointControllerV1 {
     private readonly clock: GraphPlusCheckpointClockV1 = defaultClock,
     private readonly debounceMs = 500,
     private readonly getLens?: () => GraphPlusLensStateV1,
+    private readonly prepareViewState?: (state: GraphViewStateV1) => GraphViewStateV1,
   ) {}
 
   attach(session: GraphSessionV1, document?: GraphDocumentV1): void {
@@ -90,10 +91,11 @@ export class GraphPlusCheckpointControllerV1 {
       const documentPromise: Promise<GraphDocumentV1> = needsDocument
         ? session.exportDocument()
         : Promise.resolve(this.cachedDocument!);
-      const [document, viewState] = await Promise.all([
+      const [document, exportedViewState] = await Promise.all([
         documentPromise,
         session.exportViewState(),
       ]);
+      const viewState = this.prepareViewState?.(exportedViewState) ?? exportedViewState;
       await this.store.save(this.vaultId, {
         document,
         viewState,
@@ -114,6 +116,12 @@ export class GraphPlusCheckpointControllerV1 {
       this.detach();
       await session?.dispose();
     }
+  }
+
+  /** Stop observing the live session and wait for any save already in flight. */
+  async detachAndWait(): Promise<void> {
+    this.detach();
+    await this.flushQueue.catch(() => undefined);
   }
 
   detach(): void {

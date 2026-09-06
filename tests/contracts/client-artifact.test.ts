@@ -19,7 +19,7 @@ test('external client artifact is synchronized with its reviewed public sources'
     readFileSync(join(artifactRoot, 'artifact-manifest.json'), 'utf8'),
   ) as ArtifactManifest;
   equal(manifest.artifact, '@graph-plus/graph-engine-client', 'artifact name');
-  equal(manifest.artifactVersion, '1.5.0', 'artifact version');
+  equal(manifest.artifactVersion, '1.7.1', 'artifact version');
   equal(manifest.protocolVersion, 1, 'artifact protocol');
 
   const drift: string[] = [];
@@ -40,6 +40,25 @@ test('external client artifact is synchronized with its reviewed public sources'
   }
   deepEqual(drift, [], 'generated client files should be current');
   equal(contentHash.digest('hex'), manifest.contentSha256, 'artifact content hash');
+});
+
+test('V1.7.1 registers graph-engine as the Obsidian plugin and synchronizes release versions', () => {
+  const pluginManifest = JSON.parse(readFileSync(join(repositoryRoot, 'manifest.json'), 'utf8')) as {
+    id: string; name: string; version: string;
+  };
+  const rootPackage = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8')) as {
+    name: string; version: string;
+  };
+  const clientPackage = JSON.parse(readFileSync(join(artifactRoot, 'package.json'), 'utf8')) as {
+    version: string;
+  };
+  equal(pluginManifest.id, 'graph-engine', 'Obsidian plugin ID');
+  equal(pluginManifest.name, 'graph-engine', 'Obsidian plugin name');
+  equal(rootPackage.name, 'graph-engine', 'root package name');
+  equal(pluginManifest.version, '1.7.1', 'Obsidian release version');
+  equal((pluginManifest as { minAppVersion?: string }).minAppVersion, '1.7.2', 'minimum compatible Obsidian version');
+  equal(rootPackage.version, pluginManifest.version, 'root package release version');
+  equal(clientPackage.version, pluginManifest.version, 'public client release version');
 });
 
 test('external client artifact resolves internally and excludes provider implementation', () => {

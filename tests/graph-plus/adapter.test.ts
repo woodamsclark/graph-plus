@@ -8,7 +8,7 @@ import {
   noteNodeId,
   tagNodeId,
 } from '../../src/graph-plus/adapter/index.ts';
-import { GraphPlusConsumerV1 } from '../../src/graph-plus/consumer/index.ts';
+import { GraphPlusConsumerV1, LocalGraphPlusConsumerV1 } from '../../src/graph-plus/consumer/index.ts';
 import {
   GraphPlusCheckpointControllerV1,
   type GraphPlusCheckpointStoreV1,
@@ -215,7 +215,8 @@ test('Graph+ leaves generic display and force settings in its engine profile nam
     display: { labelMode: 'all', nodeRadiusScale: 2 },
     force: { repulsionStrength: 1234 },
   });
-  equal(overrides.modules?.rendering, undefined, 'legacy display lens values should no longer shadow stock profile controls');
+  deepEqual(overrides.modules?.rendering?.settings, { backgroundColor: 'transparent' },
+    'Graph+ should expose the native host surface without restoring legacy display controls');
   equal(overrides.modules?.['force-layout'], undefined, 'legacy force lens values should no longer shadow stock profile controls');
   equal(overrides.modules?.form?.enabled, false, 'transient Form ownership should remain in Graph+ session state');
 });
@@ -304,6 +305,135 @@ test('G-LAZY consumer mounts saved graph before vault reconciliation and flushes
   assert(store.saves > 0, 'controlled close should checkpoint before session disposal');
   equal(store.value?.lens?.query, 'file:beta', 'controlled close should persist the active lens with the graph');
   equal(runtime.container.querySelector('[data-graph-engine-session]'), null, 'close should dispose the mounted session');
+});
+
+test('V1.7 layout reset replaces the live session while preserving document and lens', async () => {
+  const fixture = snapshot();
+  const runtime = runtimeHarness({ registration: graphPlusRegistration });
+  const core = new GraphEngineProviderCoreV1({
+    engineVersion: '1.7.1', engineInstanceId: 'graph-plus-reset-test', capabilities: ['render'],
+    profiles: runtime.profiles, sessions: runtime.factory,
+  });
+  const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(lease.ok, 'Graph+ should obtain a lease for layout reset');
+  const store = new MemoryStore();
+  const consumer = new GraphPlusConsumerV1({
+    lease: lease.lease,
+    container: runtime.container,
+    vaultId: fixture.value.vaultId,
+    source: { read: () => fixture.value },
+    checkpointStore: store,
+    navigator: { openNote: async () => undefined, openTag: async () => undefined },
+    countDuplicateLinks: true,
+  });
+  await consumer.open();
+  await consumer.setLens({ ...consumer.getLens(), query: 'file:beta' });
+  const oldSession = consumer.getSession();
+  assert(oldSession, 'the initial live session should exist');
+  const alphaId = noteNodeId('Alpha.md');
+  equal(await consumer.revealAndFocusNode(alphaId), true,
+    'a filtered note should receive a transient reveal through the ordinary focus path');
+  equal((await oldSession.exportViewState()).focusedNodeId, alphaId,
+    'transient reveal should focus the stable note node');
+  equal(consumer.getLens().query, 'file:beta', 'transient reveal must not rewrite the saved Filter query');
+  await oldSession.setNodePinned(alphaId, true);
+  await oldSession.setSelection([alphaId]);
+  const documentBefore = consumer.getDocument();
+
+  equal(await consumer.resetLayoutData(), true, 'reset should complete against the live vault session');
+  const freshSession = consumer.getSession();
+  assert(freshSession && freshSession !== oldSession, 'reset should replace rather than reuse the discarded session');
+  const freshState = await freshSession.exportViewState();
+  deepEqual(freshState.pinnedNodeIds, [], 'reset should discard saved pins');
+  deepEqual(freshState.selectedNodeIds, [], 'reset should discard selection');
+  equal(freshState.focusedNodeId, undefined, 'reset should discard focus');
+  deepEqual(consumer.getDocument(), documentBefore, 'reset should preserve the canonical graph document');
+  equal(consumer.getLens().query, 'file:beta', 'reset should preserve the active Filter query');
+  equal(store.value?.lens?.query, 'file:beta', 'fresh checkpoint should preserve consumer lens state');
+  deepEqual(store.value?.viewState?.pinnedNodeIds, [], 'fresh checkpoint should replace discarded layout state');
+  await consumer.close();
+  await core.dispose();
+});
+
+test('V1.7.1 global active-note following focuses without changing the full projection', async () => {
+  const fixture = snapshot();
+  const runtime = runtimeHarness({ registration: graphPlusRegistration });
+  const core = new GraphEngineProviderCoreV1({
+    engineVersion: '1.7.1', engineInstanceId: 'graph-plus-active-note-test', capabilities: ['render'],
+    profiles: runtime.profiles, sessions: runtime.factory,
+  });
+  const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(lease.ok, 'Graph+ should obtain a lease for active-note following');
+  const store = new MemoryStore();
+  const consumer = new GraphPlusConsumerV1({
+    lease: lease.lease,
+    container: runtime.container,
+    vaultId: fixture.value.vaultId,
+    source: { read: () => fixture.value },
+    checkpointStore: store,
+    navigator: { openNote: async () => undefined, openTag: async () => undefined },
+    countDuplicateLinks: true,
+  });
+  await consumer.open();
+  const alphaId = noteNodeId('Alpha.md');
+  const surface = runtime.container.querySelector<HTMLElement>('[data-graph-engine-session]');
+  assert(surface, 'the followed graph should expose its mounted session surface');
+
+  equal(await consumer.followActiveNode(alphaId), true, 'a main-split graph should follow the active note');
+  equal((await consumer.getSession()?.exportViewState())?.focusedNodeId, alphaId,
+    'active-note following should use ordinary graph focus state');
+  equal(surface.dataset.renderedNodeCount, String(consumer.getDocument()?.nodes.length),
+    'a normal split should retain the complete saved projection');
+
+  await consumer.close();
+  equal(store.value?.viewState?.activeFilters.projection, undefined,
+    'transient active-note reveal should not enter the durable checkpoint');
+  await core.dispose();
+});
+
+test('V1.7.1 Local Graph+ owns an ephemeral rooted document, layout, and depth', async () => {
+  const fixture = snapshot();
+  const runtime = runtimeHarness({ registration: graphPlusRegistration });
+  const core = new GraphEngineProviderCoreV1({
+    engineVersion: '1.7.1', engineInstanceId: 'local-graph-plus-test', capabilities: ['render'],
+    profiles: runtime.profiles, sessions: runtime.factory,
+  });
+  const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(lease.ok, 'Local Graph+ should obtain an independent session lease');
+  const alphaId = noteNodeId('Alpha.md');
+  const betaId = noteNodeId('folder/Beta.md');
+  const consumer = new LocalGraphPlusConsumerV1({
+    lease: lease.lease,
+    container: runtime.container,
+    source: { read: () => fixture.value },
+    navigator: { openNote: async () => undefined, openTag: async () => undefined },
+    countDuplicateLinks: true,
+    initialRootNodeId: alphaId,
+  });
+  await consumer.open();
+  let local = consumer.getLocalDocument();
+  assert(local, 'Local Graph+ should mount a derived local document');
+  equal(local.nodes[0]?.id, alphaId, 'the active root should seed the local origin');
+  equal(local.nodes.length, 3, 'depth one should contain the root and its direct eligible neighbors');
+  let state = await consumer.getSession()?.exportViewState();
+  equal(state?.focusedNodeId, alphaId, 'the local root should own ordinary focus state');
+  equal(state?.pinnedNodeIds.includes(alphaId), true, 'the local root should remain anchored while neighbors settle');
+  deepEqual(state?.camera.target, state?.positions[alphaId],
+    'the camera should center on the root while retaining a fit sized for its neighborhood');
+
+  await consumer.setLocalDepth(2);
+  local = consumer.getLocalDocument();
+  equal(local?.nodes.length, 4, 'depth two should reveal the next connected layer');
+
+  equal(await consumer.followActiveNode(betaId), true, 'the local view should follow a newly active note');
+  local = consumer.getLocalDocument();
+  state = await consumer.getSession()?.exportViewState();
+  equal(local?.nodes[0]?.id, betaId, 'a new root should receive a fresh local document identity and origin');
+  equal(state?.focusedNodeId, betaId, 'focus should transfer with the active note');
+  equal(state?.pinnedNodeIds.includes(alphaId), false, 'the prior local root anchor must not leak across documents');
+  deepEqual(state?.camera.target, state?.positions[betaId], 'camera centering should follow the new local root');
+  await consumer.close();
+  await core.dispose();
 });
 
 test('G-PARITY engine host resolves Graph+ open-node once and hands transient Form state back', async () => {

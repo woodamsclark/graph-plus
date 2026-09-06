@@ -346,15 +346,24 @@ export class CanvasGraphRenderer {
     this.context.fillStyle = frame.theme.labelColor;
     const candidates = nodes
       .filter(({ node }) => node.showLabel !== false)
-      .map((value) => ({ ...value, score: labelScore(value) }))
-      .sort((a, b) => b.score - a.score || a.node.id.localeCompare(b.node.id));
+      .sort(compareLabelCandidates);
     const layoutStart = this.now();
     let acceptedCandidates: readonly ProjectedNode[];
     if (mode === 'all') {
       acceptedCandidates = candidates;
     } else {
-      const zoom = Math.max(0.1, this.camera.getState().zoom);
-      const budget = clampInteger(Math.round(this.width * this.height / 12000 * Math.sqrt(zoom)), 12, 120);
+      const cameraState = this.camera.getState();
+      const zoom = cameraState.projection === 'perspective'
+        ? this.camera.worldToScreen(cameraState.target).scale
+        : Math.max(0.1, cameraState.zoom);
+      const threshold = Math.max(0, Math.min(100, frame.theme.adaptiveLabelThreshold ?? 50));
+      const thresholdFactor = 2 ** ((50 - threshold) / 50);
+      const minimumBudget = clampInteger(Math.round(12 * thresholdFactor), 4, 24);
+      const budget = clampInteger(
+        Math.round(this.width * this.height / 12000 * Math.sqrt(zoom) * thresholdFactor),
+        minimumBudget,
+        120,
+      );
       const occupied: LabelBounds[] = [];
       const accepted: ProjectedNode[] = [];
       for (const candidate of candidates) {
@@ -429,12 +438,20 @@ interface LabelBounds {
   readonly bottom: number;
 }
 
-function labelScore(value: ProjectedNode): number {
-  if (value.node.focused) return 1_000_000_000;
-  if (value.node.selected) return 900_000_000;
-  if (value.node.hovered) return 800_000_000;
-  if (value.node.labelAlwaysVisible) return 700_000_000;
-  return (value.node.labelPriority ?? 0) * 10_000 + value.point.scale * 100 + value.radius;
+function compareLabelCandidates(a: ProjectedNode, b: ProjectedNode): number {
+  return labelStatePriority(b) - labelStatePriority(a)
+    || (b.node.labelPriority ?? 0) - (a.node.labelPriority ?? 0)
+    || b.node.radius - a.node.radius
+    || b.point.scale - a.point.scale
+    || a.node.id.localeCompare(b.node.id);
+}
+
+function labelStatePriority(value: ProjectedNode): number {
+  if (value.node.focused) return 4;
+  if (value.node.selected) return 3;
+  if (value.node.hovered) return 2;
+  if (value.node.labelAlwaysVisible) return 1;
+  return 0;
 }
 
 function overlaps(a: LabelBounds, b: LabelBounds): boolean {
@@ -485,9 +502,9 @@ function projectedRadius(
     return radius * Math.sqrt(Math.max(0, scale));
   }
   const projected = radius * scale;
-  return projection === 'perspective'
-    ? Math.max(frame.theme.minimumPerspectiveNodeRadius ?? 0, projected)
-    : projected;
+  if (projection !== 'perspective') return projected;
+  const relativeFloor = radius * Math.max(0, frame.theme.minimumPerspectiveNodeScale ?? 0);
+  return Math.max(frame.theme.minimumPerspectiveNodeRadius ?? 0, relativeFloor, projected);
 }
 
 function nodeFont(

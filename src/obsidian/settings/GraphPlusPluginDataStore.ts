@@ -172,7 +172,7 @@ export function withGraphPlusCheckpointV1(
   checkpoint: GraphPlusCheckpointV1,
 ): GraphPlusPluginDataV1 {
   const checked = validateGraphPlusCheckpointV1(checkpoint);
-  if (!checked) throw new Error('Cannot persist an invalid Graph+ checkpoint.');
+  if (!checked) throw new Error('Cannot persist an invalid graph+ checkpoint.');
   const graphDocuments = withoutKey(data.consumers.graphPlus.graphDocuments, vaultId);
   const viewStates = withoutKey(data.consumers.graphPlus.viewStates, vaultId);
   return {
@@ -198,7 +198,7 @@ export function withGraphPlusCheckpointReferenceV1(
   reference: GraphPlusCheckpointReferenceV1,
 ): GraphPlusPluginDataV1 {
   const checked = validateGraphPlusCheckpointReferenceV1(reference);
-  if (!checked) throw new Error('Cannot persist an invalid Graph+ checkpoint reference.');
+  if (!checked) throw new Error('Cannot persist an invalid graph+ checkpoint reference.');
   const graphDocuments = withoutKey(data.consumers.graphPlus.graphDocuments, vaultId);
   const viewStates = withoutKey(data.consumers.graphPlus.viewStates, vaultId);
   return {

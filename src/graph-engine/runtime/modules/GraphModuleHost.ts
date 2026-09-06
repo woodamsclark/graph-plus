@@ -229,6 +229,7 @@ export class GraphModuleHost {
     const choreographed = this.runProjectionHook(state, 'choreograph', 'choreograph');
     let positions = choreographed.positions;
     let changed = false;
+    let requestNextFrame = false;
     for (const module of [...this.active]) {
       if (!module.instance.tick) continue;
       try {
@@ -237,13 +238,18 @@ export class GraphModuleHost {
           positions = result.positions;
           changed = true;
         }
+        if (result?.requestNextFrame) requestNextFrame = true;
       } catch (error) {
         this.failActiveModule(module, 'tick', error);
         if (this.fatal) break;
       }
     }
     const camera = choreographed.motionTargets?.camera;
-    return changed || camera ? { ...(changed ? { positions } : {}), ...(camera ? { camera } : {}) } : undefined;
+    return changed || camera || requestNextFrame ? {
+      ...(changed ? { positions } : {}),
+      ...(camera ? { camera } : {}),
+      ...(requestNextFrame || camera ? { requestNextFrame: true } : {}),
+    } : undefined;
   }
 
   documentChanged(document: GraphDocumentV1): void {

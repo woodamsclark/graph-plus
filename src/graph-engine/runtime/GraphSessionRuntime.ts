@@ -1,6 +1,7 @@
 import type {
   ApplyGraphPatchResultV1,
   Disposable,
+  FitNodesOptionsV1,
   GraphCameraStateV1,
   GraphChangedEventV1,
   GraphDocumentV1,
@@ -73,6 +74,7 @@ export interface GraphSessionRuntimeOptionsV1 {
 
 const RETIRED_GRAPH_SYSTEM_STATE_KEY_V1 = 'graph-system-states-v1';
 const MAX_RESTORED_POSITION_COORDINATE = 1_000_000_000;
+const MIN_PIPELINE_INTERVAL_MS = 1_000 / 60;
 
 export class GraphSessionDisposedErrorV1 extends Error {
   readonly code = 'session-disposed' as const;
@@ -137,6 +139,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly onAnimationFrame: FrameRequestCallback = (timestamp) => {
     this.animationFrame = null;
     if (this.isSuspended()) return;
+    if (this.lastFrameTimestamp !== null
+      && timestamp - this.lastFrameTimestamp < MIN_PIPELINE_INTERVAL_MS - 0.001) {
+      this.scheduleFrame();
+      return;
+    }
     const frameStart = this.platform.now();
     const interactionStart = this.platform.now();
     this.interaction.tick();
@@ -145,6 +152,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.performanceCounters.hitTests += this.interaction.consumeHitTestCount();
     const deltaSeconds = this.lastFrameTimestamp === null ? 1 / 60 : Math.max(0, (timestamp - this.lastFrameTimestamp) / 1000);
     this.lastFrameTimestamp = timestamp;
+    const focusedNodeId = this.viewState.focusedNodeId;
+    const focusedPosition = focusedNodeId ? this.moduleView.positions[focusedNodeId] : undefined;
+    const previousFocusedPosition = focusedPosition ? { ...focusedPosition } : undefined;
     const moduleStart = this.platform.now();
     this.performanceCounters.moduleTicks += 1;
     const tickResult = this.moduleHost.tick({
@@ -156,8 +166,18 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const moduleTickMs = duration(moduleStart, this.platform.now());
     const compositionStart = this.platform.now();
     if (positions) {
+      const nextFocusedPosition = focusedNodeId ? positions[focusedNodeId] : undefined;
       const requiresComposition = positions !== this.moduleView.positions;
       this.viewState = { ...this.viewState, positions };
+      if (!tickResult?.camera && previousFocusedPosition && nextFocusedPosition) {
+        const camera = this.camera.getState();
+        this.camera.setTarget({
+          x: camera.target.x + nextFocusedPosition.x - previousFocusedPosition.x,
+          y: camera.target.y + nextFocusedPosition.y - previousFocusedPosition.y,
+          z: camera.target.z + nextFocusedPosition.z - previousFocusedPosition.z,
+        });
+        this.synchronizeCameraState();
+      }
       this.projectionView = { ...this.projectionView, positions, viewState: this.viewState };
       this.moduleView = { ...this.moduleView, positions, viewState: this.viewState };
       if (requiresComposition) this.refreshFrame();
@@ -189,7 +209,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.performanceCounters.renderedFrames += 1;
       this.surface.recordFrame(this.frameCount);
     }
-    this.scheduleFrame();
+    if (tickResult?.requestNextFrame) this.scheduleFrame();
   };
 
   constructor(options: GraphSessionRuntimeOptionsV1) {
@@ -218,7 +238,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (restored && !plausibleRestored) {
       this.deferredErrors.push({
         code: 'incompatible-view-state',
-        message: 'Saved graph positions exceeded safe numerical bounds. Graph Engine regenerated the layout.',
+        message: 'Saved graph positions exceeded safe numerical bounds. graph-engine regenerated the layout.',
         recoverable: true,
       });
     }
@@ -254,6 +274,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         this.camera.setViewport(next.width, next.height);
         this.renderer.resize(next.width, next.height, next.devicePixelRatio);
         this.frameDirty = true;
+        this.scheduleFrame();
       });
       this.moduleHost = this.createModuleHost(this.profile, this.viewState.moduleState);
       this.interaction = new SessionInteractionRuntime({
@@ -278,6 +299,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         onViewStateChanged: (change) => this.handleRuntimeViewChange(change),
         onIntent: (intent) => this.emitIntent(intent),
         onActivateNode: (nodeId) => this.invokePrimaryNodeAction(nodeId),
+        onInputQueued: () => this.scheduleFrame(),
       });
       this.platform.document.addEventListener('visibilitychange', this.onVisibilityChange);
       visibilityListenerInstalled = true;
@@ -440,7 +462,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.refreshFrame();
   }
 
-  async fitNodes(nodeIds?: readonly string[], options?: TransitionOptionsV1): Promise<void> {
+  async fitNodes(nodeIds?: readonly string[], options?: FitNodesOptionsV1): Promise<void> {
     this.requireActive();
     assertTransition(options);
     const document = this.store.readDocument();
@@ -450,7 +472,13 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       .map((id) => this.moduleView.positions[id])
       .filter((position): position is Vec3 => position !== undefined);
     if (!positions.length) return;
-    this.fitPositions(positions);
+    const center = options?.centerNodeId
+      ? this.moduleView.positions[options.centerNodeId]
+      : undefined;
+    if (options?.centerNodeId && !center) {
+      throw new Error(`Cannot center camera on unknown node "${options.centerNodeId}".`);
+    }
+    this.fitPositions(positions, center);
   }
 
   async resetCamera(options?: TransitionOptionsV1): Promise<void> {
@@ -871,6 +899,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       hoveredNodeId: this.interaction?.getHoveredNodeId(),
     }));
     this.frameDirty = true;
+    this.scheduleFrame();
   }
 
   private updateSurface(): void {
@@ -914,9 +943,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.viewState = { ...this.viewState, camera: this.camera.getState() };
   }
 
-  private fitPositions(positions: readonly Vec3[]): void {
+  private fitPositions(positions: readonly Vec3[], center?: Vec3): void {
     if (!positions.length) return;
-    this.camera.fit(positions);
+    this.camera.fit(positions, 48, undefined, center);
     this.synchronizeCameraState();
     this.projectionView = { ...this.projectionView, viewState: this.viewState };
     this.moduleView = { ...this.moduleView, viewState: this.viewState };

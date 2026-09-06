@@ -31,7 +31,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
         labelMode: 'adaptive',
         nodeRadiusScale: 1,
         edgeThicknessScale: 1,
-        showArrows: true,
+        showArrows: false,
         tokenColors: {},
       },
     },
@@ -77,7 +77,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       dependencies: ['rendering'],
       settingsSchemaVersion: 1,
       defaultSettings: {
-        boundariesVisible: true,
+        boundariesVisible: false,
         membershipStrength: 0.18,
         membershipDistance: 64,
         boundaryPadding: 28,
@@ -112,7 +112,6 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       capabilities: ['layout', 'force-layout'],
       settingsSchemaVersion: 1,
       defaultSettings: {
-        weightingMode: 'topology-weighted',
         repulsionStrength: 1000,
         springStrength: 1,
         springLength: 250,
@@ -135,6 +134,8 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
         componentPadding: 80,
         collisionRadius: 60,
         collisionStrength: 0.5,
+        axialSpringAxis: 'off',
+        axialSpringStiffness: 0,
       },
     },
     create: ({ dimensions, settings }) => new ForceLayoutModule(dimensions, readForceSettings(settings)),
@@ -147,7 +148,11 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       displayName: 'Anima',
       capabilities: ['animation'],
       settingsSchemaVersion: 1,
-      defaultSettings: { labelPosition: 'below' },
+      defaultSettings: {
+        labelPosition: 'above',
+        adaptiveLabelThreshold2d: 65,
+        adaptiveLabelThreshold3d: 50,
+      },
     },
     create: ({ themePalette, settings }) => new AnimaModule(themePalette, settings),
   });

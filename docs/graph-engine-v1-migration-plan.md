@@ -65,7 +65,7 @@ This works as a single application but is not yet a leaseable engine boundary.
    while mixing generic controls with Graph+-specific note/tag/Form vocabulary.
 9. The current settings schema is one large Graph+ object rather than independently
    versioned engine, module, profile, and consumer namespaces.
-10. The build exports only the default Graph+ plugin and has no public contracts/client
+10. The build exports only the default Graph Engine plugin and has no public contracts/client
     artifact or service provider.
 
 ### 2.3 Existing assets to preserve
@@ -503,7 +503,7 @@ Before each commit:
 - PatternSmith projection or UI integration;
 - PatternSmith learning cleanup;
 - attachments, Canvas, or unresolved Graph+ nodes;
-- a separate installed Graph Engine plugin;
+- a separate installed Graph+ plugin;
 - third-party executable engine modules;
 - new Anima visuals or physics;
 - dimming as filtering;
@@ -514,7 +514,7 @@ Before each commit:
 
 Approval of this plan confirms:
 
-1. one installed Graph+ plugin remains the delivery topology;
+1. one installed Graph Engine plugin remains the delivery topology;
 2. the target dependency direction and source boundaries are correct;
 3. the synthetic consumer precedes the Graph+ cutover;
 4. Graph+ stays on the legacy runtime until the neutral session and service pass;

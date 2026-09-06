@@ -37,7 +37,7 @@ async function main(): Promise<void> {
   const results = [];
   for (const scenario of scenarios) results.push(await runScenario(scenario));
   console.log(JSON.stringify({
-    benchmark: 'graph-engine-v1.6-headless',
+    benchmark: 'graph-engine-v1.7.1-headless',
     runtime: process.version,
     platform: `${process.platform}-${process.arch}`,
     results,

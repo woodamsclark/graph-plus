@@ -1,11 +1,11 @@
 # `@graph-plus/graph-engine-client`
 
-This is the self-contained compile-time client for the Graph Engine V1 provider hosted
-by the Graph+ Obsidian plugin. It contains public contracts, validation helpers, the
+This is the self-contained compile-time client for the graph-engine V1 provider hosted
+by the graph-engine Obsidian plugin. It contains public contracts, validation helpers, the
 Workspace Events client, and the standard unavailable surface. It does not contain a
-renderer or Graph Engine provider runtime.
+renderer or graph-engine provider runtime.
 
-The `src` directory is generated from Graph+'s reviewed public boundary:
+The `src` directory is generated from graph-engine's reviewed public boundary:
 
 ```sh
 npm run build:client
@@ -16,7 +16,7 @@ only `@graph-plus/graph-engine-client` and obtain the runtime through Workspace 
 
 Protocol version: 1
 
-Artifact version: 1.5.0
+Artifact version: 1.7.1
 
 V1.1 adds optional engine-owned session UI configuration, lease-scoped semantic node
 actions, consumer/profile UI policy, and constrained 2D/3D profile settings. These are

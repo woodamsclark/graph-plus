@@ -22,19 +22,19 @@ export const GRAPH_PLUS_REQUESTED_CAPABILITIES_V1 = [
 
 export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
   consumerId: GRAPH_PLUS_CONSUMER_ID_V1,
-  displayName: 'Graph+',
-  consumerVersion: '1.6.0',
+  displayName: 'graph+',
+  consumerVersion: '1.7.1',
   supportedProtocolVersions: [1],
   profiles: [{
     profileId: GRAPH_PLUS_PROFILE_ID_V1,
     displayName: 'Default',
-    descriptorVersion: 6,
+    descriptorVersion: 8,
     dimensions: '2d',
     allowedDimensions: ['2d', '3d'],
     requestedCapabilities: GRAPH_PLUS_REQUESTED_CAPABILITIES_V1,
     uiDefaults: {
       dimensionControlVisible: true,
-      quickSettingsVisibility: 'shown',
+      quickSettingsVisibility: 'collapsed',
       quickSettingsSections: {
         filter: { controls: { 'filter.clear': 'hidden' } },
         form: { visibility: 'shown' },
@@ -58,12 +58,6 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
     modules: {
       rendering: {
         policy: 'required',
-        defaults: {
-          labelMode: 'adaptive',
-          nodeRadiusScale: 1,
-          edgeThicknessScale: 1,
-          showArrows: false,
-        },
         constraints: { labelMode: { type: 'enum', allowed: ['adaptive', 'all', 'off'] } },
       },
       filtering: { policy: 'required' },
@@ -81,30 +75,14 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
       'force-layout': {
         policy: 'optional',
         defaultEnabled: true,
-        defaults: {
-          weightingMode: 'topology-weighted',
-          repulsionStrength: 1000,
-          springStrength: 1,
-          springLength: 250,
-          centeringStrength: 0.1,
-          velocityDecay: 0.4,
-          alphaDecay: 0.02276277904418933,
-          alphaMin: 0.001,
-          repulsionMinDistance: 30,
-          barnesHutTheta: 0.9,
-          collisionRadius: 60,
-          collisionStrength: 0.5,
+        constraints: {
+          axialSpringAxis: { type: 'enum', allowed: ['off', 'x', 'y', 'z'] },
+          axialSpringStiffness: { type: 'number', min: 0, max: 0.9 },
         },
       },
       'node-regions': {
         policy: 'optional',
         defaultEnabled: true,
-        defaults: {
-          boundariesVisible: false,
-          membershipStrength: 0.18,
-          membershipDistance: 64,
-          boundaryPadding: 28,
-        },
         constraints: {
           boundariesVisible: { type: 'enum', allowed: [true, false] },
           membershipStrength: { type: 'number', min: 0, max: 2 },
@@ -114,18 +92,21 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
       },
       anima: {
         policy: 'required',
-        defaults: { labelPosition: 'above' },
-        constraints: { labelPosition: { type: 'enum', allowed: ['above', 'below'] } },
+        constraints: {
+          labelPosition: { type: 'enum', allowed: ['above', 'below'] },
+          adaptiveLabelThreshold2d: { type: 'number', min: 0, max: 100 },
+          adaptiveLabelThreshold3d: { type: 'number', min: 0, max: 100 },
+        },
       },
     },
   }],
 };
 
 /**
- * Explicit, idempotent retirement migration. V1.6 briefly stored two complete
- * setting banks; the accepted Anima/native bank is now the direct setting set.
+ * Cumulative, idempotent V1.7 migration. It retires V1.6's temporary dual
+ * setting banks and removes the obsolete homogeneous-layout selector.
  */
-export function migrateGraphPlusProfileOverridesV16(
+export function migrateGraphPlusProfileOverridesV17(
   value: GraphSettingsOverridesV1,
 ): GraphSettingsOverridesV1 {
   const cloned = clone(value);
@@ -138,6 +119,11 @@ export function migrateGraphPlusProfileOverridesV16(
     delete settings.newSettings;
     delete settings.legacySettings;
     modules[moduleId] = { ...module, settings: { ...settings, ...accepted } };
+  }
+  if (modules['force-layout']?.settings) {
+    const settings = { ...modules['force-layout'].settings };
+    delete settings.weightingMode;
+    modules['force-layout'] = { ...modules['force-layout'], settings: Object.keys(settings).length ? settings : undefined };
   }
   const anima = modules.anima;
   if (anima?.enabled === false) {
@@ -154,6 +140,9 @@ export function migrateGraphPlusProfileOverridesV16(
     modules: Object.keys(modules).length ? modules : undefined,
   };
 }
+
+/** @deprecated Use the cumulative V1.7 migration. */
+export const migrateGraphPlusProfileOverridesV16 = migrateGraphPlusProfileOverridesV17;
 
 function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);

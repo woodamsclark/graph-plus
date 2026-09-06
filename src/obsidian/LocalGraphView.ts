@@ -1,29 +1,28 @@
 import { ItemView, MarkdownView, type Plugin, type TFile, type ViewStateResult, type WorkspaceLeaf } from 'obsidian';
 import { mountGraphEngineUnavailableSurfaceV1, type Disposable } from '../graph-engine/public.ts';
 import { noteNodeId } from '../graph-plus/adapter/index.ts';
-import { GraphPlusConsumerV1 } from '../graph-plus/consumer/index.ts';
+import { LocalGraphPlusConsumerV1 } from '../graph-plus/consumer/index.ts';
 import { coerceGraphPlusLensStateV1, createDefaultGraphPlusLensV1, type GraphPlusLensStateV1 } from '../graph-plus/query/index.ts';
 import { GraphPlusObsidianNavigatorV1 } from './GraphPlusObsidianNavigator.ts';
 import { createGraphPlusUiContributionsV1 } from './GraphPlusUiContributions.ts';
 import type GraphEnginePlugin from './main.ts';
 
-export const GRAPH_PLUS_TYPE = 'graph-plus';
+export const LOCAL_GRAPH_PLUS_TYPE = 'graph-plus-local';
 
-export class GraphPlusView extends ItemView {
+export class LocalGraphPlusView extends ItemView {
   private readonly plugin: GraphEnginePlugin;
-  private consumer?: GraphPlusConsumerV1<TFile>;
+  private consumer?: LocalGraphPlusConsumerV1<TFile>;
   private fallback?: Disposable;
   private unregisters: Array<() => void> = [];
   private rebuildTimer: number | undefined;
   private pendingLens: GraphPlusLensStateV1 = createDefaultGraphPlusLensV1();
+  private pendingDepth = 1;
   private stateRestored = false;
   private leafVisible = true;
   private reconcilePending = false;
   private previewAnchor?: HTMLElement;
   private activeFileToFollow?: TFile;
   private followRunning = false;
-  private followCompletion: Promise<void> = Promise.resolve();
-  private explicitNavigation = false;
 
   constructor(leaf: WorkspaceLeaf, plugin: Plugin) {
     super(leaf);
@@ -32,37 +31,37 @@ export class GraphPlusView extends ItemView {
 
   async onOpen(): Promise<void> {
     this.contentEl.empty();
-    const container = this.contentEl.createDiv({ cls: 'greater-graph-view graphplus-view' });
+    const container = this.contentEl.createDiv({ cls: 'greater-graph-view graphplus-view graphplus-local-view' });
     if (!this.stateRestored) this.pendingLens = { ...this.pendingLens, showTags: this.plugin.settings.showTags };
     try {
       this.pendingLens = await this.plugin.migrateLegacyLensSettings(this.pendingLens);
+      const activeFile = this.activeMarkdownFile() ?? this.app.workspace.getActiveFile();
       const lease = this.plugin.acquireGraphPlusLease();
-      let consumer!: GraphPlusConsumerV1<TFile>;
-      consumer = new GraphPlusConsumerV1({
+      let consumer!: LocalGraphPlusConsumerV1<TFile>;
+      consumer = new LocalGraphPlusConsumerV1({
         lease,
         container,
-        vaultId: this.app.vault.getName(),
         source: this.plugin.graphPlusVaultSource,
-        checkpointStore: this.plugin.graphPlusCheckpointStore,
         navigator: new GraphPlusObsidianNavigatorV1(this.app),
         countDuplicateLinks: this.plugin.settings.countDuplicateLinks,
-        legacyPositions: this.plugin.getLegacyGraphState(this.app.vault.getName()),
+        initialRootNodeId: activeFile?.extension === 'md' ? noteNodeId(activeFile.path) : undefined,
+        initialDepth: this.pendingDepth,
         initialLens: this.pendingLens,
-        restoreSavedLens: !this.stateRestored,
-        clock: createWindowClock(container),
         ui: {
-          quickSettings: { contributions: createGraphPlusUiContributionsV1(() => consumer) },
+          quickSettings: {
+            contributions: createGraphPlusUiContributionsV1(() => consumer, () => consumer),
+          },
         },
-        onError: (error) => console.error('[graph+] consumer error', error),
+        onError: (error) => console.error('[local graph+] consumer error', error),
         onNotePreview: (request) => this.updateNotePreview(request),
       });
       this.consumer = consumer;
       await consumer.open();
-      this.registerGraphRebuildEvents();
+      this.registerEvents();
       this.synchronizeLeafVisibility();
-      this.requestActiveFileFollow(this.app.workspace.getActiveFile());
+      this.requestActiveFileFollow(activeFile);
     } catch (error) {
-      console.error('[graph+] failed to open', error);
+      console.error('[local graph+] failed to open', error);
       await this.consumer?.close().catch(() => undefined);
       this.consumer = undefined;
       this.fallback = mountGraphEngineUnavailableSurfaceV1(container, {
@@ -84,48 +83,33 @@ export class GraphPlusView extends ItemView {
     this.reconcilePending = false;
     this.activeFileToFollow = undefined;
     this.followRunning = false;
-    this.explicitNavigation = false;
     this.clearNotePreview();
   }
 
-  getViewType(): string { return GRAPH_PLUS_TYPE; }
-  getDisplayText(): string { return 'graph+'; }
-  getIcon(): string { return 'dot-network'; }
-
-  async showFile(file: TFile): Promise<boolean> {
-    this.explicitNavigation = true;
-    this.activeFileToFollow = undefined;
-    try {
-      await this.followCompletion;
-      this.activeFileToFollow = undefined;
-      return this.consumer?.revealAndFocusNode(noteNodeId(file.path)) ?? false;
-    } finally {
-      this.explicitNavigation = false;
-    }
-  }
-
-  async resetGraphLayoutData(): Promise<boolean> {
-    const window = this.contentEl.ownerDocument.defaultView;
-    if (this.rebuildTimer !== undefined) window?.clearTimeout(this.rebuildTimer);
-    this.rebuildTimer = undefined;
-    this.reconcilePending = false;
-    this.clearNotePreview();
-    return this.consumer?.resetLayoutData() ?? false;
-  }
+  getViewType(): string { return LOCAL_GRAPH_PLUS_TYPE; }
+  getDisplayText(): string { return 'local graph+'; }
+  getIcon(): string { return 'network'; }
 
   getState(): Record<string, unknown> {
-    return { lens: this.consumer?.getLens() ?? this.pendingLens };
+    return {
+      lens: this.consumer?.getLens() ?? this.pendingLens,
+      depth: this.consumer?.getLocalDepth() ?? this.pendingDepth,
+    };
   }
 
   async setState(state: unknown, _result: ViewStateResult): Promise<void> {
-    const lens = coerceGraphPlusLensStateV1(isRecord(state) ? state.lens : undefined);
-    if (!lens) return;
-    this.pendingLens = await this.plugin.migrateLegacyLensSettings(lens);
+    if (!isRecord(state)) return;
+    const lens = coerceGraphPlusLensStateV1(state.lens);
+    if (lens) {
+      this.pendingLens = await this.plugin.migrateLegacyLensSettings(lens);
+      await this.consumer?.setLens(this.pendingLens);
+    }
+    this.pendingDepth = coerceDepth(state.depth);
+    await this.consumer?.setLocalDepth(this.pendingDepth);
     this.stateRestored = true;
-    await this.consumer?.setLens(this.pendingLens);
   }
 
-  private registerGraphRebuildEvents(): void {
+  private registerEvents(): void {
     if (this.unregisters.length > 0) return;
     const schedule = (): void => {
       if (!this.leafVisible) {
@@ -184,14 +168,11 @@ export class GraphPlusView extends ItemView {
   }
 
   private requestActiveFileFollow(file: TFile | null): void {
-    if (this.explicitNavigation || !file || file.extension !== 'md') return;
+    if (!file || file.extension !== 'md') return;
     this.activeFileToFollow = file;
     if (!this.leafVisible || this.followRunning || !this.consumer) return;
     this.followRunning = true;
-    this.followCompletion = this.drainActiveFileFollow().catch((error) => {
-      console.error('[graph+] active-note follow failed', error);
-    });
-    void this.followCompletion;
+    void this.drainActiveFileFollow();
   }
 
   private async drainActiveFileFollow(): Promise<void> {
@@ -203,7 +184,7 @@ export class GraphPlusView extends ItemView {
       }
     } finally {
       this.followRunning = false;
-      if (!this.explicitNavigation && this.leafVisible && this.consumer && this.activeFileToFollow) {
+      if (this.leafVisible && this.consumer && this.activeFileToFollow) {
         this.requestActiveFileFollow(this.activeFileToFollow);
       }
     }
@@ -244,7 +225,7 @@ export class GraphPlusView extends ItemView {
     });
     this.app.workspace.trigger('hover-link', {
       event,
-      source: GRAPH_PLUS_TYPE,
+      source: LOCAL_GRAPH_PLUS_TYPE,
       hoverParent: this.leaf,
       targetEl: anchor,
       linktext: request.file.path,
@@ -264,13 +245,10 @@ export class GraphPlusView extends ItemView {
   }
 }
 
-function createWindowClock(container: HTMLElement) {
-  const window = container.ownerDocument.defaultView;
-  return {
-    now: () => Date.now(),
-    setTimeout: (callback: () => void, delayMs: number) => window?.setTimeout(callback, delayMs),
-    clearTimeout: (handle: unknown) => window?.clearTimeout(handle as number),
-  };
+function coerceDepth(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(1, Math.min(8, Math.round(value)))
+    : 1;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

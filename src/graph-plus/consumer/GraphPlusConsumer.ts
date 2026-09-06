@@ -6,7 +6,6 @@ import type {
   GraphSessionErrorV1,
   GraphSessionUiOptionsV1,
   GraphSessionV1,
-  GraphSettingsOverridesV1,
   GraphViewStateV1,
 } from '../../graph-engine/contracts/v1/index.ts';
 import { reconcileGraphViewStateV1 } from '../../graph-engine/public.ts';
@@ -22,6 +21,7 @@ import {
   type GraphPlusCheckpointStoreV1,
 } from '../persistence/index.ts';
 import {
+  adoptGraphPlusSessionOverridesV1,
   compileGraphPlusFilterV1,
   createDefaultGraphPlusLensV1,
   graphPlusSessionOverridesV1,
@@ -54,6 +54,11 @@ export interface GraphPlusConsumerOptionsV1<TFile> {
   readonly ui?: GraphSessionUiOptionsV1;
   readonly clock?: GraphPlusCheckpointClockV1;
   readonly onError?: (error: GraphSessionErrorV1 | Error) => void;
+  readonly onNotePreview?: (request: {
+    readonly file?: TFile;
+    readonly anchor?: { readonly x: number; readonly y: number };
+    readonly mod: boolean;
+  }) => void;
 }
 
 export class GraphPlusConsumerV1<TFile> {
@@ -72,6 +77,8 @@ export class GraphPlusConsumerV1<TFile> {
   private opened = false;
   private leaseReleased = false;
   private lensQueue: Promise<void> = Promise.resolve();
+  private transientRevealNodeId?: string;
+  private resettingLayout = false;
 
   constructor(private readonly options: GraphPlusConsumerOptionsV1<TFile>) {
     this.adapter = new VaultGraphAdapterV1({ countDuplicateLinks: options.countDuplicateLinks });
@@ -82,6 +89,7 @@ export class GraphPlusConsumerV1<TFile> {
       options.clock,
       500,
       () => clone(this.lens),
+      stripGraphPlusProjectionFilter,
     );
     this.profileId = options.profileId ?? 'default';
     this.dimensions = options.dimensions ?? '2d';
@@ -129,7 +137,7 @@ export class GraphPlusConsumerV1<TFile> {
   }
 
   async reconcile(): Promise<void> {
-    if (!this.session || !this.document) return;
+    if (this.resettingLayout || !this.session || !this.document) return;
     try {
       const snapshot = await this.options.source.read();
       const projection = this.adapter.reconcile(this.document, snapshot);
@@ -186,6 +194,29 @@ export class GraphPlusConsumerV1<TFile> {
     await this.session.focusNode(nodeId);
   }
 
+  async revealAndFocusNode(nodeId: string): Promise<boolean> {
+    if (!this.session || !this.document) return false;
+    if (!this.document.nodes.some((node) => node.id === nodeId)) await this.reconcile();
+    if (!this.session || !this.document?.nodes.some((node) => node.id === nodeId)) return false;
+    this.transientRevealNodeId = nodeId;
+    await this.applyFilter();
+    await this.session.setSelection([nodeId]);
+    await this.session.focusNode(nodeId);
+    await this.session.fitNodes([nodeId]);
+    return true;
+  }
+
+  async followActiveNode(nodeId: string): Promise<boolean> {
+    if (!this.session || !this.document) return false;
+    if (!this.document.nodes.some((node) => node.id === nodeId)) await this.reconcile();
+    if (!this.session || !this.document?.nodes.some((node) => node.id === nodeId)) return false;
+    this.transientRevealNodeId = nodeId;
+    await this.applyFilter();
+    await this.session.setSelection([nodeId]);
+    await this.session.focusNode(nodeId);
+    return true;
+  }
+
   async mindMapFromNode(nodeId: string): Promise<void> {
     if (!this.document?.nodes.some((node) => node.id === nodeId)) return;
     const next: GraphPlusLensStateV1 = {
@@ -211,6 +242,39 @@ export class GraphPlusConsumerV1<TFile> {
     await this.session?.setNodePinned(nodeId, pinned);
   }
 
+  setSuspended(suspended: boolean): void {
+    this.session?.setSuspended(suspended);
+  }
+
+  async resetLayoutData(): Promise<boolean> {
+    if (this.resettingLayout || !this.session || !this.document) return false;
+    this.resettingLayout = true;
+    try {
+      await this.lensQueue.catch(() => undefined);
+      const document = this.document;
+      const discardedSession = this.session;
+      this.sessionSubscriptions.splice(0).forEach((subscription) => subscription.dispose());
+      this.options.onNotePreview?.({ mod: false });
+      this.transientRevealNodeId = undefined;
+      await this.checkpoint.detachAndWait();
+      this.session = undefined;
+      this.effectiveSettings = undefined;
+      await discardedSession.dispose();
+      await this.options.checkpointStore.save(this.options.vaultId, {
+        document,
+        lens: clone(this.lens),
+        savedAt: this.options.clock?.now() ?? Date.now(),
+      }, { documentChanged: false });
+      await this.mount(document);
+      const regeneratedSession = this.session as GraphSessionV1 | undefined;
+      await regeneratedSession?.fitNodes();
+      await this.checkpoint.flush();
+      return true;
+    } finally {
+      this.resettingLayout = false;
+    }
+  }
+
   async close(): Promise<void> {
     this.opened = false;
     await this.lensQueue.catch(() => undefined);
@@ -225,6 +289,7 @@ export class GraphPlusConsumerV1<TFile> {
       this.document = undefined;
       this.lookup = new GraphPlusLookupV1<TFile>();
       this.searchIndex = new Map();
+      this.transientRevealNodeId = undefined;
       if (!this.leaseReleased) {
         this.leaseReleased = true;
         await this.options.lease.release();
@@ -249,30 +314,26 @@ export class GraphPlusConsumerV1<TFile> {
     this.document = document;
     this.checkpoint.attach(session, document);
     this.sessionSubscriptions.push(session.onError((error) => this.options.onError?.(error)));
+    this.sessionSubscriptions.push(session.onIntent((intent) => {
+      if (intent.type !== 'node-hover-changed') return;
+      const entry = intent.nodeId ? this.lookup.get(intent.nodeId) : undefined;
+      this.options.onNotePreview?.({
+        ...(entry?.kind === 'note' ? { file: entry.file } : {}),
+        ...(intent.anchor ? { anchor: intent.anchor } : {}),
+        mod: intent.mod && entry?.kind === 'note',
+      });
+    }));
+    this.sessionSubscriptions.push(session.onIntent((intent) => {
+      if (intent.type !== 'focus-changed' || intent.focusedNodeId === this.transientRevealNodeId) return;
+      if (!this.transientRevealNodeId) return;
+      this.transientRevealNodeId = undefined;
+      void this.applyFilter();
+    }));
     await this.applyFilter();
   }
 
-  private adoptSessionOverrides(overrides: GraphSettingsOverridesV1): void {
-    const form = overrides.modules?.form;
-    const settings = form?.settings ?? {};
-    const direction = settings.direction;
-    const edgeToken = settings.edgeToken;
-    const maxDepth = settings.maxDepth;
-    this.lens = {
-      ...this.lens,
-      form: {
-        enabled: form?.enabled ?? this.lens.form.enabled,
-        ...(typeof settings.rootNodeId === 'string' ? { rootNodeId: settings.rootNodeId } : {}),
-        direction: direction === 'incoming' || direction === 'outgoing' ? direction : 'either',
-        ...(typeof edgeToken === 'string' && edgeToken.startsWith('relation:')
-          ? { relation: edgeToken.slice('relation:'.length) }
-          : {}),
-        ...(typeof maxDepth === 'number' && Number.isSafeInteger(maxDepth) ? { maxDepth } : {}),
-        showCrossLinks: settings.showCrossLinks !== false,
-        showDisconnected: settings.showDisconnected === true,
-        colorBranches: settings.colorBranches !== false,
-      },
-    };
+  private adoptSessionOverrides(overrides: Parameters<typeof adoptGraphPlusSessionOverridesV1>[1]): void {
+    this.lens = adoptGraphPlusSessionOverridesV1(this.lens, overrides);
     this.checkpoint.schedule();
   }
 
@@ -289,8 +350,8 @@ export class GraphPlusConsumerV1<TFile> {
     }
   }
 
-  private async applyFilter(): Promise<void> {
-    if (!this.session || !this.document) return;
+  private async applyFilter(): Promise<readonly string[]> {
+    if (!this.session || !this.document) return [];
     const compiled = compileGraphPlusFilterV1(this.document, this.lens, this.searchIndex);
     if (compiled.error) this.options.onError?.(new Error(compiled.error));
     const rootId = this.lens.form.rootNodeId;
@@ -300,8 +361,21 @@ export class GraphPlusConsumerV1<TFile> {
       this.effectiveSettings = await this.session.exportEffectiveSettings();
       this.options.onError?.(new Error('Mind Map paused because its selected root is hidden by the active filter.'));
     }
-    await this.session.applyFilter(compiled.request);
+    let visibleNodeIds = compiled.visibleNodeIds;
+    if (this.transientRevealNodeId) {
+      visibleNodeIds = [...new Set([...visibleNodeIds, this.transientRevealNodeId])];
+    }
+    await this.session.applyFilter({
+      ...compiled.request,
+      node: { op: 'id-in', ids: visibleNodeIds },
+    });
+    return visibleNodeIds;
   }
+}
+
+function stripGraphPlusProjectionFilter(state: GraphViewStateV1): GraphViewStateV1 {
+  const { projection: _projection, ...activeFilters } = state.activeFilters;
+  return { ...state, activeFilters };
 }
 
 function clone<T>(value: T): T {

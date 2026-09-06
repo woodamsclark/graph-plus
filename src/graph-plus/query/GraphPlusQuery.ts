@@ -131,6 +131,9 @@ export function compileGraphPlusFilterV1(
 export function graphPlusSessionOverridesV1(lens: GraphPlusLensStateV1): GraphSettingsOverridesV1 {
   return {
     modules: {
+      rendering: {
+        settings: { backgroundColor: 'transparent' },
+      },
       form: {
         enabled: lens.form.enabled,
         settings: {
@@ -143,6 +146,32 @@ export function graphPlusSessionOverridesV1(lens: GraphPlusLensStateV1): GraphSe
           colorBranches: lens.form.colorBranches,
         },
       },
+    },
+  };
+}
+
+export function adoptGraphPlusSessionOverridesV1(
+  lens: GraphPlusLensStateV1,
+  overrides: GraphSettingsOverridesV1,
+): GraphPlusLensStateV1 {
+  const form = overrides.modules?.form;
+  const settings = form?.settings ?? {};
+  const direction = settings.direction;
+  const edgeToken = settings.edgeToken;
+  const maxDepth = settings.maxDepth;
+  return {
+    ...lens,
+    form: {
+      enabled: form?.enabled ?? lens.form.enabled,
+      ...(typeof settings.rootNodeId === 'string' ? { rootNodeId: settings.rootNodeId } : {}),
+      direction: direction === 'incoming' || direction === 'outgoing' ? direction : 'either',
+      ...(typeof edgeToken === 'string' && edgeToken.startsWith('relation:')
+        ? { relation: edgeToken.slice('relation:'.length) }
+        : {}),
+      ...(typeof maxDepth === 'number' && Number.isSafeInteger(maxDepth) ? { maxDepth } : {}),
+      showCrossLinks: settings.showCrossLinks !== false,
+      showDisconnected: settings.showDisconnected === true,
+      colorBranches: settings.colorBranches !== false,
     },
   };
 }

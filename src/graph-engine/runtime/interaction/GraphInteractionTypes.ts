@@ -43,6 +43,18 @@ export type GraphInputEventV1 =
       readonly pointerId: number;
       readonly pointerKind: GraphPointerKindV1;
       readonly point: GraphScreenPointV1;
+      readonly mod: boolean;
+    })
+  | (GraphInputBaseV1 & {
+      readonly type: 'pointer-leave';
+      readonly pointerId: number;
+      readonly pointerKind: GraphPointerKindV1;
+      readonly point: GraphScreenPointV1;
+    })
+  | (GraphInputBaseV1 & {
+      readonly type: 'modifier-change';
+      readonly point: GraphScreenPointV1;
+      readonly mod: boolean;
     })
   | (GraphInputBaseV1 & {
       readonly type: 'pointer-cancel';
@@ -85,7 +97,7 @@ interface GraphCommandBaseV1 {
 export type GraphRuntimeCommandV1 =
   | (GraphCommandBaseV1 & { readonly type: 'pan-by'; readonly deltaX: number; readonly deltaY: number })
   | (GraphCommandBaseV1 & { readonly type: 'orbit-by'; readonly deltaX: number; readonly deltaY: number })
-  | (GraphCommandBaseV1 & { readonly type: 'zoom-by'; readonly deltaY: number })
+  | (GraphCommandBaseV1 & { readonly type: 'zoom-by'; readonly deltaY: number; readonly anchor?: GraphScreenPointV1 })
   | (GraphCommandBaseV1 & { readonly type: 'reset-camera' })
   | (GraphCommandBaseV1 & { readonly type: 'fit-camera'; readonly nodeIds?: readonly string[] })
   | (GraphCommandBaseV1 & { readonly type: 'set-selection'; readonly nodeIds: readonly string[] })
@@ -102,7 +114,12 @@ export type GraphRuntimeCommandV1 =
       readonly point: GraphScreenPointV1;
       readonly modality: GraphPointerKindV1;
     })
-  | (GraphCommandBaseV1 & { readonly type: 'set-hover'; readonly nodeId?: string })
+  | (GraphCommandBaseV1 & {
+      readonly type: 'set-hover';
+      readonly nodeId?: string;
+      readonly point?: GraphScreenPointV1;
+      readonly mod: boolean;
+    })
   | (GraphCommandBaseV1 & { readonly type: 'drag-start'; readonly nodeId: string; readonly point: GraphScreenPointV1 })
   | (GraphCommandBaseV1 & { readonly type: 'drag-update'; readonly nodeId: string; readonly point: GraphScreenPointV1 })
   | (GraphCommandBaseV1 & {

@@ -326,7 +326,7 @@ controls hidden by the consumer.
 
 Given an unsupported document, patch, view-state, or settings schema, when it crosses
 its boundary, then the relevant boundary rejects it without inferring compatibility
-from the installed Graph+ version.
+from the installed Graph Engine version.
 
 #### C-VERSION-02 — Capability negotiation
 

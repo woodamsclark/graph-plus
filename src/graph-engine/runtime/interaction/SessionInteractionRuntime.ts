@@ -30,6 +30,8 @@ export class SessionInteractionRuntime {
   private readonly input: GraphInput;
   private readonly interpreter: GraphInteractionInterpreter;
   private hoveredNodeId: string | undefined;
+  private hoverMod = false;
+  private hoverPoint: GraphScreenPointV1 | undefined;
   private hitTestMs = 0;
   private hitTestCount = 0;
   private dragContext: {
@@ -62,6 +64,7 @@ export class SessionInteractionRuntime {
     readonly onViewStateChanged: (change: GraphRuntimeViewChangeV1) => void;
     readonly onIntent: (intent: GraphIntentV1) => void;
     readonly onActivateNode: (nodeId: string) => boolean;
+    readonly onInputQueued?: () => void;
   }) {
     this.registerCommandHandlers();
     this.input = new GraphInput({
@@ -72,6 +75,7 @@ export class SessionInteractionRuntime {
         const document = this.options.getDocument();
         return { documentId: document.documentId, documentRevision: document.revision };
       },
+      onInputQueued: this.options.onInputQueued,
     });
     this.interpreter = new GraphInteractionInterpreter({
       dimensions: this.options.dimensions,
@@ -88,6 +92,10 @@ export class SessionInteractionRuntime {
       getSelectedNodeIds: () => this.options.getViewState().selectedNodeIds,
       getNodeSelection: (nodeId) => this.options.getNodeSelection(nodeId),
       getViewport: () => this.options.surface.getViewport(),
+      setTimeout: (callback, delayMs) => this.options.platform.setTimeout(callback, delayMs),
+      clearTimeout: (handle) => this.options.platform.clearTimeout(handle),
+      onDeferredCommand: this.options.onInputQueued ?? (() => undefined),
+      cancelLongPress: () => this.input.cancelLongPress(),
     });
   }
 
@@ -168,7 +176,7 @@ export class SessionInteractionRuntime {
         this.cameraChanged(command);
         return;
       case 'zoom-by':
-        this.options.camera.zoomByWheel(command.deltaY);
+        this.options.camera.zoomByWheel(command.deltaY, command.anchor);
         this.cameraChanged(command);
         return;
       case 'reset-camera':
@@ -210,10 +218,21 @@ export class SessionInteractionRuntime {
         });
         return;
       case 'set-hover':
-        if (this.hoveredNodeId === command.nodeId) return;
+        if (this.hoveredNodeId === command.nodeId
+          && this.hoverMod === command.mod
+          && samePoint(this.hoverPoint, command.point)) return;
         this.hoveredNodeId = command.nodeId;
+        this.hoverMod = command.mod;
+        this.hoverPoint = command.point ? { ...command.point } : undefined;
         this.updateCursor();
         this.options.onViewStateChanged('interaction');
+        this.options.onIntent({
+          ...this.intentBase(command),
+          type: 'node-hover-changed',
+          ...(command.nodeId ? { nodeId: command.nodeId } : {}),
+          ...(command.point ? { anchor: { ...command.point } } : {}),
+          mod: command.mod,
+        });
         return;
       case 'drag-start':
         this.beginNodeDrag(command.nodeId, command.point);
@@ -278,7 +297,14 @@ export class SessionInteractionRuntime {
     const hoverChanged = this.hoveredNodeId !== undefined;
     if (!focusChanged && !hoverChanged) return;
     this.hoveredNodeId = undefined;
+    this.hoverMod = false;
+    this.hoverPoint = undefined;
     this.updateCursor();
+    if (hoverChanged) this.options.onIntent({
+      ...this.intentBase(command),
+      type: 'node-hover-changed',
+      mod: false,
+    });
     if (focusChanged) {
       const { focusedNodeId: _focusedNodeId, ...withoutFocus } = state;
       this.commit(nodeId === undefined ? withoutFocus : { ...withoutFocus, focusedNodeId: nodeId });
@@ -364,6 +390,8 @@ export class SessionInteractionRuntime {
     this.commands.clear();
     this.dragContext = null;
     this.hoveredNodeId = undefined;
+    this.hoverMod = false;
+    this.hoverPoint = undefined;
     this.updateCursor();
   }
 
@@ -391,6 +419,13 @@ export class SessionInteractionRuntime {
 
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function samePoint(
+  a: GraphScreenPointV1 | undefined,
+  b: GraphScreenPointV1 | undefined,
+): boolean {
+  return a === undefined ? b === undefined : b !== undefined && a.x === b.x && a.y === b.y;
 }
 
 function isVec3(value: Vec3 | undefined): value is Vec3 {

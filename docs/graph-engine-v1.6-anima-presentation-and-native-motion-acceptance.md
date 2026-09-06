@@ -197,15 +197,31 @@ module's value. Toggling Form preserves the configured global multiplier.
 
 Perspective 3D continues to use depth-aware projection and hit testing. The 2D
 square-root compensation is not silently applied to perspective depth. At sufficient
-distance, a new-mode node retains a `4` CSS-pixel visible radius. A touch at up to
-`22` CSS pixels from its center selects it, while the same mouse point outside the
-visible disc misses. These floors do not affect 2D, force, or collision geometry.
+distance, a minimum-degree node retains a `4` CSS-pixel visible radius and every node
+retains at least `0.5` of its resolved world radius. Assert that an `8`-radius leaf and
+a `24`-radius hub therefore render at `4` and `12` CSS pixels rather than sharing one
+floor. A touch at up to `22` CSS pixels from its center selects it, while the same
+mouse point outside the visible disc misses. These floors do not affect 2D, force, or
+collision geometry.
 
 ### A-V16-LABEL-01 — Label size and adaptive preservation
 
-Assert base font size equals `14 + worldRadius / 4`, receives the declared 2D zoom
-compensation, and remains collision-aware. Focused, hovered, selected, dragged, and
-Form-required labels survive the adaptive candidate budget.
+Assert base font size equals `14 + worldRadius / 4`, remains fixed in CSS pixels under
+both orthographic zoom and perspective dolly, and remains collision-aware. Focused,
+hovered, selected, dragged, and Form-required labels survive the adaptive candidate
+budget.
+
+For ordinary colliding labels, explicit structural priority wins first, then larger
+Anima world radius, then perspective proximity, then stable node ID. A distant hub
+therefore reserves space before a nearer low-degree leaf. In perspective 3D, compare
+far and near camera-target scales and assert that dollying closer increases the
+ordinary label budget while keeping the threshold-adjusted result inside `4` through
+`120`.
+
+Graph+ defaults Label threshold to `65` in 2D and `50` in 3D. At one fixed camera and
+viewport, raising the active dimension's threshold reduces ordinary accepted labels
+without hiding forced labels or changing the other dimension's setting. The control
+is present only while label mode is Adaptive and updates without remounting.
 
 ### A-V16-LABEL-02 — Anima placement and quick setting
 

@@ -16,6 +16,7 @@ import {
 } from './GraphEngineUiPolicy.ts';
 import { GraphEngineQuickSettingsDisclosureStateV1 } from './GraphEngineQuickSettingsDisclosureState.ts';
 import { ObsidianGraphUiLayoutV1 } from './ObsidianGraphUiLayout.ts';
+import { graphSettingPresentationV1 } from '../settings/GraphEngineSettingsCatalog.ts';
 
 const SECTION_TITLES: Readonly<Record<string, string>> = {
   [SECTIONS.filter]: 'Filter',
@@ -35,6 +36,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
   private contributionDisposables: Disposable[] = [];
   private readonly disclosureState = new GraphEngineQuickSettingsDisclosureStateV1();
   private collapsed: boolean;
+  private renderRevision = 0;
   private disposed = false;
 
   constructor(
@@ -85,12 +87,13 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
   private async render(): Promise<void> {
     const root = this.root;
     if (!root || this.disposed) return;
+    const revision = ++this.renderRevision;
     const [viewState, effective, document] = await Promise.all([
       this.context.session.exportViewState(),
       this.context.session.exportEffectiveSettings(),
       this.context.session.exportDocument(),
     ]);
-    if (!this.root || this.disposed) return;
+    if (!this.root || this.disposed || revision !== this.renderRevision) return;
     this.disposeContributions();
     root.replaceChildren();
     root.classList.toggle('is-collapsed', this.collapsed);
@@ -122,7 +125,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     const body = div(root, 'graphplus-controls-body graph-engine-controls-body');
     const contributions = groupContributions(this.policy.quickSettings.contributions);
     this.renderFilter(body, contributions.get(SECTIONS.filter) ?? []);
-    await this.renderForm(body, viewState, effective, contributions.get(SECTIONS.form) ?? []);
+    this.renderForm(body, viewState, effective, contributions.get(SECTIONS.form) ?? []);
     this.renderDisplay(body, effective, contributions.get(SECTIONS.display) ?? []);
     this.renderCamera(body, contributions.get(SECTIONS.camera) ?? []);
     this.renderForces(body, effective, contributions.get(SECTIONS.forces) ?? []);
@@ -139,31 +142,30 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
 
   private renderFilter(parent: HTMLElement, contributions: readonly GraphQuickSettingsContributionV1[]): void {
     if (!graphUiSectionIsShownV1(this.policy, SECTIONS.filter)) return;
-    const body = this.section(parent, SECTIONS.filter, SECTION_TITLES[SECTIONS.filter], true);
+    const body = this.section(parent, SECTIONS.filter, SECTION_TITLES[SECTIONS.filter], false);
     if (graphUiControlIsShownV1(this.policy, SECTIONS.filter, CONTROLS.clearFilter)) {
-      new Setting(body).setName('Active filters').setDesc('Consumers supply neutral filter ASTs.')
+      new Setting(body).setName('Active filters')
         .addButton((button) => button.setButtonText('Clear filters').onClick(() => this.context.session.clearFilter()));
     }
     this.mountContributions(body, contributions);
   }
 
-  private async renderForm(
+  private renderForm(
     parent: HTMLElement,
     viewState: GraphViewStateV1,
     effective: GraphEffectiveSettingsV1,
     contributions: readonly GraphQuickSettingsContributionV1[],
-  ): Promise<void> {
+  ): void {
     if (!graphUiSectionIsShownV1(this.policy, SECTIONS.form)) return;
-    const body = this.section(parent, SECTIONS.form, SECTION_TITLES[SECTIONS.form], true);
+    const body = this.section(parent, SECTIONS.form, SECTION_TITLES[SECTIONS.form], false);
     if (graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.mindMap)) {
       const form = effective.modules.form;
       const selectedId = viewState.selectedNodeIds.length === 1 ? viewState.selectedNodeIds[0] : undefined;
-      const rootNodeId = this.context.controls.getSessionOverrides().modules?.form?.settings?.rootNodeId;
       new Setting(body)
         .setName('Mind map')
         .setDesc(form?.enabled
-          ? `Root: ${typeof rootNodeId === 'string' ? rootNodeId : 'automatic'}`
-          : selectedId ? `Ready from: ${selectedId}` : 'Select one visible node to enable.')
+          ? 'Active'
+          : selectedId ? 'Ready' : 'Select a node')
         .addToggle((toggle) => toggle
           .setValue(form?.enabled === true)
           .setDisabled(form?.enabled !== true && !selectedId)
@@ -212,25 +214,36 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     if (!graphUiSectionIsShownV1(this.policy, SECTIONS.display)) return;
     const body = this.section(parent, SECTIONS.display, SECTION_TITLES[SECTIONS.display], false);
     const rendering = effective.modules.rendering;
+    const anima = effective.modules.anima;
     if (rendering) {
       const settings = rendering.settings;
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labels)) {
-        new Setting(body).setName('Labels').addDropdown((dropdown) => dropdown
-          .addOptions({ adaptive: 'Adaptive', all: 'All', off: 'Off' })
+        const presentation = graphSettingPresentationV1('rendering.labelMode');
+        new Setting(body).setName(presentation.name).addDropdown((dropdown) => dropdown
+          .addOptions(selectOptions(presentation))
           .setValue(readLabelMode(settings.labelMode))
           .onChange(async (value) => {
             await this.context.profileSettings.setModuleSetting('rendering', 'labelMode', value);
             await this.render();
           }));
       }
+      if (readLabelMode(settings.labelMode) === 'adaptive'
+        && anima?.enabled
+        && graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labelThreshold)) {
+        const thresholdKey = effective.dimensions === '3d'
+          ? 'adaptiveLabelThreshold3d'
+          : 'adaptiveLabelThreshold2d';
+        this.catalogSlider(body, `anima.${thresholdKey}`, readNumber(anima.settings[thresholdKey], 50));
+      }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.nodeSize)) {
-        this.slider(body, 'Node size', readNumber(settings.nodeRadiusScale, 1), 0.5, 4, 0.1, 'rendering', 'nodeRadiusScale');
+        this.catalogSlider(body, 'rendering.nodeRadiusScale', readNumber(settings.nodeRadiusScale, 1));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.linkThickness)) {
-        this.slider(body, 'Link thickness', readNumber(settings.edgeThicknessScale, 1), 0.1, 5, 0.05, 'rendering', 'edgeThicknessScale');
+        this.catalogSlider(body, 'rendering.edgeThicknessScale', readNumber(settings.edgeThicknessScale, 1));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.showArrows)) {
-        new Setting(body).setName('Show arrows').addToggle((toggle) => toggle
+        const presentation = graphSettingPresentationV1('rendering.showArrows');
+        new Setting(body).setName(presentation.name).addToggle((toggle) => toggle
           .setValue(settings.showArrows === true)
           .onChange(async (visible) => {
             await this.context.profileSettings.setModuleSetting('rendering', 'showArrows', visible);
@@ -238,11 +251,11 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
           }));
       }
     }
-    const anima = effective.modules.anima;
     if (anima?.enabled
       && graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labelPosition)) {
-      new Setting(body).setName('Label position').addDropdown((dropdown) => dropdown
-        .addOptions({ above: 'Above', below: 'Below' })
+      const presentation = graphSettingPresentationV1('anima.labelPosition');
+      new Setting(body).setName(presentation.name).addDropdown((dropdown) => dropdown
+        .addOptions(selectOptions(presentation))
         .setValue(readLabelPosition(anima.settings.labelPosition))
         .onChange(async (value) => {
           await this.context.profileSettings.setModuleSetting('anima', 'labelPosition', value);
@@ -271,7 +284,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     step: number,
     key: string,
   ): void {
-    const setting = new Setting(parent).setName(name).setDesc(`Current: ${formatNumber(value)}`);
+    const setting = new Setting(parent).setName(name);
     setting.settingEl.classList.add('graphplus-slider-setting', 'graph-engine-slider-setting');
     setting.addSlider((slider) => {
       slider.setLimits(min, max, step).setValue(value).setDynamicTooltip().onChange((next) => {
@@ -292,7 +305,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     if (!graphUiSectionIsShownV1(this.policy, SECTIONS.camera)) return;
     const body = this.section(parent, SECTIONS.camera, SECTION_TITLES[SECTIONS.camera], false);
     if (graphUiControlIsShownV1(this.policy, SECTIONS.camera, CONTROLS.resetCamera)) {
-      new Setting(body).setName('Camera').setDesc('Reset framing without changing the graph document.')
+      new Setting(body).setName('Camera')
         .addButton((button) => button.setButtonText('Reset camera').onClick(() => this.context.session.resetCamera()));
     }
     this.mountContributions(body, contributions);
@@ -308,29 +321,35 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     const forces = effective.modules['force-layout'];
     if (forces?.enabled) {
       const settings = forces.settings;
-      if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.weightingMode)) {
+      if (effective.dimensions === '3d'
+        && graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.axialSpringAxis)) {
+        const presentation = graphSettingPresentationV1('force-layout.axialSpringAxis');
         new Setting(body)
-          .setName('Layout weighting')
-          .setDesc('Use graph topology to form neighborhoods and loosen hub-mediated bridges.')
+          .setName(presentation.name)
           .addDropdown((dropdown) => dropdown
-            .addOptions({ 'topology-weighted': 'Topology weighted', uniform: 'Uniform' })
-            .setValue(settings.weightingMode === 'uniform' ? 'uniform' : 'topology-weighted')
-            .onChange(async (mode) => {
-              await this.context.profileSettings.setModuleSetting('force-layout', 'weightingMode', mode);
+            .addOptions(selectOptions(presentation))
+            .setValue(readAxialAxis(settings.axialSpringAxis))
+            .onChange(async (axis) => {
+              await this.context.profileSettings.setModuleSetting('force-layout', 'axialSpringAxis', axis);
               await this.render();
             }));
       }
+      if (effective.dimensions === '3d'
+        && readAxialAxis(settings.axialSpringAxis) !== 'off'
+        && graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.axialSpringStiffness)) {
+        this.catalogSlider(body, 'force-layout.axialSpringStiffness', readNumber(settings.axialSpringStiffness, 0) * 100);
+      }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.centerForce)) {
-        this.slider(body, 'Center force', readNumber(settings.centeringStrength, 0.1), 0, 1, 0.001, 'force-layout', 'centeringStrength');
+        this.catalogSlider(body, 'force-layout.centeringStrength', readNumber(settings.centeringStrength, 0.1));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.radialForce)) {
-        this.slider(body, 'Repel force', readNumber(settings.repulsionStrength, 1000), 0, 50000, 250, 'force-layout', 'repulsionStrength');
+        this.catalogSlider(body, 'force-layout.repulsionStrength', readNumber(settings.repulsionStrength, 1000));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.linkForce)) {
-        this.slider(body, 'Link force', readNumber(settings.springStrength, 1), 0, 5, 0.05, 'force-layout', 'springStrength');
+        this.catalogSlider(body, 'force-layout.springStrength', readNumber(settings.springStrength, 1));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.linkDistance)) {
-        this.slider(body, 'Link distance', readNumber(settings.springLength, 250), 20, 500, 5, 'force-layout', 'springLength');
+        this.catalogSlider(body, 'force-layout.springLength', readNumber(settings.springLength, 250));
       }
     }
     this.mountContributions(body, contributions);
@@ -346,15 +365,12 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     const body = this.section(parent, SECTIONS.regions, SECTION_TITLES[SECTIONS.regions], false);
     const settings = regions.settings;
     if (graphUiControlIsShownV1(this.policy, SECTIONS.regions, CONTROLS.regionAttraction)) {
-      this.slider(body, 'Region attraction', readNumber(settings.membershipStrength, 0.18), 0, 2, 0.01,
-        'node-regions', 'membershipStrength');
+      this.catalogSlider(body, 'node-regions.membershipStrength', readNumber(settings.membershipStrength, 0.18));
     }
     if (graphUiControlIsShownV1(this.policy, SECTIONS.regions, CONTROLS.regionBoundaries)) {
+      const presentation = graphSettingPresentationV1('node-regions.boundariesVisible');
       new Setting(body)
-        .setName('Show region boundaries')
-        .setDesc(effective.dimensions === '2d'
-          ? 'Draw live visual boundaries without changing membership forces.'
-          : 'Region boundaries are available in 2D only.')
+        .setName(presentation.name)
         .addToggle((toggle) => toggle
           .setValue(settings.boundariesVisible !== false)
           .setDisabled(effective.dimensions !== '2d')
@@ -375,12 +391,13 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     step: number,
     moduleId: string,
     key: string,
+    storageScale = 1,
   ): void {
-    const setting = new Setting(parent).setName(name).setDesc(`Current: ${formatNumber(value)}`);
+    const setting = new Setting(parent).setName(name);
     setting.settingEl.classList.add('graphplus-slider-setting', 'graph-engine-slider-setting');
     setting.addSlider((slider) => {
       slider.setLimits(min, max, step).setValue(value).setDynamicTooltip().onChange((next) => {
-        void this.context.profileSettings.setModuleSetting(moduleId, key, next);
+        void this.context.profileSettings.setModuleSetting(moduleId, key, next * storageScale);
       });
       slider.sliderEl.addEventListener('dblclick', async (event) => {
         event.preventDefault();
@@ -397,6 +414,22 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
         await this.context.profileSettings.setModuleSetting(moduleId, key, undefined);
         await this.render();
       }));
+  }
+
+  private catalogSlider(parent: HTMLElement, id: string, value: number): void {
+    const presentation = graphSettingPresentationV1(id);
+    if (presentation.control.type !== 'slider') throw new Error(`${id} is not a slider setting.`);
+    this.slider(
+      parent,
+      presentation.name,
+      value,
+      presentation.control.min,
+      presentation.control.max,
+      presentation.control.step,
+      presentation.moduleId,
+      presentation.key,
+      presentation.control.storageScale ?? 1,
+    );
   }
 
   private section(parent: HTMLElement, sectionId: string, title: string, defaultOpen: boolean): HTMLElement {
@@ -486,10 +519,15 @@ function readLabelPosition(value: JsonValue | undefined): 'above' | 'below' {
   return value === 'below' ? 'below' : 'above';
 }
 
-
-function formatNumber(value: number): string {
-  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
+function readAxialAxis(value: JsonValue | undefined): 'off' | 'x' | 'y' | 'z' {
+  return value === 'x' || value === 'y' || value === 'z' ? value : 'off';
 }
+
+function selectOptions(presentation: ReturnType<typeof graphSettingPresentationV1>): Record<string, string> {
+  if (presentation.control.type !== 'select') throw new Error(`${presentation.id} is not a select setting.`);
+  return { ...presentation.control.options };
+}
+
 
 function humanize(value: string): string {
   return value.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_.]/g, ' ').replace(/^./, (letter) => letter.toUpperCase());

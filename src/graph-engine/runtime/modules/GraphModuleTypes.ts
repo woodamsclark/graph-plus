@@ -86,6 +86,8 @@ export interface GraphNodeRegionLayoutV1 {
 export interface GraphModuleTickResultV1 {
   readonly positions?: Readonly<Record<string, Vec3>>;
   readonly camera?: import('../../contracts/v1/index.ts').GraphCameraStateV1;
+  /** Keeps the session awake for another eligible pipeline frame. */
+  readonly requestNextFrame?: boolean;
 }
 
 export interface GraphMotionTargetsV1 {

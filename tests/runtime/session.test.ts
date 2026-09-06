@@ -138,6 +138,10 @@ test('R-SHELL-03 round-trips consumer-owned view state and supports camera comma
   deepEqual(saved.selectedNodeIds, ['b'], 'selection should deduplicate and reconcile unknown IDs');
   equal(saved.focusedNodeId, 'a', 'focus should export by stable node ID');
   deepEqual(saved.camera.target, { x: 20, y: 30, z: 0 }, 'fit command should target known saved positions');
+  await session.fitNodes(['a', 'b'], { centerNodeId: 'a' });
+  deepEqual((await session.exportViewState()).camera.target, { x: 10, y: 20, z: 0 },
+    'anchored fit should size for all requested nodes while centering the requested node');
+  await session.restoreViewState(saved);
   equal(saved.activeFilters.render?.scope, 'render', 'active filters should belong to exported view state');
   await session.dispose();
 
@@ -221,7 +225,7 @@ test('R-SHELL-04 suspends animation work and disposes every owned lifecycle reso
   const session = await value.create();
   value.platform.flushFrame();
   equal(surface(value.container).dataset.frameCount, '1', 'flushed frame should update deterministic diagnostics');
-  equal(value.platform.pendingFrames, 1, 'frame loop should reschedule exactly once');
+  equal(value.platform.pendingFrames, 0, 'an unchanged session should sleep after its frame completes');
 
   session.setSuspended(true);
   equal(value.platform.pendingFrames, 0, 'manual suspension should cancel animation work');
@@ -268,6 +272,42 @@ test('R-SHELL-04 suspends animation work and disposes every owned lifecycle reso
     disposedSuspensionError = error instanceof GraphSessionDisposedErrorV1;
   }
   equal(disposedSuspensionError, true, 'disposed suspension requests should fail structurally');
+});
+
+test('active graph work is capped at 60 Hz and a settled force session goes fully idle', async () => {
+  const value = harness();
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
+    modules: { 'force-layout': { enabled: true } },
+  });
+  const session = await value.create();
+  await session.resetPerformanceMeasurements();
+  const callbackInterval = 1_000 / 120;
+  for (let index = 1; index <= 120; index += 1) {
+    value.platform.flushFrame(index * callbackInterval);
+  }
+  const active = await session.exportPerformanceSnapshot();
+  assert((active.counters?.moduleTicks ?? 0) <= 60,
+    'a 120 Hz callback stream must not advance the expensive graph pipeline more than 60 times per second');
+  for (let index = 121; index <= 720 && value.platform.pendingFrames > 0; index += 1) {
+    value.platform.flushFrame(index * callbackInterval);
+  }
+  equal(value.platform.pendingFrames, 0, 'the cooled force session should stop requesting animation callbacks');
+  await session.resetPerformanceMeasurements();
+  value.platform.flushFrame(10_000);
+  equal((await session.exportPerformanceSnapshot()).counters?.moduleTicks, 0,
+    'a settled graph with no input should perform no module work');
+  await session.dispose();
+
+  const highRefresh = harness();
+  highRefresh.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
+    modules: { 'force-layout': { enabled: true } },
+  });
+  const highRefreshSession = await highRefresh.create();
+  await highRefreshSession.resetPerformanceMeasurements();
+  for (let index = 1; index <= 144; index += 1) highRefresh.platform.flushFrame(index * (1_000 / 144));
+  assert(((await highRefreshSession.exportPerformanceSnapshot()).counters?.moduleTicks ?? 0) <= 60,
+    'a 144 Hz callback stream must remain below the 60 Hz pipeline ceiling');
+  await highRefreshSession.dispose();
 });
 
 test('R-PROFILE-LIVE-01 refreshes mounted sessions without replacing their surface', async () => {

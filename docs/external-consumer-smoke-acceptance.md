@@ -9,7 +9,7 @@ Governing contract: [Graph Engine V1 External Consumer Smoke Contract](external-
 ## 1. Acceptance objective
 
 PatternSmith is a real external bundle used to verify that Graph Engine can be leased
-from the installed Graph+ plugin and embedded in outside plugin UI. These checks judge
+from the installed Graph Engine plugin and embedded in outside plugin UI. These checks judge
 the public provider/client boundary. PatternSmith learning behavior is out of scope.
 
 Record each item as `pass`, `fail`, or `not run`, with the test command, Obsidian
@@ -154,15 +154,15 @@ follow-ups but are not required to answer the primary insertion question.
 
 ### I — Provider absence, unload, and reload
 
-- [ ] **EXT-I-01 Initially absent:** Disable Graph+, keep PatternSmith enabled, and open
+- [ ] **EXT-I-01 Initially absent:** Disable Graph Engine, keep PatternSmith enabled, and open
   the smoke surface. The standard `Graph Engine unavailable/not installed` surface
   appears inside PatternSmith and other PatternSmith UI remains usable.
-- [ ] **EXT-I-02 Late provider:** Start the connection attempt before Graph+ finishes
+- [ ] **EXT-I-02 Late provider:** Start the connection attempt before Graph Engine finishes
   enabling. Confirm the availability retry creates one graph, not duplicates.
-- [ ] **EXT-I-03 Active unload:** With both graphs active, disable Graph+. PatternSmith
+- [ ] **EXT-I-03 Active unload:** With both graphs active, disable Graph Engine. PatternSmith
   reports unavailability; stale interaction does not continue against an orphaned
   runtime.
-- [ ] **EXT-I-04 Reload recovery:** Re-enable Graph+ and reconnect or reopen the smoke
+- [ ] **EXT-I-04 Reload recovery:** Re-enable Graph Engine and reconnect or reopen the smoke
   surface. A new provider instance/session works and persisted PatternSmith state
   restores.
 - [ ] **EXT-I-05 Stale handle rejection:** A diagnostic/test call through the old

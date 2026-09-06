@@ -148,7 +148,11 @@ export class GraphCameraController {
     };
   }
 
-  zoomByWheel(deltaY: number): void {
+  zoomByWheel(deltaY: number, anchor?: { readonly x: number; readonly y: number }): void {
+    const validAnchor = anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y) ? anchor : undefined;
+    const anchorWorld = validAnchor && this.viewport.width > 0 && this.viewport.height > 0
+      ? this.screenToWorld(validAnchor.x, validAnchor.y, this.worldToScreen(this.state.target).depth)
+      : undefined;
     if (this.state.projection === 'perspective') {
       const offset = subtract(this.state.position, this.state.target);
       const currentDistance = Math.max(0.0001, length(offset));
@@ -161,10 +165,27 @@ export class GraphCameraController {
         ...this.state,
         position: add(this.state.target, scaleVector(offset, nextDistance / currentDistance)),
       };
+      this.preserveAnchor(validAnchor, anchorWorld);
       return;
     }
     const zoom = clamp(this.state.zoom * Math.exp(-deltaY * 0.0015), MIN_ZOOM, MAX_ZOOM);
     this.state = { ...this.state, zoom };
+    this.preserveAnchor(validAnchor, anchorWorld);
+  }
+
+  private preserveAnchor(
+    anchor: { readonly x: number; readonly y: number } | undefined,
+    before: Vec3 | undefined,
+  ): void {
+    if (!anchor || !before) return;
+    const depth = this.worldToScreen(this.state.target).depth;
+    const after = this.screenToWorld(anchor.x, anchor.y, depth);
+    const translation = subtract(before, after);
+    this.state = {
+      ...this.state,
+      position: add(this.state.position, translation),
+      target: add(this.state.target, translation),
+    };
   }
 
   setPerspectiveZoom(zoom: number): void {
@@ -188,17 +209,21 @@ export class GraphCameraController {
     };
   }
 
-  fit(positions: readonly Vec3[], paddingPx = 48, maxMagnification?: number): void {
+  fit(positions: readonly Vec3[], paddingPx = 48, maxMagnification?: number, center?: Vec3): void {
     if (!positions.length || this.viewport.width <= 0 || this.viewport.height <= 0) return;
     const bounds = graphBounds(positions);
-    const target = {
+    const target = center ? { ...center } : {
       x: (bounds.min.x + bounds.max.x) / 2,
       y: (bounds.min.y + bounds.max.y) / 2,
       z: (bounds.min.z + bounds.max.z) / 2,
     };
     if (this.state.projection === 'orthographic') {
-      const width = Math.max(1, bounds.max.x - bounds.min.x);
-      const height = Math.max(1, bounds.max.y - bounds.min.y);
+      const width = Math.max(1, center
+        ? 2 * Math.max(...positions.map((position) => Math.abs(position.x - target.x)))
+        : bounds.max.x - bounds.min.x);
+      const height = Math.max(1, center
+        ? 2 * Math.max(...positions.map((position) => Math.abs(position.y - target.y)))
+        : bounds.max.y - bounds.min.y);
       let zoom = clamp(Math.min(
         Math.max(1, this.viewport.width - paddingPx * 2) / width,
         Math.max(1, this.viewport.height - paddingPx * 2) / height,

@@ -154,7 +154,7 @@ engine-owned panel.
 ## 4. Target composition
 
 ```text
-Obsidian Graph+ plugin
+Obsidian Graph Engine plugin
 ├── Graph Engine provider
 │   ├── host-neutral contracts/core/runtime/modules
 │   ├── lease-scoped node action registry

@@ -56,7 +56,7 @@ export class GraphEngineWorkspaceClientV1 {
           for (const reply of replies) if (reply.ok) void reply.lease.release();
           finish({
             ok: false,
-            error: { code: 'ambiguous-provider', message: 'Multiple Graph Engine providers answered the same request.' },
+            error: { code: 'ambiguous-provider', message: 'Multiple graph-engine providers answered the same request.' },
           });
           return;
         }
@@ -89,7 +89,7 @@ export class GraphEngineWorkspaceClientV1 {
         ok: false,
         error: {
           code: 'engine-unavailable',
-          message: 'Graph+ is unavailable or not installed. This feature requires its Graph Engine.',
+          message: 'graph-engine is unavailable or not installed. This feature requires graph-engine.',
         },
       }), timeoutMs);
       request();

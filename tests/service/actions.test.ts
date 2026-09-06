@@ -50,3 +50,23 @@ test('R-INPUT-15 namespaces identical local action IDs and disposes only their o
   registry.runtimeFor('second').invokeFirst(['primary'], context('second', 'a'), () => undefined);
   deepEqual(runs, ['first', 'second', 'second'], 'disposing one namespace must not affect another consumer');
 });
+
+test('R-INPUT-15 scopes identical action IDs to independent leases of one consumer', () => {
+  const registry = new ConsumerNodeActionRegistryV1();
+  const globalOwner = {};
+  const localOwner = {};
+  const runs: string[] = [];
+  registry.register('graph-plus', globalOwner, [{
+    id: 'open-node', label: 'Global open', run: () => { runs.push('global'); },
+  }]);
+  registry.register('graph-plus', localOwner, [{
+    id: 'open-node', label: 'Local open', run: () => { runs.push('local'); },
+  }]);
+
+  registry.runtimeFor('graph-plus', globalOwner)
+    .invokeFirst(['open-node'], context('graph-plus', 'a'), () => undefined);
+  registry.runtimeFor('graph-plus', localOwner)
+    .invokeFirst(['open-node'], context('graph-plus', 'a'), () => undefined);
+
+  deepEqual(runs, ['global', 'local'], 'each session lease should invoke only its own consumer callback');
+});

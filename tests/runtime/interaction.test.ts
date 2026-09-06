@@ -56,6 +56,35 @@ test('R-INPUT-01 pans an unfocused wheel and orbits a focused 3d graph', async (
   await session.dispose();
 });
 
+test('a focused camera follows its node while the force layout settles', async () => {
+  const value = runtimeHarness({ profileId: 'three-dimensional' });
+  value.profiles.setUserOverrides('synthetic-consumer', 'three-dimensional', {
+    modules: {
+      'force-layout': {
+        enabled: true,
+        settings: {
+          repulsionStrength: 0,
+          springStrength: 0,
+          centeringStrength: 0.5,
+          collisionRadius: 0,
+          velocityDecay: 0,
+        },
+      },
+    },
+  });
+  const session = await value.create();
+  await session.focusNode('a');
+  const before = await session.exportViewState();
+  value.platform.flushFrame();
+  const after = await session.exportViewState();
+
+  assert(!sameVector(after.positions.a, before.positions.a), 'the fixture node should move during force settling');
+  equal(after.focusedNodeId, 'a', 'force settling must preserve focus identity');
+  assert(vectorDistance(after.camera.target, after.positions.a) < 0.000001,
+    'the camera target should remain attached to the moving focused node');
+  await session.dispose();
+});
+
 test('V1.2 coalesces camera input and hover without graph-wide recomputation', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
@@ -511,8 +540,78 @@ test('focused 3D drag over another node orbits without moving or transiently hig
   const stationaryOtherPoint = await nodePoint(session, 'b');
   click(value, canvas, stationaryOtherPoint, { pointerId: 36, pointerType: 'touch' });
   value.platform.flushFrame();
+  value.platform.flushTimer();
+  value.platform.flushFrame();
   equal((await session.exportViewState()).focusedNodeId, 'b',
     'a stationary click on another node should still transfer focus');
+  await session.dispose();
+});
+
+test('V1.7 double tap hold and vertical drag owns precision zoom in 2D and focused 3D', async () => {
+  const flat = runtimeHarness();
+  const flatSession = await flat.create();
+  const flatCanvas = runtimeCanvas(flat.container);
+  const flatPoint = await nodePoint(flatSession, 'a');
+  click(flat, flatCanvas, flatPoint, { pointerId: 100, pointerType: 'touch' });
+  flat.platform.flushFrame();
+  const flatBefore = await flatSession.exportViewState();
+  pointer(flat, flatCanvas, 'pointerdown', flatPoint.x, flatPoint.y, { pointerId: 101, pointerType: 'touch' });
+  pointer(flat, flatCanvas, 'pointermove', flatPoint.x, flatPoint.y + 30, { pointerId: 101, pointerType: 'touch' });
+  flat.platform.flushFrame();
+  const flatIn = await flatSession.exportViewState();
+  assert(flatIn.camera.zoom > flatBefore.camera.zoom, 'pulling down should zoom a 2D graph in');
+  deepEqual(flatIn.selectedNodeIds, flatBefore.selectedNodeIds, 'precision zoom over a node must not select it');
+  pointer(flat, flatCanvas, 'pointermove', flatPoint.x, flatPoint.y - 10, { pointerId: 101, pointerType: 'touch' });
+  flat.platform.flushFrame();
+  const flatReversed = await flatSession.exportViewState();
+  assert(flatReversed.camera.zoom < flatIn.camera.zoom, 'reversing upward should reverse zoom continuously');
+  pointer(flat, flatCanvas, 'pointerup', flatPoint.x, flatPoint.y - 10, { pointerId: 101, pointerType: 'touch' });
+  flat.platform.flushFrame();
+  equal(flat.platform.pendingTimers, 0, 'completed precision zoom should leave no touch timer behind');
+  await flatSession.dispose();
+
+  const spatial = runtimeHarness({ profileId: 'three-dimensional' });
+  const spatialSession = await spatial.create();
+  const spatialCanvas = runtimeCanvas(spatial.container);
+  await spatialSession.setSelection(['a']);
+  await spatialSession.focusNode('a');
+  const spatialPoint = await nodePoint(spatialSession, 'b');
+  click(spatial, spatialCanvas, spatialPoint, { pointerId: 102, pointerType: 'touch' });
+  spatial.platform.flushFrame();
+  const spatialBefore = await spatialSession.exportViewState();
+  pointer(spatial, spatialCanvas, 'pointerdown', spatialPoint.x, spatialPoint.y, { pointerId: 103, pointerType: 'touch' });
+  pointer(spatial, spatialCanvas, 'pointermove', spatialPoint.x, spatialPoint.y + 30, { pointerId: 103, pointerType: 'touch' });
+  spatial.platform.flushFrame();
+  const spatialAfter = await spatialSession.exportViewState();
+  assert(vectorDistance(spatialAfter.camera.position, spatialAfter.camera.target)
+    < vectorDistance(spatialBefore.camera.position, spatialBefore.camera.target),
+  'pulling down should dolly a perspective graph in');
+  equal(spatialAfter.focusedNodeId, 'a', 'focused 3D precision zoom must retain the existing focus');
+  deepEqual(spatialAfter.positions.b, spatialBefore.positions.b, 'precision zoom beginning over a node must not drag it');
+  pointer(spatial, spatialCanvas, 'pointerup', spatialPoint.x, spatialPoint.y + 30, { pointerId: 103, pointerType: 'touch' });
+  spatial.platform.flushFrame();
+  await spatialSession.dispose();
+});
+
+test('V1.7 semantic hover reports Mod changes without mutating graph state', async () => {
+  const value = runtimeHarness();
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  const point = await nodePoint(session, 'a');
+  const intents: GraphIntentV1[] = [];
+  session.onIntent((intent) => intents.push(intent));
+  const mac = /Mac|iPhone|iPad|iPod/i.test(value.window.navigator.platform ?? '');
+  pointer(value, canvas, 'pointermove', point.x, point.y, {
+    pointerId: 104,
+    pointerType: 'mouse',
+    metaKey: mac,
+    ctrlKey: !mac,
+  });
+  value.platform.flushFrame();
+  const hover = [...intents].reverse().find((intent) => intent.type === 'node-hover-changed');
+  equal(hover?.type === 'node-hover-changed' ? hover.nodeId : undefined, 'a', 'hover should expose the hit node');
+  equal(hover?.type === 'node-hover-changed' ? hover.mod : false, true, 'hover should expose semantic platform Mod');
+  deepEqual((await session.exportViewState()).selectedNodeIds, [], 'preview eligibility must not alter selection');
   await session.dispose();
 });
 
@@ -632,6 +731,8 @@ test('renderer draws generic nodes, labels, edges, and directed arrows in both p
   for (const profileId of ['two-dimensional', 'three-dimensional']) {
     const value = runtimeHarness({ profileId });
     const session = await value.create();
+    await session.setSessionOverrides({ modules: { rendering: { settings: { showArrows: true } } } });
+    value.platform.flushFrame();
     assert(value.drawCalls.includes('clearRect'), `${profileId} renderer should clear its canvas`);
     assert(value.drawCalls.includes('arc'), `${profileId} renderer should draw nodes`);
     assert(value.drawCalls.includes('fillText'), `${profileId} renderer should draw labels`);
@@ -757,7 +858,7 @@ function pointer(
   type: 'pointerdown' | 'pointermove' | 'pointerup',
   clientX: number,
   clientY: number,
-  options: { pointerId: number; button?: number; pointerType?: string },
+  options: { pointerId: number; button?: number; pointerType?: string; ctrlKey?: boolean; metaKey?: boolean },
 ): void {
   const event = new value.window.PointerEvent(type, {
     clientX,
@@ -765,6 +866,8 @@ function pointer(
     pointerId: options.pointerId,
     pointerType: options.pointerType ?? 'mouse',
     button: options.button ?? 0,
+    ctrlKey: options.ctrlKey ?? false,
+    metaKey: options.metaKey ?? false,
     bubbles: true,
     cancelable: true,
   });
@@ -773,6 +876,8 @@ function pointer(
   Object.defineProperty(event, 'pointerId', { value: options.pointerId });
   Object.defineProperty(event, 'pointerType', { value: options.pointerType ?? 'mouse' });
   Object.defineProperty(event, 'button', { value: options.button ?? 0 });
+  Object.defineProperty(event, 'ctrlKey', { value: options.ctrlKey ?? false });
+  Object.defineProperty(event, 'metaKey', { value: options.metaKey ?? false });
   canvas.dispatchEvent(event as unknown as Event);
 }
 

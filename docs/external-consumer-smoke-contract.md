@@ -14,7 +14,7 @@ harness, but PatternSmith product behavior is not the subject of this pass.
 
 The pass answers one question:
 
-> Can an outside Obsidian plugin obtain Graph Engine from the installed Graph+ plugin,
+> Can an outside Obsidian plugin obtain Graph Engine from the installed Graph Engine plugin,
 > mount a working graph inside its own UI, use the public API, own its persisted state,
 > and cleanly survive provider and consumer lifecycle changes without importing Graph+
 > implementation code?
@@ -28,7 +28,7 @@ not replace Graph+'s own performance or platform testing.
 There is one runtime provider and two independent consumers:
 
 ```text
-Installed Graph+ plugin
+Installed Graph Engine plugin
   Graph Engine provider
     <- local public lease <- bundled Graph+ vault consumer
     <- Workspace Events lease <- PatternSmith smoke consumer
@@ -36,7 +36,7 @@ Installed Graph+ plugin
 
 PatternSmith bundles only the small compile-time contracts/client artifact. It does
 not bundle a second Graph Engine runtime. At runtime it discovers and leases the
-provider hosted by Graph+ through the documented Workspace Events protocol.
+provider hosted by Graph Engine through the documented Workspace Events protocol.
 
 The compile-time artifact must be self-contained and consumable from PatternSmith's
 repository. It may contain public V1 types, validation/reconciliation helpers, the

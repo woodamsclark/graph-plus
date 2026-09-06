@@ -1,14 +1,14 @@
 # Graph Engine V1 consumer guide
 
-Graph+ is the installed Obsidian plugin and Graph Engine is its leaseable platform.
-The engine starts without scanning the vault or creating a renderer. Graph+ itself is
-only one consumer; opening its view is what starts the vault adapter and graph session.
+Graph Engine is the installed Obsidian plugin and leaseable platform. It starts without
+scanning the vault or creating a renderer. Graph+ is its bundled first-party consumer;
+opening that view is what starts the vault adapter and graph session.
 
 ## Public artifact
 
 External consumer code depends only on the generated
 [`@graph-plus/graph-engine-client`](../packages/graph-engine-client/package.json)
-artifact. Graph+'s canonical public entry remains
+artifact. Graph Engine's canonical public entry remains
 [`src/graph-engine/public.ts`](../src/graph-engine/public.ts), and `npm run build:client`
 copies its reviewed dependency closure into the self-contained package. Consumers may
 install a packed copy or vendor the artifact; they must not import provider core,
@@ -41,10 +41,10 @@ if (!result.ok) {
 }
 ```
 
-The client listens before its first request, retries when Graph+ announces late
+The client listens before its first request, retries when Graph Engine announces late
 availability, rejects incompatible or ambiguous providers structurally, and removes
 its temporary listeners after settlement. Never use Obsidian's undocumented plugin
-manager to find Graph+.
+manager to find Graph Engine.
 
 ## Register and mount
 

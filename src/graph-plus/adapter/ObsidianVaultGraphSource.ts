@@ -7,10 +7,17 @@ interface ResolvedLinks {
 
 export class ObsidianVaultGraphSourceV1 {
   private readonly contentCache = new Map<string, { readonly mtime: number; readonly content: string }>();
+  private inFlight?: Promise<VaultGraphSnapshotV1<TFile>>;
 
   constructor(private readonly app: App) {}
 
   async read(): Promise<VaultGraphSnapshotV1<TFile>> {
+    if (this.inFlight) return this.inFlight;
+    this.inFlight = this.readFresh().finally(() => { this.inFlight = undefined; });
+    return this.inFlight;
+  }
+
+  private async readFresh(): Promise<VaultGraphSnapshotV1<TFile>> {
     const files = this.app.vault.getMarkdownFiles();
     const notes = await Promise.all(files.map((file) => this.readNote(file)));
     const currentPaths = new Set(files.map((file) => file.path));

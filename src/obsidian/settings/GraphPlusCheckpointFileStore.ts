@@ -76,12 +76,12 @@ export class GraphPlusCheckpointFileStoreV1 implements GraphPlusCheckpointStoreV
     let checkedCheckpoint: GraphPlusCheckpointV1 | undefined;
     if (writeDocument) {
       checkedCheckpoint = validateGraphPlusCheckpointV1(checkpoint);
-      if (!checkedCheckpoint) throw new Error('Cannot persist an invalid Graph+ checkpoint.');
+      if (!checkedCheckpoint) throw new Error('Cannot persist an invalid graph+ checkpoint.');
       await this.ensureDirectory();
       documentPath = this.nextDocumentPath(vaultId, checkedCheckpoint);
       await this.options.adapter.write(documentPath, JSON.stringify(checkedCheckpoint.document));
     }
-    if (!documentPath) throw new Error('Graph+ checkpoint document storage is unavailable.');
+    if (!documentPath) throw new Error('graph+ checkpoint document storage is unavailable.');
 
     const source = checkedCheckpoint ?? checkpoint;
     const nextReference: GraphPlusCheckpointReferenceV1 = {

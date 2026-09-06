@@ -115,15 +115,15 @@ export class GraphEngineProviderCoreV1 {
     readonly supportedProtocolVersions: readonly number[];
     readonly requestedCapabilities: readonly string[];
   }): GraphEngineLeaseResultV1 {
-    if (!this.active) return failure('engine-unavailable', 'Graph Engine is unavailable.');
+    if (!this.active) return failure('engine-unavailable', 'graph-engine is unavailable.');
     requireId(options.consumerId, 'consumer ID');
     if (!options.supportedProtocolVersions.includes(1)) {
-      return failure('protocol-incompatible', 'Graph Engine protocol v1 is not supported by this consumer.');
+      return failure('protocol-incompatible', 'graph-engine protocol v1 is not supported by this consumer.');
     }
     const missing = uniqueIds(options.requestedCapabilities, 'requested capabilities')
       .filter((capability) => !this.capabilities.includes(capability));
     if (missing.length > 0) {
-      return failure('capability-unavailable', `Graph Engine does not provide: ${missing.join(', ')}.`);
+      return failure('capability-unavailable', `graph-engine does not provide: ${missing.join(', ')}.`);
     }
     const record: LeaseRecord = {
       id: this.nextLeaseId++,
@@ -172,7 +172,7 @@ export class GraphEngineProviderCoreV1 {
           });
         }
         const hosted = await this.sessions.createHostedSession(options, {
-          nodeActions: this.nodeActions.runtimeFor(record.consumerId),
+          nodeActions: this.nodeActions.runtimeFor(record.consumerId, record),
         });
         let ui: Disposable | undefined;
         try {
@@ -211,7 +211,7 @@ export class GraphEngineProviderCoreV1 {
     if (!this.active || record.released || !this.leases.has(record)) {
       throw new GraphEngineServiceErrorV1({
         code: 'engine-unavailable',
-        message: 'This Graph Engine lease is no longer available.',
+        message: 'This graph-engine lease is no longer available.',
       });
     }
   }

@@ -107,10 +107,14 @@ export interface GraphRenderThemeV1 {
   readonly labelFont: string;
   readonly labelMode?: 'adaptive' | 'all' | 'off';
   readonly labelPosition?: 'above' | 'below';
+  /** Higher values delay ordinary adaptive labels; interaction-required labels remain visible. */
+  readonly adaptiveLabelThreshold?: number;
   readonly nodeScaleMode?: 'linear' | 'sqrt-orthographic';
   readonly labelScaleMode?: 'fixed' | 'sqrt-orthographic';
   /** New-mode perspective floor for the visible node disc, in CSS pixels. */
   readonly minimumPerspectiveNodeRadius?: number;
+  /** Perspective-only minimum fraction of the node's resolved world radius. */
+  readonly minimumPerspectiveNodeScale?: number;
   /** Perspective-only finger hit radius; it does not enlarge the visible disc. */
   readonly minimumPerspectiveTouchHitRadius?: number;
   readonly edgeAggregation?: 'canonical' | 'unordered-pair';

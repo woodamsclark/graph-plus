@@ -9,6 +9,9 @@ import type {
 
 export class GraphInput {
   private longPressTimer: number | null = null;
+  private mouseInside = false;
+  private lastMousePoint: GraphScreenPointV1 = { x: 0, y: 0 };
+  private lastMod = false;
   private longPressPointer: { readonly pointerId: number; readonly point: GraphScreenPointV1 } | null = null;
   private readonly activePointers = new Set<number>();
   private enabled = true;
@@ -19,6 +22,7 @@ export class GraphInput {
     readonly platform: SessionRuntimePlatformV1;
     readonly events: BufferedQueue<GraphInputEventV1>;
     readonly getIdentity: () => InputGraphIdentityV1;
+    readonly onInputQueued?: () => void;
     readonly longPressMs?: number;
   }) {
     this.attach();
@@ -32,6 +36,8 @@ export class GraphInput {
   reset(): void {
     this.clearLongPress();
     this.activePointers.clear();
+    this.mouseInside = false;
+    this.lastMod = false;
     this.options.events.clear();
   }
 
@@ -46,22 +52,28 @@ export class GraphInput {
     const canvas = this.options.canvas;
     canvas.addEventListener('pointerdown', this.onPointerDown, { passive: false });
     canvas.addEventListener('pointermove', this.onPointerMove, { passive: false });
+    canvas.addEventListener('pointerleave', this.onPointerLeave, { passive: false });
     canvas.addEventListener('pointerup', this.onPointerUp, { passive: false });
     canvas.addEventListener('pointercancel', this.onPointerCancel, { passive: false });
     canvas.addEventListener('wheel', this.onWheel, { passive: false });
     canvas.addEventListener('contextmenu', this.onContextMenu, { passive: false });
     canvas.addEventListener('keydown', this.onKeyDown);
+    this.options.platform.window.addEventListener('keydown', this.onModifierChange);
+    this.options.platform.window.addEventListener('keyup', this.onModifierChange);
   }
 
   private detach(): void {
     const canvas = this.options.canvas;
     canvas.removeEventListener('pointerdown', this.onPointerDown);
     canvas.removeEventListener('pointermove', this.onPointerMove);
+    canvas.removeEventListener('pointerleave', this.onPointerLeave);
     canvas.removeEventListener('pointerup', this.onPointerUp);
     canvas.removeEventListener('pointercancel', this.onPointerCancel);
     canvas.removeEventListener('wheel', this.onWheel);
     canvas.removeEventListener('contextmenu', this.onContextMenu);
     canvas.removeEventListener('keydown', this.onKeyDown);
+    this.options.platform.window.removeEventListener('keydown', this.onModifierChange);
+    this.options.platform.window.removeEventListener('keyup', this.onModifierChange);
   }
 
   private readonly onContextMenu = (event: MouseEvent): void => {
@@ -97,6 +109,12 @@ export class GraphInput {
     if (!this.enabled || this.disposed) return;
     event.preventDefault();
     const point = this.toScreen(event.clientX, event.clientY);
+    const pointerKind = pointerKindOf(event.pointerType);
+    if (pointerKind === 'mouse') {
+      this.mouseInside = true;
+      this.lastMousePoint = point;
+      this.lastMod = platformMod(event, this.options.platform.window);
+    }
     if (this.longPressPointer?.pointerId === event.pointerId
       && distanceSquared(this.longPressPointer.point, point) > 36) {
       this.clearLongPress();
@@ -105,9 +123,31 @@ export class GraphInput {
       ...this.base(),
       type: 'pointer-move',
       pointerId: event.pointerId,
-      pointerKind: pointerKindOf(event.pointerType),
+      pointerKind,
       point,
+      mod: platformMod(event, this.options.platform.window),
     });
+  };
+
+  private readonly onPointerLeave = (event: PointerEvent): void => {
+    if (!this.enabled || this.disposed) return;
+    const pointerKind = pointerKindOf(event.pointerType);
+    if (pointerKind === 'mouse') this.mouseInside = false;
+    this.push({
+      ...this.base(),
+      type: 'pointer-leave',
+      pointerId: event.pointerId,
+      pointerKind,
+      point: this.toScreen(event.clientX, event.clientY),
+    });
+  };
+
+  private readonly onModifierChange = (event: KeyboardEvent): void => {
+    if (!this.enabled || this.disposed || !this.mouseInside) return;
+    const mod = platformMod(event, this.options.platform.window);
+    if (mod === this.lastMod) return;
+    this.lastMod = mod;
+    this.push({ ...this.base(), type: 'modifier-change', point: this.lastMousePoint, mod });
   };
 
   private readonly onPointerUp = (event: PointerEvent): void => {
@@ -194,8 +234,13 @@ export class GraphInput {
     this.longPressPointer = null;
   }
 
+  cancelLongPress(): void {
+    this.clearLongPress();
+  }
+
   private push(event: GraphInputEventV1): void {
     this.options.events.push(event);
+    this.options.onInputQueued?.();
   }
 
   private base() {
@@ -212,11 +257,18 @@ export class GraphInput {
     const logicalHeight = this.options.canvas.height / ratio;
     const scaleX = bounds.width > 0 ? logicalWidth / bounds.width : 1;
     const scaleY = bounds.height > 0 ? logicalHeight / bounds.height : 1;
+    const safeClientX = Number.isFinite(clientX) ? clientX : bounds.left + bounds.width / 2;
+    const safeClientY = Number.isFinite(clientY) ? clientY : bounds.top + bounds.height / 2;
     return {
-      x: (clientX - bounds.left) * scaleX,
-      y: (clientY - bounds.top) * scaleY,
+      x: (safeClientX - bounds.left) * scaleX,
+      y: (safeClientY - bounds.top) * scaleY,
     };
   }
+}
+
+function platformMod(event: MouseEvent | PointerEvent | KeyboardEvent, window: Window): boolean {
+  const platform = window.navigator.platform ?? '';
+  return /Mac|iPhone|iPad|iPod/i.test(platform) ? event.metaKey : event.ctrlKey;
 }
 
 function distanceSquared(a: GraphScreenPointV1, b: GraphScreenPointV1): number {
