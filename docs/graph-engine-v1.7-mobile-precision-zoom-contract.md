@@ -49,6 +49,10 @@ jitter cannot consume an ordinary double tap.
 - Direct user zoom input cancels nonessential Anima camera choreography under the
   existing user-input precedence rule.
 
+A stationary one-finger long press on graph background invokes the same profile camera
+reset used by the keyboard and Quick Settings actions. A long press whose hit test
+resolves a node retains the existing node context-menu behavior instead.
+
 ## 4. Gesture arbitration
 
 Once the second held tap crosses the zoom threshold, precision zoom owns that pointer
@@ -252,6 +256,11 @@ Automated pointer traces must prove:
     mutate the graph and stop cleanly when the leaf is backgrounded or disposed.
 43. Rebuilding the main Settings page or profile modal after any setting change keeps
     the user's current scroll position instead of returning the surface to the top.
+44. A stationary mobile long press on background resets the camera, while the same
+    gesture on a node continues to open that node's context menu.
+45. Moving from a Mod-hovered note into its native Page Preview keeps the popover open,
+    retains the node's Anima hover presentation, allows ordinary pointer and wheel
+    scrolling inside it, and releases the latched hover when Mod is released.
 
 Manual acceptance requires physical iOS testing in portrait and landscape, beginning
 over both nodes and background, at near and far zoom limits, in focused and unfocused
@@ -320,6 +329,12 @@ background, a tag node, a filtered or removed node, or outside the Graph+ surfac
 Graph+'s preview eligibility and must not leave the prior note preview latched. Releasing
 Mod also clears eligibility through Obsidian's native dismissal path and does not
 synthesize a graph command.
+
+After the native popover opens, Graph+ provides a short pointer-handoff window between
+the canvas node and Obsidian's preview element. Entering the preview preserves its
+anchor and the node's semantic Anima hover, then delegates pointer and wheel behavior
+to Obsidian so long notes can be scrolled. The semantic node hover is latched while Mod
+is held and is released when Mod is released, even after the pointer has left the graph.
 
 Tag nodes are deliberately inert. Graph+ does not emit a hover-link request for a tag
 node, attempt to preview a tag search, or infer a note merely because a tag label

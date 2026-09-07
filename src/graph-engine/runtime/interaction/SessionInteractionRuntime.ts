@@ -30,6 +30,7 @@ export class SessionInteractionRuntime {
   private readonly input: GraphInput;
   private readonly interpreter: GraphInteractionInterpreter;
   private hoveredNodeId: string | undefined;
+  private previewedNodeId: string | undefined;
   private hoverMod = false;
   private hoverPoint: GraphScreenPointV1 | undefined;
   private hitTestMs = 0;
@@ -132,7 +133,7 @@ export class SessionInteractionRuntime {
   }
 
   getHoveredNodeId(): string | undefined {
-    return this.hoveredNodeId;
+    return this.previewedNodeId ?? this.hoveredNodeId;
   }
 
   getDraggedNodeId(): string | undefined {
@@ -157,6 +158,7 @@ export class SessionInteractionRuntime {
       'activate-background',
       'request-node-context',
       'set-hover',
+      'set-preview-hover',
       'drag-start',
       'drag-update',
       'drag-end',
@@ -234,6 +236,12 @@ export class SessionInteractionRuntime {
           mod: command.mod,
         });
         return;
+      case 'set-preview-hover':
+        if (this.previewedNodeId === command.nodeId) return;
+        this.previewedNodeId = command.nodeId;
+        this.updateCursor();
+        this.options.onViewStateChanged('interaction');
+        return;
       case 'drag-start':
         this.beginNodeDrag(command.nodeId, command.point);
         return;
@@ -294,9 +302,10 @@ export class SessionInteractionRuntime {
     if (nodeId !== undefined && !document.nodes.some((node) => node.id === nodeId)) return;
     const state = this.options.getViewState();
     const focusChanged = state.focusedNodeId !== nodeId;
-    const hoverChanged = this.hoveredNodeId !== undefined;
+    const hoverChanged = this.hoveredNodeId !== undefined || this.previewedNodeId !== undefined;
     if (!focusChanged && !hoverChanged) return;
     this.hoveredNodeId = undefined;
+    this.previewedNodeId = undefined;
     this.hoverMod = false;
     this.hoverPoint = undefined;
     this.updateCursor();
@@ -381,7 +390,7 @@ export class SessionInteractionRuntime {
   }
 
   private updateCursor(): void {
-    this.options.surface.setCursor(this.dragContext ? 'grabbing' : this.hoveredNodeId ? 'pointer' : 'default');
+    this.options.surface.setCursor(this.dragContext ? 'grabbing' : this.getHoveredNodeId() ? 'pointer' : 'default');
   }
 
   private resetTransientState(): void {
@@ -390,6 +399,7 @@ export class SessionInteractionRuntime {
     this.commands.clear();
     this.dragContext = null;
     this.hoveredNodeId = undefined;
+    this.previewedNodeId = undefined;
     this.hoverMod = false;
     this.hoverPoint = undefined;
     this.updateCursor();

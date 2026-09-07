@@ -50,11 +50,13 @@ export type GraphInputEventV1 =
       readonly pointerId: number;
       readonly pointerKind: GraphPointerKindV1;
       readonly point: GraphScreenPointV1;
+      readonly mod: boolean;
     })
   | (GraphInputBaseV1 & {
       readonly type: 'modifier-change';
       readonly point: GraphScreenPointV1;
       readonly mod: boolean;
+      readonly pointerInside: boolean;
     })
   | (GraphInputBaseV1 & {
       readonly type: 'pointer-cancel';
@@ -120,6 +122,7 @@ export type GraphRuntimeCommandV1 =
       readonly point?: GraphScreenPointV1;
       readonly mod: boolean;
     })
+  | (GraphCommandBaseV1 & { readonly type: 'set-preview-hover'; readonly nodeId?: string })
   | (GraphCommandBaseV1 & { readonly type: 'drag-start'; readonly nodeId: string; readonly point: GraphScreenPointV1 })
   | (GraphCommandBaseV1 & { readonly type: 'drag-update'; readonly nodeId: string; readonly point: GraphScreenPointV1 })
   | (GraphCommandBaseV1 & {

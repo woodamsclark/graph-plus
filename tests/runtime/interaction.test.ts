@@ -612,6 +612,26 @@ test('V1.7 semantic hover reports Mod changes without mutating graph state', asy
   equal(hover?.type === 'node-hover-changed' ? hover.nodeId : undefined, 'a', 'hover should expose the hit node');
   equal(hover?.type === 'node-hover-changed' ? hover.mod : false, true, 'hover should expose semantic platform Mod');
   deepEqual((await session.exportViewState()).selectedNodeIds, [], 'preview eligibility must not alter selection');
+  pointer(value, canvas, 'pointermove', -100, -100, {
+    pointerId: 104,
+    pointerType: 'mouse',
+    metaKey: mac,
+    ctrlKey: !mac,
+  });
+  value.platform.flushFrame();
+  equal(canvas.style.cursor, 'pointer', 'Mod preview latch should survive transient pointer hit-test misses');
+  const heldLeave = new value.window.PointerEvent('pointerleave', {
+    pointerId: 104,
+    pointerType: 'mouse',
+  });
+  Object.defineProperty(heldLeave, 'pointerType', { value: 'mouse' });
+  canvas.dispatchEvent(heldLeave as unknown as Event);
+  value.platform.flushFrame();
+  equal(canvas.style.cursor, 'pointer', 'Mod hover should remain latched when the pointer leaves for a preview');
+  const release = new value.window.KeyboardEvent('keyup', { key: 'Meta', metaKey: false, ctrlKey: false });
+  value.window.dispatchEvent(release);
+  value.platform.flushFrame();
+  equal(canvas.style.cursor, 'default', 'releasing Mod outside the canvas should clear the latched hover');
   await session.dispose();
 });
 
@@ -673,6 +693,28 @@ test('stationary mobile long-press requests node context without selecting or fo
   equal(intents.filter((intent) => intent.type === 'node-context-requested').length, 1, 'long press should emit one context request');
   equal((await session.exportViewState()).focusedNodeId, undefined, 'opening context should not focus');
   deepEqual((await session.exportViewState()).selectedNodeIds, [], 'opening context should not select');
+  await session.dispose();
+});
+
+test('stationary mobile background long-press resets the camera without requesting node context', async () => {
+  const value = runtimeHarness();
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  await session.resetCamera();
+  const reset = await session.exportViewState();
+  const intents: GraphIntentV1[] = [];
+  session.onIntent((intent) => intents.push(intent));
+  wheel(value, canvas, { deltaX: 40, deltaY: 24 });
+  value.platform.flushFrame();
+  assert(!sameVector((await session.exportViewState()).camera.target, reset.camera.target),
+    'the camera should begin away from its reset target');
+  pointer(value, canvas, 'pointerdown', -100, -100, { pointerId: 36, pointerType: 'touch' });
+  value.platform.flushTimer();
+  value.platform.flushFrame();
+  deepEqual((await session.exportViewState()).camera, reset.camera, 'background long press should restore the reset camera');
+  equal(intents.filter((intent) => intent.type === 'node-context-requested').length, 0,
+    'background long press should not request a node menu');
+  pointer(value, canvas, 'pointerup', -100, -100, { pointerId: 36, pointerType: 'touch' });
   await session.dispose();
 });
 

@@ -4,6 +4,7 @@ import { noteNodeId } from '../graph-plus/adapter/index.ts';
 import { GraphPlusConsumerV1 } from '../graph-plus/consumer/index.ts';
 import { coerceGraphPlusLensStateV1, createDefaultGraphPlusLensV1, type GraphPlusLensStateV1 } from '../graph-plus/query/index.ts';
 import { GraphPlusObsidianNavigatorV1 } from './GraphPlusObsidianNavigator.ts';
+import { GraphPlusNotePreviewControllerV1 } from './GraphPlusNotePreviewController.ts';
 import { createGraphPlusUiContributionsV1 } from './GraphPlusUiContributions.ts';
 import type GraphEnginePlugin from './main.ts';
 
@@ -19,7 +20,7 @@ export class GraphPlusView extends ItemView {
   private stateRestored = false;
   private leafVisible = true;
   private reconcilePending = false;
-  private previewAnchor?: HTMLElement;
+  private notePreview?: GraphPlusNotePreviewControllerV1<TFile>;
   private activeFileToFollow?: TFile;
   private followRunning = false;
   private followCompletion: Promise<void> = Promise.resolve();
@@ -33,6 +34,14 @@ export class GraphPlusView extends ItemView {
   async onOpen(): Promise<void> {
     this.contentEl.empty();
     const container = this.contentEl.createDiv({ cls: 'greater-graph-view graphplus-view' });
+    this.notePreview = new GraphPlusNotePreviewControllerV1({
+      container: this.contentEl,
+      source: GRAPH_PLUS_TYPE,
+      hoverParent: this.leaf,
+      getHoverPopover: () => this.leaf.hoverPopover,
+      triggerHoverLink: (request) => this.app.workspace.trigger('hover-link', request),
+      isVisible: () => this.leafVisible,
+    });
     if (!this.stateRestored) this.pendingLens = { ...this.pendingLens, showTags: this.plugin.settings.showTags };
     try {
       this.pendingLens = await this.plugin.migrateLegacyLensSettings(this.pendingLens);
@@ -85,7 +94,8 @@ export class GraphPlusView extends ItemView {
     this.activeFileToFollow = undefined;
     this.followRunning = false;
     this.explicitNavigation = false;
-    this.clearNotePreview();
+    this.notePreview?.clear();
+    this.notePreview = undefined;
   }
 
   getViewType(): string { return GRAPH_PLUS_TYPE; }
@@ -109,7 +119,7 @@ export class GraphPlusView extends ItemView {
     if (this.rebuildTimer !== undefined) window?.clearTimeout(this.rebuildTimer);
     this.rebuildTimer = undefined;
     this.reconcilePending = false;
-    this.clearNotePreview();
+    this.notePreview?.clear();
     return this.consumer?.resetLayoutData() ?? false;
   }
 
@@ -170,7 +180,7 @@ export class GraphPlusView extends ItemView {
       this.reconcilePending = true;
     }
     this.consumer?.setSuspended(!visible);
-    if (!visible) this.clearNotePreview();
+    if (!visible) this.notePreview?.clear();
     if (!visible) return;
     if (this.reconcilePending) {
       this.reconcilePending = false;
@@ -214,53 +224,7 @@ export class GraphPlusView extends ItemView {
     readonly anchor?: { readonly x: number; readonly y: number };
     readonly mod: boolean;
   }): void {
-    if (!request.mod || !request.file || !request.anchor || !this.leafVisible) {
-      this.clearNotePreview();
-      return;
-    }
-    this.clearNotePreview();
-    const canvas = this.contentEl.querySelector('canvas');
-    if (!(canvas instanceof this.contentEl.ownerDocument.defaultView!.HTMLCanvasElement)) return;
-    const bounds = canvas.getBoundingClientRect();
-    const deviceRatio = Math.max(1, this.contentEl.ownerDocument.defaultView?.devicePixelRatio ?? 1);
-    const logicalWidth = canvas.width / deviceRatio;
-    const ratio = logicalWidth > 0 ? bounds.width / logicalWidth : 1;
-    const anchor = this.contentEl.createDiv({ cls: 'graphplus-native-preview-anchor' });
-    anchor.style.position = 'absolute';
-    anchor.style.pointerEvents = 'none';
-    anchor.style.width = '1px';
-    anchor.style.height = '1px';
-    anchor.style.left = `${bounds.left - this.contentEl.getBoundingClientRect().left + request.anchor.x * ratio}px`;
-    anchor.style.top = `${bounds.top - this.contentEl.getBoundingClientRect().top + request.anchor.y * ratio}px`;
-    this.previewAnchor = anchor;
-    const window = this.contentEl.ownerDocument.defaultView!;
-    const mac = /Mac|iPhone|iPad|iPod/i.test(window.navigator.platform ?? '');
-    const event = new window.MouseEvent('mouseover', {
-      bubbles: true,
-      clientX: bounds.left + request.anchor.x * ratio,
-      clientY: bounds.top + request.anchor.y * ratio,
-      metaKey: mac,
-      ctrlKey: !mac,
-    });
-    this.app.workspace.trigger('hover-link', {
-      event,
-      source: GRAPH_PLUS_TYPE,
-      hoverParent: this.leaf,
-      targetEl: anchor,
-      linktext: request.file.path,
-      sourcePath: request.file.path,
-    });
-  }
-
-  private clearNotePreview(): void {
-    if (this.previewAnchor) {
-      const window = this.contentEl.ownerDocument.defaultView;
-      if (window) this.previewAnchor.dispatchEvent(new window.MouseEvent('mouseleave', { bubbles: false }));
-      this.previewAnchor.remove();
-      this.previewAnchor = undefined;
-    }
-    const popover = this.leaf.hoverPopover as unknown as { hide?: () => void } | null;
-    popover?.hide?.();
+    this.notePreview?.update(request);
   }
 }
 

@@ -139,15 +139,23 @@ export class GraphInput {
       pointerId: event.pointerId,
       pointerKind,
       point: this.toScreen(event.clientX, event.clientY),
+      mod: this.lastMod,
     });
   };
 
   private readonly onModifierChange = (event: KeyboardEvent): void => {
-    if (!this.enabled || this.disposed || !this.mouseInside) return;
+    if (!this.enabled || this.disposed) return;
     const mod = platformMod(event, this.options.platform.window);
     if (mod === this.lastMod) return;
     this.lastMod = mod;
-    this.push({ ...this.base(), type: 'modifier-change', point: this.lastMousePoint, mod });
+    if (!this.mouseInside && mod) return;
+    this.push({
+      ...this.base(),
+      type: 'modifier-change',
+      point: this.lastMousePoint,
+      mod,
+      pointerInside: this.mouseInside,
+    });
   };
 
   private readonly onPointerUp = (event: PointerEvent): void => {

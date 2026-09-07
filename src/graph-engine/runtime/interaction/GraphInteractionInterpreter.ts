@@ -110,6 +110,11 @@ export class GraphInteractionInterpreter {
         ...(hover ? { nodeId: hover.nodeId, point: hoverEvent.point } : {}),
         mod: hoverEvent.mod,
       });
+      if (hoverEvent.mod && hover) {
+        this.command(hoverEvent, { type: 'set-preview-hover', nodeId: hover.nodeId });
+      } else if (!hoverEvent.mod) {
+        this.command(hoverEvent, { type: 'set-preview-hover' });
+      }
     }
   }
 
@@ -317,17 +322,29 @@ export class GraphInteractionInterpreter {
   private pointerLeave(event: Extract<GraphInputEventV1, { type: 'pointer-leave' }>): void {
     if (event.pointerKind !== 'mouse' || this.mode.kind !== 'idle') return;
     this.pendingHover = null;
+    if (event.mod) return;
+    this.command(event, { type: 'set-preview-hover' });
     this.command(event, { type: 'set-hover', mod: false });
   }
 
   private modifierChange(event: Extract<GraphInputEventV1, { type: 'modifier-change' }>): void {
     if (this.mode.kind !== 'idle' || this.pointers.size > 0 || this.touchGesture) return;
+    if (!event.pointerInside) {
+      this.command(event, { type: 'set-preview-hover' });
+      this.command(event, { type: 'set-hover', mod: false });
+      return;
+    }
     const hover = this.options.hitTest(event.point);
     this.command(event, {
       type: 'set-hover',
       ...(hover ? { nodeId: hover.nodeId, point: event.point } : {}),
       mod: event.mod,
     });
+    if (event.mod && hover) {
+      this.command(event, { type: 'set-preview-hover', nodeId: hover.nodeId });
+    } else if (!event.mod) {
+      this.command(event, { type: 'set-preview-hover' });
+    }
   }
 
   private wheel(event: Extract<GraphInputEventV1, { type: 'wheel' }>): void {
@@ -346,12 +363,16 @@ export class GraphInteractionInterpreter {
   private longPress(event: Extract<GraphInputEventV1, { type: 'long-press' }>): void {
     const hit = this.options.hitTest(event.point, event.pointerKind);
     if (this.mode.kind === 'press' && this.mode.pointerId === event.pointerId) this.mode = { kind: 'idle' };
-    if (hit) this.command(event, {
-      type: 'request-node-context',
-      nodeId: hit.nodeId,
-      point: event.point,
-      modality: event.pointerKind,
-    });
+    if (hit) {
+      this.command(event, {
+        type: 'request-node-context',
+        nodeId: hit.nodeId,
+        point: event.point,
+        modality: event.pointerKind,
+      });
+    } else {
+      this.command(event, { type: 'reset-camera' });
+    }
   }
 
   private keyDown(event: Extract<GraphInputEventV1, { type: 'key-down' }>): void {
