@@ -18,6 +18,11 @@ Protocol version: 1
 
 Artifact version: 1.7.1
 
+The artifact version is not a minimum graph-engine version and does not need to match
+the installed provider. Runtime compatibility is negotiated by protocol and requested
+capabilities. Existing V1 consumers may remain pinned to an older V1 artifact; they
+only need to update when adopting a new public API or a relevant client-side fix.
+
 V1.1 adds optional engine-owned session UI configuration, lease-scoped semantic node
 actions, consumer/profile UI policy, and constrained 2D/3D profile settings. These are
 additive capabilities: consumers using the original V1 fields remain source-compatible.
@@ -35,3 +40,7 @@ discounting, spring mapping, and component packing remain private provider behav
 V1.5 adds the public Linear build-out direction contract. Consumers may request the
 shipped `linear-layout` capability and choose `up`, `down`, `left`, `right`, `in`, or
 `out`; depth-axis directions require a 3D profile.
+
+V1.6 and V1.7 add optional presentation, camera-fit, input, and session-UI fields while
+retaining protocol V1. Provider-side physics, rendering, performance, and lifecycle
+improvements remain available to older V1 clients without an artifact refresh.

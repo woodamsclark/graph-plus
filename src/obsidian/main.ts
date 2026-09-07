@@ -144,6 +144,11 @@ export default class GraphEnginePlugin extends Plugin {
     this.registerView(LOCAL_GRAPH_PLUS_TYPE, (leaf) => new LocalGraphPlusView(leaf, this));
     this.registerHoverLinkSource(GRAPH_PLUS_TYPE, { display: 'graph+', defaultMod: true });
     this.registerHoverLinkSource(LOCAL_GRAPH_PLUS_TYPE, { display: 'local graph+', defaultMod: true });
+    this.addRibbonIcon('network', 'open graph+', () => {
+      void this.activateView().then((leaf) => {
+        if (!leaf) new Notice('graph+ is disabled in settings.');
+      });
+    });
     this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
       if (!this.settings.enabled || !(file instanceof TFile) || file.extension !== 'md') return;
       menu.addItem((item) => item

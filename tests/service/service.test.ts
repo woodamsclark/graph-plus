@@ -151,6 +151,40 @@ test('S-CONNECT local lease uses the provider core and release owns only its ses
   await session.dispose();
 });
 
+test('protocol V1 consumers remain compatible without matching provider or client releases', async () => {
+  const runtime = runtimeHarness();
+  const core = new GraphEngineProviderCoreV1({
+    engineVersion: '9.4.2',
+    engineInstanceId: 'future-v1-provider',
+    capabilities: ['render'],
+    profiles: runtime.profiles,
+    sessions: runtime.factory,
+  });
+  const result = core.connectLocal({
+    consumerId: 'synthetic-consumer',
+    supportedProtocolVersions: [1],
+    requestedCapabilities: ['render'],
+  });
+  assert(result.ok, 'a legacy-shaped V1 consumer should connect to a newer V1 provider');
+  const legacyRegistration = {
+    ...runtimeRegistration(),
+    consumerVersion: '0.3.0',
+  };
+  await result.lease.registerConsumer(legacyRegistration);
+  const session = await result.lease.createSession({
+    consumerId: 'synthetic-consumer',
+    profileId: 'two-dimensional',
+    container: runtime.container,
+    document: runtimeFixture(),
+  });
+  equal(result.lease.protocolVersion, 1, 'the protocol, not release equality, should gate compatibility');
+  equal(result.lease.engineVersion, '9.4.2', 'the lease should report the independent provider release');
+  equal(legacyRegistration.consumerVersion, '0.3.0', 'the consumer should retain its independent release');
+  await session.dispose();
+  await result.lease.release();
+  await core.dispose();
+});
+
 test('R-INPUT-15 node action registrations are disposable and lease-scoped', async () => {
   const value = provider();
   const result = value.core.connectLocal({

@@ -14,6 +14,8 @@ public boundary and a runnable neutral example.
 
 Current design artifacts:
 
+- [graph-engine V1.7.2 ribbon contract](docs/graph-engine-v1.7.2-ribbon-contract.md)
+- [graph-engine downstream compatibility policy](docs/graph-engine-downstream-compatibility-policy.md)
 - [graph-engine V1.5 Linear build-out layout contract](docs/graph-engine-v1.5-linear-build-out-layout-contract.md)
 - [graph-engine V1.5 Linear build-out acceptance plan](docs/graph-engine-v1.5-linear-build-out-layout-acceptance.md)
 - [graph-engine V1.4 topology-weighted layout contract](docs/graph-engine-v1.4-topology-weighted-layout-contract.md)

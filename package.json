@@ -1,6 +1,6 @@
 {
   "name": "graph-engine",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "A reusable graph platform for Obsidian with the graph+ experience built in.",
   "private": true,
   "main": "main.js",
