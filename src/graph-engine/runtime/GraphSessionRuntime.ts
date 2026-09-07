@@ -75,6 +75,32 @@ export interface GraphSessionRuntimeOptionsV1 {
 const RETIRED_GRAPH_SYSTEM_STATE_KEY_V1 = 'graph-system-states-v1';
 const MAX_RESTORED_POSITION_COORDINATE = 1_000_000_000;
 const MIN_PIPELINE_INTERVAL_MS = 1_000 / 60;
+const LARGE_GRAPH_NODE_COUNT = 500;
+const EFFICIENT_PIXEL_RATIO_LIMIT = 2;
+
+export interface GraphSessionRuntimeDiagnosticsV1 {
+  readonly sessionId: string;
+  readonly consumerId: string;
+  readonly profileId: string;
+  readonly dimensions: '2d' | '3d';
+  readonly documentId: string;
+  readonly documentRevision: number;
+  readonly nodeCount: number;
+  readonly edgeCount: number;
+  readonly manuallySuspended: boolean;
+  readonly documentSuspended: boolean;
+  readonly suspended: boolean;
+  readonly frameScheduled: boolean;
+  readonly animationFrameScheduled: boolean;
+  readonly wakeTimerScheduled: boolean;
+  readonly renderQuality: 'automatic' | 'high-fidelity' | 'energy-saver';
+  readonly nativePixelRatio: number;
+  readonly effectivePixelRatio: number;
+  readonly frameCount: number;
+  readonly lastFrameTimestamp: number | null;
+  readonly counters: GraphPerformanceSnapshotV1['counters'];
+  readonly modules: Readonly<Record<string, unknown>>;
+}
 
 export class GraphSessionDisposedErrorV1 extends Error {
   readonly code = 'session-disposed' as const;
@@ -119,6 +145,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly errorListeners = new Set<(error: GraphSessionErrorV1) => void>();
   private readonly overrideListeners = new Set<(overrides: GraphSettingsOverridesV1) => void>();
   private animationFrame: number | null = null;
+  private frameWakeTimer: number | null = null;
+  private frameWakeDueAt: number | null = null;
   private frameCount = 0;
   private frameDirty = true;
   private latestFramePerformance = emptyFramePerformance();
@@ -141,7 +169,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (this.isSuspended()) return;
     if (this.lastFrameTimestamp !== null
       && timestamp - this.lastFrameTimestamp < MIN_PIPELINE_INTERVAL_MS - 0.001) {
-      this.scheduleFrame();
+      this.scheduleFrame(MIN_PIPELINE_INTERVAL_MS - (timestamp - this.lastFrameTimestamp));
       return;
     }
     const frameStart = this.platform.now();
@@ -180,7 +208,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       }
       this.projectionView = { ...this.projectionView, positions, viewState: this.viewState };
       this.moduleView = { ...this.moduleView, positions, viewState: this.viewState };
-      if (requiresComposition) this.refreshFrame();
+      if (requiresComposition) this.refreshFrame(false);
       else this.frameDirty = true;
     }
     if (tickResult?.camera) {
@@ -209,7 +237,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.performanceCounters.renderedFrames += 1;
       this.surface.recordFrame(this.frameCount);
     }
-    if (tickResult?.requestNextFrame) this.scheduleFrame();
+    if (tickResult?.requestNextFrame) this.scheduleFrame(tickResult.nextFrameDelayMs);
   };
 
   constructor(options: GraphSessionRuntimeOptionsV1) {
@@ -264,6 +292,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         dimensions: this.profile.dimensions,
         container: this.container,
         platform: this.platform,
+        pixelRatioLimit: renderPixelRatioLimit(this.profile, this.store.readDocument().nodes.length),
       });
       this.frames = new GraphFrameStore();
       this.renderer = new CanvasGraphRenderer(this.surface.canvas, this.camera, this.frames, () => this.platform.now());
@@ -310,8 +339,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.renderer.render();
       this.synchronizeRuntimeActivity();
     } catch (error) {
-      if (this.animationFrame !== null) this.platform.cancelAnimationFrame(this.animationFrame);
-      this.animationFrame = null;
+      this.clearScheduledFrame();
       this.interaction?.dispose();
       this.moduleHost?.dispose();
       this.surfaceResizeSubscription?.dispose();
@@ -332,6 +360,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       const nextStore = new GraphDocumentStore(document);
       const next = nextStore.readDocument();
       this.store = nextStore;
+      this.refreshRenderQuality(next.nodes.length);
       this.viewState = previous.documentId === next.documentId
         ? addMissingPositions(
             reconcileGraphViewStateV1(this.viewState, this.restoreContext()),
@@ -375,6 +404,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       }
       return result;
     }
+    this.refreshRenderQuality(this.store.readDocument().nodes.length);
     this.viewState = addMissingPositions(
       reconcileGraphViewStateV1(this.viewState, this.restoreContext()),
       this.store.readDocument(),
@@ -478,7 +508,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (options?.centerNodeId && !center) {
       throw new Error(`Cannot center camera on unknown node "${options.centerNodeId}".`);
     }
-    this.fitPositions(positions, center);
+    const minimumRadius = options?.minimumRadius;
+    if (minimumRadius !== undefined && (!Number.isFinite(minimumRadius) || minimumRadius < 0)) {
+      throw new Error('Fit minimum radius must be a non-negative finite number.');
+    }
+    this.fitPositions(positions, center, minimumRadius);
   }
 
   async resetCamera(options?: TransitionOptionsV1): Promise<void> {
@@ -600,6 +634,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.camera.setPerspectiveZoom(focalLengthMm(next.profileSettings) / 24);
     this.synchronizeCameraState();
     this.profile = next;
+    this.refreshRenderQuality();
     this.recomputeView(false);
   }
 
@@ -624,14 +659,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       (failure) => deferredFailures.push(failure),
     );
     this.interaction.setEnabled(false);
-    if (this.animationFrame !== null) {
-      this.platform.cancelAnimationFrame(this.animationFrame);
-      this.animationFrame = null;
-    }
+    this.clearScheduledFrame();
     this.lastFrameTimestamp = null;
     try {
       this.viewState = converted;
       this.profile = next;
+      this.refreshRenderQuality();
       this.camera.reconfigure(converted.camera, next.dimensions);
       this.interaction.setDimensions(next.dimensions);
       this.surface.setDimensions(next.dimensions);
@@ -646,6 +679,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     } catch (error) {
       this.moduleHost = previousHost;
       this.profile = previousProfile;
+      this.refreshRenderQuality();
       this.viewState = previousViewState;
       this.camera.reconfigure(previousCamera, previousProfile.dimensions);
       this.interaction.setDimensions(previousProfile.dimensions);
@@ -760,6 +794,33 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.performanceCounters = emptyPerformanceCounters();
   }
 
+  getDiagnostics(): GraphSessionRuntimeDiagnosticsV1 {
+    const document = this.store.readDocument();
+    return {
+      sessionId: this.sessionId,
+      consumerId: this.consumerId,
+      profileId: this.profileId,
+      dimensions: this.profile.dimensions,
+      documentId: document.documentId,
+      documentRevision: document.revision,
+      nodeCount: document.nodes.length,
+      edgeCount: document.edges.length,
+      manuallySuspended: this.manuallySuspended,
+      documentSuspended: this.documentSuspended,
+      suspended: this.isSuspended(),
+      frameScheduled: this.animationFrame !== null || this.frameWakeTimer !== null,
+      animationFrameScheduled: this.animationFrame !== null,
+      wakeTimerScheduled: this.frameWakeTimer !== null,
+      renderQuality: renderQuality(this.profile),
+      nativePixelRatio: this.platform.devicePixelRatio,
+      effectivePixelRatio: this.surface.getViewport().devicePixelRatio,
+      frameCount: this.frameCount,
+      lastFrameTimestamp: this.lastFrameTimestamp,
+      counters: { ...this.performanceCounters },
+      modules: this.moduleHost.getDiagnostics(),
+    };
+  }
+
   onIntent(listener: (intent: GraphIntentV1) => void): Disposable {
     return this.subscribe(this.intentListeners, listener);
   }
@@ -787,10 +848,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
-    if (this.animationFrame !== null) {
-      this.platform.cancelAnimationFrame(this.animationFrame);
-      this.animationFrame = null;
-    }
+    this.clearScheduledFrame();
     this.interaction.dispose();
     this.moduleHost.dispose();
     this.frames.set(null);
@@ -803,6 +861,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.overrideListeners.clear();
     this.surface.dispose();
     this.onDisposed?.();
+  }
+
+  private refreshRenderQuality(nodeCount = this.store.readDocument().nodes.length): void {
+    this.surface?.setPixelRatioLimit(renderPixelRatioLimit(this.profile, nodeCount));
   }
 
   private restoreContext() {
@@ -880,7 +942,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.updateSurface();
   }
 
-  private refreshFrame(): void {
+  private refreshFrame(schedule = true): void {
     this.performanceCounters.frameCompositions += 1;
     this.moduleView = this.moduleHost.contribute({
       ...this.projectionView,
@@ -899,7 +961,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       hoveredNodeId: this.interaction?.getHoveredNodeId(),
     }));
     this.frameDirty = true;
-    this.scheduleFrame();
+    if (schedule) this.scheduleFrame();
   }
 
   private updateSurface(): void {
@@ -943,9 +1005,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.viewState = { ...this.viewState, camera: this.camera.getState() };
   }
 
-  private fitPositions(positions: readonly Vec3[], center?: Vec3): void {
+  private fitPositions(positions: readonly Vec3[], center?: Vec3, minimumRadius?: number): void {
     if (!positions.length) return;
-    this.camera.fit(positions, 48, undefined, center);
+    this.camera.fit(positions, 48, undefined, center, minimumRadius);
     this.synchronizeCameraState();
     this.projectionView = { ...this.projectionView, viewState: this.viewState };
     this.moduleView = { ...this.moduleView, viewState: this.viewState };
@@ -1016,10 +1078,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     });
     if (!required || this.fatalModuleError) return;
     this.fatalModuleError = new GraphRequiredModuleErrorV1(failure.moduleId, failure.hook, failure.error);
-    if (this.animationFrame !== null) {
-      this.platform.cancelAnimationFrame(this.animationFrame);
-      this.animationFrame = null;
-    }
+    this.clearScheduledFrame();
     this.lastFrameTimestamp = null;
     this.interaction?.setEnabled(false);
   }
@@ -1075,20 +1134,48 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.moduleHost.setSuspended(suspended);
     if (suspended) {
       this.lastFrameTimestamp = null;
-      if (this.animationFrame !== null) {
-        this.platform.cancelAnimationFrame(this.animationFrame);
-        this.animationFrame = null;
-      }
+      this.clearScheduledFrame();
       return;
     }
     this.scheduleFrame();
   }
 
-  private scheduleFrame(): void {
-    if (this.animationFrame === null && !this.isSuspended()) {
-      this.performanceCounters.scheduledFrames += 1;
-      this.animationFrame = this.platform.requestAnimationFrame(this.onAnimationFrame);
+  private scheduleFrame(delayMs = 0): void {
+    if (this.isSuspended()) return;
+    const delay = Number.isFinite(delayMs) ? Math.max(0, delayMs) : 0;
+    if (delay <= 0) {
+      this.clearFrameWakeTimer();
+      this.requestFrame();
+      return;
     }
+    if (this.animationFrame !== null) return;
+    const dueAt = this.platform.now() + delay;
+    if (this.frameWakeTimer !== null && this.frameWakeDueAt !== null && this.frameWakeDueAt <= dueAt + 0.5) return;
+    this.clearFrameWakeTimer();
+    this.frameWakeDueAt = dueAt;
+    this.frameWakeTimer = this.platform.setTimeout(() => {
+      this.frameWakeTimer = null;
+      this.frameWakeDueAt = null;
+      if (!this.isSuspended()) this.requestFrame();
+    }, delay);
+  }
+
+  private requestFrame(): void {
+    if (this.animationFrame !== null || this.isSuspended()) return;
+    this.performanceCounters.scheduledFrames += 1;
+    this.animationFrame = this.platform.requestAnimationFrame(this.onAnimationFrame);
+  }
+
+  private clearFrameWakeTimer(): void {
+    if (this.frameWakeTimer !== null) this.platform.clearTimeout(this.frameWakeTimer);
+    this.frameWakeTimer = null;
+    this.frameWakeDueAt = null;
+  }
+
+  private clearScheduledFrame(): void {
+    this.clearFrameWakeTimer();
+    if (this.animationFrame !== null) this.platform.cancelAnimationFrame(this.animationFrame);
+    this.animationFrame = null;
   }
 
   private isSuspended(): boolean {
@@ -1142,6 +1229,18 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       try { listener(cloneOverrides(overrides)); } catch {}
     }
   }
+}
+
+function renderQuality(profile: EffectiveConsumerProfileV1): 'automatic' | 'high-fidelity' | 'energy-saver' {
+  const value = profile.modules[SHIPPED_GRAPH_MODULE_IDS_V1.rendering]?.settings.renderQuality;
+  return value === 'high-fidelity' || value === 'energy-saver' ? value : 'automatic';
+}
+
+function renderPixelRatioLimit(profile: EffectiveConsumerProfileV1, nodeCount: number): number | undefined {
+  const quality = renderQuality(profile);
+  if (quality === 'high-fidelity') return undefined;
+  if (quality === 'energy-saver' || nodeCount >= LARGE_GRAPH_NODE_COUNT) return EFFICIENT_PIXEL_RATIO_LIMIT;
+  return undefined;
 }
 
 function emptyFramePerformance(): GraphPerformanceSnapshotV1['latestFrame'] {

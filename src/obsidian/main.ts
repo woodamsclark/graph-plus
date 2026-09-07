@@ -166,6 +166,11 @@ export default class GraphEnginePlugin extends Plugin {
       name: 'open local graph+',
       callback: () => this.activateLocalView(),
     });
+    this.addCommand({
+      id: 'copy-graph-engine-diagnostics',
+      name: 'copy graph-engine diagnostics',
+      callback: () => { void this.copyDiagnostics(); },
+    });
 
     this.addSettingTab(new GraphEngineSettingTab(this.app, this));
   }
@@ -256,6 +261,39 @@ export default class GraphEnginePlugin extends Plugin {
     };
     if (!result.ok) throw new GraphEngineServiceErrorV1(result.error);
     return result.lease;
+  }
+
+  private async copyDiagnostics(): Promise<void> {
+    const document = this.app.workspace.containerEl.ownerDocument;
+    const graphLeaves = this.app.workspace.getLeavesOfType(GRAPH_PLUS_TYPE);
+    const localLeaves = this.app.workspace.getLeavesOfType(LOCAL_GRAPH_PLUS_TYPE);
+    const snapshot = {
+      schemaVersion: 1,
+      capturedAt: new Date().toISOString(),
+      pluginVersion: this.manifest.version,
+      documentHidden: document.hidden,
+      graphPlusEnabled: this.settings.enabled,
+      views: [...graphLeaves, ...localLeaves].map((leaf) => {
+        const view = leaf.view;
+        if (view instanceof GraphPlusView || view instanceof LocalGraphPlusView) {
+          return view.getLifecycleDiagnostics();
+        }
+        return { type: view.getViewType(), contentShown: view.containerEl.isShown() };
+      }),
+      mountedSessionElements: document.querySelectorAll('[data-graph-engine-session]').length,
+      provider: this.graphEngineCore?.getDiagnostics(),
+    };
+    const text = JSON.stringify(snapshot, null, 2);
+    console.info('[graph-engine diagnostics]', snapshot);
+    try {
+      const clipboard = document.defaultView?.navigator.clipboard;
+      if (!clipboard) throw new Error('Clipboard API is unavailable.');
+      await clipboard.writeText(text);
+      new Notice('graph-engine diagnostics copied.');
+    } catch (error) {
+      console.error('[graph-engine] could not copy diagnostics', error);
+      new Notice('Could not copy diagnostics. Details were written to the developer console.');
+    }
   }
 
   get graphPlusVaultSource(): ObsidianVaultGraphSourceV1 {

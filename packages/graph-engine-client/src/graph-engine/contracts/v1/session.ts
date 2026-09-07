@@ -103,6 +103,8 @@ export interface TransitionOptionsV1 {
 export interface FitNodesOptionsV1 extends TransitionOptionsV1 {
   /** Keep this node at the viewport center while sizing the camera for all fitted nodes. */
   readonly centerNodeId?: string;
+  /** Reserve at least this much world-space radius around the fit center. */
+  readonly minimumRadius?: number;
 }
 
 export type GraphIntentV1 =

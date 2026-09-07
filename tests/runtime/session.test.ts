@@ -52,6 +52,40 @@ test('neutral platform derives browser services from the supplied container', ()
   observer.disconnect();
 });
 
+test('render quality caps large automatic canvases and updates without remounting', async () => {
+  const value = harness({
+    document: graphDocument({
+      nodes: Array.from({ length: 600 }, (_, index) => graphNode(`node-${index}`)),
+      edges: [],
+    }),
+  });
+  value.platform.pixelRatio = 3;
+  const session = await value.create();
+  const canvas = surface(value.container).querySelector('canvas');
+  assert(canvas, 'quality test canvas should mount');
+  equal(canvas.width, 1280, 'Automatic should cap a large graph canvas at 2x');
+  let diagnostics = value.factory.getDiagnostics().sessions[0];
+  equal(diagnostics?.renderQuality, 'automatic', 'diagnostics should name the effective policy');
+  equal(diagnostics?.nativePixelRatio, 3, 'diagnostics should retain the native display ratio');
+  equal(diagnostics?.effectivePixelRatio, 2, 'diagnostics should expose the capped backing ratio');
+
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
+    modules: { rendering: { settings: { renderQuality: 'high-fidelity' } } },
+  });
+  value.factory.refreshActiveProfiles();
+  equal(canvas.width, 1920, 'High fidelity should use the full native 3x backing width');
+  equal(surface(value.container).querySelector('canvas'), canvas, 'quality changes should preserve the mounted canvas');
+
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
+    modules: { rendering: { settings: { renderQuality: 'energy-saver' } } },
+  });
+  value.factory.refreshActiveProfiles();
+  diagnostics = value.factory.getDiagnostics().sessions[0];
+  equal(canvas.width, 1280, 'Energy saver should cap the backing width at 2x');
+  equal(diagnostics?.effectivePixelRatio, 2, 'the live diagnostic should follow a quality change');
+  await session.dispose();
+});
+
 test('R-SHELL-02 drives documents, events, projection filters, and render filters independently', async () => {
   const value = harness();
   const session = await value.create();
@@ -274,40 +308,72 @@ test('R-SHELL-04 suspends animation work and disposes every owned lifecycle reso
   equal(disposedSuspensionError, true, 'disposed suspension requests should fail structurally');
 });
 
-test('active graph work is capped at 60 Hz and a settled force session goes fully idle', async () => {
+test('adaptive force cadence runs hot at 30 Hz, cools at 15 Hz, and settles fully idle', async () => {
   const value = harness();
   value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
     modules: { 'force-layout': { enabled: true } },
   });
   const session = await value.create();
   await session.resetPerformanceMeasurements();
-  const callbackInterval = 1_000 / 120;
-  for (let index = 1; index <= 120; index += 1) {
-    value.platform.flushFrame(index * callbackInterval);
+  let timestamp = 1_000 / 60;
+  value.platform.flushFrame(timestamp);
+  let force = value.factory.getDiagnostics().sessions[0]?.modules['force-layout'] as {
+    targetStepRateHz?: number;
+    integrationStepCount?: number;
+  } | undefined;
+  equal(force?.targetStepRateHz, 30, 'hot physics should request a 30 Hz cadence');
+  equal(value.factory.getDiagnostics().sessions[0]?.animationFrameScheduled, false,
+    'diagnostics should distinguish sleeping physics from a queued visual frame');
+  equal(value.factory.getDiagnostics().sessions[0]?.wakeTimerScheduled, true,
+    'diagnostics should expose the delayed physics wake');
+  equal(value.platform.pendingFrames, 0, 'continuous physics should not spin on display refresh callbacks');
+  equal(value.platform.pendingTimers, 1, 'hot physics should sleep between integration steps');
+
+  for (let index = 0; index < 30; index += 1) {
+    value.platform.advanceTime(1_000 / 30);
+    value.platform.flushTimer();
+    timestamp += 1_000 / 30;
+    value.platform.flushFrame(timestamp);
   }
-  const active = await session.exportPerformanceSnapshot();
-  assert((active.counters?.moduleTicks ?? 0) <= 60,
-    'a 120 Hz callback stream must not advance the expensive graph pipeline more than 60 times per second');
-  for (let index = 121; index <= 720 && value.platform.pendingFrames > 0; index += 1) {
-    value.platform.flushFrame(index * callbackInterval);
+  assert(((await session.exportPerformanceSnapshot()).counters?.moduleTicks ?? 0) <= 31,
+    'one second of hot continuous physics should not exceed roughly 30 module ticks');
+  const beforeImmediateInput = force?.integrationStepCount ?? 0;
+  await session.resetCamera();
+  equal(value.platform.pendingTimers, 0, 'camera input should interrupt a sleeping physics delay');
+  equal(value.platform.pendingFrames, 1, 'camera input should request an immediate visual frame');
+  value.platform.advanceTime(1_000 / 60);
+  timestamp += 1_000 / 60;
+  value.platform.flushFrame(timestamp);
+  force = value.factory.getDiagnostics().sessions[0]?.modules['force-layout'] as typeof force;
+  assert((force?.integrationStepCount ?? 0) >= beforeImmediateInput,
+    'immediate camera work must not corrupt the force integrator');
+
+  const beforeRapidInput = force?.integrationStepCount ?? 0;
+  for (let index = 0; index < 60; index += 1) {
+    await session.resetCamera();
+    value.platform.advanceTime(1_000 / 60);
+    timestamp += 1_000 / 60;
+    value.platform.flushFrame(timestamp);
   }
-  equal(value.platform.pendingFrames, 0, 'the cooled force session should stop requesting animation callbacks');
+  force = value.factory.getDiagnostics().sessions[0]?.modules['force-layout'] as typeof force;
+  assert((force?.integrationStepCount ?? 0) - beforeRapidInput <= 31,
+    '60 Hz camera input must not make the expensive force integrator exceed 30 Hz');
+
+  for (let index = 0; index < 360 && (value.platform.pendingFrames > 0 || value.platform.pendingTimers > 0); index += 1) {
+    value.platform.advanceTime(1_000 / 15);
+    value.platform.flushTimer();
+    timestamp += 1_000 / 15;
+    value.platform.flushFrame(timestamp);
+  }
+  force = value.factory.getDiagnostics().sessions[0]?.modules['force-layout'] as typeof force;
+  equal(force?.targetStepRateHz, 0, 'settled physics should report a zero Hz target');
+  equal(value.platform.pendingFrames, 0, 'settled force should stop requesting animation callbacks');
+  equal(value.platform.pendingTimers, 0, 'settled force should leave no wake timer');
   await session.resetPerformanceMeasurements();
   value.platform.flushFrame(10_000);
   equal((await session.exportPerformanceSnapshot()).counters?.moduleTicks, 0,
     'a settled graph with no input should perform no module work');
   await session.dispose();
-
-  const highRefresh = harness();
-  highRefresh.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
-    modules: { 'force-layout': { enabled: true } },
-  });
-  const highRefreshSession = await highRefresh.create();
-  await highRefreshSession.resetPerformanceMeasurements();
-  for (let index = 1; index <= 144; index += 1) highRefresh.platform.flushFrame(index * (1_000 / 144));
-  assert(((await highRefreshSession.exportPerformanceSnapshot()).counters?.moduleTicks ?? 0) <= 60,
-    'a 144 Hz callback stream must remain below the 60 Hz pipeline ceiling');
-  await highRefreshSession.dispose();
 });
 
 test('R-PROFILE-LIVE-01 refreshes mounted sessions without replacing their surface', async () => {
@@ -483,6 +549,40 @@ test('large-graph fixture keeps adaptive labels bounded and exports stage timing
   for (let index = 0; index < 10; index += 1) value.platform.flushFrame((index + 301) * (1_000 / 60));
   equal((await session.exportPerformanceSnapshot()).counters?.renderedFrames, settledRenderCount, 'settled force should stop invalidating renders');
   await session.dispose();
+});
+
+test('runtime diagnostics expose session activity and disappear on disposal', async () => {
+  const value = harness({
+    document: graphDocument({
+      nodes: [
+        graphNode('private-node-sentinel', {
+          label: 'private-label-sentinel',
+          positionHint: { x: 987_654_321, y: 20, z: 0 },
+        }),
+      ],
+      edges: [],
+    }),
+  });
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
+    modules: { 'force-layout': { enabled: true } },
+  });
+  const session = await value.create();
+  let diagnostics = value.factory.getDiagnostics();
+  equal(diagnostics.activeSessionCount, 1, 'mounted runtime should be counted');
+  equal(diagnostics.sessions[0]?.consumerId, 'synthetic-consumer', 'diagnostics should identify the owner');
+  equal(diagnostics.sessions[0]?.frameScheduled, true, 'diagnostics should report pending work');
+  const force = diagnostics.sessions[0]?.modules['force-layout'] as { running?: boolean } | undefined;
+  equal(force?.running, true, 'diagnostics should expose compact force activity');
+  const serialized = JSON.stringify(diagnostics);
+  equal(serialized.includes('private-node-sentinel'), false, 'diagnostics must omit node IDs');
+  equal(serialized.includes('private-label-sentinel'), false, 'diagnostics must omit node labels');
+  equal(serialized.includes('987654321'), false, 'diagnostics must omit node coordinates');
+  session.setSuspended(true);
+  diagnostics = value.factory.getDiagnostics();
+  equal(diagnostics.sessions[0]?.suspended, true, 'diagnostics should report suspension');
+  equal(diagnostics.sessions[0]?.frameScheduled, false, 'suspension should cancel scheduled work');
+  await session.dispose();
+  equal(value.factory.getDiagnostics().activeSessionCount, 0, 'disposed runtime should disappear');
 });
 
 test('R-SHELL-05 isolates sessions and leaves no DOM behind when activation fails', async () => {

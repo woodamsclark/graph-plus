@@ -16,6 +16,7 @@ export class CanvasSessionSurface implements SessionSurfaceV1 {
   private readonly resizeObserver: SessionResizeObserverV1;
   private readonly resizeListeners = new Set<(viewport: SessionSurfaceViewportV1) => void>();
   private viewport: SessionSurfaceViewportV1 = { width: 0, height: 0, devicePixelRatio: 1 };
+  private pixelRatioLimit?: number;
   private disposed = false;
 
   constructor(options: {
@@ -23,9 +24,11 @@ export class CanvasSessionSurface implements SessionSurfaceV1 {
     readonly dimensions: GraphDimensionsV1;
     readonly container: HTMLElement;
     readonly platform: SessionRuntimePlatformV1;
+    readonly pixelRatioLimit?: number;
   }) {
     this.container = options.container;
     this.platform = options.platform;
+    this.pixelRatioLimit = finitePositive(options.pixelRatioLimit) ? options.pixelRatioLimit : undefined;
     this.root = this.platform.document.createElement('div');
     this.root.className = 'graph-engine-session';
     this.root.dataset.graphEngineSession = options.sessionId;
@@ -80,6 +83,13 @@ export class CanvasSessionSurface implements SessionSurfaceV1 {
     return { dispose: () => this.resizeListeners.delete(listener) };
   }
 
+  setPixelRatioLimit(limit?: number): void {
+    const next = finitePositive(limit) ? limit : undefined;
+    if (next === this.pixelRatioLimit) return;
+    this.pixelRatioLimit = next;
+    this.resize();
+  }
+
   setDimensions(dimensions: GraphDimensionsV1): void {
     if (this.disposed) return;
     this.root.dataset.dimensions = dimensions;
@@ -119,7 +129,10 @@ export class CanvasSessionSurface implements SessionSurfaceV1 {
     const bounds = this.container.getBoundingClientRect();
     const width = Math.max(0, bounds.width || this.container.clientWidth || 0);
     const height = Math.max(0, bounds.height || this.container.clientHeight || 0);
-    const devicePixelRatio = this.platform.devicePixelRatio;
+    const nativePixelRatio = this.platform.devicePixelRatio;
+    const devicePixelRatio = this.pixelRatioLimit === undefined
+      ? nativePixelRatio
+      : Math.min(nativePixelRatio, this.pixelRatioLimit);
     this.viewport = { width, height, devicePixelRatio };
     this.canvas.width = Math.round(width * devicePixelRatio);
     this.canvas.height = Math.round(height * devicePixelRatio);
@@ -128,4 +141,8 @@ export class CanvasSessionSurface implements SessionSurfaceV1 {
     this.root.dataset.devicePixelRatio = String(devicePixelRatio);
     for (const listener of [...this.resizeListeners]) listener({ ...this.viewport });
   }
+}
+
+function finitePositive(value: number | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }

@@ -28,6 +28,7 @@ import {
   type GraphPlusLensStateV1,
   type ObsidianSearchIndexV1,
 } from '../query/index.ts';
+import { GraphPlusNeighborhoodFramerV1 } from './GraphPlusNeighborhoodFramer.ts';
 
 export interface GraphPlusVaultSourceV1<TFile> {
   read(): VaultGraphSnapshotV1<TFile> | Promise<VaultGraphSnapshotV1<TFile>>;
@@ -79,6 +80,8 @@ export class GraphPlusConsumerV1<TFile> {
   private lensQueue: Promise<void> = Promise.resolve();
   private transientRevealNodeId?: string;
   private resettingLayout = false;
+  private visibleNodeIds = new Set<string>();
+  private readonly neighborhoodFramer: GraphPlusNeighborhoodFramerV1;
 
   constructor(private readonly options: GraphPlusConsumerOptionsV1<TFile>) {
     this.adapter = new VaultGraphAdapterV1({ countDuplicateLinks: options.countDuplicateLinks });
@@ -93,6 +96,12 @@ export class GraphPlusConsumerV1<TFile> {
     );
     this.profileId = options.profileId ?? 'default';
     this.dimensions = options.dimensions ?? '2d';
+    this.neighborhoodFramer = new GraphPlusNeighborhoodFramerV1({
+      container: options.container,
+      getSession: () => this.session,
+      getDocument: () => this.document,
+      getVisibleNodeIds: () => this.visibleNodeIds,
+    });
   }
 
   async open(): Promise<void> {
@@ -192,6 +201,7 @@ export class GraphPlusConsumerV1<TFile> {
     if (!this.session) return;
     await this.session.setSelection([nodeId]);
     await this.session.focusNode(nodeId);
+    await this.neighborhoodFramer.frame(nodeId);
   }
 
   async revealAndFocusNode(nodeId: string): Promise<boolean> {
@@ -202,7 +212,7 @@ export class GraphPlusConsumerV1<TFile> {
     await this.applyFilter();
     await this.session.setSelection([nodeId]);
     await this.session.focusNode(nodeId);
-    await this.session.fitNodes([nodeId]);
+    await this.neighborhoodFramer.frame(nodeId);
     return true;
   }
 
@@ -214,6 +224,7 @@ export class GraphPlusConsumerV1<TFile> {
     await this.applyFilter();
     await this.session.setSelection([nodeId]);
     await this.session.focusNode(nodeId);
+    await this.neighborhoodFramer.frame(nodeId);
     return true;
   }
 
@@ -243,6 +254,7 @@ export class GraphPlusConsumerV1<TFile> {
   }
 
   setSuspended(suspended: boolean): void {
+    if (suspended) this.neighborhoodFramer.cancel();
     this.session?.setSuspended(suspended);
   }
 
@@ -254,6 +266,7 @@ export class GraphPlusConsumerV1<TFile> {
       const document = this.document;
       const discardedSession = this.session;
       this.sessionSubscriptions.splice(0).forEach((subscription) => subscription.dispose());
+      this.neighborhoodFramer.cancel();
       this.options.onNotePreview?.({ mod: false });
       this.transientRevealNodeId = undefined;
       await this.checkpoint.detachAndWait();
@@ -279,6 +292,7 @@ export class GraphPlusConsumerV1<TFile> {
     this.opened = false;
     await this.lensQueue.catch(() => undefined);
     this.sessionSubscriptions.splice(0).forEach((subscription) => subscription.dispose());
+    this.neighborhoodFramer.cancel();
     this.actionRegistration?.dispose();
     this.actionRegistration = undefined;
     try {
@@ -290,6 +304,7 @@ export class GraphPlusConsumerV1<TFile> {
       this.lookup = new GraphPlusLookupV1<TFile>();
       this.searchIndex = new Map();
       this.transientRevealNodeId = undefined;
+      this.visibleNodeIds.clear();
       if (!this.leaseReleased) {
         this.leaseReleased = true;
         await this.options.lease.release();
@@ -315,6 +330,15 @@ export class GraphPlusConsumerV1<TFile> {
     this.checkpoint.attach(session, document);
     this.sessionSubscriptions.push(session.onError((error) => this.options.onError?.(error)));
     this.sessionSubscriptions.push(session.onIntent((intent) => {
+      if (intent.type === 'viewport-changed') {
+        this.neighborhoodFramer.cancel();
+        return;
+      }
+      if (intent.type === 'focus-changed') {
+        if (intent.focusedNodeId) void this.neighborhoodFramer.frame(intent.focusedNodeId);
+        else this.neighborhoodFramer.cancel();
+        return;
+      }
       if (intent.type !== 'node-hover-changed') return;
       const entry = intent.nodeId ? this.lookup.get(intent.nodeId) : undefined;
       this.options.onNotePreview?.({
@@ -352,6 +376,7 @@ export class GraphPlusConsumerV1<TFile> {
 
   private async applyFilter(): Promise<readonly string[]> {
     if (!this.session || !this.document) return [];
+    this.neighborhoodFramer.cancel();
     const compiled = compileGraphPlusFilterV1(this.document, this.lens, this.searchIndex);
     if (compiled.error) this.options.onError?.(new Error(compiled.error));
     const rootId = this.lens.form.rootNodeId;
@@ -365,6 +390,7 @@ export class GraphPlusConsumerV1<TFile> {
     if (this.transientRevealNodeId) {
       visibleNodeIds = [...new Set([...visibleNodeIds, this.transientRevealNodeId])];
     }
+    this.visibleNodeIds = new Set(visibleNodeIds);
     await this.session.applyFilter({
       ...compiled.request,
       node: { op: 'id-in', ids: visibleNodeIds },

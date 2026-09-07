@@ -140,8 +140,15 @@ test('S-CONNECT local lease uses the provider core and release owns only its ses
     container: first.runtime.container,
     document: runtimeFixture(),
   });
+  let diagnostics = first.core.getDiagnostics();
+  equal(diagnostics.leaseCount, 1, 'provider diagnostics should count the live lease');
+  equal(diagnostics.leases[0]?.consumerId, 'synthetic-consumer', 'provider diagnostics should identify its consumer');
+  equal(diagnostics.leases[0]?.sessionCount, 1, 'provider diagnostics should count lease-owned sessions');
   equal(first.runtime.container.querySelectorAll('[data-graph-engine-session]').length, 1, 'lease should create a mounted session');
   await result.lease.release();
+  diagnostics = first.core.getDiagnostics();
+  equal(diagnostics.leaseCount, 0, 'released lease should disappear from diagnostics');
+  equal(diagnostics.runtime.activeSessionCount, 0, 'released lease should leave no active runtime');
   equal(first.runtime.container.querySelectorAll('[data-graph-engine-session]').length, 0, 'release should dispose the lease session');
   let rejected = false;
   try { await result.lease.registerConsumer(runtimeRegistration()); } catch (error) {

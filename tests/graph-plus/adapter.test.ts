@@ -1,6 +1,6 @@
 import type { ConsumerRegistrationV1 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { ConsumerProfileRegistry } from '../../src/graph-engine/core/profile/index.ts';
-import { SessionFactory } from '../../src/graph-engine/runtime/index.ts';
+import { GraphCameraController, SessionFactory } from '../../src/graph-engine/runtime/index.ts';
 import { GraphEngineProviderCoreV1 } from '../../src/graph-engine/service/index.ts';
 import {
   ObsidianVaultGraphSourceV1,
@@ -9,6 +9,7 @@ import {
   tagNodeId,
 } from '../../src/graph-plus/adapter/index.ts';
 import { GraphPlusConsumerV1, LocalGraphPlusConsumerV1 } from '../../src/graph-plus/consumer/index.ts';
+import { neighborhoodNodeIds } from '../../src/graph-plus/consumer/GraphPlusNeighborhoodFramer.ts';
 import {
   GraphPlusCheckpointControllerV1,
   type GraphPlusCheckpointStoreV1,
@@ -17,7 +18,7 @@ import {
 import { compileGraphPlusFilterV1, createDefaultGraphPlusLensV1, graphPlusSessionOverridesV1 } from '../../src/graph-plus/query/index.ts';
 import { graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
-import { runtimeHarness, runtimeFixture, runtimeRegistration } from '../support/runtimeHarness.ts';
+import { runtimeCanvas, runtimeHarness, runtimeFixture, runtimeRegistration } from '../support/runtimeHarness.ts';
 
 interface FakeFile { readonly path: string }
 
@@ -120,6 +121,18 @@ test('G-ADAPTER reconciliation is stable and increments only changed documents',
   });
   equal(changed.document.revision, 5, 'changed vault snapshot should advance once');
   equal(changed.document.nodes.some((node) => node.id === noteNodeId('Alpha.md')), false, 'removed notes should reconcile away');
+});
+
+test('V1.7.3 focus framing includes only the focused node and its visible direct neighbors', () => {
+  const fixture = snapshot();
+  const document = new VaultGraphAdapterV1<FakeFile>({ countDuplicateLinks: true }).build(fixture.value).document;
+  const alphaId = noteNodeId('Alpha.md');
+  const betaId = noteNodeId('folder/Beta.md');
+  const courseId = tagNodeId('course');
+  deepEqual(neighborhoodNodeIds(document, alphaId), [alphaId, betaId, courseId],
+    'focus framing should use graph adjacency rather than the entire document');
+  deepEqual(neighborhoodNodeIds(document, alphaId, new Set([alphaId])), [alphaId],
+    'focus framing should not pull filtered neighbors back into view');
 });
 
 test('Graph+ query translation selects IDs before invoking the generic AST filter', () => {
@@ -376,12 +389,35 @@ test('V1.7.1 global active-note following focuses without changing the full proj
   });
   await consumer.open();
   const alphaId = noteNodeId('Alpha.md');
+  const betaId = noteNodeId('folder/Beta.md');
+  const courseId = tagNodeId('course');
+  const session = consumer.getSession();
+  assert(session, 'the followed graph should expose its engine session');
+  const fitRequests: Array<{ nodeIds?: readonly string[]; centerNodeId?: string }> = [];
+  const fitNodes = session.fitNodes.bind(session);
+  session.fitNodes = async (nodeIds, options) => {
+    fitRequests.push({ nodeIds, centerNodeId: options?.centerNodeId });
+    await fitNodes(nodeIds, options);
+  };
   const surface = runtime.container.querySelector<HTMLElement>('[data-graph-engine-session]');
   assert(surface, 'the followed graph should expose its mounted session surface');
 
   equal(await consumer.followActiveNode(alphaId), true, 'a main-split graph should follow the active note');
   equal((await consumer.getSession()?.exportViewState())?.focusedNodeId, alphaId,
     'active-note following should use ordinary graph focus state');
+  deepEqual(fitRequests[0], { nodeIds: [alphaId, betaId, courseId], centerNodeId: alphaId },
+    'every programmatic focus should frame the focused node with its visible direct neighbors');
+  await session.focusNode(null);
+  fitRequests.length = 0;
+  const state = await session.exportViewState();
+  const camera = new GraphCameraController(state.camera, state.dimensions);
+  camera.setViewport(640, 360);
+  const point = camera.worldToScreen(state.positions[alphaId]);
+  dispatchGraphClick(runtime.window, runtimeCanvas(runtime.container), point.x, point.y, 731);
+  runtime.platform.flushFrame();
+  await Promise.resolve();
+  deepEqual(fitRequests[0], { nodeIds: [alphaId, betaId, courseId], centerNodeId: alphaId },
+    'refocusing a node through graph input should use the same neighborhood framing path');
   equal(surface.dataset.renderedNodeCount, String(consumer.getDocument()?.nodes.length),
     'a normal split should retain the complete saved projection');
 
@@ -390,6 +426,32 @@ test('V1.7.1 global active-note following focuses without changing the full proj
     'transient active-note reveal should not enter the durable checkpoint');
   await core.dispose();
 });
+
+function dispatchGraphClick(
+  window: ReturnType<typeof runtimeHarness>['window'],
+  canvas: HTMLCanvasElement,
+  x: number,
+  y: number,
+  pointerId: number,
+): void {
+  for (const type of ['pointerdown', 'pointerup'] as const) {
+    const event = new window.PointerEvent(type, {
+      clientX: x,
+      clientY: y,
+      pointerId,
+      pointerType: 'mouse',
+      button: 0,
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.defineProperty(event, 'clientX', { value: x });
+    Object.defineProperty(event, 'clientY', { value: y });
+    Object.defineProperty(event, 'pointerId', { value: pointerId });
+    Object.defineProperty(event, 'pointerType', { value: 'mouse' });
+    Object.defineProperty(event, 'button', { value: 0 });
+    canvas.dispatchEvent(event as unknown as Event);
+  }
+}
 
 test('V1.7.1 Local Graph+ owns an ephemeral rooted document, layout, and depth', async () => {
   const fixture = snapshot();
@@ -425,6 +487,14 @@ test('V1.7.1 Local Graph+ owns an ephemeral rooted document, layout, and depth',
   local = consumer.getLocalDocument();
   equal(local?.nodes.length, 4, 'depth two should reveal the next connected layer');
 
+  const session = consumer.getSession();
+  assert(session, 'the local graph should retain its engine session');
+  const fitRequests: Array<{ minimumRadius?: number; centerNodeId?: string }> = [];
+  const fitNodes = session.fitNodes.bind(session);
+  session.fitNodes = async (nodeIds, options) => {
+    fitRequests.push({ minimumRadius: options?.minimumRadius, centerNodeId: options?.centerNodeId });
+    await fitNodes(nodeIds, options);
+  };
   equal(await consumer.followActiveNode(betaId), true, 'the local view should follow a newly active note');
   local = consumer.getLocalDocument();
   state = await consumer.getSession()?.exportViewState();
@@ -432,6 +502,8 @@ test('V1.7.1 Local Graph+ owns an ephemeral rooted document, layout, and depth',
   equal(state?.focusedNodeId, betaId, 'focus should transfer with the active note');
   equal(state?.pinnedNodeIds.includes(alphaId), false, 'the prior local root anchor must not leak across documents');
   deepEqual(state?.camera.target, state?.positions[betaId], 'camera centering should follow the new local root');
+  deepEqual(fitRequests[0], { minimumRadius: 462.5, centerNodeId: betaId },
+    'local focus should reserve the configured maximum spring radius in one predictive camera fit');
   await consumer.close();
   await core.dispose();
 });

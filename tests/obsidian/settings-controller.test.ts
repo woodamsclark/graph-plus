@@ -7,12 +7,12 @@ import {
 import { createShippedGraphModuleRegistryV1 } from '../../src/graph-engine/runtime/index.ts';
 import { GraphEngineSettingsControllerV1 } from '../../src/obsidian/settings/GraphEngineSettingsController.ts';
 import { GRAPH_SETTING_PRESENTATIONS_V1 } from '../../src/obsidian/settings/GraphEngineSettingsCatalog.ts';
-import { assert, equal, test } from '../support/harness.ts';
+import { assert, deepEqual, equal, test } from '../support/harness.ts';
 
 test('Graph+ releases dragged nodes while retaining explicit context-menu pinning', () => {
   const profile = GRAPH_PLUS_CONSUMER_REGISTRATION_V1.profiles[0];
   equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.displayName, 'graph+', 'bundled product name should use lowercase branding');
-  equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.consumerVersion, '1.7.2', 'bundled Graph+ should match the patch release');
+  equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.consumerVersion, '1.7.3', 'bundled Graph+ should match the patch release');
   equal(profile?.uiDefaults?.quickSettingsVisibility, 'collapsed', 'Graph+ controls should begin as the minimized launcher');
   equal(profile?.profileSettings?.dragRelease, 'dynamic', 'drag release should return an unpinned node to the active layout');
   equal(profile?.uiDefaults?.contextMenuEnabled, true, 'the right-click menu should remain available for explicit pinning');
@@ -126,6 +126,9 @@ test('V1.7 settings catalog exposes only curated typed controls', () => {
   const stiffness = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'force-layout.axialSpringStiffness');
   equal(stiffness?.control.type === 'slider' ? stiffness.control.max : undefined, 90,
     'axial stiffness should share the contracted 90 percent ceiling');
+  const quality = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'rendering.renderQuality');
+  deepEqual(quality?.scopes, ['global', 'profile'], 'render quality should live in full settings without crowding quick settings');
+  equal(quality?.control.type, 'select', 'render quality should use named choices rather than free-form text');
 });
 
 test('V1.7 global catalog values flow into Graph+ until its profile overrides them', async () => {

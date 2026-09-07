@@ -88,6 +88,8 @@ export interface GraphModuleTickResultV1 {
   readonly camera?: import('../../contracts/v1/index.ts').GraphCameraStateV1;
   /** Keeps the session awake for another eligible pipeline frame. */
   readonly requestNextFrame?: boolean;
+  /** Optional minimum delay before continuous module work needs another frame. */
+  readonly nextFrameDelayMs?: number;
 }
 
 export interface GraphMotionTargetsV1 {
@@ -122,9 +124,13 @@ export interface GraphModuleInstanceV1 {
   projectTopology?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
   selectRender?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
   choreograph?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
+  /** `null` means idle; a number throttles continuous ticks; `undefined` is unthrottled. */
+  preferredTickIntervalMs?(state: GraphModulePipelineStateV1): number | null | undefined;
   tick?(state: GraphModulePipelineStateV1, deltaSeconds: number): GraphModuleTickResultV1 | void;
   contributeFrame?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
   exportState?(): JsonValue;
+  /** Compact, read-only runtime evidence for lifecycle and performance diagnosis. */
+  getDiagnostics?(): unknown;
   setSuspended?(suspended: boolean): void;
   dispose?(): void;
 }

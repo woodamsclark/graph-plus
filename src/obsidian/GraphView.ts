@@ -102,6 +102,19 @@ export class GraphPlusView extends ItemView {
   getDisplayText(): string { return 'graph+'; }
   getIcon(): string { return 'dot-network'; }
 
+  getLifecycleDiagnostics(): Readonly<Record<string, unknown>> {
+    return {
+      type: GRAPH_PLUS_TYPE,
+      contentShown: this.contentEl.isShown(),
+      trackedVisible: this.leafVisible,
+      hasConsumer: this.consumer !== undefined,
+      listenerCount: this.unregisters.length,
+      rebuildScheduled: this.rebuildTimer !== undefined,
+      reconcilePending: this.reconcilePending,
+      followRunning: this.followRunning,
+    };
+  }
+
   async showFile(file: TFile): Promise<boolean> {
     this.explicitNavigation = true;
     this.activeFileToFollow = undefined;

@@ -22,6 +22,7 @@ export interface SessionSurfaceV1 {
   readonly canvas: HTMLCanvasElement;
   getViewport(): SessionSurfaceViewportV1;
   onResize(listener: (viewport: SessionSurfaceViewportV1) => void): Disposable;
+  setPixelRatioLimit(limit?: number): void;
   setDimensions(dimensions: GraphDimensionsV1): void;
   update(state: SessionSurfaceStateV1): void;
   recordFrame(frameCount: number): void;

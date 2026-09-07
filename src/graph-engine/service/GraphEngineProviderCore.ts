@@ -29,6 +29,17 @@ export interface GraphEngineProviderCoreOptionsV1 {
   readonly sessionUiHost?: GraphEngineSessionUiHostV1;
 }
 
+export interface GraphEngineProviderDiagnosticsV1 {
+  readonly active: boolean;
+  readonly leaseCount: number;
+  readonly leases: readonly {
+    readonly consumerId: string;
+    readonly sessionCount: number;
+    readonly actionRegistrationCount: number;
+  }[];
+  readonly runtime: ReturnType<SessionFactory['getDiagnostics']>;
+}
+
 interface LeaseRecord {
   readonly id: number;
   readonly consumerId: string;
@@ -108,6 +119,23 @@ export class GraphEngineProviderCoreV1 {
     await Promise.all(leases.map((lease) => this.releaseLease(lease)));
     this.leases.clear();
     this.nodeActions.dispose();
+  }
+
+  getDiagnostics(): GraphEngineProviderDiagnosticsV1 {
+    const leases = [...this.leases]
+      .filter((lease) => !lease.released)
+      .map((lease) => ({
+        consumerId: lease.consumerId,
+        sessionCount: lease.sessions.size,
+        actionRegistrationCount: lease.actionRegistrations.size,
+      }))
+      .sort((left, right) => left.consumerId.localeCompare(right.consumerId));
+    return {
+      active: this.active,
+      leaseCount: leases.length,
+      leases,
+      runtime: this.sessions.getDiagnostics(),
+    };
   }
 
   private requestLease(options: {

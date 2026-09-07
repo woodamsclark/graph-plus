@@ -209,7 +209,13 @@ export class GraphCameraController {
     };
   }
 
-  fit(positions: readonly Vec3[], paddingPx = 48, maxMagnification?: number, center?: Vec3): void {
+  fit(
+    positions: readonly Vec3[],
+    paddingPx = 48,
+    maxMagnification?: number,
+    center?: Vec3,
+    minimumRadius = 0,
+  ): void {
     if (!positions.length || this.viewport.width <= 0 || this.viewport.height <= 0) return;
     const bounds = graphBounds(positions);
     const target = center ? { ...center } : {
@@ -218,10 +224,10 @@ export class GraphCameraController {
       z: (bounds.min.z + bounds.max.z) / 2,
     };
     if (this.state.projection === 'orthographic') {
-      const width = Math.max(1, center
+      const width = Math.max(1, minimumRadius * 2, center
         ? 2 * Math.max(...positions.map((position) => Math.abs(position.x - target.x)))
         : bounds.max.x - bounds.min.x);
-      const height = Math.max(1, center
+      const height = Math.max(1, minimumRadius * 2, center
         ? 2 * Math.max(...positions.map((position) => Math.abs(position.y - target.y)))
         : bounds.max.y - bounds.min.y);
       let zoom = clamp(Math.min(
@@ -236,7 +242,7 @@ export class GraphCameraController {
       return;
     }
 
-    const radius = Math.max(1, ...positions.map((position) => distance(position, target)));
+    const radius = Math.max(1, minimumRadius, ...positions.map((position) => distance(position, target)));
     const backwards = normalize(subtract(this.state.position, this.state.target));
     let distanceForFit = Math.max(10, radius * 2.4 * Math.max(MIN_ZOOM, this.state.zoom));
     if (maxMagnification !== undefined && Number.isFinite(maxMagnification) && maxMagnification > 0) {

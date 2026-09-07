@@ -84,3 +84,27 @@ test('focus fitting caps magnification in orthographic and perspective cameras',
   assert(Math.abs(fittedDistance - (1000 / 1.75)) < 1e-9,
     'single-node focus should not dolly a 3D camera closer than the supplied cap');
 });
+
+test('camera fitting can reserve a stable world-space radius before nodes expand', () => {
+  const orthographic = new GraphCameraController({
+    position: { x: 0, y: 0, z: 10 }, target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic',
+  }, '2d');
+  orthographic.setViewport(640, 360);
+  orthographic.fit([{ x: 0, y: 0, z: 0 }], 48, undefined, { x: 0, y: 0, z: 0 }, 500);
+  assert(Math.abs(orthographic.getState().zoom - 0.264) < 1e-9,
+    'a 2D predictive fit should reserve the requested radius even while nodes remain near the origin');
+
+  const perspective = new GraphCameraController({
+    position: { x: 0, y: 0, z: 100 }, target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 }, zoom: 50 / 24, projection: 'perspective',
+  }, '3d');
+  perspective.setViewport(640, 360);
+  perspective.fit([{ x: 0, y: 0, z: 0 }], 48, undefined, { x: 0, y: 0, z: 0 }, 500);
+  const state = perspective.getState();
+  equal(Math.hypot(
+    state.position.x - state.target.x,
+    state.position.y - state.target.y,
+    state.position.z - state.target.z,
+  ), 2500, 'a 3D predictive fit should dolly for the requested future radius');
+});

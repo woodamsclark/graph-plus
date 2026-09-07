@@ -260,16 +260,11 @@ export class GraphInput {
 
   private toScreen(clientX: number, clientY: number): GraphScreenPointV1 {
     const bounds = this.options.canvas.getBoundingClientRect();
-    const ratio = this.options.platform.devicePixelRatio;
-    const logicalWidth = this.options.canvas.width / ratio;
-    const logicalHeight = this.options.canvas.height / ratio;
-    const scaleX = bounds.width > 0 ? logicalWidth / bounds.width : 1;
-    const scaleY = bounds.height > 0 ? logicalHeight / bounds.height : 1;
     const safeClientX = Number.isFinite(clientX) ? clientX : bounds.left + bounds.width / 2;
     const safeClientY = Number.isFinite(clientY) ? clientY : bounds.top + bounds.height / 2;
     return {
-      x: (safeClientX - bounds.left) * scaleX,
-      y: (safeClientY - bounds.top) * scaleY,
+      x: safeClientX - bounds.left,
+      y: safeClientY - bounds.top,
     };
   }
 }

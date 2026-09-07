@@ -30,6 +30,9 @@ export interface GraphSettingPresentationV1 {
  * customization, and Quick Settings. Solver internals deliberately do not appear.
  */
 export const GRAPH_SETTING_PRESENTATIONS_V1: readonly GraphSettingPresentationV1[] = [
+  entry('rendering.renderQuality', 'appearance', 'rendering', 'renderQuality', 'Render quality', 'Balance sharpness and energy use.',
+    { type: 'select', options: { automatic: 'Automatic', 'high-fidelity': 'High fidelity', 'energy-saver': 'Energy saver' } },
+    ['global', 'profile']),
   entry('rendering.labelMode', 'appearance', 'rendering', 'labelMode', 'Labels', 'Choose when labels are shown.',
     { type: 'select', options: { adaptive: 'Adaptive', all: 'All', off: 'Off' } }),
   entry('anima.labelPosition', 'appearance', 'anima', 'labelPosition', 'Label position', 'Place labels above or below nodes.',
@@ -99,6 +102,7 @@ function entry(
   name: string,
   description: string,
   control: GraphSettingControlV1,
+  scopes: readonly ('global' | 'profile' | 'quick')[] = ['global', 'profile', 'quick'],
 ): GraphSettingPresentationV1 {
   return {
     id,
@@ -108,6 +112,6 @@ function entry(
     name,
     description,
     control,
-    scopes: ['global', 'profile', 'quick'],
+    scopes,
   };
 }

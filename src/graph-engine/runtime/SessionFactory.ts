@@ -5,6 +5,7 @@ import type {
 } from '../contracts/v1/index.ts';
 import { ConsumerProfileRegistry } from '../core/profile/index.ts';
 import { GraphSessionRuntime } from './GraphSessionRuntime.ts';
+import type { GraphSessionRuntimeDiagnosticsV1 } from './GraphSessionRuntime.ts';
 import {
   createShippedGraphModuleRegistryV1,
   SHIPPED_GRAPH_MODULE_IDS_V1,
@@ -38,6 +39,11 @@ export interface GraphSessionHostServicesV1 {
 export interface HostedGraphSessionV1 {
   readonly session: GraphSessionV1;
   readonly controls: GraphSessionControlPortV1;
+}
+
+export interface GraphEngineRuntimeDiagnosticsV1 {
+  readonly activeSessionCount: number;
+  readonly sessions: readonly GraphSessionRuntimeDiagnosticsV1[];
 }
 
 export class GraphSessionProfileErrorV1 extends Error {
@@ -131,6 +137,13 @@ export class SessionFactory {
 
   refreshActiveThemes(): void {
     for (const session of [...this.activeSessions]) session.refreshThemePalette();
+  }
+
+  getDiagnostics(): GraphEngineRuntimeDiagnosticsV1 {
+    const sessions = [...this.activeSessions]
+      .map((session) => session.getDiagnostics())
+      .sort((left, right) => left.sessionId.localeCompare(right.sessionId));
+    return { activeSessionCount: sessions.length, sessions };
   }
 }
 

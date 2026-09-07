@@ -23,12 +23,12 @@ export const GRAPH_PLUS_REQUESTED_CAPABILITIES_V1 = [
 export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
   consumerId: GRAPH_PLUS_CONSUMER_ID_V1,
   displayName: 'graph+',
-  consumerVersion: '1.7.2',
+  consumerVersion: '1.7.3',
   supportedProtocolVersions: [1],
   profiles: [{
     profileId: GRAPH_PLUS_PROFILE_ID_V1,
     displayName: 'Default',
-    descriptorVersion: 8,
+    descriptorVersion: 9,
     dimensions: '2d',
     allowedDimensions: ['2d', '3d'],
     requestedCapabilities: GRAPH_PLUS_REQUESTED_CAPABILITIES_V1,
@@ -58,7 +58,10 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
     modules: {
       rendering: {
         policy: 'required',
-        constraints: { labelMode: { type: 'enum', allowed: ['adaptive', 'all', 'off'] } },
+        constraints: {
+          renderQuality: { type: 'enum', allowed: ['automatic', 'high-fidelity', 'energy-saver'] },
+          labelMode: { type: 'enum', allowed: ['adaptive', 'all', 'off'] },
+        },
       },
       filtering: { policy: 'required' },
       form: {

@@ -28,6 +28,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       capabilities: ['render', 'camera', 'input'],
       settingsSchemaVersion: 1,
       defaultSettings: {
+        renderQuality: 'automatic',
         labelMode: 'adaptive',
         nodeRadiusScale: 1,
         edgeThicknessScale: 1,

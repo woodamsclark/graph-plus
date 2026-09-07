@@ -100,6 +100,19 @@ export class LocalGraphPlusView extends ItemView {
   getDisplayText(): string { return 'local graph+'; }
   getIcon(): string { return 'network'; }
 
+  getLifecycleDiagnostics(): Readonly<Record<string, unknown>> {
+    return {
+      type: LOCAL_GRAPH_PLUS_TYPE,
+      contentShown: this.contentEl.isShown(),
+      trackedVisible: this.leafVisible,
+      hasConsumer: this.consumer !== undefined,
+      listenerCount: this.unregisters.length,
+      rebuildScheduled: this.rebuildTimer !== undefined,
+      reconcilePending: this.reconcilePending,
+      followRunning: this.followRunning,
+    };
+  }
+
   getState(): Record<string, unknown> {
     return {
       lens: this.consumer?.getLens() ?? this.pendingLens,

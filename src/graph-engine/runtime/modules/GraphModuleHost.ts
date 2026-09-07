@@ -38,6 +38,8 @@ export class GraphModuleHost {
   private readonly getViewState: () => GraphViewStateV1;
   private fatal = false;
   private disposed = false;
+  private readonly tickElapsedSeconds = new Map<string, number>();
+  private readonly tickHasRun = new Set<string>();
 
   constructor(options: {
     readonly registry: GraphModuleRegistry;
@@ -138,6 +140,8 @@ export class GraphModuleHost {
       if (desiredIds.has(module.id)) continue;
       const index = this.active.indexOf(module);
       if (index >= 0) this.active.splice(index, 1);
+      this.tickElapsedSeconds.delete(module.id);
+      this.tickHasRun.delete(module.id);
       try { module.instance.dispose?.(); } catch (error) {
         this.onFailure({ moduleId: module.id, policy: module.policy, hook: 'dispose', error });
       }
@@ -161,6 +165,8 @@ export class GraphModuleHost {
           current.instance.updateSettings(cloneJsonRecord(desired.settings));
           current.instance.updateProfileSettings?.(cloneJsonRecord(profile.profileSettings));
           this.active[currentIndex] = { ...current, settings: cloneJsonRecord(desired.settings) };
+          this.tickElapsedSeconds.delete(current.id);
+          this.tickHasRun.delete(current.id);
         } catch (error) {
           this.failActiveModule(current, 'settings-changed', error);
           if (this.fatal) return;
@@ -192,6 +198,8 @@ export class GraphModuleHost {
         continue;
       }
       if (current) {
+        this.tickElapsedSeconds.delete(current.id);
+        this.tickHasRun.delete(current.id);
         try { current.instance.dispose?.(); } catch (error) {
           this.onFailure({ moduleId: current.id, policy: current.policy, hook: 'dispose', error });
         }
@@ -230,15 +238,42 @@ export class GraphModuleHost {
     let positions = choreographed.positions;
     let changed = false;
     let requestNextFrame = false;
+    let nextFrameDelayMs: number | undefined;
     for (const module of [...this.active]) {
       if (!module.instance.tick) continue;
       try {
-        const result = module.instance.tick({ ...choreographed, positions }, deltaSeconds);
+        const moduleState = { ...choreographed, positions };
+        const preferredInterval = module.instance.preferredTickIntervalMs?.(moduleState);
+        if (preferredInterval === null) {
+          this.tickElapsedSeconds.delete(module.id);
+          continue;
+        }
+        const elapsed = (this.tickElapsedSeconds.get(module.id) ?? 0) + Math.max(0, deltaSeconds);
+        if (this.tickHasRun.has(module.id)
+          && typeof preferredInterval === 'number' && Number.isFinite(preferredInterval)
+          && elapsed * 1_000 + 1e-9 < Math.max(0, preferredInterval)) {
+          this.tickElapsedSeconds.set(module.id, elapsed);
+          requestNextFrame = true;
+          const remaining = Math.max(0, preferredInterval - elapsed * 1_000);
+          nextFrameDelayMs = nextFrameDelayMs === undefined ? remaining : Math.min(nextFrameDelayMs, remaining);
+          continue;
+        }
+        this.tickElapsedSeconds.delete(module.id);
+        const result = module.instance.tick(moduleState, elapsed);
+        this.tickHasRun.add(module.id);
         if (result?.positions) {
           positions = result.positions;
           changed = true;
         }
-        if (result?.requestNextFrame) requestNextFrame = true;
+        if (result?.requestNextFrame) {
+          requestNextFrame = true;
+          const requestedDelay = typeof result.nextFrameDelayMs === 'number' && Number.isFinite(result.nextFrameDelayMs)
+            ? Math.max(0, result.nextFrameDelayMs)
+            : 0;
+          nextFrameDelayMs = nextFrameDelayMs === undefined
+            ? requestedDelay
+            : Math.min(nextFrameDelayMs, requestedDelay);
+        }
       } catch (error) {
         this.failActiveModule(module, 'tick', error);
         if (this.fatal) break;
@@ -249,6 +284,7 @@ export class GraphModuleHost {
       ...(changed ? { positions } : {}),
       ...(camera ? { camera } : {}),
       ...(requestNextFrame || camera ? { requestNextFrame: true } : {}),
+      ...(requestNextFrame && nextFrameDelayMs !== undefined ? { nextFrameDelayMs } : {}),
     } : undefined;
   }
 
@@ -291,9 +327,22 @@ export class GraphModuleHost {
     return result;
   }
 
+  getDiagnostics(): Readonly<Record<string, unknown>> {
+    return Object.fromEntries(this.active.flatMap((module) => {
+      if (!module.instance.getDiagnostics) return [];
+      try {
+        return [[module.id, module.instance.getDiagnostics()] as const];
+      } catch (error) {
+        return [[module.id, { error: errorMessage(error) }] as const];
+      }
+    }));
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.tickElapsedSeconds.clear();
+    this.tickHasRun.clear();
     this.disposeActivated((failure) => this.onFailure(failure));
   }
 

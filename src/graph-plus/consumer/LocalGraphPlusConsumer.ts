@@ -5,7 +5,6 @@ import type {
   GraphSessionErrorV1,
   GraphSessionUiOptionsV1,
   GraphSessionV1,
-  Vec3,
 } from '../../graph-engine/contracts/v1/index.ts';
 import {
   GraphPlusLookupV1,
@@ -20,6 +19,7 @@ import {
   type ObsidianSearchIndexV1,
 } from '../query/index.ts';
 import type { GraphPlusNavigatorV1, GraphPlusVaultSourceV1 } from './GraphPlusConsumer.ts';
+import { GraphPlusNeighborhoodFramerV1 } from './GraphPlusNeighborhoodFramer.ts';
 
 export interface LocalGraphPlusConsumerOptionsV1<TFile> {
   readonly lease: GraphEngineLeaseV1;
@@ -60,8 +60,8 @@ export class LocalGraphPlusConsumerV1<TFile> {
   private lensQueue: Promise<void> = Promise.resolve();
   private opened = false;
   private leaseReleased = false;
-  private neighborhoodFrameTimer?: number;
-  private neighborhoodFrameGeneration = 0;
+  private focusedNodeId?: string;
+  private readonly neighborhoodFramer: GraphPlusNeighborhoodFramerV1;
 
   constructor(private readonly options: LocalGraphPlusConsumerOptionsV1<TFile>) {
     this.adapter = new VaultGraphAdapterV1({ countDuplicateLinks: options.countDuplicateLinks });
@@ -69,6 +69,11 @@ export class LocalGraphPlusConsumerV1<TFile> {
     this.lens = clone(options.initialLens ?? createDefaultGraphPlusLensV1());
     this.depth = localDepth(options.initialDepth);
     this.rootNodeId = options.initialRootNodeId;
+    this.neighborhoodFramer = new GraphPlusNeighborhoodFramerV1({
+      container: options.container,
+      getSession: () => this.session,
+      getDocument: () => this.localDocument,
+    });
   }
 
   async open(): Promise<void> {
@@ -104,7 +109,13 @@ export class LocalGraphPlusConsumerV1<TFile> {
       this.subscriptions.push(session.onError((error) => this.options.onError?.(error)));
       this.subscriptions.push(session.onIntent((intent) => {
         if (intent.type === 'viewport-changed') {
-          this.cancelNeighborhoodFraming();
+          this.neighborhoodFramer.cancel();
+          return;
+        }
+        if (intent.type === 'focus-changed') {
+          this.focusedNodeId = intent.focusedNodeId;
+          if (this.focusedNodeId) void this.frameNeighborhood(this.focusedNodeId);
+          else this.neighborhoodFramer.cancel();
           return;
         }
         if (intent.type !== 'node-hover-changed') return;
@@ -173,9 +184,9 @@ export class LocalGraphPlusConsumerV1<TFile> {
   }
 
   setSuspended(suspended: boolean): void {
-    if (suspended) this.cancelNeighborhoodFraming();
+    if (suspended) this.neighborhoodFramer.cancel();
     this.session?.setSuspended(suspended);
-    if (!suspended && this.rootNodeId) this.startNeighborhoodFraming(this.rootNodeId);
+    if (!suspended && this.focusedNodeId) void this.frameNeighborhood(this.focusedNodeId);
   }
 
   async openNode(nodeId: string): Promise<void> {
@@ -188,7 +199,7 @@ export class LocalGraphPlusConsumerV1<TFile> {
 
   async close(): Promise<void> {
     this.opened = false;
-    this.cancelNeighborhoodFraming();
+    this.neighborhoodFramer.cancel();
     await this.lensQueue.catch(() => undefined);
     this.subscriptions.splice(0).forEach((subscription) => subscription.dispose());
     this.actionRegistration?.dispose();
@@ -200,6 +211,7 @@ export class LocalGraphPlusConsumerV1<TFile> {
       this.session = undefined;
       this.canonicalDocument = undefined;
       this.localDocument = undefined;
+      this.focusedNodeId = undefined;
       if (!this.leaseReleased) {
         this.leaseReleased = true;
         await this.options.lease.release();
@@ -209,7 +221,7 @@ export class LocalGraphPlusConsumerV1<TFile> {
 
   private async replaceLocalDocument(): Promise<void> {
     if (!this.session) return;
-    this.cancelNeighborhoodFraming();
+    this.neighborhoodFramer.cancel();
     const localDocument = this.buildLocalDocument();
     this.localDocument = localDocument;
     await this.session.replaceDocument(localDocument);
@@ -219,46 +231,26 @@ export class LocalGraphPlusConsumerV1<TFile> {
   private async presentRoot(): Promise<void> {
     const root = this.rootNodeId;
     if (!this.session || !root || !this.localDocument?.nodes.some((node) => node.id === root)) return;
-    this.cancelNeighborhoodFraming();
+    this.neighborhoodFramer.cancel();
     await this.session.setNodePinned(root, true);
     await this.session.setSelection([root]);
     await this.session.focusNode(root);
-    await this.session.fitNodes(undefined, { centerNodeId: root });
-    this.startNeighborhoodFraming(root);
+    this.focusedNodeId = root;
+    await this.frameNeighborhood(root);
   }
 
-  private startNeighborhoodFraming(rootNodeId: string): void {
-    this.cancelNeighborhoodFraming();
-    const window = this.options.container.ownerDocument.defaultView;
-    if (!window || !this.session) return;
-    const generation = this.neighborhoodFrameGeneration;
-    let previous: Readonly<Record<string, Vec3>> | undefined;
-    let stableSamples = 0;
-    let sampleCount = 0;
-    const sample = async (): Promise<void> => {
-      this.neighborhoodFrameTimer = undefined;
-      const session = this.session;
-      if (!session || generation !== this.neighborhoodFrameGeneration || this.rootNodeId !== rootNodeId) return;
-      const state = await session.exportViewState();
-      if (generation !== this.neighborhoodFrameGeneration || this.rootNodeId !== rootNodeId) return;
-      const movement = previous ? maximumMovement(previous, state.positions) : Number.POSITIVE_INFINITY;
-      previous = state.positions;
-      stableSamples = movement <= 0.75 ? stableSamples + 1 : 0;
-      sampleCount += 1;
-      await session.fitNodes(undefined, { centerNodeId: rootNodeId });
-      if (generation !== this.neighborhoodFrameGeneration) return;
-      if (stableSamples >= 3 || sampleCount >= 25) return;
-      this.neighborhoodFrameTimer = window.setTimeout(() => { void sample(); }, 120);
-    };
-    this.neighborhoodFrameTimer = window.setTimeout(() => { void sample(); }, 120);
-  }
-
-  private cancelNeighborhoodFraming(): void {
-    this.neighborhoodFrameGeneration += 1;
-    if (this.neighborhoodFrameTimer !== undefined) {
-      this.options.container.ownerDocument.defaultView?.clearTimeout(this.neighborhoodFrameTimer);
-      this.neighborhoodFrameTimer = undefined;
-    }
+  private async frameNeighborhood(nodeId: string): Promise<void> {
+    const session = this.session;
+    if (!session) return;
+    const settings = await session.exportEffectiveSettings();
+    if (session !== this.session || this.focusedNodeId !== nodeId) return;
+    const force = settings.modules['force-layout']?.settings;
+    const springLength = finitePositive(force?.springLength, 250);
+    const maximumLengthScale = finitePositive(force?.maximumSpringLengthScale, 1.85);
+    await this.neighborhoodFramer.frame(nodeId, {
+      minimumRadius: springLength * maximumLengthScale,
+      followSettling: false,
+    });
   }
 
   private buildLocalDocument(): GraphDocumentV1 {
@@ -339,23 +331,8 @@ function localDepth(value: number | undefined): number {
     : 1;
 }
 
-function maximumMovement(
-  previous: Readonly<Record<string, Vec3>>,
-  next: Readonly<Record<string, Vec3>>,
-): number {
-  let maximum = 0;
-  for (const [nodeId, position] of Object.entries(next)) {
-    const prior = previous[nodeId];
-    if (!prior) return Number.POSITIVE_INFINITY;
-    maximum = Math.max(maximum, Math.hypot(
-      position.x - prior.x,
-      position.y - prior.y,
-      position.z - prior.z,
-    ));
-  }
-  return Object.keys(previous).length === Object.keys(next).length
-    ? maximum
-    : Number.POSITIVE_INFINITY;
+function finitePositive(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }

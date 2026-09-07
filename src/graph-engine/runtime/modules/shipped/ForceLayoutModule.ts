@@ -56,6 +56,16 @@ interface OctreeNode {
   children?: Array<OctreeNode | undefined>;
 }
 
+interface PreparedSpring {
+  readonly sourceId: string;
+  readonly targetId: string;
+  readonly edgeIds: readonly string[];
+  readonly parameters: WeightedSpringParametersV1;
+  readonly sourceDegree: number;
+  readonly targetDegree: number;
+  readonly bias: number;
+}
+
 export interface WeightedSpringParametersV1 {
   readonly strength: number;
   readonly targetLength: number;
@@ -68,10 +78,15 @@ export interface ForceLayoutDiagnosticsV1 {
   readonly coordinatedMembershipPairCount: number;
   readonly alpha: number;
   readonly running: boolean;
+  readonly targetStepRateHz: number;
+  readonly integrationStepCount: number;
 }
 
 const NATIVE_ACTIVE_DRAG_ALPHA = 0.3;
 const FIXED_STEP_SECONDS = 1 / 60;
+const HOT_LAYOUT_ALPHA = 0.01;
+const HOT_LAYOUT_INTERVAL_MS = 1_000 / 30;
+const COOLING_LAYOUT_INTERVAL_MS = 1_000 / 15;
 const RESTORED_SPEED_REJECTION_MULTIPLIER = 4;
 
 export class ForceLayoutModule implements GraphModuleInstanceV1 {
@@ -83,6 +98,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private topologyDocumentSource: GraphDocumentV1 | null = null;
   private topologyRegionKey = '';
   private topology?: GraphTopologyAnalysisV1;
+  private springs: readonly PreparedSpring[] = [];
   private membershipPairStrengths = new Map<string, number>();
   private componentTargets: ReadonlyMap<string, Vec3> = new Map();
   private documentKey = '';
@@ -97,6 +113,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private alphaTarget = 0;
   private dragWasActive = false;
   private restoredStatePending = false;
+  private integrationStepCount = 0;
 
   constructor(
     private readonly dimensions: GraphDimensionsV1,
@@ -167,6 +184,14 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.suspended = suspended;
   }
 
+  preferredTickIntervalMs(state: GraphModulePipelineStateV1): number | null {
+    if (this.suspended || state.formActive || state.document.nodes.length < 2) return null;
+    const dragActive = state.draggedNodeId !== undefined
+      && state.document.nodes.some((node) => node.id === state.draggedNodeId);
+    if (!this.running && !dragActive) return null;
+    return this.targetFrameIntervalMs(dragActive);
+  }
+
   tick(state: GraphModulePipelineStateV1, deltaSeconds: number) {
     // A restored view can reach the first tick before a view lifecycle event. Keep
     // pin state correct without requiring the session kernel to special-case force.
@@ -219,6 +244,25 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       evidenceLogFactor: this.settings.evidenceLogFactor,
       reciprocalBoost: this.settings.reciprocalBoost,
       hubDiscountExponent: this.settings.hubDiscountExponent,
+    });
+    const physicalPairs = this.topology.pairs.filter((pair) => pair.affinity > 0);
+    const degree = new Map<string, number>();
+    for (const pair of physicalPairs) {
+      degree.set(pair.sourceId, (degree.get(pair.sourceId) ?? 0) + 1);
+      degree.set(pair.targetId, (degree.get(pair.targetId) ?? 0) + 1);
+    }
+    this.springs = physicalPairs.map((pair) => {
+      const sourceDegree = Math.max(1, degree.get(pair.sourceId) ?? 1);
+      const targetDegree = Math.max(1, degree.get(pair.targetId) ?? 1);
+      return {
+        sourceId: pair.sourceId,
+        targetId: pair.targetId,
+        edgeIds: pair.edgeIds,
+        parameters: deriveWeightedSpringParametersV1(pair, this.settings),
+        sourceDegree,
+        targetDegree,
+        bias: sourceDegree / (sourceDegree + targetDegree),
+      };
     });
     this.topologyAnalysisCount += 1;
     this.membershipPairStrengths = new Map();
@@ -313,13 +357,17 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     if (dragActive && !this.dragWasActive) this.alpha = Math.max(this.alpha, NATIVE_ACTIVE_DRAG_ALPHA);
     this.dragWasActive = dragActive;
     this.accumulatorSeconds += Math.max(0, Math.min(0.25, deltaSeconds || FIXED_STEP_SECONDS));
-    if (this.accumulatorSeconds + 1e-12 < FIXED_STEP_SECONDS) return { requestNextFrame: true };
+    if (this.accumulatorSeconds + 1e-12 < FIXED_STEP_SECONDS) return {
+      requestNextFrame: true,
+      nextFrameDelayMs: this.targetFrameIntervalMs(dragActive),
+    };
     this.accumulatorSeconds = Math.min(
       FIXED_STEP_SECONDS - 1e-12,
       Math.max(0, this.accumulatorSeconds - FIXED_STEP_SECONDS),
     );
     let changed = false;
     {
+      this.integrationStepCount += 1;
       this.alpha += (this.alphaTarget - this.alpha) * this.settings.alphaDecay;
       this.applyD3Origin(state);
       this.applyD3Links(state);
@@ -353,7 +401,14 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     return {
       ...(changed ? { positions: this.positions } : {}),
       requestNextFrame: this.running,
+      ...(this.running ? { nextFrameDelayMs: this.targetFrameIntervalMs(dragActive) } : {}),
     };
+  }
+
+  private targetFrameIntervalMs(dragActive: boolean): number {
+    return dragActive || this.alpha >= HOT_LAYOUT_ALPHA
+      ? HOT_LAYOUT_INTERVAL_MS
+      : COOLING_LAYOUT_INTERVAL_MS;
   }
 
   private applyD3Origin(state: GraphModulePipelineStateV1): void {
@@ -383,18 +438,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   private applyD3Links(state: GraphModulePipelineStateV1): void {
-    const pairs = (this.topology?.pairs ?? []).filter((pair) => pair.affinity > 0).map((pair) => ({
-      sourceId: pair.sourceId,
-      targetId: pair.targetId,
-      edgeIds: pair.edgeIds,
-      parameters: deriveWeightedSpringParametersV1(pair, this.settings),
-    }));
-    const degree = new Map<string, number>();
-    for (const pair of pairs) {
-      degree.set(pair.sourceId, (degree.get(pair.sourceId) ?? 0) + 1);
-      degree.set(pair.targetId, (degree.get(pair.targetId) ?? 0) + 1);
-    }
-    for (const pair of pairs) {
+    for (const pair of this.springs) {
       if (pair.sourceId === pair.targetId) continue;
       const source = this.positions[pair.sourceId];
       const target = this.positions[pair.targetId];
@@ -410,24 +454,17 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
         dx = jitter.x * 1e-6; dy = jitter.y * 1e-6; dz = jitter.z * 1e-6;
         length = Math.hypot(dx, dy, dz);
       }
-      const sourceDegree = Math.max(1, degree.get(pair.sourceId) ?? 1);
-      const targetDegree = Math.max(1, degree.get(pair.targetId) ?? 1);
-      const bias = sourceDegree / (sourceDegree + targetDegree);
-      const declaredStrengths = pair.edgeIds
-        .map((id) => state.motionTargets?.edgeStrengthScales?.[id])
-        .filter((value): value is number => value !== undefined && Number.isFinite(value) && value >= 0);
-      const strength = pair.parameters.strength / Math.min(sourceDegree, targetDegree)
-        * finiteNonNegative(declaredStrengths[0], 1)
+      const declaredStrength = firstFiniteEdgeValue(pair.edgeIds, state.motionTargets?.edgeStrengthScales, false);
+      const strength = pair.parameters.strength / Math.min(pair.sourceDegree, pair.targetDegree)
+        * finiteNonNegative(declaredStrength, 1)
         * finiteNonNegative(state.motionTargets?.linkStrengthScale, 1);
-      const declaredLengths = pair.edgeIds
-        .map((id) => state.motionTargets?.edgeLengths?.[id])
-        .filter((value): value is number => value !== undefined && Number.isFinite(value) && value > 0);
-      const targetLength = (declaredLengths[0] ?? pair.parameters.targetLength)
+      const declaredLength = firstFiniteEdgeValue(pair.edgeIds, state.motionTargets?.edgeLengths, true);
+      const targetLength = (declaredLength ?? pair.parameters.targetLength)
         * finitePositive(state.motionTargets?.linkLengthScale, 1);
       const amount = (length - targetLength) / length * this.alpha * strength;
       dx *= amount; dy *= amount; dz *= amount;
-      targetVelocity.x -= dx * bias; targetVelocity.y -= dy * bias; targetVelocity.z -= dz * bias;
-      sourceVelocity.x += dx * (1 - bias); sourceVelocity.y += dy * (1 - bias); sourceVelocity.z += dz * (1 - bias);
+      targetVelocity.x -= dx * pair.bias; targetVelocity.y -= dy * pair.bias; targetVelocity.z -= dz * pair.bias;
+      sourceVelocity.x += dx * (1 - pair.bias); sourceVelocity.y += dy * (1 - pair.bias); sourceVelocity.z += dz * (1 - pair.bias);
       clampVelocity(sourceVelocity, this.settings.maxSpeed, this.dimensions);
       clampVelocity(targetVelocity, this.settings.maxSpeed, this.dimensions);
     }
@@ -573,6 +610,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.bufferDocumentSource = null;
     this.topologyDocumentSource = null;
     this.topology = undefined;
+    this.springs = [];
     this.membershipPairStrengths.clear();
     this.componentTargets = new Map();
     this.regionLayoutKey = '';
@@ -581,11 +619,13 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   getDiagnostics(): ForceLayoutDiagnosticsV1 {
     return {
       topologyAnalysisCount: this.topologyAnalysisCount,
-      physicalSpringCount: this.topology?.pairs.filter((pair) => pair.affinity > 0).length ?? 0,
+      physicalSpringCount: this.springs.length,
       componentCount: this.topology?.components.length ?? 0,
       coordinatedMembershipPairCount: this.membershipPairStrengths.size,
       alpha: this.alpha,
       running: this.running,
+      targetStepRateHz: this.running ? (this.alpha >= HOT_LAYOUT_ALPHA ? 30 : 15) : 0,
+      integrationStepCount: this.integrationStepCount,
     };
   }
 
@@ -866,6 +906,19 @@ function deterministicDirection(a: string, b: string, dimensions: GraphDimension
 
 function magnitude(value: Vec3): number {
   return Math.hypot(value.x, value.y, value.z);
+}
+
+function firstFiniteEdgeValue(
+  edgeIds: readonly string[],
+  values: Readonly<Record<string, number>> | undefined,
+  positive: boolean,
+): number | undefined {
+  if (!values) return undefined;
+  for (const edgeId of edgeIds) {
+    const value = values[edgeId];
+    if (Number.isFinite(value) && (positive ? value > 0 : value >= 0)) return value;
+  }
+  return undefined;
 }
 
 function finitePositive(value: JsonValue | undefined, fallback: number): number {

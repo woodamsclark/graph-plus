@@ -37,7 +37,7 @@ async function main(): Promise<void> {
   const results = [];
   for (const scenario of scenarios) results.push(await runScenario(scenario));
   console.log(JSON.stringify({
-    benchmark: 'graph-engine-v1.7.1-headless',
+    benchmark: 'graph-engine-v1.7.3-headless',
     runtime: process.version,
     platform: `${process.platform}-${process.arch}`,
     results,
@@ -82,14 +82,14 @@ async function runScenario(scenario: BenchmarkScenario) {
   const mountStart = performance.now();
   const session = await harness.create();
   const mountMs = performance.now() - mountStart;
-  const frameDuration = 1_000 / 60;
+  const frameDuration = 1_000 / 30;
   for (let index = 0; index < scenario.warmupFrames; index += 1) {
-    harness.platform.flushFrame((index + 1) * frameDuration);
+    flushScheduledWork(harness.platform, (index + 1) * frameDuration);
   }
   await session.resetPerformanceMeasurements();
   const runStart = performance.now();
   for (let index = 0; index < scenario.measuredFrames; index += 1) {
-    harness.platform.flushFrame((index + scenario.warmupFrames + 1) * frameDuration);
+    flushScheduledWork(harness.platform, (index + scenario.warmupFrames + 1) * frameDuration);
   }
   const wallMs = performance.now() - runStart;
   const snapshot = await session.exportPerformanceSnapshot();
@@ -120,6 +120,14 @@ async function runScenario(scenario: BenchmarkScenario) {
     regionRenderMs: snapshot.window?.regionRenderMs,
     counters: snapshot.counters,
   };
+}
+
+function flushScheduledWork(
+  platform: ReturnType<typeof runtimeHarness>['platform'],
+  timestamp: number,
+): void {
+  if (platform.pendingTimers > 0) platform.flushTimer();
+  if (platform.pendingFrames > 0) platform.flushFrame(timestamp);
 }
 
 function benchmarkRegistration() {
