@@ -33,10 +33,12 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
   private layout?: ObsidianGraphUiLayoutV1;
   private intentSubscription?: Disposable;
   private overrideSubscription?: Disposable;
+  private graphSubscription?: Disposable;
   private contributionDisposables: Disposable[] = [];
   private readonly disclosureState = new GraphEngineQuickSettingsDisclosureStateV1();
   private collapsed: boolean;
   private renderRevision = 0;
+  private graphCounts?: { readonly nodes: number; readonly edges: number };
   private disposed = false;
 
   constructor(
@@ -61,11 +63,18 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       this.policy.hostOcclusions,
     );
     this.intentSubscription = this.context.session.onIntent((intent) => {
+      if (this.collapsed) return;
       if (intent.type === 'selection-changed' || intent.type === 'focus-changed' || intent.type === 'node-drag-ended') {
         void this.render();
       }
     });
-    this.overrideSubscription = this.context.controls.onSessionOverridesChanged(() => { void this.render(); });
+    this.overrideSubscription = this.context.controls.onSessionOverridesChanged(() => {
+      if (!this.collapsed) void this.render();
+    });
+    this.graphSubscription = this.context.session.onGraphChanged(() => {
+      if (this.collapsed) this.graphCounts = undefined;
+      else void this.refreshGraphCounts();
+    });
     void this.render();
   }
 
@@ -77,27 +86,24 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     this.intentSubscription = undefined;
     this.overrideSubscription?.dispose();
     this.overrideSubscription = undefined;
+    this.graphSubscription?.dispose();
+    this.graphSubscription = undefined;
     this.layout?.dispose();
     this.layout = undefined;
     this.root?.remove();
     this.root = undefined;
     this.status = undefined;
+    this.graphCounts = undefined;
   }
 
   private async render(): Promise<void> {
     const root = this.root;
     if (!root || this.disposed) return;
     const revision = ++this.renderRevision;
-    const [viewState, effective, document] = await Promise.all([
-      this.context.session.exportViewState(),
-      this.context.session.exportEffectiveSettings(),
-      this.context.session.exportDocument(),
-    ]);
-    if (!this.root || this.disposed || revision !== this.renderRevision) return;
-    this.disposeContributions();
-    root.replaceChildren();
     root.classList.toggle('is-collapsed', this.collapsed);
     if (this.collapsed) {
+      this.disposeContributions();
+      root.replaceChildren();
       const open = this.iconButton('settings-2', 'Open graph controls', () => {
         this.collapsed = false;
         void this.render();
@@ -106,6 +112,14 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       root.append(open);
       return;
     }
+    const [viewState, effective] = await Promise.all([
+      this.context.session.exportViewState(),
+      this.context.session.exportEffectiveSettings(),
+    ]);
+    if (!this.graphCounts) await this.refreshGraphCounts(false);
+    if (!this.root || this.disposed || revision !== this.renderRevision) return;
+    this.disposeContributions();
+    root.replaceChildren();
 
     const header = div(root, 'graphplus-controls-header graph-engine-controls-header');
     const title = this.context.container.ownerDocument.createElement('span');
@@ -137,7 +151,20 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       this.mountContributions(sectionBody, values);
     }
     this.status = div(root, 'graphplus-controls-status graph-engine-controls-status');
-    this.status.textContent = `${document.nodes.length} nodes · ${document.edges.length} links`;
+    this.updateStatus();
+  }
+
+  private async refreshGraphCounts(updateStatus = true): Promise<void> {
+    if (this.disposed) return;
+    const document = await this.context.session.exportDocument();
+    if (this.disposed) return;
+    this.graphCounts = { nodes: document.nodes.length, edges: document.edges.length };
+    if (updateStatus) this.updateStatus();
+  }
+
+  private updateStatus(): void {
+    if (!this.status || !this.graphCounts) return;
+    this.status.textContent = `${this.graphCounts.nodes} nodes · ${this.graphCounts.edges} links`;
   }
 
   private renderFilter(parent: HTMLElement, contributions: readonly GraphQuickSettingsContributionV1[]): void {
@@ -215,6 +242,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     const body = this.section(parent, SECTIONS.display, SECTION_TITLES[SECTIONS.display], false);
     const rendering = effective.modules.rendering;
     const anima = effective.modules.anima;
+    let adaptiveThresholdHost: HTMLDivElement | undefined;
     if (rendering) {
       const settings = rendering.settings;
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labels)) {
@@ -224,16 +252,17 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
           .setValue(readLabelMode(settings.labelMode))
           .onChange(async (value) => {
             await this.context.profileSettings.setModuleSetting('rendering', 'labelMode', value);
-            await this.render();
+            if (adaptiveThresholdHost) adaptiveThresholdHost.hidden = value !== 'adaptive';
           }));
       }
-      if (readLabelMode(settings.labelMode) === 'adaptive'
-        && anima?.enabled
+      if (anima?.enabled
         && graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labelThreshold)) {
         const thresholdKey = effective.dimensions === '3d'
           ? 'adaptiveLabelThreshold3d'
           : 'adaptiveLabelThreshold2d';
-        this.catalogSlider(body, `anima.${thresholdKey}`, readNumber(anima.settings[thresholdKey], 50));
+        adaptiveThresholdHost = div(body, 'graph-engine-conditional-control');
+        adaptiveThresholdHost.hidden = readLabelMode(settings.labelMode) !== 'adaptive';
+        this.catalogSlider(adaptiveThresholdHost, `anima.${thresholdKey}`, readNumber(anima.settings[thresholdKey], 50));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.nodeSize)) {
         this.catalogSlider(body, 'rendering.nodeRadiusScale', readNumber(settings.nodeRadiusScale, 1));
@@ -247,7 +276,6 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
           .setValue(settings.showArrows === true)
           .onChange(async (visible) => {
             await this.context.profileSettings.setModuleSetting('rendering', 'showArrows', visible);
-            await this.render();
           }));
       }
     }
@@ -259,7 +287,6 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
         .setValue(readLabelPosition(anima.settings.labelPosition))
         .onChange(async (value) => {
           await this.context.profileSettings.setModuleSetting('anima', 'labelPosition', value);
-          await this.render();
         }));
     }
     this.mountContributions(body, contributions);
@@ -321,6 +348,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     const forces = effective.modules['force-layout'];
     if (forces?.enabled) {
       const settings = forces.settings;
+      let axialStiffnessHost: HTMLDivElement | undefined;
       if (effective.dimensions === '3d'
         && graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.axialSpringAxis)) {
         const presentation = graphSettingPresentationV1('force-layout.axialSpringAxis');
@@ -331,13 +359,14 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
             .setValue(readAxialAxis(settings.axialSpringAxis))
             .onChange(async (axis) => {
               await this.context.profileSettings.setModuleSetting('force-layout', 'axialSpringAxis', axis);
-              await this.render();
+              if (axialStiffnessHost) axialStiffnessHost.hidden = axis === 'off';
             }));
       }
       if (effective.dimensions === '3d'
-        && readAxialAxis(settings.axialSpringAxis) !== 'off'
         && graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.axialSpringStiffness)) {
-        this.catalogSlider(body, 'force-layout.axialSpringStiffness', readNumber(settings.axialSpringStiffness, 0) * 100);
+        axialStiffnessHost = div(body, 'graph-engine-conditional-control');
+        axialStiffnessHost.hidden = readAxialAxis(settings.axialSpringAxis) === 'off';
+        this.catalogSlider(axialStiffnessHost, 'force-layout.axialSpringStiffness', readNumber(settings.axialSpringStiffness, 0) * 100);
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.centerForce)) {
         this.catalogSlider(body, 'force-layout.centeringStrength', readNumber(settings.centeringStrength, 0.1));
@@ -376,7 +405,6 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
           .setDisabled(effective.dimensions !== '2d')
           .onChange(async (visible) => {
             await this.context.profileSettings.setModuleSetting('node-regions', 'boundariesVisible', visible);
-            await this.render();
           }));
     }
     this.mountContributions(body, contributions);

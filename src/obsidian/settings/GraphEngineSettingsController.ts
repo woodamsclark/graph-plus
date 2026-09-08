@@ -61,16 +61,7 @@ export class GraphEngineSettingsControllerV1 {
     if (dimensions !== undefined && !allowed.includes(dimensions)) {
       throw new Error(`Dimension "${dimensions}" is not permitted for ${consumerId}/${profileId}.`);
     }
-    const current = this.profiles.getUserOverrides(consumerId, profileId);
-    const next = { ...clone(current), dimensions };
-    this.profiles.setUserOverrides(consumerId, profileId, next);
-    try {
-      await this.save();
-    } catch (error) {
-      this.profiles.setUserOverrides(consumerId, profileId, current);
-      try { await this.save(); } catch {}
-      throw error;
-    }
+    await this.transactProfile(consumerId, profileId, (current) => ({ ...current, dimensions }));
   }
 
   async setProfileSetting(
@@ -79,33 +70,30 @@ export class GraphEngineSettingsControllerV1 {
     key: string,
     value: JsonValue | undefined,
   ): Promise<void> {
-    const current = this.profiles.getUserOverrides(consumerId, profileId);
-    const profileSettings = { ...(current.profileSettings ?? {}) };
-    if (value === undefined) delete profileSettings[key];
-    else profileSettings[key] = value;
-    this.profiles.setUserOverrides(consumerId, profileId, {
-      ...clone(current),
-      profileSettings: Object.keys(profileSettings).length ? profileSettings : undefined,
+    await this.transactProfile(consumerId, profileId, (current) => {
+      const profileSettings = { ...(current.profileSettings ?? {}) };
+      if (value === undefined) delete profileSettings[key];
+      else profileSettings[key] = value;
+      return {
+        ...current,
+        profileSettings: Object.keys(profileSettings).length ? profileSettings : undefined,
+      };
     });
-    await this.save();
   }
 
   async setGlobalModuleEnabled(moduleId: string, enabled: boolean | undefined): Promise<void> {
-    this.globalOverrides = changeModule(this.globalOverrides, moduleId, (module) => ({ ...module, enabled }));
-    await this.save();
+    await this.transactGlobal((current) => changeModule(current, moduleId, (module) => ({ ...module, enabled })));
   }
 
   async setGlobalModuleSetting(moduleId: string, key: string, value: JsonValue | undefined): Promise<void> {
-    this.globalOverrides = changeModule(this.globalOverrides, moduleId, (module) => ({
+    await this.transactGlobal((current) => changeModule(current, moduleId, (module) => ({
       ...module,
       settings: changeSetting(module.settings, key, value),
-    }));
-    await this.save();
+    })));
   }
 
   async resetGlobal(): Promise<void> {
-    this.globalOverrides = {};
-    await this.save();
+    await this.transactGlobal(() => ({}));
   }
 
   async setProfileModuleEnabled(
@@ -114,9 +102,8 @@ export class GraphEngineSettingsControllerV1 {
     moduleId: string,
     enabled: boolean | undefined,
   ): Promise<void> {
-    const current = this.profiles.getUserOverrides(consumerId, profileId);
-    this.profiles.setUserOverrides(consumerId, profileId, changeModule(current, moduleId, (module) => ({ ...module, enabled })));
-    await this.save();
+    await this.transactProfile(consumerId, profileId, (current) =>
+      changeModule(current, moduleId, (module) => ({ ...module, enabled })));
   }
 
   async setProfileModuleSetting(
@@ -126,17 +113,44 @@ export class GraphEngineSettingsControllerV1 {
     key: string,
     value: JsonValue | undefined,
   ): Promise<void> {
-    const current = this.profiles.getUserOverrides(consumerId, profileId);
-    this.profiles.setUserOverrides(consumerId, profileId, changeModule(current, moduleId, (module) => ({
+    await this.transactProfile(consumerId, profileId, (current) => changeModule(current, moduleId, (module) => ({
       ...module,
       settings: changeSetting(module.settings, key, value),
     })));
-    await this.save();
   }
 
   async resetProfile(consumerId: string, profileId: string): Promise<void> {
-    this.profiles.clearUserOverrides(consumerId, profileId);
-    await this.save();
+    await this.transactProfile(consumerId, profileId, () => ({}));
+  }
+
+  private async transactGlobal(
+    change: (current: GraphSettingsOverridesV1) => GraphSettingsOverridesV1,
+  ): Promise<void> {
+    const previous = clone(this.globalOverrides);
+    this.globalOverrides = clone(change(previous));
+    try {
+      await this.save();
+    } catch (error) {
+      this.globalOverrides = previous;
+      try { await this.save(); } catch {}
+      throw error;
+    }
+  }
+
+  private async transactProfile(
+    consumerId: string,
+    profileId: string,
+    change: (current: GraphSettingsOverridesV1) => GraphSettingsOverridesV1,
+  ): Promise<void> {
+    const previous = this.profiles.getUserOverrides(consumerId, profileId);
+    this.profiles.setUserOverrides(consumerId, profileId, clone(change(clone(previous))));
+    try {
+      await this.save();
+    } catch (error) {
+      this.profiles.setUserOverrides(consumerId, profileId, previous);
+      try { await this.save(); } catch {}
+      throw error;
+    }
   }
 }
 

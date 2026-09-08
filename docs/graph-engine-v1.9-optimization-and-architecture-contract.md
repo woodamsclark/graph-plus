@@ -1,6 +1,7 @@
 # graph-engine V1.9 optimization and architecture contract
 
-Status: Proposed; architecture direction for review.
+Status: Implemented in V1.9.0; automated validation complete, live Obsidian smoke
+validation pending.
 
 Date: 2026-09-07
 
@@ -216,3 +217,38 @@ Before V1.9 is considered complete:
 V1.9 does not include a new physics solver, a general Anima timeline system, a custom
 Canvas/WebGL Markdown renderer, arbitrary cache persistence, or a broad public protocol
 version. Those remain separate design and contract work.
+
+## 13. Implementation record
+
+Implemented on 2026-09-08 as a behavior-preserving internal release:
+
+- `GraphSessionRuntime` now delegates frame scheduling, activity state, projection and
+  composition, and diagnostics to independently owned runtime components.
+- Frame diagnostics identify geometry, camera, presentation, content, and UI
+  invalidations. The renderer reuses projected geometry and depth ordering when only
+  presentation changes, while geometry revisions explicitly invalidate that cache.
+- Force-layout cadence policy is isolated from the solver without changing topology
+  weighting, integration, cooling, or settling behavior.
+- Global Graph+ and Local Graph+ share preview creation and view-lifecycle services,
+  while retaining their distinct document and filtering behavior.
+- Global and profile settings use shared transaction paths with validation, live
+  application, persistence, and rollback. Quick settings avoid graph exports and broad
+  control reconstruction while collapsed or during non-structural updates.
+- Cache sizes, cache hits, pending invalidations, and the causes of the last rendered
+  frame are exposed through diagnostics. The public `GraphSessionV1` contract and the
+  independently versioned downstream client protocol remain unchanged.
+
+The headless benchmark was run against the pre-V1.9 `ac617e3` snapshot with the same
+new presentation-only scenario applied to both versions. Representative results:
+
+| Scenario | Metric | Pre-V1.9 | V1.9.0 | Change |
+| --- | ---: | ---: | ---: | ---: |
+| 5,000 nodes, 3D, presentation only | projection p50 | 3.167 ms | 2.098 ms | -33.8% |
+| 5,000 nodes, 3D, presentation only | total p50 | 8.860 ms | 8.010 ms | -9.6% |
+| 1,500 nodes, 3D, active layout | total p50 | 10.574 ms | 10.574 ms | parity |
+| 5,000 nodes, 3D, active layout | total p50 | 47.714 ms | 47.683 ms | parity |
+
+Single-run tail values remain sensitive to garbage collection and are not used as a
+release claim. Automated typecheck, unit, client-artifact, build, and diff gates pass.
+Desktop/mobile behavior and energy acceptance remain live-host validation items rather
+than claims made by the headless suite.

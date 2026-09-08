@@ -7,4 +7,5 @@ export * from './interaction/index.ts';
 export * from './modules/index.ts';
 export * from './platform/index.ts';
 export * from './render/index.ts';
+export * from './session/index.ts';
 export * from './surface/index.ts';

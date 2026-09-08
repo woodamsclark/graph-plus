@@ -15,6 +15,7 @@ interface BenchmarkScenario {
   readonly measuredFrames: number;
   readonly regions?: { readonly count: number; readonly memberships: number };
   readonly topology?: 'weighted-stress';
+  readonly mode?: 'active-layout' | 'presentation-only';
 }
 
 const scenarios: readonly BenchmarkScenario[] = [
@@ -28,6 +29,10 @@ const scenarios: readonly BenchmarkScenario[] = [
   { id: 'scale-5000-2d', nodes: 5_000, edges: 10_000, dimensions: '2d', warmupFrames: 10, measuredFrames: 180 },
   { id: 'scale-5000-3d', nodes: 5_000, edges: 10_000, dimensions: '3d', warmupFrames: 10, measuredFrames: 180 },
   {
+    id: 'presentation-5000-3d', nodes: 5_000, edges: 10_000, dimensions: '3d',
+    warmupFrames: 5, measuredFrames: 180, mode: 'presentation-only',
+  },
+  {
     id: 'weighted-stress-10000-2d', nodes: 10_000, edges: 30_000, dimensions: '2d',
     warmupFrames: 5, measuredFrames: 60, topology: 'weighted-stress',
   },
@@ -37,7 +42,8 @@ async function main(): Promise<void> {
   const results = [];
   for (const scenario of scenarios) results.push(await runScenario(scenario));
   console.log(JSON.stringify({
-    benchmark: 'graph-engine-v1.7.3-headless',
+    benchmark: 'graph-engine-v1.9-headless',
+    baselineContract: 'graph-engine-v1.7.3-headless',
     runtime: process.version,
     platform: `${process.platform}-${process.arch}`,
     results,
@@ -73,7 +79,7 @@ async function runScenario(scenario: BenchmarkScenario) {
   });
   harness.profiles.setUserOverrides('synthetic-consumer', profileId, {
     modules: {
-      'force-layout': { enabled: true },
+      'force-layout': { enabled: scenario.mode !== 'presentation-only' },
       'node-regions': { enabled: nodeRegions !== undefined },
       rendering: { settings: { labelMode: 'off' } },
     },
@@ -84,11 +90,13 @@ async function runScenario(scenario: BenchmarkScenario) {
   const mountMs = performance.now() - mountStart;
   const frameDuration = 1_000 / 30;
   for (let index = 0; index < scenario.warmupFrames; index += 1) {
+    if (scenario.mode === 'presentation-only') await session.setSelection([`vault-${index % scenario.nodes}`]);
     flushScheduledWork(harness.platform, (index + 1) * frameDuration);
   }
   await session.resetPerformanceMeasurements();
   const runStart = performance.now();
   for (let index = 0; index < scenario.measuredFrames; index += 1) {
+    if (scenario.mode === 'presentation-only') await session.setSelection([`vault-${index % scenario.nodes}`]);
     flushScheduledWork(harness.platform, (index + scenario.warmupFrames + 1) * frameDuration);
   }
   const wallMs = performance.now() - runStart;
@@ -109,6 +117,7 @@ async function runScenario(scenario: BenchmarkScenario) {
       ) ?? 0,
       topology: scenario.topology ?? 'regular',
       system: 'anima-native',
+      mode: scenario.mode ?? 'active-layout',
     },
     mountMs,
     requestedFrames: scenario.measuredFrames,

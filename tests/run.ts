@@ -12,6 +12,7 @@ import './runtime/camera.test.ts';
 import './runtime/modules.test.ts';
 import './runtime/v16-native-presentation.test.ts';
 import './runtime/session.test.ts';
+import './runtime/session-internals.test.ts';
 import './service/service.test.ts';
 import './service/actions.test.ts';
 import './service/neutral-sample.test.ts';

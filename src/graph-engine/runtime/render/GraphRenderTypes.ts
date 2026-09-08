@@ -122,6 +122,8 @@ export interface GraphRenderThemeV1 {
 }
 
 export interface GraphRenderFrameV1 {
+  /** Internal revision used to reuse screen projection across presentation-only frames. */
+  readonly geometryRevision?: number;
   readonly regions: readonly GraphRenderRegionV1[];
   readonly nodes: readonly GraphRenderNodeV1[];
   readonly edges: readonly GraphRenderEdgeV1[];

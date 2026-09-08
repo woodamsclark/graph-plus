@@ -18,9 +18,11 @@ export function composeGraphRenderFrameV1(options: {
   readonly regionContributions?: GraphRenderFrameV1['regions'];
   readonly theme?: GraphRenderThemeV1;
   readonly hoveredNodeId?: string;
+  readonly geometryRevision?: number;
 }): GraphRenderFrameV1 {
   const selected = new Set(options.viewState.selectedNodeIds);
   return {
+    geometryRevision: options.geometryRevision,
     regions: options.regionContributions ?? [],
     nodes: options.document.nodes
       .filter((node) => options.selection.nodeIds.has(node.id))

@@ -12,6 +12,11 @@ interface ProjectedNode {
   readonly radius: number;
 }
 
+interface ProjectedGeometry {
+  readonly id: string;
+  readonly point: ProjectedGraphPointV1;
+}
+
 export interface GraphRenderTimingV1 {
   readonly projectionMs: number;
   readonly regionRenderMs: number;
@@ -28,6 +33,10 @@ export class CanvasGraphRenderer {
   private readonly hitCellSize = 32;
   private indexedFrame: GraphRenderFrameV1 | null = null;
   private indexedCameraKey = '';
+  private projectedGeometryRevision = -1;
+  private projectedGeometryCameraKey = '';
+  private projectedGeometry: readonly ProjectedGeometry[] = [];
+  private projectionCacheHits = 0;
   private readonly regionContourCache = new Map<string, {
     readonly signature: string;
     readonly points: readonly import('../../contracts/v1/index.ts').Vec3[];
@@ -62,13 +71,7 @@ export class CanvasGraphRenderer {
     }
     this.clear(frame);
     const projectionStart = this.now();
-    const projected = frame.nodes
-      .map((node) => {
-        const point = this.camera.worldToScreen(node.position);
-        return { node, point, radius: projectedRadius(frame, node.radius, point.scale, this.camera.getState().projection) };
-      })
-      .filter(({ point }) => point.depth > 0)
-      .sort((a, b) => b.point.depth - a.point.depth);
+    const projected = this.projectFrame(frame);
     const byId = new Map(projected.map((value) => [value.node.id, value]));
     const renderNodeById = new Map(frame.nodes.map((node) => [node.id, node] as const));
     const visible = projected.filter(({ point, radius }) => circleIntersectsViewport(point.x, point.y, radius + 4, this.width, this.height));
@@ -97,13 +100,9 @@ export class CanvasGraphRenderer {
     const frame = this.frames.get();
     const cameraKey = this.cameraKey();
     if (frame && (frame !== this.indexedFrame || cameraKey !== this.indexedCameraKey)) {
-      const visible = frame.nodes
-        .map((node) => {
-          const projected = this.camera.worldToScreen(node.position);
-          return { node, point: projected, radius: projectedRadius(frame, node.radius, projected.scale, this.camera.getState().projection) };
-        })
-        .filter(({ point: projected, radius }) => projected.depth > 0
-          && circleIntersectsViewport(projected.x, projected.y, radius + 4, this.width, this.height));
+      const visible = this.projectFrame(frame)
+        .filter(({ point: projected, radius }) =>
+          circleIntersectsViewport(projected.x, projected.y, radius + 4, this.width, this.height));
       this.rebuildHitGrid(visible);
       this.indexedFrame = frame;
       this.indexedCameraKey = cameraKey;
@@ -140,6 +139,45 @@ export class CanvasGraphRenderer {
       position: { ...best.node.position },
       depth: best.point.depth,
     } : null;
+  }
+
+  getDiagnostics(): Readonly<Record<string, number>> {
+    return {
+      projectedGeometryEntries: this.projectedGeometry.length,
+      projectionCacheHits: this.projectionCacheHits,
+      hitGridCells: this.hitGrid.size,
+      textWidthCacheEntries: this.textWidthCache.size,
+      regionContourCacheEntries: this.regionContourCache.size,
+    };
+  }
+
+  private projectFrame(frame: GraphRenderFrameV1): readonly ProjectedNode[] {
+    const cameraKey = this.cameraKey();
+    if (
+      frame.geometryRevision !== undefined
+      && frame.geometryRevision === this.projectedGeometryRevision
+      && cameraKey === this.projectedGeometryCameraKey
+    ) {
+      this.projectionCacheHits += 1;
+      const nodes = new Map(frame.nodes.map((node) => [node.id, node] as const));
+      const projection = this.camera.getState().projection;
+      return this.projectedGeometry.flatMap(({ id, point }) => {
+        const node = nodes.get(id);
+        return node ? [{ node, point, radius: projectedRadius(frame, node.radius, point.scale, projection) }] : [];
+      });
+    }
+    const projection = this.camera.getState().projection;
+    const projected = frame.nodes
+      .map((node) => {
+        const point = this.camera.worldToScreen(node.position);
+        return { node, point, radius: projectedRadius(frame, node.radius, point.scale, projection) };
+      })
+      .filter(({ point }) => point.depth > 0)
+      .sort((a, b) => b.point.depth - a.point.depth);
+    this.projectedGeometryRevision = frame.geometryRevision ?? -1;
+    this.projectedGeometryCameraKey = cameraKey;
+    this.projectedGeometry = projected.map(({ node, point }) => ({ id: node.id, point }));
+    return projected;
   }
 
   private hitCandidates(x: number, y: number, searchRadius: number): readonly ProjectedNode[] {

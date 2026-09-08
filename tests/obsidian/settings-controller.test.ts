@@ -12,7 +12,7 @@ import { assert, deepEqual, equal, test } from '../support/harness.ts';
 test('Graph+ releases dragged nodes while retaining explicit context-menu pinning', () => {
   const profile = GRAPH_PLUS_CONSUMER_REGISTRATION_V1.profiles[0];
   equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.displayName, 'graph+', 'bundled product name should use lowercase branding');
-  equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.consumerVersion, '1.8.0', 'bundled Graph+ should match the feature release');
+  equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.consumerVersion, '1.9.0', 'bundled Graph+ should match the feature release');
   equal(profile?.uiDefaults?.quickSettingsVisibility, 'collapsed', 'Graph+ controls should begin as the minimized launcher');
   equal(profile?.profileSettings?.dragRelease, 'dynamic', 'drag release should return an unpinned node to the active layout');
   equal(profile?.uiDefaults?.contextMenuEnabled, true, 'the right-click menu should remain available for explicit pinning');
@@ -76,6 +76,40 @@ test('R-DIM-04 failed live activation rolls the persistent dimension override ba
   equal(controller.getProfileOverrides('graph-plus', 'default').dimensions, undefined, 'failed activation should not remain persisted in the profile namespace');
   equal(controller.getEffectiveProfile('graph-plus', 'default').dimensions, '2d', 'rollback should restore the prior effective dimension');
   equal(attempts, 2, 'rollback should run the change hook again to restore any sessions switched before the failure');
+});
+
+test('V1.9 failed global and profile settings transactions restore their prior values', async () => {
+  const profiles = new ConsumerProfileRegistry();
+  for (const descriptor of createShippedGraphModuleRegistryV1().descriptors()) profiles.registerModule(descriptor);
+  profiles.registerConsumer(GRAPH_PLUS_CONSUMER_REGISTRATION_V1);
+  let attempts = 0;
+  let failNext = true;
+  const controller = new GraphEngineSettingsControllerV1(profiles, {}, () => {
+    attempts += 1;
+    if (failNext) {
+      failNext = false;
+      throw new Error('persistence failed');
+    }
+  }, true);
+
+  let globalRejected = false;
+  try { await controller.setGlobalModuleSetting('rendering', 'nodeRadiusScale', 3); } catch { globalRejected = true; }
+  equal(globalRejected, true, 'the persistence error should reach the global settings caller');
+  equal(controller.getGlobalOverrides().modules?.rendering, undefined,
+    'a failed global write should restore the previous override graph');
+  equal(attempts, 2, 'global rollback should reapply the previous live state');
+
+  failNext = true;
+  let profileRejected = false;
+  try {
+    await controller.setProfileModuleSetting('graph-plus', 'default', 'rendering', 'nodeRadiusScale', 4);
+  } catch {
+    profileRejected = true;
+  }
+  equal(profileRejected, true, 'the persistence error should reach the profile settings caller');
+  equal(controller.getProfileOverrides('graph-plus', 'default').modules?.rendering, undefined,
+    'a failed profile write should restore the previous override graph');
+  equal(attempts, 4, 'profile rollback should use the same transaction semantics as global settings');
 });
 
 test('I-UI-02 region-boundary preference persists per consumer profile and resets to its default', async () => {

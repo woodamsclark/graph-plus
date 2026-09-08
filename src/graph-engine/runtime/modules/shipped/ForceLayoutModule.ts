@@ -11,6 +11,7 @@ import type {
   GraphModulePipelineStateV1,
   GraphModuleTickResultV1,
 } from '../GraphModuleTypes.ts';
+import { forceLayoutIntervalMsV1, forceLayoutTargetStepRateHzV1 } from './ForceLayoutCadence.ts';
 
 export type GraphAxialSpringAxisV1 = 'off' | 'x' | 'y' | 'z';
 
@@ -84,9 +85,6 @@ export interface ForceLayoutDiagnosticsV1 {
 
 const NATIVE_ACTIVE_DRAG_ALPHA = 0.3;
 const FIXED_STEP_SECONDS = 1 / 60;
-const HOT_LAYOUT_ALPHA = 0.01;
-const HOT_LAYOUT_INTERVAL_MS = 1_000 / 30;
-const COOLING_LAYOUT_INTERVAL_MS = 1_000 / 15;
 const RESTORED_SPEED_REJECTION_MULTIPLIER = 4;
 
 export class ForceLayoutModule implements GraphModuleInstanceV1 {
@@ -406,9 +404,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   private targetFrameIntervalMs(dragActive: boolean): number {
-    return dragActive || this.alpha >= HOT_LAYOUT_ALPHA
-      ? HOT_LAYOUT_INTERVAL_MS
-      : COOLING_LAYOUT_INTERVAL_MS;
+    return forceLayoutIntervalMsV1(this.alpha, dragActive);
   }
 
   private applyD3Origin(state: GraphModulePipelineStateV1): void {
@@ -624,7 +620,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       coordinatedMembershipPairCount: this.membershipPairStrengths.size,
       alpha: this.alpha,
       running: this.running,
-      targetStepRateHz: this.running ? (this.alpha >= HOT_LAYOUT_ALPHA ? 30 : 15) : 0,
+      targetStepRateHz: forceLayoutTargetStepRateHzV1(this.alpha, this.running),
       integrationStepCount: this.integrationStepCount,
     };
   }
