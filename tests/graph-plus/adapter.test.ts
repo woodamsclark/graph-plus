@@ -418,6 +418,13 @@ test('V1.7.1 global active-note following focuses without changing the full proj
   await Promise.resolve();
   deepEqual(fitRequests[0], { nodeIds: [alphaId, betaId, courseId], centerNodeId: alphaId },
     'refocusing a node through graph input should use the same neighborhood framing path');
+  fitRequests.length = 0;
+  await session.resetCamera();
+  await Promise.resolve();
+  deepEqual(fitRequests[0], { nodeIds: [alphaId, betaId, courseId], centerNodeId: alphaId },
+    'resetting a focused global graph should reuse its neighbor-aware focus framing');
+  equal((await session.exportViewState()).focusedNodeId, alphaId,
+    'resetting the camera should preserve global graph focus');
   equal(surface.dataset.renderedNodeCount, String(consumer.getDocument()?.nodes.length),
     'a normal split should retain the complete saved projection');
 
@@ -504,6 +511,13 @@ test('V1.7.1 Local Graph+ owns an ephemeral rooted document, layout, and depth',
   deepEqual(state?.camera.target, state?.positions[betaId], 'camera centering should follow the new local root');
   deepEqual(fitRequests[0], { minimumRadius: 462.5, centerNodeId: betaId },
     'local focus should reserve the configured maximum spring radius in one predictive camera fit');
+  fitRequests.length = 0;
+  await session.resetCamera();
+  await Promise.resolve();
+  deepEqual(fitRequests[0], { minimumRadius: 462.5, centerNodeId: betaId },
+    'resetting a focused local graph should reuse its predictive neighbor-aware framing');
+  equal((await session.exportViewState()).focusedNodeId, betaId,
+    'resetting the camera should preserve local graph focus');
   await consumer.close();
   await core.dispose();
 });

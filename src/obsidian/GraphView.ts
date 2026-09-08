@@ -1,4 +1,4 @@
-import { ItemView, MarkdownView, type Plugin, type TFile, type ViewStateResult, type WorkspaceLeaf } from 'obsidian';
+import { Component, ItemView, MarkdownRenderer, MarkdownView, type Plugin, type TFile, type ViewStateResult, type WorkspaceLeaf } from 'obsidian';
 import { mountGraphEngineUnavailableSurfaceV1, type Disposable } from '../graph-engine/public.ts';
 import { noteNodeId } from '../graph-plus/adapter/index.ts';
 import { GraphPlusConsumerV1 } from '../graph-plus/consumer/index.ts';
@@ -36,11 +36,23 @@ export class GraphPlusView extends ItemView {
     const container = this.contentEl.createDiv({ cls: 'greater-graph-view graphplus-view' });
     this.notePreview = new GraphPlusNotePreviewControllerV1({
       container: this.contentEl,
-      source: GRAPH_PLUS_TYPE,
-      hoverParent: this.leaf,
-      getHoverPopover: () => this.leaf.hoverPopover,
-      triggerHoverLink: (request) => this.app.workspace.trigger('hover-link', request),
       isVisible: () => this.leafVisible,
+      readFile: (file) => this.app.vault.cachedRead(file),
+      renderMarkdown: async (markdown, element, sourcePath) => {
+        const component = new Component();
+        component.load();
+        try {
+          await MarkdownRenderer.render(this.app, markdown, element, sourcePath, component);
+          return { dispose: () => component.unload() };
+        } catch (error) {
+          component.unload();
+          throw error;
+        }
+      },
+      openFile: (file) => this.app.workspace.getLeaf(false).openFile(file),
+      openLink: (link, sourcePath, newLeaf) => this.app.workspace.openLinkText(link, sourcePath, newLeaf),
+      onPreviewSurfaceActive: (active) => this.consumer?.setPreviewSurfaceActive(active),
+      onDismissRequested: () => this.consumer?.clearPreview(),
     });
     if (!this.stateRestored) this.pendingLens = { ...this.pendingLens, showTags: this.plugin.settings.showTags };
     try {
@@ -94,7 +106,7 @@ export class GraphPlusView extends ItemView {
     this.activeFileToFollow = undefined;
     this.followRunning = false;
     this.explicitNavigation = false;
-    this.notePreview?.clear();
+    this.notePreview?.dispose();
     this.notePreview = undefined;
   }
 
@@ -233,9 +245,11 @@ export class GraphPlusView extends ItemView {
   }
 
   private updateNotePreview(request: {
+    readonly immediate?: boolean;
+    readonly nodeId?: string;
     readonly file?: TFile;
     readonly anchor?: { readonly x: number; readonly y: number };
-    readonly mod: boolean;
+    readonly active: boolean;
   }): void {
     this.notePreview?.update(request);
   }

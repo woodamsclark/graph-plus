@@ -50,6 +50,8 @@ export interface GraphModulePipelineStateV1 {
   readonly draggedNodeId?: string;
   /** Runtime-only hover state supplied to presentation modules. */
   readonly hoveredNodeId?: string;
+  /** Runtime-only semantic preview state supplied independently from pointer hover. */
+  readonly previewedNodeId?: string;
   readonly nodeContributions: Readonly<Record<string, GraphNodeRenderContributionV1>>;
   readonly edgeContributions: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
   readonly regionLayouts: readonly GraphNodeRegionLayoutV1[];

@@ -43,7 +43,17 @@ export class AnimaModule implements GraphModuleInstanceV1 {
   ): GraphModuleProjectionPatchV1 | void {
     const visibleNodes = state.renderSelection.nodeIds;
     const { visibleEdges, relationships, degree } = this.presentationTopology(state);
-    const activeId = state.draggedNodeId ?? state.viewState.focusedNodeId ?? state.hoveredNodeId;
+    const focusedId = state.viewState.focusedNodeId;
+    const inspectedNeighborId = focusedId !== undefined
+      && state.hoveredNodeId !== undefined
+      && relationships.get(focusedId)?.has(state.hoveredNodeId)
+      ? state.hoveredNodeId
+      : undefined;
+    const activeId = state.draggedNodeId
+      ?? state.previewedNodeId
+      ?? inspectedNeighborId
+      ?? focusedId
+      ?? state.hoveredNodeId;
     const activeNeighborhood = activeId === undefined
       ? undefined
       : new Set([activeId, ...(relationships.get(activeId) ?? [])]);

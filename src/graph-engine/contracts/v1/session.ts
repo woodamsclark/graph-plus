@@ -32,6 +32,10 @@ export interface GraphSessionV1 {
 
   setSelection(nodeIds: readonly string[]): Promise<void>;
   focusNode(nodeId: string | null): Promise<void>;
+  /** Retain semantic preview while the pointer is inside a consumer preview surface. */
+  setPreviewSurfaceActive(active: boolean): Promise<void>;
+  /** Dismiss transient semantic preview without changing hover, focus, or selection. */
+  clearPreview(): Promise<void>;
   setNodePinned(nodeId: string, pinned: boolean): Promise<void>;
   fitNodes(nodeIds?: readonly string[], options?: FitNodesOptionsV1): Promise<void>;
   resetCamera(options?: TransitionOptionsV1): Promise<void>;
@@ -115,6 +119,8 @@ export type GraphIntentV1 =
   | GraphNodeDragEndedIntentV1
   | GraphNodeContextRequestedIntentV1
   | GraphNodeHoverChangedIntentV1
+  | GraphPreviewChangedIntentV1
+  | GraphCameraResetIntentV1
   | GraphViewportChangedIntentV1;
 
 export interface GraphIntentBaseV1 {
@@ -162,6 +168,19 @@ export interface GraphNodeHoverChangedIntentV1 extends GraphIntentBaseV1 {
   readonly nodeId?: string;
   readonly anchor?: { readonly x: number; readonly y: number };
   readonly mod: boolean;
+}
+
+export interface GraphPreviewChangedIntentV1 extends GraphIntentBaseV1 {
+  readonly type: 'preview-changed';
+  /** Target eligibility ended; allow bounded pointer handoff before final dismissal. */
+  readonly closing?: boolean;
+  readonly nodeId?: string;
+  readonly anchor?: { readonly x: number; readonly y: number };
+}
+
+export interface GraphCameraResetIntentV1 extends GraphIntentBaseV1 {
+  readonly type: 'camera-reset';
+  readonly focusedNodeId?: string;
 }
 
 export interface GraphViewportChangedIntentV1 extends GraphIntentBaseV1 {

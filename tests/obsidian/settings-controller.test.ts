@@ -12,7 +12,7 @@ import { assert, deepEqual, equal, test } from '../support/harness.ts';
 test('Graph+ releases dragged nodes while retaining explicit context-menu pinning', () => {
   const profile = GRAPH_PLUS_CONSUMER_REGISTRATION_V1.profiles[0];
   equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.displayName, 'graph+', 'bundled product name should use lowercase branding');
-  equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.consumerVersion, '1.7.3', 'bundled Graph+ should match the patch release');
+  equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.consumerVersion, '1.8.0', 'bundled Graph+ should match the feature release');
   equal(profile?.uiDefaults?.quickSettingsVisibility, 'collapsed', 'Graph+ controls should begin as the minimized launcher');
   equal(profile?.profileSettings?.dragRelease, 'dynamic', 'drag release should return an unpinned node to the active layout');
   equal(profile?.uiDefaults?.contextMenuEnabled, true, 'the right-click menu should remain available for explicit pinning');

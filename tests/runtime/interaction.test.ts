@@ -56,6 +56,38 @@ test('R-INPUT-01 pans an unfocused wheel and orbits a focused 3d graph', async (
   await session.dispose();
 });
 
+test('focused wheel zoom anchors to the focused node instead of the pointer', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    const value = runtimeHarness({ profileId });
+    const session = await value.create();
+    const canvas = runtimeCanvas(value.container);
+    await session.focusNode('a');
+    const before = await session.exportViewState();
+    wheel(value, canvas, { x: 20, y: 20, deltaY: -60, ctrlKey: true });
+    value.platform.flushFrame();
+    const after = await session.exportViewState();
+    deepEqual(after.camera.target, before.camera.target,
+      `${profileId} focused zoom should retain the focused node as its camera target`);
+    await session.dispose();
+  }
+});
+
+test('camera reset input preserves focus and announces focused reframing', async () => {
+  const value = runtimeHarness({ profileId: 'three-dimensional' });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  const intents: GraphIntentV1[] = [];
+  session.onIntent((intent) => intents.push(intent));
+  await session.focusNode('a');
+  key(value, canvas, '0');
+  value.platform.flushFrame();
+  equal((await session.exportViewState()).focusedNodeId, 'a', 'camera reset must retain active focus');
+  const reset = [...intents].reverse().find((intent) => intent.type === 'camera-reset');
+  equal(reset?.type === 'camera-reset' ? reset.focusedNodeId : undefined, 'a',
+    'camera reset should request consumer neighbor-aware framing for the focused node');
+  await session.dispose();
+});
+
 test('a focused camera follows its node while the force layout settles', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   value.profiles.setUserOverrides('synthetic-consumer', 'three-dimensional', {
@@ -464,12 +496,13 @@ test('pointer background drags pan in 2d and secondary-drag orbits in 3d', async
   await threeDSession.dispose();
 });
 
-test('background pan clears selection and focus only after crossing its threshold', async () => {
+test('desktop primary background pan offsets the camera while preserving focus and selection', async () => {
   const value = runtimeHarness();
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
   await session.setSelection(['a']);
   await session.focusNode('a');
+  const before = await session.exportViewState();
   const intents: GraphIntentV1[] = [];
   session.onIntent((intent) => intents.push(intent));
   pointer(value, canvas, 'pointerdown', -100, -100, { pointerId: 32 });
@@ -479,10 +512,12 @@ test('background pan clears selection and focus only after crossing its threshol
   deepEqual((await session.exportViewState()).selectedNodeIds, ['a'], 'sub-threshold motion should retain selection');
   pointer(value, canvas, 'pointermove', -70, -80, { pointerId: 32 });
   value.platform.flushFrame();
-  equal((await session.exportViewState()).focusedNodeId, undefined, 'pan threshold should clear focus');
-  deepEqual((await session.exportViewState()).selectedNodeIds, [], 'pan threshold should clear selection');
-  equal(intents.filter((intent) => intent.type === 'focus-changed').length, 1, 'pan should emit one focus clear');
-  equal(intents.filter((intent) => intent.type === 'selection-changed').length, 1, 'pan should emit one selection clear');
+  const after = await session.exportViewState();
+  equal(after.focusedNodeId, 'a', 'desktop primary pan should preserve focus');
+  deepEqual(after.selectedNodeIds, ['a'], 'desktop primary pan should preserve selection');
+  assert(!sameVector(after.camera.target, before.camera.target), 'desktop primary pan should offset the focused camera target');
+  equal(intents.filter((intent) => intent.type === 'focus-changed').length, 0, 'desktop primary pan should emit no focus change');
+  equal(intents.filter((intent) => intent.type === 'selection-changed').length, 0, 'desktop primary pan should emit no selection change');
   await session.dispose();
 });
 
@@ -544,6 +579,29 @@ test('focused 3D drag over another node orbits without moving or transiently hig
   value.platform.flushFrame();
   equal((await session.exportViewState()).focusedNodeId, 'b',
     'a stationary click on another node should still transfer focus');
+  await session.dispose();
+});
+
+test('desktop can drag a stably hovered direct neighbor while retaining the original focus', async () => {
+  const value = runtimeHarness({ profileId: 'three-dimensional' });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  await session.setSelection(['a']);
+  await session.focusNode('a');
+  const neighborPoint = await nodePoint(session, 'b');
+  pointer(value, canvas, 'pointermove', neighborPoint.x, neighborPoint.y, { pointerId: 370, pointerType: 'mouse' });
+  value.platform.flushFrame();
+  const before = await session.exportViewState();
+  pointer(value, canvas, 'pointerdown', neighborPoint.x, neighborPoint.y, { pointerId: 371, pointerType: 'mouse' });
+  pointer(value, canvas, 'pointermove', neighborPoint.x + 40, neighborPoint.y + 25, { pointerId: 371, pointerType: 'mouse' });
+  value.platform.flushFrame();
+  pointer(value, canvas, 'pointerup', neighborPoint.x + 40, neighborPoint.y + 25, { pointerId: 371, pointerType: 'mouse' });
+  value.platform.flushFrame();
+  const after = await session.exportViewState();
+  assert(!sameVector(after.positions.b, before.positions.b), 'the direct neighbor should move with the desktop drag');
+  equal(after.focusedNodeId, 'a', 'neighbor drag should retain the original focused node');
+  deepEqual(after.selectedNodeIds, ['a'], 'neighbor drag should retain the original selection');
+  deepEqual(after.camera.position, before.camera.position, 'neighbor drag should not orbit the camera');
   await session.dispose();
 });
 
@@ -609,8 +667,11 @@ test('V1.7 semantic hover reports Mod changes without mutating graph state', asy
   });
   value.platform.flushFrame();
   const hover = [...intents].reverse().find((intent) => intent.type === 'node-hover-changed');
+  const preview = [...intents].reverse().find((intent) => intent.type === 'preview-changed');
   equal(hover?.type === 'node-hover-changed' ? hover.nodeId : undefined, 'a', 'hover should expose the hit node');
   equal(hover?.type === 'node-hover-changed' ? hover.mod : false, true, 'hover should expose semantic platform Mod');
+  equal(preview?.type === 'preview-changed' ? preview.nodeId : undefined, 'a',
+    'Mod hover should establish an independent semantic preview target');
   deepEqual((await session.exportViewState()).selectedNodeIds, [], 'preview eligibility must not alter selection');
   pointer(value, canvas, 'pointermove', -100, -100, {
     pointerId: 104,
@@ -631,7 +692,41 @@ test('V1.7 semantic hover reports Mod changes without mutating graph state', asy
   const release = new value.window.KeyboardEvent('keyup', { key: 'Meta', metaKey: false, ctrlKey: false });
   value.window.dispatchEvent(release);
   value.platform.flushFrame();
+  value.platform.flushTimer();
   equal(canvas.style.cursor, 'default', 'releasing Mod outside the canvas should clear the latched hover');
+  const dismissed = [...intents].reverse().find((intent) => intent.type === 'preview-changed');
+  equal(dismissed?.type === 'preview-changed' ? dismissed.nodeId : 'missing', undefined,
+    'releasing Mod should emit semantic preview dismissal');
+  await session.dispose();
+});
+
+test('V1.8 preview surface ownership holds Anima preview through Mod release', async () => {
+  const value = runtimeHarness();
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  const point = await nodePoint(session, 'a');
+  const intents: GraphIntentV1[] = [];
+  session.onIntent((intent) => intents.push(intent));
+  const mac = /Mac|iPhone|iPad|iPod/i.test(value.window.navigator.platform ?? '');
+  pointer(value, canvas, 'pointermove', point.x, point.y, {
+    pointerId: 105, pointerType: 'mouse', metaKey: mac, ctrlKey: !mac,
+  });
+  value.platform.flushFrame();
+  pointer(value, canvas, 'pointermove', -100, -100, {
+    pointerId: 105, pointerType: 'mouse', metaKey: mac, ctrlKey: !mac,
+  });
+  value.platform.flushFrame();
+  await session.setPreviewSurfaceActive(true);
+  equal(value.platform.pendingTimers, 0, 'card entry should cancel the pending handoff release');
+  canvas.dispatchEvent(new value.window.PointerEvent('pointerleave', { pointerId: 105, pointerType: 'mouse' }) as unknown as Event);
+  value.window.dispatchEvent(new value.window.KeyboardEvent('keyup', { key: 'Meta', metaKey: false, ctrlKey: false }));
+  value.platform.flushFrame();
+  equal(canvas.style.cursor, 'pointer', 'card-active semantic preview should survive Mod release outside the canvas');
+  await session.setPreviewSurfaceActive(false);
+  await session.clearPreview();
+  equal(canvas.style.cursor, 'default', 'card dismissal should release the independent preview target');
+  const previewIntents = intents.filter((intent) => intent.type === 'preview-changed');
+  equal(previewIntents.length, 3, 'target, handoff, and final dismissal should each emit once');
   await session.dispose();
 });
 
@@ -926,11 +1021,11 @@ function pointer(
 function wheel(
   value: ReturnType<typeof runtimeHarness>,
   canvas: HTMLCanvasElement,
-  options: { deltaX?: number; deltaY: number; ctrlKey?: boolean; metaKey?: boolean },
+  options: { x?: number; y?: number; deltaX?: number; deltaY: number; ctrlKey?: boolean; metaKey?: boolean },
 ): void {
   const event = new value.window.WheelEvent('wheel', {
-    clientX: 320,
-    clientY: 180,
+    clientX: options.x ?? 320,
+    clientY: options.y ?? 180,
     deltaX: options.deltaX ?? 0,
     deltaY: options.deltaY,
     ctrlKey: options.ctrlKey ?? false,
@@ -940,8 +1035,8 @@ function wheel(
   } as any);
   Object.defineProperty(event, 'ctrlKey', { value: options.ctrlKey ?? false });
   Object.defineProperty(event, 'metaKey', { value: options.metaKey ?? false });
-  Object.defineProperty(event, 'clientX', { value: 320 });
-  Object.defineProperty(event, 'clientY', { value: 180 });
+  Object.defineProperty(event, 'clientX', { value: options.x ?? 320 });
+  Object.defineProperty(event, 'clientY', { value: options.y ?? 180 });
   canvas.dispatchEvent(event as unknown as Event);
 }
 

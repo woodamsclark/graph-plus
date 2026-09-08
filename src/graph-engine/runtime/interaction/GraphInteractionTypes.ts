@@ -122,7 +122,11 @@ export type GraphRuntimeCommandV1 =
       readonly point?: GraphScreenPointV1;
       readonly mod: boolean;
     })
-  | (GraphCommandBaseV1 & { readonly type: 'set-preview-hover'; readonly nodeId?: string })
+  | (GraphCommandBaseV1 & {
+      readonly type: 'set-preview-hover';
+      readonly nodeId?: string;
+      readonly point?: GraphScreenPointV1;
+    })
   | (GraphCommandBaseV1 & { readonly type: 'drag-start'; readonly nodeId: string; readonly point: GraphScreenPointV1 })
   | (GraphCommandBaseV1 & { readonly type: 'drag-update'; readonly nodeId: string; readonly point: GraphScreenPointV1 })
   | (GraphCommandBaseV1 & {

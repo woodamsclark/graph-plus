@@ -23,7 +23,7 @@ export const GRAPH_PLUS_REQUESTED_CAPABILITIES_V1 = [
 export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
   consumerId: GRAPH_PLUS_CONSUMER_ID_V1,
   displayName: 'graph+',
-  consumerVersion: '1.7.3',
+  consumerVersion: '1.8.0',
   supportedProtocolVersions: [1],
   profiles: [{
     profileId: GRAPH_PLUS_PROFILE_ID_V1,

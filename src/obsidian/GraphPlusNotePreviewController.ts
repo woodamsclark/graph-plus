@@ -1,12 +1,15 @@
+import { animaPreviewTiming, resolveAnimaPreviewCard, type AnimaPreviewPhase } from '../graph-engine/runtime/modules/shipped/AnimaPreviewPresentation.ts';
+
 export interface GraphPlusNotePreviewRequestV1<FileValue extends { readonly path: string }> {
+  readonly nodeId?: string;
   readonly file?: FileValue;
   readonly anchor?: { readonly x: number; readonly y: number };
-  readonly mod: boolean;
+  readonly active: boolean;
+  readonly immediate?: boolean;
 }
 
-interface HoverPopoverLike {
-  readonly hoverEl: HTMLElement;
-  readonly hide?: () => void;
+export interface GraphPlusPreviewRenderHandleV1 {
+  dispose(): void;
 }
 
 interface PreviewClock {
@@ -14,175 +17,254 @@ interface PreviewClock {
   readonly clearTimeout: (handle: number) => void;
 }
 
-interface HoverLinkRequest {
-  readonly event: MouseEvent;
-  readonly source: string;
-  readonly hoverParent: unknown;
-  readonly targetEl: HTMLElement;
-  readonly linktext: string;
-  readonly sourcePath: string;
-}
+export type GraphPlusPreviewPhaseV1 = AnimaPreviewPhase;
 
-const PREVIEW_HANDOFF_MS = 400;
-const PREVIEW_LEAVE_MS = 80;
-
+/** Graph hover truth stays in Graph Engine; this class owns Markdown and card interaction. */
 export class GraphPlusNotePreviewControllerV1<FileValue extends { readonly path: string }> {
-  private anchor?: HTMLElement;
-  private filePath?: string;
+  private phase: GraphPlusPreviewPhaseV1 = 'inactive';
+  private target?: GraphPlusNotePreviewRequestV1<FileValue>;
+  private card?: HTMLElement;
+  private openTimer?: number;
   private closeTimer?: number;
-  private popoverEl?: HTMLElement;
-  private pointerInsideAnchor = false;
-  private pointerInsidePopover = false;
+  private renderHandle?: GraphPlusPreviewRenderHandleV1;
+  private pointerInsideCard = false;
+  private generation = 0;
 
   constructor(private readonly options: {
     readonly container: HTMLElement;
-    readonly source: string;
-    readonly hoverParent: unknown;
-    readonly getHoverPopover: () => HoverPopoverLike | null;
-    readonly triggerHoverLink: (request: HoverLinkRequest) => void;
     readonly isVisible: () => boolean;
+    readonly readFile: (file: FileValue) => Promise<string>;
+    readonly renderMarkdown: (
+      markdown: string,
+      element: HTMLElement,
+      sourcePath: string,
+    ) => Promise<GraphPlusPreviewRenderHandleV1>;
+    readonly openFile: (file: FileValue) => void | Promise<void>;
+    readonly openLink?: (link: string, sourcePath: string, newLeaf: boolean) => void | Promise<void>;
+    readonly onPreviewSurfaceActive: (active: boolean) => void | Promise<void>;
+    readonly onDismissRequested: () => void | Promise<void>;
     readonly clock?: PreviewClock;
-  }) {}
+  }) {
+    this.options.container.ownerDocument.defaultView?.addEventListener('keydown', this.onKeyDown);
+  }
 
   update(request: GraphPlusNotePreviewRequestV1<FileValue>): void {
     if (!this.options.isVisible()) {
-      this.clear();
+      this.dismiss(false);
       return;
     }
-    if (request.mod && request.file && request.anchor) {
-      this.show(request.file, request.anchor);
+    if (!request.active || !request.nodeId || !request.file || !request.anchor) {
+      if (request.immediate) {
+        this.dismiss(false);
+        return;
+      }
+      if (this.pointerInsideCard) return;
+      this.scheduleDismiss(this.card ? animaPreviewTiming.handoff : 0);
       return;
     }
-    if (request.file && !request.mod) {
-      this.clear();
+    const sameTarget = this.target?.nodeId === request.nodeId && this.target.file?.path === request.file.path;
+    this.target = request;
+    if (sameTarget) {
+      this.cancelClose();
+      if (this.card) this.phase = this.pointerInsideCard ? 'card-active' : 'node-active';
+      this.positionCard();
       return;
     }
-    this.scheduleClear(PREVIEW_HANDOFF_MS);
+    this.beginTarget();
   }
 
   clear(): void {
-    this.clearPreview(true);
+    this.dismiss(true);
   }
 
-  private clearPreview(releaseGraphHover: boolean): void {
-    this.cancelClose();
-    this.unbindPopover();
+  dispose(): void {
+    this.options.container.ownerDocument.defaultView?.removeEventListener('keydown', this.onKeyDown);
+    this.dismiss(true);
+  }
+
+  getPhase(): GraphPlusPreviewPhaseV1 {
+    return this.phase;
+  }
+
+  private beginTarget(): void {
+    this.pointerInsideCard = false;
+    void this.options.onPreviewSurfaceActive(false);
+    this.generation += 1;
+    const generation = this.generation;
+    this.cancelTimers();
+    this.releaseCard();
+    this.phase = 'waiting';
+    this.openTimer = this.clock().setTimeout(() => {
+      this.openTimer = undefined;
+      void this.openCard(generation);
+    }, animaPreviewTiming.open);
+  }
+
+  private async openCard(generation: number): Promise<void> {
+    const target = this.target;
+    if (!target?.file || generation !== this.generation || !this.options.isVisible()) return;
+    const document = this.options.container.ownerDocument;
+    const card = document.createElement('section');
+    card.className = 'graphplus-note-preview';
+    card.setAttribute('role', 'region');
+    card.setAttribute('aria-label', `Preview of ${displayName(target.file.path)}`);
+    const header = document.createElement('header');
+    header.className = 'graphplus-note-preview-header';
+    const title = document.createElement('button');
+    title.className = 'graphplus-note-preview-title';
+    title.type = 'button';
+    title.textContent = displayName(target.file.path);
+    title.addEventListener('click', this.onTitleClick);
+    header.append(title);
+    const body = document.createElement('div');
+    body.className = 'graphplus-note-preview-body markdown-preview-view markdown-rendered';
+    body.textContent = 'Loading…';
+    card.append(header, body);
+    card.addEventListener('pointerenter', this.onCardEnter);
+    card.addEventListener('pointerleave', this.onCardLeave);
+    card.addEventListener('wheel', this.onCardWheel, { passive: false });
+    card.addEventListener('click', this.onCardClick);
+    this.options.container.append(card);
+    this.card = card;
+    this.phase = 'node-active';
+    this.positionCard();
+
+    try {
+      const markdown = await this.options.readFile(target.file);
+      if (!this.isCurrent(generation, target.file.path)) return;
+      body.textContent = '';
+      const handle = await this.options.renderMarkdown(markdown, body, target.file.path);
+      if (!this.isCurrent(generation, target.file.path)) {
+        handle.dispose();
+        return;
+      }
+      this.renderHandle = handle;
+      this.positionCard();
+    } catch (error) {
+      if (!this.isCurrent(generation, target.file.path)) return;
+      body.textContent = error instanceof Error ? error.message : 'Unable to render note preview.';
+      body.classList.add('graphplus-note-preview-error');
+    }
+  }
+
+  private positionCard(): void {
+    const card = this.card;
+    const point = this.target?.anchor;
+    if (!card || !point) return;
     const canvas = this.options.container.querySelector('canvas');
-    if (this.anchor) {
-      const window = this.options.container.ownerDocument.defaultView;
-      this.anchor.removeEventListener('pointerenter', this.onAnchorEnter);
-      this.anchor.removeEventListener('pointerleave', this.onAnchorLeave);
-      if (window) this.anchor.dispatchEvent(new window.MouseEvent('mouseleave', { bubbles: false }));
-      this.anchor.remove();
-      this.anchor = undefined;
-    }
-    this.pointerInsideAnchor = false;
-    this.filePath = undefined;
-    this.options.getHoverPopover()?.hide?.();
-    if (releaseGraphHover && canvas instanceof this.options.container.ownerDocument.defaultView!.HTMLCanvasElement) {
-      const window = this.options.container.ownerDocument.defaultView;
-      if (window) canvas.dispatchEvent(new window.PointerEvent('pointerleave', {
-        bubbles: false,
-        pointerId: -1,
-        pointerType: 'mouse',
-      }));
-    }
-  }
-
-  private show(file: FileValue, point: { readonly x: number; readonly y: number }): void {
-    this.cancelClose();
-    if (this.anchor?.isConnected && this.filePath === file.path) return;
-    this.clearPreview(false);
     const window = this.options.container.ownerDocument.defaultView;
-    if (!window) return;
-    const canvas = this.options.container.querySelector('canvas');
-    if (!(canvas instanceof window.HTMLCanvasElement)) return;
-    const bounds = canvas.getBoundingClientRect();
-    const deviceRatio = Math.max(1, window.devicePixelRatio ?? 1);
-    const logicalWidth = canvas.width / deviceRatio;
-    const ratio = logicalWidth > 0 ? bounds.width / logicalWidth : 1;
-    const anchor = this.options.container.ownerDocument.createElement('div');
-    anchor.className = 'graphplus-native-preview-anchor';
-    anchor.style.position = 'absolute';
-    anchor.style.pointerEvents = 'auto';
-    anchor.style.width = '18px';
-    anchor.style.height = '18px';
-    anchor.style.transform = 'translate(-50%, -50%)';
-    anchor.style.zIndex = '1';
-    anchor.style.left = `${bounds.left - this.options.container.getBoundingClientRect().left + point.x * ratio}px`;
-    anchor.style.top = `${bounds.top - this.options.container.getBoundingClientRect().top + point.y * ratio}px`;
-    anchor.addEventListener('pointerenter', this.onAnchorEnter);
-    anchor.addEventListener('pointerleave', this.onAnchorLeave);
-    this.options.container.append(anchor);
-    this.anchor = anchor;
-    this.filePath = file.path;
-    const mac = /Mac|iPhone|iPad|iPod/i.test(window.navigator.platform ?? '');
-    const event = new window.MouseEvent('mouseover', {
-      bubbles: true,
-      clientX: bounds.left + point.x * ratio,
-      clientY: bounds.top + point.y * ratio,
-      metaKey: mac,
-      ctrlKey: !mac,
+    if (!window || !(canvas instanceof window.HTMLCanvasElement)) return;
+    const containerBounds = this.options.container.getBoundingClientRect();
+    const canvasBounds = canvas.getBoundingClientRect();
+    const logicalWidth = Math.max(1, canvas.clientWidth || canvasBounds.width);
+    const logicalHeight = Math.max(1, canvas.clientHeight || canvasBounds.height);
+    const anchorX = canvasBounds.left - containerBounds.left + point.x * canvasBounds.width / logicalWidth;
+    const anchorY = canvasBounds.top - containerBounds.top + point.y * canvasBounds.height / logicalHeight;
+    const availableWidth = Math.max(0, containerBounds.width);
+    const availableHeight = Math.max(0, containerBounds.height);
+    const target = resolveAnimaPreviewCard({
+      anchor: { x: anchorX, y: anchorY },
+      viewport: { width: availableWidth, height: availableHeight },
+      measuredHeight: card.getBoundingClientRect().height,
     });
-    this.options.triggerHoverLink({
-      event,
-      source: this.options.source,
-      hoverParent: this.options.hoverParent,
-      targetEl: anchor,
-      linktext: file.path,
-      sourcePath: file.path,
-    });
-    this.bindPopover();
+    card.style.width = `${target.width}px`;
+    card.style.maxHeight = `${target.maxHeight}px`;
+    card.style.left = `${target.left}px`;
+    card.style.top = `${target.top}px`;
+    card.style.opacity = String(target.opacity);
+    card.style.transform = `scale(${target.scale})`;
   }
 
-  private scheduleClear(delayMs: number): void {
-    if (!this.anchor) return;
+  private readonly onCardEnter = (): void => {
+    this.pointerInsideCard = true;
     this.cancelClose();
-    this.bindPopover();
+    this.phase = 'card-active';
+    void this.options.onPreviewSurfaceActive(true);
+  };
+
+  private readonly onCardLeave = (): void => {
+    this.pointerInsideCard = false;
+    void this.options.onPreviewSurfaceActive(false);
+    this.scheduleDismiss(animaPreviewTiming.leave);
+  };
+
+  private readonly onCardWheel = (event: WheelEvent): void => {
+    event.stopPropagation();
+  };
+
+  private readonly onTitleClick = (): void => {
+    const file = this.target?.file;
+    if (file) {
+      this.dismiss(true);
+      void this.options.openFile(file);
+    }
+  };
+
+  private readonly onCardClick = (event: MouseEvent): void => {
+    const window = this.options.container.ownerDocument.defaultView;
+    if (!window || !(event.target instanceof window.Element)) return;
+    const link = event.target.closest('a.internal-link');
+    const href = link?.getAttribute('data-href') ?? link?.getAttribute('href');
+    const sourcePath = this.target?.file?.path;
+    if (!href || !sourcePath || !this.options.openLink) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.dismiss(true);
+    void this.options.openLink(href, sourcePath, event.metaKey || event.ctrlKey);
+  };
+
+  private readonly onKeyDown = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape' || this.phase === 'inactive') return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.dismiss(true);
+  };
+
+  private scheduleDismiss(delayMs: number): void {
+    if (this.phase === 'inactive') return;
+    this.cancelClose();
+    this.phase = 'closing';
     this.closeTimer = this.clock().setTimeout(() => {
       this.closeTimer = undefined;
-      this.bindPopover();
-      if (this.pointerInsideAnchor || elementIsHovered(this.anchor)
-        || this.pointerInsidePopover || elementIsHovered(this.popoverEl)) return;
-      this.clear();
+      if (!this.pointerInsideCard) this.dismiss(true);
     }, delayMs);
   }
 
-  private bindPopover(): void {
-    const next = this.options.getHoverPopover()?.hoverEl;
-    if (!next || next === this.popoverEl) return;
-    this.unbindPopover();
-    this.popoverEl = next;
-    next.addEventListener('pointerenter', this.onPopoverEnter);
-    next.addEventListener('pointerleave', this.onPopoverLeave);
+  private dismiss(notifyEngine: boolean): void {
+    if (this.phase === 'inactive' && !this.target && !this.card) return;
+    this.generation += 1;
+    this.cancelTimers();
+    this.pointerInsideCard = false;
+    void this.options.onPreviewSurfaceActive(false);
+    this.releaseCard();
+    this.target = undefined;
+    this.phase = 'inactive';
+    if (notifyEngine) void this.options.onDismissRequested();
   }
 
-  private unbindPopover(): void {
-    this.popoverEl?.removeEventListener('pointerenter', this.onPopoverEnter);
-    this.popoverEl?.removeEventListener('pointerleave', this.onPopoverLeave);
-    this.popoverEl = undefined;
-    this.pointerInsidePopover = false;
+  private releaseCard(): void {
+    this.renderHandle?.dispose();
+    this.renderHandle = undefined;
+    if (this.card) {
+      this.card.removeEventListener('pointerenter', this.onCardEnter);
+      this.card.removeEventListener('pointerleave', this.onCardLeave);
+      this.card.removeEventListener('wheel', this.onCardWheel);
+      this.card.removeEventListener('click', this.onCardClick);
+      this.card.querySelector('.graphplus-note-preview-title')?.removeEventListener('click', this.onTitleClick);
+      this.card.remove();
+    }
+    this.card = undefined;
   }
 
-  private readonly onPopoverEnter = (): void => {
-    this.pointerInsidePopover = true;
+  private isCurrent(generation: number, path: string): boolean {
+    return generation === this.generation && this.target?.file?.path === path && this.card?.isConnected === true;
+  }
+
+  private cancelTimers(): void {
+    if (this.openTimer !== undefined) this.clock().clearTimeout(this.openTimer);
+    this.openTimer = undefined;
     this.cancelClose();
-  };
-
-  private readonly onPopoverLeave = (): void => {
-    this.pointerInsidePopover = false;
-    this.scheduleClear(PREVIEW_LEAVE_MS);
-  };
-
-  private readonly onAnchorEnter = (): void => {
-    this.pointerInsideAnchor = true;
-    this.cancelClose();
-  };
-
-  private readonly onAnchorLeave = (): void => {
-    this.pointerInsideAnchor = false;
-    this.scheduleClear(PREVIEW_HANDOFF_MS);
-  };
+  }
 
   private cancelClose(): void {
     if (this.closeTimer !== undefined) this.clock().clearTimeout(this.closeTimer);
@@ -198,11 +280,6 @@ export class GraphPlusNotePreviewControllerV1<FileValue extends { readonly path:
   }
 }
 
-function elementIsHovered(element: HTMLElement | undefined): boolean {
-  if (!element) return false;
-  try {
-    return element.matches(':hover');
-  } catch {
-    return false;
-  }
+function displayName(path: string): string {
+  return path.split('/').pop()?.replace(/\.md$/i, '') || path;
 }

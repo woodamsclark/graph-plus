@@ -34,9 +34,11 @@ export interface LocalGraphPlusConsumerOptionsV1<TFile> {
   readonly ui?: GraphSessionUiOptionsV1;
   readonly onError?: (error: GraphSessionErrorV1 | Error) => void;
   readonly onNotePreview?: (request: {
+    readonly nodeId?: string;
     readonly file?: TFile;
     readonly anchor?: { readonly x: number; readonly y: number };
-    readonly mod: boolean;
+    readonly active: boolean;
+    readonly immediate?: boolean;
   }) => void;
 }
 
@@ -112,18 +114,28 @@ export class LocalGraphPlusConsumerV1<TFile> {
           this.neighborhoodFramer.cancel();
           return;
         }
+        if (intent.type === 'camera-reset') {
+          if (intent.focusedNodeId) void this.frameNeighborhood(intent.focusedNodeId);
+          return;
+        }
         if (intent.type === 'focus-changed') {
           this.focusedNodeId = intent.focusedNodeId;
           if (this.focusedNodeId) void this.frameNeighborhood(this.focusedNodeId);
           else this.neighborhoodFramer.cancel();
           return;
         }
-        if (intent.type !== 'node-hover-changed') return;
+        if (intent.type !== 'preview-changed') return;
         const entry = intent.nodeId ? this.lookup.get(intent.nodeId) : undefined;
+        if (intent.nodeId && entry?.kind !== 'note') {
+          void session.clearPreview();
+          return;
+        }
         this.options.onNotePreview?.({
+          ...(intent.nodeId ? { nodeId: intent.nodeId } : {}),
           ...(entry?.kind === 'note' ? { file: entry.file } : {}),
           ...(intent.anchor ? { anchor: intent.anchor } : {}),
-          mod: intent.mod && entry?.kind === 'note',
+          active: intent.nodeId !== undefined && entry?.kind === 'note',
+          immediate: !intent.closing,
         });
       }));
       await this.presentRoot();
@@ -189,6 +201,14 @@ export class LocalGraphPlusConsumerV1<TFile> {
     if (!suspended && this.focusedNodeId) void this.frameNeighborhood(this.focusedNodeId);
   }
 
+  async setPreviewSurfaceActive(active: boolean): Promise<void> {
+    await this.session?.setPreviewSurfaceActive(active);
+  }
+
+  async clearPreview(): Promise<void> {
+    await this.session?.clearPreview();
+  }
+
   async openNode(nodeId: string): Promise<void> {
     const entry = this.lookup.get(nodeId);
     if (entry?.kind === 'note') await this.options.navigator.openNote(entry.file);
@@ -204,7 +224,7 @@ export class LocalGraphPlusConsumerV1<TFile> {
     this.subscriptions.splice(0).forEach((subscription) => subscription.dispose());
     this.actionRegistration?.dispose();
     this.actionRegistration = undefined;
-    this.options.onNotePreview?.({ mod: false });
+    this.options.onNotePreview?.({ active: false });
     try {
       await this.session?.dispose();
     } finally {

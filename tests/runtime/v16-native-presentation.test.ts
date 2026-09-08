@@ -67,6 +67,39 @@ test('V1.6 Anima neighborhood highlighting follows focus changes and clears with
     'focus should outrank a stale hover when choosing the active neighborhood');
   equal(focusedC.edgeContributions['b-c'].opacity, 1, 'highlighting should follow the newly focused node');
 
+  const inspectedNeighbor = anima.contributeFrame({
+    ...state,
+    hoveredNodeId: 'b',
+    viewState: { ...state.viewState, focusedNodeId: 'a' },
+  });
+  assert(inspectedNeighbor?.edgeContributions, 'a focused neighbor hover should produce edge presentation');
+  equal(inspectedNeighbor.edgeContributions['a-b'].opacity, 1,
+    'hovering a direct neighbor should retain its link to the focused node');
+  equal(inspectedNeighbor.edgeContributions['b-c'].opacity, 1,
+    'hovering a direct neighbor should illuminate that neighbor\'s own neighborhood');
+
+  const ignoredDistantHover = anima.contributeFrame({
+    ...state,
+    hoveredNodeId: 'c',
+    viewState: { ...state.viewState, focusedNodeId: 'a' },
+  });
+  assert(ignoredDistantHover?.edgeContributions, 'a distant hover should retain focused presentation');
+  equal(ignoredDistantHover.edgeContributions['a-b'].opacity, 1,
+    'a non-neighbor hover should leave the focused neighborhood active');
+  equal(ignoredDistantHover.edgeContributions['b-c'].opacity, 0.2,
+    'a non-neighbor hover should not inspect an unrelated neighborhood');
+
+  const previewedA = anima.contributeFrame({
+    ...state,
+    previewedNodeId: 'a',
+    viewState: { ...state.viewState, focusedNodeId: 'c' },
+  });
+  assert(previewedA?.edgeContributions, 'semantic preview should produce Anima presentation');
+  equal(previewedA.edgeContributions['a-b'].opacity, 1,
+    'Anima preview should own the active neighborhood independently from focus and ordinary hover');
+  equal(previewedA.edgeContributions['b-c'].opacity, 0.2,
+    'a focused neighborhood should yield while a semantic preview target is active');
+
   const cleared = anima.contributeFrame(state);
   assert(cleared?.edgeContributions, 'cleared focus should still resolve baseline edge presentation');
   equal(cleared.edgeContributions['a-b'].opacity, 1, 'clearing focus should restore ordinary link opacity');

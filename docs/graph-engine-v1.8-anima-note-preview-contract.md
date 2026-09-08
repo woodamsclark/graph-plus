@@ -1,6 +1,11 @@
 # Graph Engine V1.8 Anima Note Preview Contract
 
-Status: Proposed; approved product direction, implementation pending.
+Status: Implemented for V1.8.0; desktop visual acceptance pending.
+
+Implementation note: Graph Engine retains semantic target and handoff ownership;
+the host tracks its asynchronous card lifecycle (waiting, mounted, closing). Anima
+supplies graph emphasis, timing constants, and bounded card placement/presentation
+targets. Initial card presentation is immediate, with no continuous animation loop.
 
 Date: 2026-09-07
 
@@ -85,6 +90,33 @@ only according to the state machine above. Focus and preview remain separate: a 
 may be previewed without becoming focused, and changing preview target never invokes
 the focus controller.
 
+Ordinary hover remains useful during focus without replacing focus. When the pointer
+rests on a visible direct neighbor of the focused node, Anima temporarily presents
+that neighbor as the inspected node and illuminates its direct neighborhood. Hovering
+a node outside the focused node's direct neighborhood leaves focused presentation
+unchanged. Removing the pointer restores the focused node's neighborhood.
+
+When a node is focused, wheel or pinch zoom is anchored to that focused node rather
+than the pointer position. The camera continues to track the focused node while its
+layout position changes. Unfocused zoom retains pointer anchoring.
+
+Resetting the camera while focus is active preserves focus and applies the same
+neighbor-aware camera fit used when that node first receives focus. Resetting an
+unfocused graph retains the profile's ordinary default-camera behavior.
+
+On desktop, primary-button dragging on the background pans the camera whether focus
+is active or not. A focused pan changes the camera offset without clearing focus or
+selection. In 3D, trackpad scrolling remains contextual: it pans while unfocused and
+orbits the focused node while focused. Secondary-button dragging remains an explicit
+3D orbit.
+
+While focus is active, a mouse may drag a visible direct neighbor only when that node
+was already the stable hover target at pointer-down. The dragged neighbor receives
+transient Anima drag presentation, while the original focus and selection remain
+unchanged. A background node, non-neighbor, or overlapping hit without stable hover
+falls through to focused camera panning. Touch and pen retain the existing focused 3D
+orbit gesture and do not move neighbor nodes in V1.8.
+
 ## 4. Anima ownership
 
 Anima is the sole authority for the graph's response to preview state. It owns all
@@ -127,9 +159,10 @@ The host:
 5. reports semantic card enter, leave, Escape, navigation, and disposal events; and
 6. cancels obsolete asynchronous work when the target changes or closes.
 
-The card has a bounded desktop width and height, a scrollable content body, and a
-visible title affordance that can open the source note. Placement may flip above,
-below, left, or right to avoid clipping. It must remain usable in a narrow graph+ leaf.
+The card has rounded corners, a bounded desktop width and height, a scrollable content
+body, and a visible title affordance that can open the source note. Placement may flip
+above, below, left, or right to avoid clipping. It must remain usable in a narrow
+graph+ leaf.
 
 CSS is limited to structural layout, overflow, typography, theme tokens, and
 accessibility. It may not encode preview state transitions or graph presentation.
@@ -195,6 +228,16 @@ Automated tests must prove:
 13. A settled open card schedules no continuous graph frame, and a closed, suspended,
     or disposed view performs zero preview work.
 14. Reduced-motion mode removes nonessential card motion without hiding state changes.
+15. Ordinary hover on a focused node's direct neighbor illuminates the neighbor's
+    neighborhood without changing focus; hover outside that neighborhood does not.
+16. Focused zoom retains the focused node as the camera target in 2D and 3D, while
+    unfocused zoom remains pointer-anchored.
+17. Camera reset preserves active focus and reframes the focused node with its visible
+    direct neighbors; an unfocused reset restores the profile default camera.
+18. Desktop primary background drag pans without clearing focus or selection, while
+    focused trackpad scrolling and secondary drag retain 3D orbit access.
+19. A stably hovered visible direct neighbor can be mouse-dragged without changing the
+    original focus; non-neighbors and touch or pen cannot enter this focused drag path.
 
 Manual desktop acceptance must verify Cmd behavior on macOS and the platform Mod
 equivalent elsewhere, long-note scrolling, internal and external links, narrow side

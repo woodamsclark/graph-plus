@@ -56,9 +56,11 @@ export interface GraphPlusConsumerOptionsV1<TFile> {
   readonly clock?: GraphPlusCheckpointClockV1;
   readonly onError?: (error: GraphSessionErrorV1 | Error) => void;
   readonly onNotePreview?: (request: {
+    readonly nodeId?: string;
     readonly file?: TFile;
     readonly anchor?: { readonly x: number; readonly y: number };
-    readonly mod: boolean;
+    readonly active: boolean;
+    readonly immediate?: boolean;
   }) => void;
 }
 
@@ -199,6 +201,7 @@ export class GraphPlusConsumerV1<TFile> {
 
   async focusNode(nodeId: string): Promise<void> {
     if (!this.session) return;
+    await this.session.clearPreview();
     await this.session.setSelection([nodeId]);
     await this.session.focusNode(nodeId);
     await this.neighborhoodFramer.frame(nodeId);
@@ -209,6 +212,7 @@ export class GraphPlusConsumerV1<TFile> {
     if (!this.document.nodes.some((node) => node.id === nodeId)) await this.reconcile();
     if (!this.session || !this.document?.nodes.some((node) => node.id === nodeId)) return false;
     this.transientRevealNodeId = nodeId;
+    await this.session.clearPreview();
     await this.applyFilter();
     await this.session.setSelection([nodeId]);
     await this.session.focusNode(nodeId);
@@ -221,6 +225,7 @@ export class GraphPlusConsumerV1<TFile> {
     if (!this.document.nodes.some((node) => node.id === nodeId)) await this.reconcile();
     if (!this.session || !this.document?.nodes.some((node) => node.id === nodeId)) return false;
     this.transientRevealNodeId = nodeId;
+    await this.session.clearPreview();
     await this.applyFilter();
     await this.session.setSelection([nodeId]);
     await this.session.focusNode(nodeId);
@@ -258,6 +263,14 @@ export class GraphPlusConsumerV1<TFile> {
     this.session?.setSuspended(suspended);
   }
 
+  async setPreviewSurfaceActive(active: boolean): Promise<void> {
+    await this.session?.setPreviewSurfaceActive(active);
+  }
+
+  async clearPreview(): Promise<void> {
+    await this.session?.clearPreview();
+  }
+
   async resetLayoutData(): Promise<boolean> {
     if (this.resettingLayout || !this.session || !this.document) return false;
     this.resettingLayout = true;
@@ -267,7 +280,7 @@ export class GraphPlusConsumerV1<TFile> {
       const discardedSession = this.session;
       this.sessionSubscriptions.splice(0).forEach((subscription) => subscription.dispose());
       this.neighborhoodFramer.cancel();
-      this.options.onNotePreview?.({ mod: false });
+      this.options.onNotePreview?.({ active: false });
       this.transientRevealNodeId = undefined;
       await this.checkpoint.detachAndWait();
       this.session = undefined;
@@ -334,17 +347,27 @@ export class GraphPlusConsumerV1<TFile> {
         this.neighborhoodFramer.cancel();
         return;
       }
+      if (intent.type === 'camera-reset') {
+        if (intent.focusedNodeId) void this.neighborhoodFramer.frame(intent.focusedNodeId);
+        return;
+      }
       if (intent.type === 'focus-changed') {
         if (intent.focusedNodeId) void this.neighborhoodFramer.frame(intent.focusedNodeId);
         else this.neighborhoodFramer.cancel();
         return;
       }
-      if (intent.type !== 'node-hover-changed') return;
+      if (intent.type !== 'preview-changed') return;
       const entry = intent.nodeId ? this.lookup.get(intent.nodeId) : undefined;
+      if (intent.nodeId && entry?.kind !== 'note') {
+        void session.clearPreview();
+        return;
+      }
       this.options.onNotePreview?.({
+        ...(intent.nodeId ? { nodeId: intent.nodeId } : {}),
         ...(entry?.kind === 'note' ? { file: entry.file } : {}),
         ...(intent.anchor ? { anchor: intent.anchor } : {}),
-        mod: intent.mod && entry?.kind === 'note',
+        active: intent.nodeId !== undefined && entry?.kind === 'note',
+        immediate: !intent.closing,
       });
     }));
     this.sessionSubscriptions.push(session.onIntent((intent) => {

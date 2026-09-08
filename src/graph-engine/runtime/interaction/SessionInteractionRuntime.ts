@@ -11,6 +11,7 @@ import type { GraphCameraController } from '../camera/index.ts';
 import type { SessionRuntimePlatformV1 } from '../platform/index.ts';
 import type { SessionSurfaceV1 } from '../surface/index.ts';
 import { BufferedQueue } from './BufferedQueue.ts';
+import { animaPreviewTiming } from '../modules/shipped/AnimaPreviewPresentation.ts';
 import { GraphCommander, GraphCommandRegistry } from './GraphCommander.ts';
 import { GraphInput } from './GraphInput.ts';
 import { GraphInteractionInterpreter } from './GraphInteractionInterpreter.ts';
@@ -31,6 +32,9 @@ export class SessionInteractionRuntime {
   private readonly interpreter: GraphInteractionInterpreter;
   private hoveredNodeId: string | undefined;
   private previewedNodeId: string | undefined;
+  private previewPoint: GraphScreenPointV1 | undefined;
+  private previewSurfaceActive = false;
+  private previewReleaseTimer: number | undefined;
   private hoverMod = false;
   private hoverPoint: GraphScreenPointV1 | undefined;
   private hitTestMs = 0;
@@ -90,6 +94,8 @@ export class SessionInteractionRuntime {
         return hit;
       },
       getFocusedNodeId: () => this.options.getViewState().focusedNodeId,
+      getHoveredNodeId: () => this.hoveredNodeId,
+      isDirectNeighbor: (nodeId, focusedNodeId) => this.isDirectNeighbor(nodeId, focusedNodeId),
       getSelectedNodeIds: () => this.options.getViewState().selectedNodeIds,
       getNodeSelection: (nodeId) => this.options.getNodeSelection(nodeId),
       getViewport: () => this.options.surface.getViewport(),
@@ -133,7 +139,35 @@ export class SessionInteractionRuntime {
   }
 
   getHoveredNodeId(): string | undefined {
-    return this.previewedNodeId ?? this.hoveredNodeId;
+    return this.hoveredNodeId;
+  }
+
+  getPreviewedNodeId(): string | undefined {
+    return this.previewedNodeId;
+  }
+
+  setPreviewSurfaceActive(active: boolean): void {
+    if (active) this.cancelPreviewRelease();
+    this.previewSurfaceActive = active && this.previewedNodeId !== undefined;
+  }
+
+  private cancelPreviewRelease(): void {
+    if (this.previewReleaseTimer !== undefined) this.options.platform.clearTimeout(this.previewReleaseTimer);
+    this.previewReleaseTimer = undefined;
+  }
+
+  clearPreview(): void {
+    this.cancelPreviewRelease();
+    if (this.previewedNodeId === undefined) return;
+    this.previewSurfaceActive = false;
+    this.previewedNodeId = undefined;
+    this.previewPoint = undefined;
+    this.updateCursor();
+    this.options.onViewStateChanged('interaction');
+    this.options.onIntent({
+      ...this.currentIntentBase(),
+      type: 'preview-changed',
+    });
   }
 
   getDraggedNodeId(): string | undefined {
@@ -178,13 +212,22 @@ export class SessionInteractionRuntime {
         this.cameraChanged(command);
         return;
       case 'zoom-by':
-        this.options.camera.zoomByWheel(command.deltaY, command.anchor);
+        this.options.camera.zoomByWheel(
+          command.deltaY,
+          this.options.getViewState().focusedNodeId === undefined ? command.anchor : undefined,
+        );
         this.cameraChanged(command);
         return;
       case 'reset-camera':
         this.options.camera.setState(this.options.getResetCamera());
-        this.setFocus(undefined, command);
         this.cameraChanged(command);
+        this.options.onIntent({
+          ...this.intentBase(command),
+          type: 'camera-reset',
+          ...(this.options.getViewState().focusedNodeId
+            ? { focusedNodeId: this.options.getViewState().focusedNodeId }
+            : {}),
+        });
         return;
       case 'fit-camera':
         this.fitVisibleNodes(command.nodeIds);
@@ -237,10 +280,30 @@ export class SessionInteractionRuntime {
         });
         return;
       case 'set-preview-hover':
-        if (this.previewedNodeId === command.nodeId) return;
+        if (command.nodeId === undefined && this.previewSurfaceActive) return;
+        if (command.nodeId === undefined && this.previewedNodeId !== undefined) {
+          if (this.previewReleaseTimer !== undefined) return;
+          this.previewReleaseTimer = this.options.platform.setTimeout(() => {
+            this.previewReleaseTimer = undefined;
+            this.clearPreview();
+          }, animaPreviewTiming.handoff);
+          this.options.onIntent({ ...this.intentBase(command), type: 'preview-changed', closing: true });
+          return;
+        }
+        const wasClosing = this.previewReleaseTimer !== undefined;
+        this.cancelPreviewRelease();
+        if (!wasClosing && this.previewedNodeId === command.nodeId && samePoint(this.previewPoint, command.point)) return;
         this.previewedNodeId = command.nodeId;
+        this.previewPoint = command.point ? { ...command.point } : undefined;
+        if (command.nodeId === undefined) this.previewSurfaceActive = false;
         this.updateCursor();
         this.options.onViewStateChanged('interaction');
+        this.options.onIntent({
+          ...this.intentBase(command),
+          type: 'preview-changed',
+          ...(command.nodeId ? { nodeId: command.nodeId } : {}),
+          ...(command.point ? { anchor: { ...command.point } } : {}),
+        });
         return;
       case 'drag-start':
         this.beginNodeDrag(command.nodeId, command.point);
@@ -259,6 +322,13 @@ export class SessionInteractionRuntime {
     const document = this.options.getDocument();
     return command.identity.documentId === document.documentId
       && command.identity.documentRevision === document.revision;
+  }
+
+  private isDirectNeighbor(nodeId: string, focusedNodeId: string): boolean {
+    if (nodeId === focusedNodeId || !this.options.getRenderSelection().nodeIds.has(nodeId)) return false;
+    return this.options.getDocument().edges.some((edge) => this.options.getRenderSelection().edgeIds.has(edge.id)
+      && ((edge.sourceId === focusedNodeId && edge.targetId === nodeId)
+        || (edge.targetId === focusedNodeId && edge.sourceId === nodeId)));
   }
 
   private cameraChanged(command: GraphRuntimeCommandV1): void {
@@ -298,14 +368,18 @@ export class SessionInteractionRuntime {
   }
 
   private setFocus(nodeId: string | undefined, command: GraphRuntimeCommandV1): void {
+    this.cancelPreviewRelease();
     const document = this.options.getDocument();
     if (nodeId !== undefined && !document.nodes.some((node) => node.id === nodeId)) return;
     const state = this.options.getViewState();
     const focusChanged = state.focusedNodeId !== nodeId;
     const hoverChanged = this.hoveredNodeId !== undefined || this.previewedNodeId !== undefined;
+    const previewChanged = this.previewedNodeId !== undefined;
     if (!focusChanged && !hoverChanged) return;
     this.hoveredNodeId = undefined;
     this.previewedNodeId = undefined;
+    this.previewPoint = undefined;
+    this.previewSurfaceActive = false;
     this.hoverMod = false;
     this.hoverPoint = undefined;
     this.updateCursor();
@@ -313,6 +387,10 @@ export class SessionInteractionRuntime {
       ...this.intentBase(command),
       type: 'node-hover-changed',
       mod: false,
+    });
+    if (previewChanged) this.options.onIntent({
+      ...this.intentBase(command),
+      type: 'preview-changed',
     });
     if (focusChanged) {
       const { focusedNodeId: _focusedNodeId, ...withoutFocus } = state;
@@ -390,19 +468,31 @@ export class SessionInteractionRuntime {
   }
 
   private updateCursor(): void {
-    this.options.surface.setCursor(this.dragContext ? 'grabbing' : this.getHoveredNodeId() ? 'pointer' : 'default');
+    this.options.surface.setCursor(this.dragContext
+      ? 'grabbing'
+      : this.previewedNodeId ?? this.hoveredNodeId
+        ? 'pointer'
+        : 'default');
   }
 
   private resetTransientState(): void {
+    this.cancelPreviewRelease();
+    const previewChanged = this.previewedNodeId !== undefined;
     this.interpreter.reset();
     this.inputEvents.clear();
     this.commands.clear();
     this.dragContext = null;
     this.hoveredNodeId = undefined;
     this.previewedNodeId = undefined;
+    this.previewPoint = undefined;
+    this.previewSurfaceActive = false;
     this.hoverMod = false;
     this.hoverPoint = undefined;
     this.updateCursor();
+    if (previewChanged) this.options.onIntent({
+      ...this.currentIntentBase(),
+      type: 'preview-changed',
+    });
   }
 
   private intentBase(command: GraphRuntimeCommandV1) {
@@ -411,6 +501,16 @@ export class SessionInteractionRuntime {
       documentId: command.identity.documentId,
       documentRevision: command.identity.documentRevision,
       timestamp: command.timestamp,
+    } as const;
+  }
+
+  private currentIntentBase() {
+    const document = this.options.getDocument();
+    return {
+      sessionId: this.options.sessionId,
+      documentId: document.documentId,
+      documentRevision: document.revision,
+      timestamp: this.options.platform.now(),
     } as const;
   }
 

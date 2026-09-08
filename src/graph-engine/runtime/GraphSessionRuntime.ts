@@ -189,6 +189,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       ...this.moduleView,
       draggedNodeId: this.interaction.getDraggedNodeId(),
       hoveredNodeId: this.interaction.getHoveredNodeId(),
+      previewedNodeId: this.interaction.getPreviewedNodeId(),
     }, deltaSeconds);
     const positions = tickResult?.positions;
     const moduleTickMs = duration(moduleStart, this.platform.now());
@@ -472,7 +473,18 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (nodeId !== null && !this.store.hasNode(nodeId)) {
       throw new Error(`Cannot focus unknown node "${nodeId}".`);
     }
+    this.interaction.clearPreview();
     this.setFocusState(nodeId ?? undefined);
+  }
+
+  async setPreviewSurfaceActive(active: boolean): Promise<void> {
+    this.requireActive();
+    this.interaction.setPreviewSurfaceActive(active);
+  }
+
+  async clearPreview(): Promise<void> {
+    this.requireActive();
+    this.interaction.clearPreview();
   }
 
   async setNodePinned(nodeId: string, pinned: boolean): Promise<void> {
@@ -524,6 +536,15 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame();
+    const document = this.store.readDocument();
+    this.emitIntent({
+      sessionId: this.sessionId,
+      documentId: document.documentId,
+      documentRevision: document.revision,
+      timestamp: this.platform.now(),
+      type: 'camera-reset',
+      ...(this.viewState.focusedNodeId ? { focusedNodeId: this.viewState.focusedNodeId } : {}),
+    });
   }
 
   async exportViewState(): Promise<GraphViewStateV1> {
@@ -914,6 +935,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       renderSelection: allOf(document),
       formActive: false,
       hoveredNodeId: this.interaction?.getHoveredNodeId(),
+      previewedNodeId: this.interaction?.getPreviewedNodeId(),
       nodeContributions: {},
       edgeContributions: {},
       regionLayouts: [],
@@ -948,6 +970,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       ...this.projectionView,
       draggedNodeId: this.interaction?.getDraggedNodeId(),
       hoveredNodeId: this.interaction?.getHoveredNodeId(),
+      previewedNodeId: this.interaction?.getPreviewedNodeId(),
     });
     this.frames.set(composeGraphRenderFrameV1({
       document: this.moduleView.document,

@@ -79,6 +79,8 @@ export class GraphInteractionInterpreter {
     readonly commands: BufferedQueue<GraphRuntimeCommandV1>;
     readonly hitTest: (point: GraphScreenPointV1, pointerKind?: 'mouse' | 'touch' | 'pen') => GraphHitV1 | null;
     readonly getFocusedNodeId: () => string | undefined;
+    readonly getHoveredNodeId: () => string | undefined;
+    readonly isDirectNeighbor: (nodeId: string, focusedNodeId: string) => boolean;
     readonly getSelectedNodeIds: () => readonly string[];
     readonly getNodeSelection: (nodeId: string) => readonly string[];
     readonly getViewport: () => { readonly width: number; readonly height: number };
@@ -110,9 +112,9 @@ export class GraphInteractionInterpreter {
         ...(hover ? { nodeId: hover.nodeId, point: hoverEvent.point } : {}),
         mod: hoverEvent.mod,
       });
-      if (hoverEvent.mod && hover) {
-        this.command(hoverEvent, { type: 'set-preview-hover', nodeId: hover.nodeId });
-      } else if (!hoverEvent.mod) {
+      if (hoverEvent.pointerKind === 'mouse' && hoverEvent.mod && hover) {
+        this.command(hoverEvent, { type: 'set-preview-hover', nodeId: hover.nodeId, point: hoverEvent.point });
+      } else {
         this.command(hoverEvent, { type: 'set-preview-hover' });
       }
     }
@@ -192,12 +194,23 @@ export class GraphInteractionInterpreter {
         };
         return;
       }
-      const focusedThreeDimensionalOrbit = this.dimensions === '3d'
+      const focusedNodeId = this.options.getFocusedNodeId();
+      const focusedThreeDimensionalTouchOrbit = this.dimensions === '3d'
         && this.mode.button === 0
-        && this.options.getFocusedNodeId() !== undefined;
-      if (this.mode.hit && this.mode.button === 0 && !focusedThreeDimensionalOrbit) {
-        this.command(event, { type: 'set-focus' });
-        this.command(event, { type: 'set-selection', nodeIds: [this.mode.hit.nodeId] });
+        && this.mode.pointerKind !== 'mouse'
+        && focusedNodeId !== undefined;
+      const focusedNeighborDrag = this.mode.pointerKind === 'mouse'
+        && focusedNodeId !== undefined
+        && this.mode.hit !== null
+        && this.options.getHoveredNodeId() === this.mode.hit.nodeId
+        && this.options.isDirectNeighbor(this.mode.hit.nodeId, focusedNodeId);
+      if (this.mode.hit && this.mode.button === 0
+        && !focusedThreeDimensionalTouchOrbit
+        && (focusedNodeId === undefined || focusedNeighborDrag)) {
+        if (!focusedNeighborDrag) {
+          this.command(event, { type: 'set-focus' });
+          this.command(event, { type: 'set-selection', nodeIds: [this.mode.hit.nodeId] });
+        }
         this.command(event, { type: 'drag-start', nodeId: this.mode.hit.nodeId, point: this.mode.downPoint });
         this.command(event, { type: 'drag-update', nodeId: this.mode.hit.nodeId, point: event.point });
         this.mode = {
@@ -208,7 +221,7 @@ export class GraphInteractionInterpreter {
       }
       const orbit = this.dimensions === '3d' && (
         this.mode.button === 2
-        || focusedThreeDimensionalOrbit
+        || focusedThreeDimensionalTouchOrbit
       );
       if (orbit) {
         this.command(event, {
@@ -218,8 +231,13 @@ export class GraphInteractionInterpreter {
         });
         this.mode = { kind: 'orbit', pointerId: event.pointerId, lastPoint: event.point };
       } else {
-        this.command(event, { type: 'set-selection', nodeIds: [] });
-        this.command(event, { type: 'set-focus' });
+        const preserveFocus = this.mode.pointerKind === 'mouse'
+          && this.mode.button === 0
+          && focusedNodeId !== undefined;
+        if (!preserveFocus) {
+          this.command(event, { type: 'set-selection', nodeIds: [] });
+          this.command(event, { type: 'set-focus' });
+        }
         this.command(event, {
           type: 'pan-by',
           deltaX: this.mode.lastPoint.x - event.point.x,
@@ -322,7 +340,6 @@ export class GraphInteractionInterpreter {
   private pointerLeave(event: Extract<GraphInputEventV1, { type: 'pointer-leave' }>): void {
     if (event.pointerKind !== 'mouse' || this.mode.kind !== 'idle') return;
     this.pendingHover = null;
-    if (event.mod) return;
     this.command(event, { type: 'set-preview-hover' });
     this.command(event, { type: 'set-hover', mod: false });
   }
@@ -341,8 +358,8 @@ export class GraphInteractionInterpreter {
       mod: event.mod,
     });
     if (event.mod && hover) {
-      this.command(event, { type: 'set-preview-hover', nodeId: hover.nodeId });
-    } else if (!event.mod) {
+      this.command(event, { type: 'set-preview-hover', nodeId: hover.nodeId, point: event.point });
+    } else {
       this.command(event, { type: 'set-preview-hover' });
     }
   }
