@@ -14,6 +14,8 @@ public boundary and a runnable neutral example.
 
 Current design artifacts:
 
+- [graph-engine V1.9 optimization and architecture contract](docs/graph-engine-v1.9-optimization-and-architecture-contract.md)
+- [graph-engine V1.8 Anima note preview contract](docs/graph-engine-v1.8-anima-note-preview-contract.md)
 - [graph-engine V1.7.3 energy and performance contract](docs/graph-engine-v1.7.3-energy-diagnostics-contract.md)
 - [graph-engine V1.7.2 ribbon contract](docs/graph-engine-v1.7.2-ribbon-contract.md)
 - [graph-engine downstream compatibility policy](docs/graph-engine-downstream-compatibility-policy.md)
