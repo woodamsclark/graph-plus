@@ -26,7 +26,7 @@ are planned for future releases.
 
 ## How to use Graph+
 
-### Open the graph
+### Open the global or local graph
 
 Use any of these entry points:
 
@@ -35,8 +35,18 @@ Use any of these entry points:
 - Right-click a Markdown file and choose `show in graph+` to open the graph with
   that note available as the starting point.
 
-To explore only a note’s neighborhood, run `open local graph+`. Local Graph+ starts
-from the active note and lets you adjust the neighborhood depth.
+Graph+ has two related views:
+
+- **Global graph** shows the vault-wide graph. Use it to explore broad clusters,
+  connections, orphan notes, and the overall shape of your knowledge base.
+- **Local graph** shows a neighborhood around one note. Run `open local graph+` from
+  the command palette, or use it from an active note, then adjust the neighborhood
+  depth to expand or narrow what is around that note.
+
+The global graph is the place for broad discovery and spatial organization. The local
+graph is the place for following one idea, note, or thread without loading the entire
+vault into your immediate view. Both views use the same Graph+ interaction model and
+persist their own graph state.
 
 ### Explore and navigate
 
