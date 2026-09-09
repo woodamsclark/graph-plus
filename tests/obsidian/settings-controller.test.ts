@@ -17,7 +17,7 @@ test('Graph+ releases dragged nodes while retaining explicit context-menu pinnin
   equal(profile?.uiDefaults?.quickSettingsSections?.camera?.visibility, 'hidden',
     'Graph+ quick settings should not expose a redundant Camera section');
   deepEqual(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.profiles[0]?.interaction?.contextActionIds,
-    ['open-node', 'show-preview'], 'Graph+ should expose persistent note previews from node context menus');
+    ['open-node'], 'Graph+ should keep note preview as a transient hover interaction');
   equal(createShippedGraphModuleRegistryV1().get('rendering')?.descriptor.defaultSettings.nodeRadiusScale, 2,
     'the shipped Graph Engine node-size default should be 2.0');
   equal(createShippedGraphModuleRegistryV1().get('rendering')?.descriptor.defaultSettings.edgeThicknessScale, 0.1,

@@ -47,7 +47,7 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
     },
     interaction: {
       activationActionIds: ['open-node'],
-      contextActionIds: ['open-node', 'show-preview'],
+      contextActionIds: ['open-node'],
     },
     profileSettings: {
       focalLengthMm: 50,

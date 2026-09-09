@@ -15,18 +15,6 @@ test('V1.8 Anima preview placement fits narrow and edge-adjacent viewports', () 
         'a long note must remain bounded vertically');
     }
   }
-  const distant = resolveAnimaPreviewCard({
-    anchor: { x: 600, y: 300 }, viewport: { width: 1200, height: 700 }, measuredHeight: 400, worldScale: 0.4,
-  });
-  const close = resolveAnimaPreviewCard({
-    anchor: { x: 600, y: 300 }, viewport: { width: 1200, height: 700 }, measuredHeight: 400, worldScale: 1.6,
-  });
-  assert(distant.scale < 1 && close.scale > 1,
-    'a preview should become a small distant placard and grow as its node approaches');
-  assert(distant.left + distant.width * distant.scale <= 1188,
-    'scaled preview placement should use its displayed world width');
-  assert(close.top + Math.min(400, close.maxHeight) * close.scale <= 688.000001,
-    'scaled preview placement should use its displayed world height');
 });
 
 test('V1.8 custom note preview delays, renders, scrolls, hands off, and dismisses semantically', async () => {
@@ -143,59 +131,6 @@ test('V1.8 rapid preview transfer cannot render stale note content', async () =>
   await Promise.resolve();
   equal(container.querySelector('.graphplus-note-preview-body')?.textContent, 'current B',
     'a late read from the prior target must not replace the current card');
-  controller.dispose();
-});
-
-test('V2 persistent note preview ignores hover departure and dismisses from its close control', async () => {
-  const window = new Window();
-  const document = window.document as unknown as Document;
-  const container = document.createElement('div');
-  const canvas = document.createElement('canvas');
-  canvas.width = 640;
-  canvas.height = 360;
-  container.getBoundingClientRect = () => bounds(640, 360);
-  canvas.getBoundingClientRect = () => bounds(640, 360);
-  container.append(canvas);
-  document.body.append(container);
-  const timers = new Map<number, () => void>();
-  let nextTimer = 1;
-  let dismissed = 0;
-  const controller = new GraphPlusNotePreviewControllerV1({
-    container,
-    isVisible: () => true,
-    readFile: async () => 'persistent body',
-    renderMarkdown: async (markdown, element) => {
-      element.textContent = markdown;
-      return { dispose: () => undefined };
-    },
-    openFile: async () => undefined,
-    onPreviewSurfaceActive: () => undefined,
-    onDismissRequested: () => { dismissed += 1; },
-    clock: {
-      setTimeout: (callback) => {
-        const handle = nextTimer++;
-        timers.set(handle, callback);
-        return handle;
-      },
-      clearTimeout: (handle) => { timers.delete(handle); },
-    },
-  });
-  controller.update({
-    nodeId: 'a', file: { path: 'a.md' }, anchor: { x: 100, y: 80 }, active: true,
-    immediate: true, persistent: true,
-  });
-  await runTimers(timers, 1);
-  controller.update({ active: false });
-  container.querySelector('.graphplus-note-preview')?.dispatchEvent(
-    new window.PointerEvent('pointerleave') as unknown as Event,
-  );
-  await runTimers(timers);
-  assert(container.querySelector('.graphplus-note-preview'), 'hover departure must not close a persistent placard');
-  const close = container.querySelector('.graphplus-note-preview-close') as HTMLElement | null;
-  assert(close, 'persistent preview should have an explicit dismiss control');
-  close.dispatchEvent(new window.MouseEvent('click', { bubbles: true }) as unknown as Event);
-  equal(container.querySelector('.graphplus-note-preview'), null, 'the close control should dismiss the placard');
-  equal(dismissed, 1, 'explicit dismissal should clear engine preview ownership');
   controller.dispose();
 });
 

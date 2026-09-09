@@ -608,25 +608,6 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     return cloneGraphViewStateV1(withoutRetiredGraphSystemState(this.viewState));
   }
 
-  async getNodeScreenPoint(nodeId: string): Promise<{
-    readonly x: number;
-    readonly y: number;
-    readonly scale: number;
-  } | undefined> {
-    this.requireActive();
-    if (!this.moduleView.renderSelection.nodeIds.has(nodeId)) return undefined;
-    const position = this.moduleView.positions[nodeId];
-    if (!position) return undefined;
-    const projected = this.camera.worldToScreen(position);
-    return {
-      x: projected.x,
-      y: projected.y,
-      scale: this.profile.dimensions === '2d'
-        ? Math.sqrt(Math.max(0, projected.scale))
-        : projected.scale,
-    };
-  }
-
   async restoreViewState(state: GraphViewStateV1): Promise<void> {
     this.requireActive();
     try {
