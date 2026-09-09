@@ -40,7 +40,12 @@ export interface GraphSessionV1 {
   fitNodes(nodeIds?: readonly string[], options?: FitNodesOptionsV1): Promise<void>;
   resetCamera(options?: TransitionOptionsV1): Promise<void>;
   /** Project a visible node center into this session's logical viewport coordinates. */
-  getNodeScreenPoint(nodeId: string): Promise<{ readonly x: number; readonly y: number } | undefined>;
+  getNodeScreenPoint(nodeId: string): Promise<{
+    readonly x: number;
+    readonly y: number;
+    /** Visual scale relative to the node's default camera scale. */
+    readonly scale: number;
+  } | undefined>;
 
   exportViewState(): Promise<GraphViewStateV1>;
   restoreViewState(state: GraphViewStateV1): Promise<void>;

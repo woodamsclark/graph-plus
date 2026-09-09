@@ -184,7 +184,6 @@ export class SessionInteractionRuntime {
       'pan-by',
       'orbit-by',
       'zoom-by',
-      'focal-length-zoom-by',
       'reset-camera',
       'fit-camera',
       'set-selection',
@@ -217,10 +216,6 @@ export class SessionInteractionRuntime {
           command.deltaY,
           this.options.getViewState().focusedNodeId === undefined ? command.anchor : undefined,
         );
-        this.cameraChanged(command);
-        return;
-      case 'focal-length-zoom-by':
-        this.options.camera.zoomFocalLengthByWheel(command.deltaY);
         this.cameraChanged(command);
         return;
       case 'reset-camera':

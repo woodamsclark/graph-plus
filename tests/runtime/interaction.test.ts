@@ -51,10 +51,10 @@ test('R-INPUT-01 pans an unfocused wheel and orbits a focused 3d graph', async (
   wheel(value, canvas, { deltaY: -30, ctrlKey: true });
   value.platform.flushFrame();
   const zoomed = await session.exportViewState();
-  assert(zoomed.camera.zoom > zoomBefore, 'modified scroll should increase perspective focal length');
-  equal(vectorDistance(zoomed.camera.position, zoomed.camera.target), distanceBefore,
-    'modified scroll should act like a telescope without moving the camera');
-  deepEqual(zoomed.camera.position, orbited.camera.position, 'focal-length zoom should preserve the camera position');
+  equal(zoomed.camera.zoom, zoomBefore, 'modified scroll should retain the standard perspective focal length');
+  const distanceAfter = vectorDistance(zoomed.camera.position, zoomed.camera.target);
+  assert(distanceAfter < distanceBefore, 'modified scroll should use the standard perspective dolly');
+  deepEqual(zoomed.camera.target, orbited.camera.target, 'standard zoom should stay aimed at the focused target');
   await session.dispose();
 });
 
@@ -865,8 +865,8 @@ test('R-INPUT-02 handles keyboard and two-finger navigation within one session',
   touch.platform.flushFrame();
   const touchAfterPinch = await touchSession.exportViewState();
   assert(touchAfterPinch.camera.zoom > touchAfterPan.camera.zoom, 'pinch spread should win and zoom in');
-  assert(touchAfterPinch.camera.zoom / touchAfterPan.camera.zoom > 1.19,
-    'pinch should use the accelerated mobile zoom response');
+  assert(touchAfterPinch.camera.zoom / touchAfterPan.camera.zoom > 1.4,
+    'pinch should use four times the original mobile zoom response');
   await touchSession.dispose();
   equal(touch.platform.pendingTimers, 0, 'disposing input should clear its owning-window timer');
   pointer(touch, touchCanvas, 'pointerdown', 50, 50, { pointerId: 12, pointerType: 'touch' });

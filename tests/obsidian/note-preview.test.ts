@@ -15,6 +15,18 @@ test('V1.8 Anima preview placement fits narrow and edge-adjacent viewports', () 
         'a long note must remain bounded vertically');
     }
   }
+  const distant = resolveAnimaPreviewCard({
+    anchor: { x: 600, y: 300 }, viewport: { width: 1200, height: 700 }, measuredHeight: 400, worldScale: 0.4,
+  });
+  const close = resolveAnimaPreviewCard({
+    anchor: { x: 600, y: 300 }, viewport: { width: 1200, height: 700 }, measuredHeight: 400, worldScale: 1.6,
+  });
+  assert(distant.scale < 1 && close.scale > 1,
+    'a preview should become a small distant placard and grow as its node approaches');
+  assert(distant.left + distant.width * distant.scale <= 1188,
+    'scaled preview placement should use its displayed world width');
+  assert(close.top + Math.min(400, close.maxHeight) * close.scale <= 688.000001,
+    'scaled preview placement should use its displayed world height');
 });
 
 test('V1.8 custom note preview delays, renders, scrolls, hands off, and dismisses semantically', async () => {

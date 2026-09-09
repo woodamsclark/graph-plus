@@ -3,7 +3,7 @@ import { animaPreviewTiming, resolveAnimaPreviewCard, type AnimaPreviewPhase } f
 export interface GraphPlusNotePreviewRequestV1<FileValue extends { readonly path: string }> {
   readonly nodeId?: string;
   readonly file?: FileValue;
-  readonly anchor?: { readonly x: number; readonly y: number };
+  readonly anchor?: { readonly x: number; readonly y: number; readonly scale?: number };
   readonly active: boolean;
   readonly immediate?: boolean;
   readonly persistent?: boolean;
@@ -176,13 +176,14 @@ export class GraphPlusNotePreviewControllerV1<FileValue extends { readonly path:
       anchor: { x: anchorX, y: anchorY },
       viewport: { width: availableWidth, height: availableHeight },
       measuredHeight: card.getBoundingClientRect().height,
+      worldScale: point.scale,
     });
     card.style.width = `${target.width}px`;
     card.style.maxHeight = `${target.maxHeight}px`;
     card.style.left = `${target.left}px`;
     card.style.top = `${target.top}px`;
     card.style.opacity = String(target.opacity);
-    card.style.transform = `scale(${target.scale})`;
+    card.style.setProperty('--graphplus-preview-world-scale', String(target.scale));
   }
 
   private readonly onCardEnter = (): void => {

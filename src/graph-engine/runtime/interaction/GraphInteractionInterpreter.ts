@@ -367,7 +367,7 @@ export class GraphInteractionInterpreter {
   private wheel(event: Extract<GraphInputEventV1, { type: 'wheel' }>): void {
     const delta = this.normalizedWheel(event);
     if (event.ctrl || event.meta) {
-      this.command(event, { type: 'focal-length-zoom-by', deltaY: delta.y });
+      this.command(event, { type: 'zoom-by', deltaY: delta.y, anchor: event.point });
       return;
     }
     if (this.dimensions === '3d' && this.options.getFocusedNodeId() !== undefined) {
@@ -466,7 +466,7 @@ export class GraphInteractionInterpreter {
       const originDistance = previous.mode === 'pending' ? previous.startDistance : previous.distance;
       const distanceDelta = next.distance - originDistance;
       if (Math.abs(distanceDelta) >= 1) this.command(event, {
-        type: 'zoom-by', deltaY: -distanceDelta * 6, anchor: next.centroid,
+        type: 'zoom-by', deltaY: -distanceDelta * 12, anchor: next.centroid,
       });
     }
     this.touchGesture = {

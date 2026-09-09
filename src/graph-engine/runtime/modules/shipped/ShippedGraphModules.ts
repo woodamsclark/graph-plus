@@ -30,8 +30,8 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       defaultSettings: {
         renderQuality: 'automatic',
         labelMode: 'adaptive',
-        nodeRadiusScale: 1,
-        edgeThicknessScale: 1,
+        nodeRadiusScale: 2,
+        edgeThicknessScale: 0.1,
         showArrows: false,
         tokenColors: {},
       },

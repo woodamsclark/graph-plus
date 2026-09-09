@@ -288,7 +288,7 @@ export class GraphPlusConsumerV1<TFile> {
   private async showNotePreview(
     nodeId: string,
     persistent: boolean,
-    fallbackAnchor?: { readonly x: number; readonly y: number },
+    fallbackAnchor?: { readonly x: number; readonly y: number; readonly scale?: number },
     immediate = true,
   ): Promise<void> {
     const entry = this.lookup.get(nodeId);
@@ -300,7 +300,11 @@ export class GraphPlusConsumerV1<TFile> {
     this.options.onNotePreview?.({ nodeId, file: entry.file, anchor, active: true, immediate, persistent });
   }
 
-  private async nodeScreenPoint(nodeId: string): Promise<{ readonly x: number; readonly y: number } | undefined> {
+  private async nodeScreenPoint(nodeId: string): Promise<{
+    readonly x: number;
+    readonly y: number;
+    readonly scale: number;
+  } | undefined> {
     return this.session?.getNodeScreenPoint(nodeId);
   }
 

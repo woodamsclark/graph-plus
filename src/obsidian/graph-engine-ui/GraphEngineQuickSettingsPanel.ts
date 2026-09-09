@@ -276,10 +276,10 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
         this.catalogSlider(adaptiveThresholdHost, `anima.${thresholdKey}`, readNumber(anima.settings[thresholdKey], 50));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.nodeSize)) {
-        this.catalogSlider(body, 'rendering.nodeRadiusScale', readNumber(settings.nodeRadiusScale, 1));
+        this.catalogSlider(body, 'rendering.nodeRadiusScale', readNumber(settings.nodeRadiusScale, 2));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.linkThickness)) {
-        this.catalogSlider(body, 'rendering.edgeThicknessScale', readNumber(settings.edgeThicknessScale, 1));
+        this.catalogSlider(body, 'rendering.edgeThicknessScale', readNumber(settings.edgeThicknessScale, 0.1));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.showArrows)) {
         const presentation = graphSettingPresentationV1('rendering.showArrows');

@@ -173,11 +173,6 @@ export class GraphCameraController {
     this.preserveAnchor(validAnchor, anchorWorld);
   }
 
-  zoomFocalLengthByWheel(deltaY: number): void {
-    const zoom = clamp(this.state.zoom * Math.exp(-deltaY * 0.0015), MIN_ZOOM, MAX_ZOOM);
-    this.state = { ...this.state, zoom };
-  }
-
   private preserveAnchor(
     anchor: { readonly x: number; readonly y: number } | undefined,
     before: Vec3 | undefined,

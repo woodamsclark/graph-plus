@@ -176,7 +176,8 @@ test('R-SHELL-03 round-trips consumer-owned view state and supports camera comma
   deepEqual((await session.exportViewState()).camera.target, { x: 10, y: 20, z: 0 },
     'anchored fit should size for all requested nodes while centering the requested node');
   const projectedA = await session.getNodeScreenPoint('a');
-  assert(projectedA && Number.isFinite(projectedA.x) && Number.isFinite(projectedA.y),
+  assert(projectedA && Number.isFinite(projectedA.x) && Number.isFinite(projectedA.y)
+    && Number.isFinite(projectedA.scale) && projectedA.scale > 0,
     'consumers should be able to anchor host UI to a visible node center');
   equal(await session.getNodeScreenPoint('b'), undefined,
     'host UI should not anchor to a node excluded by the render filter');

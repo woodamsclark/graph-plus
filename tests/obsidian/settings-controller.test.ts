@@ -18,6 +18,10 @@ test('Graph+ releases dragged nodes while retaining explicit context-menu pinnin
     'Graph+ quick settings should not expose a redundant Camera section');
   deepEqual(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.profiles[0]?.interaction?.contextActionIds,
     ['open-node', 'show-preview'], 'Graph+ should expose persistent note previews from node context menus');
+  equal(createShippedGraphModuleRegistryV1().get('rendering')?.descriptor.defaultSettings.nodeRadiusScale, 2,
+    'the shipped Graph Engine node-size default should be 2.0');
+  equal(createShippedGraphModuleRegistryV1().get('rendering')?.descriptor.defaultSettings.edgeThicknessScale, 0.1,
+    'the shipped Graph Engine link-thickness default should be 0.10');
   equal(profile?.profileSettings?.dragRelease, 'dynamic', 'drag release should return an unpinned node to the active layout');
   equal(profile?.uiDefaults?.contextMenuEnabled, true, 'the right-click menu should remain available for explicit pinning');
   equal(profile?.uiDefaults?.coreContextActions?.['toggle-pin'], undefined, 'the core Pin node action should remain visible by default');
