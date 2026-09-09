@@ -1,7 +1,8 @@
 {
-  "name": "graph-engine",
+  "name": "graph-plus",
   "version": "2.0.0",
-  "description": "A reusable graph platform for Obsidian with the graph+ experience built in.",
+  "description": "Explore your Obsidian vault as an interactive 2D or 3D graph, with persistent node positions and an embeddable graph engine.",
+  "license": "MPL-2.0",
   "private": true,
   "main": "main.js",
   "scripts": {

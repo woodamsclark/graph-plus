@@ -1,11 +1,11 @@
 {
   "id": "graph-engine",
-  "name": "graph-engine",
+  "name": "Graph+",
   "version": "2.0.0",
-  "minAppVersion": "1.8.0",
-  "description": "A reusable graph platform for Obsidian with the graph+ experience built in.",
+  "minAppVersion": "1.13.7",
+  "description": "Explore your Obsidian vault as an interactive 2D or 3D graph, with persistent node positions and an engine that other plugins can embed.",
   "author": "Woodams Clark",
-  "authorUrl": "",
+  "authorUrl": "https://github.com/woodamsclark",
   "isDesktopOnly": false,
   "main": "main.js"
 }

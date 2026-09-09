@@ -1,29 +1,140 @@
-# graph-engine
+# Graph+
 
-graph-engine is a reusable graph platform for Obsidian with the graph+ experience built in.
+Graph+ is an exploratory graph for Obsidian: a place to move through the ideas in
+your vault, not just a dashboard about them.
 
-- Opening graph+ lazily interprets Markdown notes and tags, mounts the saved graph,
-  reconciles it with the vault, and checkpoints its document and view state.
-- Other Obsidian plugins can lease the same neutral graph interface through public
-  Workspace Events without importing graph+ product code.
-- graph-engine owns in-memory graph operations, filters, profiles, modules, rendering,
-  and interaction. Each consumer owns domain meaning and persistence.
+Obsidian’s native graph is a useful map. Graph+ keeps that spirit and adds a more
+spatial, interactive workflow for creating, returning, reflecting, and discovering:
 
-See [graph-engine V1 consumer guide](docs/graph-engine-consumer-guide.md) for the
-public boundary and a runnable neutral example.
+- Open the whole vault in 2D or 3D.
+- Keep meaningful node locations between sessions.
+- Focus on a note and its neighborhood.
+- Filter the graph while leaving your notes and links unchanged.
+- Preview notes while you explore.
+- Use Form, filters, regions, and layout controls to look at the same vault from
+  different angles.
 
-Current design artifacts:
+Graph+ is for Obsidian users who think through connections—writers, researchers,
+students, knowledge workers, and anyone whose vault becomes more useful when they
+can see relationships spatially. It is especially useful after notes and links have
+accumulated and you want to return to the vault with a question: What connects to
+this? Where are the clusters? What did I overlook?
 
-- [graph-engine V1.9 optimization and architecture contract](docs/graph-engine-v1.9-optimization-and-architecture-contract.md)
-- [graph-engine V1.8 Anima note preview contract](docs/graph-engine-v1.8-anima-note-preview-contract.md)
-- [graph-engine V1.7.3 energy and performance contract](docs/graph-engine-v1.7.3-energy-diagnostics-contract.md)
-- [graph-engine V1.7.2 ribbon contract](docs/graph-engine-v1.7.2-ribbon-contract.md)
-- [graph-engine downstream compatibility policy](docs/graph-engine-downstream-compatibility-policy.md)
-- [graph-engine V1.5 Linear build-out layout contract](docs/graph-engine-v1.5-linear-build-out-layout-contract.md)
-- [graph-engine V1.5 Linear build-out acceptance plan](docs/graph-engine-v1.5-linear-build-out-layout-acceptance.md)
-- [graph-engine V1.4 topology-weighted layout contract](docs/graph-engine-v1.4-topology-weighted-layout-contract.md)
-- [graph-engine V1.4 topology-weighted layout acceptance plan](docs/graph-engine-v1.4-topology-weighted-layout-acceptance.md)
-- [graph-engine V1.3 tag regions contract](docs/graph-engine-v1.3-tag-regions-contract.md)
-- [graph-engine V1.3 tag regions acceptance plan](docs/graph-engine-v1.3-tag-regions-acceptance.md)
-- [graph-engine V1.2 scalability contract](docs/graph-engine-v1.2-scalability-contract.md)
-- [graph-engine V1.2 scalability acceptance plan](docs/graph-engine-v1.2-scalability-acceptance.md)
+Graph+ 2.0 is intentionally foundational. It establishes the persistent 2D/3D graph,
+interaction model, rendering system, and plugin platform. Larger exploratory tools
+are planned for future releases.
+
+## How to use Graph+
+
+### Open the graph
+
+Use any of these entry points:
+
+- Click the network ribbon icon.
+- Run the `open graph+` command from the command palette.
+- Right-click a Markdown file and choose `show in graph+` to open the graph with
+  that note available as the starting point.
+
+To explore only a note’s neighborhood, run `open local graph+`. Local Graph+ starts
+from the active note and lets you adjust the neighborhood depth.
+
+### Explore and navigate
+
+Select nodes to focus on them and reveal their neighborhood. Clear focus to return to
+the broader graph. Drag nodes to arrange the space; Graph+ persists node placement,
+camera framing, pins, focus, and selection as graph state for the vault.
+
+On desktop, use pointer, wheel, keyboard, and modifier interactions. On touch devices,
+use one- and two-finger gestures for graph movement and navigation. The exact gesture
+behavior follows the active graph dimension and focus state.
+
+### Refine what you see
+
+Use the graph controls to:
+
+- Search for nodes with `Filter nodes…`.
+- Include or hide tag nodes and orphan notes.
+- Reset the current filters.
+- Switch between ordinary graph exploration and Form mode.
+- Choose a relation and depth when using Form mode.
+- Change display, force-layout, region, and dimension settings.
+
+These are reversible views of your vault. They do not rewrite Markdown files, rename
+notes, or change the canonical links between them.
+
+### Change dimensions and recover a layout
+
+Graph+ opens in 2D by default. Use the dimension control to switch to 3D. The graph
+engine preserves the graph document while changing the presentation and camera.
+
+If you want to regenerate placement and camera state for the vault, use **Settings →
+Community plugins → Graph+ → Reset graph layout data**. This does not change notes,
+links, filters, Form state, colors, labels, or settings.
+
+## Default experience
+
+These are the defaults for a new Graph+ profile. Settings can be changed globally or
+for the Graph+ profile where supported.
+
+| Area | Default |
+| --- | --- |
+| Graph dimensions | 2D; 3D is available from the dimension control |
+| Layout | Topology-weighted force layout |
+| Render quality | Automatic |
+| Labels | Adaptive |
+| Label position | Above nodes |
+| Node size | 2× base radius |
+| Link thickness | 0.1× base width |
+| Link arrows | Off |
+| Region boundaries | Off; region attraction remains enabled |
+| Form | Off |
+| Force layout | Enabled |
+| Repulsion strength | 1000 |
+| Link strength | 1 |
+| Link distance | 250 |
+| Center force | 0.1 |
+| Motion damping | 0.4 |
+| Collision spacing | 60 |
+| 3D axial spring | Off |
+| Quick settings | Collapsed |
+
+## For plugin developers
+
+Graph+ is the first priority consumer of `graph-engine`, a host-neutral graph platform.
+
+The core engine is designed for plugins that already own meaningful data. A consumer
+plugin passes graph nodes, edges, profiles, and view state to graph-engine; the engine
+returns a presentable interactive graph surface inside an HTML element owned by that
+plugin. The consumer keeps ownership of its data, domain meaning, and persistence.
+
+Graph-engine owns generic graph layout, rendering, camera movement, hit testing,
+gestures, filters, modules, and presentation state. This lets another plugin add a
+graph without importing Graph+’s Obsidian-vault interpretation.
+
+See [the graph-engine consumer guide](docs/graph-engine-consumer-guide.md) and the
+[neutral consumer example](examples/neutral-consumer.ts) for the public boundary.
+
+## Compatibility
+
+Graph+ 2.0.0 has been tested on Obsidian 1.13.7. Desktop and mobile behavior should be
+validated against your own vault and device before relying on it for daily work.
+
+## Installation
+
+Graph+ is available through the Obsidian community plugins browser. For manual
+installation, place `main.js`, `manifest.json`, and `styles.css` in:
+
+`.obsidian/plugins/graph-engine/`
+
+## Development
+
+```bash
+npm install
+npm run typecheck
+npm test
+npm run build
+```
+
+## License
+
+Graph+ is available under the Mozilla Public License 2.0. See [LICENSE](LICENSE).
