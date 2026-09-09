@@ -5,7 +5,7 @@ import type {
   Vec3,
 } from '../../contracts/v1/index.ts';
 import type { EffectiveConsumerProfileV1 } from '../../core/profile/index.ts';
-import type { GraphRenderThemeV1 } from '../render/index.ts';
+import type { GraphVisualThemeV2 } from '../theme/index.ts';
 import type {
   GraphEdgeRenderContributionV1,
   GraphNodeRenderContributionV1,
@@ -33,7 +33,7 @@ export class GraphModuleHost {
   private readonly active: ActiveGraphModuleV1[] = [];
   private readonly registry: GraphModuleRegistry;
   private readonly sessionId: string;
-  private readonly themePalette: GraphRenderThemeV1;
+  private themePalette: GraphVisualThemeV2;
   private readonly getDocument: () => GraphDocumentV1;
   private readonly getViewState: () => GraphViewStateV1;
   private fatal = false;
@@ -45,7 +45,7 @@ export class GraphModuleHost {
     readonly registry: GraphModuleRegistry;
     readonly profile: EffectiveConsumerProfileV1;
     readonly sessionId: string;
-    readonly themePalette: GraphRenderThemeV1;
+    readonly themePalette: GraphVisualThemeV2;
     readonly initialModuleState: Readonly<Record<string, JsonValue>>;
     readonly getDocument: () => GraphDocumentV1;
     readonly getViewState: () => GraphViewStateV1;
@@ -296,6 +296,11 @@ export class GraphModuleHost {
     this.invokeLifecycle('onViewChanged', 'view-changed', state);
   }
 
+  themeChanged(theme: GraphVisualThemeV2): void {
+    this.themePalette = theme;
+    this.invokeLifecycle('onThemeChanged', 'theme-changed', theme);
+  }
+
   restoreState(state: Readonly<Record<string, JsonValue>>): void {
     if (this.fatal || this.disposed) return;
     for (const module of [...this.active]) {
@@ -374,9 +379,9 @@ export class GraphModuleHost {
   }
 
   private invokeLifecycle(
-    method: 'onDocumentChanged' | 'onViewChanged' | 'setSuspended',
+    method: 'onDocumentChanged' | 'onViewChanged' | 'onThemeChanged' | 'setSuspended',
     hook: GraphModuleHookV1,
-    value: GraphDocumentV1 | GraphViewStateV1 | boolean,
+    value: GraphDocumentV1 | GraphViewStateV1 | GraphVisualThemeV2 | boolean,
   ): void {
     if (this.fatal || this.disposed) return;
     for (const module of [...this.active]) {

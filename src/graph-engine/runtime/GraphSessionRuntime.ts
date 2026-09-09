@@ -41,9 +41,20 @@ import {
 } from './modules/index.ts';
 import type { SessionRuntimePlatformV1 } from './platform/index.ts';
 import {
-  CanvasGraphRenderer,
-  type GraphRenderThemeV1,
+  DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
+  detectGraphRendererCapabilitiesV2,
+  selectGraphRendererV2,
+  type GraphRendererBackendIdV2,
+  type GraphRendererCapabilitiesV2,
+  type GraphRendererRegistryV2,
+  type GraphRendererSelectionV2,
+  type GraphRendererV2,
 } from './render/index.ts';
+import {
+  graphVisualThemesEqualV2,
+  freezeGraphVisualThemeV2,
+  type GraphVisualThemeV2,
+} from './theme/index.ts';
 import { CanvasSessionSurface, type SessionSurfaceV1 } from './surface/index.ts';
 import type {
   GraphNodeActionFailureV1,
@@ -70,11 +81,13 @@ export interface GraphSessionRuntimeOptionsV1 {
   readonly resolveProfile: (overrides: GraphSettingsOverridesV1) => EffectiveConsumerProfileV1;
   readonly onDisposed?: () => void;
   readonly modules: GraphModuleRegistry;
-  readonly themePalette: GraphRenderThemeV1;
-  readonly resolveThemePalette?: () => GraphRenderThemeV1;
+  readonly themePalette: GraphVisualThemeV2;
+  readonly resolveThemePalette?: () => GraphVisualThemeV2;
   readonly restoreViewState?: GraphViewStateV1;
   readonly platform: SessionRuntimePlatformV1;
   readonly nodeActions?: GraphNodeActionRuntimeV1;
+  readonly rendererRegistry: GraphRendererRegistryV2;
+  readonly preferredRendererBackend?: GraphRendererBackendIdV2;
 }
 
 const RETIRED_GRAPH_SYSTEM_STATE_KEY_V1 = 'graph-system-states-v1';
@@ -102,6 +115,13 @@ export interface GraphSessionRuntimeDiagnosticsV1 {
   readonly lastFrameInvalidations: readonly SessionInvalidationClassV1[];
   readonly invalidationCounts: Readonly<Record<SessionInvalidationClassV1, number>>;
   readonly renderCaches: Readonly<Record<string, number>>;
+  readonly renderer: {
+    readonly selectedBackendId: GraphRendererBackendIdV2;
+    readonly registeredBackendIds: readonly GraphRendererBackendIdV2[];
+    readonly capabilities: GraphRendererCapabilitiesV2;
+    readonly attempts: GraphRendererSelectionV2['attempts'];
+    readonly lifecycle: string;
+  };
   readonly renderQuality: 'automatic' | 'high-fidelity' | 'energy-saver';
   readonly nativePixelRatio: number;
   readonly effectivePixelRatio: number;
@@ -132,14 +152,17 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly onDisposed?: () => void;
   private readonly container: HTMLElement;
   private readonly platform: SessionRuntimePlatformV1;
-  private readonly themePalette: GraphRenderThemeV1;
-  private readonly resolveThemePalette?: () => GraphRenderThemeV1;
+  private themePalette: GraphVisualThemeV2;
+  private readonly resolveThemePalette?: () => GraphVisualThemeV2;
   private readonly nodeActions?: GraphNodeActionRuntimeV1;
   private readonly modules: GraphModuleRegistry;
   private surface!: SessionSurfaceV1;
   private camera!: GraphCameraController;
   private projection!: SessionProjectionCoordinatorV1;
-  private renderer!: CanvasGraphRenderer;
+  private renderer!: GraphRendererV2;
+  private rendererSelection!: GraphRendererSelectionV2;
+  private renderSceneRevision = 0;
+  private presentationRevision = 0;
   private interaction!: SessionInteractionRuntime;
   private moduleHost!: GraphModuleHost;
   private projectionView!: GraphModulePipelineStateV1;
@@ -230,6 +253,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.activeFrameInvalidations = null;
       return;
     }
+    this.updateRendererScene([...this.activeFrameInvalidations]);
     const render = this.projection.render(this.renderer);
     if (render) {
       const latestFramePerformance = {
@@ -258,7 +282,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.onDisposed = options.onDisposed;
     this.container = options.container;
     this.platform = options.platform;
-    this.themePalette = options.themePalette;
+    this.themePalette = freezeGraphVisualThemeV2(options.themePalette);
     this.resolveThemePalette = options.resolveThemePalette;
     this.nodeActions = options.nodeActions;
     this.modules = options.modules;
@@ -311,13 +335,21 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         () => { this.diagnostics.counters.projectionPasses += 1; },
         () => { this.diagnostics.counters.frameCompositions += 1; },
       );
-      this.renderer = new CanvasGraphRenderer(this.surface.canvas, this.camera, this.projection.frames, () => this.platform.now());
+      const capabilities = detectGraphRendererCapabilitiesV2(this.platform.document, this.platform.window);
+      this.rendererSelection = selectGraphRendererV2({
+        registry: options.rendererRegistry,
+        capabilities,
+        context: { createCanvas: () => this.surface.createRendererCanvas(), now: () => this.platform.now() },
+        preferredBackend: options.preferredRendererBackend,
+      });
+      this.renderer = this.rendererSelection.renderer;
+      this.surface.setRendererBackend(this.renderer.backendId);
       const viewport = this.surface.getViewport();
       this.camera.setViewport(viewport.width, viewport.height);
-      this.renderer.resize(viewport.width, viewport.height, viewport.devicePixelRatio);
+      this.renderer.resize(viewport);
       this.surfaceResizeSubscription = this.surface.onResize((next) => {
         this.camera.setViewport(next.width, next.height);
-        this.renderer.resize(next.width, next.height, next.devicePixelRatio);
+        this.renderer.resize(next);
         this.projection.markDirty();
         this.scheduleFrame(0, 'camera');
       });
@@ -327,8 +359,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         dimensions: this.profile.dimensions,
         platform: this.platform,
         surface: this.surface,
+        interactionElement: this.renderer.interactionElement,
         camera: this.camera,
-        hitTest: (point, pointerKind) => this.renderer.hitTest(point, pointerKind),
+        hitTest: (point, pointerKind) => {
+          this.updateRendererScene([]);
+          return this.renderer.pick({ point, pointerKind });
+        },
         getDocument: () => this.store.readDocument(),
         getViewState: () => this.viewState,
         getInteractivePositions: () => this.moduleView?.positions ?? this.viewState.positions,
@@ -336,7 +372,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         isNodeDraggable: () => !this.moduleView?.formActive,
         setViewState: (state) => { this.viewState = state; },
         getRenderSelection: () => this.renderSelection,
-        getResetCamera: () => defaultCamera(this.profile.dimensions, focalLengthMm(this.profile.profileSettings)),
+        resetCamera: () => this.resetCameraState(),
         getDragReleasePolicy: () => this.profile.profileSettings.dragRelease === 'pin' ? 'pin' : 'dynamic',
         getDragConstraintPolicy: () => this.profile.profileSettings.dragConstraint === 'transient'
           ? 'transient'
@@ -352,6 +388,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.recomputeView();
       if (!restoredViewState) this.fitPositions(Object.values(this.moduleView.positions));
       this.refreshFrame();
+      this.updateRendererScene(['content']);
       this.renderer.render();
       this.synchronizeRuntimeActivity();
     } catch (error) {
@@ -363,6 +400,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       if (visibilityListenerInstalled) {
         this.platform.document.removeEventListener('visibilitychange', this.onVisibilityChange);
       }
+      this.renderer?.dispose();
       this.surface?.dispose();
       this.activity.dispose();
       throw error;
@@ -545,7 +583,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   async resetCamera(options?: TransitionOptionsV1): Promise<void> {
     this.requireActive();
     assertTransition(options);
-    this.camera.setState(defaultCamera(this.profile.dimensions, focalLengthMm(this.profile.profileSettings)));
+    this.resetCameraState();
+    const focusedNodeId = this.viewState.focusedNodeId;
     this.synchronizeCameraState();
     this.projectionView = { ...this.projectionView, viewState: this.viewState };
     this.moduleView = { ...this.moduleView, viewState: this.viewState };
@@ -558,7 +597,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       documentRevision: document.revision,
       timestamp: this.platform.now(),
       type: 'camera-reset',
-      ...(this.viewState.focusedNodeId ? { focusedNodeId: this.viewState.focusedNodeId } : {}),
+      ...(focusedNodeId ? { focusedNodeId } : {}),
     });
   }
 
@@ -567,6 +606,15 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.diagnostics.counters.viewExports += 1;
     this.synchronizeModuleState();
     return cloneGraphViewStateV1(withoutRetiredGraphSystemState(this.viewState));
+  }
+
+  async getNodeScreenPoint(nodeId: string): Promise<{ readonly x: number; readonly y: number } | undefined> {
+    this.requireActive();
+    if (!this.moduleView.renderSelection.nodeIds.has(nodeId)) return undefined;
+    const position = this.moduleView.positions[nodeId];
+    if (!position) return undefined;
+    const projected = this.camera.worldToScreen(position);
+    return { x: projected.x, y: projected.y };
   }
 
   async restoreViewState(state: GraphViewStateV1): Promise<void> {
@@ -642,11 +690,15 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   refreshThemePalette(): void {
     this.requireActive();
-    const next = this.resolveThemePalette?.();
-    if (!next) return;
-    Object.assign(this.themePalette as unknown as Record<string, unknown>, next);
-    this.moduleHost.updateProfile(this.profile);
-    this.recomputeView(false);
+    const resolved = this.resolveThemePalette?.();
+    if (!resolved || graphVisualThemesEqualV2(this.themePalette, resolved)) return;
+    const next = freezeGraphVisualThemeV2({ ...resolved, revision: this.themePalette.revision + 1 });
+    this.themePalette = next;
+    this.moduleHost.themeChanged(next);
+    this.projectionView = { ...this.projectionView, theme: next };
+    this.moduleView = { ...this.moduleView, theme: next };
+    this.renderer.updateTheme(next);
+    this.refreshFrame(true, 'presentation');
   }
 
   private applyResolvedProfile(next: EffectiveConsumerProfileV1): void {
@@ -846,7 +898,14 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       pendingInvalidations: scheduler.pendingInvalidations,
       lastFrameInvalidations: diagnostics.lastFrameInvalidations,
       invalidationCounts: diagnostics.invalidationCounts,
-      renderCaches: this.renderer.getDiagnostics(),
+      renderCaches: this.renderer.getRendererDiagnostics().resources,
+      renderer: {
+        selectedBackendId: this.renderer.backendId,
+        registeredBackendIds: this.rendererSelection.registeredBackendIds,
+        capabilities: this.rendererSelection.capabilities,
+        attempts: this.rendererSelection.attempts,
+        lifecycle: this.renderer.getRendererDiagnostics().lifecycle,
+      },
       renderQuality: renderQuality(this.profile),
       nativePixelRatio: this.platform.devicePixelRatio,
       effectivePixelRatio: this.surface.getViewport().devicePixelRatio,
@@ -893,6 +952,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.graphChangedListeners.clear();
     this.errorListeners.clear();
     this.overrideListeners.clear();
+    this.renderer.dispose();
     this.surface.dispose();
     this.onDisposed?.();
   }
@@ -953,6 +1013,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       regionLayouts: [],
       regionContributions: [],
       theme: this.themePalette,
+      presentationPolicy: DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
       motionTargets: {},
     });
     this.moduleView = this.projectionView;
@@ -980,6 +1041,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     schedule = true,
     invalidation: SessionInvalidationClassV1 = 'presentation',
   ): void {
+    if (invalidation === 'presentation') this.presentationRevision += 1;
     this.activeFrameInvalidations?.add(invalidation);
     this.moduleView = this.projection.compose({
       host: this.moduleHost,
@@ -992,6 +1054,34 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       invalidation,
     });
     if (schedule) this.scheduleFrame(0, invalidation);
+  }
+
+  private updateRendererScene(invalidations: readonly SessionInvalidationClassV1[]): void {
+    const frame = this.projection.frames.get();
+    if (!frame) return;
+    this.renderSceneRevision += 1;
+    this.renderer.updateScene({
+      ...frame,
+      revision: this.renderSceneRevision,
+      presentationRevision: this.presentationRevision,
+      view: {
+        dimensions: this.profile.dimensions,
+        camera: this.camera.getState(),
+        viewport: this.surface.getViewport(),
+      },
+      labels: frame.policy?.labelMode === 'off' ? [] : frame.nodes.map((node) => ({
+        id: `label:${node.id}`,
+        nodeId: node.id,
+        text: node.label,
+        color: node.labelColor ?? frame.theme.colors.label,
+        opacity: node.labelOpacity ?? 1,
+        fontSizePx: node.labelFontSize ?? frame.theme.labelFont.sizePx,
+        offset: node.labelOffset ?? { x: 0, y: 0 },
+        visible: node.showLabel !== false,
+        priority: node.labelPriority ?? 0,
+        alwaysVisible: node.labelAlwaysVisible === true,
+      })),
+    }, invalidations);
   }
 
   private updateSurface(): void {
@@ -1034,6 +1124,17 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   private synchronizeCameraState(): void {
     this.viewState = { ...this.viewState, camera: this.camera.getState() };
+  }
+
+  private resetCameraState(): void {
+    this.camera.setState(defaultCamera(this.profile.dimensions, focalLengthMm(this.profile.profileSettings)));
+    if (this.viewState.focusedNodeId) return;
+    const document = this.store.readDocument();
+    const positions = [...this.renderSelection.nodeIds]
+      .filter((id) => document.nodes.some((node) => node.id === id))
+      .map((id) => this.moduleView.positions[id])
+      .filter((position): position is Vec3 => position !== undefined);
+    this.camera.fit(positions, 48);
   }
 
   private fitPositions(positions: readonly Vec3[], center?: Vec3, minimumRadius?: number): void {

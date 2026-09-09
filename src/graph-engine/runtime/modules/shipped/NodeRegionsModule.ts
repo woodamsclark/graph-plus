@@ -1,6 +1,7 @@
 import type { GraphDimensionsV1, JsonValue } from '../../../contracts/v1/index.ts';
 import { GraphNodeRegionIndexV1 } from '../../../core/regions/index.ts';
 import type { GraphRenderRegionV1 } from '../../render/index.ts';
+import { parseGraphColorV2, type GraphColorV2 } from '../../theme/index.ts';
 import type {
   GraphModuleInstanceV1,
   GraphModulePipelineStateV1,
@@ -67,13 +68,13 @@ export function readNodeRegionSettingsV1(
   };
 }
 
-function regionColor(id: string): string {
+function regionColor(id: string): GraphColorV2 {
   let hash = 2166136261;
   for (const character of id) {
     hash ^= character.charCodeAt(0);
     hash = Math.imul(hash, 16777619);
   }
-  return `hsl(${(hash >>> 0) % 360} 72% 64%)`;
+  return parseGraphColorV2(`hsl(${(hash >>> 0) % 360} 72% 64%)`)!;
 }
 
 function finitePositive(value: JsonValue | undefined, fallback: number): number {

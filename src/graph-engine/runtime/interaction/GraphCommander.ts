@@ -51,6 +51,10 @@ function coalesceCommands(commands: readonly GraphRuntimeCommandV1[]): readonly 
         result[result.length - 1] = { ...command, deltaY: previous.deltaY + command.deltaY };
         continue;
       }
+      if (command.type === 'focal-length-zoom-by' && previous.type === 'focal-length-zoom-by') {
+        result[result.length - 1] = { ...command, deltaY: previous.deltaY + command.deltaY };
+        continue;
+      }
       if (command.type === 'drag-update' && previous.type === 'drag-update'
         && command.nodeId === previous.nodeId) {
         result[result.length - 1] = command;

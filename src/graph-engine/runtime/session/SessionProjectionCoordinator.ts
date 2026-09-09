@@ -2,9 +2,9 @@ import type { GraphViewStateV1 } from '../../contracts/v1/index.ts';
 import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
 import type { GraphModuleHost, GraphModulePipelineStateV1 } from '../modules/index.ts';
 import {
-  CanvasGraphRenderer,
   composeGraphRenderFrameV1,
   GraphFrameStore,
+  type GraphRendererV2,
   type GraphRenderTimingV1,
 } from '../render/index.ts';
 import type { SessionInvalidationClassV1 } from './SessionFrameScheduler.ts';
@@ -52,6 +52,7 @@ export class SessionProjectionCoordinatorV1 {
       edgeContributions: moduleView.edgeContributions,
       regionContributions: moduleView.regionContributions,
       theme: moduleView.theme,
+      presentationPolicy: moduleView.presentationPolicy,
       hoveredNodeId: options.hoveredNodeId,
       geometryRevision: this.geometryRevision,
     }));
@@ -68,7 +69,7 @@ export class SessionProjectionCoordinatorV1 {
     this.dirty = true;
   }
 
-  render(renderer: CanvasGraphRenderer): GraphRenderTimingV1 | undefined {
+  render(renderer: GraphRendererV2): GraphRenderTimingV1 | undefined {
     if (!this.dirty) return undefined;
     const timing = renderer.render();
     this.dirty = false;

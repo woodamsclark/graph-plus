@@ -10,11 +10,12 @@ import type {
   GraphNodeRenderContributionV1,
 } from '../../render/index.ts';
 import type { GraphModuleInstanceV1, GraphModulePipelineStateV1 } from '../GraphModuleTypes.ts';
+import { parseGraphColorV2, type GraphColorV2 } from '../../theme/index.ts';
 
-const BRANCH_COLORS = [
+const BRANCH_COLORS: readonly GraphColorV2[] = [
   '#e57373', '#ffb74d', '#ffd54f', '#81c784', '#4db6ac', '#4fc3f7',
   '#64b5f6', '#7986cb', '#9575cd', '#ba68c8', '#f06292', '#a1887f',
-];
+].map((value) => parseGraphColorV2(value)!);
 
 interface FormSettings {
   readonly rootNodeId?: string;
@@ -93,7 +94,7 @@ export class FormModule implements GraphModuleInstanceV1 {
       .filter((edge) => visibleIds.has(edge.sourceId) && visibleIds.has(edge.targetId))
       .filter((edge) => this.settings.showCrossLinks || treeEdgeIds.has(edge.id));
     const branchColors = new Map(topBranches.map((id, index) => [id, BRANCH_COLORS[index % BRANCH_COLORS.length]]));
-    const colorFor = (id: string): string | undefined => {
+    const colorFor = (id: string): GraphColorV2 | undefined => {
       const branchId = branch.get(id);
       if (!branchId || branchId === rootId) return undefined;
       return branchColors.get(branchId) ?? BRANCH_COLORS[stableHash(branchId) % BRANCH_COLORS.length];

@@ -3,8 +3,10 @@ import {
   CanvasGraphRenderer,
   composeGraphRenderFrameV1,
   DEFAULT_GRAPH_RENDER_THEME_V1,
+  DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
   GraphFrameStore,
 } from '../../src/graph-engine/runtime/render/index.ts';
+import { parseGraphColorV2 } from '../../src/graph-engine/runtime/theme/index.ts';
 import { GraphCameraController } from '../../src/graph-engine/runtime/camera/index.ts';
 import { AnimaModule } from '../../src/graph-engine/runtime/modules/shipped/AnimaModule.ts';
 import {
@@ -15,7 +17,10 @@ import {
   GRAPH_PLUS_CONSUMER_REGISTRATION_V1,
   migrateGraphPlusProfileOverridesV16,
 } from '../../src/graph-plus/consumer/index.ts';
-import { ThemeStyleResolver } from '../../src/obsidian/themeStyleResolver.ts';
+import {
+  DEFAULT_OBSIDIAN_GRAPH_PLUS_THEME_V2,
+  ThemeStyleResolver,
+} from '../../src/obsidian/themeStyleResolver.ts';
 import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import { runtimeCanvas, runtimeHarness } from '../support/runtimeHarness.ts';
@@ -37,8 +42,8 @@ test('V1.6 Anima owns the exact visible-degree radius and composable structural 
   assert(Math.abs((patch.nodeContributions.hub.radius ?? 0) - expected) < 1e-10,
     'hub radius should use the exact formula and ignore duplicate ordered relationships');
   equal(patch.nodeContributions['leaf-0'].radius, 8, 'low-degree nodes should use the exact lower clamp');
-  equal(patch.theme?.nodeScaleMode, 'sqrt-orthographic', 'Anima should request native-style 2d node scaling');
-  equal(patch.theme?.labelScaleMode, 'fixed', 'Anima labels should remain screen-readable in both dimensions');
+  equal(patch.presentationPolicy?.nodeScaleMode, 'sqrt-orthographic', 'Anima should request native-style 2d node scaling');
+  equal(patch.presentationPolicy?.labelScaleMode, 'fixed', 'Anima labels should remain screen-readable in both dimensions');
 });
 
 test('V1.6 Anima neighborhood highlighting follows focus changes and clears with focus', () => {
@@ -106,14 +111,40 @@ test('V1.6 Anima neighborhood highlighting follows focus changes and clears with
   equal(cleared.edgeContributions['b-c'].opacity, 1, 'no prior focus highlight should remain latched');
 });
 
+test('V2 adaptive labels stay inside the active neighborhood', () => {
+  const document = graphDocument({
+    nodes: [graphNode('a'), graphNode('b'), graphNode('c')],
+    edges: [graphEdge('a-b', 'a', 'b')],
+  });
+  const selection = { nodeIds: new Set(['a', 'b', 'c']), edgeIds: new Set(['a-b']) };
+  const state = pipeline(document, selection);
+  const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, {});
+  const adaptive = anima.contributeFrame({
+    ...state,
+    presentationPolicy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'adaptive' },
+    viewState: { ...state.viewState, focusedNodeId: 'a' },
+  });
+  assert(adaptive?.nodeContributions, 'focused adaptive presentation should contribute nodes');
+  equal(adaptive.nodeContributions.a.showLabel, true, 'the focused node label should remain eligible');
+  equal(adaptive.nodeContributions.b.showLabel, true, 'a direct-neighbor label should remain eligible');
+  equal(adaptive.nodeContributions.c.showLabel, false, 'an unrelated node label should be suppressed');
+
+  const all = anima.contributeFrame({
+    ...state,
+    presentationPolicy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'all' },
+    viewState: { ...state.viewState, focusedNodeId: 'a' },
+  });
+  equal(all?.nodeContributions?.c.showLabel, true, 'All labels should remain an explicit override');
+});
+
 test('V1.6 Anima owns live above and below label placement', () => {
   const document = graphDocument({ nodes: [graphNode('a')], edges: [] });
   const state = pipeline(document, { nodeIds: new Set(['a']), edgeIds: new Set() });
   const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, { labelPosition: 'above' });
-  equal(anima.contributeFrame(state)?.theme?.labelPosition, 'above',
+  equal(anima.contributeFrame(state)?.presentationPolicy?.labelPosition, 'above',
     'Anima should publish the configured above placement');
   anima.updateSettings({ labelPosition: 'below' });
-  equal(anima.contributeFrame(state)?.theme?.labelPosition, 'below',
+  equal(anima.contributeFrame(state)?.presentationPolicy?.labelPosition, 'below',
     'Anima should update label placement without remounting');
 });
 
@@ -135,8 +166,9 @@ test('V1.6 Anima labels retain their CSS size across orthographic zoom', () => {
       id: 'hub', label: 'hub', position: { x: 0, y: 0, z: 0 }, radius: 24,
       selected: false, focused: false, hovered: false, labelFontSize: 20,
     }],
-    theme: {
-      ...DEFAULT_GRAPH_RENDER_THEME_V1,
+    theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    policy: {
+      ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
       labelMode: 'all',
       labelScaleMode: 'fixed',
     },
@@ -172,13 +204,15 @@ test('V1.6 renderer anchors labels above or below the resolved node boundary', (
   };
   frames.set({
     regions: [], edges: [], nodes: [node],
-    theme: { ...DEFAULT_GRAPH_RENDER_THEME_V1, labelMode: 'all', labelPosition: 'below' },
+    theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    policy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'all', labelPosition: 'below' },
   });
   renderer.render();
   equal(fillTextY.pop(), 192, 'below should begin four pixels beneath the eight-pixel node');
   frames.set({
     regions: [], edges: [], nodes: [node],
-    theme: { ...DEFAULT_GRAPH_RENDER_THEME_V1, labelMode: 'all', labelPosition: 'above' },
+    theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    policy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'all', labelPosition: 'above' },
   });
   renderer.render();
   equal(fillTextY.pop(), 156, 'above should clear the node and the twelve-pixel label height');
@@ -198,7 +232,8 @@ test('V1.6 presentation aggregation preserves reciprocal direction without mutat
     document,
     viewState: viewState(document),
     selection,
-    theme: { ...DEFAULT_GRAPH_RENDER_THEME_V1, edgeAggregation: 'unordered-pair', showArrows: true },
+    theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    presentationPolicy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, edgeAggregation: 'unordered-pair', showArrows: true },
   });
   equal(frame.edges.length, 1, 'parallel and reciprocal canonical edges should render as one shaft');
   equal(frame.edges[0].arrowAtSource, true, 'the shaft should preserve its reverse direction marker');
@@ -216,21 +251,22 @@ test('V1.6 frame composition carries future Anima label and arrow targets to ren
     viewState: viewState(document),
     selection: { nodeIds: new Set(['a', 'b']), edgeIds: new Set(['a-b']) },
     nodeContributions: {
-      a: { finalColor: '#123456', labelOffset: { x: 3, y: -4 } },
+      a: { finalColor: parseGraphColorV2('#123456'), labelOffset: { x: 3, y: -4 } },
     },
     edgeContributions: {
       'a-b': {
         arrowAtSource: true, arrowAtTarget: false,
-        arrowColor: '#abcdef', arrowOpacity: 0.4,
+        arrowColor: parseGraphColorV2('#abcdef'), arrowOpacity: 0.4,
       },
     },
-    theme: { ...DEFAULT_GRAPH_RENDER_THEME_V1, showArrows: true },
+    theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    presentationPolicy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, showArrows: true },
   });
-  equal(frame.nodes[0].finalColor, '#123456', 'Anima final fill should reach the render frame');
+  deepEqual(frame.nodes[0].finalColor, parseGraphColorV2('#123456'), 'Anima final fill should reach the render frame');
   deepEqual(frame.nodes[0].labelOffset, { x: 3, y: -4 }, 'label offsets should survive composition');
   equal(frame.edges[0].arrowAtSource, true, 'Anima should be able to show a source arrow');
   equal(frame.edges[0].arrowAtTarget, false, 'Anima should be able to suppress a canonical target arrow');
-  equal(frame.edges[0].arrowColor, '#abcdef', 'arrow color should be independent from shaft color');
+  deepEqual(frame.edges[0].arrowColor, parseGraphColorV2('#abcdef'), 'arrow color should be independent from shaft color');
   equal(frame.edges[0].arrowOpacity, 0.4, 'arrow opacity should be independent from shaft opacity');
 });
 
@@ -249,13 +285,34 @@ test('V1.6 host theme probes resolve native graph roles, opacity, and CSS-variab
   value.document.body.style.setProperty('--native-tag', 'rgb(190, 200, 210)');
   value.document.body.style.setProperty('--graph-node-tag', 'var(--native-tag)');
   const palette = new ThemeStyleResolver(() => value.document.body).getPalette();
-  equal(palette.nodeColor, 'rgba(10, 20, 30, 0.5)', 'native node opacity should be folded into its resolved color');
-  equal(palette.tagColor, 'rgb(190, 200, 210)', 'nested graph CSS variables should resolve before reaching Anima');
-  equal(palette.linkColor, 'rgb(40, 50, 60)', 'native line role should outrank generic fallbacks');
-  equal(palette.labelColor, 'rgb(70, 80, 90)', 'native text role should be sampled');
-  equal(palette.arrowColor, 'rgb(100, 110, 120)', 'native arrow role should be sampled separately');
-  equal(palette.highlightColor, 'rgb(130, 140, 150)', 'native focus role should drive interaction highlighting');
-  equal(palette.outlineColor, 'rgb(160, 170, 180)', 'native circle role should drive outlines');
+  deepEqual(palette.colors.node, parseGraphColorV2('rgba(10, 20, 30, 0.5)'), 'native node opacity should be folded into its resolved color');
+  deepEqual(palette.colors.tagNode, parseGraphColorV2('rgb(190, 200, 210)'), 'nested graph CSS variables should resolve before reaching Anima');
+  deepEqual(palette.colors.edge, parseGraphColorV2('rgb(40, 50, 60)'), 'native line role should outrank generic fallbacks');
+  deepEqual(palette.colors.label, parseGraphColorV2('rgb(70, 80, 90)'), 'native text role should be sampled');
+  deepEqual(palette.colors.arrow, parseGraphColorV2('rgb(100, 110, 120)'), 'native arrow role should be sampled separately');
+  deepEqual(palette.colors.highlightedNode, parseGraphColorV2('rgb(130, 140, 150)'), 'native focus role should drive interaction highlighting');
+  deepEqual(palette.colors.nodeOutline, parseGraphColorV2('rgb(160, 170, 180)'), 'native circle role should drive outlines');
+});
+
+test('V2 default Obsidian theme uses the Graph+ kosmos palette without affecting community themes', () => {
+  const value = runtimeHarness();
+  value.document.body.style.color = 'rgb(220, 220, 220)';
+  value.document.body.style.backgroundColor = 'rgb(30, 30, 30)';
+
+  const defaultPalette = new ThemeStyleResolver(() => value.document.body, () => true).getPalette(7);
+  equal(defaultPalette.revision, 7, 'the hard-coded default-theme palette should retain the requested revision');
+  deepEqual(defaultPalette.colors, DEFAULT_OBSIDIAN_GRAPH_PLUS_THEME_V2.colors,
+    'the stock Obsidian theme should use the restrained Graph+ kosmos colors');
+  deepEqual(defaultPalette.colors.background, parseGraphColorV2('#0b0810'), 'the default graph field should be near-black');
+  deepEqual(defaultPalette.colors.node, parseGraphColorV2('#4b3562'), 'ordinary nodes should be dark plum');
+  deepEqual(defaultPalette.colors.tagNode, parseGraphColorV2('#e1d7eb'), 'tag nodes should be pale lavender-white');
+
+  const style = value.document.createElement('style');
+  style.textContent = '.graph-view.color-fill { color: rgb(12, 34, 56); }';
+  value.document.head.append(style);
+  const communityPalette = new ThemeStyleResolver(() => value.document.body, () => false).getPalette();
+  deepEqual(communityPalette.colors.node, parseGraphColorV2('rgb(12, 34, 56)'),
+    'a selected community theme should continue to own its graph node color');
 });
 
 test('V1.6 new-mode 3D preserves depth while keeping nodes visible and finger-selectable', () => {
@@ -282,8 +339,9 @@ test('V1.6 new-mode 3D preserves depth while keeping nodes visible and finger-se
         selected: false, focused: false, hovered: false,
       },
     ],
-    theme: {
-      ...DEFAULT_GRAPH_RENDER_THEME_V1,
+    theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    policy: {
+      ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
       minimumPerspectiveNodeRadius: 4,
       minimumPerspectiveNodeScale: 0.5,
       minimumPerspectiveTouchHitRadius: 22,
@@ -330,8 +388,9 @@ test('V1.6 adaptive labels reserve overlap space for structural hubs before near
         selected: false, focused: false, hovered: false, labelFontSize: 14,
       },
     ],
-    theme: {
-      ...DEFAULT_GRAPH_RENDER_THEME_V1,
+    theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    policy: {
+      ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
       labelMode: 'adaptive',
       labelPosition: 'below',
       minimumPerspectiveNodeRadius: 4,
@@ -377,8 +436,9 @@ test('V1.6 adaptive label budget follows perspective distance and the active thr
         hovered: false,
         labelFontSize: 10,
       })),
-      theme: {
-        ...DEFAULT_GRAPH_RENDER_THEME_V1,
+      theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+      policy: {
+        ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
         labelMode: 'adaptive',
         labelPosition: 'below',
         adaptiveLabelThreshold: threshold,

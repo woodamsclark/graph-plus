@@ -1,5 +1,6 @@
 import type { GraphDimensionsV1 } from '../../contracts/v1/index.ts';
 import type { SessionResizeObserverV1, SessionRuntimePlatformV1 } from '../platform/index.ts';
+import type { GraphRendererBackendIdV2 } from '../render/index.ts';
 import type {
   SessionSurfaceStateV1,
   SessionSurfaceV1,
@@ -7,7 +8,6 @@ import type {
 } from './SessionSurface.ts';
 
 export class CanvasSessionSurface implements SessionSurfaceV1 {
-  readonly canvas: HTMLCanvasElement;
 
   private readonly container: HTMLElement;
   private readonly platform: SessionRuntimePlatformV1;
@@ -16,6 +16,7 @@ export class CanvasSessionSurface implements SessionSurfaceV1 {
   private readonly resizeObserver: SessionResizeObserverV1;
   private readonly resizeListeners = new Set<(viewport: SessionSurfaceViewportV1) => void>();
   private viewport: SessionSurfaceViewportV1 = { width: 0, height: 0, devicePixelRatio: 1 };
+  private activeCanvas?: HTMLCanvasElement;
   private pixelRatioLimit?: number;
   private disposed = false;
 
@@ -38,16 +39,6 @@ export class CanvasSessionSurface implements SessionSurfaceV1 {
     this.root.style.position = 'relative';
     this.root.style.overflow = 'hidden';
 
-    this.canvas = this.platform.document.createElement('canvas');
-    this.canvas.className = 'graph-engine-surface';
-    this.canvas.tabIndex = 0;
-    this.canvas.style.display = 'block';
-    this.canvas.style.width = '100%';
-    this.canvas.style.height = '100%';
-    this.canvas.style.touchAction = 'none';
-    this.canvas.setAttribute('role', 'application');
-    this.canvas.setAttribute('aria-label', 'Interactive graph surface');
-
     this.accessibleSummary = this.platform.document.createElement('div');
     this.accessibleSummary.className = 'graph-engine-accessible-summary';
     this.accessibleSummary.setAttribute('role', 'status');
@@ -59,7 +50,7 @@ export class CanvasSessionSurface implements SessionSurfaceV1 {
     this.accessibleSummary.style.clipPath = 'inset(50%)';
     this.accessibleSummary.style.whiteSpace = 'nowrap';
 
-    this.root.append(this.canvas, this.accessibleSummary);
+    this.root.append(this.accessibleSummary);
     this.resizeObserver = this.platform.createResizeObserver(() => this.resize());
     try {
       this.container.append(this.root);
@@ -75,6 +66,30 @@ export class CanvasSessionSurface implements SessionSurfaceV1 {
 
   getViewport(): SessionSurfaceViewportV1 {
     return { ...this.viewport };
+  }
+
+  get canvas(): HTMLCanvasElement {
+    if (!this.activeCanvas) throw new Error('The graph renderer has not mounted a canvas.');
+    return this.activeCanvas;
+  }
+
+  createRendererCanvas(): HTMLCanvasElement {
+    if (this.disposed) throw new Error('The graph surface has been disposed.');
+    this.activeCanvas?.remove();
+    const canvas = this.platform.document.createElement('canvas');
+    canvas.className = 'graph-engine-surface';
+    canvas.tabIndex = 0;
+    canvas.style.display = 'block';
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.touchAction = 'none';
+    canvas.setAttribute('role', 'application');
+    canvas.setAttribute('aria-label', 'Interactive graph surface');
+    canvas.width = Math.round(this.viewport.width * this.viewport.devicePixelRatio);
+    canvas.height = Math.round(this.viewport.height * this.viewport.devicePixelRatio);
+    this.root.insertBefore(canvas, this.accessibleSummary);
+    this.activeCanvas = canvas;
+    return canvas;
   }
 
   onResize(listener: (viewport: SessionSurfaceViewportV1) => void) {
@@ -93,6 +108,10 @@ export class CanvasSessionSurface implements SessionSurfaceV1 {
   setDimensions(dimensions: GraphDimensionsV1): void {
     if (this.disposed) return;
     this.root.dataset.dimensions = dimensions;
+  }
+
+  setRendererBackend(backendId: GraphRendererBackendIdV2): void {
+    if (!this.disposed) this.root.dataset.rendererBackend = backendId;
   }
 
   update(state: SessionSurfaceStateV1): void {
@@ -134,8 +153,10 @@ export class CanvasSessionSurface implements SessionSurfaceV1 {
       ? nativePixelRatio
       : Math.min(nativePixelRatio, this.pixelRatioLimit);
     this.viewport = { width, height, devicePixelRatio };
-    this.canvas.width = Math.round(width * devicePixelRatio);
-    this.canvas.height = Math.round(height * devicePixelRatio);
+    if (this.activeCanvas) {
+      this.activeCanvas.width = Math.round(width * devicePixelRatio);
+      this.activeCanvas.height = Math.round(height * devicePixelRatio);
+    }
     this.root.dataset.width = String(width);
     this.root.dataset.height = String(height);
     this.root.dataset.devicePixelRatio = String(devicePixelRatio);

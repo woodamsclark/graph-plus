@@ -522,6 +522,60 @@ test('V1.7.1 Local Graph+ owns an ephemeral rooted document, layout, and depth',
   await core.dispose();
 });
 
+test('V2 Local Graph+ ignores content-only vault reconciliation but replaces changed topology', async () => {
+  const fixture = snapshot();
+  let current: any = fixture.value;
+  const runtime = runtimeHarness({ registration: graphPlusRegistration });
+  const core = new GraphEngineProviderCoreV1({
+    engineVersion: '2.0.0', engineInstanceId: 'local-stable-reconcile-test', capabilities: ['render'],
+    profiles: runtime.profiles, sessions: runtime.factory,
+  });
+  const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(lease.ok, 'Local Graph+ should obtain a session lease');
+  const consumer = new LocalGraphPlusConsumerV1({
+    lease: lease.lease,
+    container: runtime.container,
+    source: { read: () => current },
+    navigator: { openNote: async () => undefined, openTag: async () => undefined },
+    countDuplicateLinks: true,
+    initialRootNodeId: noteNodeId('Alpha.md'),
+  });
+  await consumer.open();
+  const session = consumer.getSession();
+  assert(session, 'Local Graph+ should expose its mounted session');
+  let replacements = 0;
+  const replaceDocument = session.replaceDocument.bind(session);
+  session.replaceDocument = async (document) => {
+    replacements += 1;
+    await replaceDocument(document);
+  };
+
+  current = {
+    ...fixture.value,
+    notes: fixture.value.notes.map((note) => note.path === 'Alpha.md'
+      ? { ...note, content: `${note.content} One more typed character.` }
+      : note),
+  };
+  await consumer.reconcile();
+  equal(replacements, 0, 'typing without changing local graph membership or links must not replace the session document');
+
+  const gamma = { path: 'Gamma.md' };
+  current = {
+    ...current,
+    notes: [...current.notes, {
+      file: gamma, path: gamma.path, basename: 'Gamma', extension: 'md', content: '', tags: [], properties: {},
+    }],
+    resolvedLinks: { ...current.resolvedLinks, 'Alpha.md': { ...current.resolvedLinks['Alpha.md'], 'Gamma.md': 1 } },
+  };
+  await consumer.reconcile();
+  equal(replacements, 1, 'a new link entering the local neighborhood should replace the session document once');
+  assert(consumer.getLocalDocument()?.nodes.some((node) => node.id === noteNodeId('Gamma.md')),
+    'the changed topology should appear in the local graph');
+
+  await consumer.close();
+  await core.dispose();
+});
+
 test('G-PARITY engine host resolves Graph+ open-node once and hands transient Form state back', async () => {
   const fixture = snapshot();
   const runtime = runtimeHarness({ registration: graphPlusRegistration });

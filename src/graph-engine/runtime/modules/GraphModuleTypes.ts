@@ -11,9 +11,10 @@ import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
 import type {
   GraphEdgeRenderContributionV1,
   GraphNodeRenderContributionV1,
+  GraphPresentationPolicyV2,
   GraphRenderRegionV1,
-  GraphRenderThemeV1,
 } from '../render/index.ts';
+import type { GraphVisualThemeV2 } from '../theme/index.ts';
 
 export type GraphModuleHookV1 =
   | 'setup'
@@ -21,6 +22,7 @@ export type GraphModuleHookV1 =
   | 'settings-changed'
   | 'document-changed'
   | 'view-changed'
+  | 'theme-changed'
   | 'project-source'
   | 'project-topology'
   | 'select-render'
@@ -56,7 +58,8 @@ export interface GraphModulePipelineStateV1 {
   readonly edgeContributions: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
   readonly regionLayouts: readonly GraphNodeRegionLayoutV1[];
   readonly regionContributions: readonly GraphRenderRegionV1[];
-  readonly theme: GraphRenderThemeV1;
+  readonly theme: GraphVisualThemeV2;
+  readonly presentationPolicy?: GraphPresentationPolicyV2;
   /** Declarative Anima/layout/camera targets; mechanisms remain owned by their runtimes. */
   readonly motionTargets?: GraphMotionTargetsV1;
   /** Internal signal that a derived position set should become the session's editable position state. */
@@ -73,7 +76,8 @@ export interface GraphModuleProjectionPatchV1 {
   readonly edgeContributions?: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
   readonly regionLayouts?: readonly GraphNodeRegionLayoutV1[];
   readonly regionContributions?: readonly GraphRenderRegionV1[];
-  readonly theme?: GraphRenderThemeV1;
+  readonly theme?: GraphVisualThemeV2;
+  readonly presentationPolicy?: GraphPresentationPolicyV2;
   readonly motionTargets?: GraphMotionTargetsV1;
   readonly commitPositions?: boolean;
 }
@@ -110,7 +114,7 @@ export interface GraphModuleFactoryContextV1 {
   readonly dimensions: GraphDimensionsV1;
   readonly settings: Readonly<Record<string, JsonValue>>;
   readonly profileSettings: Readonly<Record<string, JsonValue>>;
-  readonly themePalette: GraphRenderThemeV1;
+  readonly themePalette: GraphVisualThemeV2;
   readonly getDocument: () => GraphDocumentV1;
   readonly getViewState: () => GraphViewStateV1;
 }
@@ -122,6 +126,7 @@ export interface GraphModuleInstanceV1 {
   restoreState?(state: JsonValue): void;
   onDocumentChanged?(document: GraphDocumentV1): void;
   onViewChanged?(state: GraphViewStateV1): void;
+  onThemeChanged?(theme: GraphVisualThemeV2): void;
   projectSource?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
   projectTopology?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
   selectRender?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;

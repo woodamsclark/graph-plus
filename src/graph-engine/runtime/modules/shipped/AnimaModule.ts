@@ -1,5 +1,5 @@
 import type { JsonValue } from '../../../contracts/v1/index.ts';
-import type { GraphRenderThemeV1 } from '../../render/index.ts';
+import type { GraphVisualThemeV2 } from '../../theme/index.ts';
 import type { GraphModuleInstanceV1, GraphModuleProjectionPatchV1 } from '../GraphModuleTypes.ts';
 
 export class AnimaModule implements GraphModuleInstanceV1 {
@@ -16,7 +16,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
   };
 
   constructor(
-    private readonly palette: GraphRenderThemeV1,
+    private palette: GraphVisualThemeV2,
     settings: Readonly<Record<string, JsonValue>>,
   ) {
     this.labelPosition = readLabelPosition(settings.labelPosition);
@@ -67,22 +67,26 @@ export class AnimaModule implements GraphModuleInstanceV1 {
           * clamp(3 * Math.sqrt(visibleDegree + 1), 8, 30) * structuralScale;
         const isActive = node.id === activeId;
         const color = isActive
-          ? this.palette.highlightNodeColor ?? this.palette.focusedNodeColor
+          ? this.palette.colors.animaAccent
           : state.viewState.focusedNodeId === node.id
-            ? this.palette.focusedNodeColor
-            : prior?.color ?? (node.tokens?.includes('kind:tag') ? this.palette.tagNodeColor : undefined) ?? this.palette.nodeColor;
+            ? this.palette.colors.focusedNode
+            : prior?.color ?? (node.tokens?.includes('kind:tag') ? this.palette.colors.tagNode : undefined) ?? this.palette.colors.node;
         const selected = state.viewState.selectedNodeIds.includes(node.id);
         const pinned = state.viewState.pinnedNodeIds.includes(node.id);
+        const suppressAdaptiveLabel = state.presentationPolicy?.labelMode === 'adaptive'
+          && activeNeighborhood !== undefined
+          && !activeNeighborhood.has(node.id);
         return [node.id, {
           ...prior,
           radius,
           finalColor: color,
           opacity: activeNeighborhood === undefined || activeNeighborhood.has(node.id) ? 1 : 0.2,
           labelOpacity: activeNeighborhood === undefined || activeNeighborhood.has(node.id) ? 1 : 0.2,
+          showLabel: prior?.showLabel !== false && !suppressAdaptiveLabel,
           labelFontSize: 14 + radius / 4,
           labelAlwaysVisible: prior?.labelAlwaysVisible || isActive || selected || node.id === state.viewState.focusedNodeId,
           ...(selected || pinned ? {
-            strokeColor: this.palette.nodeOutlineColor ?? this.palette.labelColor,
+            strokeColor: this.palette.colors.nodeOutline,
             strokeWidth: pinned ? 2 : 1,
           } : {}),
         }];
@@ -94,16 +98,16 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         ...prior,
         thickness: positive(prior?.baseThicknessScale, 1) * positive(prior?.thicknessScale, 1),
         opacity: activeId === undefined || incident ? 1 : 0.2,
-        arrowColor: this.palette.arrowColor ?? this.palette.edgeColor,
+        arrowColor: this.palette.colors.arrow,
         arrowOpacity: activeId === undefined || incident ? 1 : 0.2,
-        ...(incident ? { color: this.palette.highlightNodeColor ?? this.palette.focusedNodeColor } : {}),
+        ...(incident ? { color: this.palette.colors.highlightedNode } : {}),
       }];
     }));
     return {
       nodeContributions,
       edgeContributions,
-      theme: {
-        ...state.theme,
+      presentationPolicy: {
+        ...(state.presentationPolicy ?? {}),
         nodeScaleMode: 'sqrt-orthographic',
         labelScaleMode: 'fixed',
         labelPosition: this.labelPosition,
@@ -114,9 +118,13 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         minimumPerspectiveNodeScale: 0.5,
         minimumPerspectiveTouchHitRadius: 22,
         edgeAggregation: 'unordered-pair',
-        showArrows: state.theme.showArrows === true,
+        showArrows: state.presentationPolicy?.showArrows === true,
       },
     };
+  }
+
+  onThemeChanged(theme: GraphVisualThemeV2): void {
+    this.palette = theme;
   }
 
   private presentationTopology(

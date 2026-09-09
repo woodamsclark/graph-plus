@@ -61,6 +61,7 @@ export interface GraphPlusConsumerOptionsV1<TFile> {
     readonly anchor?: { readonly x: number; readonly y: number };
     readonly active: boolean;
     readonly immediate?: boolean;
+    readonly persistent?: boolean;
   }) => void;
 }
 
@@ -83,6 +84,8 @@ export class GraphPlusConsumerV1<TFile> {
   private transientRevealNodeId?: string;
   private resettingLayout = false;
   private visibleNodeIds = new Set<string>();
+  private previewNodeId?: string;
+  private persistentPreviewNodeId?: string;
   private readonly neighborhoodFramer: GraphPlusNeighborhoodFramerV1;
 
   constructor(private readonly options: GraphPlusConsumerOptionsV1<TFile>) {
@@ -110,13 +113,22 @@ export class GraphPlusConsumerV1<TFile> {
     if (this.opened) return;
     this.opened = true;
     try {
-      this.actionRegistration = this.options.lease.registerNodeActions([{
-        id: 'open-node',
-        label: (context) => this.nodeKind(context.nodeId) === 'tag' ? 'Open tag' : 'Open note',
-        icon: 'file-text',
-        isAvailable: (context) => this.nodeKind(context.nodeId) !== undefined,
-        run: (context) => this.openNode(context.nodeId),
-      }]);
+      this.actionRegistration = this.options.lease.registerNodeActions([
+        {
+          id: 'open-node',
+          label: (context) => this.nodeKind(context.nodeId) === 'tag' ? 'Open tag' : 'Open note',
+          icon: 'file-text',
+          isAvailable: (context) => this.nodeKind(context.nodeId) !== undefined,
+          run: (context) => this.openNode(context.nodeId),
+        },
+        {
+          id: 'show-preview',
+          label: 'Show preview',
+          icon: 'panel-right',
+          isAvailable: (context) => this.nodeKind(context.nodeId) === 'note',
+          run: (context) => this.showNotePreview(context.nodeId, true),
+        },
+      ]);
       const saved = await this.options.checkpointStore.load(this.options.vaultId);
       if (saved) {
         if (saved.lens && this.options.restoreSavedLens !== false) this.lens = clone(saved.lens);
@@ -268,7 +280,28 @@ export class GraphPlusConsumerV1<TFile> {
   }
 
   async clearPreview(): Promise<void> {
+    this.previewNodeId = undefined;
+    this.persistentPreviewNodeId = undefined;
     await this.session?.clearPreview();
+  }
+
+  private async showNotePreview(
+    nodeId: string,
+    persistent: boolean,
+    fallbackAnchor?: { readonly x: number; readonly y: number },
+    immediate = true,
+  ): Promise<void> {
+    const entry = this.lookup.get(nodeId);
+    if (entry?.kind !== 'note') return;
+    if (persistent) this.persistentPreviewNodeId = nodeId;
+    this.previewNodeId = nodeId;
+    const anchor = await this.nodeScreenPoint(nodeId) ?? fallbackAnchor;
+    if (this.previewNodeId !== nodeId || !anchor) return;
+    this.options.onNotePreview?.({ nodeId, file: entry.file, anchor, active: true, immediate, persistent });
+  }
+
+  private async nodeScreenPoint(nodeId: string): Promise<{ readonly x: number; readonly y: number } | undefined> {
+    return this.session?.getNodeScreenPoint(nodeId);
   }
 
   async resetLayoutData(): Promise<boolean> {
@@ -345,6 +378,12 @@ export class GraphPlusConsumerV1<TFile> {
     this.sessionSubscriptions.push(session.onIntent((intent) => {
       if (intent.type === 'viewport-changed') {
         this.neighborhoodFramer.cancel();
+        if (this.previewNodeId) void this.showNotePreview(
+          this.previewNodeId,
+          this.previewNodeId === this.persistentPreviewNodeId,
+          undefined,
+          true,
+        );
         return;
       }
       if (intent.type === 'camera-reset') {
@@ -357,18 +396,18 @@ export class GraphPlusConsumerV1<TFile> {
         return;
       }
       if (intent.type !== 'preview-changed') return;
+      if (this.persistentPreviewNodeId) return;
       const entry = intent.nodeId ? this.lookup.get(intent.nodeId) : undefined;
       if (intent.nodeId && entry?.kind !== 'note') {
         void session.clearPreview();
         return;
       }
-      this.options.onNotePreview?.({
-        ...(intent.nodeId ? { nodeId: intent.nodeId } : {}),
-        ...(entry?.kind === 'note' ? { file: entry.file } : {}),
-        ...(intent.anchor ? { anchor: intent.anchor } : {}),
-        active: intent.nodeId !== undefined && entry?.kind === 'note',
-        immediate: !intent.closing,
-      });
+      if (intent.nodeId && entry?.kind === 'note') {
+        void this.showNotePreview(intent.nodeId, false, intent.anchor, !intent.closing);
+      } else {
+        this.previewNodeId = undefined;
+        this.options.onNotePreview?.({ active: false, immediate: !intent.closing });
+      }
     }));
     this.sessionSubscriptions.push(session.onIntent((intent) => {
       if (intent.type !== 'focus-changed' || intent.focusedNodeId === this.transientRevealNodeId) return;

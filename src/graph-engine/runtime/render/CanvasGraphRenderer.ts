@@ -1,10 +1,19 @@
-import type { GraphCameraController, ProjectedGraphPointV1 } from '../camera/index.ts';
+import { GraphCameraController, type ProjectedGraphPointV1 } from '../camera/index.ts';
 import type { GraphFrameStore } from './GraphFrameStore.ts';
+import type {
+  GraphPickRequestV2,
+  GraphRendererDiagnosticsV2,
+  GraphRendererV2,
+  GraphRenderSceneV2,
+  GraphRenderViewportV2,
+} from './GraphRenderer.ts';
 import type {
   GraphRenderFrameV1,
   GraphRenderNodeV1,
   GraphRenderRegionV1,
 } from './GraphRenderTypes.ts';
+import { graphColorToCssV2, type GraphFontV2 } from '../theme/index.ts';
+import type { GraphColorV2 } from '../theme/index.ts';
 
 interface ProjectedNode {
   readonly node: GraphRenderNodeV1;
@@ -26,9 +35,17 @@ export interface GraphRenderTimingV1 {
   readonly labelDrawMs: number;
 }
 
-export class CanvasGraphRenderer {
-  private readonly context: CanvasRenderingContext2D;
+export class CanvasGraphRenderer implements GraphRendererV2 {
+  readonly backendId = 'canvas2d' as const;
+  readonly interactionElement: HTMLElement;
+  private context!: CanvasRenderingContext2D;
+  private camera!: GraphCameraController;
+  private frames?: GraphFrameStore;
+  private scene: GraphRenderSceneV2 | null = null;
+  private readonly now: () => number;
+  private lifecycle: 'created' | 'initialized' | 'disposed' = 'created';
   private readonly textWidthCache = new Map<string, number>();
+  private colorCssCache = new WeakMap<GraphColorV2, string>();
   private readonly hitGrid = new Map<string, ProjectedNode[]>();
   private readonly hitCellSize = 32;
   private indexedFrame: GraphRenderFrameV1 | null = null;
@@ -44,25 +61,46 @@ export class CanvasGraphRenderer {
   private width = 0;
   private height = 0;
 
+  constructor(canvas: HTMLCanvasElement, now: () => number);
+  constructor(canvas: HTMLCanvasElement, camera: GraphCameraController, frames: GraphFrameStore, now: () => number);
   constructor(
     private readonly canvas: HTMLCanvasElement,
-    private readonly camera: GraphCameraController,
-    private readonly frames: GraphFrameStore,
-    private readonly now: () => number,
+    cameraOrNow: GraphCameraController | (() => number),
+    frames?: GraphFrameStore,
+    now?: () => number,
   ) {
+    this.interactionElement = canvas;
+    this.now = typeof cameraOrNow === 'function' ? cameraOrNow : (now ?? (() => performance.now()));
+    if (typeof cameraOrNow !== 'function') {
+      this.camera = cameraOrNow;
+      this.frames = frames;
+      this.initialize();
+    }
+  }
+
+  initialize(): void {
+    if (this.lifecycle === 'initialized') return;
+    if (this.lifecycle === 'disposed') throw new Error('The Canvas2D renderer has been disposed.');
     const context = this.canvas.getContext('2d');
     if (!context) throw new Error('Could not acquire the graph Canvas2D rendering context.');
     this.context = context;
+    this.lifecycle = 'initialized';
   }
 
-  resize(width: number, height: number, devicePixelRatio: number): void {
+  resize(viewport: GraphRenderViewportV2): void;
+  resize(width: number, height: number, devicePixelRatio: number): void;
+  resize(viewportOrWidth: GraphRenderViewportV2 | number, heightValue?: number, pixelRatioValue?: number): void {
+    const viewport = typeof viewportOrWidth === 'number'
+      ? { width: viewportOrWidth, height: heightValue ?? 0, devicePixelRatio: pixelRatioValue ?? 1 }
+      : viewportOrWidth;
+    const { width, height, devicePixelRatio } = viewport;
     this.width = width;
     this.height = height;
     this.context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
   }
 
   render(): GraphRenderTimingV1 {
-    const frame = this.frames.get();
+    const frame = this.currentFrame();
     if (!frame) {
       this.hitGrid.clear();
       this.indexedFrame = null;
@@ -97,7 +135,7 @@ export class CanvasGraphRenderer {
     readonly position: import('../../contracts/v1/index.ts').Vec3;
     readonly depth: number;
   } | null {
-    const frame = this.frames.get();
+    const frame = this.currentFrame();
     const cameraKey = this.cameraKey();
     if (frame && (frame !== this.indexedFrame || cameraKey !== this.indexedCameraKey)) {
       const visible = this.projectFrame(frame)
@@ -107,9 +145,10 @@ export class CanvasGraphRenderer {
       this.indexedFrame = frame;
       this.indexedCameraKey = cameraKey;
     }
-    const minimumTouchRadius = pointerKind === 'touch' && frame?.theme.minimumPerspectiveTouchHitRadius !== undefined
+    const minimumTouchRadius = pointerKind === 'touch' && frame !== null
+      && renderPolicy(frame).minimumPerspectiveTouchHitRadius !== undefined
       && this.camera.getState().projection === 'perspective'
-      ? frame.theme.minimumPerspectiveTouchHitRadius
+      ? renderPolicy(frame).minimumPerspectiveTouchHitRadius!
       : 0;
     const candidates = this.hitCandidates(point.x, point.y, minimumTouchRadius);
     let bestVisible: ProjectedNode | undefined;
@@ -149,6 +188,47 @@ export class CanvasGraphRenderer {
       textWidthCacheEntries: this.textWidthCache.size,
       regionContourCacheEntries: this.regionContourCache.size,
     };
+  }
+
+  updateTheme(_theme: import('../theme/index.ts').GraphVisualThemeV2): void {}
+
+  updateScene(scene: GraphRenderSceneV2): void {
+    this.scene = scene;
+    if (!this.camera) this.camera = new GraphCameraController(scene.view.camera, scene.view.dimensions);
+    else this.camera.setState(scene.view.camera);
+    this.camera.setViewport(scene.view.viewport.width, scene.view.viewport.height);
+  }
+
+  pick(request: GraphPickRequestV2) {
+    return this.hitTest(request.point, request.pointerKind);
+  }
+
+  getRendererDiagnostics(): GraphRendererDiagnosticsV2 {
+    return { backendId: this.backendId, lifecycle: this.lifecycle, resources: this.getDiagnostics() };
+  }
+
+  dispose(): void {
+    if (this.lifecycle === 'disposed') return;
+    this.lifecycle = 'disposed';
+    this.scene = null;
+    this.hitGrid.clear();
+    this.textWidthCache.clear();
+    this.regionContourCache.clear();
+    this.projectedGeometry = [];
+    this.colorCssCache = new WeakMap();
+    this.canvas.remove();
+  }
+
+  private currentFrame(): GraphRenderFrameV1 | null {
+    return this.scene ?? this.frames?.get() ?? null;
+  }
+
+  private colorCss(color: GraphColorV2): string {
+    const cached = this.colorCssCache.get(color);
+    if (cached) return cached;
+    const value = graphColorToCssV2(color);
+    this.colorCssCache.set(color, value);
+    return value;
   }
 
   private projectFrame(frame: GraphRenderFrameV1): readonly ProjectedNode[] {
@@ -231,8 +311,8 @@ export class CanvasGraphRenderer {
 
   private clear(frame: GraphRenderFrameV1): void {
     this.context.clearRect(0, 0, this.width, this.height);
-    if (frame.theme.backgroundColor !== 'transparent') {
-      this.context.fillStyle = frame.theme.backgroundColor;
+    if (frame.theme.colors.background.a > 0) {
+      this.context.fillStyle = this.colorCss(frame.theme.colors.background);
       this.context.fillRect(0, 0, this.width, this.height);
     }
   }
@@ -254,7 +334,7 @@ export class CanvasGraphRenderer {
       const startY = source.point.y + unitY * source.radius;
       const endX = target.point.x - unitX * target.radius;
       const endY = target.point.y - unitY * target.radius;
-      this.context.strokeStyle = edge.color ?? frame.theme.edgeColor;
+      this.context.strokeStyle = this.colorCss(edge.color ?? frame.theme.colors.edge);
       this.context.globalAlpha = clampOpacity(edge.opacity);
       this.context.lineWidth = edge.thickness;
       this.context.setLineDash(edge.dashed ? [4, 5] : []);
@@ -262,7 +342,7 @@ export class CanvasGraphRenderer {
       this.context.moveTo(startX, startY);
       this.context.lineTo(endX, endY);
       this.context.stroke();
-      this.context.fillStyle = edge.arrowColor ?? frame.theme.arrowColor ?? edge.color ?? frame.theme.edgeColor;
+      this.context.fillStyle = this.colorCss(edge.arrowColor ?? edge.color ?? frame.theme.colors.arrow);
       this.context.globalAlpha = clampOpacity(edge.arrowOpacity ?? edge.opacity);
       if (edge.arrowAtTarget ?? edge.directed) drawArrow(this.context, endX, endY, unitX, unitY, Math.max(5, edge.thickness * 3));
       if (edge.arrowAtSource === true) drawArrow(this.context, startX, startY, -unitX, -unitY, Math.max(5, edge.thickness * 3));
@@ -288,11 +368,11 @@ export class CanvasGraphRenderer {
       if (projected.length < 3) continue;
       this.traceSmoothClosedPath(projected);
       this.context.globalAlpha = clampOpacity(region.fillOpacity ?? 0.12);
-      this.context.fillStyle = region.fillColor ?? region.color;
+      this.context.fillStyle = this.colorCss(region.fillColor ?? region.color);
       this.context.fill();
       this.traceSmoothClosedPath(projected);
       this.context.globalAlpha = clampOpacity(region.strokeOpacity ?? 0.52);
-      this.context.strokeStyle = region.strokeColor ?? region.color;
+      this.context.strokeStyle = this.colorCss(region.strokeColor ?? region.color);
       this.context.lineWidth = region.strokeWidth ?? 1.5;
       this.context.setLineDash([]);
       this.context.stroke();
@@ -357,16 +437,16 @@ export class CanvasGraphRenderer {
     this.context.save();
     for (const { node, point, radius } of nodes) {
       this.context.globalAlpha = clampOpacity(node.opacity);
-      this.context.fillStyle = node.finalColor ?? (node.focused
-        ? frame.theme.focusedNodeColor
+      this.context.fillStyle = this.colorCss(node.finalColor ?? (node.focused
+        ? frame.theme.colors.focusedNode
         : node.selected
-          ? frame.theme.selectedNodeColor
-          : node.color ?? frame.theme.nodeColor);
+          ? frame.theme.colors.selectedNode
+          : node.color ?? frame.theme.colors.node));
       this.context.beginPath();
       this.context.arc(point.x, point.y, radius, 0, Math.PI * 2);
       this.context.fill();
       if (node.focused || node.selected || node.strokeWidth !== undefined) {
-        this.context.strokeStyle = node.strokeColor ?? frame.theme.labelColor;
+        this.context.strokeStyle = this.colorCss(node.strokeColor ?? frame.theme.colors.label);
         this.context.lineWidth = node.strokeWidth ?? (node.focused ? 2 : 1);
         this.context.stroke();
       }
@@ -375,13 +455,13 @@ export class CanvasGraphRenderer {
   }
 
   private drawLabels(frame: GraphRenderFrameV1, nodes: readonly ProjectedNode[]): Pick<GraphRenderTimingV1, 'labelLayoutMs' | 'labelDrawMs'> {
-    const mode = frame.theme.labelMode ?? 'adaptive';
+    const mode = renderPolicy(frame).labelMode ?? 'adaptive';
     if (mode === 'off') return { labelLayoutMs: 0, labelDrawMs: 0 };
     this.context.save();
     this.context.textAlign = 'center';
     this.context.textBaseline = 'top';
-    this.context.font = frame.theme.labelFont;
-    this.context.fillStyle = frame.theme.labelColor;
+    this.context.font = graphFontToCss(frame.theme.labelFont);
+    this.context.fillStyle = this.colorCss(frame.theme.colors.label);
     const candidates = nodes
       .filter(({ node }) => node.showLabel !== false)
       .sort(compareLabelCandidates);
@@ -394,7 +474,7 @@ export class CanvasGraphRenderer {
       const zoom = cameraState.projection === 'perspective'
         ? this.camera.worldToScreen(cameraState.target).scale
         : Math.max(0.1, cameraState.zoom);
-      const threshold = Math.max(0, Math.min(100, frame.theme.adaptiveLabelThreshold ?? 50));
+      const threshold = Math.max(0, Math.min(100, renderPolicy(frame).adaptiveLabelThreshold ?? 50));
       const thresholdFactor = 2 ** ((50 - threshold) / 50);
       const minimumBudget = clampInteger(Math.round(12 * thresholdFactor), 4, 24);
       const budget = clampInteger(
@@ -422,7 +502,7 @@ export class CanvasGraphRenderer {
     for (const { node, point, radius } of acceptedCandidates) {
       const offset = node.labelOffset ?? { x: 0, y: 0 };
       this.context.globalAlpha = clampOpacity(node.labelOpacity ?? node.opacity);
-      this.context.fillStyle = node.labelColor ?? frame.theme.labelColor;
+      this.context.fillStyle = this.colorCss(node.labelColor ?? frame.theme.colors.label);
       const font = nodeFont(frame, node, this.camera.getState().zoom, this.camera.getState().projection);
       this.context.font = font;
       this.context.fillText(node.label, point.x + offset.x, labelTop(frame, point.y, radius, font) + offset.y);
@@ -521,7 +601,7 @@ function labelTop(
   radius: number,
   font: string,
 ): number {
-  return frame.theme.labelPosition === 'above'
+  return renderPolicy(frame).labelPosition === 'above'
     ? nodeY - radius - 4 - fontPixelHeight(font)
     : nodeY + radius + 4;
 }
@@ -536,13 +616,13 @@ function projectedRadius(
   scale: number,
   projection: 'orthographic' | 'perspective',
 ): number {
-  if (frame.theme.nodeScaleMode === 'sqrt-orthographic' && projection === 'orthographic') {
+  if (renderPolicy(frame).nodeScaleMode === 'sqrt-orthographic' && projection === 'orthographic') {
     return radius * Math.sqrt(Math.max(0, scale));
   }
   const projected = radius * scale;
   if (projection !== 'perspective') return projected;
-  const relativeFloor = radius * Math.max(0, frame.theme.minimumPerspectiveNodeScale ?? 0);
-  return Math.max(frame.theme.minimumPerspectiveNodeRadius ?? 0, relativeFloor, projected);
+  const relativeFloor = radius * Math.max(0, renderPolicy(frame).minimumPerspectiveNodeScale ?? 0);
+  return Math.max(renderPolicy(frame).minimumPerspectiveNodeRadius ?? 0, relativeFloor, projected);
 }
 
 function nodeFont(
@@ -551,15 +631,21 @@ function nodeFont(
   zoom: number,
   projection: 'orthographic' | 'perspective',
 ): string {
-  if (node.labelFontSize === undefined) return frame.theme.labelFont;
-  const scale = frame.theme.labelScaleMode === 'sqrt-orthographic' && projection === 'orthographic'
+  if (node.labelFontSize === undefined) return graphFontToCss(frame.theme.labelFont);
+  const scale = renderPolicy(frame).labelScaleMode === 'sqrt-orthographic' && projection === 'orthographic'
     ? Math.sqrt(Math.max(0, zoom))
     : 1;
   const size = Math.max(1, node.labelFontSize * scale);
-  const shorthand = /\b[0-9]+(?:\.[0-9]+)?px(?:\/[^\s]+)?\s+(.+)$/.exec(frame.theme.labelFont);
-  const family = shorthand?.[1]
-    ?? frame.theme.labelFont.replace(/^\s*[0-9]+(?:\.[0-9]+)?px\s*/, '');
+  const family = frame.theme.labelFont.family;
   return `${size}px ${family || 'sans-serif'}`;
+}
+
+function graphFontToCss(font: GraphFontV2): string {
+  return `${font.style} ${font.weight} ${font.sizePx}px/${font.lineHeightPx}px ${font.family}`;
+}
+
+function renderPolicy(frame: GraphRenderFrameV1) {
+  return frame.policy ?? frame.theme as import('./GraphRenderTypes.ts').GraphPresentationPolicyV2;
 }
 
 function clampOpacity(value: number | undefined): number {

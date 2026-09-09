@@ -9,3 +9,4 @@ export * from './platform/index.ts';
 export * from './render/index.ts';
 export * from './session/index.ts';
 export * from './surface/index.ts';
+export * from './theme/index.ts';

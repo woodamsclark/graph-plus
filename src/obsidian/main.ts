@@ -79,22 +79,10 @@ export default class GraphEnginePlugin extends Plugin {
       profiles,
       modules,
       getGlobalOverrides: () => this.pluginData.engine.globalSettings,
-      resolveThemePalette: (container) => {
-        const palette = new ThemeStyleResolver(() => container).getPalette();
-        return {
-          backgroundColor: palette.backgroundColor,
-          nodeColor: palette.nodeColor,
-          tagNodeColor: palette.tagColor,
-          highlightNodeColor: palette.highlightColor,
-          nodeOutlineColor: palette.outlineColor,
-          selectedNodeColor: palette.tagColor,
-          focusedNodeColor: palette.highlightColor,
-          edgeColor: palette.linkColor,
-          arrowColor: palette.arrowColor,
-          labelColor: palette.labelColor,
-          labelFont: container.ownerDocument.defaultView?.getComputedStyle(container).font || '12px sans-serif',
-        };
-      },
+      resolveThemePalette: (container) => new ThemeStyleResolver(
+        () => container,
+        () => selectedCommunityTheme(this.app) === '',
+      ).getPalette(),
     });
     this.registerEvent(this.app.workspace.on('css-change', () => sessionFactory.refreshActiveThemes()));
     const capabilities = [...new Set(modules.descriptors().flatMap((module) => module.capabilities))];
@@ -341,6 +329,11 @@ export default class GraphEnginePlugin extends Plugin {
     if (!this.checkpointFileStore) throw new Error('graph+ checkpoint storage is unavailable before plugin load.');
     return this.checkpointFileStore;
   }
+}
+
+function selectedCommunityTheme(app: unknown): string {
+  const theme = (app as { customCss?: { theme?: unknown } }).customCss?.theme;
+  return typeof theme === 'string' ? theme.trim() : '';
 }
 
 function createEngineInstanceId(): string {

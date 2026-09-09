@@ -12,8 +12,12 @@ import { assert, deepEqual, equal, test } from '../support/harness.ts';
 test('Graph+ releases dragged nodes while retaining explicit context-menu pinning', () => {
   const profile = GRAPH_PLUS_CONSUMER_REGISTRATION_V1.profiles[0];
   equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.displayName, 'graph+', 'bundled product name should use lowercase branding');
-  equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.consumerVersion, '1.9.0', 'bundled Graph+ should match the feature release');
+  equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.consumerVersion, '2.0.0', 'bundled Graph+ should match the feature release');
   equal(profile?.uiDefaults?.quickSettingsVisibility, 'collapsed', 'Graph+ controls should begin as the minimized launcher');
+  equal(profile?.uiDefaults?.quickSettingsSections?.camera?.visibility, 'hidden',
+    'Graph+ quick settings should not expose a redundant Camera section');
+  deepEqual(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.profiles[0]?.interaction?.contextActionIds,
+    ['open-node', 'show-preview'], 'Graph+ should expose persistent note previews from node context menus');
   equal(profile?.profileSettings?.dragRelease, 'dynamic', 'drag release should return an unpinned node to the active layout');
   equal(profile?.uiDefaults?.contextMenuEnabled, true, 'the right-click menu should remain available for explicit pinning');
   equal(profile?.uiDefaults?.coreContextActions?.['toggle-pin'], undefined, 'the core Pin node action should remain visible by default');

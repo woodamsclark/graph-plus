@@ -1,5 +1,6 @@
 import type { Disposable } from '../../contracts/v1/index.ts';
 import type { GraphDimensionsV1 } from '../../contracts/v1/index.ts';
+import type { GraphRendererBackendIdV2 } from '../render/index.ts';
 
 export interface SessionSurfaceStateV1 {
   readonly documentId: string;
@@ -20,10 +21,12 @@ export interface SessionSurfaceViewportV1 {
 
 export interface SessionSurfaceV1 {
   readonly canvas: HTMLCanvasElement;
+  createRendererCanvas(): HTMLCanvasElement;
   getViewport(): SessionSurfaceViewportV1;
   onResize(listener: (viewport: SessionSurfaceViewportV1) => void): Disposable;
   setPixelRatioLimit(limit?: number): void;
   setDimensions(dimensions: GraphDimensionsV1): void;
+  setRendererBackend(backendId: GraphRendererBackendIdV2): void;
   update(state: SessionSurfaceStateV1): void;
   recordFrame(frameCount: number): void;
   setCursor(cursor: 'default' | 'pointer' | 'grabbing'): void;

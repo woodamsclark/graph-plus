@@ -18,7 +18,7 @@ export class GraphInput {
   private disposed = false;
 
   constructor(private readonly options: {
-    readonly canvas: HTMLCanvasElement;
+    readonly element: HTMLElement;
     readonly platform: SessionRuntimePlatformV1;
     readonly events: BufferedQueue<GraphInputEventV1>;
     readonly getIdentity: () => InputGraphIdentityV1;
@@ -49,7 +49,7 @@ export class GraphInput {
   }
 
   private attach(): void {
-    const canvas = this.options.canvas;
+    const canvas = this.options.element;
     canvas.addEventListener('pointerdown', this.onPointerDown, { passive: false });
     canvas.addEventListener('pointermove', this.onPointerMove, { passive: false });
     canvas.addEventListener('pointerleave', this.onPointerLeave, { passive: false });
@@ -63,7 +63,7 @@ export class GraphInput {
   }
 
   private detach(): void {
-    const canvas = this.options.canvas;
+    const canvas = this.options.element;
     canvas.removeEventListener('pointerdown', this.onPointerDown);
     canvas.removeEventListener('pointermove', this.onPointerMove);
     canvas.removeEventListener('pointerleave', this.onPointerLeave);
@@ -83,7 +83,7 @@ export class GraphInput {
   private readonly onPointerDown = (event: PointerEvent): void => {
     if (!this.enabled || this.disposed) return;
     event.preventDefault();
-    try { this.options.canvas.setPointerCapture(event.pointerId); } catch {}
+    try { this.options.element.setPointerCapture(event.pointerId); } catch {}
     this.activePointers.add(event.pointerId);
     const pointerKind = pointerKindOf(event.pointerType);
     const point = this.toScreen(event.clientX, event.clientY);
@@ -163,7 +163,7 @@ export class GraphInput {
     event.preventDefault();
     this.activePointers.delete(event.pointerId);
     if (this.longPressPointer?.pointerId === event.pointerId) this.clearLongPress();
-    try { this.options.canvas.releasePointerCapture(event.pointerId); } catch {}
+    try { this.options.element.releasePointerCapture(event.pointerId); } catch {}
     this.push({
       ...this.base(),
       type: 'pointer-up',
@@ -182,7 +182,7 @@ export class GraphInput {
     event.preventDefault();
     this.activePointers.delete(event.pointerId);
     if (this.longPressPointer?.pointerId === event.pointerId) this.clearLongPress();
-    try { this.options.canvas.releasePointerCapture(event.pointerId); } catch {}
+    try { this.options.element.releasePointerCapture(event.pointerId); } catch {}
     this.push({
       ...this.base(),
       type: 'pointer-cancel',
@@ -259,7 +259,7 @@ export class GraphInput {
   }
 
   private toScreen(clientX: number, clientY: number): GraphScreenPointV1 {
-    const bounds = this.options.canvas.getBoundingClientRect();
+    const bounds = this.options.element.getBoundingClientRect();
     const safeClientX = Number.isFinite(clientX) ? clientX : bounds.left + bounds.width / 2;
     const safeClientY = Number.isFinite(clientY) ? clientY : bounds.top + bounds.height / 2;
     return {

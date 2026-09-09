@@ -1,12 +1,13 @@
 import type { GraphDocumentV1, GraphViewStateV1, Vec3 } from '../../contracts/v1/index.ts';
 import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
 import {
-  DEFAULT_GRAPH_RENDER_THEME_V1,
+  DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
   type GraphRenderFrameV1,
   type GraphEdgeRenderContributionV1,
   type GraphNodeRenderContributionV1,
-  type GraphRenderThemeV1,
+  type GraphPresentationPolicyV2,
 } from './GraphRenderTypes.ts';
+import { DEFAULT_GRAPH_VISUAL_THEME_V2, type GraphVisualThemeV2 } from '../theme/index.ts';
 
 export function composeGraphRenderFrameV1(options: {
   readonly document: GraphDocumentV1;
@@ -16,7 +17,8 @@ export function composeGraphRenderFrameV1(options: {
   readonly nodeContributions?: Readonly<Record<string, GraphNodeRenderContributionV1>>;
   readonly edgeContributions?: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
   readonly regionContributions?: GraphRenderFrameV1['regions'];
-  readonly theme?: GraphRenderThemeV1;
+  readonly theme?: GraphVisualThemeV2;
+  readonly presentationPolicy?: GraphPresentationPolicyV2;
   readonly hoveredNodeId?: string;
   readonly geometryRevision?: number;
 }): GraphRenderFrameV1 {
@@ -51,12 +53,13 @@ export function composeGraphRenderFrameV1(options: {
         };
       }),
     edges: composeEdges(options),
-    theme: options.theme ?? DEFAULT_GRAPH_RENDER_THEME_V1,
+    theme: options.theme ?? DEFAULT_GRAPH_VISUAL_THEME_V2,
+    policy: options.presentationPolicy ?? DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
   };
 }
 
 function composeEdges(options: Parameters<typeof composeGraphRenderFrameV1>[0]): GraphRenderFrameV1['edges'] {
-  const theme = options.theme ?? DEFAULT_GRAPH_RENDER_THEME_V1;
+  const policy = options.presentationPolicy ?? DEFAULT_GRAPH_PRESENTATION_POLICY_V2;
   const edges = options.document.edges.filter((edge) => options.selection.edgeIds.has(edge.id));
   const canonical = edges.map((edge) => {
         const contribution = options.edgeContributions?.[edge.id];
@@ -70,15 +73,15 @@ function composeEdges(options: Parameters<typeof composeGraphRenderFrameV1>[0]):
           ...(contribution?.color === undefined ? {} : { color: contribution.color }),
           ...(contribution?.opacity === undefined ? {} : { opacity: contribution.opacity }),
           ...(contribution?.dashed === undefined ? {} : { dashed: contribution.dashed }),
-          arrowAtSource: theme.showArrows === false ? false : contribution?.arrowAtSource ?? false,
-          arrowAtTarget: theme.showArrows === false
+          arrowAtSource: policy.showArrows === false ? false : contribution?.arrowAtSource ?? false,
+          arrowAtTarget: policy.showArrows === false
             ? false
             : contribution?.arrowAtTarget ?? (edge.directed ?? false),
           ...(contribution?.arrowColor === undefined ? {} : { arrowColor: contribution.arrowColor }),
           ...(contribution?.arrowOpacity === undefined ? {} : { arrowOpacity: contribution.arrowOpacity }),
         };
       });
-  if (theme.edgeAggregation !== 'unordered-pair') return canonical;
+  if (policy.edgeAggregation !== 'unordered-pair') return canonical;
   const groups = new Map<string, typeof canonical>();
   for (const edge of canonical) {
     const key = edge.sourceId < edge.targetId

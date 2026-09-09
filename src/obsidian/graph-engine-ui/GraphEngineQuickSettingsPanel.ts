@@ -39,6 +39,8 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
   private collapsed: boolean;
   private renderRevision = 0;
   private graphCounts?: { readonly nodes: number; readonly edges: number };
+  private autoCloseTimer?: number;
+  private localSettingWrites = 0;
   private disposed = false;
 
   constructor(
@@ -55,6 +57,8 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     root.dataset.graphEngineQuickSettings = '';
     root.addEventListener('pointerdown', stopPropagation);
     root.addEventListener('wheel', stopPropagation);
+    root.addEventListener('pointerenter', this.cancelAutoClose);
+    root.addEventListener('pointerleave', this.scheduleAutoClose);
     this.context.container.append(root);
     this.root = root;
     this.layout = new ObsidianGraphUiLayoutV1(
@@ -69,7 +73,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       }
     });
     this.overrideSubscription = this.context.controls.onSessionOverridesChanged(() => {
-      if (!this.collapsed) void this.render();
+      if (!this.collapsed && this.localSettingWrites === 0) void this.render();
     });
     this.graphSubscription = this.context.session.onGraphChanged(() => {
       if (this.collapsed) this.graphCounts = undefined;
@@ -81,6 +85,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.cancelAutoClose();
     this.disposeContributions();
     this.intentSubscription?.dispose();
     this.intentSubscription = undefined;
@@ -90,6 +95,8 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     this.graphSubscription = undefined;
     this.layout?.dispose();
     this.layout = undefined;
+    this.root?.removeEventListener('pointerenter', this.cancelAutoClose);
+    this.root?.removeEventListener('pointerleave', this.scheduleAutoClose);
     this.root?.remove();
     this.root = undefined;
     this.status = undefined;
@@ -102,6 +109,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     const revision = ++this.renderRevision;
     root.classList.toggle('is-collapsed', this.collapsed);
     if (this.collapsed) {
+      this.cancelAutoClose();
       this.disposeContributions();
       root.replaceChildren();
       const open = this.iconButton('settings-2', 'Open graph controls', () => {
@@ -127,10 +135,6 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     title.textContent = 'Graph controls';
     header.append(title);
     const actions = div(header, 'graphplus-controls-actions graph-engine-controls-actions');
-    actions.append(this.iconButton('rotate-ccw', 'Reset camera and release focus', () => {
-      void this.context.session.resetCamera();
-      void this.context.session.focusNode(null);
-    }));
     actions.append(this.iconButton('x', 'Collapse graph controls', () => {
       this.collapsed = true;
       void this.render();
@@ -139,11 +143,15 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     const body = div(root, 'graphplus-controls-body graph-engine-controls-body');
     const contributions = groupContributions(this.policy.quickSettings.contributions);
     this.renderFilter(body, contributions.get(SECTIONS.filter) ?? []);
-    this.renderForm(body, viewState, effective, contributions.get(SECTIONS.form) ?? []);
+    this.renderForm(
+      body,
+      viewState,
+      effective,
+      contributions.get(SECTIONS.form) ?? [],
+      contributions.get(SECTIONS.regions) ?? [],
+    );
     this.renderDisplay(body, effective, contributions.get(SECTIONS.display) ?? []);
-    this.renderCamera(body, contributions.get(SECTIONS.camera) ?? []);
     this.renderForces(body, effective, contributions.get(SECTIONS.forces) ?? []);
-    this.renderRegions(body, effective, contributions.get(SECTIONS.regions) ?? []);
     for (const [sectionId, values] of contributions) {
       if (Object.values(SECTIONS).includes(sectionId as typeof SECTIONS[keyof typeof SECTIONS])) continue;
       if (!graphUiSectionIsShownV1(this.policy, sectionId)) continue;
@@ -182,6 +190,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     viewState: GraphViewStateV1,
     effective: GraphEffectiveSettingsV1,
     contributions: readonly GraphQuickSettingsContributionV1[],
+    regionContributions: readonly GraphQuickSettingsContributionV1[],
   ): void {
     if (!graphUiSectionIsShownV1(this.policy, SECTIONS.form)) return;
     const body = this.section(parent, SECTIONS.form, SECTION_TITLES[SECTIONS.form], false);
@@ -230,7 +239,9 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
         }
       }
     }
+    this.renderRegionControls(body, effective);
     this.mountContributions(body, contributions);
+    this.mountContributions(body, regionContributions);
   }
 
   private renderDisplay(
@@ -314,8 +325,9 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     const setting = new Setting(parent).setName(name);
     setting.settingEl.classList.add('graphplus-slider-setting', 'graph-engine-slider-setting');
     setting.addSlider((slider) => {
-      slider.setLimits(min, max, step).setValue(value).setDynamicTooltip().onChange((next) => {
-        void this.context.controls.setModuleSetting('form', key, next);
+      slider.setLimits(min, max, step).setValue(value).setDynamicTooltip();
+      slider.sliderEl.addEventListener('input', () => {
+        void this.writeSessionSetting('form', key, slider.getValue());
       });
       slider.sliderEl.addEventListener('dblclick', (event) => {
         event.preventDefault();
@@ -326,16 +338,6 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       setting.addExtraButton((control) => control.setIcon('rotate-ccw').setTooltip('Reset to profile default')
         .onClick(() => this.setTransientFormSetting(key, undefined)));
     }
-  }
-
-  private renderCamera(parent: HTMLElement, contributions: readonly GraphQuickSettingsContributionV1[]): void {
-    if (!graphUiSectionIsShownV1(this.policy, SECTIONS.camera)) return;
-    const body = this.section(parent, SECTIONS.camera, SECTION_TITLES[SECTIONS.camera], false);
-    if (graphUiControlIsShownV1(this.policy, SECTIONS.camera, CONTROLS.resetCamera)) {
-      new Setting(body).setName('Camera')
-        .addButton((button) => button.setButtonText('Reset camera').onClick(() => this.context.session.resetCamera()));
-    }
-    this.mountContributions(body, contributions);
   }
 
   private renderForces(
@@ -384,21 +386,16 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     this.mountContributions(body, contributions);
   }
 
-  private renderRegions(
-    parent: HTMLElement,
-    effective: GraphEffectiveSettingsV1,
-    contributions: readonly GraphQuickSettingsContributionV1[],
-  ): void {
+  private renderRegionControls(parent: HTMLElement, effective: GraphEffectiveSettingsV1): void {
     const regions = effective.modules['node-regions'];
     if (!regions?.enabled || !graphUiSectionIsShownV1(this.policy, SECTIONS.regions)) return;
-    const body = this.section(parent, SECTIONS.regions, SECTION_TITLES[SECTIONS.regions], false);
     const settings = regions.settings;
     if (graphUiControlIsShownV1(this.policy, SECTIONS.regions, CONTROLS.regionAttraction)) {
-      this.catalogSlider(body, 'node-regions.membershipStrength', readNumber(settings.membershipStrength, 0.18));
+      this.catalogSlider(parent, 'node-regions.membershipStrength', readNumber(settings.membershipStrength, 0.18));
     }
     if (graphUiControlIsShownV1(this.policy, SECTIONS.regions, CONTROLS.regionBoundaries)) {
       const presentation = graphSettingPresentationV1('node-regions.boundariesVisible');
-      new Setting(body)
+      new Setting(parent)
         .setName(presentation.name)
         .addToggle((toggle) => toggle
           .setValue(settings.boundariesVisible !== false)
@@ -407,7 +404,6 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
             await this.context.profileSettings.setModuleSetting('node-regions', 'boundariesVisible', visible);
           }));
     }
-    this.mountContributions(body, contributions);
   }
 
   private slider(
@@ -424,8 +420,9 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     const setting = new Setting(parent).setName(name);
     setting.settingEl.classList.add('graphplus-slider-setting', 'graph-engine-slider-setting');
     setting.addSlider((slider) => {
-      slider.setLimits(min, max, step).setValue(value).setDynamicTooltip().onChange((next) => {
-        void this.context.profileSettings.setModuleSetting(moduleId, key, next * storageScale);
+      slider.setLimits(min, max, step).setValue(value).setDynamicTooltip();
+      slider.sliderEl.addEventListener('input', () => {
+        void this.writeProfileSetting(moduleId, key, slider.getValue() * storageScale);
       });
       slider.sliderEl.addEventListener('dblclick', async (event) => {
         event.preventDefault();
@@ -459,6 +456,36 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       presentation.control.storageScale ?? 1,
     );
   }
+
+  private writeProfileSetting(moduleId: string, key: string, value: JsonValue | undefined): Promise<void> {
+    this.localSettingWrites += 1;
+    return this.context.profileSettings.setModuleSetting(moduleId, key, value)
+      .finally(() => { this.localSettingWrites = Math.max(0, this.localSettingWrites - 1); });
+  }
+
+  private writeSessionSetting(moduleId: string, key: string, value: JsonValue | undefined): Promise<void> {
+    this.localSettingWrites += 1;
+    return this.context.controls.setModuleSetting(moduleId, key, value)
+      .finally(() => { this.localSettingWrites = Math.max(0, this.localSettingWrites - 1); });
+  }
+
+  private readonly cancelAutoClose = (): void => {
+    if (this.autoCloseTimer === undefined) return;
+    this.context.container.ownerDocument.defaultView?.clearTimeout(this.autoCloseTimer);
+    this.autoCloseTimer = undefined;
+  };
+
+  private readonly scheduleAutoClose = (event: PointerEvent): void => {
+    if (event.pointerType && event.pointerType !== 'mouse') return;
+    this.cancelAutoClose();
+    if (this.collapsed || this.disposed) return;
+    this.autoCloseTimer = this.context.container.ownerDocument.defaultView?.setTimeout(() => {
+      this.autoCloseTimer = undefined;
+      if (this.disposed) return;
+      this.collapsed = true;
+      void this.render();
+    }, 5_000);
+  };
 
   private section(parent: HTMLElement, sectionId: string, title: string, defaultOpen: boolean): HTMLElement {
     const details = this.context.container.ownerDocument.createElement('details');

@@ -15,11 +15,16 @@ import {
   createSessionRuntimePlatformV1,
   type SessionRuntimePlatformFactoryV1,
 } from './platform/index.ts';
-import { DEFAULT_GRAPH_RENDER_THEME_V1, type GraphRenderThemeV1 } from './render/index.ts';
+import { DEFAULT_GRAPH_VISUAL_THEME_V2, type GraphVisualThemeV2 } from './theme/index.ts';
+import {
+  createDefaultGraphRendererRegistryV2,
+  type GraphRendererBackendIdV2,
+  type GraphRendererRegistryV2,
+} from './render/index.ts';
 import type { GraphNodeActionRuntimeV1 } from './actions/index.ts';
 import type { GraphSessionControlPortV1 } from './host/index.ts';
 
-export type GraphThemePaletteResolverV1 = (container: HTMLElement) => GraphRenderThemeV1;
+export type GraphThemePaletteResolverV1 = (container: HTMLElement) => GraphVisualThemeV2;
 
 export interface SessionFactoryOptionsV1 {
   readonly engineInstanceId: string;
@@ -30,6 +35,8 @@ export interface SessionFactoryOptionsV1 {
   readonly createPlatform?: SessionRuntimePlatformFactoryV1;
   readonly modules?: GraphModuleRegistry;
   readonly resolveThemePalette?: GraphThemePaletteResolverV1;
+  readonly rendererRegistry?: GraphRendererRegistryV2;
+  readonly preferredRendererBackend?: GraphRendererBackendIdV2;
 }
 
 export interface GraphSessionHostServicesV1 {
@@ -61,6 +68,8 @@ export class SessionFactory {
   private readonly createPlatform: SessionRuntimePlatformFactoryV1;
   private readonly modules: GraphModuleRegistry;
   private readonly resolveThemePalette: GraphThemePaletteResolverV1;
+  private readonly rendererRegistry: GraphRendererRegistryV2;
+  private readonly preferredRendererBackend?: GraphRendererBackendIdV2;
   private nextSessionNumber = 1;
   private readonly activeSessions = new Set<GraphSessionRuntime>();
 
@@ -71,7 +80,9 @@ export class SessionFactory {
     this.createSessionId = options.createSessionId ?? (() => `${this.engineInstanceId}:session:${this.nextSessionNumber++}`);
     this.createPlatform = options.createPlatform ?? createSessionRuntimePlatformV1;
     this.modules = options.modules ?? createShippedGraphModuleRegistryV1();
-    this.resolveThemePalette = options.resolveThemePalette ?? (() => DEFAULT_GRAPH_RENDER_THEME_V1);
+    this.resolveThemePalette = options.resolveThemePalette ?? (() => DEFAULT_GRAPH_VISUAL_THEME_V2);
+    this.rendererRegistry = options.rendererRegistry ?? createDefaultGraphRendererRegistryV2();
+    this.preferredRendererBackend = options.preferredRendererBackend;
     for (const descriptor of this.modules.descriptors()) this.profiles.registerModule(descriptor);
   }
 
@@ -122,6 +133,8 @@ export class SessionFactory {
       modules: this.modules,
       themePalette: this.resolveThemePalette(options.container),
       resolveThemePalette: () => this.resolveThemePalette(options.container),
+      rendererRegistry: this.rendererRegistry,
+      preferredRendererBackend: this.preferredRendererBackend,
       restoreViewState: options.restoreViewState,
       platform: this.createPlatform(options.container),
       nodeActions: hostServices.nodeActions,

@@ -51,8 +51,10 @@ test('R-INPUT-01 pans an unfocused wheel and orbits a focused 3d graph', async (
   wheel(value, canvas, { deltaY: -30, ctrlKey: true });
   value.platform.flushFrame();
   const zoomed = await session.exportViewState();
-  equal(zoomed.camera.zoom, zoomBefore, 'perspective zoom should preserve the profile focal length');
-  assert(vectorDistance(zoomed.camera.position, zoomed.camera.target) < distanceBefore, 'perspective zoom-in should dolly the camera toward its target');
+  assert(zoomed.camera.zoom > zoomBefore, 'modified scroll should increase perspective focal length');
+  equal(vectorDistance(zoomed.camera.position, zoomed.camera.target), distanceBefore,
+    'modified scroll should act like a telescope without moving the camera');
+  deepEqual(zoomed.camera.position, orbited.camera.position, 'focal-length zoom should preserve the camera position');
   await session.dispose();
 });
 
@@ -803,10 +805,13 @@ test('stationary mobile background long-press resets the camera without requesti
   value.platform.flushFrame();
   assert(!sameVector((await session.exportViewState()).camera.target, reset.camera.target),
     'the camera should begin away from its reset target');
+  const beforeLongPress = await session.exportViewState();
+  const expectedTarget = positionsCenter(Object.values(beforeLongPress.positions));
   pointer(value, canvas, 'pointerdown', -100, -100, { pointerId: 36, pointerType: 'touch' });
   value.platform.flushTimer();
   value.platform.flushFrame();
-  deepEqual((await session.exportViewState()).camera, reset.camera, 'background long press should restore the reset camera');
+  deepEqual((await session.exportViewState()).camera.target, expectedTarget,
+    'background long press should reset and fit the complete visible graph');
   equal(intents.filter((intent) => intent.type === 'node-context-requested').length, 0,
     'background long press should not request a node menu');
   pointer(value, canvas, 'pointerup', -100, -100, { pointerId: 36, pointerType: 'touch' });
@@ -828,9 +833,11 @@ test('R-INPUT-02 handles keyboard and two-finger navigation within one session',
   const afterKeyboardZoom = await session.exportViewState();
   equal(afterKeyboardZoom.camera.zoom, beforeKeyboardZoom.camera.zoom, 'perspective keyboard zoom should preserve focal length');
   assert(vectorDistance(afterKeyboardZoom.camera.position, afterKeyboardZoom.camera.target) < distanceBeforeKeyboardZoom, 'plus key should dolly in');
+  const expectedResetTarget = positionsCenter(Object.values(afterKeyboardZoom.positions));
   key(keyboard, canvas, '0');
   keyboard.platform.flushFrame();
-  deepEqual((await session.exportViewState()).camera.target, { x: 0, y: 0, z: 0 }, 'zero key should reset camera');
+  deepEqual((await session.exportViewState()).camera.target, expectedResetTarget,
+    'zero key should restore the profile angle and fit the visible graph');
   key(keyboard, canvas, 'f');
   keyboard.platform.flushFrame();
   assert(!sameVector((await session.exportViewState()).camera.target, { x: 0, y: 0, z: 0 }), 'fit key should target visible graph bounds');
@@ -858,11 +865,24 @@ test('R-INPUT-02 handles keyboard and two-finger navigation within one session',
   touch.platform.flushFrame();
   const touchAfterPinch = await touchSession.exportViewState();
   assert(touchAfterPinch.camera.zoom > touchAfterPan.camera.zoom, 'pinch spread should win and zoom in');
+  assert(touchAfterPinch.camera.zoom / touchAfterPan.camera.zoom > 1.19,
+    'pinch should use the accelerated mobile zoom response');
   await touchSession.dispose();
   equal(touch.platform.pendingTimers, 0, 'disposing input should clear its owning-window timer');
   pointer(touch, touchCanvas, 'pointerdown', 50, 50, { pointerId: 12, pointerType: 'touch' });
   equal(touch.platform.pendingTimers, 0, 'disposed canvas should have no live input listeners');
 });
+
+function positionsCenter(positions: readonly { readonly x: number; readonly y: number; readonly z: number }[]) {
+  const xs = positions.map((position) => position.x);
+  const ys = positions.map((position) => position.y);
+  const zs = positions.map((position) => position.z);
+  return {
+    x: (Math.min(...xs) + Math.max(...xs)) / 2,
+    y: (Math.min(...ys) + Math.max(...ys)) / 2,
+    z: (Math.min(...zs) + Math.max(...zs)) / 2,
+  };
+}
 
 test('renderer draws generic nodes, labels, edges, and directed arrows in both profile dimensions', async () => {
   for (const profileId of ['two-dimensional', 'three-dimensional']) {

@@ -39,6 +39,8 @@ export interface GraphSessionV1 {
   setNodePinned(nodeId: string, pinned: boolean): Promise<void>;
   fitNodes(nodeIds?: readonly string[], options?: FitNodesOptionsV1): Promise<void>;
   resetCamera(options?: TransitionOptionsV1): Promise<void>;
+  /** Project a visible node center into this session's logical viewport coordinates. */
+  getNodeScreenPoint(nodeId: string): Promise<{ readonly x: number; readonly y: number } | undefined>;
 
   exportViewState(): Promise<GraphViewStateV1>;
   restoreViewState(state: GraphViewStateV1): Promise<void>;

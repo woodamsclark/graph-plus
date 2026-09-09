@@ -1,5 +1,5 @@
 /** Host-neutral preview presentation. Markdown and DOM lifecycle stay in the host. */
-export const animaPreviewTiming = { open: 220, handoff: 320, leave: 100 } as const;
+export const animaPreviewTiming = { open: 220, handoff: 400, leave: 240 } as const;
 
 export type AnimaPreviewPhase = 'inactive' | 'waiting' | 'node-active' | 'card-active' | 'closing';
 

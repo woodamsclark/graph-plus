@@ -6,6 +6,7 @@ export interface GraphPlusNotePreviewRequestV1<FileValue extends { readonly path
   readonly anchor?: { readonly x: number; readonly y: number };
   readonly active: boolean;
   readonly immediate?: boolean;
+  readonly persistent?: boolean;
 }
 
 export interface GraphPlusPreviewRenderHandleV1 {
@@ -54,6 +55,7 @@ export class GraphPlusNotePreviewControllerV1<FileValue extends { readonly path:
       return;
     }
     if (!request.active || !request.nodeId || !request.file || !request.anchor) {
+      if (this.target?.persistent) return;
       if (request.immediate) {
         this.dismiss(false);
         return;
@@ -66,6 +68,7 @@ export class GraphPlusNotePreviewControllerV1<FileValue extends { readonly path:
     this.target = request;
     if (sameTarget) {
       this.cancelClose();
+      this.card?.classList.toggle('is-persistent', request.persistent === true);
       if (this.card) this.phase = this.pointerInsideCard ? 'card-active' : 'node-active';
       this.positionCard();
       return;
@@ -97,7 +100,7 @@ export class GraphPlusNotePreviewControllerV1<FileValue extends { readonly path:
     this.openTimer = this.clock().setTimeout(() => {
       this.openTimer = undefined;
       void this.openCard(generation);
-    }, animaPreviewTiming.open);
+    }, this.target?.persistent ? 0 : animaPreviewTiming.open);
   }
 
   private async openCard(generation: number): Promise<void> {
@@ -106,6 +109,7 @@ export class GraphPlusNotePreviewControllerV1<FileValue extends { readonly path:
     const document = this.options.container.ownerDocument;
     const card = document.createElement('section');
     card.className = 'graphplus-note-preview';
+    card.classList.toggle('is-persistent', target.persistent === true);
     card.setAttribute('role', 'region');
     card.setAttribute('aria-label', `Preview of ${displayName(target.file.path)}`);
     const header = document.createElement('header');
@@ -115,7 +119,13 @@ export class GraphPlusNotePreviewControllerV1<FileValue extends { readonly path:
     title.type = 'button';
     title.textContent = displayName(target.file.path);
     title.addEventListener('click', this.onTitleClick);
-    header.append(title);
+    const close = document.createElement('button');
+    close.className = 'graphplus-note-preview-close';
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Dismiss preview');
+    close.textContent = '×';
+    close.addEventListener('click', this.onCloseClick);
+    header.append(title, close);
     const body = document.createElement('div');
     body.className = 'graphplus-note-preview-body markdown-preview-view markdown-rendered';
     body.textContent = 'Loading…';
@@ -185,6 +195,7 @@ export class GraphPlusNotePreviewControllerV1<FileValue extends { readonly path:
   private readonly onCardLeave = (): void => {
     this.pointerInsideCard = false;
     void this.options.onPreviewSurfaceActive(false);
+    if (this.target?.persistent) return;
     this.scheduleDismiss(animaPreviewTiming.leave);
   };
 
@@ -198,6 +209,10 @@ export class GraphPlusNotePreviewControllerV1<FileValue extends { readonly path:
       this.dismiss(true);
       void this.options.openFile(file);
     }
+  };
+
+  private readonly onCloseClick = (): void => {
+    this.dismiss(true);
   };
 
   private readonly onCardClick = (event: MouseEvent): void => {
@@ -224,6 +239,7 @@ export class GraphPlusNotePreviewControllerV1<FileValue extends { readonly path:
     if (this.phase === 'inactive') return;
     this.cancelClose();
     this.phase = 'closing';
+    this.card?.classList.add('is-closing');
     this.closeTimer = this.clock().setTimeout(() => {
       this.closeTimer = undefined;
       if (!this.pointerInsideCard) this.dismiss(true);
@@ -251,6 +267,7 @@ export class GraphPlusNotePreviewControllerV1<FileValue extends { readonly path:
       this.card.removeEventListener('wheel', this.onCardWheel);
       this.card.removeEventListener('click', this.onCardClick);
       this.card.querySelector('.graphplus-note-preview-title')?.removeEventListener('click', this.onTitleClick);
+      this.card.querySelector('.graphplus-note-preview-close')?.removeEventListener('click', this.onCloseClick);
       this.card.remove();
     }
     this.card = undefined;
@@ -269,6 +286,7 @@ export class GraphPlusNotePreviewControllerV1<FileValue extends { readonly path:
   private cancelClose(): void {
     if (this.closeTimer !== undefined) this.clock().clearTimeout(this.closeTimer);
     this.closeTimer = undefined;
+    this.card?.classList.remove('is-closing');
   }
 
   private clock(): PreviewClock {

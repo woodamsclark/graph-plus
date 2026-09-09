@@ -39,6 +39,7 @@ export interface LocalGraphPlusConsumerOptionsV1<TFile> {
     readonly anchor?: { readonly x: number; readonly y: number };
     readonly active: boolean;
     readonly immediate?: boolean;
+    readonly persistent?: boolean;
   }) => void;
 }
 
@@ -63,6 +64,8 @@ export class LocalGraphPlusConsumerV1<TFile> {
   private opened = false;
   private leaseReleased = false;
   private focusedNodeId?: string;
+  private previewNodeId?: string;
+  private persistentPreviewNodeId?: string;
   private readonly neighborhoodFramer: GraphPlusNeighborhoodFramerV1;
 
   constructor(private readonly options: LocalGraphPlusConsumerOptionsV1<TFile>) {
@@ -82,13 +85,22 @@ export class LocalGraphPlusConsumerV1<TFile> {
     if (this.opened) return;
     this.opened = true;
     try {
-      this.actionRegistration = this.options.lease.registerNodeActions([{
-        id: 'open-node',
-        label: (context) => this.nodeKind(context.nodeId) === 'tag' ? 'Open tag' : 'Open note',
-        icon: 'file-text',
-        isAvailable: (context) => this.nodeKind(context.nodeId) !== undefined,
-        run: (context) => this.openNode(context.nodeId),
-      }]);
+      this.actionRegistration = this.options.lease.registerNodeActions([
+        {
+          id: 'open-node',
+          label: (context) => this.nodeKind(context.nodeId) === 'tag' ? 'Open tag' : 'Open note',
+          icon: 'file-text',
+          isAvailable: (context) => this.nodeKind(context.nodeId) !== undefined,
+          run: (context) => this.openNode(context.nodeId),
+        },
+        {
+          id: 'show-preview',
+          label: 'Show preview',
+          icon: 'panel-right',
+          isAvailable: (context) => this.nodeKind(context.nodeId) === 'note',
+          run: (context) => this.showNotePreview(context.nodeId, true),
+        },
+      ]);
       const snapshot = await this.options.source.read();
       const projection = this.adapter.build(snapshot);
       this.canonicalDocument = projection.document;
@@ -112,6 +124,12 @@ export class LocalGraphPlusConsumerV1<TFile> {
       this.subscriptions.push(session.onIntent((intent) => {
         if (intent.type === 'viewport-changed') {
           this.neighborhoodFramer.cancel();
+          if (this.previewNodeId) void this.showNotePreview(
+            this.previewNodeId,
+            this.previewNodeId === this.persistentPreviewNodeId,
+            undefined,
+            true,
+          );
           return;
         }
         if (intent.type === 'camera-reset') {
@@ -125,18 +143,18 @@ export class LocalGraphPlusConsumerV1<TFile> {
           return;
         }
         if (intent.type !== 'preview-changed') return;
+        if (this.persistentPreviewNodeId) return;
         const entry = intent.nodeId ? this.lookup.get(intent.nodeId) : undefined;
         if (intent.nodeId && entry?.kind !== 'note') {
           void session.clearPreview();
           return;
         }
-        this.options.onNotePreview?.({
-          ...(intent.nodeId ? { nodeId: intent.nodeId } : {}),
-          ...(entry?.kind === 'note' ? { file: entry.file } : {}),
-          ...(intent.anchor ? { anchor: intent.anchor } : {}),
-          active: intent.nodeId !== undefined && entry?.kind === 'note',
-          immediate: !intent.closing,
-        });
+        if (intent.nodeId && entry?.kind === 'note') {
+          void this.showNotePreview(intent.nodeId, false, intent.anchor, !intent.closing);
+        } else {
+          this.previewNodeId = undefined;
+          this.options.onNotePreview?.({ active: false, immediate: !intent.closing });
+        }
       }));
       await this.presentRoot();
     } catch (error) {
@@ -206,7 +224,28 @@ export class LocalGraphPlusConsumerV1<TFile> {
   }
 
   async clearPreview(): Promise<void> {
+    this.previewNodeId = undefined;
+    this.persistentPreviewNodeId = undefined;
     await this.session?.clearPreview();
+  }
+
+  private async showNotePreview(
+    nodeId: string,
+    persistent: boolean,
+    fallbackAnchor?: { readonly x: number; readonly y: number },
+    immediate = true,
+  ): Promise<void> {
+    const entry = this.lookup.get(nodeId);
+    if (entry?.kind !== 'note') return;
+    if (persistent) this.persistentPreviewNodeId = nodeId;
+    this.previewNodeId = nodeId;
+    const anchor = await this.nodeScreenPoint(nodeId) ?? fallbackAnchor;
+    if (this.previewNodeId !== nodeId || !anchor) return;
+    this.options.onNotePreview?.({ nodeId, file: entry.file, anchor, active: true, immediate, persistent });
+  }
+
+  private async nodeScreenPoint(nodeId: string): Promise<{ readonly x: number; readonly y: number } | undefined> {
+    return this.session?.getNodeScreenPoint(nodeId);
   }
 
   async openNode(nodeId: string): Promise<void> {
@@ -241,8 +280,9 @@ export class LocalGraphPlusConsumerV1<TFile> {
 
   private async replaceLocalDocument(): Promise<void> {
     if (!this.session) return;
-    this.neighborhoodFramer.cancel();
     const localDocument = this.buildLocalDocument();
+    if (sameLocalGraph(this.localDocument, localDocument)) return;
+    this.neighborhoodFramer.cancel();
     this.localDocument = localDocument;
     await this.session.replaceDocument(localDocument);
     await this.presentRoot();
@@ -353,6 +393,12 @@ function localDepth(value: number | undefined): number {
 
 function finitePositive(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function sameLocalGraph(left: GraphDocumentV1 | undefined, right: GraphDocumentV1): boolean {
+  if (!left || left.documentId !== right.documentId) return false;
+  return JSON.stringify({ nodes: left.nodes, edges: left.edges, nodeRegions: left.nodeRegions })
+    === JSON.stringify({ nodes: right.nodes, edges: right.edges, nodeRegions: right.nodeRegions });
 }
 
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }

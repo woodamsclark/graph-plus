@@ -175,6 +175,11 @@ test('R-SHELL-03 round-trips consumer-owned view state and supports camera comma
   await session.fitNodes(['a', 'b'], { centerNodeId: 'a' });
   deepEqual((await session.exportViewState()).camera.target, { x: 10, y: 20, z: 0 },
     'anchored fit should size for all requested nodes while centering the requested node');
+  const projectedA = await session.getNodeScreenPoint('a');
+  assert(projectedA && Number.isFinite(projectedA.x) && Number.isFinite(projectedA.y),
+    'consumers should be able to anchor host UI to a visible node center');
+  equal(await session.getNodeScreenPoint('b'), undefined,
+    'host UI should not anchor to a node excluded by the render filter');
   await session.restoreViewState(saved);
   equal(saved.activeFilters.render?.scope, 'render', 'active filters should belong to exported view state');
   await session.dispose();
@@ -184,8 +189,12 @@ test('R-SHELL-03 round-trips consumer-owned view state and supports camera comma
   const next = await restored.exportViewState();
   deepEqual(next, saved, 'a generic consumer should be able to persist and restore complete view state');
   equal(surface(second.container).dataset.renderedNodeCount, '2', 'restored filter should affect the mounted view');
+  await restored.focusNode(null);
+  const visibleState = await restored.exportViewState();
+  const expectedTarget = midpoint(visibleState.positions.a, visibleState.positions.c);
   await restored.resetCamera();
-  deepEqual((await restored.exportViewState()).camera.target, { x: 0, y: 0, z: 0 }, 'reset should restore profile camera defaults');
+  deepEqual((await restored.exportViewState()).camera.target, expectedTarget,
+    'an unfocused reset should restore the profile angle and fit the complete visible graph');
 
   const controller = new AbortController();
   controller.abort();
@@ -198,6 +207,17 @@ test('R-SHELL-03 round-trips consumer-owned view state and supports camera comma
   equal(aborted, true, 'camera commands should respect an already-aborted transition');
   await restored.dispose();
 });
+
+function midpoint(
+  left: { readonly x: number; readonly y: number; readonly z: number },
+  right: { readonly x: number; readonly y: number; readonly z: number },
+): { readonly x: number; readonly y: number; readonly z: number } {
+  return {
+    x: (left.x + right.x) / 2,
+    y: (left.y + right.y) / 2,
+    z: (left.z + right.z) / 2,
+  };
+}
 
 test('restored positions outside safe numerical bounds regenerate before rendering', async () => {
   const source = harness();

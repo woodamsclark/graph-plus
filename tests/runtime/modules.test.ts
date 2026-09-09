@@ -9,6 +9,7 @@ import {
   GraphModuleRegistry,
   GraphRequiredModuleErrorV1,
   GraphSessionProfileErrorV1,
+  parseGraphColorV2,
 } from '../../src/graph-engine/runtime/index.ts';
 import { FormModule } from '../../src/graph-engine/runtime/modules/shipped/FormModule.ts';
 import {
@@ -489,13 +490,16 @@ test('shipped Filter, Form, force layout, and palette contributions stay domain-
   const form = runtimeHarness({
     document,
     resolveThemePalette: () => ({
-      backgroundColor: 'transparent',
-      nodeColor: '#123456',
-      selectedNodeColor: '#234567',
-      focusedNodeColor: '#345678',
-      edgeColor: '#456789',
-      labelColor: '#56789a',
-      labelFont: '13px serif',
+      ...DEFAULT_GRAPH_RENDER_THEME_V1,
+      colors: {
+        ...DEFAULT_GRAPH_RENDER_THEME_V1.colors,
+        node: parseGraphColorV2('#123456')!,
+        selectedNode: parseGraphColorV2('#234567')!,
+        focusedNode: parseGraphColorV2('#345678')!,
+        edge: parseGraphColorV2('#456789')!,
+        label: parseGraphColorV2('#56789a')!,
+      },
+      labelFont: { ...DEFAULT_GRAPH_RENDER_THEME_V1.labelFont, sizePx: 13, family: 'serif' },
     }),
   });
   form.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
@@ -507,7 +511,7 @@ test('shipped Filter, Form, force layout, and palette contributions stay domain-
   equal(runtimeSurface(form.container).dataset.projectedEdgeCount, '2', 'Form should omit the generic cross-link from its projection');
   equal((await formSession.exportDocument()).edges.length, 3, 'Form must not mutate the canonical consumer document');
   deepEqual((await formSession.exportViewState()).positions.a, { x: 10, y: 20, z: 0 }, 'Form must preserve the free-layout position for persistence');
-  assert(form.styleAssignments.includes('fillStyle:#123456'), 'rendering module should consume an injected host-neutral palette');
+  assert(form.styleAssignments.includes('fillStyle:rgb(18, 52, 86)'), 'rendering module should consume an injected host-neutral palette');
   await formSession.dispose();
 
   const force = runtimeHarness({ document });

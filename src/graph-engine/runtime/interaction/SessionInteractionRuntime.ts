@@ -1,5 +1,4 @@
 import type {
-  GraphCameraStateV1,
   GraphDimensionsV1,
   GraphDocumentV1,
   GraphIntentV1,
@@ -51,6 +50,7 @@ export class SessionInteractionRuntime {
     readonly dimensions: GraphDimensionsV1;
     readonly platform: SessionRuntimePlatformV1;
     readonly surface: SessionSurfaceV1;
+    readonly interactionElement: HTMLElement;
     readonly camera: GraphCameraController;
     readonly hitTest: (
       point: GraphScreenPointV1,
@@ -63,7 +63,7 @@ export class SessionInteractionRuntime {
     readonly isNodeDraggable: (nodeId: string) => boolean;
     readonly setViewState: (state: GraphViewStateV1) => void;
     readonly getRenderSelection: () => GraphFilterSelectionV1;
-    readonly getResetCamera: () => GraphCameraStateV1;
+    readonly resetCamera: () => void;
     readonly getDragReleasePolicy: () => 'pin' | 'dynamic';
     readonly getDragConstraintPolicy?: () => 'persistent-pin' | 'transient';
     readonly onViewStateChanged: (change: GraphRuntimeViewChangeV1) => void;
@@ -73,7 +73,7 @@ export class SessionInteractionRuntime {
   }) {
     this.registerCommandHandlers();
     this.input = new GraphInput({
-      canvas: this.options.surface.canvas,
+      element: this.options.interactionElement,
       platform: this.options.platform,
       events: this.inputEvents,
       getIdentity: () => {
@@ -184,6 +184,7 @@ export class SessionInteractionRuntime {
       'pan-by',
       'orbit-by',
       'zoom-by',
+      'focal-length-zoom-by',
       'reset-camera',
       'fit-camera',
       'set-selection',
@@ -218,8 +219,12 @@ export class SessionInteractionRuntime {
         );
         this.cameraChanged(command);
         return;
+      case 'focal-length-zoom-by':
+        this.options.camera.zoomFocalLengthByWheel(command.deltaY);
+        this.cameraChanged(command);
+        return;
       case 'reset-camera':
-        this.options.camera.setState(this.options.getResetCamera());
+        this.options.resetCamera();
         this.cameraChanged(command);
         this.options.onIntent({
           ...this.intentBase(command),

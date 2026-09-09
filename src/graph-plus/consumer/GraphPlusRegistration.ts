@@ -23,7 +23,7 @@ export const GRAPH_PLUS_REQUESTED_CAPABILITIES_V1 = [
 export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
   consumerId: GRAPH_PLUS_CONSUMER_ID_V1,
   displayName: 'graph+',
-  consumerVersion: '1.9.0',
+  consumerVersion: '2.0.0',
   supportedProtocolVersions: [1],
   profiles: [{
     profileId: GRAPH_PLUS_PROFILE_ID_V1,
@@ -39,7 +39,7 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
         filter: { controls: { 'filter.clear': 'hidden' } },
         form: { visibility: 'shown' },
         display: { visibility: 'shown' },
-        camera: { visibility: 'shown' },
+        camera: { visibility: 'hidden' },
         forces: { visibility: 'shown' },
         regions: { visibility: 'shown' },
       },
@@ -47,7 +47,7 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
     },
     interaction: {
       activationActionIds: ['open-node'],
-      contextActionIds: ['open-node'],
+      contextActionIds: ['open-node', 'show-preview'],
     },
     profileSettings: {
       focalLengthMm: 50,

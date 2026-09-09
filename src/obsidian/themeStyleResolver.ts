@@ -1,16 +1,36 @@
-export type ThemePalette = {
-  nodeColor:        string;
-  tagColor:         string;
-  linkColor:        string;
-  labelColor:       string;
-  arrowColor:       string;
-  backgroundColor:  string;
-  highlightColor:   string;
-  outlineColor:     string;
-};
+import {
+  DEFAULT_GRAPH_VISUAL_THEME_V2,
+  freezeGraphVisualThemeV2,
+  graphColorV2,
+  parseGraphColorV2,
+  type GraphColorV2,
+  type GraphFontV2,
+  type GraphVisualThemeV2,
+} from '../graph-engine/runtime/theme/index.ts';
+
+export const DEFAULT_OBSIDIAN_GRAPH_PLUS_THEME_V2: GraphVisualThemeV2 = freezeGraphVisualThemeV2({
+  revision: 0,
+  colors: {
+    background: graphColorV2(0x0b / 255, 0x08 / 255, 0x10 / 255),
+    node: graphColorV2(0x4b / 255, 0x35 / 255, 0x62 / 255),
+    tagNode: graphColorV2(0xe1 / 255, 0xd7 / 255, 0xeb / 255),
+    selectedNode: graphColorV2(0x82 / 255, 0x63 / 255, 0x9b / 255),
+    focusedNode: graphColorV2(0xc5 / 255, 0xa8 / 255, 0xd5 / 255),
+    highlightedNode: graphColorV2(0xa5 / 255, 0x7e / 255, 0xb9 / 255),
+    nodeOutline: graphColorV2(0xd8 / 255, 0xca / 255, 0xe2 / 255),
+    edge: graphColorV2(0x72 / 255, 0x5d / 255, 0x7e / 255, 0.48),
+    arrow: graphColorV2(0xa0 / 255, 0x7d / 255, 0xb2 / 255, 0.72),
+    label: graphColorV2(0xf1 / 255, 0xed / 255, 0xf4 / 255),
+    animaAccent: graphColorV2(0xb9 / 255, 0x8d / 255, 0xcd / 255),
+  },
+  labelFont: DEFAULT_GRAPH_VISUAL_THEME_V2.labelFont,
+});
 
 export class ThemeStyleResolver {
-  constructor(private getRoot: () => HTMLElement = () => document.body) {}
+  constructor(
+    private getRoot: () => HTMLElement = () => document.body,
+    private isDefaultObsidianTheme: () => boolean = () => false,
+  ) {}
 
   private read(styles: CSSStyleDeclaration, ...vars: string[]): string {
     for (const name of vars) {
@@ -60,20 +80,16 @@ export class ThemeStyleResolver {
     }
   }
 
-  getPalette(): ThemePalette {
+  getPalette(revision = 0): GraphVisualThemeV2 {
     const root = this.getRoot();
     const styles = root.ownerDocument.defaultView?.getComputedStyle(root);
-    if (!styles) {
-      return {
-        nodeColor: '#888',
-        tagColor: '#888',
-        linkColor: '#666',
-        labelColor: '#ccc',
-        arrowColor: '#666',
-        backgroundColor: '#111',
-        highlightColor: '#e0af68',
-        outlineColor: '#ccc',
-      };
+    if (!styles) return freezeGraphVisualThemeV2({ ...DEFAULT_GRAPH_VISUAL_THEME_V2, revision });
+    if (this.isDefaultObsidianTheme()) {
+      return freezeGraphVisualThemeV2({
+        ...DEFAULT_OBSIDIAN_GRAPH_PLUS_THEME_V2,
+        revision,
+        labelFont: font(styles),
+      });
     }
 
     const accent = this.read(
@@ -83,45 +99,78 @@ export class ThemeStyleResolver {
       "--text-accent"
     );
     
-    return {
-      nodeColor: this.probe(root, 'color-fill') || this.read(styles, '--graph-node') || accent || "#888",
-      tagColor: this.probe(root, 'color-fill-tag') || this.read(
+    const fallback = DEFAULT_GRAPH_VISUAL_THEME_V2.colors;
+    const node = this.color(root, this.probe(root, 'color-fill') || this.read(styles, '--graph-node') || accent, fallback.node);
+    const tagNode = this.color(root, this.probe(root, 'color-fill-tag') || this.read(
         styles,
         '--graph-node-tag',
         "--color-accent-2",
         "--color-purple",
         "--interactive-accent"
-      ) || accent || "#888",
-      linkColor: this.probe(root, 'color-line') || this.read(
+      ) || accent, fallback.tagNode);
+    const edge = this.color(root, this.probe(root, 'color-line') || this.read(
         styles,
         '--graph-line',
         "--background-modifier-border",
         "--color-base-35"
-      ) || "#666",
-      labelColor: this.probe(root, 'color-text') || this.read(
+      ), fallback.edge);
+    const label = this.color(root, this.probe(root, 'color-text') || this.read(
         styles,
         '--graph-text',
         "--text-normal"
-      ) || "#ccc",
-      arrowColor: this.probe(root, 'color-arrow') || this.read(styles, '--graph-line') || '#666',
-      backgroundColor: this.read(
+      ), fallback.label);
+    const arrow = this.color(root, this.probe(root, 'color-arrow') || this.read(styles, '--graph-line'), edge);
+    const background = this.color(root, this.read(
         styles,
         '--graph-background',
         "--background-primary"
-      ) || "#111",
-      highlightColor: this.probe(root, 'color-fill-focused') || this.read(
+      ), fallback.background);
+    const highlighted = this.color(root, this.probe(root, 'color-fill-focused') || this.read(
         styles,
         '--graph-node-focused',
         '--graph-node-unresolved',
         '--interactive-accent-hover',
         '--color-accent'
-      ) || accent || '#e0af68',
-      outlineColor: this.probe(root, 'color-circle') || this.read(
+      ) || accent, fallback.highlightedNode);
+    const outline = this.color(root, this.probe(root, 'color-circle') || this.read(
         styles,
         '--graph-node-focused',
         '--text-normal'
-      ) || '#ccc',
-    };
+      ), fallback.nodeOutline);
+    return freezeGraphVisualThemeV2({
+      revision,
+      colors: {
+        background,
+        node,
+        tagNode,
+        selectedNode: tagNode,
+        focusedNode: highlighted,
+        highlightedNode: highlighted,
+        nodeOutline: outline,
+        edge,
+        arrow,
+        label,
+        animaAccent: highlighted,
+      },
+      labelFont: font(styles),
+    });
+  }
+
+  private color(root: HTMLElement, value: string, fallback: GraphColorV2): GraphColorV2 {
+    const parsed = parseGraphColorV2(value);
+    if (parsed) return parsed;
+    if (!value.trim()) return fallback;
+    const element = root.ownerDocument.createElement('span');
+    element.style.color = value;
+    element.style.position = 'absolute';
+    element.style.visibility = 'hidden';
+    root.append(element);
+    try {
+      const normalized = root.ownerDocument.defaultView?.getComputedStyle(element).color ?? '';
+      return parseGraphColorV2(normalized) ?? fallback;
+    } finally {
+      element.remove();
+    }
   }
 }
 
@@ -133,4 +182,19 @@ function applyOpacity(color: string, opacityValue: string): string {
   if (!channels || channels.length < 3) return color;
   const alpha = Math.max(0, Math.min(1, (channels[3] ?? 1) * Math.max(0, opacity)));
   return `rgba(${channels[0]}, ${channels[1]}, ${channels[2]}, ${Number(alpha.toFixed(4))})`;
+}
+
+function font(styles: CSSStyleDeclaration): GraphFontV2 {
+  const fallback = DEFAULT_GRAPH_VISUAL_THEME_V2.labelFont;
+  const size = Number.parseFloat(styles.fontSize);
+  const lineHeight = Number.parseFloat(styles.lineHeight);
+  const weight = Number.parseInt(styles.fontWeight, 10);
+  const style = styles.fontStyle === 'italic' || styles.fontStyle === 'oblique' ? styles.fontStyle : 'normal';
+  return {
+    family: styles.fontFamily.trim() || fallback.family,
+    sizePx: Number.isFinite(size) && size > 0 ? size : fallback.sizePx,
+    weight: Number.isFinite(weight) ? weight : fallback.weight,
+    style,
+    lineHeightPx: Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : (Number.isFinite(size) ? size * 1.2 : fallback.lineHeightPx),
+  };
 }

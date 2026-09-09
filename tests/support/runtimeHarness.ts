@@ -9,8 +9,10 @@ import {
   DEFAULT_GRAPH_RENDER_THEME_V1,
   GraphModuleRegistry,
   SessionFactory,
-  type GraphRenderThemeV1,
+  type GraphVisualThemeV2,
   type GraphNodeActionRuntimeV1,
+  type GraphRendererBackendIdV2,
+  type GraphRendererRegistryV2,
   type SessionResizeObserverV1,
   type SessionRuntimePlatformV1,
 } from '../../src/graph-engine/runtime/index.ts';
@@ -193,9 +195,11 @@ export function runtimeHarness(options: {
   registration?: ConsumerRegistrationV1;
   modules?: GraphModuleRegistry;
   getGlobalOverrides?: () => GraphSettingsOverridesV1;
-  resolveThemePalette?: (container: HTMLElement) => GraphRenderThemeV1;
+  resolveThemePalette?: (container: HTMLElement) => GraphVisualThemeV2;
   nodeActions?: GraphNodeActionRuntimeV1;
   realTime?: boolean;
+  rendererRegistry?: GraphRendererRegistryV2;
+  preferredRendererBackend?: GraphRendererBackendIdV2;
 } = {}) {
   const window = new Window();
   const drawCalls: string[] = [];
@@ -235,6 +239,8 @@ export function runtimeHarness(options: {
     ...(options.modules ? { modules: options.modules } : {}),
     ...(options.getGlobalOverrides ? { getGlobalOverrides: options.getGlobalOverrides } : {}),
     resolveThemePalette: options.resolveThemePalette ?? (() => DEFAULT_GRAPH_RENDER_THEME_V1),
+    ...(options.rendererRegistry ? { rendererRegistry: options.rendererRegistry } : {}),
+    ...(options.preferredRendererBackend ? { preferredRendererBackend: options.preferredRendererBackend } : {}),
   });
   return {
     window,
