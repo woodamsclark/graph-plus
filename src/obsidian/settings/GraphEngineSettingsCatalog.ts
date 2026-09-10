@@ -58,7 +58,7 @@ export const GRAPH_SETTING_PRESENTATIONS_V1: readonly GraphSettingPresentationV1
     { type: 'slider', min: 0, max: 5, step: 0.05 }),
   entry('force-layout.springLength', 'layout-motion', 'force-layout', 'springLength', 'Link distance', 'Set the preferred spacing of linked nodes.',
     { type: 'slider', min: 20, max: 500, step: 5 }),
-  entry('force-layout.velocityDecay', 'layout-motion', 'force-layout', 'velocityDecay', 'Motion damping', 'Higher values calm movement sooner.',
+  entry('force-layout.velocityDecay', 'layout-motion', 'force-layout', 'velocityDecay', 'Velocity decay', '0 keeps all motion; higher values calm movement sooner.',
     { type: 'slider', min: 0, max: 0.9, step: 0.05 }),
   entry('force-layout.collisionRadius', 'layout-motion', 'force-layout', 'collisionRadius', 'Collision spacing', 'Keep nearby nodes from overlapping.',
     { type: 'slider', min: 0, max: 200, step: 5 }),

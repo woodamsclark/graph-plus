@@ -129,10 +129,10 @@ test('A-COMPONENT-01 includes generic region connections and packs deterministic
   });
   const analysis = analyzeGraphTopologyV1(document, [{ sourceId: 'c', targetId: 'd' }]);
   deepEqual(analysis.components.map((component) => component.nodeIds), [['a', 'b'], ['c', 'd']], 'active region relationships should join force components generically');
-  const targets = buildComponentPackingTargetsV1(analysis.components, 120, 80, '2d');
+  const targets = buildComponentPackingTargetsV1(analysis.components, 80, '2d');
   deepEqual(targets.get('a'), { x: 0, y: 0, z: 0 }, 'the largest deterministic component should anchor the collection');
   assert(Math.hypot(targets.get('c')!.x, targets.get('c')!.y) > 0, 'another component should receive a separate packing target');
-  deepEqual([...targets], [...buildComponentPackingTargetsV1(analysis.components, 120, 80, '2d')], 'packing targets should be deterministic');
+  deepEqual([...targets], [...buildComponentPackingTargetsV1(analysis.components, 80, '2d')], 'packing targets should be deterministic');
 });
 
 test('R-REGION-01 shares one bounded pair-level attraction budget', () => {

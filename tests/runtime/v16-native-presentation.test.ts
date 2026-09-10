@@ -512,6 +512,86 @@ test('V1.6 D3-compatible link integration matches the reviewed one-tick equation
     'target movement should mirror the D3 link step');
 });
 
+test('high link strength converges without crossing its target in one integration step', () => {
+  const document = graphDocument({
+    nodes: [
+      graphNode('left', { positionHint: { x: -200, y: 0, z: 0 } }),
+      graphNode('right', { positionHint: { x: 200, y: 0, z: 0 } }),
+    ],
+    edges: [graphEdge('join', 'left', 'right')],
+  });
+  const force = new ForceLayoutModule('2d', readForceSettings({
+    repulsionStrength: 0, centeringStrength: 0, collisionRadius: 0,
+    springStrength: 4, springLength: 250, velocityDecay: 0.4,
+  }));
+  const result = force.tick(pipeline(document, {
+    nodeIds: new Set(['left', 'right']), edgeIds: new Set(['join']),
+  }), 1 / 60);
+  assert(result?.positions, 'a high-strength spring should still advance the layout');
+  const distance = Math.abs(result.positions.right.x - result.positions.left.x);
+  assert(distance >= 250,
+    'a high-strength spring must not overshoot through its target distance in one step');
+  assert(distance < 400, 'a high-strength spring should still move monotonically toward its target');
+});
+
+test('active drag scales heat down when its incident link strength is high', () => {
+  const document = graphDocument({
+    nodes: [
+      graphNode('left', { positionHint: { x: -200, y: 0, z: 0 } }),
+      graphNode('right', { positionHint: { x: 200, y: 0, z: 0 } }),
+    ],
+    edges: [graphEdge('join', 'left', 'right')],
+  });
+  const state = {
+    ...pipeline(document, {
+      nodeIds: new Set(['left', 'right']), edgeIds: new Set(['join']),
+    }),
+    draggedNodeId: 'left',
+  };
+  const baseSettings = {
+    repulsionStrength: 0, centeringStrength: 0, collisionRadius: 0,
+    springLength: 250, velocityDecay: 0.4,
+  };
+  const ordinary = new ForceLayoutModule('2d', readForceSettings({ ...baseSettings, springStrength: 1 }));
+  const strong = new ForceLayoutModule('2d', readForceSettings({ ...baseSettings, springStrength: 5 }));
+  ordinary.tick(state, 1 / 60);
+  strong.tick(state, 1 / 60);
+  const ordinaryAlpha = ordinary.getDiagnostics().alpha;
+  const strongAlpha = strong.getDiagnostics().alpha;
+  assert(Math.abs(ordinaryAlpha - 0.3) < 1e-12,
+    'ordinary incident links should retain the familiar active-drag heat');
+  assert(strongAlpha < ordinaryAlpha,
+    'strong incident links should reduce active-drag heat immediately, even from startup alpha 1');
+  assert(strongAlpha <= ordinaryAlpha / 2,
+    'high-strength drag heat should be materially lower than ordinary drag heat');
+});
+
+test('link distance does not change disconnected-component packing', () => {
+  const document = graphDocument({
+    nodes: [
+      graphNode('left', { positionHint: { x: -100, y: 0, z: 0 } }),
+      graphNode('right', { positionHint: { x: 100, y: 0, z: 0 } }),
+      graphNode('orphan', { positionHint: { x: 0, y: 0, z: 0 } }),
+    ],
+    edges: [graphEdge('join', 'left', 'right')],
+  });
+  const state = pipeline(document, {
+    nodeIds: new Set(['left', 'right', 'orphan']), edgeIds: new Set(['join']),
+  });
+  const settings = {
+    repulsionStrength: 0, springStrength: 0, centeringStrength: 0.1,
+    collisionRadius: 0, velocityDecay: 0.4,
+  };
+  const compact = new ForceLayoutModule('2d', readForceSettings({ ...settings, springLength: 20 }));
+  const spacious = new ForceLayoutModule('2d', readForceSettings({ ...settings, springLength: 500 }));
+  const compactResult = compact.tick(state, 1 / 60);
+  const spaciousResult = spacious.tick(state, 1 / 60);
+  assert(compactResult?.positions && spaciousResult?.positions,
+    'component packing should move the disconnected orphan in both layouts');
+  deepEqual(compactResult.positions.orphan, spaciousResult.positions.orphan,
+    'an orphan packing target must be independent of linked-node distance');
+});
+
 test('V1.6 D3-compatible mechanics remain finite and spatial in 3D', () => {
   const document = graphDocument({
     nodes: [
@@ -581,6 +661,63 @@ test('V1.6 force integration rejects hostile restored motion and enforces maxSpe
   );
   assert(leftMovement <= maxSpeed + 1e-10 && rightMovement <= maxSpeed + 1e-10,
     'every integrated node movement should obey the configured maximum speed');
+});
+
+test('force cooling clears residual velocity before a later reheat', () => {
+  const document = graphDocument({
+    nodes: [graphNode('left'), graphNode('right')],
+    edges: [],
+  });
+  const force = new ForceLayoutModule('2d', readForceSettings({
+    repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionRadius: 0,
+    velocityDecay: 0, alphaDecay: 1, alphaMin: 0.001,
+  }));
+  force.restoreState({
+    schemaVersion: 1,
+    alpha: 0.0005,
+    alphaTarget: 0,
+    running: true,
+    velocities: {
+      left: { x: 100, y: 0, z: 0 },
+      right: { x: -100, y: 0, z: 0 },
+    },
+  });
+  const state = pipeline(document, {
+    nodeIds: new Set(['left', 'right']), edgeIds: new Set(),
+  });
+  force.tick(state, 1 / 60);
+  const settled = force.exportState() as { readonly alpha: number; readonly running: boolean; readonly velocities: Record<string, unknown> };
+  equal(settled.alpha, 0, 'cooling should end at zero alpha');
+  equal(settled.running, false, 'cooling should stop the layout');
+  deepEqual(settled.velocities, {}, 'a settled layout must not retain replayable momentum');
+
+  force.onDocumentChanged();
+  const reheated = force.tick(state, 1 / 60);
+  assert(!reheated?.positions, 'a later reheat should start from rest instead of replaying old motion');
+});
+
+test('velocity-decay-only changes preserve a settled topology and do not reheat it', () => {
+  const document = graphDocument({
+    nodes: [graphNode('left'), graphNode('right')],
+    edges: [graphEdge('join', 'left', 'right')],
+  });
+  const settings = {
+    repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionRadius: 0,
+    velocityDecay: 0.4, alphaDecay: 1, alphaMin: 0.001,
+  };
+  const force = new ForceLayoutModule('2d', readForceSettings(settings));
+  const state = pipeline(document, {
+    nodeIds: new Set(['left', 'right']), edgeIds: new Set(['join']),
+  });
+  force.tick(state, 1 / 60);
+  const topologyAnalysisCount = force.getDiagnostics().topologyAnalysisCount;
+  force.updateSettings({ ...settings, velocityDecay: 0.8 });
+  const afterUpdate = force.exportState() as { readonly alpha: number; readonly running: boolean };
+  equal(afterUpdate.alpha, 0, 'changing velocity decay must not reheat a settled layout');
+  equal(afterUpdate.running, false, 'changing velocity decay must keep a settled layout stopped');
+  force.tick(state, 1 / 60);
+  equal(force.getDiagnostics().topologyAnalysisCount, topologyAnalysisCount,
+    'velocity decay must not invalidate topology-derived springs');
 });
 
 test('V1.7 axial spring flattens only the selected 3D coordinate and respects pins', () => {

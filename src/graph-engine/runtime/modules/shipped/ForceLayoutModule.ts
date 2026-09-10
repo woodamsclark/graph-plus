@@ -84,8 +84,11 @@ export interface ForceLayoutDiagnosticsV1 {
 }
 
 const NATIVE_ACTIVE_DRAG_ALPHA = 0.3;
+const MAX_ACTIVE_DRAG_LINK_CORRECTION = 0.5;
 const FIXED_STEP_SECONDS = 1 / 60;
 const RESTORED_SPEED_REJECTION_MULTIPLIER = 4;
+const MAX_LINK_CORRECTION_PER_STEP = 1;
+const COMPONENT_PACKING_BASE_DISTANCE = 250;
 
 export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private readonly velocities = new Map<string, MutableVec3>();
@@ -119,7 +122,14 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   ) {}
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
-    this.settings = readForceSettings(settings);
+    const nextSettings = readForceSettings(settings);
+    const dampingOnlyChange = forceSettingsEqualExceptVelocityDecay(this.settings, nextSettings)
+      && this.settings.velocityDecay !== nextSettings.velocityDecay;
+    this.settings = nextSettings;
+    // Damping changes should tame existing motion, not create more of it. They
+    // neither affect the topology-derived spring data nor need to reheat a
+    // settled layout.
+    if (dampingOnlyChange) return;
     this.topologyDocumentSource = null;
     this.reheatForChange();
   }
@@ -275,7 +285,6 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     }
     this.componentTargets = buildComponentPackingTargetsV1(
       this.topology.components,
-      this.settings.springLength,
       this.settings.componentPadding,
       this.dimensions,
     );
@@ -351,8 +360,11 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     deltaSeconds: number,
     dragActive: boolean,
   ): GraphModuleTickResultV1 | undefined {
-    this.alphaTarget = dragActive ? NATIVE_ACTIVE_DRAG_ALPHA : 0;
-    if (dragActive && !this.dragWasActive) this.alpha = Math.max(this.alpha, NATIVE_ACTIVE_DRAG_ALPHA);
+    this.alphaTarget = dragActive ? this.activeDragAlpha(state) : 0;
+    // Drag begins a bounded interactive heating phase. Do not carry hotter
+    // startup or document-change heat into direct manipulation, where it would
+    // compound with deliberately strong incident links.
+    if (dragActive && !this.dragWasActive) this.alpha = this.alphaTarget;
     this.dragWasActive = dragActive;
     this.accumulatorSeconds += Math.max(0, Math.min(0.25, deltaSeconds || FIXED_STEP_SECONDS));
     if (this.accumulatorSeconds + 1e-12 < FIXED_STEP_SECONDS) return {
@@ -395,6 +407,10 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       this.running = false;
       this.alpha = 0;
       this.accumulatorSeconds = 0;
+      // Alpha controls how long a simulation runs. Without clearing the
+      // velocity reservoir, a zero-decay layout can store momentum forever
+      // and replay it on the next otherwise-unrelated reheat.
+      this.velocities.clear();
     }
     return {
       ...(changed ? { positions: this.positions } : {}),
@@ -450,20 +466,47 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
         dx = jitter.x * 1e-6; dy = jitter.y * 1e-6; dz = jitter.z * 1e-6;
         length = Math.hypot(dx, dy, dz);
       }
-      const declaredStrength = firstFiniteEdgeValue(pair.edgeIds, state.motionTargets?.edgeStrengthScales, false);
-      const strength = pair.parameters.strength / Math.min(pair.sourceDegree, pair.targetDegree)
-        * finiteNonNegative(declaredStrength, 1)
-        * finiteNonNegative(state.motionTargets?.linkStrengthScale, 1);
+      const strength = this.resolvedLinkStrength(pair, state);
       const declaredLength = firstFiniteEdgeValue(pair.edgeIds, state.motionTargets?.edgeLengths, true);
       const targetLength = (declaredLength ?? pair.parameters.targetLength)
         * finitePositive(state.motionTargets?.linkLengthScale, 1);
-      const amount = (length - targetLength) / length * this.alpha * strength;
+      // A correction above 1 crosses the target distance in one integration
+      // step and feeds an inverted error into the next one. Preserve the
+      // reviewed force equation throughout its stable range, while treating 1
+      // as the strongest meaningful per-step positional correction.
+      const correction = Math.min(MAX_LINK_CORRECTION_PER_STEP, this.alpha * strength);
+      const amount = (length - targetLength) / length * correction;
       dx *= amount; dy *= amount; dz *= amount;
       targetVelocity.x -= dx * pair.bias; targetVelocity.y -= dy * pair.bias; targetVelocity.z -= dz * pair.bias;
       sourceVelocity.x += dx * (1 - pair.bias); sourceVelocity.y += dy * (1 - pair.bias); sourceVelocity.z += dz * (1 - pair.bias);
       clampVelocity(sourceVelocity, this.settings.maxSpeed, this.dimensions);
       clampVelocity(targetVelocity, this.settings.maxSpeed, this.dimensions);
     }
+  }
+
+  private activeDragAlpha(state: GraphModulePipelineStateV1): number {
+    const draggedNodeId = state.draggedNodeId;
+    if (!draggedNodeId) return NATIVE_ACTIVE_DRAG_ALPHA;
+    let strongestIncidentLink = 0;
+    for (const pair of this.springs) {
+      if (pair.sourceId !== draggedNodeId && pair.targetId !== draggedNodeId) continue;
+      strongestIncidentLink = Math.max(strongestIncidentLink, this.resolvedLinkStrength(pair, state));
+    }
+    if (strongestIncidentLink <= 0) return NATIVE_ACTIVE_DRAG_ALPHA;
+    return Math.min(
+      NATIVE_ACTIVE_DRAG_ALPHA,
+      MAX_ACTIVE_DRAG_LINK_CORRECTION / strongestIncidentLink,
+    );
+  }
+
+  private resolvedLinkStrength(
+    pair: PreparedSpring,
+    state: GraphModulePipelineStateV1,
+  ): number {
+    const declaredStrength = firstFiniteEdgeValue(pair.edgeIds, state.motionTargets?.edgeStrengthScales, false);
+    return pair.parameters.strength / Math.min(pair.sourceDegree, pair.targetDegree)
+      * finiteNonNegative(declaredStrength, 1)
+      * finiteNonNegative(state.motionTargets?.linkStrengthScale, 1);
   }
 
   private applyD3ManyBody(): void {
@@ -702,6 +745,32 @@ function readAxialSpringAxis(value: JsonValue | undefined): GraphAxialSpringAxis
   return value === 'x' || value === 'y' || value === 'z' ? value : 'off';
 }
 
+function forceSettingsEqualExceptVelocityDecay(left: ForceSettings, right: ForceSettings): boolean {
+  return left.repulsionStrength === right.repulsionStrength
+    && left.springStrength === right.springStrength
+    && left.springLength === right.springLength
+    && left.centeringStrength === right.centeringStrength
+    && left.alphaDecay === right.alphaDecay
+    && left.alphaMin === right.alphaMin
+    && left.repulsionMinDistance === right.repulsionMinDistance
+    && left.barnesHutTheta === right.barnesHutTheta
+    && left.maxSpeed === right.maxSpeed
+    && left.minimumAffinity === right.minimumAffinity
+    && left.maximumAffinity === right.maximumAffinity
+    && left.evidenceLogFactor === right.evidenceLogFactor
+    && left.reciprocalBoost === right.reciprocalBoost
+    && left.hubDiscountExponent === right.hubDiscountExponent
+    && left.minimumSpringStrengthScale === right.minimumSpringStrengthScale
+    && left.maximumSpringStrengthScale === right.maximumSpringStrengthScale
+    && left.minimumSpringLengthScale === right.minimumSpringLengthScale
+    && left.maximumSpringLengthScale === right.maximumSpringLengthScale
+    && left.componentPadding === right.componentPadding
+    && left.collisionRadius === right.collisionRadius
+    && left.collisionStrength === right.collisionStrength
+    && left.axialSpringAxis === right.axialSpringAxis
+    && left.axialSpringStiffness === right.axialSpringStiffness;
+}
+
 function collisionCell(position: Vec3, size: number): { x: number; y: number; z: number } {
   return {
     x: Math.floor(position.x / size),
@@ -772,15 +841,14 @@ export function coordinateWeightedSpringStrengthV1(
 
 export function buildComponentPackingTargetsV1(
   components: readonly GraphTopologyComponentV1[],
-  springLength: number,
   padding: number,
   dimensions: GraphDimensionsV1,
 ): ReadonlyMap<string, Vec3> {
   const targets = new Map<string, Vec3>();
   if (!components.length) return targets;
   const radii = components.map((component) => Math.max(
-    springLength * 0.35,
-    Math.sqrt(component.nodeIds.length) * springLength * 0.65,
+    COMPONENT_PACKING_BASE_DISTANCE * 0.35,
+    Math.sqrt(component.nodeIds.length) * COMPONENT_PACKING_BASE_DISTANCE * 0.65,
   ));
   targets.set(components[0].id, { x: 0, y: 0, z: 0 });
   let ringRadius = radii[0] + padding;

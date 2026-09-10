@@ -103,7 +103,7 @@ for the Graph+ profile where supported.
 | Link strength | 1 |
 | Link distance | 250 |
 | Center force | 0.1 |
-| Motion damping | 0.4 |
+| Velocity decay | 0.4 |
 | Collision spacing | 60 |
 | 3D axial spring | Off |
 | Quick settings | Collapsed |
