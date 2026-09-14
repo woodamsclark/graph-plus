@@ -52,6 +52,13 @@ tagParentStrength = ordinaryWeightedStrength * 1.5
 These values are release-characterization defaults. Live acceptance may tune them
 without changing the public tag contract.
 
+All endpoint pairs, including ordinary relationships, resolve through one universal
+topology-layout policy. The default policy expresses the currently shipped evidence,
+reciprocity, hub-discount, affinity, length, and strength equations. Relation policies
+are declarative field overrides, not a second force path. A validated policy snapshot
+may later be replaced while a session is mounted without changing canonical graph
+data.
+
 ## 2. Motivation
 
 Graph+ currently performs tag projection privately in `VaultGraphAdapter`:
@@ -356,30 +363,137 @@ The target is an equilibrium input, not a guarantee of exact final distance. Man
 children must spread around their parent, and collision, repulsion, other links, pins,
 and memberships remain authoritative participants.
 
-### 7.4 Declarative implementation
+### 7.4 Universal declarative topology policy
 
-The current force settings contain one global `hubDiscountExponent`. The extension
-should remain data-driven and deterministic, for example:
+The current force settings expose individual global scalars such as
+`evidenceLogFactor`, `reciprocalBoost`, and `hubDiscountExponent`. V2.0 gathers their
+meaning into one immutable, validated topology-layout policy. Ordinary and specialized
+relationships use the same policy-resolution and force pipeline.
+
+An equivalent public shape is:
 
 ```ts
-interface GraphRelationLayoutPolicyV1 {
+interface GraphEvidenceGrowthPolicyV1 {
+  readonly curve: 'none' | 'log2';
+  readonly coefficient: number;
+}
+
+interface GraphSpringMappingPolicyV1 {
+  readonly strengthExponent: number;
+  readonly lengthExponent: number;
+  readonly minimumStrengthScale: number;
+  readonly maximumStrengthScale: number;
+  readonly minimumLengthScale: number;
+  readonly maximumLengthScale: number;
+  readonly targetLengthScale: number;
+  readonly strengthScale: number;
+}
+
+interface GraphRecursiveRegionSpacingPolicyV1 {
+  readonly mode: 'off' | 'target-region-closure';
+}
+
+interface GraphTopologyPairPolicyV1 {
+  readonly evidenceGrowth: GraphEvidenceGrowthPolicyV1;
+  readonly reciprocityScale: number;
+  readonly hubDiscountExponent: number;
+  readonly minimumAffinity: number;
+  readonly maximumAffinity: number;
+  readonly spring: GraphSpringMappingPolicyV1;
+  readonly recursiveRegionSpacing: GraphRecursiveRegionSpacingPolicyV1;
+}
+
+interface GraphRelationPolicyOverrideV1 {
+  readonly id: string;
   readonly edgeToken: string;
-  readonly hubDiscountExponent?: number;
-  readonly targetLengthScale?: number;
-  readonly strengthScale?: number;
-  readonly recursiveRegionSpacing?: boolean;
+  readonly priority: number;
+  readonly override: PartialGraphTopologyPairPolicyV1;
+}
+
+interface GraphTopologyLayoutPolicyV1 {
+  readonly version: 1;
+  readonly defaultPairPolicy: GraphTopologyPairPolicyV1;
+  readonly relationOverrides: readonly GraphRelationPolicyOverrideV1[];
 }
 ```
 
-The shipped Graph+ profile registers one policy for `relation:tag-parent`. Graph
-Engine interprets the policy generically; it does not branch on Obsidian, vault paths,
-or consumer identity.
+`PartialGraphTopologyPairPolicyV1` is a structural partial form defined by the public
+contract; it does not accept functions, source text, or unbounded expressions. Exact
+exported names may follow repository conventions.
 
-Policy precedence must be deterministic when an endpoint pair carries multiple
-matching tokens. V2.0 generated tag-parent edges carry one structural relation token,
-so arbitrary multi-policy composition is deferred. Conflicting matches should be
-rejected or resolved by one published precedence rule rather than multiplied without
-bounds.
+The shipped default policy reproduces current ordinary topology behavior:
+
+```text
+evidence growth: log2, coefficient 0.35
+reciprocity scale: 1.25
+hub discount exponent: 0.25
+affinity bounds: 0.2 through 2.5
+spring strength exponent: 0.65
+spring length exponent: -0.55
+spring strength scale bounds: 0.35 through 2
+spring length scale bounds: 0.55 through 1.85
+target length scale: 1
+strength scale: 1
+recursive region spacing: off
+```
+
+The engine-owned tag-parent override is:
+
+```text
+edge token: relation:tag-parent
+hub discount exponent: 0
+target length scale: 0.5
+strength scale: 1.5
+recursive region spacing: target-region-closure
+```
+
+No force implementation branches on Obsidian, PatternSmith, vault paths, or consumer
+identity. It resolves an effective pair policy and evaluates the same bounded
+equations for every relationship.
+
+### 7.5 Resolution and precedence
+
+For every aggregated endpoint pair, Graph Engine:
+
+1. starts with `defaultPairPolicy`;
+2. selects relation overrides whose exact `edgeToken` occurs on the pair;
+3. sorts matching overrides by ascending `priority`, then stable `id`;
+4. applies structural field replacement in that order, so the highest priority wins
+   for a field declared by several matches;
+5. validates the resolved finite bounds and coefficients; and
+6. calculates affinity, spring mapping, and optional structural spacing once.
+
+Scales replace inherited scale fields; they are not repeatedly multiplied merely
+because an edge carries several relation tokens. Input order and token order cannot
+change the result. Duplicate override IDs or otherwise invalid policy snapshots reject
+atomically.
+
+### 7.6 Live policy replacement
+
+A mounted session may accept a complete replacement
+`GraphTopologyLayoutPolicyV1` through the existing engine settings/command boundary.
+Replacement is atomic:
+
+- validate and copy the complete immutable snapshot before activation;
+- retain the previous policy if validation fails;
+- invalidate cached effective pair policies and affected spring parameters;
+- preserve canonical nodes and edges, positions, camera, pins, selection, focus,
+  filters, and consumer state;
+- reheat the free layout once without resetting coordinates; and
+- persist only through the existing consumer/profile/session settings-precedence
+  boundary.
+
+The first implementation rebuilds all pair parameters on replacement. Later versions
+may narrow work only through dependency-aware invalidation. A change to evidence,
+reciprocity, hub discount, or affinity bounds can change the graph-wide median
+reference and therefore requires renormalizing every active pair. A change confined to
+post-affinity spring mapping may update only matching pairs when the resulting behavior
+is identical. Policy evaluation and replacement are event-driven and never occur once
+per frame.
+
+Existing scalar settings migrate into the equivalent fields of
+`defaultPairPolicy`. With no relation overrides, the numerical ordinary-layout oracle
+must remain unchanged.
 
 ## 8. Membership behavior
 
@@ -435,6 +549,7 @@ Diagnostics should report:
 - projected tag, membership, and parent-edge counts;
 - cached closure counts and effective region-radius ranges;
 - rejected projection reasons without consumer objects;
+- active topology-layout policy version and resolved override counts;
 - number of pairs matched by the tag-parent layout policy; and
 - effective tag-parent length and strength ranges.
 
@@ -466,6 +581,14 @@ The feature is accepted when automated fixtures and live Graph+ smoke testing sh
 16. A large tag fixture does not introduce per-frame tag reconstruction or quadratic
     hierarchy analysis.
 17. The generated client artifact and consumer smoke fixtures remain synchronized.
+18. The default policy with no relation overrides matches the current ordinary-layout
+    numerical oracle.
+19. Relation-override resolution is independent of document edge order, token order,
+    and override declaration order.
+20. Replacing a valid policy on a mounted session retains graph and interaction state,
+    rebuilds required spring parameters, and reheats once.
+21. Replacing a policy with invalid curves, coefficients, priorities, or bounds leaves
+    the prior policy and simulation state authoritative.
 
 ## 12. Non-goals
 
@@ -479,6 +602,7 @@ V2.0 does not include:
 - making region boundaries authoritative membership containers;
 - applying tight hierarchy physics to ordinary tag membership;
 - exposing arbitrary consumer force callbacks;
+- evaluating or compiling consumer-authored mathematical expressions;
 - guaranteeing exact settled distances in a multi-force simulation; or
 - changing consumer domain data when a generated tag node is dragged or activated.
 
@@ -504,5 +628,11 @@ Approval of this design confirms:
 9. Graph+ preserves current tag IDs during migration so saved view state survives.
 10. PatternSmith and other consumers may opt into the same tag facility without Graph
    Engine learning their source vocabulary.
-11. Exact tuning remains subject to live acceptance, while ownership, proportional
+11. Ordinary and specialized relationships resolve through one universal declarative
+    topology-layout policy rather than separate solver branches.
+12. The default policy explicitly represents today's ordinary relationship equations,
+    and relation policies deterministically override selected fields.
+13. Valid policies may be replaced atomically during a mounted session without
+    changing canonical graph data or resetting view state.
+14. Exact tuning remains subject to live acceptance, while ownership, proportional
     scaling, neutrality, and deterministic behavior are contract decisions.
