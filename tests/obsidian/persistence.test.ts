@@ -37,6 +37,23 @@ test('legacy flat settings copy forward into the Graph+ consumer namespace', () 
   equal(migrated.data.engine.settingsSchemaVersion, 1, 'engine namespace should initialize independently');
 });
 
+test('Graph+ color overrides migrate additively and discard invalid values', () => {
+  const migrated = migrateGraphPlusPluginDataV1({
+    consumers: {
+      graphPlus: {
+        dataSchemaVersion: 1,
+        consumerSettings: {
+          colors: { background: '#123ABC', noteNode: 'invalid', tagNode: '#fedcba' },
+        },
+      },
+    },
+  });
+  deepEqual(migrated.data.consumers.graphPlus.consumerSettings.colors, {
+    background: '#123abc',
+    tagNode: '#fedcba',
+  }, 'valid color overrides should normalize while invalid saved values return to theme ownership');
+});
+
 test('engine corruption recovers without replacing readable Graph+ consumer data', () => {
   const first = migrateGraphPlusPluginDataV1({ base: { showTags: false } });
   const namespaced = withEngineSettingsV1(first.data, { profileSettings: { theme: 'quiet' } }, {

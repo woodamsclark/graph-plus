@@ -81,6 +81,12 @@ If you want to regenerate placement and camera state for the vault, use **Settin
 Community plugins → Graph+ → Reset graph layout data**. This does not change notes,
 links, filters, Form state, colors, labels, or settings.
 
+### Customize graph colors
+
+Use **Settings → Community plugins → Graph+ → Graph+ colors** to override the graph
+background, ordinary note nodes, or tag nodes. Each color can be reset independently
+to return that role to the active Obsidian theme. Changes apply to open Graph+ views.
+
 ## Default experience
 
 These are the defaults for a new Graph+ profile. Settings can be changed globally or
@@ -107,6 +113,7 @@ for the Graph+ profile where supported.
 | Collision spacing | 60 |
 | 3D axial spring | Off |
 | Quick settings | Collapsed |
+| Graph colors | Inherited from the active Obsidian theme |
 
 ## For plugin developers
 

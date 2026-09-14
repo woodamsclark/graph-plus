@@ -327,6 +327,21 @@ test('V2 default Obsidian theme uses the Graph+ kosmos palette without affecting
     'a selected community theme should continue to own its graph node color');
 });
 
+test('Graph+ color overrides layer over the active Obsidian palette', () => {
+  const value = runtimeHarness();
+  value.document.body.style.backgroundColor = 'rgb(30, 30, 30)';
+  const palette = new ThemeStyleResolver(
+    () => value.document.body,
+    () => true,
+    () => ({ background: '#102030', noteNode: '#405060', tagNode: '#708090' }),
+  ).getPalette();
+  deepEqual(palette.colors.background, parseGraphColorV2('#102030'), 'background override should replace the resolved theme field');
+  deepEqual(palette.colors.node, parseGraphColorV2('#405060'), 'note override should replace the ordinary node role');
+  deepEqual(palette.colors.tagNode, parseGraphColorV2('#708090'), 'tag override should replace the tag node role');
+  deepEqual(palette.colors.edge, DEFAULT_OBSIDIAN_GRAPH_PLUS_THEME_V2.colors.edge,
+    'unoverridden theme roles should retain their resolved palette values');
+});
+
 test('V1.6 new-mode 3D preserves depth while keeping nodes visible and finger-selectable', () => {
   const value = runtimeHarness();
   const canvas = value.document.createElement('canvas');

@@ -7,6 +7,7 @@ import {
   type GraphFontV2,
   type GraphVisualThemeV2,
 } from '../graph-engine/runtime/theme/index.ts';
+import type { GraphPlusColorOverridesV1 } from '../graph-plus/consumer/index.ts';
 
 export const DEFAULT_OBSIDIAN_GRAPH_PLUS_THEME_V2: GraphVisualThemeV2 = freezeGraphVisualThemeV2({
   revision: 0,
@@ -30,6 +31,7 @@ export class ThemeStyleResolver {
   constructor(
     private getRoot: () => HTMLElement = () => document.body,
     private isDefaultObsidianTheme: () => boolean = () => false,
+    private getOverrides: () => GraphPlusColorOverridesV1 = () => ({}),
   ) {}
 
   private read(styles: CSSStyleDeclaration, ...vars: string[]): string {
@@ -83,9 +85,9 @@ export class ThemeStyleResolver {
   getPalette(revision = 0): GraphVisualThemeV2 {
     const root = this.getRoot();
     const styles = root.ownerDocument.defaultView?.getComputedStyle(root);
-    if (!styles) return freezeGraphVisualThemeV2({ ...DEFAULT_GRAPH_VISUAL_THEME_V2, revision });
+    if (!styles) return this.withOverrides({ ...DEFAULT_GRAPH_VISUAL_THEME_V2, revision });
     if (this.isDefaultObsidianTheme()) {
-      return freezeGraphVisualThemeV2({
+      return this.withOverrides({
         ...DEFAULT_OBSIDIAN_GRAPH_PLUS_THEME_V2,
         revision,
         labelFont: font(styles),
@@ -137,7 +139,7 @@ export class ThemeStyleResolver {
         '--graph-node-focused',
         '--text-normal'
       ), fallback.nodeOutline);
-    return freezeGraphVisualThemeV2({
+    return this.withOverrides({
       revision,
       colors: {
         background,
@@ -153,6 +155,22 @@ export class ThemeStyleResolver {
         animaAccent: highlighted,
       },
       labelFont: font(styles),
+    });
+  }
+
+  private withOverrides(theme: GraphVisualThemeV2): GraphVisualThemeV2 {
+    const overrides = this.getOverrides();
+    const background = overrides.background ? parseGraphColorV2(overrides.background) : undefined;
+    const node = overrides.noteNode ? parseGraphColorV2(overrides.noteNode) : undefined;
+    const tagNode = overrides.tagNode ? parseGraphColorV2(overrides.tagNode) : undefined;
+    return freezeGraphVisualThemeV2({
+      ...theme,
+      colors: {
+        ...theme.colors,
+        ...(background ? { background } : {}),
+        ...(node ? { node } : {}),
+        ...(tagNode ? { tagNode } : {}),
+      },
     });
   }
 

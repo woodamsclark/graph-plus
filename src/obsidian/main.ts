@@ -26,6 +26,7 @@ import {
 } from './ObsidianWorkspaceEventBus.ts';
 import { GraphEngineSettingsControllerV1 } from './settings/GraphEngineSettingsController.ts';
 import { ThemeStyleResolver } from './themeStyleResolver.ts';
+import type { GraphVisualThemeV2 } from '../graph-engine/runtime/theme/index.ts';
 import { ObsidianGraphEngineSessionUiHostV1 } from './graph-engine-ui/index.ts';
 import {
   migrateGraphPlusPluginDataV1,
@@ -47,6 +48,7 @@ export default class GraphEnginePlugin extends Plugin {
   private graphPlusLease?: GraphEngineLeaseV1;
   private checkpointFileStore?: GraphPlusCheckpointFileStoreV1;
   private vaultGraphSource?: ObsidianVaultGraphSourceV1;
+  private refreshActiveThemes?: () => void;
   private saveQueue: Promise<void> = Promise.resolve();
 
   async onload() {
@@ -79,11 +81,9 @@ export default class GraphEnginePlugin extends Plugin {
       profiles,
       modules,
       getGlobalOverrides: () => this.pluginData.engine.globalSettings,
-      resolveThemePalette: (container) => new ThemeStyleResolver(
-        () => container,
-        () => selectedCommunityTheme(this.app) === '',
-      ).getPalette(),
+      resolveThemePalette: (container) => this.resolveGraphPlusThemePalette(container),
     });
+    this.refreshActiveThemes = () => sessionFactory.refreshActiveThemes();
     this.registerEvent(this.app.workspace.on('css-change', () => sessionFactory.refreshActiveThemes()));
     const capabilities = [...new Set(modules.descriptors().flatMap((module) => module.capabilities))];
     const providerCore = new GraphEngineProviderCoreV1({
@@ -223,16 +223,26 @@ export default class GraphEnginePlugin extends Plugin {
     this.graphEngineProvider = undefined;
     this.graphEngineCore = undefined;
     this.vaultGraphSource = undefined;
+    this.refreshActiveThemes = undefined;
   }
 
   async updateGraphPlusSettings(settings: GraphPlusConsumerSettingsV1) {
     this.settings = { ...settings };
     this.pluginData = withGraphPlusSettingsV1(this.pluginData, this.settings);
     await this.persistPluginData();
+    this.refreshActiveThemes?.();
     if (!settings.enabled) {
       this.app.workspace.detachLeavesOfType(GRAPH_PLUS_TYPE);
       this.app.workspace.detachLeavesOfType(LOCAL_GRAPH_PLUS_TYPE);
     }
+  }
+
+  resolveGraphPlusThemePalette(container = this.app.workspace.containerEl): GraphVisualThemeV2 {
+    return new ThemeStyleResolver(
+      () => container,
+      () => selectedCommunityTheme(this.app) === '',
+      () => this.settings.colors,
+    ).getPalette();
   }
 
   acquireGraphPlusLease(): GraphEngineLeaseV1 {

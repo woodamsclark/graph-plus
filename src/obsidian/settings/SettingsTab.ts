@@ -1,5 +1,7 @@
 import { App, Modal, Notice, PluginSettingTab, Setting } from 'obsidian';
 import type GraphEnginePlugin from '../main.ts';
+import type { GraphPlusColorOverridesV1 } from '../../graph-plus/consumer/index.ts';
+import type { GraphColorV2 } from '../../graph-engine/runtime/theme/index.ts';
 import { GraphEngineSettingsPanelV1 } from './GraphEngineSettingsPanel.ts';
 import { preserveSettingsScrollV1 } from './SettingsScroll.ts';
 
@@ -50,6 +52,43 @@ export class GraphEngineSettingTab extends PluginSettingTab {
           );
           this.display();
         }));
+
+    parent.createEl('h3', { text: 'Graph+ colors' });
+    const palette = this.graphPlus.resolveGraphPlusThemePalette();
+    this.renderColorOverride(parent, 'Background', 'Graph canvas background.', 'background', palette.colors.background);
+    this.renderColorOverride(parent, 'Note nodes', 'Ordinary note node color.', 'noteNode', palette.colors.node);
+    this.renderColorOverride(parent, 'Tag nodes', 'Tag node color.', 'tagNode', palette.colors.tagNode);
+  }
+
+  private renderColorOverride(
+    parent: HTMLElement,
+    name: string,
+    description: string,
+    key: keyof GraphPlusColorOverridesV1,
+    inherited: GraphColorV2,
+  ): void {
+    const override = this.graphPlus.settings.colors[key];
+    const setting = new Setting(parent)
+      .setName(name)
+      .setDesc(`${description} ${override ? 'Graph+ override.' : 'Inherited from the active Obsidian theme.'}`)
+      .addColorPicker((picker) => picker
+        .setValue(override ?? colorHex(inherited))
+        .onChange(async (color) => {
+          await this.graphPlus.updateGraphPlusSettings({
+            ...this.graphPlus.settings,
+            colors: { ...this.graphPlus.settings.colors, [key]: color.toLowerCase() },
+          });
+          this.display();
+        }));
+    if (override) setting.addExtraButton((button) => button
+      .setIcon('rotate-ccw')
+      .setTooltip('Use active Obsidian theme')
+      .onClick(async () => {
+        const colors = { ...this.graphPlus.settings.colors };
+        delete colors[key];
+        await this.graphPlus.updateGraphPlusSettings({ ...this.graphPlus.settings, colors });
+        this.display();
+      }));
   }
 
   private renderRecovery(parent: HTMLElement): void {
@@ -68,6 +107,12 @@ export class GraphEngineSettingTab extends PluginSettingTab {
         .setDisabled(!canReset)
         .onClick(() => new GraphLayoutResetModal(this.app, this.graphPlus).open()));
   }
+}
+
+function colorHex(color: GraphColorV2): string {
+  const channel = (value: number) => Math.round(Math.max(0, Math.min(1, value)) * 255)
+    .toString(16).padStart(2, '0');
+  return `#${channel(color.r)}${channel(color.g)}${channel(color.b)}`;
 }
 
 class GraphLayoutResetModal extends Modal {
