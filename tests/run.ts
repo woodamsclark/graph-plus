@@ -6,6 +6,7 @@ import './core/filter.test.ts';
 import './core/profile.test.ts';
 import './core/regions.test.ts';
 import './core/topology.test.ts';
+import './core/tags.test.ts';
 import './core/view-state.test.ts';
 import './runtime/interaction.test.ts';
 import './runtime/camera.test.ts';

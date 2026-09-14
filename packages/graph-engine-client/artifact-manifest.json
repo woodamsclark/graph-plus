@@ -2,7 +2,7 @@
   "artifact": "@graph-plus/graph-engine-client",
   "artifactVersion": "1.7.1",
   "protocolVersion": 1,
-  "contentSha256": "19e4f91f25768fc05ac8bd21c2ced3ac3b726f8d8de4492c6a886b230b1688a5",
+  "contentSha256": "49321130f9ac2f434f38b3f09c6434ac387724b4466ea109e702b51a12a83308",
   "generatedFrom": "src/graph-engine/public.ts",
   "publicFiles": [
     "src/graph-engine/public.ts",
@@ -15,6 +15,7 @@
     "src/graph-engine/contracts/v1/profile.ts",
     "src/graph-engine/contracts/v1/service.ts",
     "src/graph-engine/contracts/v1/session.ts",
+    "src/graph-engine/contracts/v1/tag.ts",
     "src/graph-engine/contracts/v1/ui.ts",
     "src/graph-engine/contracts/v1/values.ts",
     "src/graph-engine/contracts/v1/view-state.ts",
@@ -23,6 +24,9 @@
     "src/graph-engine/core/filter/index.ts",
     "src/graph-engine/core/state/GraphViewState.ts",
     "src/graph-engine/core/state/index.ts",
+    "src/graph-engine/core/tags/GraphTagProjector.ts",
+    "src/graph-engine/core/tags/index.ts",
+    "src/graph-engine/core/topology/GraphTopologyLayoutPolicy.ts",
     "src/graph-engine/service/GraphEngineWorkspaceClient.ts",
     "src/graph-engine/service/UnavailableGraphSurface.ts"
   ]

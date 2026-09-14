@@ -123,6 +123,56 @@ test('G-ADAPTER reconciliation is stable and increments only changed documents',
   equal(changed.document.nodes.some((node) => node.id === noteNodeId('Alpha.md')), false, 'removed notes should reconcile away');
 });
 
+test('G-ADAPTER engine-owned tag projection preserves ordinary graph structure', () => {
+  const fixture = snapshot();
+  const adapter = new VaultGraphAdapterV1<FakeFile>({ countDuplicateLinks: true });
+  const tagged = adapter.build(fixture.value).document;
+  deepEqual(
+    tagged.nodes.filter((node) => node.attributes?.kind === 'note'),
+    [
+      {
+        id: noteNodeId('Alpha.md'), label: 'Alpha', tokens: ['kind:note', 'tag:course'],
+        attributes: { kind: 'note', path: 'Alpha.md', extension: 'md', tags: ['course'] },
+        positionHint: tagged.nodes[0].positionHint,
+      },
+      {
+        id: noteNodeId('folder/Beta.md'), label: 'Beta',
+        tokens: ['kind:note', 'tag:course/greek', 'property:status:due'],
+        attributes: {
+          kind: 'note', path: 'folder/Beta.md', extension: 'md', tags: ['course/greek'],
+          'property:status': ['due'],
+        },
+        positionHint: tagged.nodes[1].positionHint,
+      },
+    ],
+    'moving tag construction into the engine must preserve ordinary note nodes',
+  );
+  const ordinary = tagged.edges.find((edge) => edge.tokens?.includes('relation:link'))!;
+  deepEqual(ordinary, {
+    id: `edge:${encodeURIComponent(noteNodeId('Alpha.md'))}:${encodeURIComponent(noteNodeId('folder/Beta.md'))}`,
+    sourceId: noteNodeId('Alpha.md'), targetId: noteNodeId('folder/Beta.md'), directed: true, weight: 3,
+    tokens: ['relation:link', 'relation:teacher'], attributes: { relations: ['link', 'teacher'] },
+  }, 'moving tag construction into the engine must preserve ordinary note links');
+});
+
+test('G-ADAPTER deep tag hierarchy emits each structural edge once', () => {
+  const fixture = snapshot();
+  const document = new VaultGraphAdapterV1<FakeFile>({ countDuplicateLinks: true }).build({
+    ...fixture.value,
+    notes: fixture.value.notes.map((note, index) => ({
+      ...note,
+      tags: [index === 0 ? 'quote/1/2/1' : 'quote/1/2/2'],
+    })),
+  }).document;
+  const parentEdges = document.edges.filter((edge) => edge.tokens?.includes('relation:tag-parent'));
+  deepEqual(parentEdges.map((edge) => [edge.sourceId, edge.targetId, edge.weight]), [
+    ['tag:quote', 'tag:quote/1', 1],
+    ['tag:quote/1', 'tag:quote/1/2', 1],
+    ['tag:quote/1/2', 'tag:quote/1/2/1', 1],
+    ['tag:quote/1/2', 'tag:quote/1/2/2', 1],
+  ], 'shared path prefixes should be structure rather than accumulated evidence weight');
+});
+
 test('V1.7.3 focus framing includes only the focused node and its visible direct neighbors', () => {
   const fixture = snapshot();
   const document = new VaultGraphAdapterV1<FakeFile>({ countDuplicateLinks: true }).build(fixture.value).document;

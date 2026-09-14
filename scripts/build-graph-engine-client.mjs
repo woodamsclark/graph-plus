@@ -19,6 +19,7 @@ const publicFiles = [
   'src/graph-engine/contracts/v1/profile.ts',
   'src/graph-engine/contracts/v1/service.ts',
   'src/graph-engine/contracts/v1/session.ts',
+  'src/graph-engine/contracts/v1/tag.ts',
   'src/graph-engine/contracts/v1/ui.ts',
   'src/graph-engine/contracts/v1/values.ts',
   'src/graph-engine/contracts/v1/view-state.ts',
@@ -27,6 +28,9 @@ const publicFiles = [
   'src/graph-engine/core/filter/index.ts',
   'src/graph-engine/core/state/GraphViewState.ts',
   'src/graph-engine/core/state/index.ts',
+  'src/graph-engine/core/tags/GraphTagProjector.ts',
+  'src/graph-engine/core/tags/index.ts',
+  'src/graph-engine/core/topology/GraphTopologyLayoutPolicy.ts',
   'src/graph-engine/service/GraphEngineWorkspaceClient.ts',
   'src/graph-engine/service/UnavailableGraphSurface.ts',
 ];
