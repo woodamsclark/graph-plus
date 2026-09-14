@@ -749,6 +749,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.surface.setDimensions(next.dimensions);
       this.moduleHost = replacementHost;
       committed = true;
+      // A replacement layout module may restore a cooled snapshot. Dimension
+      // conversion changes its physical space, so explicitly wake it after the
+      // new host becomes active.
+      this.moduleHost.documentChanged(this.store.readDocument());
       this.moduleHost.viewChanged(this.viewState);
       this.recomputeView(false);
       if (this.moduleView.formActive) this.fitPositions(Object.values(this.moduleView.positions));

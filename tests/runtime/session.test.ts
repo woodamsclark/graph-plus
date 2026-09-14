@@ -391,6 +391,63 @@ test('adaptive force cadence runs hot at 30 Hz, cools at 15 Hz, and settles full
   await session.dispose();
 });
 
+test('layout-affecting filters and dimension changes reheat settled force', async () => {
+  const value = harness();
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
+    modules: { 'force-layout': { enabled: true } },
+  });
+  const session = await value.create();
+  let timestamp = 0;
+  const settle = () => {
+    for (let index = 0; index < 480 && (value.platform.pendingFrames > 0 || value.platform.pendingTimers > 0); index += 1) {
+      value.platform.advanceTime(1_000 / 15);
+      value.platform.flushTimer();
+      timestamp += 1_000 / 15;
+      value.platform.flushFrame(timestamp);
+    }
+  };
+  const forceDiagnostics = () => value.factory.getDiagnostics().sessions[0]?.modules['force-layout'] as {
+    running?: boolean;
+    topologyAnalysisCount?: number;
+    integrationStepCount?: number;
+  } | undefined;
+
+  settle();
+  equal(forceDiagnostics()?.running, false, 'the fixture should settle before visibility changes');
+  const beforeFilterTopology = forceDiagnostics()?.topologyAnalysisCount ?? 0;
+  const beforeFilterSteps = forceDiagnostics()?.integrationStepCount ?? 0;
+  await session.applyFilter({
+    schemaVersion: 1,
+    scope: 'projection',
+    node: { op: 'id-in', ids: ['a', 'c'] },
+  });
+  timestamp += 1_000 / 15;
+  value.platform.flushFrame(timestamp);
+  assert((forceDiagnostics()?.topologyAnalysisCount ?? 0) > beforeFilterTopology,
+    'changing projected visibility should rebuild force topology after settlement');
+  assert((forceDiagnostics()?.integrationStepCount ?? 0) > beforeFilterSteps,
+    'changing projected visibility should restart force integration after settlement');
+
+  settle();
+  equal(forceDiagnostics()?.running, false, 'the filtered fixture should settle before restoring visibility');
+  const beforeClearTopology = forceDiagnostics()?.topologyAnalysisCount ?? 0;
+  await session.clearFilter('projection');
+  timestamp += 1_000 / 15;
+  value.platform.flushFrame(timestamp);
+  assert((forceDiagnostics()?.topologyAnalysisCount ?? 0) > beforeClearTopology,
+    'clearing projected visibility should rebuild force topology after settlement');
+
+  settle();
+  equal(forceDiagnostics()?.running, false, 'the restored fixture should settle before changing dimensions');
+  await session.setSessionOverrides({ dimensions: '3d' });
+  equal(forceDiagnostics()?.running, true, 'dimension conversion should immediately reheat restored force state');
+  timestamp += 1_000 / 15;
+  value.platform.flushFrame(timestamp);
+  assert((forceDiagnostics()?.integrationStepCount ?? 0) > 0,
+    'the replacement 3D force module should resume integration');
+  await session.dispose();
+});
+
 test('R-PROFILE-LIVE-01 refreshes mounted sessions without replacing their surface', async () => {
   let globalOverrides = {};
   const value = harness({ getGlobalOverrides: () => globalOverrides });

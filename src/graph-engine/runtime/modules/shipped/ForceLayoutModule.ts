@@ -102,6 +102,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private alpha = 1;
   private running = true;
   private pinnedKey = '';
+  private projectionFilterKey: string | undefined;
   private regionLayoutKey = '';
   private topologyAnalysisCount = 0;
   private accumulatorSeconds = 0;
@@ -138,6 +139,11 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   onViewChanged(state: GraphModulePipelineStateV1['viewState']): void {
     this.synchronizePinnedNodes(state);
+    const nextProjectionFilterKey = JSON.stringify(state.activeFilters.projection ?? null);
+    if (this.projectionFilterKey !== undefined && nextProjectionFilterKey !== this.projectionFilterKey) {
+      this.reheatForChange();
+    }
+    this.projectionFilterKey = nextProjectionFilterKey;
   }
 
   restoreState(state: JsonValue): void {
