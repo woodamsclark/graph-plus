@@ -42,7 +42,7 @@ test('external client artifact is synchronized with its reviewed public sources'
   equal(contentHash.digest('hex'), manifest.contentSha256, 'artifact content hash');
 });
 
-test('V1.9 registers graph-engine and exposes independent provider and client versions', () => {
+test('Graph+ registers its graph-engine provider and exposes independent provider and client versions', () => {
   const pluginManifest = JSON.parse(readFileSync(join(repositoryRoot, 'manifest.json'), 'utf8')) as {
     id: string; name: string; version: string;
   };
@@ -53,10 +53,10 @@ test('V1.9 registers graph-engine and exposes independent provider and client ve
     version: string;
   };
   equal(pluginManifest.id, 'graph-engine', 'Obsidian plugin ID');
-  equal(pluginManifest.name, 'graph-engine', 'Obsidian plugin name');
-  equal(rootPackage.name, 'graph-engine', 'root package name');
+  equal(pluginManifest.name, 'Graph+', 'Obsidian plugin name');
+  equal(rootPackage.name, 'graph-plus', 'root package name');
   equal(pluginManifest.version, '2.0.0', 'Obsidian release version');
-  equal((pluginManifest as { minAppVersion?: string }).minAppVersion, '1.8.0', 'minimum compatible Obsidian version');
+  equal((pluginManifest as { minAppVersion?: string }).minAppVersion, '1.13.7', 'minimum compatible Obsidian version');
   equal(rootPackage.version, pluginManifest.version, 'root package release version');
   equal(clientPackage.version, '1.7.1', 'public client release version is independently declared');
 });
