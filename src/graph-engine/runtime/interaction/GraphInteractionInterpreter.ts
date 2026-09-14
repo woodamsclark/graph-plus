@@ -553,7 +553,7 @@ export class GraphInteractionInterpreter {
     const nodeIds = this.options.getNodeSelection(hit.nodeId);
     this.command(event, { type: 'set-selection', nodeIds });
     this.command(event, { type: 'set-focus', nodeId: hit.nodeId });
-    this.command(event, { type: 'fit-camera', nodeIds });
+    this.command(event, { type: 'fit-camera', nodeIds, centerNodeId: hit.nodeId });
   }
 
   private readTouchGesture(): TouchGesture | null {

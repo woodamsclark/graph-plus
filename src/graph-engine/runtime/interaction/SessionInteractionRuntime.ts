@@ -230,7 +230,7 @@ export class SessionInteractionRuntime {
         });
         return;
       case 'fit-camera':
-        this.fitVisibleNodes(command.nodeIds);
+        this.fitVisibleNodes(command.nodeIds, command.centerNodeId);
         this.emitViewportIntent(command);
         return;
       case 'set-selection':
@@ -341,14 +341,15 @@ export class SessionInteractionRuntime {
     this.commit({ ...this.options.getViewState(), camera: this.options.camera.getState() });
   }
 
-  private fitVisibleNodes(nodeIds?: readonly string[]): void {
+  private fitVisibleNodes(nodeIds?: readonly string[], centerNodeId?: string): void {
     const positionsById = this.options.getInteractivePositions();
     const candidates = nodeIds ?? [...this.options.getRenderSelection().nodeIds];
     const positions = [...new Set(candidates)]
       .map((id) => positionsById[id])
       .filter(isVec3);
     if (!positions.length) return;
-    this.options.camera.fit(positions, 48, nodeIds === undefined ? undefined : 1.75);
+    const center = centerNodeId === undefined ? undefined : positionsById[centerNodeId];
+    this.options.camera.fit(positions, 48, nodeIds === undefined ? undefined : 1.75, center);
     this.commitCamera();
     this.options.onViewStateChanged('camera');
   }

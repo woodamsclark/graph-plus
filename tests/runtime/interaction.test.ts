@@ -303,6 +303,8 @@ test('R-REGION-04 first tag click selects visible recursive children and second 
   const selected = await session.exportViewState();
   deepEqual(selected.selectedNodeIds, ['subtag', 'nested', 'direct'], 'first click should select visible descendants through child tags and exclude the owner');
   equal(selected.focusedNodeId, 'tag', 'the clicked tag node should own focus');
+  deepEqual(selected.camera.target, selected.positions.tag,
+    'region framing should stay centered on the clicked owner rather than one of its selected descendants');
 
   click(value, canvas, await nodePoint(session, 'tag'), { pointerId: 202 });
   value.platform.flushFrame();
