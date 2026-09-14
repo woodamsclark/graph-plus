@@ -131,9 +131,6 @@ export function compileGraphPlusFilterV1(
 export function graphPlusSessionOverridesV1(lens: GraphPlusLensStateV1): GraphSettingsOverridesV1 {
   return {
     modules: {
-      rendering: {
-        settings: { backgroundColor: 'transparent' },
-      },
       form: {
         enabled: lens.form.enabled,
         settings: {

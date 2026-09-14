@@ -278,8 +278,8 @@ test('Graph+ leaves generic display and force settings in its engine profile nam
     display: { labelMode: 'all', nodeRadiusScale: 2 },
     force: { repulsionStrength: 1234 },
   });
-  deepEqual(overrides.modules?.rendering?.settings, { backgroundColor: 'transparent' },
-    'Graph+ should expose the native host surface without restoring legacy display controls');
+  equal(overrides.modules?.rendering, undefined,
+    'Graph+ should leave background and node colors to the resolved theme palette');
   equal(overrides.modules?.['force-layout'], undefined, 'legacy force lens values should no longer shadow stock profile controls');
   equal(overrides.modules?.form?.enabled, false, 'transient Form ownership should remain in Graph+ session state');
 });
