@@ -8,6 +8,7 @@ import {
   deriveWeightedSpringParametersV1,
   ForceLayoutModule,
   readForceSettings,
+  recursiveTargetRegionNodeCountV1,
 } from '../../src/graph-engine/runtime/modules/shipped/ForceLayoutModule.ts';
 import { DEFAULT_GRAPH_RENDER_THEME_V1 } from '../../src/graph-engine/runtime/render/index.ts';
 import type { GraphModulePipelineStateV1 } from '../../src/graph-engine/runtime/modules/GraphModuleTypes.ts';
@@ -195,6 +196,29 @@ test('L-POLICY-02 recursive tag regions reserve child closure space safely', () 
   const leaf = deriveWeightedSpringParametersV1(policy, settings, { dimensions: '2d', recursiveMemberCount: 0 });
   const region = deriveWeightedSpringParametersV1(policy, settings, { dimensions: '2d', recursiveMemberCount: 15 });
   assert(region.targetLength > leaf.targetLength, 'larger recursive child closures should reserve more parent-child space');
+});
+
+test('L-POLICY-03 region spacing counts nested tag regions rather than ordinary members', () => {
+  const document = graphDocument({
+    nodes: ['tag:root', 'tag:child', 'tag:grandchild', 'note:a', 'note:b'].map((id) => graphNode(id)),
+    edges: [
+      graphEdge('root-child', 'tag:root', 'tag:child', { directed: true, tokens: ['relation:tag-parent'] }),
+      graphEdge('child-grandchild', 'tag:child', 'tag:grandchild', { directed: true, tokens: ['relation:tag-parent'] }),
+      graphEdge('note-child', 'note:a', 'tag:child', { directed: true, tokens: ['relation:tag'] }),
+      graphEdge('note-grandchild', 'note:b', 'tag:grandchild', { directed: true, tokens: ['relation:tag'] }),
+    ],
+    nodeRegions: {
+      version: 1,
+      definitions: [
+        { regionNodeId: 'tag:root', directMemberNodeIds: ['tag:child'] },
+        { regionNodeId: 'tag:child', directMemberNodeIds: ['tag:grandchild', 'note:a'] },
+        { regionNodeId: 'tag:grandchild', directMemberNodeIds: ['note:b'] },
+      ],
+    },
+  });
+  const pair = analyzeGraphTopologyV1(document).pairs.find((candidate) => candidate.edgeIds.includes('root-child'))!;
+  equal(recursiveTargetRegionNodeCountV1(document, pair), 1,
+    'only the nested tag region should reserve structural parent-child space');
 });
 
 test('S-ANALYSIS-01 topology analysis is event-driven rather than frame-driven', () => {

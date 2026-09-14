@@ -248,7 +248,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
         edgeIds: pair.edgeIds,
         parameters: deriveWeightedSpringParametersV1(pair, this.settings, {
           dimensions: this.dimensions,
-          recursiveMemberCount: recursiveTargetRegionMemberCountV1(state.document, pair),
+          recursiveMemberCount: recursiveTargetRegionNodeCountV1(state.document, pair),
         }),
         sourceDegree,
         targetDegree,
@@ -787,7 +787,7 @@ export function deriveWeightedSpringParametersV1(
   };
 }
 
-function recursiveTargetRegionMemberCountV1(document: GraphDocumentV1, pair: GraphTopologyPairV1): number {
+export function recursiveTargetRegionNodeCountV1(document: GraphDocumentV1, pair: GraphTopologyPairV1): number {
   const token = pair.layoutPolicy.recursiveRegionSpacingEdgeToken;
   if (!token || pair.layoutPolicy.recursiveRegionSpacing.mode !== 'target-region-closure') return 0;
   const edgeIds = new Set(pair.edgeIds);
@@ -799,9 +799,11 @@ function recursiveTargetRegionMemberCountV1(document: GraphDocumentV1, pair: Gra
   const queue = [...(directMembers.get(edge.targetId) ?? [])];
   for (let index = 0; index < queue.length; index += 1) {
     const nodeId = queue[index];
-    if (visited.has(nodeId)) continue;
+    // Ordinary members do not make their tag anchor more distant from its
+    // parent. Only nested regions represent structural subtrees that need room.
+    if (visited.has(nodeId) || !directMembers.has(nodeId)) continue;
     visited.add(nodeId);
-    queue.push(...(directMembers.get(nodeId) ?? []));
+    queue.push(...directMembers.get(nodeId)!);
   }
   return visited.size;
 }
