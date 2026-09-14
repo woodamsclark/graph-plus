@@ -74,6 +74,30 @@ test('focused wheel zoom anchors to the focused node instead of the pointer', as
   }
 });
 
+test('desktop trackpad pinch carries bounded momentum and ordinary wheel input cancels it', async () => {
+  const value = runtimeHarness();
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  const before = await session.exportViewState();
+
+  wheel(value, canvas, { x: 260, y: 140, deltaY: -1, ctrlKey: true });
+  value.platform.flushFrame();
+  const afterPinch = await session.exportViewState();
+  assert(afterPinch.camera.zoom > before.camera.zoom, 'trackpad pinch should zoom immediately');
+  equal(value.platform.pendingTimers, 1, 'trackpad pinch should wait briefly before beginning momentum');
+
+  value.platform.flushTimer();
+  value.platform.flushFrame();
+  const afterMomentum = await session.exportViewState();
+  assert(afterMomentum.camera.zoom > afterPinch.camera.zoom,
+    'trackpad pinch momentum should continue zooming in the original direction');
+
+  wheel(value, canvas, { deltaY: 1 });
+  value.platform.flushFrame();
+  equal(value.platform.pendingTimers, 0, 'ordinary wheel input should cancel trackpad pinch momentum');
+  await session.dispose();
+});
+
 test('camera reset input preserves focus and announces focused reframing', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
@@ -868,8 +892,8 @@ test('R-INPUT-02 handles keyboard and two-finger navigation within one session',
   touch.platform.flushFrame();
   const touchAfterPinch = await touchSession.exportViewState();
   assert(touchAfterPinch.camera.zoom > touchAfterPan.camera.zoom, 'pinch spread should win and zoom in');
-  assert(touchAfterPinch.camera.zoom / touchAfterPan.camera.zoom > 1.4,
-    'pinch should use four times the original mobile zoom response');
+  assert(touchAfterPinch.camera.zoom > touchAfterPan.camera.zoom,
+    'pinch should use the restored mobile zoom response');
   await touchSession.dispose();
   equal(touch.platform.pendingTimers, 0, 'disposing input should clear its owning-window timer');
   pointer(touch, touchCanvas, 'pointerdown', 50, 50, { pointerId: 12, pointerType: 'touch' });

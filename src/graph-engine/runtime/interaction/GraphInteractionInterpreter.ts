@@ -64,6 +64,20 @@ interface TouchGesture {
   readonly navigationStarted: boolean;
 }
 
+interface TrackpadPinchMomentum {
+  readonly identity: InputGraphIdentityV1;
+  readonly timestamp: number;
+  readonly anchor: GraphScreenPointV1;
+  velocity: number;
+}
+
+const TRACKPAD_PINCH_ZOOM_MULTIPLIER = 12;
+const TRACKPAD_PINCH_MOMENTUM_DELAY_MS = 48;
+const TRACKPAD_PINCH_MOMENTUM_INTERVAL_MS = 16;
+const TRACKPAD_PINCH_MOMENTUM_INITIAL_SCALE = 0.35;
+const TRACKPAD_PINCH_MOMENTUM_DECAY = 0.78;
+const TRACKPAD_PINCH_MOMENTUM_MIN_DELTA = 0.1;
+
 export class GraphInteractionInterpreter {
   private readonly pointers = new Map<number, PointerRecord>();
   private mode: SinglePointerMode = { kind: 'idle' };
@@ -72,6 +86,8 @@ export class GraphInteractionInterpreter {
   private pendingHover: Extract<GraphInputEventV1, { type: 'pointer-move' }> | null = null;
   private pendingTouchTap: PendingTouchTap | null = null;
   private pendingTouchTapTimer: number | null = null;
+  private trackpadPinchMomentum: TrackpadPinchMomentum | null = null;
+  private trackpadPinchMomentumTimer: number | null = null;
 
   constructor(private readonly options: {
     readonly dimensions: GraphDimensionsV1;
@@ -122,6 +138,7 @@ export class GraphInteractionInterpreter {
 
   reset(): void {
     this.clearPendingTouchTap();
+    this.cancelTrackpadPinchMomentum();
     this.pointers.clear();
     this.mode = { kind: 'idle' };
     this.touchGesture = null;
@@ -129,6 +146,7 @@ export class GraphInteractionInterpreter {
   }
 
   private ingest(event: GraphInputEventV1): void {
+    if (event.type !== 'wheel' || !event.ctrl || event.meta) this.cancelTrackpadPinchMomentum();
     switch (event.type) {
       case 'pointer-down': this.pointerDown(event); return;
       case 'pointer-move': this.pointerMove(event); return;
@@ -367,7 +385,11 @@ export class GraphInteractionInterpreter {
   private wheel(event: Extract<GraphInputEventV1, { type: 'wheel' }>): void {
     const delta = this.normalizedWheel(event);
     if (event.ctrl || event.meta) {
-      this.command(event, { type: 'zoom-by', deltaY: delta.y, anchor: event.point });
+      const zoomDelta = event.ctrl && !event.meta
+        ? delta.y * TRACKPAD_PINCH_ZOOM_MULTIPLIER
+        : delta.y;
+      this.command(event, { type: 'zoom-by', deltaY: zoomDelta, anchor: event.point });
+      if (event.ctrl && !event.meta) this.captureTrackpadPinchMomentum(event, zoomDelta);
       return;
     }
     if (this.dimensions === '3d' && this.options.getFocusedNodeId() !== undefined) {
@@ -466,7 +488,7 @@ export class GraphInteractionInterpreter {
       const originDistance = previous.mode === 'pending' ? previous.startDistance : previous.distance;
       const distanceDelta = next.distance - originDistance;
       if (Math.abs(distanceDelta) >= 1) this.command(event, {
-        type: 'zoom-by', deltaY: -distanceDelta * 12, anchor: next.centroid,
+        type: 'zoom-by', deltaY: -distanceDelta * 3, anchor: next.centroid,
       });
     }
     this.touchGesture = {
@@ -561,6 +583,55 @@ export class GraphInteractionInterpreter {
       x: clamp(event.deltaX * scale, -48, 48),
       y: clamp(event.deltaY * scale, -48, 48),
     };
+  }
+
+  private captureTrackpadPinchMomentum(
+    event: Extract<GraphInputEventV1, { type: 'wheel' }>,
+    zoomDelta: number,
+  ): void {
+    if (this.trackpadPinchMomentumTimer !== null) {
+      this.options.clearTimeout(this.trackpadPinchMomentumTimer);
+      this.trackpadPinchMomentumTimer = null;
+    }
+    const previousVelocity = this.trackpadPinchMomentum?.velocity;
+    const sameDirection = previousVelocity !== undefined
+      && Math.sign(previousVelocity) === Math.sign(zoomDelta);
+    this.trackpadPinchMomentum = {
+      identity: { ...event.identity },
+      timestamp: event.timestamp,
+      anchor: { ...event.point },
+      velocity: sameDirection ? previousVelocity * 0.65 + zoomDelta * 0.35 : zoomDelta,
+    };
+    this.trackpadPinchMomentumTimer = this.options.setTimeout(() => {
+      this.trackpadPinchMomentumTimer = null;
+      if (!this.trackpadPinchMomentum) return;
+      this.trackpadPinchMomentum.velocity *= TRACKPAD_PINCH_MOMENTUM_INITIAL_SCALE;
+      this.advanceTrackpadPinchMomentum();
+    }, TRACKPAD_PINCH_MOMENTUM_DELAY_MS);
+  }
+
+  private advanceTrackpadPinchMomentum(): void {
+    const momentum = this.trackpadPinchMomentum;
+    if (!momentum || Math.abs(momentum.velocity) < TRACKPAD_PINCH_MOMENTUM_MIN_DELTA) {
+      this.cancelTrackpadPinchMomentum();
+      return;
+    }
+    this.command(momentum, { type: 'zoom-by', deltaY: momentum.velocity, anchor: momentum.anchor });
+    momentum.velocity *= TRACKPAD_PINCH_MOMENTUM_DECAY;
+    this.options.onDeferredCommand();
+    this.trackpadPinchMomentumTimer = this.options.setTimeout(
+      () => {
+        this.trackpadPinchMomentumTimer = null;
+        this.advanceTrackpadPinchMomentum();
+      },
+      TRACKPAD_PINCH_MOMENTUM_INTERVAL_MS,
+    );
+  }
+
+  private cancelTrackpadPinchMomentum(): void {
+    if (this.trackpadPinchMomentumTimer !== null) this.options.clearTimeout(this.trackpadPinchMomentumTimer);
+    this.trackpadPinchMomentumTimer = null;
+    this.trackpadPinchMomentum = null;
   }
 
   private command(
