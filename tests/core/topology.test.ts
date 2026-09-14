@@ -1,4 +1,7 @@
-import { analyzeGraphTopologyV1 } from '../../src/graph-engine/core/topology/index.ts';
+import {
+  analyzeGraphTopologyV1,
+  DEFAULT_GRAPH_TOPOLOGY_LAYOUT_POLICY_V1,
+} from '../../src/graph-engine/core/topology/index.ts';
 import {
   buildComponentPackingTargetsV1,
   coordinateWeightedSpringStrengthV1,
@@ -152,6 +155,48 @@ test('L-SPRING-01 maps affinity to bounded length and stiffness', () => {
   assert(strong.targetLength >= 137.5 && weak.targetLength <= 462.5, 'default length mapping should remain in its characterized bounds');
 });
 
+test('L-POLICY-01 tag-parent policy bypasses hub discount without moving ordinary affinity', () => {
+  const document = graphDocument({
+    nodes: ['ordinary-a', 'ordinary-b', 'tag:root', 'tag:a', 'tag:b', 'tag:c'].map((id) => graphNode(id)),
+    edges: [
+      graphEdge('ordinary', 'ordinary-a', 'ordinary-b', { tokens: ['relation:link'] }),
+      graphEdge('tag-a', 'tag:root', 'tag:a', { directed: true, tokens: ['relation:tag-parent'] }),
+      graphEdge('tag-b', 'tag:root', 'tag:b', { directed: true, tokens: ['relation:tag-parent'] }),
+      graphEdge('tag-c', 'tag:root', 'tag:c', { directed: true, tokens: ['relation:tag-parent'] }),
+    ],
+  });
+  const legacy = analyzeGraphTopologyV1(document, [], {
+    ...DEFAULT_GRAPH_TOPOLOGY_LAYOUT_POLICY_V1,
+    relationOverrides: [],
+  });
+  const specialized = analyzeGraphTopologyV1(document);
+  equal(
+    specialized.pairs.find((pair) => pair.edgeIds.includes('ordinary'))?.affinity,
+    legacy.pairs.find((pair) => pair.edgeIds.includes('ordinary'))?.affinity,
+    'relation overrides should use a compatibility median and leave unrelated pairs numerically unchanged',
+  );
+  const oldTag = legacy.pairs.find((pair) => pair.edgeIds.includes('tag-a'))!;
+  const newTag = specialized.pairs.find((pair) => pair.edgeIds.includes('tag-a'))!;
+  assert(newTag.affinity > oldTag.affinity, 'tag-parent pairs should bypass the ordinary hub discount');
+  const settings = readForceSettings({});
+  assert(
+    deriveWeightedSpringParametersV1(newTag, settings).targetLength
+      < deriveWeightedSpringParametersV1(oldTag, settings).targetLength,
+    'a leaf tag child should bind more tightly to its parent',
+  );
+});
+
+test('L-POLICY-02 recursive tag regions reserve child closure space safely', () => {
+  const settings = readForceSettings({ collisionRadius: 60, springLength: 250 });
+  const policy = analyzeGraphTopologyV1(graphDocument({
+    nodes: [graphNode('tag:root'), graphNode('tag:child')],
+    edges: [graphEdge('tag-edge', 'tag:root', 'tag:child', { directed: true, tokens: ['relation:tag-parent'] })],
+  })).pairs[0];
+  const leaf = deriveWeightedSpringParametersV1(policy, settings, { dimensions: '2d', recursiveMemberCount: 0 });
+  const region = deriveWeightedSpringParametersV1(policy, settings, { dimensions: '2d', recursiveMemberCount: 15 });
+  assert(region.targetLength > leaf.targetLength, 'larger recursive child closures should reserve more parent-child space');
+});
+
 test('S-ANALYSIS-01 topology analysis is event-driven rather than frame-driven', () => {
   const document = graphDocument({
     nodes: [graphNode('a'), graphNode('b')],
@@ -202,6 +247,9 @@ test('S-ANALYSIS-01 topology analysis is event-driven rather than frame-driven',
   }
   equal(force.getDiagnostics().topologyAnalysisCount, 1, 'unchanged frames should reuse the private topology index');
   equal(force.getDiagnostics().physicalSpringCount, 1, 'diagnostics should report aggregated physical pairs rather than canonical-edge loops');
+  force.updateSettings({ topologyLayoutPolicy: { version: 1, defaultPairPolicy: {}, relationOverrides: [] } });
+  force.tick(state, 1 / 60);
+  equal(force.getDiagnostics().topologyAnalysisCount, 1, 'an invalid live policy replacement should retain the active policy and cache');
   const replacement = { ...document, nodes: [...document.nodes], edges: [...document.edges] };
   force.tick({ ...state, sourceDocument: replacement, document: replacement }, 1 / 60);
   equal(force.getDiagnostics().topologyAnalysisCount, 2, 'a new accepted projection object should invalidate analysis once even at the same revision');

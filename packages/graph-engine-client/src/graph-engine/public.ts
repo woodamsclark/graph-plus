@@ -15,3 +15,12 @@ export {
   reconcileGraphViewStateV1,
   validateGraphViewStateV1,
 } from './core/state/index.ts';
+export { projectGraphTagsV1 } from './core/tags/index.ts';
+export {
+  DEFAULT_GRAPH_TOPOLOGY_LAYOUT_POLICY_V1,
+  DEFAULT_GRAPH_TOPOLOGY_PAIR_POLICY_V1,
+  parseGraphTopologyLayoutPolicyV1,
+  readGraphTopologyLayoutPolicyV1,
+  resolveGraphTopologyPairPolicyV1,
+  type ResolvedGraphTopologyPairPolicyV1,
+} from './core/topology/GraphTopologyLayoutPolicy.ts';

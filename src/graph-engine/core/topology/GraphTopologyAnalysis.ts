@@ -1,12 +1,9 @@
-import type { GraphDocumentV1 } from '../../contracts/v1/index.ts';
-
-export interface GraphTopologyAffinitySettingsV1 {
-  readonly minimumAffinity: number;
-  readonly maximumAffinity: number;
-  readonly evidenceLogFactor: number;
-  readonly reciprocalBoost: number;
-  readonly hubDiscountExponent: number;
-}
+import type { GraphDocumentV1, GraphTopologyLayoutPolicyV1 } from '../../contracts/v1/index.ts';
+import {
+  DEFAULT_GRAPH_TOPOLOGY_LAYOUT_POLICY_V1,
+  resolveGraphTopologyPairPolicyV1,
+  type ResolvedGraphTopologyPairPolicyV1,
+} from './GraphTopologyLayoutPolicy.ts';
 
 export interface GraphTopologyConnectionV1 {
   readonly sourceId: string;
@@ -26,6 +23,7 @@ export interface GraphTopologyPairV1 {
   readonly sourceDegree: number;
   readonly targetDegree: number;
   readonly affinity: number;
+  readonly layoutPolicy: ResolvedGraphTopologyPairPolicyV1;
 }
 
 export interface GraphTopologyComponentV1 {
@@ -56,20 +54,12 @@ interface MutablePair {
   readonly relationChannels: Set<string>;
 }
 
-export const DEFAULT_TOPOLOGY_AFFINITY_SETTINGS_V1: GraphTopologyAffinitySettingsV1 = Object.freeze({
-  minimumAffinity: 0.2,
-  maximumAffinity: 2.5,
-  evidenceLogFactor: 0.35,
-  reciprocalBoost: 1.25,
-  hubDiscountExponent: 0.25,
-});
-
 const DEFAULT_RELATION_CHANNEL = '';
 
 export function analyzeGraphTopologyV1(
   document: GraphDocumentV1,
   additionalConnections: readonly GraphTopologyConnectionV1[] = [],
-  settings: GraphTopologyAffinitySettingsV1 = DEFAULT_TOPOLOGY_AFFINITY_SETTINGS_V1,
+  policy: GraphTopologyLayoutPolicyV1 = DEFAULT_GRAPH_TOPOLOGY_LAYOUT_POLICY_V1,
 ): GraphTopologyAnalysisV1 {
   const nodeIds = document.nodes.map((node) => node.id).sort();
   const pairs = aggregatePairs(document);
@@ -113,9 +103,14 @@ export function analyzeGraphTopologyV1(
     relationDegrees.set(channel, countSets(sets));
   }
 
-  const rawAffinities = pairs.map((pair) => rawAffinity(pair, totalDegrees, relationDegrees, settings));
-  const reference = median(rawAffinities.filter((value) => value > 0)) || 1;
-  const analyzedPairs = pairs.map((pair, index): GraphTopologyPairV1 => ({
+  // Specialized relations must not move unrelated springs merely by changing the
+  // normalization median. The reference therefore uses the universal default for
+  // every pair; only the specialized pair's numerator and bounds are overridden.
+  const baselineRawAffinities = pairs.map((pair) => rawAffinity(
+    pair, totalDegrees, relationDegrees, policy.defaultPairPolicy,
+  ));
+  const reference = median(baselineRawAffinities.filter((value) => value > 0)) || 1;
+  const analyzedPairs = pairs.map((pair): GraphTopologyPairV1 => ({
     key: pair.key,
     sourceId: pair.sourceId,
     targetId: pair.targetId,
@@ -127,9 +122,8 @@ export function analyzeGraphTopologyV1(
     relationChannels: [...pair.relationChannels].sort(),
     sourceDegree: effectiveDegree(pair.sourceId, pair.relationChannels, totalDegrees, relationDegrees),
     targetDegree: effectiveDegree(pair.targetId, pair.relationChannels, totalDegrees, relationDegrees),
-    affinity: pair.evidenceMass <= 0
-      ? 0
-      : clamp(rawAffinities[index] / reference, settings.minimumAffinity, settings.maximumAffinity),
+    affinity: pairAffinity(pair, totalDegrees, relationDegrees, policy, reference),
+    layoutPolicy: resolveGraphTopologyPairPolicyV1(pair.relationChannels, policy),
   }));
 
   const componentConnections: GraphTopologyConnectionV1[] = [
@@ -196,15 +190,34 @@ function rawAffinity(
   pair: MutablePair,
   totalDegrees: ReadonlyMap<string, number>,
   relationDegrees: ReadonlyMap<string, ReadonlyMap<string, number>>,
-  settings: GraphTopologyAffinitySettingsV1,
+  settings: Pick<ResolvedGraphTopologyPairPolicyV1,
+    'evidenceGrowth' | 'reciprocalBoost' | 'hubDiscountExponent'>,
 ): number {
   if (pair.evidenceMass <= 0) return 0;
-  const evidence = 1 + settings.evidenceLogFactor * Math.log2(Math.max(1, pair.evidenceMass));
+  const evidence = settings.evidenceGrowth.curve === 'log2'
+    ? 1 + settings.evidenceGrowth.coefficient * Math.log2(Math.max(1, pair.evidenceMass))
+    : 1;
   const reciprocal = pair.forward && pair.reverse ? settings.reciprocalBoost : 1;
   const sourceDegree = effectiveDegree(pair.sourceId, pair.relationChannels, totalDegrees, relationDegrees);
   const targetDegree = effectiveDegree(pair.targetId, pair.relationChannels, totalDegrees, relationDegrees);
   const hubDiscount = 1 / Math.pow(Math.max(1, sourceDegree * targetDegree), settings.hubDiscountExponent);
   return evidence * reciprocal * hubDiscount;
+}
+
+function pairAffinity(
+  pair: MutablePair,
+  totalDegrees: ReadonlyMap<string, number>,
+  relationDegrees: ReadonlyMap<string, ReadonlyMap<string, number>>,
+  policy: GraphTopologyLayoutPolicyV1,
+  reference: number,
+): number {
+  if (pair.evidenceMass <= 0) return 0;
+  const resolved = resolveGraphTopologyPairPolicyV1(pair.relationChannels, policy);
+  return clamp(
+    rawAffinity(pair, totalDegrees, relationDegrees, resolved) / reference,
+    resolved.minimumAffinity,
+    resolved.maximumAffinity,
+  );
 }
 
 function effectiveDegree(

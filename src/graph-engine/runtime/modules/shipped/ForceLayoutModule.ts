@@ -1,6 +1,8 @@
-import type { GraphDimensionsV1, GraphDocumentV1, JsonValue, Vec3 } from '../../../contracts/v1/index.ts';
+import type { GraphDimensionsV1, GraphDocumentV1, GraphTopologyLayoutPolicyV1, JsonValue, Vec3 } from '../../../contracts/v1/index.ts';
 import {
   analyzeGraphTopologyV1,
+  parseGraphTopologyLayoutPolicyV1,
+  readGraphTopologyLayoutPolicyV1,
   graphTopologyPairKeyV1,
   type GraphTopologyAnalysisV1,
   type GraphTopologyComponentV1,
@@ -26,15 +28,7 @@ interface ForceSettings {
   readonly repulsionMinDistance: number;
   readonly barnesHutTheta: number;
   readonly maxSpeed: number;
-  readonly minimumAffinity: number;
-  readonly maximumAffinity: number;
-  readonly evidenceLogFactor: number;
-  readonly reciprocalBoost: number;
-  readonly hubDiscountExponent: number;
-  readonly minimumSpringStrengthScale: number;
-  readonly maximumSpringStrengthScale: number;
-  readonly minimumSpringLengthScale: number;
-  readonly maximumSpringLengthScale: number;
+  readonly topologyLayoutPolicy: GraphTopologyLayoutPolicyV1;
   readonly componentPadding: number;
   readonly collisionRadius: number;
   readonly collisionStrength: number;
@@ -122,6 +116,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   ) {}
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
+    if (settings.topologyLayoutPolicy !== undefined
+      && !parseGraphTopologyLayoutPolicyV1(settings.topologyLayoutPolicy)) return;
     const nextSettings = readForceSettings(settings);
     const dampingOnlyChange = forceSettingsEqualExceptVelocityDecay(this.settings, nextSettings)
       && this.settings.velocityDecay !== nextSettings.velocityDecay;
@@ -246,13 +242,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       sourceId: region.regionNodeId,
       targetId: memberId,
     })));
-    this.topology = analyzeGraphTopologyV1(state.document, membershipConnections, {
-      minimumAffinity: this.settings.minimumAffinity,
-      maximumAffinity: this.settings.maximumAffinity,
-      evidenceLogFactor: this.settings.evidenceLogFactor,
-      reciprocalBoost: this.settings.reciprocalBoost,
-      hubDiscountExponent: this.settings.hubDiscountExponent,
-    });
+    this.topology = analyzeGraphTopologyV1(state.document, membershipConnections, this.settings.topologyLayoutPolicy);
     const physicalPairs = this.topology.pairs.filter((pair) => pair.affinity > 0);
     const degree = new Map<string, number>();
     for (const pair of physicalPairs) {
@@ -266,7 +256,10 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
         sourceId: pair.sourceId,
         targetId: pair.targetId,
         edgeIds: pair.edgeIds,
-        parameters: deriveWeightedSpringParametersV1(pair, this.settings),
+        parameters: deriveWeightedSpringParametersV1(pair, this.settings, {
+          dimensions: this.dimensions,
+          recursiveMemberCount: recursiveTargetRegionMemberCountV1(state.document, pair),
+        }),
         sourceDegree,
         targetDegree,
         bias: sourceDegree / (sourceDegree + targetDegree),
@@ -701,17 +694,9 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 }
 
 export function readForceSettings(settings: Readonly<Record<string, JsonValue>>): ForceSettings {
-  const minimumAffinity = finitePositive(settings.minimumAffinity, 0.2);
-  const maximumAffinity = Math.max(minimumAffinity, finitePositive(settings.maximumAffinity, 2.5));
-  const minimumSpringStrengthScale = finiteNonNegative(settings.minimumSpringStrengthScale, 0.35);
-  const maximumSpringStrengthScale = Math.max(
-    minimumSpringStrengthScale,
-    finitePositive(settings.maximumSpringStrengthScale, 2),
-  );
-  const minimumSpringLengthScale = finitePositive(settings.minimumSpringLengthScale, 0.55);
-  const maximumSpringLengthScale = Math.max(
-    minimumSpringLengthScale,
-    finitePositive(settings.maximumSpringLengthScale, 1.85),
+  const topologyLayoutPolicy = applyLegacyTopologySettings(
+    readGraphTopologyLayoutPolicyV1(settings.topologyLayoutPolicy),
+    settings,
   );
   return {
     repulsionStrength: finiteNonNegative(settings.repulsionStrength, 1000),
@@ -724,20 +709,45 @@ export function readForceSettings(settings: Readonly<Record<string, JsonValue>>)
     repulsionMinDistance: finitePositive(settings.repulsionMinDistance, 30),
     barnesHutTheta: finitePositive(settings.barnesHutTheta, 0.9),
     maxSpeed: finitePositive(settings.maxSpeed, 260),
-    minimumAffinity,
-    maximumAffinity,
-    evidenceLogFactor: finiteNonNegative(settings.evidenceLogFactor, 0.35),
-    reciprocalBoost: finitePositive(settings.reciprocalBoost, 1.25),
-    hubDiscountExponent: finiteNonNegative(settings.hubDiscountExponent, 0.25),
-    minimumSpringStrengthScale,
-    maximumSpringStrengthScale,
-    minimumSpringLengthScale,
-    maximumSpringLengthScale,
+    topologyLayoutPolicy,
     componentPadding: finiteNonNegative(settings.componentPadding, 80),
     collisionRadius: finiteNonNegative(settings.collisionRadius, 60),
     collisionStrength: clampNumber(settings.collisionStrength, 0, 1, 0.5),
     axialSpringAxis: readAxialSpringAxis(settings.axialSpringAxis),
     axialSpringStiffness: clampNumber(settings.axialSpringStiffness, 0, 0.9, 0),
+  };
+}
+
+function applyLegacyTopologySettings(
+  policy: GraphTopologyLayoutPolicyV1,
+  settings: Readonly<Record<string, JsonValue>>,
+): GraphTopologyLayoutPolicyV1 {
+  const current = policy.defaultPairPolicy;
+  const minimumAffinity = finitePositive(settings.minimumAffinity, current.minimumAffinity);
+  const minimumStrengthScale = finiteNonNegative(settings.minimumSpringStrengthScale, current.spring.minimumStrengthScale);
+  const minimumLengthScale = finitePositive(settings.minimumSpringLengthScale, current.spring.minimumLengthScale);
+  return {
+    ...policy,
+    defaultPairPolicy: {
+      ...current,
+      minimumAffinity,
+      maximumAffinity: Math.max(minimumAffinity, finitePositive(settings.maximumAffinity, current.maximumAffinity)),
+      evidenceGrowth: {
+        ...current.evidenceGrowth,
+        coefficient: finiteNonNegative(settings.evidenceLogFactor, current.evidenceGrowth.coefficient),
+      },
+      reciprocalBoost: finitePositive(settings.reciprocalBoost, current.reciprocalBoost),
+      hubDiscountExponent: finiteNonNegative(settings.hubDiscountExponent, current.hubDiscountExponent),
+      spring: {
+        ...current.spring,
+        minimumStrengthScale,
+        maximumStrengthScale: Math.max(minimumStrengthScale,
+          finitePositive(settings.maximumSpringStrengthScale, current.spring.maximumStrengthScale)),
+        minimumLengthScale,
+        maximumLengthScale: Math.max(minimumLengthScale,
+          finitePositive(settings.maximumSpringLengthScale, current.spring.maximumLengthScale)),
+      },
+    },
   };
 }
 
@@ -755,15 +765,7 @@ function forceSettingsEqualExceptVelocityDecay(left: ForceSettings, right: Force
     && left.repulsionMinDistance === right.repulsionMinDistance
     && left.barnesHutTheta === right.barnesHutTheta
     && left.maxSpeed === right.maxSpeed
-    && left.minimumAffinity === right.minimumAffinity
-    && left.maximumAffinity === right.maximumAffinity
-    && left.evidenceLogFactor === right.evidenceLogFactor
-    && left.reciprocalBoost === right.reciprocalBoost
-    && left.hubDiscountExponent === right.hubDiscountExponent
-    && left.minimumSpringStrengthScale === right.minimumSpringStrengthScale
-    && left.maximumSpringStrengthScale === right.maximumSpringStrengthScale
-    && left.minimumSpringLengthScale === right.minimumSpringLengthScale
-    && left.maximumSpringLengthScale === right.maximumSpringLengthScale
+    && JSON.stringify(left.topologyLayoutPolicy) === JSON.stringify(right.topologyLayoutPolicy)
     && left.componentPadding === right.componentPadding
     && left.collisionRadius === right.collisionRadius
     && left.collisionStrength === right.collisionStrength
@@ -811,25 +813,69 @@ function collisionForwardOffsets(dimensions: GraphDimensionsV1): readonly Vec3[]
 }
 
 export function deriveWeightedSpringParametersV1(
-  pair: Pick<GraphTopologyPairV1, 'affinity'>,
+  pair: Pick<GraphTopologyPairV1, 'affinity'> & Partial<Pick<GraphTopologyPairV1, 'layoutPolicy'>>,
   settings: ForceSettings,
+  options: {
+    readonly dimensions?: GraphDimensionsV1;
+    readonly recursiveMemberCount?: number;
+  } = {},
 ): WeightedSpringParametersV1 {
+  const policy = pair.layoutPolicy ?? settings.topologyLayoutPolicy.defaultPairPolicy;
   const strengthScale = clampNumber(
-    Math.pow(Math.max(0, pair.affinity), 0.65),
-    settings.minimumSpringStrengthScale,
-    settings.maximumSpringStrengthScale,
+    Math.pow(Math.max(0, pair.affinity), policy.spring.strengthExponent),
+    policy.spring.minimumStrengthScale,
+    policy.spring.maximumStrengthScale,
     1,
   );
   const lengthScale = clampNumber(
-    Math.pow(Math.max(0.001, pair.affinity), -0.55),
-    settings.minimumSpringLengthScale,
-    settings.maximumSpringLengthScale,
+    Math.pow(Math.max(0.001, pair.affinity), policy.spring.lengthExponent),
+    policy.spring.minimumLengthScale,
+    policy.spring.maximumLengthScale,
     1,
   );
+  const baseTargetLength = settings.springLength * lengthScale * policy.spring.targetLengthScale;
+  const extension = policy.recursiveRegionSpacing.mode === 'target-region-closure'
+    ? recursiveRegionSpaceExtensionV1(
+      options.recursiveMemberCount ?? 0,
+      Math.max(settings.collisionRadius * 2, settings.springLength * policy.spring.targetLengthScale),
+      settings.springLength * policy.spring.targetLengthScale / 2,
+      options.dimensions ?? '2d',
+    )
+    : 0;
   return {
-    strength: settings.springStrength * strengthScale,
-    targetLength: settings.springLength * lengthScale,
+    strength: settings.springStrength * strengthScale * policy.spring.strengthScale,
+    targetLength: baseTargetLength + extension,
   };
+}
+
+function recursiveTargetRegionMemberCountV1(document: GraphDocumentV1, pair: GraphTopologyPairV1): number {
+  const token = pair.layoutPolicy.recursiveRegionSpacingEdgeToken;
+  if (!token || pair.layoutPolicy.recursiveRegionSpacing.mode !== 'target-region-closure') return 0;
+  const edgeIds = new Set(pair.edgeIds);
+  const edge = document.edges.find((candidate) => edgeIds.has(candidate.id) && candidate.tokens?.includes(token));
+  if (!edge) return 0;
+  const directMembers = new Map((document.nodeRegions?.definitions ?? [])
+    .map((definition) => [definition.regionNodeId, definition.directMemberNodeIds] as const));
+  const visited = new Set<string>();
+  const queue = [...(directMembers.get(edge.targetId) ?? [])];
+  for (let index = 0; index < queue.length; index += 1) {
+    const nodeId = queue[index];
+    if (visited.has(nodeId)) continue;
+    visited.add(nodeId);
+    queue.push(...(directMembers.get(nodeId) ?? []));
+  }
+  return visited.size;
+}
+
+export function recursiveRegionSpaceExtensionV1(
+  recursiveMemberCount: number,
+  unitSpacing: number,
+  leafFootprint: number,
+  dimensions: GraphDimensionsV1,
+): number {
+  const closureSize = 1 + Math.max(0, Math.floor(recursiveMemberCount));
+  const radius = unitSpacing / 2 * (dimensions === '2d' ? Math.sqrt(closureSize) : Math.cbrt(closureSize));
+  return Math.max(0, radius - Math.max(0, leafFootprint));
 }
 
 export function coordinateWeightedSpringStrengthV1(

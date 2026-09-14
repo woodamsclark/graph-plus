@@ -6,6 +6,8 @@ import { FormModule } from './FormModule.ts';
 import { LinearBuildOutLayoutModule } from './LinearBuildOutLayoutModule.ts';
 import { RenderingModule } from './RenderingModule.ts';
 import { NodeRegionsModule } from './NodeRegionsModule.ts';
+import { DEFAULT_GRAPH_TOPOLOGY_LAYOUT_POLICY_V1 } from '../../../core/topology/index.ts';
+import type { JsonValue } from '../../../contracts/v1/index.ts';
 
 export const SHIPPED_GRAPH_MODULE_IDS_V1 = {
   rendering: 'rendering',
@@ -123,15 +125,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
         repulsionMinDistance: 30,
         barnesHutTheta: 0.9,
         maxSpeed: 260,
-        minimumAffinity: 0.2,
-        maximumAffinity: 2.5,
-        evidenceLogFactor: 0.35,
-        reciprocalBoost: 1.25,
-        hubDiscountExponent: 0.25,
-        minimumSpringStrengthScale: 0.35,
-        maximumSpringStrengthScale: 2,
-        minimumSpringLengthScale: 0.55,
-        maximumSpringLengthScale: 1.85,
+        topologyLayoutPolicy: DEFAULT_GRAPH_TOPOLOGY_LAYOUT_POLICY_V1 as unknown as JsonValue,
         componentPadding: 80,
         collisionRadius: 60,
         collisionStrength: 0.5,

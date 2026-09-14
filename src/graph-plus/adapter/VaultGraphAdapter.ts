@@ -2,10 +2,11 @@ import type {
   GraphAttributeValue,
   GraphDocumentV1,
   GraphEdgeV1,
-  GraphNodeRegionDefinitionV1,
   GraphNodeV1,
+  GraphTagDefinitionV1,
+  GraphTagMembershipV1,
 } from '../../graph-engine/contracts/v1/index.ts';
-import { assertGraphDocumentV1 } from '../../graph-engine/contracts/v1/index.ts';
+import { projectGraphTagsV1 } from '../../graph-engine/public.ts';
 import type { ObsidianSearchDocumentV1, ObsidianSearchIndexV1 } from '../query/index.ts';
 import { GraphPlusLookupV1 } from './GraphPlusLookup.ts';
 
@@ -76,6 +77,7 @@ export class VaultGraphAdapterV1<TFile> {
         positionHint: stablePosition(id),
       };
     });
+    const tagDefinitions: GraphTagDefinitionV1[] = [];
     for (const tag of [...tags].sort()) {
       const id = tagNodeId(tag);
       lookup.setTag(id, tag);
@@ -89,31 +91,23 @@ export class VaultGraphAdapterV1<TFile> {
         tags: [tag],
         properties: {},
       });
-      nodes.push({
-        id,
+      const chain = expandTagPath(tag);
+      tagDefinitions.push({
+        nodeId: id,
         label: `#${tag}`,
         tokens: ['kind:tag', `tag:${tag}`],
         attributes: { kind: 'tag', tags: [tag] },
         positionHint: stablePosition(id),
+        parentTagNodeIds: chain.length > 1 ? [tagNodeId(chain[chain.length - 2])] : [],
       });
     }
 
     const nodeIds = new Set(nodes.map((node) => node.id));
     const edges = new Map<string, MutableEdge>();
-    const regionMembers = new Map<string, Set<string>>(
-      [...tags].map((tag) => [tagNodeId(tag), new Set<string>()]),
-    );
+    const tagMemberships: GraphTagMembershipV1[] = [];
     for (const note of notes) {
       for (const tag of [...new Set(note.tags.map(normalizeTag).filter(Boolean))]) {
-        addEdge(edges, noteNodeId(note.path), tagNodeId(tag), 1, 'tag');
-        regionMembers.get(tagNodeId(tag))?.add(noteNodeId(note.path));
-      }
-    }
-    for (const tag of tags) {
-      const chain = expandTagPath(tag);
-      for (let index = 1; index < chain.length; index += 1) {
-        addEdge(edges, tagNodeId(chain[index - 1]), tagNodeId(chain[index]), 1, 'tag-parent');
-        regionMembers.get(tagNodeId(chain[index - 1]))?.add(tagNodeId(chain[index]));
+        tagMemberships.push({ memberNodeId: noteNodeId(note.path), tagNodeId: tagNodeId(tag) });
       }
     }
     for (const [sourcePath, targets] of Object.entries(snapshot.resolvedLinks)) {
@@ -146,23 +140,18 @@ export class VaultGraphAdapterV1<TFile> {
         tokens: [...edge.tokens].sort(),
         attributes: { relations: [...edge.tokens].filter((token) => token.startsWith('relation:')).map((token) => token.slice(9)) },
       }));
-    const document: GraphDocumentV1 = {
+    const baseDocument: GraphDocumentV1 = {
       schemaVersion: 1,
       documentId: `graph-plus:vault:${snapshot.vaultId}`,
       revision,
       nodes,
       edges: documentEdges,
-      nodeRegions: {
-        version: 1,
-        definitions: [...regionMembers.entries()]
-          .sort(([left], [right]) => left.localeCompare(right))
-          .map(([regionNodeId, members]): GraphNodeRegionDefinitionV1 => ({
-            regionNodeId,
-            directMemberNodeIds: [...members].sort(),
-          })),
-      },
     };
-    assertGraphDocumentV1(document);
+    const document = projectGraphTagsV1(baseDocument, {
+      version: 1,
+      tags: tagDefinitions,
+      memberships: tagMemberships,
+    });
     return { document, lookup, searchIndex };
   }
 

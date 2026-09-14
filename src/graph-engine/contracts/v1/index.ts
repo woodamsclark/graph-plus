@@ -6,6 +6,7 @@ export * from './patch.ts';
 export * from './profile.ts';
 export * from './service.ts';
 export * from './session.ts';
+export * from './tag.ts';
 export * from './ui.ts';
 export * from './values.ts';
 export * from './view-state.ts';
