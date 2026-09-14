@@ -216,10 +216,12 @@ an equivalent topological-sort algorithm. Encountering a `visiting` tag through 
 child edge identifies a cycle and rejects the complete projection atomically. The
 production implementation must not depend on JavaScript call-stack depth.
 
-Recursive member closure follows only accepted tag-parent and direct tag-membership
-relationships. It never traverses ordinary canonical graph edges. A per-root visited
-set ensures that a shared descendant reached through several valid paths contributes
-once to that root's closure and space estimate.
+Recursive structural closure follows only accepted tag-parent relationships. Direct
+tag memberships to ordinary nodes do not enlarge the parent-child tag distance; their
+ordinary forces remain responsible for their own space. The traversal never follows
+ordinary canonical graph edges. A per-root visited set ensures that a shared nested tag
+region reached through several valid paths contributes once to that root's closure and
+space estimate.
 
 Closure indexes are derived and cached when accepted tag input or projection
 visibility changes. They are not rebuilt during each simulation or rendering frame.
@@ -325,7 +327,7 @@ node motion.
 For tag `T`, define:
 
 ```text
-closureSize(T) = 1 + count(unique visible recursive members of T)
+closureSize(T) = 1 + count(unique visible nested tag regions beneath T)
 unitSpacing = max(2 * collisionRadius, linkDistance * tagParentLengthScale)
 ```
 
@@ -569,8 +571,9 @@ The feature is accepted when automated fixtures and live Graph+ smoke testing sh
 9. Above the collision-derived spacing floor, doubling Link distance approximately
    doubles tag-parent target lengths before equilibrium; no absolute tag distance
    remains hidden in the policy.
-10. Leaf tag children retain the tight base distance while larger recursive child
-    regions receive monotonically greater space.
+10. Leaf tag children retain the tight base distance regardless of ordinary note
+    membership, while children with nested tag regions receive monotonically greater
+    structural space.
 11. Diamond-shaped hierarchy counts each shared descendant once per root, and very
     deep valid hierarchy does not depend on JavaScript call-stack depth.
 12. Ordinary graph cycles do not enter tag traversal or invalidate tag projection.
