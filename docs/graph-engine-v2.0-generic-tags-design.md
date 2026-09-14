@@ -36,6 +36,8 @@ structural layout policy:
 - bypass the ordinary hub-specificity discount;
 - derive target length from the active ordinary `linkDistance` using a bounded scale,
   never an absolute distance;
+- allocate additional parent-child distance from the child's unique visible recursive
+  region size;
 - derive strength from the active ordinary `linkStrength` using a bounded scale; and
 - leave ordinary note links and tag-membership relationships under their existing
   topology-weighted behavior.
@@ -43,7 +45,7 @@ structural layout policy:
 The recommended initial scales are:
 
 ```text
-tagParentTargetLength = ordinaryWeightedTargetLength * 0.5
+tagParentBaseLength = ordinaryWeightedTargetLength * 0.5
 tagParentStrength = ordinaryWeightedStrength * 1.5
 ```
 
@@ -195,6 +197,26 @@ A node may belong directly to any number of tags. A tag may have zero, one, or m
 parents. A tag with no parents remains valid. A tag with no members remains an ordinary
 canonical node but produces no empty rendered region.
 
+### 5.2 Cycle-safe hierarchy and closure
+
+Many-to-many parentage does not require cycles. Accepted parent-tag relationships form
+a directed acyclic graph rather than requiring a strict tree. Shared descendants and
+diamond-shaped hierarchy are valid; a tag being its own direct or indirect ancestor is
+not.
+
+Validation uses an iterative depth-first walk with `visiting` and `visited` states, or
+an equivalent topological-sort algorithm. Encountering a `visiting` tag through a
+child edge identifies a cycle and rejects the complete projection atomically. The
+production implementation must not depend on JavaScript call-stack depth.
+
+Recursive member closure follows only accepted tag-parent and direct tag-membership
+relationships. It never traverses ordinary canonical graph edges. A per-root visited
+set ensures that a shared descendant reached through several valid paths contributes
+once to that root's closure and space estimate.
+
+Closure indexes are derived and cached when accepted tag input or projection
+visibility changes. They are not rebuilt during each simulation or rendering frame.
+
 ## 6. Generated canonical topology
 
 For each accepted tag definition, the projector creates one ordinary canonical node:
@@ -261,7 +283,7 @@ Tag-parent layout never hard-codes a world-unit target length. It composes over 
 ordinary topology-weighted pair parameters:
 
 ```text
-tagParentTargetLength = ordinaryWeightedTargetLength * tagParentLengthScale
+tagParentBaseLength = ordinaryWeightedTargetLength * tagParentLengthScale
 tagParentStrength = ordinaryWeightedStrength * tagParentStrengthScale
 ```
 
@@ -277,15 +299,64 @@ hierarchy geometry proportionally. The scales are finite, positive, bounded, and
 profile-owned. No consumer may inject an executable force callback.
 
 With the current default `linkDistance` of `250`, a baseline-affinity tag-parent pair
-targets `125` before collision and surrounding-force equilibrium. The current global
-collision radius seeks approximately `120` units between centers, so the initial
-scale creates a visibly compact hierarchy without requiring overlapping nodes.
+has a base target of `125`. The current global collision radius seeks approximately
+`120` units between centers, so a leaf tag can remain visibly close to its parent
+without requiring overlapping nodes.
+
+### 7.3 Recursive region space
+
+A uniformly short parent-child distance is insufficient for a deep hierarchy. A child
+tag may itself own a large descendant region that must remain separate from its sibling
+regions. This is spatial allocation, not evidence that the parent-child relationship
+is nonspecific, so it must not be represented by restoring the ordinary hub penalty.
+
+Space is estimated from cached topology rather than a live rendered contour. Feeding
+rendered boundary dimensions back into force targets would create a loop in which node
+motion changes a boundary, the boundary changes the spring, and the spring causes more
+node motion.
+
+For tag `T`, define:
+
+```text
+closureSize(T) = 1 + count(unique visible recursive members of T)
+unitSpacing = max(2 * collisionRadius, linkDistance * tagParentLengthScale)
+```
+
+The initial dimension-aware footprint estimate is:
+
+```text
+requiredRadius2d(T) = unitSpacing / 2 * sqrt(closureSize(T))
+requiredRadius3d(T) = unitSpacing / 2 * cbrt(closureSize(T))
+```
+
+The square root follows area growth in 2D; the cube root follows volume growth in 3D.
+These are stable capacity estimates, not measurements of semantic importance or exact
+rendered bounds.
+
+For a parent-child pair whose child is `T`:
+
+```text
+leafFootprint = unitSpacing / 2
+spaceExtension(T) = max(0, requiredRadius(T) - leafFootprint)
+tagParentTargetLength = tagParentBaseLength + spaceExtension(T)
+```
+
+A leaf child has `closureSize = 1`, so its extension is zero and it retains the tight
+base distance. A child containing four unique descendants has `closureSize = 5`; at
+the current `125` unit spacing its estimated 2D radius is approximately `140`, giving
+a baseline-affinity parent-child target near `202.5`.
+
+Sibling tag regions continue to interact through ordinary node collision and
+repulsion. A later accepted implementation may add cached region-level packing if live
+fixtures show that node-level forces do not separate large sibling regions reliably.
+Region overlap remains legal because tag membership and parentage are many-to-many;
+space allocation is a soft layout influence rather than rigid containment.
 
 The target is an equilibrium input, not a guarantee of exact final distance. Many
 children must spread around their parent, and collision, repulsion, other links, pins,
 and memberships remain authoritative participants.
 
-### 7.3 Declarative implementation
+### 7.4 Declarative implementation
 
 The current force settings contain one global `hubDiscountExponent`. The extension
 should remain data-driven and deterministic, for example:
@@ -296,6 +367,7 @@ interface GraphRelationLayoutPolicyV1 {
   readonly hubDiscountExponent?: number;
   readonly targetLengthScale?: number;
   readonly strengthScale?: number;
+  readonly recursiveRegionSpacing?: boolean;
 }
 ```
 
@@ -361,6 +433,7 @@ profile authoring. They should not be exposed merely because they exist internal
 Diagnostics should report:
 
 - projected tag, membership, and parent-edge counts;
+- cached closure counts and effective region-radius ranges;
 - rejected projection reasons without consumer objects;
 - number of pairs matched by the tag-parent layout policy; and
 - effective tag-parent length and strength ranges.
@@ -371,22 +444,28 @@ The feature is accepted when automated fixtures and live Graph+ smoke testing sh
 
 1. One ordinary node can belong to several tags without duplication.
 2. One tag can contain many members, and one child tag can have several parents.
-3. Parent cycles, unknown IDs, duplicates, and collisions reject atomically.
+3. Parent cycles, unknown IDs, duplicates, and ID collisions reject atomically.
 4. Generated IDs, edges, tokens, directions, and regions are deterministic under input
    reordering.
 5. Equivalent tag input from two consumers produces equivalent engine topology.
 6. Graph+ migration preserves existing tag-node IDs and persisted positions.
 7. `#quote` remains a visual center while many child tags settle compactly around it.
 8. Tag-parent pairs receive no hub discount as the parent's child count grows.
-9. Doubling Link distance approximately doubles tag-parent target lengths before
-   equilibrium; no absolute tag distance remains hidden in the policy.
-10. Ordinary note-to-note hub pairs retain the accepted topology-weighted penalty.
-11. Tag-membership edges do not silently acquire the tight parent-child scale.
-12. Collision, pins, drag, filters, 2D/3D layout, suspension, and disposal retain their
+9. Above the collision-derived spacing floor, doubling Link distance approximately
+   doubles tag-parent target lengths before equilibrium; no absolute tag distance
+   remains hidden in the policy.
+10. Leaf tag children retain the tight base distance while larger recursive child
+    regions receive monotonically greater space.
+11. Diamond-shaped hierarchy counts each shared descendant once per root, and very
+    deep valid hierarchy does not depend on JavaScript call-stack depth.
+12. Ordinary graph cycles do not enter tag traversal or invalidate tag projection.
+13. Ordinary note-to-note hub pairs retain the accepted topology-weighted penalty.
+14. Tag-membership edges do not silently acquire the tight parent-child scale.
+15. Collision, pins, drag, filters, 2D/3D layout, suspension, and disposal retain their
     accepted behavior.
-13. A large tag fixture does not introduce per-frame tag reconstruction or quadratic
+16. A large tag fixture does not introduce per-frame tag reconstruction or quadratic
     hierarchy analysis.
-14. The generated client artifact and consumer smoke fixtures remain synchronized.
+17. The generated client artifact and consumer smoke fixtures remain synchronized.
 
 ## 12. Non-goals
 
@@ -419,9 +498,11 @@ Approval of this design confirms:
    discount.
 6. Tag-parent distance and strength are scales of the active ordinary force settings,
    not fixed world-unit values.
-7. Ordinary note links and tag memberships retain their existing topology behavior.
-8. Graph+ preserves current tag IDs during migration so saved view state survives.
-9. PatternSmith and other consumers may opt into the same tag facility without Graph
+7. Recursive child-region space is estimated from unique visible closure using
+   dimension-aware area or volume growth, not live contour feedback.
+8. Ordinary note links and tag memberships retain their existing topology behavior.
+9. Graph+ preserves current tag IDs during migration so saved view state survives.
+10. PatternSmith and other consumers may opt into the same tag facility without Graph
    Engine learning their source vocabulary.
-10. Exact tuning remains subject to live acceptance, while ownership, proportional
+11. Exact tuning remains subject to live acceptance, while ownership, proportional
     scaling, neutrality, and deterministic behavior are contract decisions.
