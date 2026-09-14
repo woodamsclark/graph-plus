@@ -7,6 +7,8 @@ import type {
   SessionSurfaceViewportV1,
 } from './SessionSurface.ts';
 
+const IDLE_DONUT_CURSOR = 'url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2216%22 height=%2216%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%228%22 cy=%228%22 r=%224.5%22 fill=%22none%22 stroke=%22%23111%22 stroke-width=%223.5%22/%3E%3Ccircle cx=%228%22 cy=%228%22 r=%224.5%22 fill=%22none%22 stroke=%22%23f7f2e8%22 stroke-width=%221.4%22/%3E%3C/svg%3E") 8 8, default';
+
 export class CanvasSessionSurface implements SessionSurfaceV1 {
 
   private readonly container: HTMLElement;
@@ -132,7 +134,7 @@ export class CanvasSessionSurface implements SessionSurfaceV1 {
   }
 
   setCursor(cursor: 'default' | 'pointer' | 'grabbing'): void {
-    if (!this.disposed) this.canvas.style.cursor = cursor;
+    if (!this.disposed) this.canvas.style.cursor = cursor === 'default' ? IDLE_DONUT_CURSOR : cursor;
   }
 
   dispose(): void {

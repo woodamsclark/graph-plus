@@ -157,7 +157,8 @@ test('a background tap clears stale hover even when focus is already empty', asy
   click(value, canvas, { x: -100, y: -100 }, { pointerId: 502 });
   value.platform.flushFrame();
   equal((await session.exportViewState()).focusedNodeId, undefined, 'the fixture should remain unfocused');
-  equal(canvas.style.cursor, 'default', 'background activation should clear hover independently of focus state');
+  assert(canvas.style.cursor.includes('data:image/svg+xml'),
+    'background activation should restore the idle donut cursor independently of focus state');
   await session.dispose();
 });
 
@@ -695,7 +696,8 @@ test('V1.7 semantic hover reports Mod changes without mutating graph state', asy
   value.window.dispatchEvent(release);
   value.platform.flushFrame();
   value.platform.flushTimer();
-  equal(canvas.style.cursor, 'default', 'releasing Mod outside the canvas should clear the latched hover');
+  assert(canvas.style.cursor.includes('data:image/svg+xml'),
+    'releasing Mod outside the canvas should restore the idle donut cursor after clearing the latched hover');
   const dismissed = [...intents].reverse().find((intent) => intent.type === 'preview-changed');
   equal(dismissed?.type === 'preview-changed' ? dismissed.nodeId : 'missing', undefined,
     'releasing Mod should emit semantic preview dismissal');
@@ -726,7 +728,8 @@ test('V1.8 preview surface ownership holds Anima preview through Mod release', a
   equal(canvas.style.cursor, 'pointer', 'card-active semantic preview should survive Mod release outside the canvas');
   await session.setPreviewSurfaceActive(false);
   await session.clearPreview();
-  equal(canvas.style.cursor, 'default', 'card dismissal should release the independent preview target');
+  assert(canvas.style.cursor.includes('data:image/svg+xml'),
+    'card dismissal should restore the idle donut cursor after releasing the independent preview target');
   const previewIntents = intents.filter((intent) => intent.type === 'preview-changed');
   equal(previewIntents.length, 3, 'target, handoff, and final dismissal should each emit once');
   await session.dispose();
@@ -975,7 +978,8 @@ test('suspension and view invalidation clear transient gestures and cursors', as
     scope: 'render',
     node: { op: 'has-token', token: 'remove' },
   });
-  equal(canvas.style.cursor, 'default', 'view invalidation should clear transient drag and hover state');
+  assert(canvas.style.cursor.includes('data:image/svg+xml'),
+    'view invalidation should restore the idle donut cursor after clearing transient drag and hover state');
   const invalidated = await session.exportViewState();
   pointer(value, canvas, 'pointermove', point.x + 80, point.y + 40, { pointerId: 40 });
   pointer(value, canvas, 'pointerup', point.x + 80, point.y + 40, { pointerId: 40 });
@@ -983,7 +987,8 @@ test('suspension and view invalidation clear transient gestures and cursors', as
   deepEqual((await session.exportViewState()).positions.a, invalidated.positions.a, 'a hidden node must not keep dragging after invalidation');
 
   session.setSuspended(true);
-  equal(canvas.style.cursor, 'default', 'suspension should leave a neutral cursor');
+  assert(canvas.style.cursor.includes('data:image/svg+xml'),
+    'suspension should leave the neutral idle donut cursor');
   equal(value.platform.pendingTimers, 0, 'suspension should clear input-owned timers');
   session.setSuspended(false);
   await session.dispose();
