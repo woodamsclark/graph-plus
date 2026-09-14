@@ -48,10 +48,10 @@ test('V1.6 Anima owns the exact visible-degree radius and composable structural 
 
 test('V1.6 Anima neighborhood highlighting follows focus changes and clears with focus', () => {
   const document = graphDocument({
-    nodes: [graphNode('a'), graphNode('b'), graphNode('c')],
-    edges: [graphEdge('a-b', 'a', 'b'), graphEdge('b-c', 'b', 'c')],
+    nodes: [graphNode('a'), graphNode('b'), graphNode('c'), graphNode('d')],
+    edges: [graphEdge('a-b', 'a', 'b'), graphEdge('b-c', 'b', 'c'), graphEdge('a-d', 'a', 'd')],
   });
-  const selection = { nodeIds: new Set(['a', 'b', 'c']), edgeIds: new Set(['a-b', 'b-c']) };
+  const selection = { nodeIds: new Set(['a', 'b', 'c', 'd']), edgeIds: new Set(['a-b', 'b-c', 'a-d']) };
   const state = pipeline(document, selection);
   const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, {});
   const focusedA = anima.contributeFrame({
@@ -82,6 +82,13 @@ test('V1.6 Anima neighborhood highlighting follows focus changes and clears with
     'hovering a direct neighbor should retain its link to the focused node');
   equal(inspectedNeighbor.edgeContributions['b-c'].opacity, 1,
     'hovering a direct neighbor should illuminate that neighbor\'s own neighborhood');
+  equal(inspectedNeighbor.edgeContributions['a-d'].opacity, 1,
+    'hovering a direct neighbor should retain the focused node\'s other incident links');
+  assert(inspectedNeighbor.nodeContributions, 'a focused neighbor hover should contribute node presentation');
+  equal(inspectedNeighbor.nodeContributions.c.opacity, 1,
+    'the hovered neighbor\'s own neighbor should remain bright');
+  equal(inspectedNeighbor.nodeContributions.d.opacity, 1,
+    'the focused node\'s other neighbor should remain bright');
 
   const ignoredDistantHover = anima.contributeFrame({
     ...state,
@@ -93,6 +100,8 @@ test('V1.6 Anima neighborhood highlighting follows focus changes and clears with
     'a non-neighbor hover should leave the focused neighborhood active');
   equal(ignoredDistantHover.edgeContributions['b-c'].opacity, 0.2,
     'a non-neighbor hover should not inspect an unrelated neighborhood');
+  equal(ignoredDistantHover.edgeContributions['a-d'].opacity, 1,
+    'a non-neighbor hover should retain every focused-node link');
 
   const previewedA = anima.contributeFrame({
     ...state,
@@ -104,11 +113,14 @@ test('V1.6 Anima neighborhood highlighting follows focus changes and clears with
     'Anima preview should own the active neighborhood independently from focus and ordinary hover');
   equal(previewedA.edgeContributions['b-c'].opacity, 0.2,
     'a focused neighborhood should yield while a semantic preview target is active');
+  equal(previewedA.edgeContributions['a-d'].opacity, 1,
+    'semantic preview should preserve its own incident links');
 
   const cleared = anima.contributeFrame(state);
   assert(cleared?.edgeContributions, 'cleared focus should still resolve baseline edge presentation');
   equal(cleared.edgeContributions['a-b'].opacity, 1, 'clearing focus should restore ordinary link opacity');
   equal(cleared.edgeContributions['b-c'].opacity, 1, 'no prior focus highlight should remain latched');
+  equal(cleared.edgeContributions['a-d'].opacity, 1, 'clearing focus should restore every ordinary link');
 });
 
 test('V2 adaptive labels stay inside the active neighborhood', () => {

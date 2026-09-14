@@ -49,14 +49,18 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       && relationships.get(focusedId)?.has(state.hoveredNodeId)
       ? state.hoveredNodeId
       : undefined;
-    const activeId = state.draggedNodeId
-      ?? state.previewedNodeId
-      ?? inspectedNeighborId
-      ?? focusedId
-      ?? state.hoveredNodeId;
-    const activeNeighborhood = activeId === undefined
+    const activeIds = state.draggedNodeId !== undefined
+      ? new Set([state.draggedNodeId])
+      : state.previewedNodeId !== undefined
+        ? new Set([state.previewedNodeId])
+        : new Set([
+          ...(focusedId === undefined ? [] : [focusedId]),
+          ...(inspectedNeighborId === undefined ? [] : [inspectedNeighborId]),
+          ...(focusedId === undefined && state.hoveredNodeId !== undefined ? [state.hoveredNodeId] : []),
+        ]);
+    const activeNeighborhood = activeIds.size === 0
       ? undefined
-      : new Set([activeId, ...(relationships.get(activeId) ?? [])]);
+      : new Set([...activeIds].flatMap((nodeId) => [nodeId, ...(relationships.get(nodeId) ?? [])]));
     const nodeContributions = Object.fromEntries(state.document.nodes
       .filter((node) => visibleNodes.has(node.id))
       .map((node) => {
@@ -65,7 +69,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         const structuralScale = positive(prior?.radiusScale, 1);
         const radius = positive(prior?.baseRadiusScale, 1)
           * clamp(3 * Math.sqrt(visibleDegree + 1), 8, 30) * structuralScale;
-        const isActive = node.id === activeId;
+        const isActive = activeIds.has(node.id);
         const color = isActive
           ? this.palette.colors.animaAccent
           : state.viewState.focusedNodeId === node.id
@@ -93,13 +97,13 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       }));
     const edgeContributions = Object.fromEntries(visibleEdges.map((edge) => {
       const prior = state.edgeContributions[edge.id];
-      const incident = activeId !== undefined && (edge.sourceId === activeId || edge.targetId === activeId);
+      const incident = activeIds.has(edge.sourceId) || activeIds.has(edge.targetId);
       return [edge.id, {
         ...prior,
         thickness: positive(prior?.baseThicknessScale, 1) * positive(prior?.thicknessScale, 1),
-        opacity: activeId === undefined || incident ? 1 : 0.2,
+        opacity: activeIds.size === 0 || incident ? 1 : 0.2,
         arrowColor: this.palette.colors.arrow,
-        arrowOpacity: activeId === undefined || incident ? 1 : 0.2,
+        arrowOpacity: activeIds.size === 0 || incident ? 1 : 0.2,
         ...(incident ? { color: this.palette.colors.highlightedNode } : {}),
       }];
     }));
