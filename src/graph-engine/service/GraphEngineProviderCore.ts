@@ -252,6 +252,22 @@ export class GraphEngineProviderCoreV1 {
       getDescriptor: () => this.profiles.getProfileDescriptor(consumerId, profileId),
       getEffectiveProfile: () => this.profiles.resolve(consumerId, profileId),
       getUserOverrides: () => this.profiles.getUserOverrides(consumerId, profileId),
+      setDimensions: async (dimensions) => {
+        const descriptor = this.profiles.getProfileDescriptor(consumerId, profileId);
+        const allowed = descriptor.allowedDimensions ?? ['2d', '3d'];
+        if (dimensions !== undefined && !allowed.includes(dimensions)) {
+          throw new Error(`Dimension "${dimensions}" is not permitted for ${consumerId}/${profileId}.`);
+        }
+        const overrides = this.profiles.getUserOverrides(consumerId, profileId);
+        this.profiles.setUserOverrides(consumerId, profileId, { ...overrides, dimensions });
+        try {
+          await this.onProfilesChanged();
+        } catch (error) {
+          this.profiles.setUserOverrides(consumerId, profileId, overrides);
+          try { await this.onProfilesChanged(); } catch {}
+          throw error;
+        }
+      },
       setProfileSetting: async (key, value) => {
         const overrides = this.profiles.getUserOverrides(consumerId, profileId);
         this.profiles.setUserOverrides(consumerId, profileId, changeProfileSetting(overrides, key, value));

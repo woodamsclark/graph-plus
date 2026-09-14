@@ -194,6 +194,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
   ): void {
     if (!graphUiSectionIsShownV1(this.policy, SECTIONS.form)) return;
     const body = this.section(parent, SECTIONS.form, SECTION_TITLES[SECTIONS.form], false);
+    this.renderFormDimensions(body, effective);
     if (graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.mindMap)) {
       const form = effective.modules.form;
       const selectedId = viewState.selectedNodeIds.length === 1 ? viewState.selectedNodeIds[0] : undefined;
@@ -242,6 +243,21 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     this.renderRegionControls(body, effective);
     this.mountContributions(body, contributions);
     this.mountContributions(body, regionContributions);
+  }
+
+  private renderFormDimensions(parent: HTMLElement, effective: GraphEffectiveSettingsV1): void {
+    const descriptor = this.context.profileSettings.getDescriptor();
+    const allowed = descriptor.allowedDimensions ?? ['2d', '3d'];
+    if (descriptor.uiDefaults?.dimensionControlVisible !== true
+      || allowed.length < 2
+      || !graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.formDimensions)) return;
+    new Setting(parent).setName('Graph dimensions').addDropdown((dropdown) => {
+      for (const dimensions of allowed) dropdown.addOption(dimensions, dimensions === '2d' ? '2D' : '3D');
+      dropdown.setValue(effective.dimensions).onChange(async (value) => {
+        await this.writeProfileDimensions(value as '2d' | '3d');
+        await this.render();
+      });
+    });
   }
 
   private renderDisplay(
@@ -460,6 +476,12 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
   private writeProfileSetting(moduleId: string, key: string, value: JsonValue | undefined): Promise<void> {
     this.localSettingWrites += 1;
     return this.context.profileSettings.setModuleSetting(moduleId, key, value)
+      .finally(() => { this.localSettingWrites = Math.max(0, this.localSettingWrites - 1); });
+  }
+
+  private writeProfileDimensions(dimensions: '2d' | '3d'): Promise<void> {
+    this.localSettingWrites += 1;
+    return this.context.profileSettings.setDimensions(dimensions)
       .finally(() => { this.localSettingWrites = Math.max(0, this.localSettingWrites - 1); });
   }
 
