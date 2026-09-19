@@ -103,6 +103,7 @@ export class GraphInteractionInterpreter {
     readonly isDirectNeighbor: (nodeId: string, focusedNodeId: string) => boolean;
     readonly getSelectedNodeIds: () => readonly string[];
     readonly getNodeSelection: (nodeId: string) => readonly string[];
+    readonly getSelectionBridge: (nodeId: string, selectedNodeIds: readonly string[]) => readonly string[];
     readonly getSelectionNeighborhood: (nodeIds: readonly string[]) => readonly string[];
     readonly getViewport: () => { readonly width: number; readonly height: number };
     readonly dragThresholdPx?: number;
@@ -555,7 +556,14 @@ export class GraphInteractionInterpreter {
     }
     const selectedNodeIds = this.options.getSelectedNodeIds();
     const enteringExplore = selectedNodeIds.length === 0;
-    const nodeIds = this.options.getNodeSelection(hit.nodeId);
+    const removing = event.shift && selectedNodeIds.includes(hit.nodeId);
+    const nodeIds = removing
+      ? this.options.getNodeSelection(hit.nodeId)
+      : [
+          hit.nodeId,
+          ...this.options.getNodeSelection(hit.nodeId),
+          ...this.options.getSelectionBridge(hit.nodeId, selectedNodeIds),
+        ];
     const result = this.tagging.tag(
       nodeIds,
       hit.nodeId,

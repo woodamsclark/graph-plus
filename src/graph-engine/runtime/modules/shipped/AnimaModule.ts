@@ -1,4 +1,5 @@
 import type { JsonValue } from '../../../contracts/v1/index.ts';
+import { shortestPathToAnyV1 } from '../../../core/topology/index.ts';
 import type { GraphVisualThemeV2 } from '../../theme/index.ts';
 import type { GraphModuleInstanceV1, GraphModuleProjectionPatchV1 } from '../GraphModuleTypes.ts';
 
@@ -63,7 +64,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const hoveredIsTagged = hoveredId !== undefined && selectedIds.has(hoveredId);
     const pathTargetIds = selectedIds.size > 0 ? selectedIds : taggedIds;
     const exploreHoverPath = exploreActive && hoveredId !== undefined && !hoveredIsTagged
-      ? shortestPathToAny(hoveredId, pathTargetIds, relationships)
+      ? shortestPathToAnyV1(hoveredId, pathTargetIds, relationships)
       : undefined;
     const exploreHoverIds = hoveredId === undefined
       ? new Set<string>()
@@ -232,36 +233,6 @@ function normalize(value: number, min: number, max: number): number {
 
 function lerp(start: number, end: number, amount: number): number {
   return start + (end - start) * amount;
-}
-
-function shortestPathToAny(
-  startId: string,
-  targetIds: ReadonlySet<string>,
-  relationships: ReadonlyMap<string, ReadonlySet<string>>,
-): readonly string[] | undefined {
-  if (targetIds.has(startId)) return [startId];
-  const previous = new Map<string, string | undefined>([[startId, undefined]]);
-  const queue = [startId];
-  for (let index = 0; index < queue.length; index += 1) {
-    const current = queue[index];
-    for (const neighbor of [...(relationships.get(current) ?? [])].sort()) {
-      if (previous.has(neighbor)) continue;
-      previous.set(neighbor, current);
-      if (targetIds.has(neighbor)) return reconstructPath(neighbor, previous);
-      queue.push(neighbor);
-    }
-  }
-  return undefined;
-}
-
-function reconstructPath(targetId: string, previous: ReadonlyMap<string, string | undefined>): readonly string[] {
-  const path: string[] = [];
-  let current: string | undefined = targetId;
-  while (current !== undefined) {
-    path.push(current);
-    current = previous.get(current);
-  }
-  return path.reverse();
 }
 
 function edgePairs(path: readonly string[] | undefined): ReadonlySet<string> {

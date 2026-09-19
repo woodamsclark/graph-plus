@@ -6,6 +6,7 @@ import type {
   Vec3,
 } from '../../contracts/v1/index.ts';
 import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
+import { shortestPathToAnyV1 } from '../../core/topology/index.ts';
 import type { GraphCameraController } from '../camera/index.ts';
 import type { SessionRuntimePlatformV1 } from '../platform/index.ts';
 import type { SessionSurfaceV1 } from '../surface/index.ts';
@@ -98,6 +99,7 @@ export class SessionInteractionRuntime {
       isDirectNeighbor: (nodeId, focusedNodeId) => this.isDirectNeighbor(nodeId, focusedNodeId),
       getSelectedNodeIds: () => this.options.getViewState().selectedNodeIds,
       getNodeSelection: (nodeId) => this.options.getNodeSelection(nodeId),
+      getSelectionBridge: (nodeId, selectedNodeIds) => this.selectionBridge(nodeId, selectedNodeIds),
       getSelectionNeighborhood: (nodeIds) => this.selectionNeighborhood(nodeIds),
       getViewport: () => this.options.surface.getViewport(),
       setTimeout: (callback, delayMs) => this.options.platform.setTimeout(callback, delayMs),
@@ -362,6 +364,22 @@ export class SessionInteractionRuntime {
       }
     }
     return neighborhood;
+  }
+
+  private selectionBridge(nodeId: string, selectedNodeIds: readonly string[]): readonly string[] {
+    if (selectedNodeIds.length === 0) return [];
+    const visibleNodes = this.options.getRenderSelection().nodeIds;
+    if (!visibleNodes.has(nodeId)) return [];
+    const relationships = new Map<string, Set<string>>();
+    for (const visibleNodeId of visibleNodes) relationships.set(visibleNodeId, new Set());
+    for (const edge of this.options.getDocument().edges) {
+      if (!this.options.getRenderSelection().edgeIds.has(edge.id)
+        || !visibleNodes.has(edge.sourceId)
+        || !visibleNodes.has(edge.targetId)) continue;
+      relationships.get(edge.sourceId)?.add(edge.targetId);
+      relationships.get(edge.targetId)?.add(edge.sourceId);
+    }
+    return shortestPathToAnyV1(nodeId, new Set(selectedNodeIds), relationships) ?? [];
   }
 
   private cameraChanged(command: GraphRuntimeCommandV1): void {

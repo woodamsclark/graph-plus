@@ -259,7 +259,7 @@ test('R-INPUT-03, R-INPUT-04, and R-INPUT-08 use focus-state consumer activation
 
 });
 
-test('R-REGION-04 first tag click selects visible recursive children and second click activates the tag', async () => {
+test('R-REGION-04 first tag click selects its owner and visible recursive children, then activates', async () => {
   let actionContext: { nodeId: string; selectedNodeIds: readonly string[]; focusedNodeId?: string } | undefined;
   const actions = new ConsumerNodeActionRegistryV1();
   actions.register('synthetic-consumer', {}, [{
@@ -313,7 +313,8 @@ test('R-REGION-04 first tag click selects visible recursive children and second 
   click(value, canvas, await nodePoint(session, 'tag'), { pointerId: 201 });
   value.platform.flushFrame();
   const selected = await session.exportViewState();
-  deepEqual(selected.selectedNodeIds, ['subtag', 'nested', 'direct'], 'first click should select visible descendants through child tags and exclude the owner');
+  deepEqual(selected.selectedNodeIds, ['tag', 'subtag', 'nested', 'direct'],
+    'first click should select the clicked owner and visible descendants through child tags');
   equal(selected.focusedNodeId, 'tag', 'the clicked tag node should own focus');
   assert(JSON.stringify(selected.camera) !== JSON.stringify(beforeTag.camera),
     'the initial region tag should frame the selected descendants');
@@ -322,7 +323,7 @@ test('R-REGION-04 first tag click selects visible recursive children and second 
   value.platform.flushFrame();
   deepEqual(actionContext, {
     nodeId: 'tag',
-    selectedNodeIds: ['subtag', 'nested', 'direct'],
+    selectedNodeIds: ['tag', 'subtag', 'nested', 'direct'],
     focusedNodeId: 'tag',
   }, 'second click should invoke the consumer action with the selected region context');
   await session.dispose();
@@ -338,7 +339,8 @@ test('R-REGION-04 first tag click selects visible recursive children and second 
   const projectionCanvas = runtimeCanvas(projectionValue.container);
   click(projectionValue, projectionCanvas, await nodePoint(projectionSession, 'tag'), { pointerId: 203 });
   projectionValue.platform.flushFrame();
-  deepEqual((await projectionSession.exportViewState()).selectedNodeIds, ['subtag', 'nested', 'direct'], 'projection filtering should preserve filtered region definitions and visible recursive selection');
+  deepEqual((await projectionSession.exportViewState()).selectedNodeIds, ['tag', 'subtag', 'nested', 'direct'],
+    'projection filtering should preserve the owner and visible recursive selection');
   await projectionSession.dispose();
 });
 
@@ -351,13 +353,22 @@ test('ordinary clicks add tags while Shift suspends Explore and can remove an ex
         graphNode('c', { positionHint: { x: 900, y: 0, z: 0 } }),
         graphNode('d', { positionHint: { x: 1_000, y: 0, z: 0 } }),
       ],
-      edges: [graphEdge('a-b', 'a', 'b'), graphEdge('c-d', 'c', 'd')],
+      edges: [
+        graphEdge('a-b', 'a', 'b'),
+        graphEdge('b-c', 'b', 'c'),
+        graphEdge('c-d', 'c', 'd'),
+      ],
     }),
   });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
   const intents: GraphIntentV1[] = [];
   session.onIntent((intent) => intents.push(intent));
+  const wideView = await session.exportViewState();
+  await session.restoreViewState({
+    ...wideView,
+    camera: { ...wideView.camera, zoom: 0.1 },
+  });
   const beforeTags = await session.exportViewState();
 
   click(value, canvas, await nodePoint(session, 'a'), { pointerId: 301 });
@@ -373,24 +384,25 @@ test('ordinary clicks add tags while Shift suspends Explore and can remove an ex
     z: (initialTag.positions.a.z + initialTag.positions.b.z) / 2,
   }, 'the initial frame should center the selected node together with its direct neighbor');
 
-  click(value, canvas, await nodePoint(session, 'b'), { pointerId: 302 });
+  click(value, canvas, await nodePoint(session, 'c'), { pointerId: 302 });
   value.platform.flushFrame();
 
   const added = await session.exportViewState();
-  deepEqual(added.selectedNodeIds, ['a', 'b'], 'ordinary clicks should add new nodes to the tagged selection');
-  equal(added.focusedNodeId, 'b', 'the most recently added node should become the Explore anchor');
+  deepEqual(added.selectedNodeIds, ['a', 'c', 'b'],
+    'tagging a distant node should add it and every shortest-path hop back to the selected group');
+  equal(added.focusedNodeId, 'c', 'the clicked endpoint should become the Explore anchor');
   deepEqual(added.camera, initialTag.camera, 'adding later tags should never move or reframe the camera');
 
   modifier(value, 'keydown', true);
   value.platform.flushFrame();
   const held = await session.exportViewState();
-  deepEqual(held.selectedNodeIds, ['a', 'b'], 'holding Shift must not mutate the durable tag set');
-  equal(held.focusedNodeId, 'b', 'holding Shift must not erase the durable Explore anchor');
+  deepEqual(held.selectedNodeIds, ['a', 'c', 'b'], 'holding Shift must not mutate the durable tag set');
+  equal(held.focusedNodeId, 'c', 'holding Shift must not erase the durable Explore anchor');
   click(value, canvas, await nodePoint(session, 'a'), { pointerId: 303, shiftKey: true });
   value.platform.flushFrame();
   const removed = await session.exportViewState();
-  deepEqual(removed.selectedNodeIds, ['b'], 'Shift-clicking a tagged node should remove it');
-  equal(removed.focusedNodeId, 'b', 'removing another tag should preserve the current Explore anchor');
+  deepEqual(removed.selectedNodeIds, ['c', 'b'], 'Shift-clicking a tagged node should remove only it');
+  equal(removed.focusedNodeId, 'c', 'removing another tag should preserve the current Explore anchor');
 
   const focusIntentCount = intents.filter((intent) => intent.type === 'focus-changed').length;
   modifier(value, 'keyup', false);

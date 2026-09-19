@@ -1,6 +1,7 @@
 import {
   analyzeGraphTopologyV1,
   DEFAULT_GRAPH_TOPOLOGY_LAYOUT_POLICY_V1,
+  shortestPathToAnyV1,
 } from '../../src/graph-engine/core/topology/index.ts';
 import {
   buildComponentPackingTargetsV1,
@@ -14,6 +15,22 @@ import { DEFAULT_GRAPH_RENDER_THEME_V1 } from '../../src/graph-engine/runtime/re
 import type { GraphModulePipelineStateV1 } from '../../src/graph-engine/runtime/modules/GraphModuleTypes.ts';
 import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
+
+test('shortest paths resolve deterministically to the nearest selected group member', () => {
+  const relationships = new Map<string, ReadonlySet<string>>([
+    ['outer', new Set(['right', 'left'])],
+    ['left', new Set(['outer', 'selected-b'])],
+    ['right', new Set(['outer', 'selected-a'])],
+    ['selected-a', new Set(['right'])],
+    ['selected-b', new Set(['left'])],
+    ['isolated', new Set()],
+  ]);
+  deepEqual(shortestPathToAnyV1('outer', new Set(['selected-a', 'selected-b']), relationships),
+    ['outer', 'left', 'selected-b'],
+    'equal-length paths should use stable lexical neighbor ordering');
+  equal(shortestPathToAnyV1('isolated', new Set(['selected-a']), relationships), undefined,
+    'disconnected nodes should not invent a bridge');
+});
 
 test('A-PAIR-01 aggregates physical endpoint pairs without changing canonical edges', () => {
   const document = graphDocument({
