@@ -52,6 +52,10 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const selectedIds = new Set(state.viewState.selectedNodeIds);
     const taggedIds = new Set(selectedIds);
     if (focusedId !== undefined) taggedIds.add(focusedId);
+    const selectedNeighborhoodIds = new Set(selectedIds);
+    for (const selectedId of selectedIds) {
+      for (const neighborId of relationships.get(selectedId) ?? []) selectedNeighborhoodIds.add(neighborId);
+    }
     const hoveredId = state.hoveredNodeId;
     const hoveredNeighborhood = hoveredId === undefined
       ? new Set<string>()
@@ -77,7 +81,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         ? hoveredNeighborhood
         : new Set(exploreHoverPath ?? [hoveredId]);
     const visibleIds = transientNeighborhood ?? (exploreActive
-      ? new Set([...taggedIds, ...exploreHoverIds])
+      ? new Set([...selectedNeighborhoodIds, ...taggedIds, ...exploreHoverIds])
       : undefined);
     const labelVisibleIds = transientNeighborhood ?? (exploreActive ? taggedIds : undefined);
     const litNodeIds = transientId !== undefined

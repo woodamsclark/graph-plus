@@ -104,16 +104,27 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   });
   assert(taggedA?.nodeContributions && taggedA.edgeContributions, 'Explore presentation should resolve tagged nodes');
   equal(taggedA.nodeContributions.a.opacity, 1, 'the tagged node should remain fully visible');
-  equal(taggedA.nodeContributions.b.opacity, 0.2, 'tagging must not automatically reveal direct neighbors');
+  equal(taggedA.nodeContributions.b.opacity, 1, 'a direct neighbor should remain fully visible');
+  equal(taggedA.nodeContributions.d.opacity, 1, 'every direct neighbor should remain fully visible');
+  equal(taggedA.nodeContributions.c.opacity, 0.2, 'nodes beyond the direct neighborhood should remain dim');
   deepEqual(taggedA.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'the tagged node should light up');
+  deepEqual(taggedA.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
+    'a direct neighbor should retain its ordinary node color');
+  deepEqual(taggedA.nodeContributions.d.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
+    'direct neighbors should not inherit the tagged highlight');
   equal(taggedA.edgeContributions['a-b'].opacity, 0.2, 'a single tag should not light its neighborhood links');
 
   const taggedStructure = anima.contributeFrame({
     ...state,
     viewState: { ...state.viewState, selectedNodeIds: ['a', 'b'], focusedNodeId: 'b' },
   });
-  assert(taggedStructure?.edgeContributions, 'multi-tag presentation should include structural links');
+  assert(taggedStructure?.nodeContributions && taggedStructure.edgeContributions,
+    'multi-tag presentation should include nodes and structural links');
+  equal(taggedStructure.nodeContributions.c.opacity, 1,
+    'neighbors of any selected node should remain fully visible');
+  deepEqual(taggedStructure.nodeContributions.c.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
+    'neighbors of a selected structure should retain their ordinary color');
   equal(taggedStructure.edgeContributions['a-b'].opacity, 1, 'a link between tagged nodes should remain bright');
   equal(taggedStructure.edgeContributions['b-c'].opacity, 0.2, 'links outside the tagged structure should dim');
 
@@ -125,7 +136,10 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   assert(exploredHover?.nodeContributions && exploredHover.edgeContributions,
     'Explore hover should resolve a path back to the tagged structure');
   equal(exploredHover.nodeContributions.b.opacity, 1, 'an intermediate shortest-path node should be revealed');
-  equal(exploredHover.nodeContributions.d.opacity, 0.2, 'unrelated untagged nodes should remain dim');
+  equal(exploredHover.nodeContributions.d.opacity, 1,
+    'an off-path direct neighbor of the selection should remain visually normal');
+  deepEqual(exploredHover.nodeContributions.d.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
+    'an off-path direct neighbor should remain unhighlighted');
   deepEqual(exploredHover.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'intermediate shortest-path nodes should light');
   deepEqual(exploredHover.nodeContributions.c.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
