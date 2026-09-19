@@ -1,5 +1,6 @@
 import type { GraphDimensionsV1 } from '../../contracts/v1/index.ts';
 import type { BufferedQueue } from './BufferedQueue.ts';
+import { GraphTaggingController, type GraphTaggingResultV1 } from './GraphTaggingController.ts';
 import type {
   GraphHitV1,
   GraphInputEventV1,
@@ -88,6 +89,7 @@ export class GraphInteractionInterpreter {
   private pendingTouchTapTimer: number | null = null;
   private trackpadPinchMomentum: TrackpadPinchMomentum | null = null;
   private trackpadPinchMomentumTimer: number | null = null;
+  private readonly tagging = new GraphTaggingController();
 
   constructor(private readonly options: {
     readonly dimensions: GraphDimensionsV1;
@@ -136,6 +138,10 @@ export class GraphInteractionInterpreter {
     }
   }
 
+  isTaggingActive(): boolean {
+    return this.tagging.isActive();
+  }
+
   reset(): void {
     this.clearPendingTouchTap();
     this.cancelTrackpadPinchMomentum();
@@ -143,6 +149,7 @@ export class GraphInteractionInterpreter {
     this.mode = { kind: 'idle' };
     this.touchGesture = null;
     this.pendingHover = null;
+    this.tagging.reset();
   }
 
   private ingest(event: GraphInputEventV1): void {
@@ -213,17 +220,16 @@ export class GraphInteractionInterpreter {
         return;
       }
       const focusedNodeId = this.options.getFocusedNodeId();
-      const focusedThreeDimensionalTouchOrbit = this.dimensions === '3d'
+      const exploreThreeDimensionalPrimaryOrbit = this.dimensions === '3d'
         && this.mode.button === 0
-        && this.mode.pointerKind !== 'mouse'
-        && focusedNodeId !== undefined;
+        && this.isExploreModeActive();
       const focusedNeighborDrag = this.mode.pointerKind === 'mouse'
         && focusedNodeId !== undefined
         && this.mode.hit !== null
         && this.options.getHoveredNodeId() === this.mode.hit.nodeId
         && this.options.isDirectNeighbor(this.mode.hit.nodeId, focusedNodeId);
       if (this.mode.hit && this.mode.button === 0
-        && !focusedThreeDimensionalTouchOrbit
+        && (!exploreThreeDimensionalPrimaryOrbit || focusedNeighborDrag)
         && (focusedNodeId === undefined || focusedNeighborDrag)) {
         if (!focusedNeighborDrag) {
           this.command(event, { type: 'set-focus' });
@@ -239,7 +245,7 @@ export class GraphInteractionInterpreter {
       }
       const orbit = this.dimensions === '3d' && (
         this.mode.button === 2
-        || focusedThreeDimensionalTouchOrbit
+        || exploreThreeDimensionalPrimaryOrbit
       );
       if (orbit) {
         this.command(event, {
@@ -363,6 +369,10 @@ export class GraphInteractionInterpreter {
   }
 
   private modifierChange(event: Extract<GraphInputEventV1, { type: 'modifier-change' }>): void {
+    const wasTagging = this.tagging.isActive();
+    const completed = this.tagging.updateShift(event.shift, this.options.getSelectedNodeIds());
+    if (wasTagging !== this.tagging.isActive()) this.command(event, { type: 'tagging-changed' });
+    if (completed) this.completeTagging(event, completed);
     if (this.mode.kind !== 'idle' || this.pointers.size > 0 || this.touchGesture) return;
     if (!event.pointerInside) {
       this.command(event, { type: 'set-preview-hover' });
@@ -392,7 +402,7 @@ export class GraphInteractionInterpreter {
       if (event.ctrl && !event.meta) this.captureTrackpadPinchMomentum(event, zoomDelta);
       return;
     }
-    if (this.dimensions === '3d' && this.options.getFocusedNodeId() !== undefined) {
+    if (this.dimensions === '3d' && this.isExploreModeActive()) {
       this.command(event, { type: 'orbit-by', deltaX: -delta.x, deltaY: delta.y });
       return;
     }
@@ -440,6 +450,7 @@ export class GraphInteractionInterpreter {
       return;
     }
     if (event.key === 'Escape') {
+      this.tagging.reset();
       this.command(event, { type: 'set-selection', nodeIds: [] });
       this.command(event, { type: 'set-focus' });
       return;
@@ -480,7 +491,7 @@ export class GraphInteractionInterpreter {
       const deltaX = origin.x - next.centroid.x;
       const deltaY = origin.y - next.centroid.y;
       const focusedThreeDimensional = this.dimensions === '3d'
-        && this.options.getFocusedNodeId() !== undefined;
+        && this.isExploreModeActive();
       this.command(event, this.dimensions === '3d' && !focusedThreeDimensional
         ? { type: 'orbit-by', deltaX: -deltaX, deltaY }
         : { type: 'pan-by', deltaX, deltaY });
@@ -541,19 +552,39 @@ export class GraphInteractionInterpreter {
     hit: GraphHitV1 | null,
   ): void {
     if (!hit) {
+      this.tagging.reset();
       this.command(event, { type: 'set-selection', nodeIds: [] });
       this.command(event, { type: 'set-focus' });
       this.command(event, { type: 'activate-background' });
       return;
     }
-    if (this.options.getFocusedNodeId() === hit.nodeId) {
+    if (!event.shift && this.options.getFocusedNodeId() === hit.nodeId) {
       this.command(event, { type: 'activate-node', nodeId: hit.nodeId, activation: 'primary' });
       return;
     }
     const nodeIds = this.options.getNodeSelection(hit.nodeId);
-    this.command(event, { type: 'set-selection', nodeIds });
-    this.command(event, { type: 'set-focus', nodeId: hit.nodeId });
-    this.command(event, { type: 'fit-camera', nodeIds, centerNodeId: hit.nodeId });
+    const result = this.tagging.tag(
+      nodeIds,
+      hit.nodeId,
+      this.options.getSelectedNodeIds(),
+      event.shift,
+    );
+    this.command(event, { type: 'set-selection', nodeIds: result.selectedNodeIds });
+    if (result.complete) this.completeTagging(event, result);
+  }
+
+  private completeTagging(
+    event: Pick<GraphInputEventV1, 'identity' | 'timestamp'>,
+    result: GraphTaggingResultV1,
+  ): void {
+    if (result.selectedNodeIds.length === 0) return;
+    this.command(event, { type: 'set-focus', nodeId: result.focusNodeId });
+    this.command(event, { type: 'fit-camera', nodeIds: result.selectedNodeIds });
+  }
+
+  private isExploreModeActive(): boolean {
+    return (this.options.getSelectedNodeIds().length > 0 || this.options.getFocusedNodeId() !== undefined)
+      && !this.tagging.isActive();
   }
 
   private readTouchGesture(): TouchGesture | null {

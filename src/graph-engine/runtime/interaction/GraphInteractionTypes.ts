@@ -56,6 +56,7 @@ export type GraphInputEventV1 =
       readonly type: 'modifier-change';
       readonly point: GraphScreenPointV1;
       readonly mod: boolean;
+      readonly shift: boolean;
       readonly pointerInside: boolean;
     })
   | (GraphInputBaseV1 & {
@@ -108,6 +109,7 @@ export type GraphRuntimeCommandV1 =
     })
   | (GraphCommandBaseV1 & { readonly type: 'set-selection'; readonly nodeIds: readonly string[] })
   | (GraphCommandBaseV1 & { readonly type: 'set-focus'; readonly nodeId?: string })
+  | (GraphCommandBaseV1 & { readonly type: 'tagging-changed' })
   | (GraphCommandBaseV1 & {
       readonly type: 'activate-node';
       readonly nodeId: string;

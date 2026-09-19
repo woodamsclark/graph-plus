@@ -303,8 +303,11 @@ test('R-REGION-04 first tag click selects visible recursive children and second 
   const selected = await session.exportViewState();
   deepEqual(selected.selectedNodeIds, ['subtag', 'nested', 'direct'], 'first click should select visible descendants through child tags and exclude the owner');
   equal(selected.focusedNodeId, 'tag', 'the clicked tag node should own focus');
-  deepEqual(selected.camera.target, selected.positions.tag,
-    'region framing should stay centered on the clicked owner rather than one of its selected descendants');
+  deepEqual(selected.camera.target, {
+    x: (selected.positions.nested.x + selected.positions.direct.x) / 2,
+    y: (selected.positions.nested.y + selected.positions.direct.y) / 2,
+    z: (selected.positions.nested.z + selected.positions.direct.z) / 2,
+  }, 'region tagging should frame the selected descendant structure rather than privileging its owner');
 
   click(value, canvas, await nodePoint(session, 'tag'), { pointerId: 202 });
   value.platform.flushFrame();
@@ -328,6 +331,41 @@ test('R-REGION-04 first tag click selects visible recursive children and second 
   projectionValue.platform.flushFrame();
   deepEqual((await projectionSession.exportViewState()).selectedNodeIds, ['subtag', 'nested', 'direct'], 'projection filtering should preserve filtered region definitions and visible recursive selection');
   await projectionSession.dispose();
+});
+
+test('Shift tagging batches selection and focuses the completed structure on release', async () => {
+  const value = runtimeHarness();
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  const intents: GraphIntentV1[] = [];
+  session.onIntent((intent) => intents.push(intent));
+  const before = await session.exportViewState();
+
+  modifier(value, 'keydown', true);
+  value.platform.flushFrame();
+  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 301, shiftKey: true });
+  value.platform.flushFrame();
+  click(value, canvas, await nodePoint(session, 'b'), { pointerId: 302, shiftKey: true });
+  value.platform.flushFrame();
+
+  const batching = await session.exportViewState();
+  deepEqual(batching.selectedNodeIds, ['a', 'b'], 'Shift-click should add nodes to the live tagged selection');
+  equal(batching.focusedNodeId, undefined, 'Shift should suspend focus while tags are still being assembled');
+  deepEqual(batching.camera, before.camera, 'camera framing should remain unchanged during a tagging batch');
+
+  modifier(value, 'keyup', false);
+  value.platform.flushFrame();
+  const completed = await session.exportViewState();
+  equal(completed.focusedNodeId, 'b', 'the last tagged node should become the Explore anchor on release');
+  const expectedTarget = {
+    x: (completed.positions.a.x + completed.positions.b.x) / 2,
+    y: (completed.positions.a.y + completed.positions.b.y) / 2,
+    z: (completed.positions.a.z + completed.positions.b.z) / 2,
+  };
+  deepEqual(completed.camera.target, expectedTarget, 'Shift release should frame the complete tagged structure');
+  equal(intents.filter((intent) => intent.type === 'focus-changed').length, 1,
+    'the batch should emit focus only once when tagging completes');
+  await session.dispose();
 });
 
 test('R-INPUT-10 has no view-action fallback when no consumer action resolves', async () => {
@@ -548,6 +586,38 @@ test('desktop primary background pan offsets the camera while preserving focus a
   equal(intents.filter((intent) => intent.type === 'focus-changed').length, 0, 'desktop primary pan should emit no focus change');
   equal(intents.filter((intent) => intent.type === 'selection-changed').length, 0, 'desktop primary pan should emit no selection change');
   await session.dispose();
+});
+
+test('desktop primary navigation pans in 3D Overview and orbits in Explore', async () => {
+  const overview = runtimeHarness({ profileId: 'three-dimensional' });
+  const overviewSession = await overview.create();
+  const overviewCanvas = runtimeCanvas(overview.container);
+  const overviewBefore = await overviewSession.exportViewState();
+  pointer(overview, overviewCanvas, 'pointerdown', -100, -100, { pointerId: 320 });
+  pointer(overview, overviewCanvas, 'pointermove', -60, -75, { pointerId: 320 });
+  overview.platform.flushFrame();
+  const overviewAfter = await overviewSession.exportViewState();
+  assert(!sameVector(overviewAfter.camera.target, overviewBefore.camera.target),
+    'unselected Overview navigation should pan the camera target');
+  deepEqual(cameraOffset(overviewAfter.camera), cameraOffset(overviewBefore.camera),
+    'Overview pan should preserve the camera orientation');
+  await overviewSession.dispose();
+
+  const explore = runtimeHarness({ profileId: 'three-dimensional' });
+  const exploreSession = await explore.create();
+  const exploreCanvas = runtimeCanvas(explore.container);
+  await exploreSession.setSelection(['a']);
+  await exploreSession.focusNode('a');
+  const exploreBefore = await exploreSession.exportViewState();
+  pointer(explore, exploreCanvas, 'pointerdown', -100, -100, { pointerId: 321 });
+  pointer(explore, exploreCanvas, 'pointermove', -60, -75, { pointerId: 321 });
+  explore.platform.flushFrame();
+  const exploreAfter = await exploreSession.exportViewState();
+  deepEqual(exploreAfter.camera.target, exploreBefore.camera.target,
+    'Explore rotation should stay centered on the selected structure');
+  assert(!sameVector(exploreAfter.camera.position, exploreBefore.camera.position),
+    'the same primary gesture should rotate once a selection enters Explore mode');
+  await exploreSession.dispose();
 });
 
 test('R-INPUT-17 mobile one-finger background drag pans unfocused and orbits focused 3D', async () => {
@@ -1034,7 +1104,7 @@ function click(
   value: ReturnType<typeof runtimeHarness>,
   canvas: HTMLCanvasElement,
   point: { x: number; y: number },
-  options: { pointerId: number; button?: number; pointerType?: string },
+  options: { pointerId: number; button?: number; pointerType?: string; shiftKey?: boolean },
 ): void {
   pointer(value, canvas, 'pointerdown', point.x, point.y, options);
   pointer(value, canvas, 'pointerup', point.x, point.y, options);
@@ -1046,7 +1116,14 @@ function pointer(
   type: 'pointerdown' | 'pointermove' | 'pointerup',
   clientX: number,
   clientY: number,
-  options: { pointerId: number; button?: number; pointerType?: string; ctrlKey?: boolean; metaKey?: boolean },
+  options: {
+    pointerId: number;
+    button?: number;
+    pointerType?: string;
+    ctrlKey?: boolean;
+    metaKey?: boolean;
+    shiftKey?: boolean;
+  },
 ): void {
   const event = new value.window.PointerEvent(type, {
     clientX,
@@ -1056,6 +1133,7 @@ function pointer(
     button: options.button ?? 0,
     ctrlKey: options.ctrlKey ?? false,
     metaKey: options.metaKey ?? false,
+    shiftKey: options.shiftKey ?? false,
     bubbles: true,
     cancelable: true,
   });
@@ -1066,7 +1144,21 @@ function pointer(
   Object.defineProperty(event, 'button', { value: options.button ?? 0 });
   Object.defineProperty(event, 'ctrlKey', { value: options.ctrlKey ?? false });
   Object.defineProperty(event, 'metaKey', { value: options.metaKey ?? false });
+  Object.defineProperty(event, 'shiftKey', { value: options.shiftKey ?? false });
   canvas.dispatchEvent(event as unknown as Event);
+}
+
+function modifier(
+  value: ReturnType<typeof runtimeHarness>,
+  type: 'keydown' | 'keyup',
+  shift: boolean,
+): void {
+  value.window.dispatchEvent(new value.window.KeyboardEvent(type, {
+    key: 'Shift',
+    shiftKey: shift,
+    bubbles: true,
+    cancelable: true,
+  }));
 }
 
 function wheel(

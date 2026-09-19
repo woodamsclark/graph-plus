@@ -32,6 +32,7 @@ export class SessionProjectionCoordinatorV1 {
     readonly selection: GraphFilterSelectionV1;
     readonly draggedNodeId?: string;
     readonly hoveredNodeId?: string;
+    readonly taggingActive?: boolean;
     readonly previewedNodeId?: string;
     readonly invalidation: SessionInvalidationClassV1;
   }): GraphModulePipelineStateV1 {
@@ -41,6 +42,7 @@ export class SessionProjectionCoordinatorV1 {
       ...options.projectionView,
       draggedNodeId: options.draggedNodeId,
       hoveredNodeId: options.hoveredNodeId,
+      taggingActive: options.taggingActive,
       previewedNodeId: options.previewedNodeId,
     });
     this.frames.set(composeGraphRenderFrameV1({

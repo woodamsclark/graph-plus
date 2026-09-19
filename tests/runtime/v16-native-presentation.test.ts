@@ -46,7 +46,7 @@ test('V1.6 Anima owns the exact visible-degree radius and composable structural 
   equal(patch.presentationPolicy?.labelScaleMode, 'fixed', 'Anima labels should remain screen-readable in both dimensions');
 });
 
-test('V1.6 Anima neighborhood highlighting follows focus changes and clears with focus', () => {
+test('Anima separates undimmed overview hover from tagged Explore presentation', () => {
   const document = graphDocument({
     nodes: [graphNode('a'), graphNode('b'), graphNode('c'), graphNode('d')],
     edges: [graphEdge('a-b', 'a', 'b'), graphEdge('b-c', 'b', 'c'), graphEdge('a-d', 'a', 'd')],
@@ -54,65 +54,74 @@ test('V1.6 Anima neighborhood highlighting follows focus changes and clears with
   const selection = { nodeIds: new Set(['a', 'b', 'c', 'd']), edgeIds: new Set(['a-b', 'b-c', 'a-d']) };
   const state = pipeline(document, selection);
   const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, {});
-  const focusedA = anima.contributeFrame({
-    ...state,
-    viewState: { ...state.viewState, focusedNodeId: 'a' },
-  });
-  assert(focusedA?.edgeContributions, 'focused Anima output should include edge presentation');
-  equal(focusedA.edgeContributions['a-b'].opacity, 1, 'the focused node incident link should be highlighted');
-  equal(focusedA.edgeContributions['b-c'].opacity, 0.2, 'a nonincident link should be deemphasized');
-
-  const focusedC = anima.contributeFrame({
-    ...state,
-    hoveredNodeId: 'a',
-    viewState: { ...state.viewState, focusedNodeId: 'c' },
-  });
-  assert(focusedC?.edgeContributions, 'a changed focus should produce edge presentation');
-  equal(focusedC.edgeContributions['a-b'].opacity, 0.2,
-    'focus should outrank a stale hover when choosing the active neighborhood');
-  equal(focusedC.edgeContributions['b-c'].opacity, 1, 'highlighting should follow the newly focused node');
-
-  const inspectedNeighbor = anima.contributeFrame({
+  const overviewHover = anima.contributeFrame({
     ...state,
     hoveredNodeId: 'b',
-    viewState: { ...state.viewState, focusedNodeId: 'a' },
   });
-  assert(inspectedNeighbor?.edgeContributions, 'a focused neighbor hover should produce edge presentation');
-  equal(inspectedNeighbor.edgeContributions['a-b'].opacity, 1,
-    'hovering a direct neighbor should retain its link to the focused node');
-  equal(inspectedNeighbor.edgeContributions['b-c'].opacity, 1,
-    'hovering a direct neighbor should illuminate that neighbor\'s own neighborhood');
-  equal(inspectedNeighbor.edgeContributions['a-d'].opacity, 1,
-    'hovering a direct neighbor should retain the focused node\'s other incident links');
-  assert(inspectedNeighbor.nodeContributions, 'a focused neighbor hover should contribute node presentation');
-  equal(inspectedNeighbor.nodeContributions.c.opacity, 1,
-    'the hovered neighbor\'s own neighbor should remain bright');
-  equal(inspectedNeighbor.nodeContributions.d.opacity, 1,
-    'the focused node\'s other neighbor should remain bright');
+  assert(overviewHover?.nodeContributions && overviewHover.edgeContributions,
+    'overview hover should produce node and edge presentation');
+  equal(overviewHover.nodeContributions.a.opacity, 1, 'a hovered node neighbor should remain fully visible');
+  equal(overviewHover.nodeContributions.d.opacity, 1, 'overview hover must not dim unrelated nodes');
+  deepEqual(overviewHover.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
+    'overview hover should light direct neighbors');
+  deepEqual(overviewHover.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
+    'overview hover should light the hovered node');
+  equal(overviewHover.edgeContributions['a-d'].opacity, 1, 'overview hover must not dim unrelated links');
+  deepEqual(overviewHover.edgeContributions['a-b'].color, DEFAULT_GRAPH_RENDER_THEME_V1.colors.highlightedNode,
+    'overview hover should light incident links');
 
-  const ignoredDistantHover = anima.contributeFrame({
+  const taggedA = anima.contributeFrame({
+    ...state,
+    viewState: { ...state.viewState, selectedNodeIds: ['a'], focusedNodeId: 'a' },
+  });
+  assert(taggedA?.nodeContributions && taggedA.edgeContributions, 'Explore presentation should resolve tagged nodes');
+  equal(taggedA.nodeContributions.a.opacity, 1, 'the tagged node should remain fully visible');
+  equal(taggedA.nodeContributions.b.opacity, 0.2, 'tagging must not automatically reveal direct neighbors');
+  deepEqual(taggedA.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
+    'the tagged node should light up');
+  equal(taggedA.edgeContributions['a-b'].opacity, 0.2, 'a single tag should not light its neighborhood links');
+
+  const taggedStructure = anima.contributeFrame({
+    ...state,
+    viewState: { ...state.viewState, selectedNodeIds: ['a', 'b'], focusedNodeId: 'b' },
+  });
+  assert(taggedStructure?.edgeContributions, 'multi-tag presentation should include structural links');
+  equal(taggedStructure.edgeContributions['a-b'].opacity, 1, 'a link between tagged nodes should remain bright');
+  equal(taggedStructure.edgeContributions['b-c'].opacity, 0.2, 'links outside the tagged structure should dim');
+
+  const exploredHover = anima.contributeFrame({
     ...state,
     hoveredNodeId: 'c',
-    viewState: { ...state.viewState, focusedNodeId: 'a' },
+    viewState: { ...state.viewState, selectedNodeIds: ['a'], focusedNodeId: 'a' },
   });
-  assert(ignoredDistantHover?.edgeContributions, 'a distant hover should retain focused presentation');
-  equal(ignoredDistantHover.edgeContributions['a-b'].opacity, 1,
-    'a non-neighbor hover should leave the focused neighborhood active');
-  equal(ignoredDistantHover.edgeContributions['b-c'].opacity, 0.2,
-    'a non-neighbor hover should not inspect an unrelated neighborhood');
-  equal(ignoredDistantHover.edgeContributions['a-d'].opacity, 1,
-    'a non-neighbor hover should retain every focused-node link');
+  assert(exploredHover?.nodeContributions && exploredHover.edgeContributions,
+    'Explore hover should temporarily reveal its local neighborhood');
+  equal(exploredHover.nodeContributions.b.opacity, 1, 'an immediate neighbor of the hovered node should be revealed');
+  equal(exploredHover.nodeContributions.d.opacity, 0.2, 'unrelated untagged nodes should remain dim');
+  deepEqual(exploredHover.nodeContributions.c.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
+    'the hovered node should light independently from tagged nodes');
+  equal(exploredHover.edgeContributions['b-c'].opacity, 1, 'the hovered node links should be revealed');
+
+  const batching = anima.contributeFrame({
+    ...state,
+    taggingActive: true,
+    viewState: { ...state.viewState, selectedNodeIds: ['a', 'b'] },
+  });
+  assert(batching?.nodeContributions, 'an active Shift tagging batch should contribute presentation');
+  equal(batching.nodeContributions.c.opacity, 1, 'tagging should defer background dimming until Shift release');
+  deepEqual(batching.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
+    'already tagged nodes should light during the batch');
 
   const previewedA = anima.contributeFrame({
     ...state,
     previewedNodeId: 'a',
-    viewState: { ...state.viewState, focusedNodeId: 'c' },
+    viewState: { ...state.viewState, selectedNodeIds: ['c'], focusedNodeId: 'c' },
   });
   assert(previewedA?.edgeContributions, 'semantic preview should produce Anima presentation');
   equal(previewedA.edgeContributions['a-b'].opacity, 1,
     'Anima preview should own the active neighborhood independently from focus and ordinary hover');
   equal(previewedA.edgeContributions['b-c'].opacity, 0.2,
-    'a focused neighborhood should yield while a semantic preview target is active');
+    'the tagged structure should yield while a semantic preview target is active');
   equal(previewedA.edgeContributions['a-d'].opacity, 1,
     'semantic preview should preserve its own incident links');
 
@@ -123,7 +132,7 @@ test('V1.6 Anima neighborhood highlighting follows focus changes and clears with
   equal(cleared.edgeContributions['a-d'].opacity, 1, 'clearing focus should restore every ordinary link');
 });
 
-test('V2 adaptive labels stay inside the active neighborhood', () => {
+test('V2 adaptive labels stay inside tagged and inspected structures', () => {
   const document = graphDocument({
     nodes: [graphNode('a'), graphNode('b'), graphNode('c')],
     edges: [graphEdge('a-b', 'a', 'b')],
@@ -134,17 +143,25 @@ test('V2 adaptive labels stay inside the active neighborhood', () => {
   const adaptive = anima.contributeFrame({
     ...state,
     presentationPolicy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'adaptive' },
-    viewState: { ...state.viewState, focusedNodeId: 'a' },
+    viewState: { ...state.viewState, selectedNodeIds: ['a'], focusedNodeId: 'a' },
   });
-  assert(adaptive?.nodeContributions, 'focused adaptive presentation should contribute nodes');
-  equal(adaptive.nodeContributions.a.showLabel, true, 'the focused node label should remain eligible');
-  equal(adaptive.nodeContributions.b.showLabel, true, 'a direct-neighbor label should remain eligible');
+  assert(adaptive?.nodeContributions, 'tagged adaptive presentation should contribute nodes');
+  equal(adaptive.nodeContributions.a.showLabel, true, 'the tagged node label should remain eligible');
+  equal(adaptive.nodeContributions.b.showLabel, false, 'tagging alone should not reveal a neighbor label');
   equal(adaptive.nodeContributions.c.showLabel, false, 'an unrelated node label should be suppressed');
+
+  const inspected = anima.contributeFrame({
+    ...state,
+    hoveredNodeId: 'b',
+    presentationPolicy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'adaptive' },
+    viewState: { ...state.viewState, selectedNodeIds: ['a'], focusedNodeId: 'a' },
+  });
+  equal(inspected?.nodeContributions?.b.showLabel, true, 'hover should reveal its node label in Explore mode');
 
   const all = anima.contributeFrame({
     ...state,
     presentationPolicy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'all' },
-    viewState: { ...state.viewState, focusedNodeId: 'a' },
+    viewState: { ...state.viewState, selectedNodeIds: ['a'], focusedNodeId: 'a' },
   });
   equal(all?.nodeContributions?.c.showLabel, true, 'All labels should remain an explicit override');
 });
