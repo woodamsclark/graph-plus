@@ -33,12 +33,19 @@ test('V1.6 Anima owns the exact visible-degree radius and composable structural 
   const selection = { nodeIds: new Set(nodes.map((node) => node.id)), edgeIds: new Set(edges.map((edge) => edge.id)) };
   const state = pipeline(document, selection);
   const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, {});
-  const patch = anima.contributeFrame({
+  const geometry = anima.selectRender({
     ...state,
     nodeContributions: { hub: { baseRadiusScale: 2, radiusScale: 1.35 } },
   });
+  assert(geometry.nodeContributions, 'Anima should publish structural geometry before force ticks');
+  const patch = anima.contributeFrame({
+    ...state,
+    nodeContributions: geometry.nodeContributions,
+  });
   assert(patch && patch.nodeContributions, 'new-mode Anima should contribute final geometry');
   const expected = 2 * 1.35 * 3 * Math.sqrt(10);
+  assert(Math.abs((geometry.nodeContributions.hub.radius ?? 0) - expected) < 1e-10,
+    'the force pipeline should receive the same resolved hub radius as rendering');
   assert(Math.abs((patch.nodeContributions.hub.radius ?? 0) - expected) < 1e-10,
     'hub radius should use the exact formula and ignore duplicate ordered relationships');
   equal(patch.nodeContributions['leaf-0'].radius, 8, 'low-degree nodes should use the exact lower clamp');
@@ -497,7 +504,7 @@ test('V1.7 D3-compatible integration advances at most once after a delayed frame
   });
   const settings = readForceSettings({
     weightingMode: 'uniform', repulsionStrength: 0,
-    centeringStrength: 0, collisionRadius: 0, springStrength: 1, springLength: 250,
+    centeringStrength: 0, collisionStrength: 0, springStrength: 1, springLength: 250,
   });
   const one = new ForceLayoutModule('2d', settings);
   const two = new ForceLayoutModule('2d', settings);
@@ -523,7 +530,7 @@ test('V1.6 D3-compatible link integration matches the reviewed one-tick equation
   const alphaDecay = 1 - Math.pow(0.001, 1 / 300);
   const force = new ForceLayoutModule('2d', readForceSettings({
     weightingMode: 'uniform', repulsionStrength: 0,
-    centeringStrength: 0, collisionRadius: 0, springStrength: 1, springLength: 250,
+    centeringStrength: 0, collisionStrength: 0, springStrength: 1, springLength: 250,
     velocityDecay: 0.4, alphaDecay,
   }));
   const initial = pipeline(document, {
@@ -548,7 +555,7 @@ test('high link strength converges without crossing its target in one integratio
     edges: [graphEdge('join', 'left', 'right')],
   });
   const force = new ForceLayoutModule('2d', readForceSettings({
-    repulsionStrength: 0, centeringStrength: 0, collisionRadius: 0,
+    repulsionStrength: 0, centeringStrength: 0, collisionStrength: 0,
     springStrength: 4, springLength: 250, velocityDecay: 0.4,
   }));
   const result = force.tick(pipeline(document, {
@@ -576,7 +583,7 @@ test('active drag scales heat down when its incident link strength is high', () 
     draggedNodeId: 'left',
   };
   const baseSettings = {
-    repulsionStrength: 0, centeringStrength: 0, collisionRadius: 0,
+    repulsionStrength: 0, centeringStrength: 0, collisionStrength: 0,
     springLength: 250, velocityDecay: 0.4,
   };
   const ordinary = new ForceLayoutModule('2d', readForceSettings({ ...baseSettings, springStrength: 1 }));
@@ -593,6 +600,33 @@ test('active drag scales heat down when its incident link strength is high', () 
     'high-strength drag heat should be materially lower than ordinary drag heat');
 });
 
+test('link-force edits do not multiply the generic reheat pulse', () => {
+  const baseSettings = {
+    repulsionStrength: 0, centeringStrength: 0, collisionStrength: 0,
+    springLength: 250, velocityDecay: 0.4,
+  };
+  const force = new ForceLayoutModule('2d', readForceSettings({ ...baseSettings, springStrength: 1 }));
+  force.restoreState({
+    schemaVersion: 1,
+    alpha: 0,
+    alphaTarget: 0,
+    running: false,
+    velocities: {},
+  });
+
+  force.updateSettings({ ...baseSettings, springStrength: 2 });
+  const moderateAlpha = force.getDiagnostics().alpha;
+  assert(Math.abs(moderateAlpha - 0.15) < 1e-12,
+    'doubling Link force should halve the generic reheat alpha');
+
+  force.updateSettings({ ...baseSettings, springStrength: 5 });
+  const strongAlpha = force.getDiagnostics().alpha;
+  assert(Math.abs(strongAlpha - 0.06) < 1e-12,
+    'a subsequent stronger Link force edit should replace rather than retain the hotter pulse');
+  assert(Math.abs(moderateAlpha * 2 - strongAlpha * 5) < 1e-12,
+    'generic reheat times Link force should remain capped at the default impulse');
+});
+
 test('link distance does not change disconnected-component packing', () => {
   const document = graphDocument({
     nodes: [
@@ -607,7 +641,7 @@ test('link distance does not change disconnected-component packing', () => {
   });
   const settings = {
     repulsionStrength: 0, springStrength: 0, centeringStrength: 0.1,
-    collisionRadius: 0, velocityDecay: 0.4,
+    collisionStrength: 0, velocityDecay: 0.4,
   };
   const compact = new ForceLayoutModule('2d', readForceSettings({ ...settings, springLength: 20 }));
   const spacious = new ForceLayoutModule('2d', readForceSettings({ ...settings, springLength: 500 }));
@@ -617,6 +651,41 @@ test('link distance does not change disconnected-component packing', () => {
     'component packing should move the disconnected orphan in both layouts');
   deepEqual(compactResult.positions.orphan, spaciousResult.positions.orphan,
     'an orphan packing target must be independent of linked-node distance');
+});
+
+test('world-space collision stops unequal visible nodes at their exact edge distance', () => {
+  const document = graphDocument({
+    nodes: [
+      graphNode('small', { positionHint: { x: -10, y: 0, z: 0 } }),
+      graphNode('large', { positionHint: { x: 10, y: 0, z: 0 } }),
+    ],
+    edges: [],
+  });
+  const state = {
+    ...pipeline(document, {
+      nodeIds: new Set(['small', 'large']), edgeIds: new Set(),
+    }),
+    nodeContributions: {
+      small: { radius: 8 },
+      large: { radius: 24 },
+    },
+  };
+  const force = new ForceLayoutModule('2d', readForceSettings({
+    repulsionStrength: 0,
+    springStrength: 0,
+    centeringStrength: 0,
+    collisionGap: 0,
+    collisionStrength: 1,
+    velocityDecay: 0,
+  }));
+  const result = force.tick(state, 1 / 60);
+  assert(result?.positions, 'overlapping visible node geometry should advance the layout');
+  const distance = Math.hypot(
+    result.positions.large.x - result.positions.small.x,
+    result.positions.large.y - result.positions.small.y,
+  );
+  assert(Math.abs(distance - 32) < 1e-10,
+    'collision should resolve to the sum of the two visible world radii');
 });
 
 test('V1.6 D3-compatible mechanics remain finite and spatial in 3D', () => {
@@ -629,7 +698,7 @@ test('V1.6 D3-compatible mechanics remain finite and spatial in 3D', () => {
   });
   const force = new ForceLayoutModule('3d', readForceSettings({
     weightingMode: 'uniform', repulsionStrength: 1000,
-    centeringStrength: 0.1, collisionRadius: 60, collisionStrength: 0.5,
+    centeringStrength: 0.1, collisionGap: 0, collisionStrength: 1,
     springStrength: 1, springLength: 250, velocityDecay: 0.4,
     alphaDecay: 1 - Math.pow(0.001, 1 / 300),
   }));
@@ -659,7 +728,7 @@ test('V1.6 force integration rejects hostile restored motion and enforces maxSpe
   const maxSpeed = 10;
   const force = new ForceLayoutModule('2d', readForceSettings({
     weightingMode: 'uniform', repulsionStrength: 0, centeringStrength: 0,
-    collisionRadius: 0, springStrength: 1000, springLength: 1, maxSpeed,
+    collisionStrength: 0, springStrength: 1000, springLength: 1, maxSpeed,
   }));
   force.restoreState({
     schemaVersion: 1,
@@ -696,7 +765,7 @@ test('force cooling clears residual velocity before a later reheat', () => {
     edges: [],
   });
   const force = new ForceLayoutModule('2d', readForceSettings({
-    repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionRadius: 0,
+    repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionStrength: 0,
     velocityDecay: 0, alphaDecay: 1, alphaMin: 0.001,
   }));
   force.restoreState({
@@ -729,7 +798,7 @@ test('velocity-decay-only changes preserve a settled topology and do not reheat 
     edges: [graphEdge('join', 'left', 'right')],
   });
   const settings = {
-    repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionRadius: 0,
+    repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionStrength: 0,
     velocityDecay: 0.4, alphaDecay: 1, alphaMin: 0.001,
   };
   const force = new ForceLayoutModule('2d', readForceSettings(settings));
@@ -763,7 +832,7 @@ test('V1.7 axial spring flattens only the selected 3D coordinate and respects pi
     repulsionStrength: 0,
     springStrength: 0,
     centeringStrength: 0,
-    collisionRadius: 0,
+    collisionStrength: 0,
     velocityDecay: 0,
     alphaDecay: 0,
     axialSpringAxis: 'y',
@@ -777,14 +846,14 @@ test('V1.7 axial spring flattens only the selected 3D coordinate and respects pi
   equal(result.positions.free.z, 40, 'flattening Y should preserve Z without another force');
 
   const planar = new ForceLayoutModule('2d', readForceSettings({
-    repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionRadius: 0,
+    repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionStrength: 0,
     velocityDecay: 0, alphaDecay: 0, axialSpringAxis: 'y', axialSpringStiffness: 0.9,
   }));
   const planarResult = planar.tick(pipeline(document, {
     nodeIds: new Set(['pinned', 'free']), edgeIds: new Set(),
   }), 1 / 60);
   const planarOff = new ForceLayoutModule('2d', readForceSettings({
-    repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionRadius: 0,
+    repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionStrength: 0,
     velocityDecay: 0, alphaDecay: 0, axialSpringAxis: 'off', axialSpringStiffness: 0,
   })).tick(pipeline(document, {
     nodeIds: new Set(['pinned', 'free']), edgeIds: new Set(),

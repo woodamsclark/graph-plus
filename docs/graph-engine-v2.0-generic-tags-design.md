@@ -308,9 +308,9 @@ hierarchy geometry proportionally. The scales are finite, positive, bounded, and
 profile-owned. No consumer may inject an executable force callback.
 
 With the current default `linkDistance` of `250`, a baseline-affinity tag-parent pair
-has a base target of `125`. The current global collision radius seeks approximately
-`120` units between centers, so a leaf tag can remain visibly close to its parent
-without requiring overlapping nodes.
+has a base target of `125`. Pairwise collision separately targets the sum of the two
+resolved world radii, plus any configured collision gap, so leaf tags can remain close
+to their parents without overlapping visible node geometry.
 
 ### 7.3 Recursive region space
 
@@ -328,7 +328,7 @@ For tag `T`, define:
 
 ```text
 closureSize(T) = 1 + count(unique visible nested tag regions beneath T)
-unitSpacing = max(2 * collisionRadius, linkDistance * tagParentLengthScale)
+unitSpacing = linkDistance * tagParentLengthScale + collisionGap
 ```
 
 The initial dimension-aware footprint estimate is:

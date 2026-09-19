@@ -418,15 +418,15 @@ test('V1.7 layout reset replaces the live session while preserving document and 
   await core.dispose();
 });
 
-test('V1.7.1 global active-note following focuses without changing the full projection', async () => {
+test('V1.7.1 explicit global reveal focuses without changing the full projection', async () => {
   const fixture = snapshot();
   const runtime = runtimeHarness({ registration: graphPlusRegistration });
   const core = new GraphEngineProviderCoreV1({
-    engineVersion: '1.7.1', engineInstanceId: 'graph-plus-active-note-test', capabilities: ['render'],
+    engineVersion: '1.7.1', engineInstanceId: 'graph-plus-explicit-reveal-test', capabilities: ['render'],
     profiles: runtime.profiles, sessions: runtime.factory,
   });
   const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
-  assert(lease.ok, 'Graph+ should obtain a lease for active-note following');
+  assert(lease.ok, 'Graph+ should obtain a lease for explicit reveal');
   const store = new MemoryStore();
   const consumer = new GraphPlusConsumerV1({
     lease: lease.lease,
@@ -452,9 +452,9 @@ test('V1.7.1 global active-note following focuses without changing the full proj
   const surface = runtime.container.querySelector<HTMLElement>('[data-graph-engine-session]');
   assert(surface, 'the followed graph should expose its mounted session surface');
 
-  equal(await consumer.followActiveNode(alphaId), true, 'a main-split graph should follow the active note');
+  equal(await consumer.revealAndFocusNode(alphaId), true, 'an explicit global reveal should focus the requested note');
   equal((await consumer.getSession()?.exportViewState())?.focusedNodeId, alphaId,
-    'active-note following should use ordinary graph focus state');
+    'an explicit reveal should use ordinary graph focus state');
   deepEqual(fitRequests[0], { nodeIds: [alphaId, betaId, courseId], centerNodeId: alphaId },
     'every programmatic focus should frame the focused node with its visible direct neighbors');
   await session.focusNode(null);
@@ -480,7 +480,56 @@ test('V1.7.1 global active-note following focuses without changing the full proj
 
   await consumer.close();
   equal(store.value?.viewState?.activeFilters.projection, undefined,
-    'transient active-note reveal should not enter the durable checkpoint');
+    'transient explicit reveal should not enter the durable checkpoint');
+  await core.dispose();
+});
+
+test('V2 global Graph+ leaves the live session untouched for content-only reconciliation', async () => {
+  const fixture = snapshot();
+  let current: any = fixture.value;
+  const runtime = runtimeHarness({ registration: graphPlusRegistration });
+  const core = new GraphEngineProviderCoreV1({
+    engineVersion: '2.0.0', engineInstanceId: 'global-stable-reconcile-test', capabilities: ['render'],
+    profiles: runtime.profiles, sessions: runtime.factory,
+  });
+  const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(lease.ok, 'Graph+ should obtain a session lease');
+  const consumer = new GraphPlusConsumerV1({
+    lease: lease.lease,
+    container: runtime.container,
+    vaultId: fixture.value.vaultId,
+    source: { read: () => current },
+    checkpointStore: new MemoryStore(),
+    navigator: { openNote: async () => undefined, openTag: async () => undefined },
+    countDuplicateLinks: true,
+  });
+  await consumer.open();
+  const session = consumer.getSession();
+  assert(session, 'global Graph+ should expose its mounted session');
+  let replacements = 0;
+  let filterApplications = 0;
+  const replaceDocument = session.replaceDocument.bind(session);
+  const applyFilter = session.applyFilter.bind(session);
+  session.replaceDocument = async (document) => {
+    replacements += 1;
+    await replaceDocument(document);
+  };
+  session.applyFilter = async (filter) => {
+    filterApplications += 1;
+    await applyFilter(filter);
+  };
+
+  current = {
+    ...fixture.value,
+    notes: fixture.value.notes.map((note) => note.path === 'Alpha.md'
+      ? { ...note, content: `${note.content} One more typed character.` }
+      : note),
+  };
+  await consumer.reconcile();
+  equal(replacements, 0, 'typing without changing nodes or links must not replace the global document');
+  equal(filterApplications, 0, 'an unchanged effective projection must not touch the live session');
+
+  await consumer.close();
   await core.dispose();
 });
 
