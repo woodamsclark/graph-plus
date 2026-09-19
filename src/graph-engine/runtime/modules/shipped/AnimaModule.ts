@@ -98,6 +98,11 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       if (!exploreActive || hoveredIsTagged) return sourceId === hoveredId || targetId === hoveredId;
       return pathEdgePairs.has(unorderedPair(sourceId, targetId));
     };
+    const edgeIsVisible = (sourceId: string, targetId: string, lit: boolean): boolean => {
+      if (lit || !exploreActive) return true;
+      if (transientId !== undefined) return false;
+      return selectedIds.has(sourceId) || selectedIds.has(targetId);
+    };
     const nodesWithRadius = state.document.nodes
       .filter((node) => visibleNodes.has(node.id))
       .map((node) => {
@@ -150,7 +155,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const edgeContributions = Object.fromEntries(visibleEdges.map((edge) => {
       const prior = state.edgeContributions[edge.id];
       const lit = edgeIsLit(edge.sourceId, edge.targetId);
-      const visible = visibleIds === undefined || lit;
+      const visible = visibleIds === undefined || edgeIsVisible(edge.sourceId, edge.targetId, lit);
       return [edge.id, {
         ...prior,
         thickness: positive(prior?.baseThicknessScale, 1) * positive(prior?.thicknessScale, 1),

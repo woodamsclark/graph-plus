@@ -464,7 +464,13 @@ test('Space toggles selection dimming without changing Explore state', async () 
       },
     })),
   };
-  const value = runtimeHarness({ registration });
+  const value = runtimeHarness({
+    registration,
+    document: graphDocument({
+      nodes: ['a', 'b', 'c'].map((nodeId) => graphNode(nodeId)),
+      edges: [graphEdge('a-b', 'a', 'b'), graphEdge('b-c', 'b', 'c')],
+    }),
+  });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
   click(value, canvas, await nodePoint(session, 'a'), { pointerId: 313 });
