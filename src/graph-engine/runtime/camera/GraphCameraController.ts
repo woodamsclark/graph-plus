@@ -127,6 +127,16 @@ export class GraphCameraController {
     };
   }
 
+  /** Preserve framing while inheriting a world-space translation. */
+  translateBy(delta: Vec3): void {
+    if (![delta.x, delta.y, delta.z].every(Number.isFinite)) return;
+    this.state = {
+      ...this.state,
+      position: add(this.state.position, delta),
+      target: add(this.state.target, delta),
+    };
+  }
+
   orbitByPixels(deltaX: number, deltaY: number): void {
     if (this.dimensions !== '3d' || this.state.projection !== 'perspective') return;
     const basis = cameraBasis(this.state);

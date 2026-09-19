@@ -484,7 +484,13 @@ export class SessionInteractionRuntime {
     const state = this.options.getViewState();
     const underPointer = this.options.camera.screenToWorld(point.x, point.y, this.dragContext.depth);
     const position = add(underPointer, this.dragContext.offset);
-    this.commit({ ...state, positions: { ...state.positions, [nodeId]: position } });
+    const previousCentroid = selectionCentroid(state.selectedNodeIds, state.positions);
+    const positions = { ...state.positions, [nodeId]: position };
+    const nextCentroid = selectionCentroid(state.selectedNodeIds, positions);
+    this.commit({ ...state, positions });
+    if (previousCentroid && nextCentroid) {
+      this.options.camera.translateBy(subtract(nextCentroid, previousCentroid));
+    }
     this.commitCamera();
     this.options.onViewStateChanged('positions');
   }
@@ -592,4 +598,17 @@ function add(a: Vec3, b: Vec3): Vec3 {
 
 function subtract(a: Vec3, b: Vec3): Vec3 {
   return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+}
+
+function selectionCentroid(
+  selectedNodeIds: readonly string[],
+  positions: Readonly<Record<string, Vec3>>,
+): Vec3 | undefined {
+  const selectedPositions = selectedNodeIds.flatMap((nodeId) => {
+    const position = positions[nodeId];
+    return position ? [position] : [];
+  });
+  if (!selectedPositions.length) return undefined;
+  const total = selectedPositions.reduce((sum, position) => add(sum, position), { x: 0, y: 0, z: 0 });
+  return { x: total.x / selectedPositions.length, y: total.y / selectedPositions.length, z: total.z / selectedPositions.length };
 }

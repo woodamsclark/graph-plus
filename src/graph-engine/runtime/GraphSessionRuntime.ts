@@ -206,6 +206,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const deltaSeconds = this.lastFrameTimestamp === null ? 1 / 60 : Math.max(0, (timestamp - this.lastFrameTimestamp) / 1000);
     this.lastFrameTimestamp = timestamp;
     const moduleStart = this.platform.now();
+    const previousSelectionCentroid = selectionCentroid(
+      this.viewState.selectedNodeIds,
+      this.moduleView.positions,
+    );
     this.diagnostics.counters.moduleTicks += 1;
     const tickResult = this.moduleHost.tick({
       ...this.moduleView,
@@ -219,7 +223,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const compositionStart = this.platform.now();
     if (positions) {
       const requiresComposition = positions !== this.moduleView.positions;
+      const nextSelectionCentroid = selectionCentroid(this.viewState.selectedNodeIds, positions);
       this.viewState = { ...this.viewState, positions };
+      if (previousSelectionCentroid && nextSelectionCentroid) {
+        this.camera.translateBy(subtractVec(nextSelectionCentroid, previousSelectionCentroid));
+        this.synchronizeCameraState();
+      }
       this.projectionView = { ...this.projectionView, positions, viewState: this.viewState };
       this.moduleView = { ...this.moduleView, positions, viewState: this.viewState };
       if (requiresComposition) this.refreshFrame(false, 'geometry');
@@ -980,6 +989,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private recomputeView(resetInteraction = true): void {
     if (resetInteraction) this.interaction.reset();
     const document = this.store.readDocument();
+    const previousSelectionCentroid = selectionCentroid(
+      this.viewState.selectedNodeIds,
+      this.viewState.positions,
+    );
     this.projectionView = this.projection.project(this.moduleHost, {
       sourceDocument: document,
       document,
@@ -1001,10 +1014,18 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     });
     this.moduleView = this.projectionView;
     if (this.moduleView.commitPositions) {
+      const nextSelectionCentroid = selectionCentroid(
+        this.viewState.selectedNodeIds,
+        this.moduleView.positions,
+      );
       this.viewState = cloneGraphViewStateV1({
         ...this.viewState,
         positions: this.moduleView.positions,
       });
+      if (previousSelectionCentroid && nextSelectionCentroid) {
+        this.camera.translateBy(subtractVec(nextSelectionCentroid, previousSelectionCentroid));
+        this.synchronizeCameraState();
+      }
       this.moduleView = {
         ...this.moduleView,
         positions: this.viewState.positions,
@@ -1402,6 +1423,19 @@ function subtractVec(a: Vec3, b: Vec3): Vec3 {
 
 function scaleVec(value: Vec3, amount: number): Vec3 {
   return { x: value.x * amount, y: value.y * amount, z: value.z * amount };
+}
+
+function selectionCentroid(
+  selectedNodeIds: readonly string[],
+  positions: Readonly<Record<string, Vec3>>,
+): Vec3 | undefined {
+  const selectedPositions = selectedNodeIds.flatMap((nodeId) => {
+    const position = positions[nodeId];
+    return position ? [position] : [];
+  });
+  if (!selectedPositions.length) return undefined;
+  const total = selectedPositions.reduce((sum, position) => addVec(sum, position), { x: 0, y: 0, z: 0 });
+  return scaleVec(total, 1 / selectedPositions.length);
 }
 
 function cloneFilter(filter: GraphFilterRequestV1): GraphFilterRequestV1 {

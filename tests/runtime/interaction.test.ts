@@ -125,7 +125,7 @@ test('explicit camera reset preserves focus and frames the complete selection', 
   await session.dispose();
 });
 
-test('a focused camera remains user-positioned while the force layout settles', async () => {
+test('the camera translates with the selected centroid while force layout settles', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   value.profiles.setUserOverrides('synthetic-consumer', 'three-dimensional', {
     modules: {
@@ -142,6 +142,7 @@ test('a focused camera remains user-positioned while the force layout settles', 
     },
   });
   const session = await value.create();
+  await session.setSelection(['a', 'b']);
   await session.focusNode('a');
   const before = await session.exportViewState();
   value.platform.flushFrame();
@@ -149,7 +150,17 @@ test('a focused camera remains user-positioned while the force layout settles', 
 
   assert(!sameVector(after.positions.a, before.positions.a), 'the fixture node should move during force settling');
   equal(after.focusedNodeId, 'a', 'force settling must preserve focus identity');
-  deepEqual(after.camera, before.camera, 'force settling must not drag the camera after a focused node');
+  const centroidDelta = subtractVector(
+    midpoint(after.positions.a, after.positions.b),
+    midpoint(before.positions.a, before.positions.b),
+  );
+  deepEqual(after.camera.target, addVector(before.camera.target, centroidDelta),
+    'the camera target should inherit only the selected centroid translation');
+  deepEqual(after.camera.position, addVector(before.camera.position, centroidDelta),
+    'the camera position should translate with the target to preserve framing');
+  deepEqual(cameraOffset(after.camera), cameraOffset(before.camera),
+    'centroid following should preserve camera orientation and distance');
+  equal(after.camera.zoom, before.camera.zoom, 'centroid following should preserve zoom');
   await session.dispose();
 });
 
@@ -622,6 +633,7 @@ test('R-INPUT-06 updates view position and emits one revision-bearing drag inten
   });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
+  await session.setSelection(['a']);
   const before = await session.exportViewState();
   const point = await nodePoint(session, 'a');
   const intents: GraphIntentV1[] = [];
@@ -641,6 +653,11 @@ test('R-INPUT-06 updates view position and emits one revision-bearing drag inten
 
   const after = await session.exportViewState();
   assert(!sameVector(after.positions.a, before.positions.a), 'drag should mutate only the node view position');
+  const dragDelta = subtractVector(after.positions.a, before.positions.a);
+  deepEqual(after.camera.target, addVector(before.camera.target, dragDelta),
+    'dragging the selected structure should translate the camera by its centroid delta');
+  deepEqual(cameraOffset(after.camera), cameraOffset(before.camera),
+    'selected-node dragging should preserve camera framing');
   const dragIntents = intents.filter((intent) => intent.type === 'node-drag-ended');
   equal(dragIntents.length, 1, 'drag completion should emit exactly one intent');
   const dragIntent = dragIntents[0];
@@ -1377,6 +1394,27 @@ function cameraOffset(camera: {
     y: camera.position.y - camera.target.y,
     z: camera.position.z - camera.target.z,
   };
+}
+
+function midpoint(
+  a: { readonly x: number; readonly y: number; readonly z: number },
+  b: { readonly x: number; readonly y: number; readonly z: number },
+): { x: number; y: number; z: number } {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 };
+}
+
+function addVector(
+  a: { readonly x: number; readonly y: number; readonly z: number },
+  b: { readonly x: number; readonly y: number; readonly z: number },
+): { x: number; y: number; z: number } {
+  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+}
+
+function subtractVector(
+  a: { readonly x: number; readonly y: number; readonly z: number },
+  b: { readonly x: number; readonly y: number; readonly z: number },
+): { x: number; y: number; z: number } {
+  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
 }
 
 function vectorDistance(
