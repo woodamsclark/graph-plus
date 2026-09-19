@@ -103,6 +103,7 @@ export class GraphInteractionInterpreter {
     readonly isDirectNeighbor: (nodeId: string, focusedNodeId: string) => boolean;
     readonly getSelectedNodeIds: () => readonly string[];
     readonly getNodeSelection: (nodeId: string) => readonly string[];
+    readonly getSelectionNeighborhood: (nodeIds: readonly string[]) => readonly string[];
     readonly getViewport: () => { readonly width: number; readonly height: number };
     readonly dragThresholdPx?: number;
     readonly doubleTapIntervalMs?: number;
@@ -552,23 +553,32 @@ export class GraphInteractionInterpreter {
       this.command(event, { type: 'activate-node', nodeId: hit.nodeId, activation: 'primary' });
       return;
     }
+    const selectedNodeIds = this.options.getSelectedNodeIds();
+    const enteringExplore = selectedNodeIds.length === 0;
     const nodeIds = this.options.getNodeSelection(hit.nodeId);
     const result = this.tagging.tag(
       nodeIds,
       hit.nodeId,
-      this.options.getSelectedNodeIds(),
+      selectedNodeIds,
       this.options.getFocusedNodeId(),
       event.shift,
     );
     this.command(event, { type: 'set-selection', nodeIds: result.selectedNodeIds });
-    this.updateTaggedStructure(event, result);
+    this.updateTaggedStructure(event, result, enteringExplore);
   }
 
   private updateTaggedStructure(
     event: Pick<GraphInputEventV1, 'identity' | 'timestamp'>,
     result: GraphTaggingResultV1,
+    enteringExplore: boolean,
   ): void {
     this.command(event, { type: 'set-focus', nodeId: result.focusNodeId });
+    if (enteringExplore && result.selectedNodeIds.length > 0) {
+      this.command(event, {
+        type: 'fit-camera',
+        nodeIds: this.options.getSelectionNeighborhood(result.selectedNodeIds),
+      });
+    }
   }
 
   private viewMode(): GraphInteractionViewMode {

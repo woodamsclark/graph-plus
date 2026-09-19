@@ -98,6 +98,7 @@ export class SessionInteractionRuntime {
       isDirectNeighbor: (nodeId, focusedNodeId) => this.isDirectNeighbor(nodeId, focusedNodeId),
       getSelectedNodeIds: () => this.options.getViewState().selectedNodeIds,
       getNodeSelection: (nodeId) => this.options.getNodeSelection(nodeId),
+      getSelectionNeighborhood: (nodeIds) => this.selectionNeighborhood(nodeIds),
       getViewport: () => this.options.surface.getViewport(),
       setTimeout: (callback, delayMs) => this.options.platform.setTimeout(callback, delayMs),
       clearTimeout: (handle) => this.options.platform.clearTimeout(handle),
@@ -339,6 +340,28 @@ export class SessionInteractionRuntime {
     return this.options.getDocument().edges.some((edge) => this.options.getRenderSelection().edgeIds.has(edge.id)
       && ((edge.sourceId === focusedNodeId && edge.targetId === nodeId)
         || (edge.targetId === focusedNodeId && edge.sourceId === nodeId)));
+  }
+
+  private selectionNeighborhood(nodeIds: readonly string[]): readonly string[] {
+    const visibleNodes = this.options.getRenderSelection().nodeIds;
+    const selected = new Set(nodeIds.filter((nodeId) => visibleNodes.has(nodeId)));
+    const neighborhood = [...selected];
+    const included = new Set(neighborhood);
+    for (const edge of this.options.getDocument().edges) {
+      if (!this.options.getRenderSelection().edgeIds.has(edge.id)
+        || !visibleNodes.has(edge.sourceId)
+        || !visibleNodes.has(edge.targetId)
+        || (!selected.has(edge.sourceId) && !selected.has(edge.targetId))) continue;
+      if (!included.has(edge.sourceId)) {
+        included.add(edge.sourceId);
+        neighborhood.push(edge.sourceId);
+      }
+      if (!included.has(edge.targetId)) {
+        included.add(edge.targetId);
+        neighborhood.push(edge.targetId);
+      }
+    }
+    return neighborhood;
   }
 
   private cameraChanged(command: GraphRuntimeCommandV1): void {

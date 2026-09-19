@@ -41,7 +41,7 @@ export const GRAPH_SETTING_PRESENTATIONS_V1: readonly GraphSettingPresentationV1
     { type: 'slider', min: 0, max: 100, step: 5 }),
   entry('anima.adaptiveLabelThreshold3d', 'appearance', 'anima', 'adaptiveLabelThreshold3d', '3D label threshold', 'Higher values show fewer labels in 3D.',
     { type: 'slider', min: 0, max: 100, step: 5 }),
-  entry('anima.nodeWorldScaleBlend', 'appearance', 'anima', 'nodeWorldScaleBlend', 'Zoomed node size', 'Control how strongly nodes grow as you zoom in.',
+  entry('anima.nodeWorldScaleBlend', 'appearance', 'anima', 'nodeWorldScaleBlend', 'Node zoom response', 'Control how strongly node size responds to camera zoom and depth.',
     { type: 'slider', min: 0, max: 100, step: 5, unit: '%', storageScale: 0.01 }),
   entry('rendering.nodeRadiusScale', 'appearance', 'rendering', 'nodeRadiusScale', 'Node size', 'Scale all node sizes.',
     { type: 'slider', min: 0.5, max: 4, step: 0.1 }),

@@ -202,7 +202,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
           body,
           'anima.nodeWorldScaleBlend',
           readNumber(anima.settings.nodeWorldScaleBlend, 0) * 100,
-          'Small ←→ Big',
+          'Gentle ←→ Exaggerated',
         );
       }
     }

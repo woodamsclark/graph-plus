@@ -4,7 +4,7 @@ import type {
 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { GraphCameraController } from '../../src/graph-engine/runtime/index.ts';
 import { ConsumerNodeActionRegistryV1 } from '../../src/graph-engine/service/index.ts';
-import { graphDocument, graphNode } from '../support/contractFixtures.ts';
+import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import {
   runtimeCanvas,
@@ -315,7 +315,8 @@ test('R-REGION-04 first tag click selects visible recursive children and second 
   const selected = await session.exportViewState();
   deepEqual(selected.selectedNodeIds, ['subtag', 'nested', 'direct'], 'first click should select visible descendants through child tags and exclude the owner');
   equal(selected.focusedNodeId, 'tag', 'the clicked tag node should own focus');
-  deepEqual(selected.camera, beforeTag.camera, 'region tagging should not move or reframe the camera');
+  assert(JSON.stringify(selected.camera) !== JSON.stringify(beforeTag.camera),
+    'the initial region tag should frame the selected descendants');
 
   click(value, canvas, await nodePoint(session, 'tag'), { pointerId: 202 });
   value.platform.flushFrame();
@@ -342,7 +343,17 @@ test('R-REGION-04 first tag click selects visible recursive children and second 
 });
 
 test('ordinary clicks add tags while Shift suspends Explore and can remove an existing tag', async () => {
-  const value = runtimeHarness();
+  const value = runtimeHarness({
+    document: graphDocument({
+      nodes: [
+        graphNode('a', { positionHint: { x: -40, y: 0, z: 0 } }),
+        graphNode('b', { positionHint: { x: 40, y: 0, z: 0 } }),
+        graphNode('c', { positionHint: { x: 900, y: 0, z: 0 } }),
+        graphNode('d', { positionHint: { x: 1_000, y: 0, z: 0 } }),
+      ],
+      edges: [graphEdge('a-b', 'a', 'b'), graphEdge('c-d', 'c', 'd')],
+    }),
+  });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
   const intents: GraphIntentV1[] = [];
@@ -351,13 +362,22 @@ test('ordinary clicks add tags while Shift suspends Explore and can remove an ex
 
   click(value, canvas, await nodePoint(session, 'a'), { pointerId: 301 });
   value.platform.flushFrame();
+  const initialTag = await session.exportViewState();
+  assert(JSON.stringify(initialTag.camera) !== JSON.stringify(beforeTags.camera),
+    'entering Explore should frame the initial selection and its direct visible neighbors');
+  deepEqual(initialTag.camera.target, {
+    x: (initialTag.positions.a.x + initialTag.positions.b.x) / 2,
+    y: (initialTag.positions.a.y + initialTag.positions.b.y) / 2,
+    z: (initialTag.positions.a.z + initialTag.positions.b.z) / 2,
+  }, 'the initial frame should center the selected node together with its direct neighbor');
+
   click(value, canvas, await nodePoint(session, 'b'), { pointerId: 302 });
   value.platform.flushFrame();
 
   const added = await session.exportViewState();
   deepEqual(added.selectedNodeIds, ['a', 'b'], 'ordinary clicks should add new nodes to the tagged selection');
   equal(added.focusedNodeId, 'b', 'the most recently added node should become the Explore anchor');
-  deepEqual(added.camera, beforeTags.camera, 'adding tags should never move or reframe the camera');
+  deepEqual(added.camera, initialTag.camera, 'adding later tags should never move or reframe the camera');
 
   modifier(value, 'keydown', true);
   value.platform.flushFrame();

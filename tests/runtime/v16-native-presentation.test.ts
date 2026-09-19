@@ -43,7 +43,7 @@ test('V1.6 Anima owns the exact visible-degree radius and composable structural 
     'hub radius should use the exact formula and ignore duplicate ordered relationships');
   equal(patch.nodeContributions['leaf-0'].radius, 8, 'low-degree nodes should use the exact lower clamp');
   equal(patch.presentationPolicy?.nodeScaleMode, 'sqrt-orthographic', 'Anima should request native-style 2d node scaling');
-  equal(patch.presentationPolicy?.orthographicNodeScaleExponent, 0.5,
+  equal(patch.presentationPolicy?.nodeScaleExponent, 0.5,
     'Anima should default to its calm square-root zoom response');
   equal(patch.presentationPolicy?.labelScaleMode, 'fixed', 'Anima labels should remain screen-readable in both dimensions');
 });
@@ -52,10 +52,10 @@ test('Anima maps zoomed node size beyond world-space scaling', () => {
   const document = graphDocument({ nodes: [graphNode('a')], edges: [] });
   const state = pipeline(document, { nodeIds: new Set(['a']), edgeIds: new Set() });
   const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, { nodeWorldScaleBlend: 0.5 });
-  equal(anima.contributeFrame(state)?.presentationPolicy?.orthographicNodeScaleExponent, 1.25,
+  equal(anima.contributeFrame(state)?.presentationPolicy?.nodeScaleExponent, 1.25,
     'the slider midpoint should already exceed the world-space exponent');
   anima.updateSettings({ nodeWorldScaleBlend: 4 });
-  equal(anima.contributeFrame(state)?.presentationPolicy?.orthographicNodeScaleExponent, 2,
+  equal(anima.contributeFrame(state)?.presentationPolicy?.nodeScaleExponent, 2,
     'the slider maximum should clamp to a strongly exaggerated zoom response');
 });
 
@@ -112,12 +112,39 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     viewState: { ...state.viewState, selectedNodeIds: ['a'], focusedNodeId: 'a' },
   });
   assert(exploredHover?.nodeContributions && exploredHover.edgeContributions,
-    'Explore hover should temporarily reveal its local neighborhood');
-  equal(exploredHover.nodeContributions.b.opacity, 1, 'an immediate neighbor of the hovered node should be revealed');
+    'Explore hover should resolve a path back to the tagged structure');
+  equal(exploredHover.nodeContributions.b.opacity, 1, 'an intermediate shortest-path node should be revealed');
   equal(exploredHover.nodeContributions.d.opacity, 0.2, 'unrelated untagged nodes should remain dim');
+  deepEqual(exploredHover.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
+    'intermediate shortest-path nodes should light');
   deepEqual(exploredHover.nodeContributions.c.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'the hovered node should light independently from tagged nodes');
-  equal(exploredHover.edgeContributions['b-c'].opacity, 1, 'the hovered node links should be revealed');
+  equal(exploredHover.edgeContributions['b-c'].opacity, 1, 'the outer shortest-path link should be revealed');
+  equal(exploredHover.edgeContributions['a-b'].opacity, 1, 'the shortest path should connect fully to the selection');
+  equal(exploredHover.edgeContributions['a-d'].opacity, 0.2, 'off-path links should remain dim');
+  for (const nodeId of ['a', 'b', 'c', 'd']) {
+    equal(exploredHover.nodeContributions[nodeId].showLabel, taggedA.nodeContributions[nodeId].showLabel,
+      `hover should not change ${nodeId} label eligibility`);
+    equal(exploredHover.nodeContributions[nodeId].labelOpacity, taggedA.nodeContributions[nodeId].labelOpacity,
+      `hover should not change ${nodeId} label opacity`);
+    equal(exploredHover.nodeContributions[nodeId].labelAlwaysVisible, taggedA.nodeContributions[nodeId].labelAlwaysVisible,
+      `hover should not promote the ${nodeId} label`);
+  }
+
+  const hoveredTag = anima.contributeFrame({
+    ...state,
+    hoveredNodeId: 'a',
+    viewState: { ...state.viewState, selectedNodeIds: ['a'], focusedNodeId: 'a' },
+  });
+  assert(hoveredTag?.nodeContributions && hoveredTag.edgeContributions,
+    'hovering a tagged node should resolve its immediate neighborhood');
+  deepEqual(hoveredTag.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
+    'hovering a tagged node should light a direct neighbor');
+  deepEqual(hoveredTag.nodeContributions.d.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
+    'hovering a tagged node should light every direct neighbor');
+  equal(hoveredTag.nodeContributions.c.opacity, 0.2, 'nodes beyond the direct neighborhood should remain dim');
+  equal(hoveredTag.edgeContributions['a-b'].opacity, 1, 'direct neighborhood links should light');
+  equal(hoveredTag.edgeContributions['a-d'].opacity, 1, 'all direct neighborhood links should light');
 
   const suspended = anima.contributeFrame({
     ...state,
@@ -173,7 +200,10 @@ test('V2 adaptive labels stay inside tagged and inspected structures', () => {
     presentationPolicy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'adaptive' },
     viewState: { ...state.viewState, selectedNodeIds: ['a'], focusedNodeId: 'a' },
   });
-  equal(inspected?.nodeContributions?.b.showLabel, true, 'hover should reveal its node label in Explore mode');
+  equal(inspected?.nodeContributions?.b.showLabel, adaptive.nodeContributions.b.showLabel,
+    'hover should not change label eligibility in Explore mode');
+  equal(inspected?.nodeContributions?.b.labelOpacity, adaptive.nodeContributions.b.labelOpacity,
+    'hover should not change label opacity in Explore mode');
 
   const all = anima.contributeFrame({
     ...state,
@@ -232,7 +262,7 @@ test('V1.6 Anima labels retain their CSS size across orthographic zoom', () => {
     'zoomed-in 2D should keep the same resolved label font size');
 });
 
-test('orthographic node scaling supports calm, world, and exaggerated size responses', () => {
+test('node scaling supports calm, world, and exaggerated responses in 2D and 3D', () => {
   const arcRadii: number[] = [];
   const context = recordingContext([], arcRadii);
   const canvas = { getContext: () => context } as unknown as HTMLCanvasElement;
@@ -255,7 +285,7 @@ test('orthographic node scaling supports calm, world, and exaggerated size respo
       policy: {
         ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
         nodeScaleMode: 'sqrt-orthographic',
-        orthographicNodeScaleExponent: exponent,
+        nodeScaleExponent: exponent,
       },
     });
     renderer.render();
@@ -264,6 +294,33 @@ test('orthographic node scaling supports calm, world, and exaggerated size respo
   equal(renderAt(0.5), 20, 'the low end should use the square root of zoom');
   equal(renderAt(1), 40, 'the first third should pass through true world-space scaling');
   equal(renderAt(2), 160, 'the high end should grow substantially beyond world-space size');
+
+  const perspectiveCamera = new GraphCameraController({
+    position: { x: 0, y: 0, z: 50 }, target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 }, zoom: 50 / 24, projection: 'perspective',
+  }, '3d');
+  perspectiveCamera.setViewport(640, 360);
+  const perspectiveFrames = new GraphFrameStore();
+  const perspectiveRenderer = new CanvasGraphRenderer(canvas, perspectiveCamera, perspectiveFrames, () => 0);
+  perspectiveRenderer.resize(640, 360, 1);
+  const renderPerspectiveAt = (exponent: number): number => {
+    arcRadii.length = 0;
+    perspectiveFrames.set({
+      regions: [], edges: [], nodes: [node], theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+      policy: {
+        ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
+        nodeScaleExponent: exponent,
+        minimumPerspectiveNodeRadius: 0,
+        minimumPerspectiveNodeScale: 0,
+      },
+    });
+    perspectiveRenderer.render();
+    return arcRadii[0];
+  };
+  assert(Math.abs(renderPerspectiveAt(0.5) - 10 * Math.sqrt(2)) < 1e-10,
+    'the gentle response should apply to perspective depth');
+  equal(renderPerspectiveAt(1), 20, 'world response should remain linear in perspective');
+  equal(renderPerspectiveAt(2), 40, 'the exaggerated response should also apply in 3D');
 });
 
 test('V1.6 renderer anchors labels above or below the resolved node boundary', () => {

@@ -48,7 +48,8 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const visibleNodes = state.renderSelection.nodeIds;
     const { visibleEdges, relationships, degree } = this.presentationTopology(state);
     const focusedId = state.viewState.focusedNodeId;
-    const taggedIds = new Set(state.viewState.selectedNodeIds);
+    const selectedIds = new Set(state.viewState.selectedNodeIds);
+    const taggedIds = new Set(selectedIds);
     if (focusedId !== undefined) taggedIds.add(focusedId);
     const hoveredId = state.hoveredNodeId;
     const hoveredNeighborhood = hoveredId === undefined
@@ -59,19 +60,33 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       ? undefined
       : new Set([transientId, ...(relationships.get(transientId) ?? [])]);
     const exploreActive = taggedIds.size > 0 && state.selectionPresentationSuspended !== true;
+    const hoveredIsTagged = hoveredId !== undefined && selectedIds.has(hoveredId);
+    const pathTargetIds = selectedIds.size > 0 ? selectedIds : taggedIds;
+    const exploreHoverPath = exploreActive && hoveredId !== undefined && !hoveredIsTagged
+      ? shortestPathToAny(hoveredId, pathTargetIds, relationships)
+      : undefined;
+    const exploreHoverIds = hoveredId === undefined
+      ? new Set<string>()
+      : hoveredIsTagged
+        ? hoveredNeighborhood
+        : new Set(exploreHoverPath ?? [hoveredId]);
     const visibleIds = transientNeighborhood ?? (exploreActive
-      ? new Set([...taggedIds, ...hoveredNeighborhood])
+      ? new Set([...taggedIds, ...exploreHoverIds])
       : undefined);
+    const labelVisibleIds = transientNeighborhood ?? (exploreActive ? taggedIds : undefined);
     const litNodeIds = transientId !== undefined
       ? new Set([transientId])
       : exploreActive
-        ? new Set([...taggedIds, ...(hoveredId === undefined ? [] : [hoveredId])])
+        ? new Set([...taggedIds, ...exploreHoverIds])
         : new Set([...taggedIds, ...hoveredNeighborhood]);
+    const pathEdgePairs = edgePairs(exploreHoverPath);
     const edgeIsLit = (sourceId: string, targetId: string): boolean => {
       if (transientId !== undefined) return sourceId === transientId || targetId === transientId;
       const joinsTaggedStructure = taggedIds.has(sourceId) && taggedIds.has(targetId);
-      const joinsHoveredNode = hoveredId !== undefined && (sourceId === hoveredId || targetId === hoveredId);
-      return joinsTaggedStructure || joinsHoveredNode;
+      if (joinsTaggedStructure) return true;
+      if (hoveredId === undefined) return false;
+      if (!exploreActive || hoveredIsTagged) return sourceId === hoveredId || targetId === hoveredId;
+      return pathEdgePairs.has(unorderedPair(sourceId, targetId));
     };
     const nodeContributions = Object.fromEntries(state.document.nodes
       .filter((node) => visibleNodes.has(node.id))
@@ -88,17 +103,17 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         const selected = state.viewState.selectedNodeIds.includes(node.id);
         const pinned = state.viewState.pinnedNodeIds.includes(node.id);
         const suppressAdaptiveLabel = state.presentationPolicy?.labelMode === 'adaptive'
-          && visibleIds !== undefined
-          && !visibleIds.has(node.id);
+          && labelVisibleIds !== undefined
+          && !labelVisibleIds.has(node.id);
         return [node.id, {
           ...prior,
           radius,
           finalColor: color,
           opacity: visibleIds === undefined || visibleIds.has(node.id) ? 1 : 0.2,
-          labelOpacity: visibleIds === undefined || visibleIds.has(node.id) ? 1 : 0.2,
+          labelOpacity: labelVisibleIds === undefined || labelVisibleIds.has(node.id) ? 1 : 0.2,
           showLabel: prior?.showLabel !== false && !suppressAdaptiveLabel,
           labelFontSize: 14 + radius / 4,
-          labelAlwaysVisible: prior?.labelAlwaysVisible || selected || node.id === focusedId || (exploreActive && isLit),
+          labelAlwaysVisible: prior?.labelAlwaysVisible || selected || node.id === focusedId,
           ...(selected || pinned ? {
             strokeColor: this.palette.colors.nodeOutline,
             strokeWidth: pinned ? 2 : 1,
@@ -124,7 +139,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       presentationPolicy: {
         ...(state.presentationPolicy ?? {}),
         nodeScaleMode: 'sqrt-orthographic',
-        orthographicNodeScaleExponent: 0.5 + this.nodeZoomSize * 1.5,
+        nodeScaleExponent: 0.5 + this.nodeZoomSize * 1.5,
         labelScaleMode: 'fixed',
         labelPosition: this.labelPosition,
         adaptiveLabelThreshold: state.viewState.dimensions === '3d'
@@ -196,6 +211,49 @@ function readUnitInterval(value: JsonValue | undefined, fallback: number): numbe
   return typeof value === 'number' && Number.isFinite(value)
     ? clamp(value, 0, 1)
     : fallback;
+}
+
+function shortestPathToAny(
+  startId: string,
+  targetIds: ReadonlySet<string>,
+  relationships: ReadonlyMap<string, ReadonlySet<string>>,
+): readonly string[] | undefined {
+  if (targetIds.has(startId)) return [startId];
+  const previous = new Map<string, string | undefined>([[startId, undefined]]);
+  const queue = [startId];
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index];
+    for (const neighbor of [...(relationships.get(current) ?? [])].sort()) {
+      if (previous.has(neighbor)) continue;
+      previous.set(neighbor, current);
+      if (targetIds.has(neighbor)) return reconstructPath(neighbor, previous);
+      queue.push(neighbor);
+    }
+  }
+  return undefined;
+}
+
+function reconstructPath(targetId: string, previous: ReadonlyMap<string, string | undefined>): readonly string[] {
+  const path: string[] = [];
+  let current: string | undefined = targetId;
+  while (current !== undefined) {
+    path.push(current);
+    current = previous.get(current);
+  }
+  return path.reverse();
+}
+
+function edgePairs(path: readonly string[] | undefined): ReadonlySet<string> {
+  const pairs = new Set<string>();
+  if (!path) return pairs;
+  for (let index = 1; index < path.length; index += 1) {
+    pairs.add(unorderedPair(path[index - 1], path[index]));
+  }
+  return pairs;
+}
+
+function unorderedPair(left: string, right: string): string {
+  return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
 }
 
 function positive(value: JsonValue | number | undefined, fallback: number): number {

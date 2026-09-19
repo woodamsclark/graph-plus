@@ -616,16 +616,13 @@ function projectedRadius(
   scale: number,
   projection: 'orthographic' | 'perspective',
 ): number {
-  if (projection === 'orthographic') {
-    const policy = renderPolicy(frame);
-    const legacyExponent = policy.nodeScaleMode === 'sqrt-orthographic' ? 0.5 : 1;
-    const exponent = Math.max(0, Math.min(2, policy.orthographicNodeScaleExponent ?? legacyExponent));
-    return radius * Math.pow(Math.max(0, scale), exponent);
-  }
-  const projected = radius * scale;
+  const policy = renderPolicy(frame);
+  const legacyExponent = projection === 'orthographic' && policy.nodeScaleMode === 'sqrt-orthographic' ? 0.5 : 1;
+  const exponent = Math.max(0, Math.min(2, policy.nodeScaleExponent ?? legacyExponent));
+  const projected = radius * Math.pow(Math.max(0, scale), exponent);
   if (projection !== 'perspective') return projected;
-  const relativeFloor = radius * Math.max(0, renderPolicy(frame).minimumPerspectiveNodeScale ?? 0);
-  return Math.max(renderPolicy(frame).minimumPerspectiveNodeRadius ?? 0, relativeFloor, projected);
+  const relativeFloor = radius * Math.max(0, policy.minimumPerspectiveNodeScale ?? 0);
+  return Math.max(policy.minimumPerspectiveNodeRadius ?? 0, relativeFloor, projected);
 }
 
 function nodeFont(
