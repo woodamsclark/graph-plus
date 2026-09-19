@@ -15,6 +15,7 @@ import {
   type EffectiveGraphSessionUiPolicyV1,
 } from './GraphEngineUiPolicy.ts';
 import { GraphEngineQuickSettingsDisclosureStateV1 } from './GraphEngineQuickSettingsDisclosureState.ts';
+import { isQuickSettingsToggleKeyV1 } from './GraphEngineQuickSettingsShortcut.ts';
 import { ObsidianGraphUiLayoutV1 } from './ObsidianGraphUiLayout.ts';
 import { graphSettingPresentationV1 } from '../settings/GraphEngineSettingsCatalog.ts';
 
@@ -59,6 +60,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     root.addEventListener('wheel', stopPropagation);
     root.addEventListener('pointerenter', this.cancelAutoClose);
     root.addEventListener('pointerleave', this.scheduleAutoClose);
+    this.context.container.addEventListener('keydown', this.handleKeyDown, true);
     this.context.container.append(root);
     this.root = root;
     this.layout = new ObsidianGraphUiLayoutV1(
@@ -97,11 +99,20 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     this.layout = undefined;
     this.root?.removeEventListener('pointerenter', this.cancelAutoClose);
     this.root?.removeEventListener('pointerleave', this.scheduleAutoClose);
+    this.context.container.removeEventListener('keydown', this.handleKeyDown, true);
     this.root?.remove();
     this.root = undefined;
     this.status = undefined;
     this.graphCounts = undefined;
   }
+
+  private readonly handleKeyDown = (event: KeyboardEvent): void => {
+    if (this.disposed || !isQuickSettingsToggleKeyV1(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.collapsed = !this.collapsed;
+    void this.render();
+  };
 
   private async render(): Promise<void> {
     const root = this.root;

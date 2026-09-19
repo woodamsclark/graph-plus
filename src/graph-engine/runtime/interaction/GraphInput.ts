@@ -85,6 +85,7 @@ export class GraphInput {
   private readonly onPointerDown = (event: PointerEvent): void => {
     if (!this.enabled || this.disposed) return;
     event.preventDefault();
+    try { this.options.element.focus({ preventScroll: true }); } catch { this.options.element.focus(); }
     try { this.options.element.setPointerCapture(event.pointerId); } catch {}
     this.activePointers.add(event.pointerId);
     const pointerKind = pointerKindOf(event.pointerType);

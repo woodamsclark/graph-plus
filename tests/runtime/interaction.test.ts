@@ -362,6 +362,8 @@ test('ordinary clicks add tags while Shift suspends Explore and can remove an ex
 
   click(value, canvas, await nodePoint(session, 'a'), { pointerId: 301 });
   value.platform.flushFrame();
+  equal(canvas.ownerDocument.activeElement, canvas,
+    'pointer interaction should retain graph keyboard-shortcut scope');
   const initialTag = await session.exportViewState();
   assert(JSON.stringify(initialTag.camera) !== JSON.stringify(beforeTags.camera),
     'entering Explore should frame the initial selection and its direct visible neighbors');

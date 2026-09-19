@@ -9,6 +9,7 @@ import {
   resolveGraphSessionUiPolicyV1,
 } from '../../src/obsidian/graph-engine-ui/GraphEngineUiPolicy.ts';
 import { GraphEngineQuickSettingsDisclosureStateV1 } from '../../src/obsidian/graph-engine-ui/GraphEngineQuickSettingsDisclosureState.ts';
+import { isQuickSettingsToggleKeyV1 } from '../../src/obsidian/graph-engine-ui/GraphEngineQuickSettingsShortcut.ts';
 import { equal, test } from '../support/harness.ts';
 
 function descriptor(): ConsumerProfileDescriptorV1 {
@@ -73,4 +74,21 @@ test('R-UI-04 quick-setting disclosures retain their user state across panel ren
   equal(disclosures.resolve(SECTIONS.forces, false), true, 'an opened section should remain open after controls rerender');
   disclosures.remember(SECTIONS.filter, false);
   equal(disclosures.resolve(SECTIONS.filter, true), false, 'a closed default-open section should remain closed after controls rerender');
+});
+
+test('Tab toggles Quick Settings from the graph without consuming control navigation', () => {
+  const event = (overrides: Partial<KeyboardEvent> = {}) => ({
+    key: 'Tab', defaultPrevented: false, repeat: false, isComposing: false,
+    ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
+    target: { closest: () => null },
+    ...overrides,
+  }) as KeyboardEvent;
+  equal(isQuickSettingsToggleKeyV1(event()), true, 'plain Tab on the graph should toggle Quick Settings');
+  equal(isQuickSettingsToggleKeyV1(event({ shiftKey: true })), false,
+    'Shift-Tab should retain normal reverse focus navigation');
+  equal(isQuickSettingsToggleKeyV1(event({ repeat: true })), false,
+    'holding Tab should not repeatedly flicker the panel');
+  equal(isQuickSettingsToggleKeyV1(event({
+    target: { closest: () => ({}) } as unknown as EventTarget,
+  })), false, 'Tab on an interactive Quick Settings control should retain normal focus navigation');
 });
