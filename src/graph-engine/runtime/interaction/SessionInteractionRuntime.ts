@@ -145,8 +145,8 @@ export class SessionInteractionRuntime {
     return this.hoveredNodeId;
   }
 
-  isOverviewModifierActive(): boolean {
-    return this.interpreter.isOverviewModifierActive();
+  isSelectionPresentationSuspended(): boolean {
+    return this.interpreter.isSelectionPresentationSuspended();
   }
 
   getPreviewedNodeId(): string | undefined {
@@ -222,7 +222,7 @@ export class SessionInteractionRuntime {
       case 'zoom-by':
         this.options.camera.zoomByWheel(
           command.deltaY,
-          this.options.getViewState().focusedNodeId === undefined || this.isOverviewModifierActive()
+          this.options.getViewState().focusedNodeId === undefined
             ? command.anchor
             : undefined,
         );

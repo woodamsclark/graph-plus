@@ -92,6 +92,7 @@ export class GraphInteractionInterpreter {
   private trackpadPinchMomentum: TrackpadPinchMomentum | null = null;
   private trackpadPinchMomentumTimer: number | null = null;
   private readonly tagging = new GraphTaggingController();
+  private shiftSelectionBaseline: ReadonlySet<string> | undefined;
 
   constructor(private readonly options: {
     readonly dimensions: GraphDimensionsV1;
@@ -142,8 +143,8 @@ export class GraphInteractionInterpreter {
     }
   }
 
-  isOverviewModifierActive(): boolean {
-    return this.tagging.isOverviewHeld();
+  isSelectionPresentationSuspended(): boolean {
+    return this.tagging.isPresentationSuspended();
   }
 
   reset(): void {
@@ -153,6 +154,7 @@ export class GraphInteractionInterpreter {
     this.mode = { kind: 'idle' };
     this.touchGesture = null;
     this.pendingHover = null;
+    this.shiftSelectionBaseline = undefined;
     this.tagging.reset();
   }
 
@@ -372,7 +374,22 @@ export class GraphInteractionInterpreter {
   }
 
   private modifierChange(event: Extract<GraphInputEventV1, { type: 'modifier-change' }>): void {
-    if (this.tagging.updateShift(event.shift)) this.command(event, { type: 'selection-presentation-changed' });
+    const wasShiftHeld = this.tagging.isShiftHeld();
+    if (!wasShiftHeld && event.shift) {
+      this.shiftSelectionBaseline = new Set(this.options.getSelectedNodeIds());
+    }
+    this.tagging.updateShift(event.shift);
+    if (wasShiftHeld && !event.shift) {
+      const baseline = this.shiftSelectionBaseline ?? new Set<string>();
+      const selectedNodeIds = this.options.getSelectedNodeIds();
+      this.shiftSelectionBaseline = undefined;
+      if (selectedNodeIds.some((nodeId) => !baseline.has(nodeId))) {
+        this.command(event, {
+          type: 'fit-camera',
+          nodeIds: this.options.getSelectionNeighborhood(selectedNodeIds),
+        });
+      }
+    }
     if (this.mode.kind !== 'idle' || this.pointers.size > 0 || this.touchGesture) return;
     if (!event.pointerInside) {
       this.command(event, { type: 'set-preview-hover' });
@@ -453,6 +470,12 @@ export class GraphInteractionInterpreter {
       this.tagging.reset();
       this.command(event, { type: 'set-selection', nodeIds: [] });
       this.command(event, { type: 'set-focus' });
+      return;
+    }
+    if (event.key === ' ' || event.key === 'Spacebar') {
+      if (event.repeat || event.composing || event.ctrl || event.meta || event.shift || event.alt) return;
+      this.tagging.togglePresentation();
+      this.command(event, { type: 'selection-presentation-changed' });
       return;
     }
     if (event.key === 'Enter') {
@@ -555,6 +578,9 @@ export class GraphInteractionInterpreter {
       return;
     }
     const selectedNodeIds = this.options.getSelectedNodeIds();
+    if (event.shift && this.shiftSelectionBaseline === undefined) {
+      this.shiftSelectionBaseline = new Set(selectedNodeIds);
+    }
     const enteringExplore = selectedNodeIds.length === 0;
     const removing = event.shift && selectedNodeIds.includes(hit.nodeId);
     const nodeIds = removing
@@ -562,7 +588,7 @@ export class GraphInteractionInterpreter {
       : [
           hit.nodeId,
           ...this.options.getNodeSelection(hit.nodeId),
-          ...this.options.getSelectionBridge(hit.nodeId, selectedNodeIds),
+          ...(event.shift ? [] : this.options.getSelectionBridge(hit.nodeId, selectedNodeIds)),
         ];
     const result = this.tagging.tag(
       nodeIds,
@@ -572,7 +598,7 @@ export class GraphInteractionInterpreter {
       event.shift,
     );
     this.command(event, { type: 'set-selection', nodeIds: result.selectedNodeIds });
-    this.updateTaggedStructure(event, result, enteringExplore);
+    this.updateTaggedStructure(event, result, enteringExplore && !event.shift);
   }
 
   private updateTaggedStructure(
@@ -592,7 +618,7 @@ export class GraphInteractionInterpreter {
   private viewMode(): GraphInteractionViewMode {
     const hasExploreState = this.options.getSelectedNodeIds().length > 0
       || this.options.getFocusedNodeId() !== undefined;
-    return hasExploreState && !this.tagging.isOverviewHeld() ? 'explore' : 'overview';
+    return hasExploreState ? 'explore' : 'overview';
   }
 
   private readTouchGesture(): TouchGesture | null {

@@ -90,8 +90,8 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     'overview hover should light direct neighbors');
   deepEqual(overviewHover.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'overview hover should light the hovered node');
-  equal(overviewHover.nodeContributions.b.labelAlwaysVisible, false,
-    'overview hover should not promote the hovered node label');
+  equal(overviewHover.nodeContributions.b.labelForceVisible, true,
+    'overview hover should force the hovered node label');
   equal(overviewHover.nodeContributions.c.labelAlwaysVisible, false,
     'overview hover should not promote a neighboring node label');
   equal(overviewHover.edgeContributions['a-d'].opacity, 1, 'overview hover must not dim unrelated links');
@@ -133,13 +133,22 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   equal(exploredHover.edgeContributions['b-c'].opacity, 1, 'the outer shortest-path link should be revealed');
   equal(exploredHover.edgeContributions['a-b'].opacity, 1, 'the shortest path should connect fully to the selection');
   equal(exploredHover.edgeContributions['a-d'].opacity, 0.2, 'off-path links should remain dim');
-  for (const nodeId of ['a', 'b', 'c', 'd']) {
+  equal(exploredHover.nodeContributions.c.labelForceVisible, true,
+    'the hovered endpoint label should be forced at its normal size');
+  equal(exploredHover.nodeContributions.c.labelFontSize, taggedA.nodeContributions.c.labelFontSize,
+    'the hovered endpoint label should retain its normal size');
+  equal(exploredHover.nodeContributions.b.labelForceVisible, true,
+    'an intermediate hop label should be forced visible');
+  equal(exploredHover.nodeContributions.b.labelFontSize,
+    (taggedA.nodeContributions.b.labelFontSize ?? 0) * 0.5,
+    'an intermediate hop label should render at half size');
+  for (const nodeId of ['a', 'd']) {
     equal(exploredHover.nodeContributions[nodeId].showLabel, taggedA.nodeContributions[nodeId].showLabel,
-      `hover should not change ${nodeId} label eligibility`);
+      `hover should not change unrelated ${nodeId} label eligibility`);
     equal(exploredHover.nodeContributions[nodeId].labelOpacity, taggedA.nodeContributions[nodeId].labelOpacity,
-      `hover should not change ${nodeId} label opacity`);
+      `hover should not change unrelated ${nodeId} label opacity`);
     equal(exploredHover.nodeContributions[nodeId].labelAlwaysVisible, taggedA.nodeContributions[nodeId].labelAlwaysVisible,
-      `hover should not promote the ${nodeId} label`);
+      `hover should not promote the unrelated ${nodeId} label`);
   }
 
   const hoveredTag = anima.contributeFrame({
@@ -156,14 +165,18 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   equal(hoveredTag.nodeContributions.c.opacity, 0.2, 'nodes beyond the direct neighborhood should remain dim');
   equal(hoveredTag.edgeContributions['a-b'].opacity, 1, 'direct neighborhood links should light');
   equal(hoveredTag.edgeContributions['a-d'].opacity, 1, 'all direct neighborhood links should light');
+  equal(hoveredTag.nodeContributions.a.labelForceVisible, true,
+    'hovering a tagged node should force only its own label');
+  equal(hoveredTag.nodeContributions.b.labelForceVisible, false,
+    'a lit direct neighbor should not receive the hover label override');
 
   const suspended = anima.contributeFrame({
     ...state,
     selectionPresentationSuspended: true,
     viewState: { ...state.viewState, selectedNodeIds: ['a', 'b'] },
   });
-  assert(suspended?.nodeContributions, 'a Shift-held Overview should contribute presentation');
-  equal(suspended.nodeContributions.c.opacity, 1, 'Shift should suspend background dimming without clearing tags');
+  assert(suspended?.nodeContributions, 'a Space-toggled undimmed view should contribute presentation');
+  equal(suspended.nodeContributions.c.opacity, 1, 'Space should suspend background dimming without clearing tags');
   deepEqual(suspended.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'tagged nodes should remain lit while selection presentation is suspended');
 
@@ -211,10 +224,12 @@ test('V2 adaptive labels stay inside tagged and inspected structures', () => {
     presentationPolicy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'adaptive' },
     viewState: { ...state.viewState, selectedNodeIds: ['a'], focusedNodeId: 'a' },
   });
-  equal(inspected?.nodeContributions?.b.showLabel, adaptive.nodeContributions.b.showLabel,
-    'hover should not change label eligibility in Explore mode');
-  equal(inspected?.nodeContributions?.b.labelOpacity, adaptive.nodeContributions.b.labelOpacity,
-    'hover should not change label opacity in Explore mode');
+  equal(inspected?.nodeContributions?.b.showLabel, true,
+    'hover should force label eligibility in Explore mode');
+  equal(inspected?.nodeContributions?.b.labelOpacity, 1,
+    'hover should force full label opacity in Explore mode');
+  equal(inspected?.nodeContributions?.b.labelForceVisible, true,
+    'hover should mark its label as the explicit graph-wide mode override');
 
   const all = anima.contributeFrame({
     ...state,
@@ -271,6 +286,36 @@ test('V1.6 Anima labels retain their CSS size across orthographic zoom', () => {
   renderer.render();
   assert(value.styleAssignments.includes('font:20px sans-serif'),
     'zoomed-in 2D should keep the same resolved label font size');
+});
+
+test('hover-forced labels are the only labels rendered while label mode is off', () => {
+  const fillTextY: number[] = [];
+  const context = recordingContext(fillTextY);
+  const canvas = { getContext: () => context } as unknown as HTMLCanvasElement;
+  const camera = new GraphCameraController({
+    position: { x: 0, y: 0, z: 1000 }, target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic',
+  }, '2d');
+  camera.setViewport(640, 360);
+  const frames = new GraphFrameStore();
+  frames.set({
+    regions: [], edges: [], theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    nodes: [
+      {
+        id: 'hovered', label: 'hovered', position: { x: -40, y: 0, z: 0 }, radius: 8,
+        selected: false, focused: false, hovered: true, showLabel: true, labelForceVisible: true,
+      },
+      {
+        id: 'ordinary', label: 'ordinary', position: { x: 40, y: 0, z: 0 }, radius: 8,
+        selected: false, focused: false, hovered: false, showLabel: true,
+      },
+    ],
+    policy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'off' },
+  });
+  const renderer = new CanvasGraphRenderer(canvas, camera, frames, () => 0);
+  renderer.resize(640, 360, 1);
+  renderer.render();
+  equal(fillTextY.length, 1, 'label mode off should retain only the explicit hover label override');
 });
 
 test('node scaling supports calm, world, and exaggerated responses in 2D and 3D', () => {
@@ -407,7 +452,8 @@ test('V1.6 frame composition carries future Anima label and arrow targets to ren
     selection: { nodeIds: new Set(['a', 'b']), edgeIds: new Set(['a-b']) },
     nodeContributions: {
       a: {
-        finalColor: parseGraphColorV2('#123456'), labelOffset: { x: 3, y: -4 }, nodeScaleExponent: 1.75,
+        finalColor: parseGraphColorV2('#123456'), labelOffset: { x: 3, y: -4 },
+        labelForceVisible: true, nodeScaleExponent: 1.75,
       },
     },
     edgeContributions: {
@@ -421,6 +467,7 @@ test('V1.6 frame composition carries future Anima label and arrow targets to ren
   });
   deepEqual(frame.nodes[0].finalColor, parseGraphColorV2('#123456'), 'Anima final fill should reach the render frame');
   deepEqual(frame.nodes[0].labelOffset, { x: 3, y: -4 }, 'label offsets should survive composition');
+  equal(frame.nodes[0].labelForceVisible, true, 'the interaction label override should survive composition');
   equal(frame.nodes[0].nodeScaleExponent, 1.75, 'per-node zoom response should survive composition');
   equal(frame.edges[0].arrowAtSource, true, 'Anima should be able to show a source arrow');
   equal(frame.edges[0].arrowAtTarget, false, 'Anima should be able to suppress a canonical target arrow');

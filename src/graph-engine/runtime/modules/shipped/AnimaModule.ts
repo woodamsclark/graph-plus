@@ -66,6 +66,11 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const exploreHoverPath = exploreActive && hoveredId !== undefined && !hoveredIsTagged
       ? shortestPathToAnyV1(hoveredId, pathTargetIds, relationships)
       : undefined;
+    const hopLabelIds = new Set(exploreHoverPath?.slice(1, -1) ?? []);
+    const forcedLabelIds = new Set([
+      ...(hoveredId === undefined ? [] : [hoveredId]),
+      ...hopLabelIds,
+    ]);
     const exploreHoverIds = hoveredId === undefined
       ? new Set<string>()
       : hoveredIsTagged
@@ -114,9 +119,12 @@ export class AnimaModule implements GraphModuleInstanceV1 {
           : prior?.color ?? (node.tokens?.includes('kind:tag') ? this.palette.colors.tagNode : undefined) ?? this.palette.colors.node;
         const selected = state.viewState.selectedNodeIds.includes(node.id);
         const pinned = state.viewState.pinnedNodeIds.includes(node.id);
+        const forceLabel = forcedLabelIds.has(node.id);
+        const hopLabel = hopLabelIds.has(node.id);
         const suppressAdaptiveLabel = state.presentationPolicy?.labelMode === 'adaptive'
           && labelVisibleIds !== undefined
-          && !labelVisibleIds.has(node.id);
+          && !labelVisibleIds.has(node.id)
+          && !forceLabel;
         return [node.id, {
           ...prior,
           radius,
@@ -124,10 +132,11 @@ export class AnimaModule implements GraphModuleInstanceV1 {
             normalize(radius, smallestRadius, largestRadius)),
           finalColor: color,
           opacity: visibleIds === undefined || visibleIds.has(node.id) ? 1 : 0.2,
-          labelOpacity: labelVisibleIds === undefined || labelVisibleIds.has(node.id) ? 1 : 0.2,
-          showLabel: prior?.showLabel !== false && !suppressAdaptiveLabel,
-          labelFontSize: 14 + radius / 4,
-          labelAlwaysVisible: prior?.labelAlwaysVisible || selected || node.id === focusedId,
+          labelOpacity: forceLabel || labelVisibleIds === undefined || labelVisibleIds.has(node.id) ? 1 : 0.2,
+          showLabel: forceLabel || (prior?.showLabel !== false && !suppressAdaptiveLabel),
+          labelFontSize: (14 + radius / 4) * (hopLabel ? 0.5 : 1),
+          labelForceVisible: forceLabel,
+          labelAlwaysVisible: prior?.labelAlwaysVisible || selected || node.id === focusedId || forceLabel,
           ...(selected || pinned ? {
             strokeColor: this.palette.colors.nodeOutline,
             strokeWidth: pinned ? 2 : 1,

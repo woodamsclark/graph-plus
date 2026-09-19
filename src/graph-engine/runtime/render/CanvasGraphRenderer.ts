@@ -460,18 +460,17 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
 
   private drawLabels(frame: GraphRenderFrameV1, nodes: readonly ProjectedNode[]): Pick<GraphRenderTimingV1, 'labelLayoutMs' | 'labelDrawMs'> {
     const mode = renderPolicy(frame).labelMode ?? 'adaptive';
-    if (mode === 'off') return { labelLayoutMs: 0, labelDrawMs: 0 };
     this.context.save();
     this.context.textAlign = 'center';
     this.context.textBaseline = 'top';
     this.context.font = graphFontToCss(frame.theme.labelFont);
     this.context.fillStyle = this.colorCss(frame.theme.colors.label);
     const candidates = nodes
-      .filter(({ node }) => node.showLabel !== false)
+      .filter(({ node }) => node.showLabel !== false && (mode !== 'off' || node.labelForceVisible === true))
       .sort(compareLabelCandidates);
     const layoutStart = this.now();
     let acceptedCandidates: readonly ProjectedNode[];
-    if (mode === 'all') {
+    if (mode === 'all' || mode === 'off') {
       acceptedCandidates = candidates;
     } else {
       const cameraState = this.camera.getState();
@@ -492,6 +491,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
         const forced = candidate.node.focused
           || candidate.node.selected
           || candidate.node.hovered
+          || candidate.node.labelForceVisible === true
           || candidate.node.labelAlwaysVisible === true;
         if (!forced && accepted.length >= budget) continue;
         const bounds = this.labelBounds(frame, candidate);

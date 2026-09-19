@@ -305,5 +305,7 @@ function isGraphKeyboardCommand(key: string): boolean {
     'F',
     'Escape',
     'Enter',
+    ' ',
+    'Spacebar',
   ].includes(key);
 }

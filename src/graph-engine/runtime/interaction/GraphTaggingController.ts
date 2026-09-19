@@ -3,15 +3,22 @@ export interface GraphTaggingResultV1 {
   readonly focusNodeId?: string;
 }
 
-/**
- * Owns tag-set edits and the temporary Shift-held Overview presentation. The
- * durable selection remains in GraphViewState; Shift never delays or commits it.
- */
+/** Owns tag-set edits, Shift selection state, and the transient presentation toggle. */
 export class GraphTaggingController {
   private shiftActive = false;
+  private presentationSuspended = false;
 
-  isOverviewHeld(): boolean {
+  isShiftHeld(): boolean {
     return this.shiftActive;
+  }
+
+  isPresentationSuspended(): boolean {
+    return this.presentationSuspended;
+  }
+
+  togglePresentation(): boolean {
+    this.presentationSuspended = !this.presentationSuspended;
+    return this.presentationSuspended;
   }
 
   updateShift(active: boolean): boolean {

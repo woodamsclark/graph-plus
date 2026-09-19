@@ -205,9 +205,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.diagnostics.counters.hitTests += this.interaction.consumeHitTestCount();
     const deltaSeconds = this.lastFrameTimestamp === null ? 1 / 60 : Math.max(0, (timestamp - this.lastFrameTimestamp) / 1000);
     this.lastFrameTimestamp = timestamp;
-    const focusedNodeId = this.interaction.isOverviewModifierActive()
-      ? undefined
-      : this.viewState.focusedNodeId;
+    const focusedNodeId = this.viewState.focusedNodeId;
     const focusedPosition = focusedNodeId ? this.moduleView.positions[focusedNodeId] : undefined;
     const previousFocusedPosition = focusedPosition ? { ...focusedPosition } : undefined;
     const moduleStart = this.platform.now();
@@ -216,7 +214,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       ...this.moduleView,
       draggedNodeId: this.interaction.getDraggedNodeId(),
       hoveredNodeId: this.interaction.getHoveredNodeId(),
-      selectionPresentationSuspended: this.interaction.isOverviewModifierActive(),
+      selectionPresentationSuspended: this.interaction.isSelectionPresentationSuspended(),
       previewedNodeId: this.interaction.getPreviewedNodeId(),
     }, deltaSeconds);
     const positions = tickResult?.positions;
@@ -1005,7 +1003,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       renderSelection: allOf(document),
       formActive: false,
       hoveredNodeId: this.interaction?.getHoveredNodeId(),
-      selectionPresentationSuspended: this.interaction?.isOverviewModifierActive(),
+      selectionPresentationSuspended: this.interaction?.isSelectionPresentationSuspended(),
       previewedNodeId: this.interaction?.getPreviewedNodeId(),
       nodeContributions: {},
       edgeContributions: {},
@@ -1049,7 +1047,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       selection: this.renderSelection,
       draggedNodeId: this.interaction?.getDraggedNodeId(),
       hoveredNodeId: this.interaction?.getHoveredNodeId(),
-      selectionPresentationSuspended: this.interaction?.isOverviewModifierActive(),
+      selectionPresentationSuspended: this.interaction?.isSelectionPresentationSuspended(),
       previewedNodeId: this.interaction?.getPreviewedNodeId(),
       invalidation,
     });

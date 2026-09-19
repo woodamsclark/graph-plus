@@ -51,6 +51,9 @@ export function composeGraphRenderFrameV1(options: {
           ...(contribution?.labelFontSize === undefined ? {} : { labelFontSize: contribution.labelFontSize }),
           ...(contribution?.labelOffset === undefined ? {} : { labelOffset: { ...contribution.labelOffset } }),
           ...(contribution?.showLabel === undefined ? {} : { showLabel: contribution.showLabel }),
+          ...(contribution?.labelForceVisible === undefined
+            ? {}
+            : { labelForceVisible: contribution.labelForceVisible }),
           ...(contribution?.labelPriority === undefined ? {} : { labelPriority: contribution.labelPriority }),
           ...(contribution?.labelAlwaysVisible === undefined ? {} : { labelAlwaysVisible: contribution.labelAlwaysVisible }),
         };

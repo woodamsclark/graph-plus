@@ -23,6 +23,8 @@ export interface GraphRenderNodeV1 {
   /** Final screen-space offset from the normal centered label anchor. */
   readonly labelOffset?: { readonly x: number; readonly y: number };
   readonly showLabel?: boolean;
+  /** Force this interaction label even when the graph-wide label mode is off. */
+  readonly labelForceVisible?: boolean;
   readonly labelPriority?: number;
   readonly labelAlwaysVisible?: boolean;
 }
@@ -79,6 +81,8 @@ export interface GraphNodeRenderContributionV1 {
   readonly labelFontSize?: number;
   readonly labelOffset?: { readonly x: number; readonly y: number };
   readonly showLabel?: boolean;
+  /** Force this interaction label even when the graph-wide label mode is off. */
+  readonly labelForceVisible?: boolean;
   readonly labelPriority?: number;
   readonly labelAlwaysVisible?: boolean;
 }

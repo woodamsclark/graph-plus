@@ -344,7 +344,7 @@ test('R-REGION-04 first tag click selects its owner and visible recursive childr
   await projectionSession.dispose();
 });
 
-test('ordinary clicks add tags while Shift suspends Explore and can remove an existing tag', async () => {
+test('ordinary clicks add shortest-path tags while Shift removes without reframing', async () => {
   const value = runtimeHarness({
     document: graphDocument({
       nodes: [
@@ -408,9 +408,83 @@ test('ordinary clicks add tags while Shift suspends Explore and can remove an ex
   modifier(value, 'keyup', false);
   value.platform.flushFrame();
   const released = await session.exportViewState();
-  deepEqual(released, removed, 'Shift release should only restore Explore presentation, not commit new graph state');
+  deepEqual(released, removed, 'Shift release after removals should not commit or reframe graph state');
   equal(intents.filter((intent) => intent.type === 'focus-changed').length, focusIntentCount,
     'Shift release should not emit a delayed focus change');
+  await session.dispose();
+});
+
+test('Shift adds nodes without hops and frames the resulting selection only after release', async () => {
+  const value = runtimeHarness({
+    document: graphDocument({
+      nodes: ['a', 'b', 'c'].map((nodeId) => graphNode(nodeId)),
+      edges: [graphEdge('a-b', 'a', 'b'), graphEdge('b-c', 'b', 'c')],
+    }),
+  });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  const wideView = await session.exportViewState();
+  await session.restoreViewState({ ...wideView, camera: { ...wideView.camera, zoom: 0.1 } });
+
+  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 311 });
+  value.platform.flushFrame();
+  const beforeShift = await session.exportViewState();
+  modifier(value, 'keydown', true);
+  value.platform.flushFrame();
+  click(value, canvas, await nodePoint(session, 'c'), { pointerId: 312, shiftKey: true });
+  value.platform.flushFrame();
+  const held = await session.exportViewState();
+  deepEqual(held.selectedNodeIds, ['a', 'c'], 'Shift-click should add the clicked node without path hops');
+  deepEqual(held.camera, beforeShift.camera, 'Shift-held additions should not reframe the camera');
+
+  modifier(value, 'keyup', false);
+  value.platform.flushFrame();
+  const released = await session.exportViewState();
+  deepEqual(released.selectedNodeIds, ['a', 'c'], 'Shift release should retain the batched selection');
+  assert(JSON.stringify(released.camera) !== JSON.stringify(held.camera),
+    'Shift release should frame when the batch contains additions');
+  const framedPositions = [released.positions.a, released.positions.b, released.positions.c];
+  deepEqual(released.camera.target, {
+    x: (Math.min(...framedPositions.map(({ x }) => x)) + Math.max(...framedPositions.map(({ x }) => x))) / 2,
+    y: (Math.min(...framedPositions.map(({ y }) => y)) + Math.max(...framedPositions.map(({ y }) => y))) / 2,
+    z: (Math.min(...framedPositions.map(({ z }) => z)) + Math.max(...framedPositions.map(({ z }) => z))) / 2,
+  }, 'release framing should include the selected group and its direct neighbors');
+  await session.dispose();
+});
+
+test('Space toggles selection dimming without changing Explore state', async () => {
+  const base = runtimeRegistration();
+  const registration = {
+    ...base,
+    profiles: base.profiles.map((profile) => ({
+      ...profile,
+      modules: {
+        ...profile.modules,
+        anima: { ...profile.modules.anima, defaultEnabled: true },
+      },
+    })),
+  };
+  const value = runtimeHarness({ registration });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 313 });
+  value.platform.flushFrame();
+  const explore = await session.exportViewState();
+
+  value.styleAssignments.length = 0;
+  key(value, canvas, ' ');
+  value.platform.flushFrame();
+  const undimmed = await session.exportViewState();
+  deepEqual(undimmed, explore, 'Space should change presentation without mutating Explore state');
+  equal(value.styleAssignments.includes('globalAlpha:0.2'), false,
+    'the undimmed presentation should remove selection background opacity');
+
+  value.styleAssignments.length = 0;
+  key(value, canvas, ' ');
+  value.platform.flushFrame();
+  deepEqual(await session.exportViewState(), explore, 'a second Space press should preserve graph state');
+  equal(value.styleAssignments.includes('globalAlpha:0.2'), true,
+    'the second Space press should restore selection dimming');
   await session.dispose();
 });
 
@@ -693,10 +767,10 @@ test('desktop primary navigation pans in 3D Overview and orbits in Explore', asy
   pointer(suspended, suspendedCanvas, 'pointermove', -60, -75, { pointerId: 322, shiftKey: true });
   suspended.platform.flushFrame();
   const suspendedAfter = await suspendedSession.exportViewState();
-  assert(!sameVector(suspendedAfter.camera.target, suspendedBefore.camera.target),
-    'Shift-held selection suspension should restore Overview panning');
-  deepEqual(cameraOffset(suspendedAfter.camera), cameraOffset(suspendedBefore.camera),
-    'Shift-held Overview panning should preserve camera orientation');
+  deepEqual(suspendedAfter.camera.target, suspendedBefore.camera.target,
+    'holding Shift should retain Explore rotation around the selected structure');
+  assert(!sameVector(suspendedAfter.camera.position, suspendedBefore.camera.position),
+    'holding Shift should no longer switch Explore navigation back to Overview panning');
   deepEqual(suspendedAfter.selectedNodeIds, ['a'], 'Shift-held navigation should preserve durable tags');
   equal(suspendedAfter.focusedNodeId, 'a', 'Shift-held navigation should preserve the Explore anchor');
   await suspendedSession.dispose();
