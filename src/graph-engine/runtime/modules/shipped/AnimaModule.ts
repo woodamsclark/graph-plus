@@ -3,6 +3,7 @@ import type { GraphVisualThemeV2 } from '../../theme/index.ts';
 import type { GraphModuleInstanceV1, GraphModuleProjectionPatchV1 } from '../GraphModuleTypes.ts';
 
 export class AnimaModule implements GraphModuleInstanceV1 {
+  private nodeWorldScaleBlend: number;
   private labelPosition: 'above' | 'below';
   private adaptiveLabelThreshold2d: number;
   private adaptiveLabelThreshold3d: number;
@@ -19,12 +20,14 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     private palette: GraphVisualThemeV2,
     settings: Readonly<Record<string, JsonValue>>,
   ) {
+    this.nodeWorldScaleBlend = readUnitInterval(settings.nodeWorldScaleBlend, 0);
     this.labelPosition = readLabelPosition(settings.labelPosition);
     this.adaptiveLabelThreshold2d = readThreshold(settings.adaptiveLabelThreshold2d, 50);
     this.adaptiveLabelThreshold3d = readThreshold(settings.adaptiveLabelThreshold3d, 50);
   }
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
+    this.nodeWorldScaleBlend = readUnitInterval(settings.nodeWorldScaleBlend, 0);
     this.labelPosition = readLabelPosition(settings.labelPosition);
     this.adaptiveLabelThreshold2d = readThreshold(settings.adaptiveLabelThreshold2d, 50);
     this.adaptiveLabelThreshold3d = readThreshold(settings.adaptiveLabelThreshold3d, 50);
@@ -120,6 +123,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       presentationPolicy: {
         ...(state.presentationPolicy ?? {}),
         nodeScaleMode: 'sqrt-orthographic',
+        nodeWorldScaleBlend: this.nodeWorldScaleBlend,
         labelScaleMode: 'fixed',
         labelPosition: this.labelPosition,
         adaptiveLabelThreshold: state.viewState.dimensions === '3d'
@@ -184,6 +188,12 @@ function readLabelPosition(value: JsonValue | undefined): 'above' | 'below' {
 function readThreshold(value: JsonValue | undefined, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value)
     ? clamp(value, 0, 100)
+    : fallback;
+}
+
+function readUnitInterval(value: JsonValue | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? clamp(value, 0, 1)
     : fallback;
 }
 

@@ -195,6 +195,17 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     if (!graphUiSectionIsShownV1(this.policy, SECTIONS.form)) return;
     const body = this.section(parent, SECTIONS.form, SECTION_TITLES[SECTIONS.form], false);
     this.renderFormDimensions(body, effective);
+    if (graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.formNodeScaleSpace)) {
+      const anima = effective.modules.anima;
+      if (anima?.enabled) {
+        this.catalogSlider(
+          body,
+          'anima.nodeWorldScaleBlend',
+          readNumber(anima.settings.nodeWorldScaleBlend, 0) * 100,
+          'Balanced ←→ World space',
+        );
+      }
+    }
     if (graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.mindMap)) {
       const form = effective.modules.form;
       const selectedId = viewState.selectedNodeIds.length === 1 ? viewState.selectedNodeIds[0] : undefined;
@@ -432,8 +443,10 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     moduleId: string,
     key: string,
     storageScale = 1,
+    description?: string,
   ): void {
     const setting = new Setting(parent).setName(name);
+    if (description) setting.setDesc(description);
     setting.settingEl.classList.add('graphplus-slider-setting', 'graph-engine-slider-setting');
     setting.addSlider((slider) => {
       slider.setLimits(min, max, step).setValue(value).setDynamicTooltip();
@@ -457,7 +470,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       }));
   }
 
-  private catalogSlider(parent: HTMLElement, id: string, value: number): void {
+  private catalogSlider(parent: HTMLElement, id: string, value: number, description?: string): void {
     const presentation = graphSettingPresentationV1(id);
     if (presentation.control.type !== 'slider') throw new Error(`${id} is not a slider setting.`);
     this.slider(
@@ -470,6 +483,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       presentation.moduleId,
       presentation.key,
       presentation.control.storageScale ?? 1,
+      description,
     );
   }
 

@@ -144,6 +144,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       capabilities: ['animation'],
       settingsSchemaVersion: 1,
       defaultSettings: {
+        nodeWorldScaleBlend: 0,
         labelPosition: 'above',
         adaptiveLabelThreshold2d: 65,
         adaptiveLabelThreshold3d: 50,

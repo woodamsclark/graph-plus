@@ -43,7 +43,19 @@ test('V1.6 Anima owns the exact visible-degree radius and composable structural 
     'hub radius should use the exact formula and ignore duplicate ordered relationships');
   equal(patch.nodeContributions['leaf-0'].radius, 8, 'low-degree nodes should use the exact lower clamp');
   equal(patch.presentationPolicy?.nodeScaleMode, 'sqrt-orthographic', 'Anima should request native-style 2d node scaling');
+  equal(patch.presentationPolicy?.nodeWorldScaleBlend, 0, 'Anima should default to balanced node scaling');
   equal(patch.presentationPolicy?.labelScaleMode, 'fixed', 'Anima labels should remain screen-readable in both dimensions');
+});
+
+test('Anima exposes a clamped continuous blend from balanced to world-space node scaling', () => {
+  const document = graphDocument({ nodes: [graphNode('a')], edges: [] });
+  const state = pipeline(document, { nodeIds: new Set(['a']), edgeIds: new Set() });
+  const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, { nodeWorldScaleBlend: 0.5 });
+  equal(anima.contributeFrame(state)?.presentationPolicy?.nodeWorldScaleBlend, 0.5,
+    'Anima should publish intermediate scale-space values');
+  anima.updateSettings({ nodeWorldScaleBlend: 4 });
+  equal(anima.contributeFrame(state)?.presentationPolicy?.nodeWorldScaleBlend, 1,
+    'Anima should clamp saved scale-space values to world space');
 });
 
 test('Anima separates undimmed overview hover from tagged Explore presentation', () => {
@@ -213,6 +225,41 @@ test('V1.6 Anima labels retain their CSS size across orthographic zoom', () => {
   renderer.render();
   assert(value.styleAssignments.includes('font:20px sans-serif'),
     'zoomed-in 2D should keep the same resolved label font size');
+});
+
+test('orthographic node scaling interpolates between balanced and world space', () => {
+  const arcRadii: number[] = [];
+  const context = recordingContext([], arcRadii);
+  const canvas = { getContext: () => context } as unknown as HTMLCanvasElement;
+  const camera = new GraphCameraController({
+    position: { x: 0, y: 0, z: 1000 }, target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 }, zoom: 4, projection: 'orthographic',
+  }, '2d');
+  camera.setViewport(640, 360);
+  const frames = new GraphFrameStore();
+  const renderer = new CanvasGraphRenderer(canvas, camera, frames, () => 0);
+  renderer.resize(640, 360, 1);
+  const node = {
+    id: 'a', label: 'a', position: { x: 0, y: 0, z: 0 }, radius: 10,
+    selected: false, focused: false, hovered: false,
+  };
+  const renderAt = (blend: number): number => {
+    arcRadii.length = 0;
+    frames.set({
+      regions: [], edges: [], nodes: [node], theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+      policy: {
+        ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
+        nodeScaleMode: 'sqrt-orthographic',
+        nodeWorldScaleBlend: blend,
+      },
+    });
+    renderer.render();
+    return arcRadii[0];
+  };
+  equal(renderAt(0), 20, 'balanced scaling should use the square root of zoom');
+  assert(Math.abs(renderAt(0.5) - 10 * Math.pow(4, 0.75)) < 1e-10,
+    'the midpoint should interpolate the zoom exponent');
+  equal(renderAt(1), 40, 'world-space scaling should use the full zoom factor');
 });
 
 test('V1.6 renderer anchors labels above or below the resolved node boundary', () => {
@@ -1031,14 +1078,14 @@ function wheel(
   canvas.dispatchEvent(event as unknown as Event);
 }
 
-function recordingContext(fillTextY: number[]): CanvasRenderingContext2D {
+function recordingContext(fillTextY: number[], arcRadii: number[] = []): CanvasRenderingContext2D {
   return {
     setTransform: () => undefined,
     clearRect: () => undefined,
     save: () => undefined,
     restore: () => undefined,
     beginPath: () => undefined,
-    arc: () => undefined,
+    arc: (_x: number, _y: number, radius: number) => { arcRadii.push(radius); },
     fill: () => undefined,
     fillText: (_text: string, _x: number, y: number) => { fillTextY.push(y); },
     measureText: (text: string) => ({ width: text.length * 7 }) as TextMetrics,
