@@ -1,62 +1,51 @@
 export interface GraphTaggingResultV1 {
   readonly selectedNodeIds: readonly string[];
-  readonly focusNodeId: string;
-  readonly complete: boolean;
+  readonly focusNodeId?: string;
 }
 
 /**
- * Owns the transient interaction around assembling a selection. The durable
- * selection remains in GraphViewState; this controller only decides when a
- * series of tags is ready to become the focused Explore structure.
+ * Owns tag-set edits and the temporary Shift-held Overview presentation. The
+ * durable selection remains in GraphViewState; Shift never delays or commits it.
  */
 export class GraphTaggingController {
   private shiftActive = false;
-  private pendingFocusNodeId: string | undefined;
 
-  isActive(): boolean {
+  isOverviewHeld(): boolean {
     return this.shiftActive;
   }
 
-  updateShift(
-    active: boolean,
-    selectedNodeIds: readonly string[],
-  ): GraphTaggingResultV1 | undefined {
-    const wasActive = this.shiftActive;
+  updateShift(active: boolean): boolean {
+    const changed = this.shiftActive !== active;
     this.shiftActive = active;
-    if (!wasActive || active || this.pendingFocusNodeId === undefined) return undefined;
-    const result = {
-      selectedNodeIds: unique(selectedNodeIds),
-      focusNodeId: this.pendingFocusNodeId,
-      complete: true,
-    } as const;
-    this.pendingFocusNodeId = undefined;
-    return result;
+    return changed;
   }
 
   tag(
     nodeIds: readonly string[],
     focusNodeId: string,
     selectedNodeIds: readonly string[],
-    additive: boolean,
+    focusedNodeId: string | undefined,
+    shift: boolean,
   ): GraphTaggingResultV1 {
-    const batching = additive;
-    if (batching) {
-      this.shiftActive = true;
-      this.pendingFocusNodeId = focusNodeId;
-    } else {
-      this.shiftActive = false;
-      this.pendingFocusNodeId = undefined;
+    this.shiftActive = shift;
+    const current = unique(selectedNodeIds);
+    if (shift && current.includes(focusNodeId)) {
+      const removed = new Set(nodeIds);
+      removed.add(focusNodeId);
+      const remaining = current.filter((id) => !removed.has(id));
+      const nextFocus = focusedNodeId !== focusNodeId && focusedNodeId !== undefined
+        ? focusedNodeId
+        : remaining[remaining.length - 1];
+      return { selectedNodeIds: remaining, focusNodeId: nextFocus };
     }
     return {
-      selectedNodeIds: unique(batching ? [...selectedNodeIds, ...nodeIds] : nodeIds),
+      selectedNodeIds: unique([...current, ...nodeIds]),
       focusNodeId,
-      complete: !batching,
     };
   }
 
   reset(): void {
     this.shiftActive = false;
-    this.pendingFocusNodeId = undefined;
   }
 }
 

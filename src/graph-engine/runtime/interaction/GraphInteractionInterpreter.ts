@@ -138,8 +138,8 @@ export class GraphInteractionInterpreter {
     }
   }
 
-  isTaggingActive(): boolean {
-    return this.tagging.isActive();
+  isOverviewModifierActive(): boolean {
+    return this.tagging.isOverviewHeld();
   }
 
   reset(): void {
@@ -369,10 +369,7 @@ export class GraphInteractionInterpreter {
   }
 
   private modifierChange(event: Extract<GraphInputEventV1, { type: 'modifier-change' }>): void {
-    const wasTagging = this.tagging.isActive();
-    const completed = this.tagging.updateShift(event.shift, this.options.getSelectedNodeIds());
-    if (wasTagging !== this.tagging.isActive()) this.command(event, { type: 'tagging-changed' });
-    if (completed) this.completeTagging(event, completed);
+    if (this.tagging.updateShift(event.shift)) this.command(event, { type: 'selection-presentation-changed' });
     if (this.mode.kind !== 'idle' || this.pointers.size > 0 || this.touchGesture) return;
     if (!event.pointerInside) {
       this.command(event, { type: 'set-preview-hover' });
@@ -567,24 +564,25 @@ export class GraphInteractionInterpreter {
       nodeIds,
       hit.nodeId,
       this.options.getSelectedNodeIds(),
+      this.options.getFocusedNodeId(),
       event.shift,
     );
     this.command(event, { type: 'set-selection', nodeIds: result.selectedNodeIds });
-    if (result.complete) this.completeTagging(event, result);
+    this.focusTaggedStructure(event, result);
   }
 
-  private completeTagging(
+  private focusTaggedStructure(
     event: Pick<GraphInputEventV1, 'identity' | 'timestamp'>,
     result: GraphTaggingResultV1,
   ): void {
-    if (result.selectedNodeIds.length === 0) return;
     this.command(event, { type: 'set-focus', nodeId: result.focusNodeId });
+    if (result.selectedNodeIds.length === 0) return;
     this.command(event, { type: 'fit-camera', nodeIds: result.selectedNodeIds });
   }
 
   private isExploreModeActive(): boolean {
     return (this.options.getSelectedNodeIds().length > 0 || this.options.getFocusedNodeId() !== undefined)
-      && !this.tagging.isActive();
+      && !this.tagging.isOverviewHeld();
   }
 
   private readTouchGesture(): TouchGesture | null {

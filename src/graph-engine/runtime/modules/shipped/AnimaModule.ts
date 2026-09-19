@@ -57,7 +57,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const transientNeighborhood = transientId === undefined
       ? undefined
       : new Set([transientId, ...(relationships.get(transientId) ?? [])]);
-    const exploreActive = taggedIds.size > 0 && state.taggingActive !== true;
+    const exploreActive = taggedIds.size > 0 && state.selectionPresentationSuspended !== true;
     const visibleIds = transientNeighborhood ?? (exploreActive
       ? new Set([...taggedIds, ...hoveredNeighborhood])
       : undefined);
@@ -97,7 +97,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
           labelOpacity: visibleIds === undefined || visibleIds.has(node.id) ? 1 : 0.2,
           showLabel: prior?.showLabel !== false && !suppressAdaptiveLabel,
           labelFontSize: 14 + radius / 4,
-          labelAlwaysVisible: prior?.labelAlwaysVisible || isLit || selected || node.id === focusedId,
+          labelAlwaysVisible: prior?.labelAlwaysVisible || selected || node.id === focusedId || (exploreActive && isLit),
           ...(selected || pinned ? {
             strokeColor: this.palette.colors.nodeOutline,
             strokeWidth: pinned ? 2 : 1,

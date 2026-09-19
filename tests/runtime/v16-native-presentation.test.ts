@@ -78,6 +78,10 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     'overview hover should light direct neighbors');
   deepEqual(overviewHover.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'overview hover should light the hovered node');
+  equal(overviewHover.nodeContributions.b.labelAlwaysVisible, false,
+    'overview hover should not promote the hovered node label');
+  equal(overviewHover.nodeContributions.c.labelAlwaysVisible, false,
+    'overview hover should not promote a neighboring node label');
   equal(overviewHover.edgeContributions['a-d'].opacity, 1, 'overview hover must not dim unrelated links');
   deepEqual(overviewHover.edgeContributions['a-b'].color, DEFAULT_GRAPH_RENDER_THEME_V1.colors.highlightedNode,
     'overview hover should light incident links');
@@ -114,15 +118,15 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     'the hovered node should light independently from tagged nodes');
   equal(exploredHover.edgeContributions['b-c'].opacity, 1, 'the hovered node links should be revealed');
 
-  const batching = anima.contributeFrame({
+  const suspended = anima.contributeFrame({
     ...state,
-    taggingActive: true,
+    selectionPresentationSuspended: true,
     viewState: { ...state.viewState, selectedNodeIds: ['a', 'b'] },
   });
-  assert(batching?.nodeContributions, 'an active Shift tagging batch should contribute presentation');
-  equal(batching.nodeContributions.c.opacity, 1, 'tagging should defer background dimming until Shift release');
-  deepEqual(batching.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
-    'already tagged nodes should light during the batch');
+  assert(suspended?.nodeContributions, 'a Shift-held Overview should contribute presentation');
+  equal(suspended.nodeContributions.c.opacity, 1, 'Shift should suspend background dimming without clearing tags');
+  deepEqual(suspended.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
+    'tagged nodes should remain lit while selection presentation is suspended');
 
   const previewedA = anima.contributeFrame({
     ...state,

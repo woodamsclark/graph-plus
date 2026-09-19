@@ -142,8 +142,8 @@ export class SessionInteractionRuntime {
     return this.hoveredNodeId;
   }
 
-  isTaggingActive(): boolean {
-    return this.interpreter.isTaggingActive();
+  isOverviewModifierActive(): boolean {
+    return this.interpreter.isOverviewModifierActive();
   }
 
   getPreviewedNodeId(): string | undefined {
@@ -192,7 +192,7 @@ export class SessionInteractionRuntime {
       'fit-camera',
       'set-selection',
       'set-focus',
-      'tagging-changed',
+      'selection-presentation-changed',
       'activate-node',
       'activate-background',
       'request-node-context',
@@ -219,7 +219,7 @@ export class SessionInteractionRuntime {
       case 'zoom-by':
         this.options.camera.zoomByWheel(
           command.deltaY,
-          this.options.getViewState().focusedNodeId === undefined || this.isTaggingActive()
+          this.options.getViewState().focusedNodeId === undefined || this.isOverviewModifierActive()
             ? command.anchor
             : undefined,
         );
@@ -246,7 +246,7 @@ export class SessionInteractionRuntime {
       case 'set-focus':
         this.setFocus(command.nodeId, command);
         return;
-      case 'tagging-changed':
+      case 'selection-presentation-changed':
         this.options.onViewStateChanged('interaction');
         return;
       case 'activate-node':

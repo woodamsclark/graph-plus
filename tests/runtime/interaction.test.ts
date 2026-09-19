@@ -333,38 +333,46 @@ test('R-REGION-04 first tag click selects visible recursive children and second 
   await projectionSession.dispose();
 });
 
-test('Shift tagging batches selection and focuses the completed structure on release', async () => {
+test('ordinary clicks add tags while Shift suspends Explore and can remove an existing tag', async () => {
   const value = runtimeHarness();
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
   const intents: GraphIntentV1[] = [];
   session.onIntent((intent) => intents.push(intent));
-  const before = await session.exportViewState();
+
+  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 301 });
+  value.platform.flushFrame();
+  click(value, canvas, await nodePoint(session, 'b'), { pointerId: 302 });
+  value.platform.flushFrame();
+
+  const added = await session.exportViewState();
+  deepEqual(added.selectedNodeIds, ['a', 'b'], 'ordinary clicks should add new nodes to the tagged selection');
+  equal(added.focusedNodeId, 'b', 'the most recently added node should become the Explore anchor');
+  const expectedTarget = {
+    x: (added.positions.a.x + added.positions.b.x) / 2,
+    y: (added.positions.a.y + added.positions.b.y) / 2,
+    z: (added.positions.a.z + added.positions.b.z) / 2,
+  };
+  deepEqual(added.camera.target, expectedTarget, 'each added tag should immediately frame the complete structure');
 
   modifier(value, 'keydown', true);
   value.platform.flushFrame();
-  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 301, shiftKey: true });
+  const held = await session.exportViewState();
+  deepEqual(held.selectedNodeIds, ['a', 'b'], 'holding Shift must not mutate the durable tag set');
+  equal(held.focusedNodeId, 'b', 'holding Shift must not erase the durable Explore anchor');
+  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 303, shiftKey: true });
   value.platform.flushFrame();
-  click(value, canvas, await nodePoint(session, 'b'), { pointerId: 302, shiftKey: true });
-  value.platform.flushFrame();
+  const removed = await session.exportViewState();
+  deepEqual(removed.selectedNodeIds, ['b'], 'Shift-clicking a tagged node should remove it');
+  equal(removed.focusedNodeId, 'b', 'removing another tag should preserve the current Explore anchor');
 
-  const batching = await session.exportViewState();
-  deepEqual(batching.selectedNodeIds, ['a', 'b'], 'Shift-click should add nodes to the live tagged selection');
-  equal(batching.focusedNodeId, undefined, 'Shift should suspend focus while tags are still being assembled');
-  deepEqual(batching.camera, before.camera, 'camera framing should remain unchanged during a tagging batch');
-
+  const focusIntentCount = intents.filter((intent) => intent.type === 'focus-changed').length;
   modifier(value, 'keyup', false);
   value.platform.flushFrame();
-  const completed = await session.exportViewState();
-  equal(completed.focusedNodeId, 'b', 'the last tagged node should become the Explore anchor on release');
-  const expectedTarget = {
-    x: (completed.positions.a.x + completed.positions.b.x) / 2,
-    y: (completed.positions.a.y + completed.positions.b.y) / 2,
-    z: (completed.positions.a.z + completed.positions.b.z) / 2,
-  };
-  deepEqual(completed.camera.target, expectedTarget, 'Shift release should frame the complete tagged structure');
-  equal(intents.filter((intent) => intent.type === 'focus-changed').length, 1,
-    'the batch should emit focus only once when tagging completes');
+  const released = await session.exportViewState();
+  deepEqual(released, removed, 'Shift release should only restore Explore presentation, not commit new graph state');
+  equal(intents.filter((intent) => intent.type === 'focus-changed').length, focusIntentCount,
+    'Shift release should not emit a delayed focus change');
   await session.dispose();
 });
 
@@ -618,6 +626,28 @@ test('desktop primary navigation pans in 3D Overview and orbits in Explore', asy
   assert(!sameVector(exploreAfter.camera.position, exploreBefore.camera.position),
     'the same primary gesture should rotate once a selection enters Explore mode');
   await exploreSession.dispose();
+
+  const suspended = runtimeHarness({ profileId: 'three-dimensional' });
+  const suspendedSession = await suspended.create();
+  const suspendedCanvas = runtimeCanvas(suspended.container);
+  await suspendedSession.setSelection(['a']);
+  await suspendedSession.focusNode('a');
+  pointer(suspended, suspendedCanvas, 'pointermove', -110, -110, { pointerId: 322 });
+  suspended.platform.flushFrame();
+  modifier(suspended, 'keydown', true);
+  suspended.platform.flushFrame();
+  const suspendedBefore = await suspendedSession.exportViewState();
+  pointer(suspended, suspendedCanvas, 'pointerdown', -100, -100, { pointerId: 322, shiftKey: true });
+  pointer(suspended, suspendedCanvas, 'pointermove', -60, -75, { pointerId: 322, shiftKey: true });
+  suspended.platform.flushFrame();
+  const suspendedAfter = await suspendedSession.exportViewState();
+  assert(!sameVector(suspendedAfter.camera.target, suspendedBefore.camera.target),
+    'Shift-held selection suspension should restore Overview panning');
+  deepEqual(cameraOffset(suspendedAfter.camera), cameraOffset(suspendedBefore.camera),
+    'Shift-held Overview panning should preserve camera orientation');
+  deepEqual(suspendedAfter.selectedNodeIds, ['a'], 'Shift-held navigation should preserve durable tags');
+  equal(suspendedAfter.focusedNodeId, 'a', 'Shift-held navigation should preserve the Explore anchor');
+  await suspendedSession.dispose();
 });
 
 test('R-INPUT-17 mobile one-finger background drag pans unfocused and orbits focused 3D', async () => {
