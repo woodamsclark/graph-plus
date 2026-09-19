@@ -126,7 +126,6 @@ export function migrateGraphPlusProfileOverridesV17(
   if (modules['force-layout']?.settings) {
     const settings = { ...modules['force-layout'].settings };
     delete settings.weightingMode;
-    delete settings.collisionRadius;
     modules['force-layout'] = { ...modules['force-layout'], settings: Object.keys(settings).length ? settings : undefined };
   }
   const anima = modules.anima;

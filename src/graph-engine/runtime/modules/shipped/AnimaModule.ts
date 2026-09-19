@@ -1,7 +1,6 @@
 import type { JsonValue } from '../../../contracts/v1/index.ts';
 import type { GraphVisualThemeV2 } from '../../theme/index.ts';
 import type { GraphModuleInstanceV1, GraphModuleProjectionPatchV1 } from '../GraphModuleTypes.ts';
-import { resolveAnimaNodeRadiusV1 } from './NodeGeometry.ts';
 
 export class AnimaModule implements GraphModuleInstanceV1 {
   private labelPosition: 'above' | 'below';
@@ -39,21 +38,6 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     return null;
   }
 
-  selectRender(
-    state: Parameters<NonNullable<GraphModuleInstanceV1['selectRender']>>[0],
-  ): GraphModuleProjectionPatchV1 {
-    const visibleNodes = state.renderSelection.nodeIds;
-    const { degree } = this.presentationTopology(state);
-    return {
-      nodeContributions: Object.fromEntries(state.document.nodes
-        .filter((node) => visibleNodes.has(node.id))
-        .map((node) => [node.id, {
-          ...state.nodeContributions[node.id],
-          radius: resolveAnimaNodeRadiusV1(degree.get(node.id) ?? 0, state.nodeContributions[node.id]),
-        }])),
-    };
-  }
-
   contributeFrame(
     state: Parameters<NonNullable<GraphModuleInstanceV1['contributeFrame']>>[0],
   ): GraphModuleProjectionPatchV1 | void {
@@ -82,7 +66,9 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       .map((node) => {
         const prior = state.nodeContributions[node.id];
         const visibleDegree = degree.get(node.id) ?? 0;
-        const radius = positive(prior?.radius, resolveAnimaNodeRadiusV1(visibleDegree, prior));
+        const structuralScale = positive(prior?.radiusScale, 1);
+        const radius = positive(prior?.baseRadiusScale, 1)
+          * clamp(3 * Math.sqrt(visibleDegree + 1), 8, 30) * structuralScale;
         const isActive = activeIds.has(node.id);
         const color = isActive
           ? this.palette.colors.animaAccent

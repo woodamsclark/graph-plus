@@ -124,7 +124,7 @@ test('a focused camera follows its node while the force layout settles', async (
           repulsionStrength: 0,
           springStrength: 0,
           centeringStrength: 0.5,
-          collisionStrength: 0,
+          collisionRadius: 0,
           velocityDecay: 0,
         },
       },

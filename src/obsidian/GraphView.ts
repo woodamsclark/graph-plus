@@ -1,4 +1,4 @@
-import { ItemView, type Plugin, type TFile, type ViewStateResult, type WorkspaceLeaf } from 'obsidian';
+import { ItemView, MarkdownView, type Plugin, type TFile, type ViewStateResult, type WorkspaceLeaf } from 'obsidian';
 import { mountGraphEngineUnavailableSurfaceV1, type Disposable } from '../graph-engine/public.ts';
 import { noteNodeId } from '../graph-plus/adapter/index.ts';
 import { GraphPlusConsumerV1 } from '../graph-plus/consumer/index.ts';
@@ -20,6 +20,10 @@ export class GraphPlusView extends ItemView {
   private pendingLens: GraphPlusLensStateV1 = createDefaultGraphPlusLensV1();
   private stateRestored = false;
   private notePreview?: GraphPlusNotePreviewControllerV1<TFile>;
+  private activeFileToFollow?: TFile;
+  private followRunning = false;
+  private followCompletion: Promise<void> = Promise.resolve();
+  private explicitNavigation = false;
 
   constructor(leaf: WorkspaceLeaf, plugin: Plugin) {
     super(leaf);
@@ -68,6 +72,7 @@ export class GraphPlusView extends ItemView {
       await consumer.open();
       this.registerGraphRebuildEvents();
       this.synchronizeLeafVisibility();
+      this.requestActiveFileFollow(this.app.workspace.getActiveFile());
     } catch (error) {
       console.error('[graph+] failed to open', error);
       await this.consumer?.close().catch(() => undefined);
@@ -86,6 +91,9 @@ export class GraphPlusView extends ItemView {
     this.consumer = undefined;
     this.fallback?.dispose();
     this.fallback = undefined;
+    this.activeFileToFollow = undefined;
+    this.followRunning = false;
+    this.explicitNavigation = false;
     this.notePreview?.dispose();
     this.notePreview = undefined;
   }
@@ -103,11 +111,20 @@ export class GraphPlusView extends ItemView {
       listenerCount: this.lifecycle?.listenerCount ?? 0,
       rebuildScheduled: this.lifecycle?.rebuildScheduled ?? false,
       reconcilePending: this.lifecycle?.hasReconcilePending ?? false,
+      followRunning: this.followRunning,
     };
   }
 
   async showFile(file: TFile): Promise<boolean> {
-    return this.consumer?.revealAndFocusNode(noteNodeId(file.path)) ?? false;
+    this.explicitNavigation = true;
+    this.activeFileToFollow = undefined;
+    try {
+      await this.followCompletion;
+      this.activeFileToFollow = undefined;
+      return this.consumer?.revealAndFocusNode(noteNodeId(file.path)) ?? false;
+    } finally {
+      this.explicitNavigation = false;
+    }
   }
 
   async resetGraphLayoutData(): Promise<boolean> {
@@ -138,7 +155,9 @@ export class GraphPlusView extends ItemView {
     const metadataRef = this.app.metadataCache.on('changed', schedule);
     const activeLeafRef = this.app.workspace.on('active-leaf-change', () => {
       this.synchronizeLeafVisibility();
+      this.requestActiveFileFollow(this.activeMarkdownFile());
     });
+    const fileOpenRef = this.app.workspace.on('file-open', (file) => this.requestActiveFileFollow(file));
     this.lifecycle.register(
       () => this.app.vault.offref(createRef),
       () => this.app.vault.offref(modifyRef),
@@ -146,11 +165,43 @@ export class GraphPlusView extends ItemView {
       () => this.app.vault.offref(renameRef),
       () => this.app.metadataCache.offref(metadataRef),
       () => this.app.workspace.offref(activeLeafRef),
+      () => this.app.workspace.offref(fileOpenRef),
     );
   }
 
   private synchronizeLeafVisibility(): void {
-    this.lifecycle?.synchronizeVisibility();
+    if (!this.lifecycle?.synchronizeVisibility()) return;
+    this.requestActiveFileFollow(this.activeFileToFollow ?? this.app.workspace.getActiveFile());
+  }
+
+  private activeMarkdownFile(): TFile | null {
+    return this.app.workspace.getActiveViewOfType(MarkdownView)?.file ?? null;
+  }
+
+  private requestActiveFileFollow(file: TFile | null): void {
+    if (this.explicitNavigation || !file || file.extension !== 'md') return;
+    this.activeFileToFollow = file;
+    if (!this.lifecycle?.isVisible || this.followRunning || !this.consumer) return;
+    this.followRunning = true;
+    this.followCompletion = this.drainActiveFileFollow().catch((error) => {
+      console.error('[graph+] active-note follow failed', error);
+    });
+    void this.followCompletion;
+  }
+
+  private async drainActiveFileFollow(): Promise<void> {
+    try {
+      while (this.lifecycle?.isVisible && this.consumer && this.activeFileToFollow) {
+        const file = this.activeFileToFollow;
+        this.activeFileToFollow = undefined;
+        await this.consumer.followActiveNode(noteNodeId(file.path));
+      }
+    } finally {
+      this.followRunning = false;
+      if (!this.explicitNavigation && this.lifecycle?.isVisible && this.consumer && this.activeFileToFollow) {
+        this.requestActiveFileFollow(this.activeFileToFollow);
+      }
+    }
   }
 
   private updateNotePreview(request: {

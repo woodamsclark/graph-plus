@@ -581,10 +581,10 @@ test('L-COMPONENT-01 weighted component centering separates islands', async () =
     },
   });
   const session = await value.create();
-  for (let index = 1; index <= 120; index += 1) value.platform.flushFrame(index * 17);
+  for (let index = 1; index <= 40; index += 1) value.platform.flushFrame(index * 17);
   const packed = await session.exportViewState();
-  assert(Math.hypot(packed.positions.b.x, packed.positions.b.y) > 5, 'a disconnected component should move toward its own packing target');
-  assert(Math.hypot(packed.positions.c.x, packed.positions.c.y) > 5, 'each isolated node should remain a packable component');
+  assert(Math.hypot(packed.positions.b.x, packed.positions.b.y) > 20, 'a disconnected component should move toward its own packing target');
+  assert(Math.hypot(packed.positions.c.x, packed.positions.c.y) > 20, 'each isolated node should remain a packable component');
   await session.dispose();
 });
 

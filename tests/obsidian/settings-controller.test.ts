@@ -6,11 +6,7 @@ import {
 } from '../../src/graph-plus/consumer/index.ts';
 import { createShippedGraphModuleRegistryV1 } from '../../src/graph-engine/runtime/index.ts';
 import { GraphEngineSettingsControllerV1 } from '../../src/obsidian/settings/GraphEngineSettingsController.ts';
-import {
-  GRAPH_SETTING_PRESENTATIONS_V1,
-  graphSettingDisplayValueV1,
-  graphSettingStoredValueV1,
-} from '../../src/obsidian/settings/GraphEngineSettingsCatalog.ts';
+import { GRAPH_SETTING_PRESENTATIONS_V1 } from '../../src/obsidian/settings/GraphEngineSettingsCatalog.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 
 test('Graph+ releases dragged nodes while retaining explicit context-menu pinning', () => {
@@ -22,10 +18,10 @@ test('Graph+ releases dragged nodes while retaining explicit context-menu pinnin
     'Graph+ quick settings should not expose a redundant Camera section');
   deepEqual(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.profiles[0]?.interaction?.contextActionIds,
     ['open-node'], 'Graph+ should keep note preview as a transient hover interaction');
-  equal(createShippedGraphModuleRegistryV1().get('rendering')?.descriptor.defaultSettings.nodeRadiusScale, 1,
-    'the shipped Graph Engine node-size default should be 1.00');
-  equal(createShippedGraphModuleRegistryV1().get('rendering')?.descriptor.defaultSettings.edgeThicknessScale, 1,
-    'the shipped Graph Engine link-thickness default should be 1.00');
+  equal(createShippedGraphModuleRegistryV1().get('rendering')?.descriptor.defaultSettings.nodeRadiusScale, 2,
+    'the shipped Graph Engine node-size default should be 2.0');
+  equal(createShippedGraphModuleRegistryV1().get('rendering')?.descriptor.defaultSettings.edgeThicknessScale, 0.1,
+    'the shipped Graph Engine link-thickness default should be 0.10');
   equal(profile?.profileSettings?.dragRelease, 'dynamic', 'drag release should return an unpinned node to the active layout');
   equal(profile?.uiDefaults?.contextMenuEnabled, true, 'the right-click menu should remain available for explicit pinning');
   equal(profile?.uiDefaults?.coreContextActions?.['toggle-pin'], undefined, 'the core Pin node action should remain visible by default');
@@ -153,12 +149,10 @@ test('C-SETTING-01 migration retires the topology mode selector', () => {
     displayName: 'Other consumer',
   });
   const migrated = migrateGraphPlusProfileOverridesV17({
-    modules: { 'force-layout': { settings: { weightingMode: 'uniform', collisionRadius: 60, springLength: 180 } } },
+    modules: { 'force-layout': { settings: { weightingMode: 'uniform', springLength: 180 } } },
   });
   equal(migrated.modules?.['force-layout']?.settings?.weightingMode, undefined,
     'retired uniform selections should be discarded');
-  equal(migrated.modules?.['force-layout']?.settings?.collisionRadius, undefined,
-    'the retired fixed collision radius should not survive world-space geometry migration');
   equal(migrated.modules?.['force-layout']?.settings?.springLength, 180,
     'migration should preserve supported sibling settings');
 });
@@ -174,20 +168,6 @@ test('V1.7 settings catalog exposes only curated typed controls', () => {
   const stiffness = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'force-layout.axialSpringStiffness');
   equal(stiffness?.control.type === 'slider' ? stiffness.control.max : undefined, 90,
     'axial stiffness should share the contracted 90 percent ceiling');
-  const repulsion = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'force-layout.repulsionStrength');
-  equal(repulsion?.control.type === 'slider' ? repulsion.control.max : undefined, 1,
-    'repel force should use a normalized user-facing ceiling');
-  equal(repulsion ? graphSettingDisplayValueV1(repulsion, 1000) : undefined, 0.02,
-    'the normalized repel control should preserve the shipped solver default');
-  equal(repulsion ? graphSettingStoredValueV1(repulsion, 0.5) : undefined, 25000,
-    'normalized repel edits should map back to the established solver range');
-  const linkForce = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'force-layout.springStrength');
-  equal(linkForce?.control.type === 'slider' ? linkForce.control.max : undefined, 1,
-    'link force should use a normalized user-facing ceiling');
-  equal(linkForce ? graphSettingDisplayValueV1(linkForce, 1) : undefined, 0.2,
-    'the normalized link-force control should preserve the shipped solver default');
-  equal(linkForce ? graphSettingStoredValueV1(linkForce, 0.5) : undefined, 2.5,
-    'normalized link-force edits should map back to the established solver range');
   const quality = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'rendering.renderQuality');
   deepEqual(quality?.scopes, ['global', 'profile'], 'render quality should live in full settings without crowding quick settings');
   equal(quality?.control.type, 'select', 'render quality should use named choices rather than free-form text');

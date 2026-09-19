@@ -161,8 +161,8 @@ produce world radii approximately:
 8, 8, 8.485281, 15, 30, 30
 ```
 
-At multiplier `2`, each result doubles and becomes the corresponding world-space
-collision radius without changing topology affinity or camera.
+At multiplier `2`, each result doubles without changing node position, velocity,
+collision radius, topology affinity, or camera.
 
 ### A-V16-NODE-02 — Visible degree semantics
 
@@ -331,8 +331,7 @@ Assert the new uniform profile resolves exactly:
 - X/Y origin strength `0.1`;
 - charge `-1000`, minimum distance `30`, theta `0.9`;
 - link distance `250` and degree-derived strength;
-- collision target equal to the sum of each pair's resolved world radii, zero default
-  collision gap, and strength `1`; and
+- collision radius `60` and strength `0.5`; and
 - one link and collision iteration.
 
 ### A-V16-FORCE-03 — Cooling
@@ -350,8 +349,8 @@ whichever tolerance is larger.
 ### A-V16-FORCE-05 — Collision
 
 Two initially coincident unlinked nodes separate under the declared collision force.
-Cover both-free and one-explicitly-pinned cases. Unequal nodes target the sum of their
-resolved world radii; changing structural Node size changes the collision target.
+Cover both-free and one-explicitly-pinned cases. Changing visual Node size does not
+change the collision target.
 
 ### A-V16-FORCE-06 — Drag lifecycle
 

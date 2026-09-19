@@ -14,7 +14,6 @@ import type {
   GraphModuleTickResultV1,
 } from '../GraphModuleTypes.ts';
 import { forceLayoutIntervalMsV1, forceLayoutTargetStepRateHzV1 } from './ForceLayoutCadence.ts';
-import { resolveRenderedNodeRadiusV1 } from './NodeGeometry.ts';
 
 export type GraphAxialSpringAxisV1 = 'off' | 'x' | 'y' | 'z';
 
@@ -31,7 +30,7 @@ interface ForceSettings {
   readonly maxSpeed: number;
   readonly topologyLayoutPolicy: GraphTopologyLayoutPolicyV1;
   readonly componentPadding: number;
-  readonly collisionGap: number;
+  readonly collisionRadius: number;
   readonly collisionStrength: number;
   readonly axialSpringAxis: GraphAxialSpringAxisV1;
   readonly axialSpringStiffness: number;
@@ -79,7 +78,6 @@ export interface ForceLayoutDiagnosticsV1 {
 }
 
 const NATIVE_ACTIVE_DRAG_ALPHA = 0.3;
-const CHANGE_REHEAT_ALPHA = 0.3;
 const MAX_ACTIVE_DRAG_LINK_CORRECTION = 0.5;
 const FIXED_STEP_SECONDS = 1 / 60;
 const RESTORED_SPEED_REJECTION_MULTIPLIER = 4;
@@ -98,11 +96,6 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private springs: readonly PreparedSpring[] = [];
   private membershipPairStrengths = new Map<string, number>();
   private componentTargets: ReadonlyMap<string, Vec3> = new Map();
-  private collisionNodeIds: readonly string[] = [];
-  private collisionRadii: ReadonlyMap<string, number> = new Map();
-  private collisionDocumentSource: GraphDocumentV1 | null = null;
-  private collisionSelectionSource: ReadonlySet<string> | null = null;
-  private collisionContributionSource: GraphModulePipelineStateV1['nodeContributions'] | null = null;
   private documentKey = '';
   private pinned = new Set<string>();
   private suspended = false;
@@ -127,7 +120,6 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     if (settings.topologyLayoutPolicy !== undefined
       && !parseGraphTopologyLayoutPolicyV1(settings.topologyLayoutPolicy)) return;
     const nextSettings = readForceSettings(settings);
-    const linkForceChanged = this.settings.springStrength !== nextSettings.springStrength;
     const dampingOnlyChange = forceSettingsEqualExceptVelocityDecay(this.settings, nextSettings)
       && this.settings.velocityDecay !== nextSettings.velocityDecay;
     this.settings = nextSettings;
@@ -136,7 +128,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     // settled layout.
     if (dampingOnlyChange) return;
     this.topologyDocumentSource = null;
-    this.reheatForChange(linkForceChanged);
+    this.reheatForChange();
   }
 
   onDocumentChanged(): void {
@@ -204,7 +196,6 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   preferredTickIntervalMs(state: GraphModulePipelineStateV1): number | null {
     if (this.suspended || state.formActive || state.document.nodes.length < 2) return null;
-    if (this.settings.collisionStrength > 0) this.synchronizeCollisionGeometry(state);
     const dragActive = state.draggedNodeId !== undefined
       && state.document.nodes.some((node) => node.id === state.draggedNodeId);
     if (!this.running && !dragActive) return null;
@@ -226,7 +217,6 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     if (dragActive) this.running = true;
     this.synchronizeBuffers(state);
     this.synchronizeTopology(state);
-    this.synchronizeCollisionGeometry(state);
     if (!this.running) return;
     return this.tickD3Compatible(state, deltaSeconds, dragActive);
   }
@@ -299,29 +289,6 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     );
     this.topologyDocumentSource = state.document;
     this.topologyRegionKey = this.regionLayoutKey;
-  }
-
-  private synchronizeCollisionGeometry(state: GraphModulePipelineStateV1): void {
-    if (state.document === this.collisionDocumentSource
-      && state.renderSelection.nodeIds === this.collisionSelectionSource
-      && state.nodeContributions === this.collisionContributionSource) return;
-    const priorInitialized = this.collisionDocumentSource !== null;
-    this.collisionDocumentSource = state.document;
-    this.collisionSelectionSource = state.renderSelection.nodeIds;
-    this.collisionContributionSource = state.nodeContributions;
-    const nodeIds = state.document.nodes
-      .filter((node) => state.renderSelection.nodeIds.has(node.id))
-      .map((node) => node.id);
-    const radii = new Map(nodeIds.map((nodeId) => [
-      nodeId,
-      resolveRenderedNodeRadiusV1(state.nodeContributions[nodeId]),
-    ]));
-    const changed = nodeIds.length !== this.collisionNodeIds.length
-      || nodeIds.some((nodeId, index) => this.collisionNodeIds[index] !== nodeId
-        || this.collisionRadii.get(nodeId) !== radii.get(nodeId));
-    this.collisionNodeIds = nodeIds;
-    this.collisionRadii = radii;
-    if (priorInitialized && changed) this.reheatForChange();
   }
 
   private applyComponentCentering(): void {
@@ -416,7 +383,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       this.applyD3ManyBody();
       this.applyD3RegionAndComponentForces(state);
       this.applyAxialSpring();
-      this.applyD3Collision();
+      this.applyD3Collision(state.document);
       for (const node of state.document.nodes) {
         const velocity = this.velocities.get(node.id)!;
         if (this.pinned.has(node.id) || node.id === state.draggedNodeId) {
@@ -610,37 +577,37 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     }
   }
 
-  private applyD3Collision(): void {
-    if (this.settings.collisionStrength <= 0 || this.collisionNodeIds.length < 2) return;
-    const maximumRadius = Math.max(...this.collisionRadii.values());
-    const cellSize = Math.max(1, maximumRadius * 2 + this.settings.collisionGap);
+  private applyD3Collision(document: GraphDocumentV1): void {
+    const radius = this.settings.collisionRadius;
+    const minimum = radius * 2;
+    if (radius <= 0 || this.settings.collisionStrength <= 0) return;
     const cells = new Map<string, string[]>();
     const predicted = new Map<string, Vec3>();
-    for (const nodeId of this.collisionNodeIds) {
-      const position = this.positions[nodeId];
-      const velocity = this.velocities.get(nodeId)!;
+    for (const node of document.nodes) {
+      const position = this.positions[node.id];
+      const velocity = this.velocities.get(node.id)!;
       const next = { x: position.x + velocity.x, y: position.y + velocity.y, z: this.dimensions === '2d' ? 0 : position.z + velocity.z };
-      predicted.set(nodeId, next);
-      const key = collisionCellKey(next, cellSize, this.dimensions);
+      predicted.set(node.id, next);
+      const key = collisionCellKey(next, minimum, this.dimensions);
       const bucket = cells.get(key);
-      if (bucket) bucket.push(nodeId); else cells.set(key, [nodeId]);
+      if (bucket) bucket.push(node.id); else cells.set(key, [node.id]);
     }
     const offsets = collisionForwardOffsets(this.dimensions);
     for (const bucket of cells.values()) {
       for (let index = 0; index < bucket.length; index += 1) {
         for (let otherIndex = index + 1; otherIndex < bucket.length; otherIndex += 1) {
-          this.applyCollisionPair(bucket[index], bucket[otherIndex], predicted);
+          this.applyCollisionPair(bucket[index], bucket[otherIndex], predicted, minimum);
         }
       }
       const anchor = predicted.get(bucket[0]);
       if (!anchor) continue;
-      const cell = collisionCell(anchor, cellSize);
+      const cell = collisionCell(anchor, minimum);
       for (const offset of offsets) {
         const key = `${cell.x + offset.x}:${cell.y + offset.y}:${this.dimensions === '2d' ? 0 : cell.z + offset.z}`;
         const neighbor = cells.get(key);
         if (!neighbor) continue;
         for (const nodeId of bucket) for (const otherId of neighbor) {
-          this.applyCollisionPair(nodeId, otherId, predicted);
+          this.applyCollisionPair(nodeId, otherId, predicted, minimum);
         }
       }
     }
@@ -650,15 +617,13 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     nodeId: string,
     otherId: string,
     predicted: ReadonlyMap<string, Vec3>,
+    minimum: number,
   ): void {
     const a = predicted.get(nodeId)!;
     const b = predicted.get(otherId)!;
     let dx = a.x - b.x;
     let dy = a.y - b.y;
     let dz = this.dimensions === '2d' ? 0 : a.z - b.z;
-    const minimum = (this.collisionRadii.get(nodeId) ?? 0)
-      + (this.collisionRadii.get(otherId) ?? 0)
-      + this.settings.collisionGap;
     let distance = Math.hypot(dx, dy, dz);
     if (distance >= minimum) return;
     if (distance < 1e-6) {
@@ -686,11 +651,6 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.springs = [];
     this.membershipPairStrengths.clear();
     this.componentTargets = new Map();
-    this.collisionNodeIds = [];
-    this.collisionRadii = new Map();
-    this.collisionDocumentSource = null;
-    this.collisionSelectionSource = null;
-    this.collisionContributionSource = null;
     this.regionLayoutKey = '';
   }
 
@@ -733,12 +693,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.positionSource = this.positions;
   }
 
-  private reheatForChange(replaceCurrentHeat = false): void {
-    // Link force already multiplies alpha in applyD3Links. Scale the generic
-    // reheat pulse inversely so a stronger Link force changes the balance of
-    // forces without multiplying the transient impulse that restarts layout.
-    const reheatAlpha = CHANGE_REHEAT_ALPHA / Math.max(1, this.settings.springStrength);
-    this.alpha = replaceCurrentHeat ? reheatAlpha : Math.max(this.alpha, reheatAlpha);
+  private reheatForChange(): void {
+    this.alpha = Math.max(this.alpha, 0.3);
     this.running = true;
   }
 }
@@ -761,8 +717,8 @@ export function readForceSettings(settings: Readonly<Record<string, JsonValue>>)
     maxSpeed: finitePositive(settings.maxSpeed, 260),
     topologyLayoutPolicy,
     componentPadding: finiteNonNegative(settings.componentPadding, 80),
-    collisionGap: finiteNonNegative(settings.collisionGap, 0),
-    collisionStrength: clampNumber(settings.collisionStrength, 0, 1, 1),
+    collisionRadius: finiteNonNegative(settings.collisionRadius, 60),
+    collisionStrength: clampNumber(settings.collisionStrength, 0, 1, 0.5),
     axialSpringAxis: readAxialSpringAxis(settings.axialSpringAxis),
     axialSpringStiffness: clampNumber(settings.axialSpringStiffness, 0, 0.9, 0),
   };
@@ -817,7 +773,7 @@ function forceSettingsEqualExceptVelocityDecay(left: ForceSettings, right: Force
     && left.maxSpeed === right.maxSpeed
     && JSON.stringify(left.topologyLayoutPolicy) === JSON.stringify(right.topologyLayoutPolicy)
     && left.componentPadding === right.componentPadding
-    && left.collisionGap === right.collisionGap
+    && left.collisionRadius === right.collisionRadius
     && left.collisionStrength === right.collisionStrength
     && left.axialSpringAxis === right.axialSpringAxis
     && left.axialSpringStiffness === right.axialSpringStiffness;
@@ -887,7 +843,7 @@ export function deriveWeightedSpringParametersV1(
   const extension = policy.recursiveRegionSpacing.mode === 'target-region-closure'
     ? recursiveRegionSpaceExtensionV1(
       options.recursiveMemberCount ?? 0,
-      settings.springLength * policy.spring.targetLengthScale + settings.collisionGap,
+      Math.max(settings.collisionRadius * 2, settings.springLength * policy.spring.targetLengthScale),
       settings.springLength * policy.spring.targetLengthScale / 2,
       options.dimensions ?? '2d',
     )

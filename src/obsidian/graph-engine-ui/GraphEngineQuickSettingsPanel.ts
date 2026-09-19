@@ -16,10 +16,7 @@ import {
 } from './GraphEngineUiPolicy.ts';
 import { GraphEngineQuickSettingsDisclosureStateV1 } from './GraphEngineQuickSettingsDisclosureState.ts';
 import { ObsidianGraphUiLayoutV1 } from './ObsidianGraphUiLayout.ts';
-import {
-  graphSettingDisplayValueV1,
-  graphSettingPresentationV1,
-} from '../settings/GraphEngineSettingsCatalog.ts';
+import { graphSettingPresentationV1 } from '../settings/GraphEngineSettingsCatalog.ts';
 
 const SECTION_TITLES: Readonly<Record<string, string>> = {
   [SECTIONS.filter]: 'Filter',
@@ -64,7 +61,6 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     root.addEventListener('pointerleave', this.scheduleAutoClose);
     this.context.container.append(root);
     this.root = root;
-    this.context.container.ownerDocument.addEventListener('pointerdown', this.handleDocumentPointerDown, true);
     this.layout = new ObsidianGraphUiLayoutV1(
       this.context.container,
       root,
@@ -99,7 +95,6 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     this.graphSubscription = undefined;
     this.layout?.dispose();
     this.layout = undefined;
-    this.context.container.ownerDocument.removeEventListener('pointerdown', this.handleDocumentPointerDown, true);
     this.root?.removeEventListener('pointerenter', this.cancelAutoClose);
     this.root?.removeEventListener('pointerleave', this.scheduleAutoClose);
     this.root?.remove();
@@ -288,16 +283,6 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
           }));
       }
       if (anima?.enabled
-        && graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labelPosition)) {
-        const presentation = graphSettingPresentationV1('anima.labelPosition');
-        new Setting(body).setName(presentation.name).addDropdown((dropdown) => dropdown
-          .addOptions(selectOptions(presentation))
-          .setValue(readLabelPosition(anima.settings.labelPosition))
-          .onChange(async (value) => {
-            await this.context.profileSettings.setModuleSetting('anima', 'labelPosition', value);
-          }));
-      }
-      if (anima?.enabled
         && graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labelThreshold)) {
         const thresholdKey = effective.dimensions === '3d'
           ? 'adaptiveLabelThreshold3d'
@@ -307,10 +292,10 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
         this.catalogSlider(adaptiveThresholdHost, `anima.${thresholdKey}`, readNumber(anima.settings[thresholdKey], 50));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.nodeSize)) {
-        this.catalogSlider(body, 'rendering.nodeRadiusScale', readNumber(settings.nodeRadiusScale, 1));
+        this.catalogSlider(body, 'rendering.nodeRadiusScale', readNumber(settings.nodeRadiusScale, 2));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.linkThickness)) {
-        this.catalogSlider(body, 'rendering.edgeThicknessScale', readNumber(settings.edgeThicknessScale, 1));
+        this.catalogSlider(body, 'rendering.edgeThicknessScale', readNumber(settings.edgeThicknessScale, 0.1));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.showArrows)) {
         const presentation = graphSettingPresentationV1('rendering.showArrows');
@@ -320,6 +305,16 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
             await this.context.profileSettings.setModuleSetting('rendering', 'showArrows', visible);
           }));
       }
+    }
+    if (anima?.enabled
+      && graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labelPosition)) {
+      const presentation = graphSettingPresentationV1('anima.labelPosition');
+      new Setting(body).setName(presentation.name).addDropdown((dropdown) => dropdown
+        .addOptions(selectOptions(presentation))
+        .setValue(readLabelPosition(anima.settings.labelPosition))
+        .onChange(async (value) => {
+          await this.context.profileSettings.setModuleSetting('anima', 'labelPosition', value);
+        }));
     }
     this.mountContributions(body, contributions);
   }
@@ -389,7 +384,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
         && graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.axialSpringStiffness)) {
         axialStiffnessHost = div(body, 'graph-engine-conditional-control');
         axialStiffnessHost.hidden = readAxialAxis(settings.axialSpringAxis) === 'off';
-        this.catalogSlider(axialStiffnessHost, 'force-layout.axialSpringStiffness', readNumber(settings.axialSpringStiffness, 0));
+        this.catalogSlider(axialStiffnessHost, 'force-layout.axialSpringStiffness', readNumber(settings.axialSpringStiffness, 0) * 100);
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.centerForce)) {
         this.catalogSlider(body, 'force-layout.centeringStrength', readNumber(settings.centeringStrength, 0.1));
@@ -465,11 +460,10 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
   private catalogSlider(parent: HTMLElement, id: string, value: number): void {
     const presentation = graphSettingPresentationV1(id);
     if (presentation.control.type !== 'slider') throw new Error(`${id} is not a slider setting.`);
-    const displayValue = graphSettingDisplayValueV1(presentation, value);
     this.slider(
       parent,
       presentation.name,
-      typeof displayValue === 'number' ? displayValue : presentation.control.min,
+      value,
       presentation.control.min,
       presentation.control.max,
       presentation.control.step,
@@ -513,13 +507,6 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       this.collapsed = true;
       void this.render();
     }, 5_000);
-  };
-
-  private readonly handleDocumentPointerDown = (event: PointerEvent): void => {
-    const root = this.root;
-    if (!root || this.collapsed || this.disposed || event.composedPath().includes(root)) return;
-    this.collapsed = true;
-    void this.render();
   };
 
   private section(parent: HTMLElement, sectionId: string, title: string, defaultOpen: boolean): HTMLElement {

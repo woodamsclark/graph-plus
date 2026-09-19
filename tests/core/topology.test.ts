@@ -188,7 +188,7 @@ test('L-POLICY-01 tag-parent policy bypasses hub discount without moving ordinar
 });
 
 test('L-POLICY-02 recursive tag regions reserve child closure space safely', () => {
-  const settings = readForceSettings({ collisionGap: 0, springLength: 250 });
+  const settings = readForceSettings({ collisionRadius: 60, springLength: 250 });
   const policy = analyzeGraphTopologyV1(graphDocument({
     nodes: [graphNode('tag:root'), graphNode('tag:child')],
     edges: [graphEdge('tag-edge', 'tag:root', 'tag:child', { directed: true, tokens: ['relation:tag-parent'] })],

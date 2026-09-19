@@ -83,7 +83,6 @@ export class GraphPlusConsumerV1<TFile> {
   private transientRevealNodeId?: string;
   private resettingLayout = false;
   private visibleNodeIds = new Set<string>();
-  private appliedProjectionKey: string | undefined;
   private readonly neighborhoodFramer: GraphPlusNeighborhoodFramerV1;
 
   constructor(private readonly options: GraphPlusConsumerOptionsV1<TFile>) {
@@ -155,14 +154,12 @@ export class GraphPlusConsumerV1<TFile> {
       const projection = this.adapter.reconcile(this.document, snapshot);
       this.lookup = projection.lookup;
       this.searchIndex = projection.searchIndex;
-      const documentChanged = projection.document !== this.document;
-      if (documentChanged) {
+      if (projection.document !== this.document) {
         await this.session.replaceDocument(projection.document);
         this.document = projection.document;
       }
-      const previousProjectionKey = this.appliedProjectionKey;
       await this.applyFilter();
-      if (documentChanged || previousProjectionKey !== this.appliedProjectionKey) this.checkpoint.schedule();
+      this.checkpoint.schedule();
     } catch (error) {
       this.options.onError?.(asError(error));
     }
@@ -321,7 +318,6 @@ export class GraphPlusConsumerV1<TFile> {
       this.searchIndex = new Map();
       this.transientRevealNodeId = undefined;
       this.visibleNodeIds.clear();
-      this.appliedProjectionKey = undefined;
       if (!this.leaseReleased) {
         this.leaseReleased = true;
         await this.options.lease.release();
@@ -342,7 +338,6 @@ export class GraphPlusConsumerV1<TFile> {
       onSessionOverridesChanged: (overrides) => this.adoptSessionOverrides(overrides),
     });
     this.session = session;
-    this.appliedProjectionKey = undefined;
     this.effectiveSettings = await session.exportEffectiveSettings();
     this.document = document;
     this.checkpoint.attach(session, document);
@@ -419,14 +414,10 @@ export class GraphPlusConsumerV1<TFile> {
       visibleNodeIds = [...new Set([...visibleNodeIds, this.transientRevealNodeId])];
     }
     this.visibleNodeIds = new Set(visibleNodeIds);
-    const request = {
+    await this.session.applyFilter({
       ...compiled.request,
       node: { op: 'id-in', ids: visibleNodeIds },
-    } as const;
-    const projectionKey = JSON.stringify(request);
-    if (projectionKey === this.appliedProjectionKey) return visibleNodeIds;
-    await this.session.applyFilter(request);
-    this.appliedProjectionKey = projectionKey;
+    });
     return visibleNodeIds;
   }
 }

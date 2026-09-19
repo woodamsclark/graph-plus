@@ -99,8 +99,8 @@ for the Graph+ profile where supported.
 | Render quality | Automatic |
 | Labels | Adaptive |
 | Label position | Above nodes |
-| Node size | 1× base radius |
-| Link thickness | 1× base width |
+| Node size | 2× base radius |
+| Link thickness | 0.1× base width |
 | Link arrows | Off |
 | Region boundaries | Off; region attraction remains enabled |
 | Form | Off |

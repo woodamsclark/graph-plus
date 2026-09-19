@@ -20,8 +20,8 @@ export class RenderingModule implements GraphModuleInstanceV1 {
     this.theme = palette;
     this.policy = {};
     this.labelMode = 'adaptive';
-    this.nodeRadiusScale = 1;
-    this.edgeThicknessScale = 1;
+    this.nodeRadiusScale = 2;
+    this.edgeThicknessScale = 0.1;
     this.updateSettings(settings);
   }
 
@@ -47,16 +47,8 @@ export class RenderingModule implements GraphModuleInstanceV1 {
       showArrows: settings.showArrows === true,
     };
     this.labelMode = labelMode(settings.labelMode);
-    this.nodeRadiusScale = positive(settings.nodeRadiusScale, 1);
-    this.edgeThicknessScale = positive(settings.edgeThicknessScale, 1);
-  }
-
-  selectRender(state: Parameters<NonNullable<GraphModuleInstanceV1['selectRender']>>[0]) {
-    return {
-      nodeContributions: Object.fromEntries(state.document.nodes.map((node) => [node.id, {
-        baseRadiusScale: this.nodeRadiusScale,
-      }])),
-    };
+    this.nodeRadiusScale = positive(settings.nodeRadiusScale, 2);
+    this.edgeThicknessScale = positive(settings.edgeThicknessScale, 0.1);
   }
 
   contributeFrame(state: Parameters<NonNullable<GraphModuleInstanceV1['contributeFrame']>>[0]) {

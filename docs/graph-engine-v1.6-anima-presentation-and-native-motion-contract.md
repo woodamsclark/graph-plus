@@ -238,8 +238,7 @@ radius is respectively `0.5`, `1`, and `2` times its radius at zoom `1`, rather 
 `0.25`, `1`, and `4` times.
 
 This is presentation scaling, not a change to wheel/pinch behavior, camera bounds,
-node positions, force mass, world-space collision geometry, or topology. Collision
-uses the resolved world radius; it does not rearrange the graph during camera zoom.
+node positions, force mass, collision radius, or topology.
 
 Perspective 3D retains depth-aware camera projection and therefore preserves the
 relative size difference between near and distant nodes. To prevent perspective from
@@ -493,9 +492,8 @@ Graph+'s new uniform 2D mode uses:
 - link target distance: `250`;
 - base link strength: `1 / min(sourceDegree, targetDegree)`;
 - degree-biased endpoint motion;
-- collision target: the sum of each pair's resolved world radii plus collision gap;
-- default collision gap: `0`;
-- collision strength: `1`; and
+- collision radius: `60`;
+- collision strength: `0.5`; and
 - one iteration of link and collision forces per tick.
 
 The force order is origin position, link, many-body, collision, velocity damping, and
