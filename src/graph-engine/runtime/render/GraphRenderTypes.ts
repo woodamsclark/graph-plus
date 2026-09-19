@@ -6,6 +6,8 @@ export interface GraphRenderNodeV1 {
   readonly label: string;
   readonly position: Vec3;
   readonly radius: number;
+  /** Optional per-node exponent applied to projected camera scale. */
+  readonly nodeScaleExponent?: number;
   readonly selected: boolean;
   readonly focused: boolean;
   readonly hovered: boolean;
@@ -64,6 +66,8 @@ export interface GraphNodeRenderContributionV1 {
   readonly color?: GraphColorV2;
   /** Final world-space radius. When present this wins over the legacy radiusScale. */
   readonly radius?: number;
+  /** Optional per-node exponent applied to projected camera scale. */
+  readonly nodeScaleExponent?: number;
   readonly radiusScale?: number;
   /** Graph-wide multiplier kept separate so structural role scales can compose. */
   readonly baseRadiusScale?: number;

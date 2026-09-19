@@ -243,14 +243,18 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       const projection = this.camera.getState().projection;
       return this.projectedGeometry.flatMap(({ id, point }) => {
         const node = nodes.get(id);
-        return node ? [{ node, point, radius: projectedRadius(frame, node.radius, point.scale, projection) }] : [];
+        return node ? [{ node, point, radius: projectedRadius(
+          frame, node.radius, point.scale, projection, node.nodeScaleExponent,
+        ) }] : [];
       });
     }
     const projection = this.camera.getState().projection;
     const projected = frame.nodes
       .map((node) => {
         const point = this.camera.worldToScreen(node.position);
-        return { node, point, radius: projectedRadius(frame, node.radius, point.scale, projection) };
+        return { node, point, radius: projectedRadius(
+          frame, node.radius, point.scale, projection, node.nodeScaleExponent,
+        ) };
       })
       .filter(({ point }) => point.depth > 0)
       .sort((a, b) => b.point.depth - a.point.depth);
@@ -615,10 +619,11 @@ function projectedRadius(
   radius: number,
   scale: number,
   projection: 'orthographic' | 'perspective',
+  nodeScaleExponent?: number,
 ): number {
   const policy = renderPolicy(frame);
   const legacyExponent = projection === 'orthographic' && policy.nodeScaleMode === 'sqrt-orthographic' ? 0.5 : 1;
-  const exponent = Math.max(0, Math.min(2, policy.nodeScaleExponent ?? legacyExponent));
+  const exponent = Math.max(0, Math.min(2, nodeScaleExponent ?? policy.nodeScaleExponent ?? legacyExponent));
   const projected = radius * Math.pow(Math.max(0, scale), exponent);
   if (projection !== 'perspective') return projected;
   const relativeFloor = radius * Math.max(0, policy.minimumPerspectiveNodeScale ?? 0);

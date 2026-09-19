@@ -48,15 +48,26 @@ test('V1.6 Anima owns the exact visible-degree radius and composable structural 
   equal(patch.presentationPolicy?.labelScaleMode, 'fixed', 'Anima labels should remain screen-readable in both dimensions');
 });
 
-test('Anima maps zoomed node size beyond world-space scaling', () => {
-  const document = graphDocument({ nodes: [graphNode('a')], edges: [] });
-  const state = pipeline(document, { nodeIds: new Set(['a']), edgeIds: new Set() });
+test('Anima maps node size to a hybrid zoom-response gradient', () => {
+  const document = graphDocument({ nodes: [graphNode('small'), graphNode('large')], edges: [] });
+  const state = {
+    ...pipeline(document, { nodeIds: new Set(['small', 'large']), edgeIds: new Set() }),
+    nodeContributions: { large: { radiusScale: 2 } },
+  };
   const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, { nodeWorldScaleBlend: 0.5 });
-  equal(anima.contributeFrame(state)?.presentationPolicy?.nodeScaleExponent, 1.25,
-    'the slider midpoint should already exceed the world-space exponent');
+  const midpoint = anima.contributeFrame(state);
+  equal(midpoint?.nodeContributions?.small.nodeScaleExponent, 0.5,
+    'the smallest node should retain the gentle response');
+  equal(midpoint?.nodeContributions?.large.nodeScaleExponent, 1.25,
+    'the largest node should receive the midpoint maximum response');
+  equal(midpoint?.presentationPolicy?.nodeScaleExponent, 0.5,
+    'nodes without a usable size range should retain the gentle fallback');
   anima.updateSettings({ nodeWorldScaleBlend: 4 });
-  equal(anima.contributeFrame(state)?.presentationPolicy?.nodeScaleExponent, 2,
-    'the slider maximum should clamp to a strongly exaggerated zoom response');
+  const maximum = anima.contributeFrame(state);
+  equal(maximum?.nodeContributions?.small.nodeScaleExponent, 0.5,
+    'maximum contrast should still keep the smallest node restrained');
+  equal(maximum?.nodeContributions?.large.nodeScaleExponent, 2,
+    'maximum contrast should let the largest node grow dramatically');
 });
 
 test('Anima separates undimmed overview hover from tagged Explore presentation', () => {
@@ -294,6 +305,13 @@ test('node scaling supports calm, world, and exaggerated responses in 2D and 3D'
   equal(renderAt(0.5), 20, 'the low end should use the square root of zoom');
   equal(renderAt(1), 40, 'the first third should pass through true world-space scaling');
   equal(renderAt(2), 160, 'the high end should grow substantially beyond world-space size');
+  arcRadii.length = 0;
+  frames.set({
+    regions: [], edges: [], nodes: [{ ...node, nodeScaleExponent: 2 }], theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    policy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, nodeScaleExponent: 0.5 },
+  });
+  renderer.render();
+  equal(arcRadii[0], 160, 'a node-specific response should override the graph-wide fallback');
 
   const perspectiveCamera = new GraphCameraController({
     position: { x: 0, y: 0, z: 50 }, target: { x: 0, y: 0, z: 0 },
@@ -388,7 +406,9 @@ test('V1.6 frame composition carries future Anima label and arrow targets to ren
     viewState: viewState(document),
     selection: { nodeIds: new Set(['a', 'b']), edgeIds: new Set(['a-b']) },
     nodeContributions: {
-      a: { finalColor: parseGraphColorV2('#123456'), labelOffset: { x: 3, y: -4 } },
+      a: {
+        finalColor: parseGraphColorV2('#123456'), labelOffset: { x: 3, y: -4 }, nodeScaleExponent: 1.75,
+      },
     },
     edgeContributions: {
       'a-b': {
@@ -401,6 +421,7 @@ test('V1.6 frame composition carries future Anima label and arrow targets to ren
   });
   deepEqual(frame.nodes[0].finalColor, parseGraphColorV2('#123456'), 'Anima final fill should reach the render frame');
   deepEqual(frame.nodes[0].labelOffset, { x: 3, y: -4 }, 'label offsets should survive composition');
+  equal(frame.nodes[0].nodeScaleExponent, 1.75, 'per-node zoom response should survive composition');
   equal(frame.edges[0].arrowAtSource, true, 'Anima should be able to show a source arrow');
   equal(frame.edges[0].arrowAtTarget, false, 'Anima should be able to suppress a canonical target arrow');
   deepEqual(frame.edges[0].arrowColor, parseGraphColorV2('#abcdef'), 'arrow color should be independent from shaft color');

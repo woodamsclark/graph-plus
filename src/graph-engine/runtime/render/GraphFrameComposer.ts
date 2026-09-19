@@ -35,6 +35,9 @@ export function composeGraphRenderFrameV1(options: {
           label: node.label ?? node.id,
           position: options.positions?.[node.id] ?? options.viewState.positions[node.id] ?? { x: 0, y: 0, z: 0 },
           radius: finitePositive(contribution?.radius, 7 * finitePositive(contribution?.radiusScale, 1)),
+          ...(contribution?.nodeScaleExponent === undefined
+            ? {}
+            : { nodeScaleExponent: contribution.nodeScaleExponent }),
           selected: selected.has(node.id),
           focused: options.viewState.focusedNodeId === node.id,
           hovered: options.hoveredNodeId === node.id,

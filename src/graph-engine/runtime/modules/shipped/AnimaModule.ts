@@ -3,7 +3,7 @@ import type { GraphVisualThemeV2 } from '../../theme/index.ts';
 import type { GraphModuleInstanceV1, GraphModuleProjectionPatchV1 } from '../GraphModuleTypes.ts';
 
 export class AnimaModule implements GraphModuleInstanceV1 {
-  private nodeZoomSize: number;
+  private nodeZoomContrast: number;
   private labelPosition: 'above' | 'below';
   private adaptiveLabelThreshold2d: number;
   private adaptiveLabelThreshold3d: number;
@@ -21,14 +21,14 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     settings: Readonly<Record<string, JsonValue>>,
   ) {
     // Keep the original persisted key so existing experimental slider values survive this broader curve.
-    this.nodeZoomSize = readUnitInterval(settings.nodeWorldScaleBlend, 0);
+    this.nodeZoomContrast = readUnitInterval(settings.nodeWorldScaleBlend, 0);
     this.labelPosition = readLabelPosition(settings.labelPosition);
     this.adaptiveLabelThreshold2d = readThreshold(settings.adaptiveLabelThreshold2d, 50);
     this.adaptiveLabelThreshold3d = readThreshold(settings.adaptiveLabelThreshold3d, 50);
   }
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
-    this.nodeZoomSize = readUnitInterval(settings.nodeWorldScaleBlend, 0);
+    this.nodeZoomContrast = readUnitInterval(settings.nodeWorldScaleBlend, 0);
     this.labelPosition = readLabelPosition(settings.labelPosition);
     this.adaptiveLabelThreshold2d = readThreshold(settings.adaptiveLabelThreshold2d, 50);
     this.adaptiveLabelThreshold3d = readThreshold(settings.adaptiveLabelThreshold3d, 50);
@@ -88,7 +88,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       if (!exploreActive || hoveredIsTagged) return sourceId === hoveredId || targetId === hoveredId;
       return pathEdgePairs.has(unorderedPair(sourceId, targetId));
     };
-    const nodeContributions = Object.fromEntries(state.document.nodes
+    const nodesWithRadius = state.document.nodes
       .filter((node) => visibleNodes.has(node.id))
       .map((node) => {
         const prior = state.nodeContributions[node.id];
@@ -96,6 +96,17 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         const structuralScale = positive(prior?.radiusScale, 1);
         const radius = positive(prior?.baseRadiusScale, 1)
           * clamp(3 * Math.sqrt(visibleDegree + 1), 8, 30) * structuralScale;
+        return { node, prior, radius };
+      });
+    let smallestRadius = Number.POSITIVE_INFINITY;
+    let largestRadius = Number.NEGATIVE_INFINITY;
+    for (const { radius } of nodesWithRadius) {
+      smallestRadius = Math.min(smallestRadius, radius);
+      largestRadius = Math.max(largestRadius, radius);
+    }
+    const maximumScaleExponent = 0.5 + this.nodeZoomContrast * 1.5;
+    const nodeContributions = Object.fromEntries(nodesWithRadius
+      .map(({ node, prior, radius }) => {
         const isLit = litNodeIds.has(node.id);
         const color = isLit
           ? this.palette.colors.animaAccent
@@ -108,6 +119,8 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         return [node.id, {
           ...prior,
           radius,
+          nodeScaleExponent: lerp(0.5, maximumScaleExponent,
+            normalize(radius, smallestRadius, largestRadius)),
           finalColor: color,
           opacity: visibleIds === undefined || visibleIds.has(node.id) ? 1 : 0.2,
           labelOpacity: labelVisibleIds === undefined || labelVisibleIds.has(node.id) ? 1 : 0.2,
@@ -139,7 +152,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       presentationPolicy: {
         ...(state.presentationPolicy ?? {}),
         nodeScaleMode: 'sqrt-orthographic',
-        nodeScaleExponent: 0.5 + this.nodeZoomSize * 1.5,
+        nodeScaleExponent: 0.5,
         labelScaleMode: 'fixed',
         labelPosition: this.labelPosition,
         adaptiveLabelThreshold: state.viewState.dimensions === '3d'
@@ -211,6 +224,14 @@ function readUnitInterval(value: JsonValue | undefined, fallback: number): numbe
   return typeof value === 'number' && Number.isFinite(value)
     ? clamp(value, 0, 1)
     : fallback;
+}
+
+function normalize(value: number, min: number, max: number): number {
+  return max > min ? clamp((value - min) / (max - min), 0, 1) : 0;
+}
+
+function lerp(start: number, end: number, amount: number): number {
+  return start + (end - start) * amount;
 }
 
 function shortestPathToAny(

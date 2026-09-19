@@ -174,9 +174,9 @@ test('V1.7 settings catalog exposes only curated typed controls', () => {
   deepEqual(quality?.scopes, ['global', 'profile'], 'render quality should live in full settings without crowding quick settings');
   equal(quality?.control.type, 'select', 'render quality should use named choices rather than free-form text');
   const nodeZoomResponse = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'anima.nodeWorldScaleBlend');
-  equal(nodeZoomResponse?.name, 'Node zoom response', 'the scaling control should describe its camera response');
+  equal(nodeZoomResponse?.name, 'Node zoom contrast', 'the scaling control should describe its size-driven contrast');
   equal(nodeZoomResponse?.control.type === 'slider' ? nodeZoomResponse.control.storageScale : undefined, 0.01,
-    'node zoom response should display as a percentage while storing a normalized response');
+    'node zoom contrast should display as a percentage while storing a normalized response');
 });
 
 test('V1.7 global catalog values flow into Graph+ until its profile overrides them', async () => {
