@@ -460,19 +460,20 @@ test('V1.7.1 global active-note following focuses without changing the full proj
   await session.focusNode(null);
   fitRequests.length = 0;
   const state = await session.exportViewState();
+  const cameraBeforeClick = state.camera;
   const camera = new GraphCameraController(state.camera, state.dimensions);
   camera.setViewport(640, 360);
   const point = camera.worldToScreen(state.positions[alphaId]);
   dispatchGraphClick(runtime.window, runtimeCanvas(runtime.container), point.x, point.y, 731);
   runtime.platform.flushFrame();
   await Promise.resolve();
-  deepEqual(fitRequests[0], { nodeIds: [alphaId, betaId, courseId], centerNodeId: alphaId },
-    'refocusing a node through graph input should use the same neighborhood framing path');
+  deepEqual(fitRequests, [], 'graph input focus should not request automatic neighborhood framing');
+  deepEqual((await session.exportViewState()).camera, cameraBeforeClick,
+    'graph input focus should preserve the camera exactly');
   fitRequests.length = 0;
   await session.resetCamera();
   await Promise.resolve();
-  deepEqual(fitRequests[0], { nodeIds: [alphaId, betaId, courseId], centerNodeId: alphaId },
-    'resetting a focused global graph should reuse its neighbor-aware focus framing');
+  deepEqual(fitRequests, [], 'camera reset should use the engine selection frame without a consumer override');
   equal((await session.exportViewState()).focusedNodeId, alphaId,
     'resetting the camera should preserve global graph focus');
   equal(surface.dataset.renderedNodeCount, String(consumer.getDocument()?.nodes.length),
@@ -564,8 +565,7 @@ test('V1.7.1 Local Graph+ owns an ephemeral rooted document, layout, and depth',
   fitRequests.length = 0;
   await session.resetCamera();
   await Promise.resolve();
-  deepEqual(fitRequests[0], { minimumRadius: 462.5, centerNodeId: betaId },
-    'resetting a focused local graph should reuse its predictive neighbor-aware framing');
+  deepEqual(fitRequests, [], 'resetting a local graph should use the engine selection frame without a consumer override');
   equal((await session.exportViewState()).focusedNodeId, betaId,
     'resetting the camera should preserve local graph focus');
   await consumer.close();

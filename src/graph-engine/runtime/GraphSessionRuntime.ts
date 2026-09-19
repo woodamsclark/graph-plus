@@ -1128,9 +1128,13 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   private resetCameraState(): void {
     this.camera.setState(defaultCamera(this.profile.dimensions, focalLengthMm(this.profile.profileSettings)));
-    if (this.viewState.focusedNodeId) return;
     const document = this.store.readDocument();
-    const positions = [...this.renderSelection.nodeIds]
+    const visibleSelectedNodeIds = this.viewState.selectedNodeIds
+      .filter((id) => this.renderSelection.nodeIds.has(id));
+    const candidates = visibleSelectedNodeIds.length > 0
+      ? visibleSelectedNodeIds
+      : [...this.renderSelection.nodeIds];
+    const positions = candidates
       .filter((id) => document.nodes.some((node) => node.id === id))
       .map((id) => this.moduleView.positions[id])
       .filter((position): position is Vec3 => position !== undefined);

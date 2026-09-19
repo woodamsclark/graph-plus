@@ -115,13 +115,12 @@ export class LocalGraphPlusConsumerV1<TFile> {
           return;
         }
         if (intent.type === 'camera-reset') {
-          if (intent.focusedNodeId) void this.frameNeighborhood(intent.focusedNodeId);
+          this.neighborhoodFramer.cancel();
           return;
         }
         if (intent.type === 'focus-changed') {
           this.focusedNodeId = intent.focusedNodeId;
-          if (this.focusedNodeId) void this.frameNeighborhood(this.focusedNodeId);
-          else this.neighborhoodFramer.cancel();
+          this.neighborhoodFramer.cancel();
           return;
         }
         if (intent.type !== 'preview-changed') return;

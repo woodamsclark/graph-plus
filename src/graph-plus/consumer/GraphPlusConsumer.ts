@@ -348,12 +348,11 @@ export class GraphPlusConsumerV1<TFile> {
         return;
       }
       if (intent.type === 'camera-reset') {
-        if (intent.focusedNodeId) void this.neighborhoodFramer.frame(intent.focusedNodeId);
+        this.neighborhoodFramer.cancel();
         return;
       }
       if (intent.type === 'focus-changed') {
-        if (intent.focusedNodeId) void this.neighborhoodFramer.frame(intent.focusedNodeId);
-        else this.neighborhoodFramer.cancel();
+        this.neighborhoodFramer.cancel();
         return;
       }
       if (intent.type !== 'preview-changed') return;

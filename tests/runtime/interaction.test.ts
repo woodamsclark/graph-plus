@@ -12,7 +12,7 @@ import {
   runtimeRegistration,
 } from '../support/runtimeHarness.ts';
 
-test('R-INPUT-01 pans an unfocused wheel and orbits a focused 3d graph', async () => {
+test('R-INPUT-01 pans in Overview while Explore wheel orbits and secondary drag pans', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
@@ -42,7 +42,11 @@ test('R-INPUT-01 pans an unfocused wheel and orbits a focused 3d graph', async (
   pointer(value, canvas, 'pointermove', 296, 168, { pointerId: 91, button: 2 });
   value.platform.flushFrame();
   const rightDragged = await session.exportViewState();
-  assert(vectorDistance(rightDragged.camera.position, orbited.camera.position) < 0.000001, 'trackpad orbit should match the equivalent secondary-button drag');
+  assert(!sameVector(rightDragged.camera.target, focused.camera.target),
+    'Explore secondary drag should pan away from the selected structure');
+  deepEqual(cameraOffset(rightDragged.camera), cameraOffset(focused.camera),
+    'Explore secondary drag should preserve camera orientation instead of orbiting');
+  equal(rightDragged.focusedNodeId, 'a', 'Explore secondary drag should retain focus');
   pointer(value, canvas, 'pointerup', 296, 168, { pointerId: 91, button: 2 });
 
   await session.restoreViewState(orbited);
@@ -98,19 +102,26 @@ test('desktop trackpad pinch carries bounded momentum and ordinary wheel input c
   await session.dispose();
 });
 
-test('camera reset input preserves focus and announces focused reframing', async () => {
+test('camera reset input preserves focus and frames the complete selection', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
   const intents: GraphIntentV1[] = [];
   session.onIntent((intent) => intents.push(intent));
-  await session.focusNode('a');
+  await session.setSelection(['a', 'b']);
+  await session.focusNode('b');
   key(value, canvas, '0');
   value.platform.flushFrame();
-  equal((await session.exportViewState()).focusedNodeId, 'a', 'camera reset must retain active focus');
+  const resetState = await session.exportViewState();
+  equal(resetState.focusedNodeId, 'b', 'camera reset must retain active focus');
+  deepEqual(resetState.camera.target, {
+    x: (resetState.positions.a.x + resetState.positions.b.x) / 2,
+    y: (resetState.positions.a.y + resetState.positions.b.y) / 2,
+    z: (resetState.positions.a.z + resetState.positions.b.z) / 2,
+  }, 'camera reset should frame the whole tagged structure instead of only its focus anchor');
   const reset = [...intents].reverse().find((intent) => intent.type === 'camera-reset');
-  equal(reset?.type === 'camera-reset' ? reset.focusedNodeId : undefined, 'a',
-    'camera reset should request consumer neighbor-aware framing for the focused node');
+  equal(reset?.type === 'camera-reset' ? reset.focusedNodeId : undefined, 'b',
+    'camera reset should still report the retained focus identity');
   await session.dispose();
 });
 
@@ -298,16 +309,13 @@ test('R-REGION-04 first tag click selects visible recursive children and second 
     node: { op: 'not', operand: { op: 'has-token', token: 'hide' } },
   });
   const canvas = runtimeCanvas(value.container);
+  const beforeTag = await session.exportViewState();
   click(value, canvas, await nodePoint(session, 'tag'), { pointerId: 201 });
   value.platform.flushFrame();
   const selected = await session.exportViewState();
   deepEqual(selected.selectedNodeIds, ['subtag', 'nested', 'direct'], 'first click should select visible descendants through child tags and exclude the owner');
   equal(selected.focusedNodeId, 'tag', 'the clicked tag node should own focus');
-  deepEqual(selected.camera.target, {
-    x: (selected.positions.nested.x + selected.positions.direct.x) / 2,
-    y: (selected.positions.nested.y + selected.positions.direct.y) / 2,
-    z: (selected.positions.nested.z + selected.positions.direct.z) / 2,
-  }, 'region tagging should frame the selected descendant structure rather than privileging its owner');
+  deepEqual(selected.camera, beforeTag.camera, 'region tagging should not move or reframe the camera');
 
   click(value, canvas, await nodePoint(session, 'tag'), { pointerId: 202 });
   value.platform.flushFrame();
@@ -339,6 +347,7 @@ test('ordinary clicks add tags while Shift suspends Explore and can remove an ex
   const canvas = runtimeCanvas(value.container);
   const intents: GraphIntentV1[] = [];
   session.onIntent((intent) => intents.push(intent));
+  const beforeTags = await session.exportViewState();
 
   click(value, canvas, await nodePoint(session, 'a'), { pointerId: 301 });
   value.platform.flushFrame();
@@ -348,12 +357,7 @@ test('ordinary clicks add tags while Shift suspends Explore and can remove an ex
   const added = await session.exportViewState();
   deepEqual(added.selectedNodeIds, ['a', 'b'], 'ordinary clicks should add new nodes to the tagged selection');
   equal(added.focusedNodeId, 'b', 'the most recently added node should become the Explore anchor');
-  const expectedTarget = {
-    x: (added.positions.a.x + added.positions.b.x) / 2,
-    y: (added.positions.a.y + added.positions.b.y) / 2,
-    z: (added.positions.a.z + added.positions.b.z) / 2,
-  };
-  deepEqual(added.camera.target, expectedTarget, 'each added tag should immediately frame the complete structure');
+  deepEqual(added.camera, beforeTags.camera, 'adding tags should never move or reframe the camera');
 
   modifier(value, 'keydown', true);
   value.platform.flushFrame();
@@ -545,7 +549,7 @@ test('R-INPUT-06 updates view position and emits one revision-bearing drag inten
   await session.dispose();
 });
 
-test('pointer background drags pan in 2d and secondary-drag orbits in 3d', async () => {
+test('Overview background drags pan primarily and orbit secondarily', async () => {
   const twoD = runtimeHarness();
   const twoDSession = await twoD.create();
   const twoDCanvas = runtimeCanvas(twoD.container);
@@ -625,6 +629,20 @@ test('desktop primary navigation pans in 3D Overview and orbits in Explore', asy
     'Explore rotation should stay centered on the selected structure');
   assert(!sameVector(exploreAfter.camera.position, exploreBefore.camera.position),
     'the same primary gesture should rotate once a selection enters Explore mode');
+
+  pointer(explore, exploreCanvas, 'pointerup', -60, -75, { pointerId: 321 });
+  explore.platform.flushFrame();
+  const beforeSecondaryPan = await exploreSession.exportViewState();
+  pointer(explore, exploreCanvas, 'pointerdown', -100, -100, { pointerId: 323, button: 2 });
+  pointer(explore, exploreCanvas, 'pointermove', -60, -75, { pointerId: 323, button: 2 });
+  explore.platform.flushFrame();
+  const afterSecondaryPan = await exploreSession.exportViewState();
+  assert(!sameVector(afterSecondaryPan.camera.target, beforeSecondaryPan.camera.target),
+    'Explore secondary drag should pan the camera instead of rotating it');
+  deepEqual(cameraOffset(afterSecondaryPan.camera), cameraOffset(beforeSecondaryPan.camera),
+    'Explore secondary pan should preserve camera orientation');
+  deepEqual(afterSecondaryPan.selectedNodeIds, ['a'], 'Explore secondary pan should preserve selection');
+  equal(afterSecondaryPan.focusedNodeId, 'a', 'Explore secondary pan should preserve focus');
   await exploreSession.dispose();
 
   const suspended = runtimeHarness({ profileId: 'three-dimensional' });
@@ -861,7 +879,7 @@ test('V1.8 preview surface ownership holds Anima preview through Mod release', a
   await session.dispose();
 });
 
-test('R-INPUT-18 two-finger translation pans focused 3D and 2D without losing focused 3D state', async () => {
+test('R-INPUT-18 two-finger translation pans without leaving Explore state', async () => {
   const spatial = runtimeHarness({ profileId: 'three-dimensional' });
   const spatialSession = await spatial.create();
   const spatialCanvas = runtimeCanvas(spatial.container);
@@ -899,10 +917,10 @@ test('R-INPUT-18 two-finger translation pans focused 3D and 2D without losing fo
   flat.platform.flushFrame();
   const flatAfter = await flatSession.exportViewState();
   assert(!sameVector(flatAfter.camera.target, flatBefore.camera.target), 'two-finger translation should pan a 2d camera');
-  equal(flatAfter.focusedNodeId, undefined, 'committed 2d pan should clear focus');
-  deepEqual(flatAfter.selectedNodeIds, [], 'committed 2d pan should clear selection');
-  equal(intents.filter((intent) => intent.type === 'focus-changed').length, 1, '2d two-finger pan should clear focus once');
-  equal(intents.filter((intent) => intent.type === 'selection-changed').length, 1, '2d two-finger pan should clear selection once');
+  equal(flatAfter.focusedNodeId, 'a', '2d two-finger pan should retain focus');
+  deepEqual(flatAfter.selectedNodeIds, ['a'], '2d two-finger pan should retain selection');
+  equal(intents.filter((intent) => intent.type === 'focus-changed').length, 0, '2d two-finger pan should emit no focus change');
+  equal(intents.filter((intent) => intent.type === 'selection-changed').length, 0, '2d two-finger pan should emit no selection change');
   await flatSession.dispose();
 });
 

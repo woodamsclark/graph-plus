@@ -52,6 +52,8 @@ type SinglePointerMode =
       lastPoint: GraphScreenPointV1;
     };
 
+type GraphInteractionViewMode = 'overview' | 'explore';
+
 interface TouchGesture {
   readonly pointerA: number;
   readonly pointerB: number;
@@ -220,9 +222,10 @@ export class GraphInteractionInterpreter {
         return;
       }
       const focusedNodeId = this.options.getFocusedNodeId();
+      const viewMode = this.viewMode();
       const exploreThreeDimensionalPrimaryOrbit = this.dimensions === '3d'
         && this.mode.button === 0
-        && this.isExploreModeActive();
+        && viewMode === 'explore';
       const focusedNeighborDrag = this.mode.pointerKind === 'mouse'
         && focusedNodeId !== undefined
         && this.mode.hit !== null
@@ -243,10 +246,8 @@ export class GraphInteractionInterpreter {
         };
         return;
       }
-      const orbit = this.dimensions === '3d' && (
-        this.mode.button === 2
-        || exploreThreeDimensionalPrimaryOrbit
-      );
+      const orbit = this.dimensions === '3d' && (exploreThreeDimensionalPrimaryOrbit
+        || (this.mode.button === 2 && viewMode === 'overview'));
       if (orbit) {
         this.command(event, {
           type: 'orbit-by',
@@ -256,7 +257,7 @@ export class GraphInteractionInterpreter {
         this.mode = { kind: 'orbit', pointerId: event.pointerId, lastPoint: event.point };
       } else {
         const preserveFocus = this.mode.pointerKind === 'mouse'
-          && this.mode.button === 0
+          && (this.mode.button === 0 || this.mode.button === 2)
           && focusedNodeId !== undefined;
         if (!preserveFocus) {
           this.command(event, { type: 'set-selection', nodeIds: [] });
@@ -399,7 +400,7 @@ export class GraphInteractionInterpreter {
       if (event.ctrl && !event.meta) this.captureTrackpadPinchMomentum(event, zoomDelta);
       return;
     }
-    if (this.dimensions === '3d' && this.isExploreModeActive()) {
+    if (this.dimensions === '3d' && this.viewMode() === 'explore') {
       this.command(event, { type: 'orbit-by', deltaX: -delta.x, deltaY: delta.y });
       return;
     }
@@ -479,19 +480,11 @@ export class GraphInteractionInterpreter {
     }
     let navigationStarted = previous.navigationStarted;
     if (mode === 'navigation') {
-      if (!navigationStarted && this.dimensions === '2d') {
-        this.command(event, { type: 'set-selection', nodeIds: [] });
-        this.command(event, { type: 'set-focus' });
-      }
       navigationStarted = true;
       const origin = previous.mode === 'pending' ? previous.startCentroid : previous.centroid;
       const deltaX = origin.x - next.centroid.x;
       const deltaY = origin.y - next.centroid.y;
-      const focusedThreeDimensional = this.dimensions === '3d'
-        && this.isExploreModeActive();
-      this.command(event, this.dimensions === '3d' && !focusedThreeDimensional
-        ? { type: 'orbit-by', deltaX: -deltaX, deltaY }
-        : { type: 'pan-by', deltaX, deltaY });
+      this.command(event, { type: 'pan-by', deltaX, deltaY });
     } else if (mode === 'pinch') {
       const originDistance = previous.mode === 'pending' ? previous.startDistance : previous.distance;
       const distanceDelta = next.distance - originDistance;
@@ -568,21 +561,20 @@ export class GraphInteractionInterpreter {
       event.shift,
     );
     this.command(event, { type: 'set-selection', nodeIds: result.selectedNodeIds });
-    this.focusTaggedStructure(event, result);
+    this.updateTaggedStructure(event, result);
   }
 
-  private focusTaggedStructure(
+  private updateTaggedStructure(
     event: Pick<GraphInputEventV1, 'identity' | 'timestamp'>,
     result: GraphTaggingResultV1,
   ): void {
     this.command(event, { type: 'set-focus', nodeId: result.focusNodeId });
-    if (result.selectedNodeIds.length === 0) return;
-    this.command(event, { type: 'fit-camera', nodeIds: result.selectedNodeIds });
   }
 
-  private isExploreModeActive(): boolean {
-    return (this.options.getSelectedNodeIds().length > 0 || this.options.getFocusedNodeId() !== undefined)
-      && !this.tagging.isOverviewHeld();
+  private viewMode(): GraphInteractionViewMode {
+    const hasExploreState = this.options.getSelectedNodeIds().length > 0
+      || this.options.getFocusedNodeId() !== undefined;
+    return hasExploreState && !this.tagging.isOverviewHeld() ? 'explore' : 'overview';
   }
 
   private readTouchGesture(): TouchGesture | null {

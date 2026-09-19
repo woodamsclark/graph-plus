@@ -406,13 +406,6 @@ export class SessionInteractionRuntime {
     if (focusChanged) {
       const { focusedNodeId: _focusedNodeId, ...withoutFocus } = state;
       this.commit(nodeId === undefined ? withoutFocus : { ...withoutFocus, focusedNodeId: nodeId });
-      if (nodeId) {
-        const position = this.options.getInteractivePositions()[nodeId];
-        if (position) {
-          this.options.camera.setTarget(position);
-          this.commitCamera();
-        }
-      }
     }
     this.options.onViewStateChanged('interaction');
     if (!focusChanged) return;
