@@ -51,8 +51,7 @@ export class GraphEngineContextMenuV1 implements Disposable {
     if (graphCoreActionIsShownV1(this.policy, CORE.mindMapNode)) {
       menu.addItem((item) => item.setTitle('Mind map from here').setIcon('git-fork').onClick(() => {
         void this.context.controls.setModuleSetting('form', 'rootNodeId', intent.nodeId)
-          .then(() => this.context.controls.setModuleEnabled('form', true))
-          .then(() => this.context.session.fitNodes());
+          .then(() => this.context.controls.setModuleEnabled('form', true));
       }));
     }
     if (graphCoreActionIsShownV1(this.policy, CORE.togglePin)) {

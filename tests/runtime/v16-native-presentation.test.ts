@@ -200,7 +200,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   equal(cleared.edgeContributions['a-d'].opacity, 1, 'clearing focus should restore every ordinary link');
 });
 
-test('V2 adaptive labels stay inside tagged and inspected structures', () => {
+test('V2 adaptive labels remain continuously eligible and accept interaction requests', () => {
   const document = graphDocument({
     nodes: [graphNode('a'), graphNode('b'), graphNode('c')],
     edges: [graphEdge('a-b', 'a', 'b')],
@@ -215,8 +215,12 @@ test('V2 adaptive labels stay inside tagged and inspected structures', () => {
   });
   assert(adaptive?.nodeContributions, 'tagged adaptive presentation should contribute nodes');
   equal(adaptive.nodeContributions.a.showLabel, true, 'the tagged node label should remain eligible');
-  equal(adaptive.nodeContributions.b.showLabel, false, 'tagging alone should not reveal a neighbor label');
-  equal(adaptive.nodeContributions.c.showLabel, false, 'an unrelated node label should be suppressed');
+  equal(adaptive.nodeContributions.b.showLabel, true,
+    'adaptive policy should continue managing a neighbor label independently of selection');
+  equal(adaptive.nodeContributions.c.showLabel, true,
+    'adaptive policy should continue managing unrelated labels independently of selection');
+  equal(adaptive.nodeContributions.c.labelOpacity, 1,
+    'label policy should own label opacity instead of inheriting graph dimming');
 
   const inspected = anima.contributeFrame({
     ...state,

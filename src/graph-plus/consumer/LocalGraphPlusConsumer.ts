@@ -19,7 +19,6 @@ import {
   type ObsidianSearchIndexV1,
 } from '../query/index.ts';
 import type { GraphPlusNavigatorV1, GraphPlusVaultSourceV1 } from './GraphPlusConsumer.ts';
-import { GraphPlusNeighborhoodFramerV1 } from './GraphPlusNeighborhoodFramer.ts';
 
 export interface LocalGraphPlusConsumerOptionsV1<TFile> {
   readonly lease: GraphEngineLeaseV1;
@@ -63,7 +62,6 @@ export class LocalGraphPlusConsumerV1<TFile> {
   private opened = false;
   private leaseReleased = false;
   private focusedNodeId?: string;
-  private readonly neighborhoodFramer: GraphPlusNeighborhoodFramerV1;
 
   constructor(private readonly options: LocalGraphPlusConsumerOptionsV1<TFile>) {
     this.adapter = new VaultGraphAdapterV1({ countDuplicateLinks: options.countDuplicateLinks });
@@ -71,11 +69,6 @@ export class LocalGraphPlusConsumerV1<TFile> {
     this.lens = clone(options.initialLens ?? createDefaultGraphPlusLensV1());
     this.depth = localDepth(options.initialDepth);
     this.rootNodeId = options.initialRootNodeId;
-    this.neighborhoodFramer = new GraphPlusNeighborhoodFramerV1({
-      container: options.container,
-      getSession: () => this.session,
-      getDocument: () => this.localDocument,
-    });
   }
 
   async open(): Promise<void> {
@@ -110,17 +103,8 @@ export class LocalGraphPlusConsumerV1<TFile> {
       this.session = session;
       this.subscriptions.push(session.onError((error) => this.options.onError?.(error)));
       this.subscriptions.push(session.onIntent((intent) => {
-        if (intent.type === 'viewport-changed') {
-          this.neighborhoodFramer.cancel();
-          return;
-        }
-        if (intent.type === 'camera-reset') {
-          this.neighborhoodFramer.cancel();
-          return;
-        }
         if (intent.type === 'focus-changed') {
           this.focusedNodeId = intent.focusedNodeId;
-          this.neighborhoodFramer.cancel();
           return;
         }
         if (intent.type !== 'preview-changed') return;
@@ -195,9 +179,7 @@ export class LocalGraphPlusConsumerV1<TFile> {
   }
 
   setSuspended(suspended: boolean): void {
-    if (suspended) this.neighborhoodFramer.cancel();
     this.session?.setSuspended(suspended);
-    if (!suspended && this.focusedNodeId) void this.frameNeighborhood(this.focusedNodeId);
   }
 
   async setPreviewSurfaceActive(active: boolean): Promise<void> {
@@ -218,7 +200,6 @@ export class LocalGraphPlusConsumerV1<TFile> {
 
   async close(): Promise<void> {
     this.opened = false;
-    this.neighborhoodFramer.cancel();
     await this.lensQueue.catch(() => undefined);
     this.subscriptions.splice(0).forEach((subscription) => subscription.dispose());
     this.actionRegistration?.dispose();
@@ -242,7 +223,6 @@ export class LocalGraphPlusConsumerV1<TFile> {
     if (!this.session) return;
     const localDocument = this.buildLocalDocument();
     if (sameLocalGraph(this.localDocument, localDocument)) return;
-    this.neighborhoodFramer.cancel();
     this.localDocument = localDocument;
     await this.session.replaceDocument(localDocument);
     await this.presentRoot();
@@ -251,26 +231,10 @@ export class LocalGraphPlusConsumerV1<TFile> {
   private async presentRoot(): Promise<void> {
     const root = this.rootNodeId;
     if (!this.session || !root || !this.localDocument?.nodes.some((node) => node.id === root)) return;
-    this.neighborhoodFramer.cancel();
     await this.session.setNodePinned(root, true);
     await this.session.setSelection([root]);
     await this.session.focusNode(root);
     this.focusedNodeId = root;
-    await this.frameNeighborhood(root);
-  }
-
-  private async frameNeighborhood(nodeId: string): Promise<void> {
-    const session = this.session;
-    if (!session) return;
-    const settings = await session.exportEffectiveSettings();
-    if (session !== this.session || this.focusedNodeId !== nodeId) return;
-    const force = settings.modules['force-layout']?.settings;
-    const springLength = finitePositive(force?.springLength, 250);
-    const maximumLengthScale = finitePositive(force?.maximumSpringLengthScale, 1.85);
-    await this.neighborhoodFramer.frame(nodeId, {
-      minimumRadius: springLength * maximumLengthScale,
-      followSettling: false,
-    });
   }
 
   private buildLocalDocument(): GraphDocumentV1 {
@@ -349,10 +313,6 @@ function localDepth(value: number | undefined): number {
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.max(1, Math.min(8, Math.round(value)))
     : 1;
-}
-
-function finitePositive(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function sameLocalGraph(left: GraphDocumentV1 | undefined, right: GraphDocumentV1): boolean {

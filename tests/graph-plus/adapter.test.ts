@@ -9,7 +9,6 @@ import {
   tagNodeId,
 } from '../../src/graph-plus/adapter/index.ts';
 import { GraphPlusConsumerV1, LocalGraphPlusConsumerV1 } from '../../src/graph-plus/consumer/index.ts';
-import { neighborhoodNodeIds } from '../../src/graph-plus/consumer/GraphPlusNeighborhoodFramer.ts';
 import {
   GraphPlusCheckpointControllerV1,
   type GraphPlusCheckpointStoreV1,
@@ -171,18 +170,6 @@ test('G-ADAPTER deep tag hierarchy emits each structural edge once', () => {
     ['tag:quote/1/2', 'tag:quote/1/2/1', 1],
     ['tag:quote/1/2', 'tag:quote/1/2/2', 1],
   ], 'shared path prefixes should be structure rather than accumulated evidence weight');
-});
-
-test('V1.7.3 focus framing includes only the focused node and its visible direct neighbors', () => {
-  const fixture = snapshot();
-  const document = new VaultGraphAdapterV1<FakeFile>({ countDuplicateLinks: true }).build(fixture.value).document;
-  const alphaId = noteNodeId('Alpha.md');
-  const betaId = noteNodeId('folder/Beta.md');
-  const courseId = tagNodeId('course');
-  deepEqual(neighborhoodNodeIds(document, alphaId), [alphaId, betaId, courseId],
-    'focus framing should use graph adjacency rather than the entire document');
-  deepEqual(neighborhoodNodeIds(document, alphaId, new Set([alphaId])), [alphaId],
-    'focus framing should not pull filtered neighbors back into view');
 });
 
 test('Graph+ query translation selects IDs before invoking the generic AST filter', () => {
@@ -439,26 +426,18 @@ test('V1.7.1 global active-note following focuses without changing the full proj
   });
   await consumer.open();
   const alphaId = noteNodeId('Alpha.md');
-  const betaId = noteNodeId('folder/Beta.md');
-  const courseId = tagNodeId('course');
   const session = consumer.getSession();
   assert(session, 'the followed graph should expose its engine session');
-  const fitRequests: Array<{ nodeIds?: readonly string[]; centerNodeId?: string }> = [];
-  const fitNodes = session.fitNodes.bind(session);
-  session.fitNodes = async (nodeIds, options) => {
-    fitRequests.push({ nodeIds, centerNodeId: options?.centerNodeId });
-    await fitNodes(nodeIds, options);
-  };
+  const cameraBeforeFollow = (await session.exportViewState()).camera;
   const surface = runtime.container.querySelector<HTMLElement>('[data-graph-engine-session]');
   assert(surface, 'the followed graph should expose its mounted session surface');
 
   equal(await consumer.followActiveNode(alphaId), true, 'a main-split graph should follow the active note');
   equal((await consumer.getSession()?.exportViewState())?.focusedNodeId, alphaId,
     'active-note following should use ordinary graph focus state');
-  deepEqual(fitRequests[0], { nodeIds: [alphaId, betaId, courseId], centerNodeId: alphaId },
-    'every programmatic focus should frame the focused node with its visible direct neighbors');
+  deepEqual((await session.exportViewState()).camera, cameraBeforeFollow,
+    'programmatic focus should preserve the camera');
   await session.focusNode(null);
-  fitRequests.length = 0;
   const state = await session.exportViewState();
   const cameraBeforeClick = state.camera;
   const camera = new GraphCameraController(state.camera, state.dimensions);
@@ -467,13 +446,10 @@ test('V1.7.1 global active-note following focuses without changing the full proj
   dispatchGraphClick(runtime.window, runtimeCanvas(runtime.container), point.x, point.y, 731);
   runtime.platform.flushFrame();
   await Promise.resolve();
-  deepEqual(fitRequests, [], 'graph input focus should not request automatic neighborhood framing');
   deepEqual((await session.exportViewState()).camera, cameraBeforeClick,
     'graph input focus should preserve the camera exactly');
-  fitRequests.length = 0;
   await session.resetCamera();
   await Promise.resolve();
-  deepEqual(fitRequests, [], 'camera reset should use the engine selection frame without a consumer override');
   equal((await session.exportViewState()).focusedNodeId, alphaId,
     'resetting the camera should preserve global graph focus');
   equal(surface.dataset.renderedNodeCount, String(consumer.getDocument()?.nodes.length),
@@ -538,8 +514,6 @@ test('V1.7.1 Local Graph+ owns an ephemeral rooted document, layout, and depth',
   let state = await consumer.getSession()?.exportViewState();
   equal(state?.focusedNodeId, alphaId, 'the local root should own ordinary focus state');
   equal(state?.pinnedNodeIds.includes(alphaId), true, 'the local root should remain anchored while neighbors settle');
-  deepEqual(state?.camera.target, state?.positions[alphaId],
-    'the camera should center on the root while retaining a fit sized for its neighborhood');
 
   await consumer.setLocalDepth(2);
   local = consumer.getLocalDocument();
@@ -547,25 +521,16 @@ test('V1.7.1 Local Graph+ owns an ephemeral rooted document, layout, and depth',
 
   const session = consumer.getSession();
   assert(session, 'the local graph should retain its engine session');
-  const fitRequests: Array<{ minimumRadius?: number; centerNodeId?: string }> = [];
-  const fitNodes = session.fitNodes.bind(session);
-  session.fitNodes = async (nodeIds, options) => {
-    fitRequests.push({ minimumRadius: options?.minimumRadius, centerNodeId: options?.centerNodeId });
-    await fitNodes(nodeIds, options);
-  };
+  const cameraBeforeFollow = (await session.exportViewState()).camera;
   equal(await consumer.followActiveNode(betaId), true, 'the local view should follow a newly active note');
   local = consumer.getLocalDocument();
   state = await consumer.getSession()?.exportViewState();
   equal(local?.nodes[0]?.id, betaId, 'a new root should receive a fresh local document identity and origin');
   equal(state?.focusedNodeId, betaId, 'focus should transfer with the active note');
   equal(state?.pinnedNodeIds.includes(alphaId), false, 'the prior local root anchor must not leak across documents');
-  deepEqual(state?.camera.target, state?.positions[betaId], 'camera centering should follow the new local root');
-  deepEqual(fitRequests[0], { minimumRadius: 462.5, centerNodeId: betaId },
-    'local focus should reserve the configured maximum spring radius in one predictive camera fit');
-  fitRequests.length = 0;
+  deepEqual(state?.camera, cameraBeforeFollow, 'local active-note following should preserve the camera');
   await session.resetCamera();
   await Promise.resolve();
-  deepEqual(fitRequests, [], 'resetting a local graph should use the engine selection frame without a consumer override');
   equal((await session.exportViewState()).focusedNodeId, betaId,
     'resetting the camera should preserve local graph focus');
   await consumer.close();

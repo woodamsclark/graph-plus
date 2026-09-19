@@ -238,7 +238,6 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
               await this.context.controls.setModuleSetting('form', 'rootNodeId', selectedId);
             }
             await this.context.controls.setModuleEnabled('form', enabled);
-            if (enabled) await this.context.session.fitNodes();
           }));
       if (form?.enabled) {
         if (graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.formDirection)) {

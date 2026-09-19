@@ -3,22 +3,23 @@ export interface GraphTaggingResultV1 {
   readonly focusNodeId?: string;
 }
 
-/** Owns tag-set edits, Shift selection state, and the transient presentation toggle. */
+/** Owns tag-set edits and held interaction state for transient presentation. */
 export class GraphTaggingController {
   private shiftActive = false;
-  private presentationSuspended = false;
+  private spaceActive = false;
 
   isShiftHeld(): boolean {
     return this.shiftActive;
   }
 
   isPresentationSuspended(): boolean {
-    return this.presentationSuspended;
+    return this.shiftActive || this.spaceActive;
   }
 
-  togglePresentation(): boolean {
-    this.presentationSuspended = !this.presentationSuspended;
-    return this.presentationSuspended;
+  updateSpace(active: boolean): boolean {
+    const changed = this.spaceActive !== active;
+    this.spaceActive = active;
+    return changed;
   }
 
   updateShift(active: boolean): boolean {
@@ -53,6 +54,7 @@ export class GraphTaggingController {
 
   reset(): void {
     this.shiftActive = false;
+    this.spaceActive = false;
   }
 }
 

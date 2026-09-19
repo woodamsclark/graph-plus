@@ -205,9 +205,6 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.diagnostics.counters.hitTests += this.interaction.consumeHitTestCount();
     const deltaSeconds = this.lastFrameTimestamp === null ? 1 / 60 : Math.max(0, (timestamp - this.lastFrameTimestamp) / 1000);
     this.lastFrameTimestamp = timestamp;
-    const focusedNodeId = this.viewState.focusedNodeId;
-    const focusedPosition = focusedNodeId ? this.moduleView.positions[focusedNodeId] : undefined;
-    const previousFocusedPosition = focusedPosition ? { ...focusedPosition } : undefined;
     const moduleStart = this.platform.now();
     this.diagnostics.counters.moduleTicks += 1;
     const tickResult = this.moduleHost.tick({
@@ -221,18 +218,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const moduleTickMs = duration(moduleStart, this.platform.now());
     const compositionStart = this.platform.now();
     if (positions) {
-      const nextFocusedPosition = focusedNodeId ? positions[focusedNodeId] : undefined;
       const requiresComposition = positions !== this.moduleView.positions;
       this.viewState = { ...this.viewState, positions };
-      if (!tickResult?.camera && previousFocusedPosition && nextFocusedPosition) {
-        const camera = this.camera.getState();
-        this.camera.setTarget({
-          x: camera.target.x + nextFocusedPosition.x - previousFocusedPosition.x,
-          y: camera.target.y + nextFocusedPosition.y - previousFocusedPosition.y,
-          z: camera.target.z + nextFocusedPosition.z - previousFocusedPosition.z,
-        });
-        this.synchronizeCameraState();
-      }
       this.projectionView = { ...this.projectionView, positions, viewState: this.viewState };
       this.moduleView = { ...this.moduleView, positions, viewState: this.viewState };
       if (requiresComposition) this.refreshFrame(false, 'geometry');
@@ -411,6 +398,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   async replaceDocument(document: GraphDocumentV1): Promise<void> {
     this.requireActive();
     const previous = this.store.readDocument();
+    const previousCamera = this.camera.getState();
     try {
       const nextStore = new GraphDocumentStore(document);
       const next = nextStore.readDocument();
@@ -423,12 +411,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
             this.profile.dimensions,
             usesGeneratedInitialPositions(this.profile.profileSettings),
           )
-        : this.createInitialViewState();
+        : { ...this.createInitialViewState(), camera: previousCamera };
       this.camera.setState(this.viewState.camera);
       this.moduleHost.documentChanged(next);
       this.moduleHost.viewChanged(this.viewState);
       this.recomputeView();
-      if (previous.documentId !== next.documentId) this.fitPositions(Object.values(this.moduleView.positions));
       this.emitGraphChanged({
         sessionId: this.sessionId,
         documentId: next.documentId,
@@ -756,8 +743,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.moduleHost.documentChanged(this.store.readDocument());
       this.moduleHost.viewChanged(this.viewState);
       this.recomputeView(false);
-      if (this.moduleView.formActive) this.fitPositions(Object.values(this.moduleView.positions));
-      else this.refreshFrame();
+      this.refreshFrame();
       previousHost.dispose();
       for (const failure of deferredFailures) this.handleModuleFailure(failure);
     } catch (error) {
@@ -1165,18 +1151,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (this.viewState.focusedNodeId === nodeId) return;
     const { focusedNodeId: _focusedNodeId, ...withoutFocus } = this.viewState;
     this.viewState = nodeId === undefined ? withoutFocus : { ...withoutFocus, focusedNodeId: nodeId };
-    if (nodeId) {
-      const position = this.moduleView.positions[nodeId];
-      if (position) {
-        this.camera.setTarget(position);
-        this.synchronizeCameraState();
-      }
-    }
     this.projectionView = { ...this.projectionView, viewState: this.viewState };
     this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame(true, 'presentation');
-    if (nodeId) this.scheduleFrame(0, 'camera');
     this.updateSurface();
   }
 

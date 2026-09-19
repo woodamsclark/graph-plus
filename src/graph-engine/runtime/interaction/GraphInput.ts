@@ -13,6 +13,7 @@ export class GraphInput {
   private lastMousePoint: GraphScreenPointV1 = { x: 0, y: 0 };
   private lastMod = false;
   private lastShift = false;
+  private spaceHeld = false;
   private longPressPointer: { readonly pointerId: number; readonly point: GraphScreenPointV1 } | null = null;
   private readonly activePointers = new Set<number>();
   private enabled = true;
@@ -40,6 +41,7 @@ export class GraphInput {
     this.mouseInside = false;
     this.lastMod = false;
     this.lastShift = false;
+    this.spaceHeld = false;
     this.options.events.clear();
   }
 
@@ -60,6 +62,7 @@ export class GraphInput {
     canvas.addEventListener('wheel', this.onWheel, { passive: false });
     canvas.addEventListener('contextmenu', this.onContextMenu, { passive: false });
     canvas.addEventListener('keydown', this.onKeyDown);
+    this.options.platform.window.addEventListener('keyup', this.onKeyUp);
     this.options.platform.window.addEventListener('keydown', this.onModifierChange);
     this.options.platform.window.addEventListener('keyup', this.onModifierChange);
   }
@@ -74,6 +77,7 @@ export class GraphInput {
     canvas.removeEventListener('wheel', this.onWheel);
     canvas.removeEventListener('contextmenu', this.onContextMenu);
     canvas.removeEventListener('keydown', this.onKeyDown);
+    this.options.platform.window.removeEventListener('keyup', this.onKeyUp);
     this.options.platform.window.removeEventListener('keydown', this.onModifierChange);
     this.options.platform.window.removeEventListener('keyup', this.onModifierChange);
   }
@@ -219,6 +223,7 @@ export class GraphInput {
     if (!this.enabled || this.disposed) return;
     if (event.defaultPrevented) return;
     if (isGraphKeyboardCommand(event.key)) event.preventDefault();
+    if (event.key === ' ' || event.key === 'Spacebar') this.spaceHeld = true;
     this.push({
       ...this.base(),
       type: 'key-down',
@@ -228,6 +233,23 @@ export class GraphInput {
       shift: event.shiftKey,
       alt: event.altKey,
       repeat: event.repeat,
+      composing: event.isComposing,
+    });
+  };
+
+  private readonly onKeyUp = (event: KeyboardEvent): void => {
+    if (!this.enabled || this.disposed) return;
+    if ((event.key !== ' ' && event.key !== 'Spacebar') || !this.spaceHeld) return;
+    this.spaceHeld = false;
+    event.preventDefault();
+    this.push({
+      ...this.base(),
+      type: 'key-up',
+      key: event.key,
+      ctrl: event.ctrlKey,
+      meta: event.metaKey,
+      shift: event.shiftKey,
+      alt: event.altKey,
       composing: event.isComposing,
     });
   };
@@ -300,9 +322,6 @@ function isGraphKeyboardCommand(key: string): boolean {
     '=',
     '-',
     '_',
-    '0',
-    'f',
-    'F',
     'Escape',
     'Enter',
     ' ',

@@ -2,12 +2,11 @@ import type { JsonValue } from '../../../contracts/v1/index.ts';
 import { shortestPathToAnyV1 } from '../../../core/topology/index.ts';
 import type { GraphVisualThemeV2 } from '../../theme/index.ts';
 import type { GraphModuleInstanceV1, GraphModuleProjectionPatchV1 } from '../GraphModuleTypes.ts';
+import { GraphLabelManager, type GraphLabelRequestV1 } from './GraphLabelManager.ts';
 
 export class AnimaModule implements GraphModuleInstanceV1 {
   private nodeZoomContrast: number;
-  private labelPosition: 'above' | 'below';
-  private adaptiveLabelThreshold2d: number;
-  private adaptiveLabelThreshold3d: number;
+  private readonly labels: GraphLabelManager;
   private topologyCache?: {
     readonly document: Parameters<NonNullable<GraphModuleInstanceV1['contributeFrame']>>[0]['document'];
     readonly nodeIds: ReadonlySet<string>;
@@ -23,16 +22,12 @@ export class AnimaModule implements GraphModuleInstanceV1 {
   ) {
     // Keep the original persisted key so existing experimental slider values survive this broader curve.
     this.nodeZoomContrast = readUnitInterval(settings.nodeWorldScaleBlend, 0);
-    this.labelPosition = readLabelPosition(settings.labelPosition);
-    this.adaptiveLabelThreshold2d = readThreshold(settings.adaptiveLabelThreshold2d, 50);
-    this.adaptiveLabelThreshold3d = readThreshold(settings.adaptiveLabelThreshold3d, 50);
+    this.labels = new GraphLabelManager(settings);
   }
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
     this.nodeZoomContrast = readUnitInterval(settings.nodeWorldScaleBlend, 0);
-    this.labelPosition = readLabelPosition(settings.labelPosition);
-    this.adaptiveLabelThreshold2d = readThreshold(settings.adaptiveLabelThreshold2d, 50);
-    this.adaptiveLabelThreshold3d = readThreshold(settings.adaptiveLabelThreshold3d, 50);
+    this.labels.updateSettings(settings);
   }
 
   restoreState(state: JsonValue): void {
@@ -67,10 +62,6 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       ? shortestPathToAnyV1(hoveredId, pathTargetIds, relationships)
       : undefined;
     const hopLabelIds = new Set(exploreHoverPath?.slice(1, -1) ?? []);
-    const forcedLabelIds = new Set([
-      ...(hoveredId === undefined ? [] : [hoveredId]),
-      ...hopLabelIds,
-    ]);
     const exploreHoverIds = hoveredId === undefined
       ? new Set<string>()
       : hoveredIsTagged
@@ -79,7 +70,6 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const visibleIds = transientNeighborhood ?? (exploreActive
       ? new Set([...taggedIds, ...exploreHoverIds])
       : undefined);
-    const labelVisibleIds = transientNeighborhood ?? (exploreActive ? taggedIds : undefined);
     const litNodeIds = transientId !== undefined
       ? new Set([transientId])
       : exploreActive
@@ -111,6 +101,17 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       largestRadius = Math.max(largestRadius, radius);
     }
     const maximumScaleExponent = 0.5 + this.nodeZoomContrast * 1.5;
+    const labelRequests: GraphLabelRequestV1[] = [
+      ...[...selectedIds].map((nodeId) => ({ nodeId, alwaysVisible: true })),
+      ...(focusedId === undefined ? [] : [{ nodeId: focusedId, alwaysVisible: true }]),
+      ...(hoveredId === undefined ? [] : [{ nodeId: hoveredId, forceVisible: true }]),
+      ...[...hopLabelIds].map((nodeId) => ({ nodeId, forceVisible: true, scale: 0.5 })),
+    ];
+    const labelContributions = this.labels.resolve(nodesWithRadius.map(({ node, prior, radius }) => ({
+      nodeId: node.id,
+      radius,
+      prior,
+    })), labelRequests);
     const nodeContributions = Object.fromEntries(nodesWithRadius
       .map(({ node, prior, radius }) => {
         const isLit = litNodeIds.has(node.id);
@@ -119,24 +120,14 @@ export class AnimaModule implements GraphModuleInstanceV1 {
           : prior?.color ?? (node.tokens?.includes('kind:tag') ? this.palette.colors.tagNode : undefined) ?? this.palette.colors.node;
         const selected = state.viewState.selectedNodeIds.includes(node.id);
         const pinned = state.viewState.pinnedNodeIds.includes(node.id);
-        const forceLabel = forcedLabelIds.has(node.id);
-        const hopLabel = hopLabelIds.has(node.id);
-        const suppressAdaptiveLabel = state.presentationPolicy?.labelMode === 'adaptive'
-          && labelVisibleIds !== undefined
-          && !labelVisibleIds.has(node.id)
-          && !forceLabel;
         return [node.id, {
           ...prior,
+          ...labelContributions[node.id],
           radius,
           nodeScaleExponent: lerp(0.5, maximumScaleExponent,
             normalize(radius, smallestRadius, largestRadius)),
           finalColor: color,
           opacity: visibleIds === undefined || visibleIds.has(node.id) ? 1 : 0.2,
-          labelOpacity: forceLabel || labelVisibleIds === undefined || labelVisibleIds.has(node.id) ? 1 : 0.2,
-          showLabel: forceLabel || (prior?.showLabel !== false && !suppressAdaptiveLabel),
-          labelFontSize: (14 + radius / 4) * (hopLabel ? 0.5 : 1),
-          labelForceVisible: forceLabel,
-          labelAlwaysVisible: prior?.labelAlwaysVisible || selected || node.id === focusedId || forceLabel,
           ...(selected || pinned ? {
             strokeColor: this.palette.colors.nodeOutline,
             strokeWidth: pinned ? 2 : 1,
@@ -161,13 +152,9 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       edgeContributions,
       presentationPolicy: {
         ...(state.presentationPolicy ?? {}),
+        ...this.labels.policy(state.viewState.dimensions),
         nodeScaleMode: 'sqrt-orthographic',
         nodeScaleExponent: 0.5,
-        labelScaleMode: 'fixed',
-        labelPosition: this.labelPosition,
-        adaptiveLabelThreshold: state.viewState.dimensions === '3d'
-          ? this.adaptiveLabelThreshold3d
-          : this.adaptiveLabelThreshold2d,
         minimumPerspectiveNodeRadius: 4,
         minimumPerspectiveNodeScale: 0.5,
         minimumPerspectiveTouchHitRadius: 22,
@@ -218,16 +205,6 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     this.topologyCache = next;
     return next;
   }
-}
-
-function readLabelPosition(value: JsonValue | undefined): 'above' | 'below' {
-  return value === 'above' ? 'above' : 'below';
-}
-
-function readThreshold(value: JsonValue | undefined, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? clamp(value, 0, 100)
-    : fallback;
 }
 
 function readUnitInterval(value: JsonValue | undefined, fallback: number): number {

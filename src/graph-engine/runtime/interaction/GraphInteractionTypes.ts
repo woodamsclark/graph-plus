@@ -90,6 +90,15 @@ export type GraphInputEventV1 =
       readonly alt: boolean;
       readonly repeat: boolean;
       readonly composing: boolean;
+    })
+  | (GraphInputBaseV1 & {
+      readonly type: 'key-up';
+      readonly key: string;
+      readonly ctrl: boolean;
+      readonly meta: boolean;
+      readonly shift: boolean;
+      readonly alt: boolean;
+      readonly composing: boolean;
     });
 
 interface GraphCommandBaseV1 {

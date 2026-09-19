@@ -52,7 +52,7 @@ export interface GraphModulePipelineStateV1 {
   readonly draggedNodeId?: string;
   /** Runtime-only hover state supplied to presentation modules. */
   readonly hoveredNodeId?: string;
-  /** Runtime-only Space-toggled dimming suspension; durable selection remains unchanged. */
+  /** Runtime-only held-key dimming suspension; durable selection remains unchanged. */
   readonly selectionPresentationSuspended?: boolean;
   /** Runtime-only semantic preview state supplied independently from pointer hover. */
   readonly previewedNodeId?: string;

@@ -488,10 +488,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       const occupied: LabelBounds[] = [];
       const accepted: ProjectedNode[] = [];
       for (const candidate of candidates) {
-        const forced = candidate.node.focused
-          || candidate.node.selected
-          || candidate.node.hovered
-          || candidate.node.labelForceVisible === true
+        const forced = candidate.node.labelForceVisible === true
           || candidate.node.labelAlwaysVisible === true;
         if (!forced && accepted.length >= budget) continue;
         const bounds = this.labelBounds(frame, candidate);

@@ -485,7 +485,6 @@ export class SessionInteractionRuntime {
     const underPointer = this.options.camera.screenToWorld(point.x, point.y, this.dragContext.depth);
     const position = add(underPointer, this.dragContext.offset);
     this.commit({ ...state, positions: { ...state.positions, [nodeId]: position } });
-    if (state.focusedNodeId === nodeId) this.options.camera.setTarget(position);
     this.commitCamera();
     this.options.onViewStateChanged('positions');
   }

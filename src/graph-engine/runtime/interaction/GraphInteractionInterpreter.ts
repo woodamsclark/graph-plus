@@ -170,6 +170,7 @@ export class GraphInteractionInterpreter {
       case 'wheel': this.wheel(event); return;
       case 'long-press': this.longPress(event); return;
       case 'key-down': this.keyDown(event); return;
+      case 'key-up': this.keyUp(event); return;
     }
   }
 
@@ -344,7 +345,6 @@ export class GraphInteractionInterpreter {
         point: event.point,
         modality: pointerKind,
       });
-      else this.command(event, { type: 'reset-camera' });
       return;
     }
     if (pointerKind === 'touch' && event.button === 0 && !precisionZoomCandidate) {
@@ -378,7 +378,8 @@ export class GraphInteractionInterpreter {
     if (!wasShiftHeld && event.shift) {
       this.shiftSelectionBaseline = new Set(this.options.getSelectedNodeIds());
     }
-    this.tagging.updateShift(event.shift);
+    const presentationChanged = this.tagging.updateShift(event.shift);
+    if (presentationChanged) this.command(event, { type: 'selection-presentation-changed' });
     if (wasShiftHeld && !event.shift) {
       const baseline = this.shiftSelectionBaseline ?? new Set<string>();
       const selectedNodeIds = this.options.getSelectedNodeIds();
@@ -436,8 +437,6 @@ export class GraphInteractionInterpreter {
         point: event.point,
         modality: event.pointerKind,
       });
-    } else {
-      this.command(event, { type: 'reset-camera' });
     }
   }
 
@@ -458,14 +457,6 @@ export class GraphInteractionInterpreter {
       this.command(event, { type: 'zoom-by', deltaY: 120 });
       return;
     }
-    if (event.key === '0') {
-      this.command(event, { type: 'reset-camera' });
-      return;
-    }
-    if (event.key.toLowerCase() === 'f') {
-      this.command(event, { type: 'fit-camera' });
-      return;
-    }
     if (event.key === 'Escape') {
       this.tagging.reset();
       this.command(event, { type: 'set-selection', nodeIds: [] });
@@ -474,8 +465,7 @@ export class GraphInteractionInterpreter {
     }
     if (event.key === ' ' || event.key === 'Spacebar') {
       if (event.repeat || event.composing || event.ctrl || event.meta || event.shift || event.alt) return;
-      this.tagging.togglePresentation();
-      this.command(event, { type: 'selection-presentation-changed' });
+      if (this.tagging.updateSpace(true)) this.command(event, { type: 'selection-presentation-changed' });
       return;
     }
     if (event.key === 'Enter') {
@@ -483,6 +473,11 @@ export class GraphInteractionInterpreter {
       const nodeId = this.options.getFocusedNodeId();
       if (nodeId) this.command(event, { type: 'activate-node', nodeId, activation: 'keyboard' });
     }
+  }
+
+  private keyUp(event: Extract<GraphInputEventV1, { type: 'key-up' }>): void {
+    if (event.key !== ' ' && event.key !== 'Spacebar') return;
+    if (this.tagging.updateSpace(false)) this.command(event, { type: 'selection-presentation-changed' });
   }
 
   private updateTouchGesture(event: GraphInputEventV1): void {
@@ -581,7 +576,6 @@ export class GraphInteractionInterpreter {
     if (event.shift && this.shiftSelectionBaseline === undefined) {
       this.shiftSelectionBaseline = new Set(selectedNodeIds);
     }
-    const enteringExplore = selectedNodeIds.length === 0;
     const removing = event.shift && selectedNodeIds.includes(hit.nodeId);
     const nodeIds = removing
       ? this.options.getNodeSelection(hit.nodeId)
@@ -598,21 +592,14 @@ export class GraphInteractionInterpreter {
       event.shift,
     );
     this.command(event, { type: 'set-selection', nodeIds: result.selectedNodeIds });
-    this.updateTaggedStructure(event, result, enteringExplore && !event.shift);
+    this.updateTaggedStructure(event, result);
   }
 
   private updateTaggedStructure(
     event: Pick<GraphInputEventV1, 'identity' | 'timestamp'>,
     result: GraphTaggingResultV1,
-    enteringExplore: boolean,
   ): void {
     this.command(event, { type: 'set-focus', nodeId: result.focusNodeId });
-    if (enteringExplore && result.selectedNodeIds.length > 0) {
-      this.command(event, {
-        type: 'fit-camera',
-        nodeIds: this.options.getSelectionNeighborhood(result.selectedNodeIds),
-      });
-    }
   }
 
   private viewMode(): GraphInteractionViewMode {
