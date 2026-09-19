@@ -195,14 +195,14 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     if (!graphUiSectionIsShownV1(this.policy, SECTIONS.form)) return;
     const body = this.section(parent, SECTIONS.form, SECTION_TITLES[SECTIONS.form], false);
     this.renderFormDimensions(body, effective);
-    if (graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.formNodeScaleSpace)) {
+    if (graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.formNodeZoomSize)) {
       const anima = effective.modules.anima;
       if (anima?.enabled) {
         this.catalogSlider(
           body,
           'anima.nodeWorldScaleBlend',
           readNumber(anima.settings.nodeWorldScaleBlend, 0) * 100,
-          'Balanced ←→ World space',
+          'Small ←→ Big',
         );
       }
     }

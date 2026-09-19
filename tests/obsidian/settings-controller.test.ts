@@ -23,7 +23,7 @@ test('Graph+ releases dragged nodes while retaining explicit context-menu pinnin
   equal(createShippedGraphModuleRegistryV1().get('rendering')?.descriptor.defaultSettings.edgeThicknessScale, 0.1,
     'the shipped Graph Engine link-thickness default should be 0.10');
   equal(createShippedGraphModuleRegistryV1().get('anima')?.descriptor.defaultSettings.nodeWorldScaleBlend, 0,
-    'the shipped Graph Engine node scale space should default to Balanced');
+    'the shipped Graph Engine zoomed node size should default to its calmest response');
   equal(profile?.profileSettings?.dragRelease, 'dynamic', 'drag release should return an unpinned node to the active layout');
   equal(profile?.uiDefaults?.contextMenuEnabled, true, 'the right-click menu should remain available for explicit pinning');
   equal(profile?.uiDefaults?.coreContextActions?.['toggle-pin'], undefined, 'the core Pin node action should remain visible by default');
@@ -173,9 +173,9 @@ test('V1.7 settings catalog exposes only curated typed controls', () => {
   const quality = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'rendering.renderQuality');
   deepEqual(quality?.scopes, ['global', 'profile'], 'render quality should live in full settings without crowding quick settings');
   equal(quality?.control.type, 'select', 'render quality should use named choices rather than free-form text');
-  const nodeScaleSpace = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'anima.nodeWorldScaleBlend');
-  equal(nodeScaleSpace?.control.type === 'slider' ? nodeScaleSpace.control.storageScale : undefined, 0.01,
-    'node scale space should display as a percentage while storing a normalized blend');
+  const zoomedNodeSize = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'anima.nodeWorldScaleBlend');
+  equal(zoomedNodeSize?.control.type === 'slider' ? zoomedNodeSize.control.storageScale : undefined, 0.01,
+    'zoomed node size should display as a percentage while storing a normalized response');
 });
 
 test('V1.7 global catalog values flow into Graph+ until its profile overrides them', async () => {

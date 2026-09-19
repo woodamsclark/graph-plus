@@ -43,19 +43,20 @@ test('V1.6 Anima owns the exact visible-degree radius and composable structural 
     'hub radius should use the exact formula and ignore duplicate ordered relationships');
   equal(patch.nodeContributions['leaf-0'].radius, 8, 'low-degree nodes should use the exact lower clamp');
   equal(patch.presentationPolicy?.nodeScaleMode, 'sqrt-orthographic', 'Anima should request native-style 2d node scaling');
-  equal(patch.presentationPolicy?.nodeWorldScaleBlend, 0, 'Anima should default to balanced node scaling');
+  equal(patch.presentationPolicy?.orthographicNodeScaleExponent, 0.5,
+    'Anima should default to its calm square-root zoom response');
   equal(patch.presentationPolicy?.labelScaleMode, 'fixed', 'Anima labels should remain screen-readable in both dimensions');
 });
 
-test('Anima exposes a clamped continuous blend from balanced to world-space node scaling', () => {
+test('Anima maps zoomed node size beyond world-space scaling', () => {
   const document = graphDocument({ nodes: [graphNode('a')], edges: [] });
   const state = pipeline(document, { nodeIds: new Set(['a']), edgeIds: new Set() });
   const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, { nodeWorldScaleBlend: 0.5 });
-  equal(anima.contributeFrame(state)?.presentationPolicy?.nodeWorldScaleBlend, 0.5,
-    'Anima should publish intermediate scale-space values');
+  equal(anima.contributeFrame(state)?.presentationPolicy?.orthographicNodeScaleExponent, 1.25,
+    'the slider midpoint should already exceed the world-space exponent');
   anima.updateSettings({ nodeWorldScaleBlend: 4 });
-  equal(anima.contributeFrame(state)?.presentationPolicy?.nodeWorldScaleBlend, 1,
-    'Anima should clamp saved scale-space values to world space');
+  equal(anima.contributeFrame(state)?.presentationPolicy?.orthographicNodeScaleExponent, 2,
+    'the slider maximum should clamp to a strongly exaggerated zoom response');
 });
 
 test('Anima separates undimmed overview hover from tagged Explore presentation', () => {
@@ -231,7 +232,7 @@ test('V1.6 Anima labels retain their CSS size across orthographic zoom', () => {
     'zoomed-in 2D should keep the same resolved label font size');
 });
 
-test('orthographic node scaling interpolates between balanced and world space', () => {
+test('orthographic node scaling supports calm, world, and exaggerated size responses', () => {
   const arcRadii: number[] = [];
   const context = recordingContext([], arcRadii);
   const canvas = { getContext: () => context } as unknown as HTMLCanvasElement;
@@ -247,23 +248,22 @@ test('orthographic node scaling interpolates between balanced and world space', 
     id: 'a', label: 'a', position: { x: 0, y: 0, z: 0 }, radius: 10,
     selected: false, focused: false, hovered: false,
   };
-  const renderAt = (blend: number): number => {
+  const renderAt = (exponent: number): number => {
     arcRadii.length = 0;
     frames.set({
       regions: [], edges: [], nodes: [node], theme: DEFAULT_GRAPH_RENDER_THEME_V1,
       policy: {
         ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
         nodeScaleMode: 'sqrt-orthographic',
-        nodeWorldScaleBlend: blend,
+        orthographicNodeScaleExponent: exponent,
       },
     });
     renderer.render();
     return arcRadii[0];
   };
-  equal(renderAt(0), 20, 'balanced scaling should use the square root of zoom');
-  assert(Math.abs(renderAt(0.5) - 10 * Math.pow(4, 0.75)) < 1e-10,
-    'the midpoint should interpolate the zoom exponent');
-  equal(renderAt(1), 40, 'world-space scaling should use the full zoom factor');
+  equal(renderAt(0.5), 20, 'the low end should use the square root of zoom');
+  equal(renderAt(1), 40, 'the first third should pass through true world-space scaling');
+  equal(renderAt(2), 160, 'the high end should grow substantially beyond world-space size');
 });
 
 test('V1.6 renderer anchors labels above or below the resolved node boundary', () => {

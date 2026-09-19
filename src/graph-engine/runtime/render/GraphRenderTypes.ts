@@ -100,8 +100,8 @@ export interface GraphPresentationPolicyV2 {
   /** Higher values delay ordinary adaptive labels; interaction-required labels remain visible. */
   readonly adaptiveLabelThreshold?: number;
   readonly nodeScaleMode?: 'linear' | 'sqrt-orthographic';
-  /** Orthographic node scaling blend: 0 is balanced (sqrt zoom), 1 is true world space (linear zoom). */
-  readonly nodeWorldScaleBlend?: number;
+  /** Exponent applied to orthographic zoom when resolving node radius. */
+  readonly orthographicNodeScaleExponent?: number;
   readonly labelScaleMode?: 'fixed' | 'sqrt-orthographic';
   /** New-mode perspective floor for the visible node disc, in CSS pixels. */
   readonly minimumPerspectiveNodeRadius?: number;

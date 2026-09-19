@@ -618,9 +618,9 @@ function projectedRadius(
 ): number {
   if (projection === 'orthographic') {
     const policy = renderPolicy(frame);
-    const legacyBlend = policy.nodeScaleMode === 'sqrt-orthographic' ? 0 : 1;
-    const blend = Math.max(0, Math.min(1, policy.nodeWorldScaleBlend ?? legacyBlend));
-    return radius * Math.pow(Math.max(0, scale), 0.5 + 0.5 * blend);
+    const legacyExponent = policy.nodeScaleMode === 'sqrt-orthographic' ? 0.5 : 1;
+    const exponent = Math.max(0, Math.min(2, policy.orthographicNodeScaleExponent ?? legacyExponent));
+    return radius * Math.pow(Math.max(0, scale), exponent);
   }
   const projected = radius * scale;
   if (projection !== 'perspective') return projected;

@@ -17,7 +17,7 @@ export const GRAPH_QUICK_SETTINGS_CONTROL_IDS_V1 = Object.freeze({
   clearFilter: 'filter.clear',
   mindMap: 'form.mind-map',
   formDimensions: 'form.dimensions',
-  formNodeScaleSpace: 'form.node-scale-space',
+  formNodeZoomSize: 'form.node-zoom-size',
   formDirection: 'form.direction',
   formDepth: 'form.depth',
   formBranchColors: 'form.branch-colors',
