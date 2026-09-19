@@ -113,10 +113,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     'a direct neighbor should retain its ordinary node color');
   deepEqual(taggedA.nodeContributions.d.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
     'direct neighbors should not inherit the tagged highlight');
-  equal(taggedA.edgeContributions['a-b'].opacity, 1,
-    'a link from the selection to a direct neighbor should remain fully visible');
-  equal(taggedA.edgeContributions['a-b'].color, undefined,
-    'a visible neighbor link should retain its ordinary color');
+  equal(taggedA.edgeContributions['a-b'].opacity, 0.2, 'a single tag should not light its neighborhood links');
 
   const taggedStructure = anima.contributeFrame({
     ...state,
@@ -129,10 +126,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   deepEqual(taggedStructure.nodeContributions.c.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
     'neighbors of a selected structure should retain their ordinary color');
   equal(taggedStructure.edgeContributions['a-b'].opacity, 1, 'a link between tagged nodes should remain bright');
-  equal(taggedStructure.edgeContributions['b-c'].opacity, 1,
-    'links from the selected structure to direct neighbors should remain fully visible');
-  equal(taggedStructure.edgeContributions['b-c'].color, undefined,
-    'neighbor links outside the selected structure should remain unhighlighted');
+  equal(taggedStructure.edgeContributions['b-c'].opacity, 0.2, 'links outside the tagged structure should dim');
 
   const exploredHover = anima.contributeFrame({
     ...state,
@@ -152,10 +146,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     'the hovered node should light independently from tagged nodes');
   equal(exploredHover.edgeContributions['b-c'].opacity, 1, 'the outer shortest-path link should be revealed');
   equal(exploredHover.edgeContributions['a-b'].opacity, 1, 'the shortest path should connect fully to the selection');
-  equal(exploredHover.edgeContributions['a-d'].opacity, 1,
-    'an off-path link from the selection to a direct neighbor should remain visible');
-  equal(exploredHover.edgeContributions['a-d'].color, undefined,
-    'an off-path neighbor link should remain unhighlighted');
+  equal(exploredHover.edgeContributions['a-d'].opacity, 0.2, 'off-path links should remain dim');
   equal(exploredHover.nodeContributions.c.labelForceVisible, true,
     'the hovered endpoint label should be forced at its normal size');
   equal(exploredHover.nodeContributions.c.labelFontSize, taggedA.nodeContributions.c.labelFontSize,
