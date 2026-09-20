@@ -408,12 +408,10 @@ export class GraphInteractionInterpreter {
 
   private wheel(event: Extract<GraphInputEventV1, { type: 'wheel' }>): void {
     const delta = this.normalizedWheel(event);
-    if (event.ctrl || event.meta) {
-      const zoomDelta = event.ctrl && !event.meta
-        ? delta.y * TRACKPAD_PINCH_ZOOM_MULTIPLIER
-        : delta.y;
+    if (event.ctrl && !event.meta) {
+      const zoomDelta = delta.y * TRACKPAD_PINCH_ZOOM_MULTIPLIER;
       this.command(event, { type: 'zoom-by', deltaY: zoomDelta, anchor: event.point });
-      if (event.ctrl && !event.meta) this.captureTrackpadPinchMomentum(event, zoomDelta);
+      this.captureTrackpadPinchMomentum(event, zoomDelta);
       return;
     }
     if (this.dimensions === '3d' && this.viewMode() === 'explore') {

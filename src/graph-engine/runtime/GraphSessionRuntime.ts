@@ -22,7 +22,6 @@ import type {
 } from '../contracts/v1/index.ts';
 import { GraphDocumentStore } from '../core/document/index.ts';
 import { evaluateGraphFilterV1, type GraphFilterSelectionV1 } from '../core/filter/index.ts';
-import { GraphNodeRegionIndexV1 } from '../core/regions/index.ts';
 import type { EffectiveConsumerProfileV1 } from '../core/profile/index.ts';
 import {
   cloneGraphViewStateV1,
@@ -1250,10 +1249,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private resolveNodeSelection(nodeId: string): readonly string[] {
-    const regions = new GraphNodeRegionIndexV1(this.store.readDocument());
-    if (!regions.isRegionNode(nodeId)) return [nodeId];
-    const visibleMembers = regions.recursiveMembers(nodeId, this.renderSelection.nodeIds);
-    return visibleMembers.length ? visibleMembers : [nodeId];
+    return [nodeId];
   }
 
   private handleNodeActionFailure(failure: GraphNodeActionFailureV1): void {

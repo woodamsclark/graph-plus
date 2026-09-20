@@ -76,7 +76,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const litNodeIds = transientId !== undefined
       ? new Set([transientId])
       : exploreActive
-        ? new Set([...taggedIds, ...exploreHoverIds])
+        ? new Set([...taggedIds, ...exploreHoverIds, ...revealedNeighborIds])
         : new Set([...taggedIds, ...hoveredNeighborhood]);
     const pathEdgePairs = edgePairs(exploreHoverPath);
     const revealedNeighborLinkPairs = state.selectionNeighborRevealActive === true
@@ -89,6 +89,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       if (transientId !== undefined) return sourceId === transientId || targetId === transientId;
       const joinsTaggedStructure = taggedIds.has(sourceId) && taggedIds.has(targetId);
       if (joinsTaggedStructure) return true;
+      if (revealedNeighborLinkPairs.has(unorderedPair(sourceId, targetId))) return true;
       if (hoveredId === undefined) return false;
       if (!exploreActive || hoveredIsTagged) return sourceId === hoveredId || targetId === hoveredId;
       return pathEdgePairs.has(unorderedPair(sourceId, targetId));

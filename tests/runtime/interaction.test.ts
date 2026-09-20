@@ -272,7 +272,7 @@ test('R-INPUT-03, R-INPUT-04, and R-INPUT-08 use selection-state consumer activa
 
 });
 
-test('R-REGION-04 first tag click selects its owner and visible recursive children, then activates', async () => {
+test('tag nodes use ordinary single-node selection without selecting region members', async () => {
   let actionContext: { nodeId: string; selectedNodeIds: readonly string[]; focusedNodeId?: string } | undefined;
   const actions = new ConsumerNodeActionRegistryV1();
   actions.register('synthetic-consumer', {}, [{
@@ -326,18 +326,18 @@ test('R-REGION-04 first tag click selects its owner and visible recursive childr
   click(value, canvas, await nodePoint(session, 'tag'), { pointerId: 201 });
   value.platform.flushFrame();
   const selected = await session.exportViewState();
-  deepEqual(selected.selectedNodeIds, ['tag', 'subtag', 'nested', 'direct'],
-    'first click should select the clicked owner and visible descendants through child tags');
+  deepEqual(selected.selectedNodeIds, ['tag'],
+    'first click should select only the clicked tag node');
   equal(selected.focusedNodeId, undefined, 'the current contract should not create node-specific focus');
   assert(JSON.stringify(selected.camera) !== JSON.stringify(beforeTag.camera),
-    'an ordinary initial region selection should Center + Fit');
+    'an ordinary initial tag selection should Center + Fit');
 
   click(value, canvas, await nodePoint(session, 'tag'), { pointerId: 202 });
   value.platform.flushFrame();
   deepEqual(actionContext, {
     nodeId: 'tag',
-    selectedNodeIds: ['tag', 'subtag', 'nested', 'direct'],
-  }, 'second click should invoke the consumer action with the selected region context');
+    selectedNodeIds: ['tag'],
+  }, 'second click should invoke the consumer action with only the selected tag');
   await session.dispose();
   actions.dispose();
 
@@ -351,8 +351,8 @@ test('R-REGION-04 first tag click selects its owner and visible recursive childr
   const projectionCanvas = runtimeCanvas(projectionValue.container);
   click(projectionValue, projectionCanvas, await nodePoint(projectionSession, 'tag'), { pointerId: 203 });
   projectionValue.platform.flushFrame();
-  deepEqual((await projectionSession.exportViewState()).selectedNodeIds, ['tag', 'subtag', 'nested', 'direct'],
-    'projection filtering should preserve the owner and visible recursive selection');
+  deepEqual((await projectionSession.exportViewState()).selectedNodeIds, ['tag'],
+    'projection filtering should not change ordinary tag selection semantics');
   await projectionSession.dispose();
 });
 
@@ -455,7 +455,7 @@ test('Ctrl builds an initial selection without hops and Centers + Fits only afte
   await session.dispose();
 });
 
-test('Space suspends selection dimming while Ctrl edits selection and Option reveals neighbors', async () => {
+test('Space suspends selection dimming while Ctrl edits selection and Option highlights neighbors', async () => {
   const base = runtimeRegistration();
   const registration = {
     ...base,

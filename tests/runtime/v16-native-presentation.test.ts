@@ -196,10 +196,12 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     'Option should reveal every link from the selection to a direct neighbor');
   equal(optionRevealed.edgeContributions['b-c'].opacity, 0.2,
     'Option should leave links outside the revealed neighborhood dimmed');
-  deepEqual(optionRevealed.nodeContributions.b.finalColor, taggedA.nodeContributions.b.finalColor,
-    'Option should undim a neighbor without lighting it as selected');
-  deepEqual(optionRevealed.edgeContributions['a-b'].color, taggedA.edgeContributions['a-b'].color,
-    'Option should reveal a neighbor link without recoloring it as selected');
+  deepEqual(optionRevealed.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
+    'Option should highlight a neighbor with the same treatment as selected-node hover');
+  deepEqual(optionRevealed.edgeContributions['a-b'].color, DEFAULT_GRAPH_RENDER_THEME_V1.colors.highlightedNode,
+    'Option should highlight a neighbor link with the same treatment as selected-node hover');
+  equal(optionRevealed.nodeContributions.b.labelForceVisible, hoveredTag.nodeContributions.b.labelForceVisible,
+    'Option should match hover label behavior instead of forcing every neighbor label visible');
   const updatedOptionReveal = anima.contributeFrame({
     ...state,
     selectionNeighborRevealActive: true,
@@ -1098,7 +1100,7 @@ test('V1.6 uses generated initial placement instead of adapter position hints', 
   await session.dispose();
 });
 
-test('V1.6 keeps Canvas-like pan, Cmd-scroll zoom, and transient drag separate from explicit pins', async () => {
+test('V1.6 keeps Canvas-like pan, Cmd-scroll navigation, and transient drag separate from explicit pins', async () => {
   const document = graphDocument({
     nodes: [graphNode('a'), graphNode('b')],
     edges: [graphEdge('join', 'a', 'b')],
@@ -1117,12 +1119,14 @@ test('V1.6 keeps Canvas-like pan, Cmd-scroll zoom, and transient drag separate f
   assert(JSON.stringify(panned.camera.target) !== JSON.stringify(initial.camera.target), 'unmodified wheel should move the camera target');
   wheel(value, canvas, { deltaY: -30, metaKey: true });
   value.platform.flushFrame(34);
-  const zoomed = await session.exportViewState();
-  assert(zoomed.camera.zoom > panned.camera.zoom, 'Cmd-scroll should remain a zoom gesture');
+  const cmdScrolled = await session.exportViewState();
+  equal(cmdScrolled.camera.zoom, panned.camera.zoom, 'Cmd-scroll should not zoom');
+  assert(JSON.stringify(cmdScrolled.camera.target) !== JSON.stringify(panned.camera.target),
+    'Cmd-scroll should follow ordinary wheel navigation');
 
-  const camera = new GraphCameraController(zoomed.camera, '2d');
+  const camera = new GraphCameraController(cmdScrolled.camera, '2d');
   camera.setViewport(640, 360);
-  const point = camera.worldToScreen(zoomed.positions.a);
+  const point = camera.worldToScreen(cmdScrolled.positions.a);
   pointer(value, canvas, 'pointerdown', point.x, point.y, 9);
   pointer(value, canvas, 'pointermove', point.x + 30, point.y + 15, 9);
   value.platform.flushFrame(51);

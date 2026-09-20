@@ -844,9 +844,14 @@ Shift is not a selection modifier.
 
 Option is the transient neighbor-reveal modifier. While held, direct neighbors of the
 current selection and the links connecting those neighbors to the selection are
-undimmed. The reveal follows additions and removals from the selection. Releasing
+highlighted with the same treatment used when the selected node is hovered. The reveal
+follows additions and removals from the selection. Releasing
 Option restores normal selection dimming without changing the selection, focus point,
 or camera.
+
+Tag nodes use the same selection semantics as ordinary nodes. Clicking a tag selects
+only that tag; its region members remain topology and layout structure and are not
+implicitly added to the selection or promoted to selected-label presentation.
 
 Graph+-specific actions such as opening an Obsidian file or using the current note as
 a Form root remain in Graph+.
