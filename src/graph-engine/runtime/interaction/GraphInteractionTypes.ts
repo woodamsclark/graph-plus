@@ -56,6 +56,7 @@ export type GraphInputEventV1 =
       readonly type: 'modifier-change';
       readonly point: GraphScreenPointV1;
       readonly mod: boolean;
+      readonly ctrl: boolean;
       readonly shift: boolean;
       readonly pointerInside: boolean;
     })
@@ -110,6 +111,8 @@ export type GraphRuntimeCommandV1 =
   | (GraphCommandBaseV1 & { readonly type: 'pan-by'; readonly deltaX: number; readonly deltaY: number })
   | (GraphCommandBaseV1 & { readonly type: 'orbit-by'; readonly deltaX: number; readonly deltaY: number })
   | (GraphCommandBaseV1 & { readonly type: 'zoom-by'; readonly deltaY: number; readonly anchor?: GraphScreenPointV1 })
+  | (GraphCommandBaseV1 & { readonly type: 'center-camera' })
+  | (GraphCommandBaseV1 & { readonly type: 'center-and-fit-camera' })
   | (GraphCommandBaseV1 & { readonly type: 'reset-camera' })
   | (GraphCommandBaseV1 & {
       readonly type: 'fit-camera';

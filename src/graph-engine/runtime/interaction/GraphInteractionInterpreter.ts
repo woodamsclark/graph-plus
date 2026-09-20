@@ -1,6 +1,6 @@
 import type { GraphDimensionsV1 } from '../../contracts/v1/index.ts';
 import type { BufferedQueue } from './BufferedQueue.ts';
-import { GraphTaggingController, type GraphTaggingResultV1 } from './GraphTaggingController.ts';
+import { GraphTaggingController } from './GraphTaggingController.ts';
 import type {
   GraphHitV1,
   GraphInputEventV1,
@@ -92,20 +92,16 @@ export class GraphInteractionInterpreter {
   private trackpadPinchMomentum: TrackpadPinchMomentum | null = null;
   private trackpadPinchMomentumTimer: number | null = null;
   private readonly tagging = new GraphTaggingController();
-  private shiftSelectionBaseline: ReadonlySet<string> | undefined;
+  private ctrlSelectionBaseline: ReadonlySet<string> | undefined;
 
   constructor(private readonly options: {
     readonly dimensions: GraphDimensionsV1;
     readonly events: BufferedQueue<GraphInputEventV1>;
     readonly commands: BufferedQueue<GraphRuntimeCommandV1>;
     readonly hitTest: (point: GraphScreenPointV1, pointerKind?: 'mouse' | 'touch' | 'pen') => GraphHitV1 | null;
-    readonly getFocusedNodeId: () => string | undefined;
-    readonly getHoveredNodeId: () => string | undefined;
-    readonly isDirectNeighbor: (nodeId: string, focusedNodeId: string) => boolean;
     readonly getSelectedNodeIds: () => readonly string[];
     readonly getNodeSelection: (nodeId: string) => readonly string[];
     readonly getSelectionBridge: (nodeId: string, selectedNodeIds: readonly string[]) => readonly string[];
-    readonly getSelectionNeighborhood: (nodeIds: readonly string[]) => readonly string[];
     readonly getViewport: () => { readonly width: number; readonly height: number };
     readonly dragThresholdPx?: number;
     readonly doubleTapIntervalMs?: number;
@@ -147,6 +143,10 @@ export class GraphInteractionInterpreter {
     return this.tagging.isPresentationSuspended();
   }
 
+  isSelectionNeighborRevealActive(): boolean {
+    return this.tagging.isSelectionNeighborRevealActive();
+  }
+
   reset(): void {
     this.clearPendingTouchTap();
     this.cancelTrackpadPinchMomentum();
@@ -154,7 +154,7 @@ export class GraphInteractionInterpreter {
     this.mode = { kind: 'idle' };
     this.touchGesture = null;
     this.pendingHover = null;
-    this.shiftSelectionBaseline = undefined;
+    this.ctrlSelectionBaseline = undefined;
     this.tagging.reset();
   }
 
@@ -175,6 +175,11 @@ export class GraphInteractionInterpreter {
   }
 
   private pointerDown(event: Extract<GraphInputEventV1, { type: 'pointer-down' }>): void {
+    if (event.ctrl && !this.tagging.isCtrlHeld()) {
+      this.ctrlSelectionBaseline = new Set(this.options.getSelectedNodeIds());
+      this.tagging.updateCtrl(true);
+      this.command(event, { type: 'selection-presentation-changed' });
+    }
     this.pointers.set(event.pointerId, { id: event.pointerId, kind: event.pointerKind, point: event.point });
     if (this.pointers.size === 2) {
       this.clearPendingTouchTap();
@@ -226,22 +231,14 @@ export class GraphInteractionInterpreter {
         };
         return;
       }
-      const focusedNodeId = this.options.getFocusedNodeId();
-      const viewMode = this.viewMode();
-      const exploreThreeDimensionalPrimaryOrbit = this.dimensions === '3d'
-        && this.mode.button === 0
-        && viewMode === 'explore';
-      const focusedNeighborDrag = this.mode.pointerKind === 'mouse'
-        && focusedNodeId !== undefined
-        && this.mode.hit !== null
-        && this.options.getHoveredNodeId() === this.mode.hit.nodeId
-        && this.options.isDirectNeighbor(this.mode.hit.nodeId, focusedNodeId);
-      if (this.mode.hit && this.mode.button === 0
-        && (!exploreThreeDimensionalPrimaryOrbit || focusedNeighborDrag)
-        && (focusedNodeId === undefined || focusedNeighborDrag)) {
-        if (!focusedNeighborDrag) {
+      const selectedNodeIds = this.options.getSelectedNodeIds();
+      const hitSelectedNode = this.mode.hit !== null && selectedNodeIds.includes(this.mode.hit.nodeId);
+      const startsInitialNodeDrag = this.mode.hit !== null && selectedNodeIds.length === 0;
+      if (this.mode.hit && this.mode.button === 0 && (hitSelectedNode || startsInitialNodeDrag)) {
+        if (startsInitialNodeDrag) {
           this.command(event, { type: 'set-focus' });
           this.command(event, { type: 'set-selection', nodeIds: [this.mode.hit.nodeId] });
+          this.command(event, { type: 'center-camera' });
         }
         this.command(event, { type: 'drag-start', nodeId: this.mode.hit.nodeId, point: this.mode.downPoint });
         this.command(event, { type: 'drag-update', nodeId: this.mode.hit.nodeId, point: event.point });
@@ -251,8 +248,12 @@ export class GraphInteractionInterpreter {
         };
         return;
       }
-      const orbit = this.dimensions === '3d' && (exploreThreeDimensionalPrimaryOrbit
-        || (this.mode.button === 2 && viewMode === 'overview'));
+      const orbit = this.dimensions === '3d'
+        && (this.mode.button === 2
+          || (this.mode.pointerKind !== 'mouse'
+            && this.mode.button === 0
+            && this.mode.hit === null
+            && selectedNodeIds.length > 0));
       if (orbit) {
         this.command(event, {
           type: 'orbit-by',
@@ -261,13 +262,6 @@ export class GraphInteractionInterpreter {
         });
         this.mode = { kind: 'orbit', pointerId: event.pointerId, lastPoint: event.point };
       } else {
-        const preserveFocus = this.mode.pointerKind === 'mouse'
-          && (this.mode.button === 0 || this.mode.button === 2)
-          && focusedNodeId !== undefined;
-        if (!preserveFocus) {
-          this.command(event, { type: 'set-selection', nodeIds: [] });
-          this.command(event, { type: 'set-focus' });
-        }
         this.command(event, {
           type: 'pan-by',
           deltaX: this.mode.lastPoint.x - event.point.x,
@@ -345,6 +339,7 @@ export class GraphInteractionInterpreter {
         point: event.point,
         modality: pointerKind,
       });
+      else this.command(event, { type: 'center-and-fit-camera' });
       return;
     }
     if (pointerKind === 'touch' && event.button === 0 && !precisionZoomCandidate) {
@@ -374,21 +369,18 @@ export class GraphInteractionInterpreter {
   }
 
   private modifierChange(event: Extract<GraphInputEventV1, { type: 'modifier-change' }>): void {
-    const wasShiftHeld = this.tagging.isShiftHeld();
-    if (!wasShiftHeld && event.shift) {
-      this.shiftSelectionBaseline = new Set(this.options.getSelectedNodeIds());
+    const wasCtrlHeld = this.tagging.isCtrlHeld();
+    if (!wasCtrlHeld && event.ctrl) {
+      this.ctrlSelectionBaseline = new Set(this.options.getSelectedNodeIds());
     }
-    const presentationChanged = this.tagging.updateShift(event.shift);
+    const presentationChanged = this.tagging.updateCtrl(event.ctrl);
     if (presentationChanged) this.command(event, { type: 'selection-presentation-changed' });
-    if (wasShiftHeld && !event.shift) {
-      const baseline = this.shiftSelectionBaseline ?? new Set<string>();
+    if (wasCtrlHeld && !event.ctrl) {
+      const baseline = this.ctrlSelectionBaseline ?? new Set<string>();
       const selectedNodeIds = this.options.getSelectedNodeIds();
-      this.shiftSelectionBaseline = undefined;
-      if (selectedNodeIds.some((nodeId) => !baseline.has(nodeId))) {
-        this.command(event, {
-          type: 'fit-camera',
-          nodeIds: this.options.getSelectionNeighborhood(selectedNodeIds),
-        });
+      this.ctrlSelectionBaseline = undefined;
+      if (baseline.size === 0 && selectedNodeIds.length > 0) {
+        this.command(event, { type: 'fit-camera', nodeIds: selectedNodeIds });
       }
     }
     if (this.mode.kind !== 'idle' || this.pointers.size > 0 || this.touchGesture) return;
@@ -437,7 +429,7 @@ export class GraphInteractionInterpreter {
         point: event.point,
         modality: event.pointerKind,
       });
-    }
+    } else this.command(event, { type: 'center-and-fit-camera' });
   }
 
   private keyDown(event: Extract<GraphInputEventV1, { type: 'key-down' }>): void {
@@ -470,7 +462,8 @@ export class GraphInteractionInterpreter {
     }
     if (event.key === 'Enter') {
       if (event.repeat || event.composing || event.ctrl || event.meta || event.shift || event.alt) return;
-      const nodeId = this.options.getFocusedNodeId();
+      const selectedNodeIds = this.options.getSelectedNodeIds();
+      const nodeId = selectedNodeIds.length === 1 ? selectedNodeIds[0] : undefined;
       if (nodeId) this.command(event, { type: 'activate-node', nodeId, activation: 'keyboard' });
     }
   }
@@ -504,7 +497,10 @@ export class GraphInteractionInterpreter {
       const origin = previous.mode === 'pending' ? previous.startCentroid : previous.centroid;
       const deltaX = origin.x - next.centroid.x;
       const deltaY = origin.y - next.centroid.y;
-      this.command(event, { type: 'pan-by', deltaX, deltaY });
+      const selectionExists = this.options.getSelectedNodeIds().length > 0;
+      this.command(event, this.dimensions === '3d' && !selectionExists
+        ? { type: 'orbit-by', deltaX: -deltaX, deltaY }
+        : { type: 'pan-by', deltaX, deltaY });
     } else if (mode === 'pinch') {
       const originDistance = previous.mode === 'pending' ? previous.startDistance : previous.distance;
       const distanceDelta = next.distance - originDistance;
@@ -568,43 +564,36 @@ export class GraphInteractionInterpreter {
       this.command(event, { type: 'activate-background' });
       return;
     }
-    if (!event.shift && this.options.getFocusedNodeId() === hit.nodeId) {
+    const selectedNodeIds = this.options.getSelectedNodeIds();
+    if (!event.ctrl && selectedNodeIds.includes(hit.nodeId)) {
       this.command(event, { type: 'activate-node', nodeId: hit.nodeId, activation: 'primary' });
       return;
     }
-    const selectedNodeIds = this.options.getSelectedNodeIds();
-    if (event.shift && this.shiftSelectionBaseline === undefined) {
-      this.shiftSelectionBaseline = new Set(selectedNodeIds);
+    if (event.ctrl && this.ctrlSelectionBaseline === undefined) {
+      this.ctrlSelectionBaseline = new Set(selectedNodeIds);
     }
-    const removing = event.shift && selectedNodeIds.includes(hit.nodeId);
+    const removing = event.ctrl && selectedNodeIds.includes(hit.nodeId);
     const nodeIds = removing
       ? this.options.getNodeSelection(hit.nodeId)
       : [
           hit.nodeId,
           ...this.options.getNodeSelection(hit.nodeId),
-          ...(event.shift ? [] : this.options.getSelectionBridge(hit.nodeId, selectedNodeIds)),
+          ...(event.ctrl ? [] : this.options.getSelectionBridge(hit.nodeId, selectedNodeIds)),
         ];
     const result = this.tagging.tag(
       nodeIds,
       hit.nodeId,
       selectedNodeIds,
-      this.options.getFocusedNodeId(),
-      event.shift,
+      event.ctrl,
     );
     this.command(event, { type: 'set-selection', nodeIds: result.selectedNodeIds });
-    this.updateTaggedStructure(event, result);
-  }
-
-  private updateTaggedStructure(
-    event: Pick<GraphInputEventV1, 'identity' | 'timestamp'>,
-    result: GraphTaggingResultV1,
-  ): void {
-    this.command(event, { type: 'set-focus', nodeId: result.focusNodeId });
+    if (selectedNodeIds.length === 0 && !event.ctrl && result.selectedNodeIds.length > 0) {
+      this.command(event, { type: 'fit-camera', nodeIds: result.selectedNodeIds });
+    }
   }
 
   private viewMode(): GraphInteractionViewMode {
-    const hasExploreState = this.options.getSelectedNodeIds().length > 0
-      || this.options.getFocusedNodeId() !== undefined;
+    const hasExploreState = this.options.getSelectedNodeIds().length > 0;
     return hasExploreState ? 'explore' : 'overview';
   }
 

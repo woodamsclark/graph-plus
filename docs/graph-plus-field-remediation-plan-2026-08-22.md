@@ -70,12 +70,11 @@ defaults, product controls, and persistence.
 1. Invert vertical orbit once at normalized input mapping; retain horizontal direction.
 2. Make 50 mm-equivalent perspective the Graph+ 3D profile default while preserving
    apparent target scale; retain consumer override support.
-3. On desktop, primary background drag pans and clears focus/selection only after threshold;
-   secondary drag orbits without clearing either.
-4. On mobile, trial one-finger background pan in both dimensions, retain one-finger node
-   drag, use two-finger drag for orbit in 3D, and retain pinch zoom priority. Background
-   pan clears focus/selection; orbit retains them. In 2D, two-finger input never rotates
-   and may pan by centroid movement.
+3. On desktop, primary background drag pans; secondary drag orbits in 3D without
+   clearing focus or selection.
+4. On mobile, retain selection-sensitive one-finger navigation and pinch zoom priority. In
+   2D, two-finger translation pans. In 3D, two-finger background translation orbits
+   in Overview and pans the camera-focus offset in Explore.
 5. Emit a generic node context-request from stationary secondary click or long-press;
    movement beyond threshold cancels the request in favor of the mapped gesture.
 6. Make free-graph drag kinematic and pointer-locked. Graph+ pins on release and exposes
@@ -135,10 +134,9 @@ defaults, product controls, and persistence.
 
 - [ ] Vertical orbit direction matches the approved mapping on mouse, trackpad, and touch.
 - [ ] Horizontal orbit behavior is unchanged.
-- [ ] One-finger background pan clears focus and selection once, only after threshold,
-  in both 2D and 3D.
-- [ ] Two-finger drag orbits in 3D, never orbits in 2D, and pinch retains zoom priority.
-- [ ] Orbit works on mobile with and without a focused node and retains focus/selection.
+- [ ] One-finger background movement pans in Overview and rotates in 3D Explore.
+- [ ] Two-finger translation pans in 2D, rotates in 3D Overview, and pans in 3D Explore.
+- [ ] Pinch retains zoom priority and mobile rotation retains selection.
 - [ ] Fresh Graph+ 3D profiles use a 50 mm-equivalent perspective.
 - [ ] Perspective migration preserves apparent target scale.
 

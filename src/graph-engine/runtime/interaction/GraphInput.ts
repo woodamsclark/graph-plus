@@ -12,6 +12,7 @@ export class GraphInput {
   private mouseInside = false;
   private lastMousePoint: GraphScreenPointV1 = { x: 0, y: 0 };
   private lastMod = false;
+  private lastCtrl = false;
   private lastShift = false;
   private spaceHeld = false;
   private longPressPointer: { readonly pointerId: number; readonly point: GraphScreenPointV1 } | null = null;
@@ -40,6 +41,7 @@ export class GraphInput {
     this.activePointers.clear();
     this.mouseInside = false;
     this.lastMod = false;
+    this.lastCtrl = false;
     this.lastShift = false;
     this.spaceHeld = false;
     this.options.events.clear();
@@ -121,6 +123,7 @@ export class GraphInput {
       this.mouseInside = true;
       this.lastMousePoint = point;
       this.lastMod = platformMod(event, this.options.platform.window);
+      this.lastCtrl = event.ctrlKey;
       this.lastShift = event.shiftKey;
     }
     if (this.longPressPointer?.pointerId === event.pointerId
@@ -154,16 +157,19 @@ export class GraphInput {
   private readonly onModifierChange = (event: KeyboardEvent): void => {
     if (!this.enabled || this.disposed) return;
     const mod = platformMod(event, this.options.platform.window);
+    const ctrl = event.ctrlKey;
     const shift = event.shiftKey;
-    if (mod === this.lastMod && shift === this.lastShift) return;
+    if (mod === this.lastMod && ctrl === this.lastCtrl && shift === this.lastShift) return;
     this.lastMod = mod;
+    this.lastCtrl = ctrl;
     this.lastShift = shift;
-    if (!this.mouseInside && (mod || shift)) return;
+    if (!this.mouseInside && (mod || ctrl || shift)) return;
     this.push({
       ...this.base(),
       type: 'modifier-change',
       point: this.lastMousePoint,
       mod,
+      ctrl,
       shift,
       pointerInside: this.mouseInside,
     });

@@ -216,6 +216,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       draggedNodeId: this.interaction.getDraggedNodeId(),
       hoveredNodeId: this.interaction.getHoveredNodeId(),
       selectionPresentationSuspended: this.interaction.isSelectionPresentationSuspended(),
+      selectionNeighborRevealActive: this.interaction.isSelectionNeighborRevealActive(),
       previewedNodeId: this.interaction.getPreviewedNodeId(),
     }, deltaSeconds);
     const positions = tickResult?.positions;
@@ -1003,6 +1004,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       formActive: false,
       hoveredNodeId: this.interaction?.getHoveredNodeId(),
       selectionPresentationSuspended: this.interaction?.isSelectionPresentationSuspended(),
+      selectionNeighborRevealActive: this.interaction?.isSelectionNeighborRevealActive(),
       previewedNodeId: this.interaction?.getPreviewedNodeId(),
       nodeContributions: {},
       edgeContributions: {},
@@ -1055,6 +1057,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       draggedNodeId: this.interaction?.getDraggedNodeId(),
       hoveredNodeId: this.interaction?.getHoveredNodeId(),
       selectionPresentationSuspended: this.interaction?.isSelectionPresentationSuspended(),
+      selectionNeighborRevealActive: this.interaction?.isSelectionNeighborRevealActive(),
       previewedNodeId: this.interaction?.getPreviewedNodeId(),
       invalidation,
     });

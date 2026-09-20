@@ -67,8 +67,11 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       : hoveredIsTagged
         ? hoveredNeighborhood
         : new Set(exploreHoverPath ?? [hoveredId]);
+    const revealedNeighborIds = state.selectionNeighborRevealActive === true
+      ? new Set([...selectedIds].flatMap((nodeId) => [...(relationships.get(nodeId) ?? [])]))
+      : new Set<string>();
     const visibleIds = transientNeighborhood ?? (exploreActive
-      ? new Set([...taggedIds, ...exploreHoverIds])
+      ? new Set([...taggedIds, ...exploreHoverIds, ...revealedNeighborIds])
       : undefined);
     const litNodeIds = transientId !== undefined
       ? new Set([transientId])

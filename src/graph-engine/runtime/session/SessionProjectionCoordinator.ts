@@ -33,6 +33,7 @@ export class SessionProjectionCoordinatorV1 {
     readonly draggedNodeId?: string;
     readonly hoveredNodeId?: string;
     readonly selectionPresentationSuspended?: boolean;
+    readonly selectionNeighborRevealActive?: boolean;
     readonly previewedNodeId?: string;
     readonly invalidation: SessionInvalidationClassV1;
   }): GraphModulePipelineStateV1 {
@@ -43,6 +44,7 @@ export class SessionProjectionCoordinatorV1 {
       draggedNodeId: options.draggedNodeId,
       hoveredNodeId: options.hoveredNodeId,
       selectionPresentationSuspended: options.selectionPresentationSuspended,
+      selectionNeighborRevealActive: options.selectionNeighborRevealActive,
       previewedNodeId: options.previewedNodeId,
     });
     this.frames.set(composeGraphRenderFrameV1({

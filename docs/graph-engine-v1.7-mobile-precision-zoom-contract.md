@@ -15,7 +15,8 @@ V1.7 adds a one-finger precision zoom gesture for mobile use, a bounded graph up
 pipeline, workspace-leaf-aware background suspension, an optional 3D axial flattening
 spring, Graph+ recovery and settings cleanup, and direct Obsidian-to-Graph+
 navigation and native note preview. These additions preserve the accepted two-finger
-pinch gesture and Graph+'s focus-first interaction model.
+pinch gesture and Graph+'s selection-centroid camera model. The complete normative
+input table is [Graph+ UI Interaction Matrix](graph-plus-ui-interaction-matrix.xlsx).
 
 ## 2. Normative gesture
 
@@ -43,15 +44,34 @@ jitter cannot consume an ordinary double tap.
 - The mapping is continuous and multiplicative, so equal vertical travel produces a
   comparable perceived scale change regardless of the starting zoom.
 - Existing camera minimum and maximum zoom/distance limits remain authoritative.
-- The gesture works in both 2D and 3D and while the graph is focused or unfocused.
+- The gesture works in both 2D and 3D in Overview or Explore.
 - Focus, selection, explicit pins, canonical positions, Filter state, and Form state
   remain unchanged.
 - Direct user zoom input cancels nonessential Anima camera choreography under the
   existing user-input precedence rule.
 
-A stationary one-finger long press on graph background invokes the same profile camera
-reset used by the keyboard and Quick Settings actions. A long press whose hit test
-resolves a node retains the existing node context-menu behavior instead.
+A stationary one-finger long press or secondary click on graph background performs
+Center + Fit. Center targets the arithmetic centroid of selected nodes, or of the
+complete visible graph when nothing is selected. Fit adjusts zoom or camera distance
+to contain that same target. Angle, orientation, and up vector remain unchanged. A
+stationary long press or secondary click whose hit test resolves a node retains the
+node context-menu behavior instead. Explicit Reset Camera remains a separate operation.
+
+### 3.1 Canonical navigation matrix
+
+| Input | `2d` | `3d` Overview | `3d` Explore |
+| --- | --- | --- | --- |
+| Desktop primary background drag | Pan | Pan | Pan |
+| Desktop secondary drag | Pan | Rotate | Rotate |
+| Unmodified trackpad translation | Pan | Pan | Orbit |
+| Trackpad pinch or Ctrl-wheel | Zoom around input | Zoom around input | Zoom around input |
+| Mobile one-finger background drag | Pan | Pan | Orbit |
+| Mobile two-finger translation | Pan | Rotate | Pan camera-focus offset |
+| Mobile pinch | Zoom | Zoom | Zoom |
+| Double-tap, hold, vertical drag | Precision zoom | Precision zoom | Precision zoom |
+
+Mobile two-finger navigation is resolved only after pinch arbitration. A qualifying
+pinch always wins over translation. Two-finger rotate and pan retain selection.
 
 ## 4. Gesture arbitration
 
@@ -71,7 +91,7 @@ does not change the resulting zoom behavior after the threshold is crossed.
 Before the threshold is crossed, existing tap behavior remains eligible. A completed
 stationary double tap is not assigned a new semantic action by this contract. If the
 second tap is released without qualifying as precision zoom, the interpreter resolves
-the sequence through the existing click/focus rules without synthesizing extra taps.
+the sequence through the existing click/selection rules without synthesizing extra taps.
 
 A second pointer joining the sequence cancels the one-finger candidate and hands
 control to the existing two-finger pinch/pan recognizer. Suspension, view invalidation,
@@ -167,12 +187,13 @@ Automated pointer traces must prove:
 4. Zoom remains finite and inside camera limits under extreme travel.
 5. Beginning over a node never drags, focuses, activates, or opens that node once the
    zoom threshold wins.
-6. Focused 3D precision zoom does not orbit and preserves the focused node.
+6. Explore 3D precision zoom does not rotate and preserves selection.
 7. A second pointer cleanly transfers arbitration to pinch without a zoom jump.
 8. Cancellation and suspension leave no pointer capture, timer, pressed state, hover,
    or scheduled frame behind.
-9. Existing single tap, focus transfer, background defocus, one-finger pan/orbit,
-   two-finger pan, pinch, node drag, and long-press tests remain passing.
+9. Existing single tap, selection edits, background clearing, one-finger pan/rotate,
+   selection-sensitive two-finger pan/rotate, pinch, node drag, and long-press tests remain
+   passing.
 10. A synthetic 120 Hz and 144 Hz callback stream produces no more than 60 physics,
     Anima, composition, render, or coalescible hit-test updates per second.
 11. A delayed callback advances physics at most once and does not burst through saved

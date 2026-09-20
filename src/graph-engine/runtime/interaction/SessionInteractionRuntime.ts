@@ -94,13 +94,9 @@ export class SessionInteractionRuntime {
         this.hitTestMs += Math.max(0, this.options.platform.now() - start);
         return hit;
       },
-      getFocusedNodeId: () => this.options.getViewState().focusedNodeId,
-      getHoveredNodeId: () => this.hoveredNodeId,
-      isDirectNeighbor: (nodeId, focusedNodeId) => this.isDirectNeighbor(nodeId, focusedNodeId),
       getSelectedNodeIds: () => this.options.getViewState().selectedNodeIds,
       getNodeSelection: (nodeId) => this.options.getNodeSelection(nodeId),
       getSelectionBridge: (nodeId, selectedNodeIds) => this.selectionBridge(nodeId, selectedNodeIds),
-      getSelectionNeighborhood: (nodeIds) => this.selectionNeighborhood(nodeIds),
       getViewport: () => this.options.surface.getViewport(),
       setTimeout: (callback, delayMs) => this.options.platform.setTimeout(callback, delayMs),
       clearTimeout: (handle) => this.options.platform.clearTimeout(handle),
@@ -149,6 +145,10 @@ export class SessionInteractionRuntime {
     return this.interpreter.isSelectionPresentationSuspended();
   }
 
+  isSelectionNeighborRevealActive(): boolean {
+    return this.interpreter.isSelectionNeighborRevealActive();
+  }
+
   getPreviewedNodeId(): string | undefined {
     return this.previewedNodeId;
   }
@@ -191,6 +191,8 @@ export class SessionInteractionRuntime {
       'pan-by',
       'orbit-by',
       'zoom-by',
+      'center-camera',
+      'center-and-fit-camera',
       'reset-camera',
       'fit-camera',
       'set-selection',
@@ -220,13 +222,16 @@ export class SessionInteractionRuntime {
         this.cameraChanged(command);
         return;
       case 'zoom-by':
-        this.options.camera.zoomByWheel(
-          command.deltaY,
-          this.options.getViewState().focusedNodeId === undefined
-            ? command.anchor
-            : undefined,
-        );
+        this.options.camera.zoomByWheel(command.deltaY, command.anchor);
         this.cameraChanged(command);
+        return;
+      case 'center-camera':
+        this.centerCamera();
+        this.cameraChanged(command);
+        return;
+      case 'center-and-fit-camera':
+        this.fitVisibleNodes(this.cameraTargetNodeIds());
+        this.emitViewportIntent(command);
         return;
       case 'reset-camera':
         this.options.resetCamera();
@@ -337,35 +342,6 @@ export class SessionInteractionRuntime {
       && command.identity.documentRevision === document.revision;
   }
 
-  private isDirectNeighbor(nodeId: string, focusedNodeId: string): boolean {
-    if (nodeId === focusedNodeId || !this.options.getRenderSelection().nodeIds.has(nodeId)) return false;
-    return this.options.getDocument().edges.some((edge) => this.options.getRenderSelection().edgeIds.has(edge.id)
-      && ((edge.sourceId === focusedNodeId && edge.targetId === nodeId)
-        || (edge.targetId === focusedNodeId && edge.sourceId === nodeId)));
-  }
-
-  private selectionNeighborhood(nodeIds: readonly string[]): readonly string[] {
-    const visibleNodes = this.options.getRenderSelection().nodeIds;
-    const selected = new Set(nodeIds.filter((nodeId) => visibleNodes.has(nodeId)));
-    const neighborhood = [...selected];
-    const included = new Set(neighborhood);
-    for (const edge of this.options.getDocument().edges) {
-      if (!this.options.getRenderSelection().edgeIds.has(edge.id)
-        || !visibleNodes.has(edge.sourceId)
-        || !visibleNodes.has(edge.targetId)
-        || (!selected.has(edge.sourceId) && !selected.has(edge.targetId))) continue;
-      if (!included.has(edge.sourceId)) {
-        included.add(edge.sourceId);
-        neighborhood.push(edge.sourceId);
-      }
-      if (!included.has(edge.targetId)) {
-        included.add(edge.targetId);
-        neighborhood.push(edge.targetId);
-      }
-    }
-    return neighborhood;
-  }
-
   private selectionBridge(nodeId: string, selectedNodeIds: readonly string[]): readonly string[] {
     if (selectedNodeIds.length === 0) return [];
     const visibleNodes = this.options.getRenderSelection().nodeIds;
@@ -399,10 +375,29 @@ export class SessionInteractionRuntime {
       .map((id) => positionsById[id])
       .filter(isVec3);
     if (!positions.length) return;
-    const center = centerNodeId === undefined ? undefined : positionsById[centerNodeId];
+    const center = centerNodeId === undefined
+      ? selectionCentroid(candidates, positionsById)
+      : positionsById[centerNodeId];
     this.options.camera.fit(positions, 48, nodeIds === undefined ? undefined : 1.75, center);
     this.commitCamera();
     this.options.onViewStateChanged('camera');
+  }
+
+  private centerCamera(): void {
+    const positionsById = this.options.getInteractivePositions();
+    const candidates = this.cameraTargetNodeIds();
+    const centroid = selectionCentroid(candidates, positionsById);
+    if (!centroid) return;
+    this.options.camera.translateBy(subtract(centroid, this.options.camera.getState().target));
+  }
+
+  private cameraTargetNodeIds(): readonly string[] {
+    const positionsById = this.options.getInteractivePositions();
+    const selectedNodeIds = this.options.getViewState().selectedNodeIds
+      .filter((nodeId) => positionsById[nodeId] !== undefined);
+    return selectedNodeIds.length > 0
+      ? selectedNodeIds
+      : [...this.options.getRenderSelection().nodeIds];
   }
 
   private setSelection(nodeIds: readonly string[], command: GraphRuntimeCommandV1): void {

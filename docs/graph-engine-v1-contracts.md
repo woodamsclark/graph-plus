@@ -796,38 +796,52 @@ Generic engine commands include operations such as:
 - apply filter;
 - replace document or apply patch.
 
-Selection and focus are related but distinct session states:
+The reviewed input matrix is checked in as
+[Graph+ UI Interaction Matrix](graph-plus-ui-interaction-matrix.xlsx). It is the
+normative product-level input table; this section describes the matching engine model.
+
+Selection, the calculated selection centroid, and camera focus are distinct:
 
 - **selection** is the zero-or-more-node set explicitly chosen by the user or consumer;
   it drives selected-node presentation and `selection-changed` intents;
-- **focus** is the optional single node used as the keyboard/navigation and camera
-  interaction reference; it drives focused-node presentation, focused navigation
-  behavior, and `focus-changed` intents.
+- the **selection centroid** is recalculated whenever membership or selected-node
+  positions change; and
+- the camera's **stored focus point** is its target. Initial selection sets it to the
+  selection centroid. Later membership edits recalculate the centroid without moving
+  the stored focus point. Pan changes their offset. Selected-node motion translates
+  the focus point by the same centroid delta.
 
-A normal primary node click may set both states to the same node, but the public API
-keeps them independent for multi-selection, keyboard focus, and consumer-controlled
-camera workflows.
+`focusedNodeId` remains a public, optional node-specific state for programmatic and
+future interaction design. Ordinary pointer and touch selection does not assign it.
+Node-specific user focus is deferred until its interaction is separately formalized.
 
-When a primary background drag crosses the pan threshold, the default interaction
-contract clears `focusedNodeId`, clears `selectedNodeIds`, emits each applicable state
-change once, and applies the threshold-crossing pan movement immediately. The camera
-then pans with neither a focused nor selected node. A secondary-button 3D orbit is a
-different gesture and does not implicitly clear either state.
+Desktop primary background drag pans in both dimensions. Secondary drag orbits in
+`3d` and pans in `2d`; neither clears selection. Unmodified trackpad translation pans
+in `2d`. In `3d`, it pans in Overview and rotates in Explore. Trackpad pinch and
+Ctrl-wheel zoom around the input position.
 
-V1.1 trials a consistent mobile primary gesture across dimensions:
+Mobile navigation is selection-sensitive in `3d`:
 
-- one-finger background drag pans in both `2d` and `3d` and follows the normal
-  threshold-based focus/selection clearing contract;
-- one-finger drag beginning on a draggable node remains node drag rather than pan;
-- in `3d`, a two-finger drag with no qualifying pinch change orbits and retains focus
-  and selection, using the focused node as its target when one exists;
-- pinch changes zoom and takes precedence once its scale threshold is crossed;
-- in `2d`, orbit is unavailable; two-finger centroid movement may pan alongside pinch
-  handling but never introduces camera rotation.
+- one-finger background drag pans with no selection and rotates when a selection exists;
+- one-finger drag moves a selected node; beginning over an unselected node while a
+  selection exists pans instead;
+- two-finger translation pans in `2d`;
+- in `3d` Overview, two-finger translation rotates;
+- in `3d` Explore, two-finger translation pans the camera-focus offset while retaining
+  selection; and
+- pinch changes zoom and takes precedence once its scale threshold is crossed.
 
-Desktop primary-pan and secondary-orbit mappings remain unchanged. This mobile mapping
-is an explicit V1.1 trial and must be evaluated on-device before becoming a long-term
-gesture invariant.
+A stationary background right-click or long press performs Center + Fit. Center sets
+the camera target to the arithmetic centroid of the selected nodes, or of the complete
+visible graph when nothing is selected. Fit then adjusts zoom or camera distance to
+contain that same target. Angle, orientation, and up vector are preserved. The same
+stationary gesture on a node requests the node context menu instead.
+
+Ctrl is the selection modifier. While held, primary node clicks add or remove nodes
+without moving the camera and direct neighbors of the current selection are undimmed.
+Releasing Ctrl restores normal dimming. If Ctrl selection began empty, release performs
+Center + Fit on the result; if a selection already existed, release leaves the camera
+unchanged. Shift is not a selection modifier.
 
 Graph+-specific actions such as opening an Obsidian file or using the current note as
 a Form root remain in Graph+.
@@ -836,9 +850,13 @@ a Form root remain in Graph+.
 
 Secondary click on desktop and stationary long-press on mobile are interpreted by
 Graph Engine. When the session context-menu surface is enabled, Graph Engine opens a
-safe-area-aware menu and supplies applicable generic actions such as `Focus node`,
-`Mind map from here`, and `Pin node` or `Unpin node`. Opening the menu does not itself
-change selection or focus.
+safe-area-aware menu and supplies applicable generic actions such as `Mind map from
+here` and `Pin node` or `Unpin node`. Opening the menu does not itself change selection
+or focus.
+
+`Focus node` is reserved for the deferred node-specific focus design and is not part of
+the current default interaction contract. Current menu behavior may expose the other
+applicable actions without offering node focus.
 
 The consumer may hide individual core actions and may contribute additional
 domain-specific actions. Graph+ can contribute `Open note` or `Open tag`; PatternSmith
@@ -853,7 +871,7 @@ the stock menu does not require the consumer to subscribe to that intent.
 
 ### 11.2 Consumer-registered node actions
 
-Graph Engine owns hit testing, click counting by focus state, gesture thresholds,
+Graph Engine owns hit testing, selection-state activation, gesture thresholds,
 keyboard equivalence, context-menu composition, and action invocation lifecycle.
 Consumers register semantic node actions; they do not receive raw DOM events or replace
 the input interpreter.
@@ -894,16 +912,19 @@ another consumer.
 
 Node primary-click behavior is:
 
-1. A stationary primary click on an unfocused node selects and focuses that node.
-2. A later stationary primary click on that already-focused node resolves the first
+1. A stationary primary click with no existing selection selects the node and performs
+   Center + Fit on the result.
+2. A stationary primary click on an unselected node in Explore adds it and its
+   shortest-path bridge without moving the camera.
+3. A later stationary primary click on an already-selected node resolves the first
    available action in `activationActionIds` and invokes it once.
-3. The resolved activation action is also the first item in that node's context menu.
-4. Enter on the focused node invokes the same resolved action.
-5. If no registered activation action is available, the later click and Enter do
+4. The resolved activation action is also the first item in that node's context menu.
+5. Enter invokes that action only when exactly one node is selected.
+6. If no registered activation action is available, the later click and Enter do
    nothing; they never fall through to a generic view action.
-6. Crossing a drag or camera-gesture threshold cancels click activation.
+7. Crossing a drag or camera-gesture threshold cancels click activation.
 
-This is focus-state activation, not operating-system double-click timing. Graph+ may
+This is selection-state activation, not operating-system double-click timing. Graph+ may
 register `open-node` as its activation action; PatternSmith may register `start-drill`.
 Their callbacks own those domain behaviors. The engine context menu places the resolved
 activation action first, then other applicable consumer `contextActionIds`, then its
@@ -1468,7 +1489,7 @@ force-layout: required
 filtering: required
 form: optional
 anima: optional, disabled by default in V1
-unmodified wheel: pan when unfocused; rotate when focused
+unmodified wheel: pan in Overview; rotate in Explore
 ```
 
 ### 18.3 PatternSmith

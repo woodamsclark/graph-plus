@@ -180,6 +180,28 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   deepEqual(suspended.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'tagged nodes should remain lit while selection presentation is suspended');
 
+  const ctrlRevealed = anima.contributeFrame({
+    ...state,
+    selectionNeighborRevealActive: true,
+    viewState: { ...state.viewState, selectedNodeIds: ['a'] },
+  });
+  assert(ctrlRevealed?.nodeContributions, 'Ctrl neighbor reveal should contribute presentation');
+  equal(ctrlRevealed.nodeContributions.b.opacity, 1, 'Ctrl should undim a direct neighbor');
+  equal(ctrlRevealed.nodeContributions.d.opacity, 1, 'Ctrl should undim every direct neighbor');
+  equal(ctrlRevealed.nodeContributions.c.opacity, 0.2, 'Ctrl should leave non-neighbors dimmed');
+  deepEqual(ctrlRevealed.nodeContributions.b.finalColor, taggedA.nodeContributions.b.finalColor,
+    'Ctrl should undim a neighbor without lighting it as selected');
+  const updatedCtrlReveal = anima.contributeFrame({
+    ...state,
+    selectionNeighborRevealActive: true,
+    viewState: { ...state.viewState, selectedNodeIds: ['c'] },
+  });
+  assert(updatedCtrlReveal?.nodeContributions, 'Ctrl reveal should recompute with selection edits');
+  equal(updatedCtrlReveal.nodeContributions.b.opacity, 1,
+    'the updated selection should reveal its direct neighbor');
+  equal(updatedCtrlReveal.nodeContributions.d.opacity, 0.2,
+    'neighbors of the old selection should dim when no longer adjacent');
+
   const previewedA = anima.contributeFrame({
     ...state,
     previewedNodeId: 'a',

@@ -54,6 +54,8 @@ export interface GraphModulePipelineStateV1 {
   readonly hoveredNodeId?: string;
   /** Runtime-only held-key dimming suspension; durable selection remains unchanged. */
   readonly selectionPresentationSuspended?: boolean;
+  /** Runtime-only Ctrl reveal of direct neighbors for the current selection. */
+  readonly selectionNeighborRevealActive?: boolean;
   /** Runtime-only semantic preview state supplied independently from pointer hover. */
   readonly previewedNodeId?: string;
   readonly nodeContributions: Readonly<Record<string, GraphNodeRenderContributionV1>>;

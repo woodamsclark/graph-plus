@@ -439,6 +439,8 @@ test('V1.7.1 global active-note following focuses without changing the full proj
     'programmatic focus should preserve the camera');
   await session.focusNode(null);
   const state = await session.exportViewState();
+  deepEqual(state.selectedNodeIds, [alphaId],
+    'programmatic active-note following should retain its selected node after node focus clears');
   const cameraBeforeClick = state.camera;
   const camera = new GraphCameraController(state.camera, state.dimensions);
   camera.setViewport(640, 360);
@@ -446,12 +448,16 @@ test('V1.7.1 global active-note following focuses without changing the full proj
   dispatchGraphClick(runtime.window, runtimeCanvas(runtime.container), point.x, point.y, 731);
   runtime.platform.flushFrame();
   await Promise.resolve();
-  deepEqual((await session.exportViewState()).camera, cameraBeforeClick,
-    'graph input focus should preserve the camera exactly');
+  const selected = await session.exportViewState();
+  deepEqual(selected.selectedNodeIds, [alphaId], 'graph input should create an initial selection');
+  equal(selected.focusedNodeId, undefined,
+    'graph input should not create the deferred node-specific focus state');
+  deepEqual(selected.camera, cameraBeforeClick,
+    'clicking the already-selected active note should activate without reframing');
   await session.resetCamera();
   await Promise.resolve();
-  equal((await session.exportViewState()).focusedNodeId, alphaId,
-    'resetting the camera should preserve global graph focus');
+  deepEqual((await session.exportViewState()).selectedNodeIds, [alphaId],
+    'resetting the camera should preserve global graph selection');
   equal(surface.dataset.renderedNodeCount, String(consumer.getDocument()?.nodes.length),
     'a normal split should retain the complete saved projection');
 
