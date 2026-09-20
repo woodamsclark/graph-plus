@@ -14,6 +14,7 @@ export class GraphInput {
   private lastMod = false;
   private lastCtrl = false;
   private lastShift = false;
+  private lastAlt = false;
   private spaceHeld = false;
   private longPressPointer: { readonly pointerId: number; readonly point: GraphScreenPointV1 } | null = null;
   private readonly activePointers = new Set<number>();
@@ -43,6 +44,7 @@ export class GraphInput {
     this.lastMod = false;
     this.lastCtrl = false;
     this.lastShift = false;
+    this.lastAlt = false;
     this.spaceHeld = false;
     this.options.events.clear();
   }
@@ -106,6 +108,7 @@ export class GraphInput {
       ctrl: event.ctrlKey,
       meta: event.metaKey,
       shift: event.shiftKey,
+      alt: event.altKey,
     });
     if (pointerKind !== 'mouse' && this.activePointers.size === 1) {
       this.startLongPress(event.pointerId, pointerKind, point);
@@ -125,6 +128,7 @@ export class GraphInput {
       this.lastMod = platformMod(event, this.options.platform.window);
       this.lastCtrl = event.ctrlKey;
       this.lastShift = event.shiftKey;
+      this.lastAlt = event.altKey;
     }
     if (this.longPressPointer?.pointerId === event.pointerId
       && distanceSquared(this.longPressPointer.point, point) > 36) {
@@ -159,11 +163,13 @@ export class GraphInput {
     const mod = platformMod(event, this.options.platform.window);
     const ctrl = event.ctrlKey;
     const shift = event.shiftKey;
-    if (mod === this.lastMod && ctrl === this.lastCtrl && shift === this.lastShift) return;
+    const alt = event.altKey;
+    if (mod === this.lastMod && ctrl === this.lastCtrl && shift === this.lastShift && alt === this.lastAlt) return;
     this.lastMod = mod;
     this.lastCtrl = ctrl;
     this.lastShift = shift;
-    if (!this.mouseInside && (mod || ctrl || shift)) return;
+    this.lastAlt = alt;
+    if (!this.mouseInside && (mod || ctrl || shift || alt)) return;
     this.push({
       ...this.base(),
       type: 'modifier-change',
@@ -171,6 +177,7 @@ export class GraphInput {
       mod,
       ctrl,
       shift,
+      alt,
       pointerInside: this.mouseInside,
     });
   };
@@ -191,6 +198,7 @@ export class GraphInput {
       ctrl: event.ctrlKey,
       meta: event.metaKey,
       shift: event.shiftKey,
+      alt: event.altKey,
     });
   };
 

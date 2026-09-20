@@ -5,6 +5,7 @@ export interface GraphTaggingResultV1 {
 /** Owns tag-set edits and held interaction state for transient presentation. */
 export class GraphTaggingController {
   private ctrlActive = false;
+  private optionRevealActive = false;
   private spaceActive = false;
 
   isCtrlHeld(): boolean {
@@ -16,7 +17,7 @@ export class GraphTaggingController {
   }
 
   isSelectionNeighborRevealActive(): boolean {
-    return this.ctrlActive;
+    return this.optionRevealActive;
   }
 
   updateSpace(active: boolean): boolean {
@@ -28,6 +29,12 @@ export class GraphTaggingController {
   updateCtrl(active: boolean): boolean {
     const changed = this.ctrlActive !== active;
     this.ctrlActive = active;
+    return changed;
+  }
+
+  updateOptionReveal(active: boolean): boolean {
+    const changed = this.optionRevealActive !== active;
+    this.optionRevealActive = active;
     return changed;
   }
 
@@ -52,6 +59,7 @@ export class GraphTaggingController {
 
   reset(): void {
     this.ctrlActive = false;
+    this.optionRevealActive = false;
     this.spaceActive = false;
   }
 }

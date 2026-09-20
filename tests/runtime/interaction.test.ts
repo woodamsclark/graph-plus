@@ -455,7 +455,7 @@ test('Ctrl builds an initial selection without hops and Centers + Fits only afte
   await session.dispose();
 });
 
-test('Space suspends selection dimming while Ctrl preserves selection and camera state', async () => {
+test('Space suspends selection dimming while Ctrl edits selection and Option reveals neighbors', async () => {
   const base = runtimeRegistration();
   const registration = {
     ...base,
@@ -478,11 +478,21 @@ test('Space suspends selection dimming while Ctrl preserves selection and camera
   modifier(value, 'keydown', true);
   value.platform.flushFrame();
   deepEqual(await session.exportViewState(), explore,
-    'holding Ctrl should change only transient neighbor presentation');
+    'holding Ctrl without clicking should preserve selection and camera state');
   modifier(value, 'keyup', false);
   value.platform.flushFrame();
   deepEqual(await session.exportViewState(), explore,
     'releasing Ctrl without edits should preserve selection and camera state');
+
+  value.styleAssignments.length = 0;
+  optionModifier(value, 'keydown', true);
+  value.platform.flushFrame();
+  deepEqual(await session.exportViewState(), explore,
+    'holding Option should change only transient neighbor presentation');
+  optionModifier(value, 'keyup', false);
+  value.platform.flushFrame();
+  deepEqual(await session.exportViewState(), explore,
+    'releasing Option should preserve selection and camera state');
 
   value.styleAssignments.length = 0;
   key(value, canvas, ' ');
@@ -1325,6 +1335,7 @@ function click(
     ctrlKey?: boolean;
     metaKey?: boolean;
     shiftKey?: boolean;
+    altKey?: boolean;
   },
 ): void {
   pointer(value, canvas, 'pointerdown', point.x, point.y, options);
@@ -1344,6 +1355,7 @@ function pointer(
     ctrlKey?: boolean;
     metaKey?: boolean;
     shiftKey?: boolean;
+    altKey?: boolean;
   },
 ): void {
   const event = new value.window.PointerEvent(type, {
@@ -1355,6 +1367,7 @@ function pointer(
     ctrlKey: options.ctrlKey ?? false,
     metaKey: options.metaKey ?? false,
     shiftKey: options.shiftKey ?? false,
+    altKey: options.altKey ?? false,
     bubbles: true,
     cancelable: true,
   });
@@ -1366,6 +1379,7 @@ function pointer(
   Object.defineProperty(event, 'ctrlKey', { value: options.ctrlKey ?? false });
   Object.defineProperty(event, 'metaKey', { value: options.metaKey ?? false });
   Object.defineProperty(event, 'shiftKey', { value: options.shiftKey ?? false });
+  Object.defineProperty(event, 'altKey', { value: options.altKey ?? false });
   canvas.dispatchEvent(event as unknown as Event);
 }
 
@@ -1390,6 +1404,19 @@ function shiftModifier(
   value.window.dispatchEvent(new value.window.KeyboardEvent(type, {
     key: 'Shift',
     shiftKey: shift,
+    bubbles: true,
+    cancelable: true,
+  }));
+}
+
+function optionModifier(
+  value: ReturnType<typeof runtimeHarness>,
+  type: 'keydown' | 'keyup',
+  alt: boolean,
+): void {
+  value.window.dispatchEvent(new value.window.KeyboardEvent(type, {
+    key: 'Alt',
+    altKey: alt,
     bubbles: true,
     cancelable: true,
   }));

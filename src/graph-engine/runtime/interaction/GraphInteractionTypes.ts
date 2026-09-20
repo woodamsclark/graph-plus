@@ -27,6 +27,7 @@ export type GraphInputEventV1 =
       readonly ctrl: boolean;
       readonly meta: boolean;
       readonly shift: boolean;
+      readonly alt: boolean;
     })
   | (GraphInputBaseV1 & {
       readonly type: 'pointer-up';
@@ -37,6 +38,7 @@ export type GraphInputEventV1 =
       readonly ctrl: boolean;
       readonly meta: boolean;
       readonly shift: boolean;
+      readonly alt: boolean;
     })
   | (GraphInputBaseV1 & {
       readonly type: 'pointer-move';
@@ -58,6 +60,7 @@ export type GraphInputEventV1 =
       readonly mod: boolean;
       readonly ctrl: boolean;
       readonly shift: boolean;
+      readonly alt: boolean;
       readonly pointerInside: boolean;
     })
   | (GraphInputBaseV1 & {

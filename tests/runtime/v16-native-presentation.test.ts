@@ -180,26 +180,35 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   deepEqual(suspended.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'tagged nodes should remain lit while selection presentation is suspended');
 
-  const ctrlRevealed = anima.contributeFrame({
+  const optionRevealed = anima.contributeFrame({
     ...state,
     selectionNeighborRevealActive: true,
     viewState: { ...state.viewState, selectedNodeIds: ['a'] },
   });
-  assert(ctrlRevealed?.nodeContributions, 'Ctrl neighbor reveal should contribute presentation');
-  equal(ctrlRevealed.nodeContributions.b.opacity, 1, 'Ctrl should undim a direct neighbor');
-  equal(ctrlRevealed.nodeContributions.d.opacity, 1, 'Ctrl should undim every direct neighbor');
-  equal(ctrlRevealed.nodeContributions.c.opacity, 0.2, 'Ctrl should leave non-neighbors dimmed');
-  deepEqual(ctrlRevealed.nodeContributions.b.finalColor, taggedA.nodeContributions.b.finalColor,
-    'Ctrl should undim a neighbor without lighting it as selected');
-  const updatedCtrlReveal = anima.contributeFrame({
+  assert(optionRevealed?.nodeContributions && optionRevealed.edgeContributions,
+    'Option neighbor reveal should contribute node and link presentation');
+  equal(optionRevealed.nodeContributions.b.opacity, 1, 'Option should undim a direct neighbor');
+  equal(optionRevealed.nodeContributions.d.opacity, 1, 'Option should undim every direct neighbor');
+  equal(optionRevealed.nodeContributions.c.opacity, 0.2, 'Option should leave non-neighbors dimmed');
+  equal(optionRevealed.edgeContributions['a-b'].opacity, 1,
+    'Option should reveal a link from the selection to a direct neighbor');
+  equal(optionRevealed.edgeContributions['a-d'].opacity, 1,
+    'Option should reveal every link from the selection to a direct neighbor');
+  equal(optionRevealed.edgeContributions['b-c'].opacity, 0.2,
+    'Option should leave links outside the revealed neighborhood dimmed');
+  deepEqual(optionRevealed.nodeContributions.b.finalColor, taggedA.nodeContributions.b.finalColor,
+    'Option should undim a neighbor without lighting it as selected');
+  deepEqual(optionRevealed.edgeContributions['a-b'].color, taggedA.edgeContributions['a-b'].color,
+    'Option should reveal a neighbor link without recoloring it as selected');
+  const updatedOptionReveal = anima.contributeFrame({
     ...state,
     selectionNeighborRevealActive: true,
     viewState: { ...state.viewState, selectedNodeIds: ['c'] },
   });
-  assert(updatedCtrlReveal?.nodeContributions, 'Ctrl reveal should recompute with selection edits');
-  equal(updatedCtrlReveal.nodeContributions.b.opacity, 1,
+  assert(updatedOptionReveal?.nodeContributions, 'Option reveal should recompute with selection edits');
+  equal(updatedOptionReveal.nodeContributions.b.opacity, 1,
     'the updated selection should reveal its direct neighbor');
-  equal(updatedCtrlReveal.nodeContributions.d.opacity, 0.2,
+  equal(updatedOptionReveal.nodeContributions.d.opacity, 0.2,
     'neighbors of the old selection should dim when no longer adjacent');
 
   const previewedA = anima.contributeFrame({

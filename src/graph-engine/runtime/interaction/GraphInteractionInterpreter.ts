@@ -178,6 +178,8 @@ export class GraphInteractionInterpreter {
     if (event.ctrl && !this.tagging.isCtrlHeld()) {
       this.ctrlSelectionBaseline = new Set(this.options.getSelectedNodeIds());
       this.tagging.updateCtrl(true);
+    }
+    if (event.alt && this.tagging.updateOptionReveal(true)) {
       this.command(event, { type: 'selection-presentation-changed' });
     }
     this.pointers.set(event.pointerId, { id: event.pointerId, kind: event.pointerKind, point: event.point });
@@ -373,8 +375,10 @@ export class GraphInteractionInterpreter {
     if (!wasCtrlHeld && event.ctrl) {
       this.ctrlSelectionBaseline = new Set(this.options.getSelectedNodeIds());
     }
-    const presentationChanged = this.tagging.updateCtrl(event.ctrl);
-    if (presentationChanged) this.command(event, { type: 'selection-presentation-changed' });
+    this.tagging.updateCtrl(event.ctrl);
+    if (this.tagging.updateOptionReveal(event.alt)) {
+      this.command(event, { type: 'selection-presentation-changed' });
+    }
     if (wasCtrlHeld && !event.ctrl) {
       const baseline = this.ctrlSelectionBaseline ?? new Set<string>();
       const selectedNodeIds = this.options.getSelectedNodeIds();

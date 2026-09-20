@@ -838,10 +838,15 @@ contain that same target. Angle, orientation, and up vector are preserved. The s
 stationary gesture on a node requests the node context menu instead.
 
 Ctrl is the selection modifier. While held, primary node clicks add or remove nodes
-without moving the camera and direct neighbors of the current selection are undimmed.
-Releasing Ctrl restores normal dimming. If Ctrl selection began empty, release performs
-Center + Fit on the result; if a selection already existed, release leaves the camera
-unchanged. Shift is not a selection modifier.
+without moving the camera. If Ctrl selection began empty, release performs Center + Fit
+on the result; if a selection already existed, release leaves the camera unchanged.
+Shift is not a selection modifier.
+
+Option is the transient neighbor-reveal modifier. While held, direct neighbors of the
+current selection and the links connecting those neighbors to the selection are
+undimmed. The reveal follows additions and removals from the selection. Releasing
+Option restores normal selection dimming without changing the selection, focus point,
+or camera.
 
 Graph+-specific actions such as opening an Obsidian file or using the current note as
 a Form root remain in Graph+.

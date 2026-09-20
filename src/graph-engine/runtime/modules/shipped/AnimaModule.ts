@@ -79,6 +79,12 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         ? new Set([...taggedIds, ...exploreHoverIds])
         : new Set([...taggedIds, ...hoveredNeighborhood]);
     const pathEdgePairs = edgePairs(exploreHoverPath);
+    const revealedNeighborLinkPairs = state.selectionNeighborRevealActive === true
+      ? new Set(visibleEdges
+        .filter((edge) => (selectedIds.has(edge.sourceId) && revealedNeighborIds.has(edge.targetId))
+          || (selectedIds.has(edge.targetId) && revealedNeighborIds.has(edge.sourceId)))
+        .map((edge) => unorderedPair(edge.sourceId, edge.targetId)))
+      : new Set<string>();
     const edgeIsLit = (sourceId: string, targetId: string): boolean => {
       if (transientId !== undefined) return sourceId === transientId || targetId === transientId;
       const joinsTaggedStructure = taggedIds.has(sourceId) && taggedIds.has(targetId);
@@ -140,7 +146,8 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const edgeContributions = Object.fromEntries(visibleEdges.map((edge) => {
       const prior = state.edgeContributions[edge.id];
       const lit = edgeIsLit(edge.sourceId, edge.targetId);
-      const visible = visibleIds === undefined || lit;
+      const revealed = revealedNeighborLinkPairs.has(unorderedPair(edge.sourceId, edge.targetId));
+      const visible = visibleIds === undefined || lit || revealed;
       return [edge.id, {
         ...prior,
         thickness: positive(prior?.baseThicknessScale, 1) * positive(prior?.thicknessScale, 1),
