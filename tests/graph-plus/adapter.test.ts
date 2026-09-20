@@ -405,7 +405,7 @@ test('V1.7 layout reset replaces the live session while preserving document and 
   await core.dispose();
 });
 
-test('V1.7.1 global active-note following focuses without changing the full projection', async () => {
+test('V1.7.1 global active-note following enters local Focus without changing the full projection', async () => {
   const fixture = snapshot();
   const runtime = runtimeHarness({ registration: graphPlusRegistration });
   const core = new GraphEngineProviderCoreV1({
@@ -435,12 +435,15 @@ test('V1.7.1 global active-note following focuses without changing the full proj
   equal(await consumer.followActiveNode(alphaId), true, 'a main-split graph should follow the active note');
   equal((await consumer.getSession()?.exportViewState())?.focusedNodeId, alphaId,
     'active-note following should use ordinary graph focus state');
-  deepEqual((await session.exportViewState()).camera, cameraBeforeFollow,
-    'programmatic focus should preserve the camera');
+  const followed = await session.exportViewState();
+  deepEqual(followed.camera.target, followed.positions[alphaId],
+    'programmatic Focus should center the active note');
+  assert(JSON.stringify(followed.camera) !== JSON.stringify(cameraBeforeFollow),
+    'programmatic Focus should fit the active note neighborhood');
   await session.focusNode(null);
   const state = await session.exportViewState();
-  deepEqual(state.selectedNodeIds, [alphaId],
-    'programmatic active-note following should retain its selected node after node focus clears');
+  deepEqual(state.selectedNodeIds, [],
+    'exiting a one-node Focus should return directly to Overview');
   const cameraBeforeClick = state.camera;
   const camera = new GraphCameraController(state.camera, state.dimensions);
   camera.setViewport(640, 360);
@@ -450,10 +453,10 @@ test('V1.7.1 global active-note following focuses without changing the full proj
   await Promise.resolve();
   const selected = await session.exportViewState();
   deepEqual(selected.selectedNodeIds, [alphaId], 'graph input should create an initial selection');
-  equal(selected.focusedNodeId, undefined,
-    'graph input should not create the deferred node-specific focus state');
-  deepEqual(selected.camera, cameraBeforeClick,
-    'clicking the already-selected active note should activate without reframing');
+  equal(selected.focusedNodeId, alphaId,
+    'an initial one-node selection should shortcut directly to Focus');
+  assert(JSON.stringify(selected.camera) !== JSON.stringify(cameraBeforeClick),
+    'entering Focus should refit the active note neighborhood');
   await session.resetCamera();
   await Promise.resolve();
   deepEqual((await session.exportViewState()).selectedNodeIds, [alphaId],
@@ -534,7 +537,10 @@ test('V1.7.1 Local Graph+ owns an ephemeral rooted document, layout, and depth',
   equal(local?.nodes[0]?.id, betaId, 'a new root should receive a fresh local document identity and origin');
   equal(state?.focusedNodeId, betaId, 'focus should transfer with the active note');
   equal(state?.pinnedNodeIds.includes(alphaId), false, 'the prior local root anchor must not leak across documents');
-  deepEqual(state?.camera, cameraBeforeFollow, 'local active-note following should preserve the camera');
+  assert(JSON.stringify(state?.camera) !== JSON.stringify(cameraBeforeFollow),
+    'local active-note following should refit the new root neighborhood');
+  deepEqual(state?.camera.target, state?.positions[betaId],
+    'local active-note following should center the new root');
   await session.resetCamera();
   await Promise.resolve();
   equal((await session.exportViewState()).focusedNodeId, betaId,

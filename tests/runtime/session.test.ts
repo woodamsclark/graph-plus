@@ -157,7 +157,7 @@ test('R-SHELL-02 drives documents, events, projection filters, and render filter
   await session.dispose();
 });
 
-test('R-SHELL-03 round-trips consumer-owned view state and supports camera commands', async () => {
+test('R-SHELL-03 restores layout data into a fresh Overview and supports camera commands', async () => {
   const first = harness();
   const session = await first.create();
   await session.setSelection(['b', 'missing', 'b']);
@@ -182,11 +182,15 @@ test('R-SHELL-03 round-trips consumer-owned view state and supports camera comma
   const second = harness();
   const restored = await second.create(JSON.parse(JSON.stringify(saved)));
   const next = await restored.exportViewState();
-  deepEqual(next, saved, 'a generic consumer should be able to persist and restore complete view state');
-  equal(surface(second.container).dataset.renderedNodeCount, '2', 'restored filter should affect the mounted view');
+  deepEqual(next.positions, saved.positions, 'a reopened graph should preserve saved node positions');
+  deepEqual(next.pinnedNodeIds, saved.pinnedNodeIds, 'a reopened graph should preserve explicit pins');
+  deepEqual(next.selectedNodeIds, [], 'a reopened graph should start with no selection');
+  equal(next.focusedNodeId, undefined, 'a reopened graph should start in Overview without Focus');
+  deepEqual(next.activeFilters, {}, 'a reopened graph should not restore interaction filters');
+  equal(surface(second.container).dataset.renderedNodeCount, '3', 'fresh Overview should render the complete graph');
   await restored.focusNode(null);
   const visibleState = await restored.exportViewState();
-  const expectedTarget = midpoint(visibleState.positions.a, visibleState.positions.c);
+  const expectedTarget = averageVector(Object.values(visibleState.positions));
   await restored.resetCamera();
   deepEqual((await restored.exportViewState()).camera.target, expectedTarget,
     'an unfocused reset should restore the profile angle and fit the complete visible graph');
@@ -212,6 +216,17 @@ function midpoint(
     y: (left.y + right.y) / 2,
     z: (left.z + right.z) / 2,
   };
+}
+
+function averageVector(
+  values: readonly { readonly x: number; readonly y: number; readonly z: number }[],
+): { readonly x: number; readonly y: number; readonly z: number } {
+  const total = values.reduce((sum, value) => ({
+    x: sum.x + value.x,
+    y: sum.y + value.y,
+    z: sum.z + value.z,
+  }), { x: 0, y: 0, z: 0 });
+  return { x: total.x / values.length, y: total.y / values.length, z: total.z / values.length };
 }
 
 test('restored positions outside safe numerical bounds regenerate before rendering', async () => {
@@ -549,7 +564,7 @@ test('R-DIM-03 a valid session dimension override remains isolated from profile 
   await session.dispose();
 });
 
-test('R-MOUNT-07 restores a permitted saved view into the profile active dimension', async () => {
+test('R-MOUNT-07 restores saved layout into a fresh Overview in the active dimension', async () => {
   const first = harness();
   const firstSession = await first.create();
   await firstSession.setSelection(['b']);
@@ -564,8 +579,8 @@ test('R-MOUNT-07 restores a permitted saved view into the profile active dimensi
   const state = await restored.exportViewState();
   equal(state.dimensions, '3d', 'restore should convert a saved allowed dimension into the active profile dimension');
   equal(state.camera.projection, 'perspective', 'converted restore should use the destination projection');
-  deepEqual(state.selectedNodeIds, ['b'], 'restore conversion should preserve selection');
-  equal(state.focusedNodeId, 'a', 'restore conversion should preserve focus');
+  deepEqual(state.selectedNodeIds, [], 'restore conversion should clear selection for fresh Overview');
+  equal(state.focusedNodeId, undefined, 'restore conversion should clear Focus');
   deepEqual(state.pinnedNodeIds, ['b'], 'restore conversion should preserve pins');
   await restored.dispose();
 });

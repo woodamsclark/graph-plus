@@ -100,7 +100,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
 
   const taggedA = anima.contributeFrame({
     ...state,
-    viewState: { ...state.viewState, selectedNodeIds: ['a'], focusedNodeId: 'a' },
+    viewState: { ...state.viewState, selectedNodeIds: ['a'] },
   });
   assert(taggedA?.nodeContributions && taggedA.edgeContributions, 'Explore presentation should resolve tagged nodes');
   equal(taggedA.nodeContributions.a.opacity, 1, 'the tagged node should remain fully visible');
@@ -120,7 +120,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   const exploredHover = anima.contributeFrame({
     ...state,
     hoveredNodeId: 'c',
-    viewState: { ...state.viewState, selectedNodeIds: ['a'], focusedNodeId: 'a' },
+    viewState: { ...state.viewState, selectedNodeIds: ['a'] },
   });
   assert(exploredHover?.nodeContributions && exploredHover.edgeContributions,
     'Explore hover should resolve a path back to the tagged structure');
@@ -154,7 +154,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   const hoveredTag = anima.contributeFrame({
     ...state,
     hoveredNodeId: 'a',
-    viewState: { ...state.viewState, selectedNodeIds: ['a'], focusedNodeId: 'a' },
+    viewState: { ...state.viewState, selectedNodeIds: ['a'] },
   });
   assert(hoveredTag?.nodeContributions && hoveredTag.edgeContributions,
     'hovering a tagged node should resolve its immediate neighborhood');
@@ -219,12 +219,12 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     viewState: { ...state.viewState, selectedNodeIds: ['c'], focusedNodeId: 'c' },
   });
   assert(previewedA?.edgeContributions, 'semantic preview should produce Anima presentation');
-  equal(previewedA.edgeContributions['a-b'].opacity, 1,
-    'Anima preview should own the active neighborhood independently from focus and ordinary hover');
+  equal(previewedA.edgeContributions['a-b'].opacity, 0,
+    'Focus should hide links outside the focused neighborhood');
   equal(previewedA.edgeContributions['b-c'].opacity, 0.2,
-    'the tagged structure should yield while a semantic preview target is active');
-  equal(previewedA.edgeContributions['a-d'].opacity, 1,
-    'semantic preview should preserve its own incident links');
+    'an unselected focused-neighborhood link should remain gray');
+  equal(previewedA.edgeContributions['a-d'].opacity, 0,
+    'Focus should ignore unrelated preview links outside its local rendering scope');
 
   const cleared = anima.contributeFrame(state);
   assert(cleared?.edgeContributions, 'cleared focus should still resolve baseline edge presentation');
@@ -250,10 +250,10 @@ test('V2 adaptive labels remain continuously eligible and accept interaction req
   equal(adaptive.nodeContributions.a.showLabel, true, 'the tagged node label should remain eligible');
   equal(adaptive.nodeContributions.b.showLabel, true,
     'adaptive policy should continue managing a neighbor label independently of selection');
-  equal(adaptive.nodeContributions.c.showLabel, true,
-    'adaptive policy should continue managing unrelated labels independently of selection');
-  equal(adaptive.nodeContributions.c.labelOpacity, 1,
-    'label policy should own label opacity instead of inheriting graph dimming');
+  equal(adaptive.nodeContributions.c.showLabel, false,
+    'Focus should suppress labels outside the local node, its neighbors, and the constellation');
+  equal(adaptive.nodeContributions.c.labelOpacity, 0,
+    'hidden Focus labels should be fully transparent');
 
   const inspected = anima.contributeFrame({
     ...state,
@@ -273,7 +273,8 @@ test('V2 adaptive labels remain continuously eligible and accept interaction req
     presentationPolicy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'all' },
     viewState: { ...state.viewState, selectedNodeIds: ['a'], focusedNodeId: 'a' },
   });
-  equal(all?.nodeContributions?.c.showLabel, true, 'All labels should remain an explicit override');
+  equal(all?.nodeContributions?.c.showLabel, false,
+    'Focus rendering scope should remain authoritative even when label mode is All');
 });
 
 test('V1.6 Anima owns live above and below label placement', () => {

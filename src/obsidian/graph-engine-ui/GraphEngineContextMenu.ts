@@ -43,7 +43,7 @@ export class GraphEngineContextMenuV1 implements Disposable {
     for (const action of others) this.addConsumerAction(menu, action.id, action.label, action.icon, intent.nodeId);
     const coreVisible = Object.values(CORE).some((id) => graphCoreActionIsShownV1(this.policy, id));
     if ((primary || others.length) && coreVisible) menu.addSeparator();
-    if (graphCoreActionIsShownV1(this.policy, CORE.focusNode)) {
+    if (viewState.selectedNodeIds.length > 0 && graphCoreActionIsShownV1(this.policy, CORE.focusNode)) {
       menu.addItem((item) => item.setTitle('Focus node').setIcon('scan-eye').onClick(() => {
         void this.context.session.focusNode(intent.nodeId);
       }));

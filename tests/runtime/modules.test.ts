@@ -20,7 +20,7 @@ import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import { runtimeCanvas, runtimeHarness, runtimeRegistration, runtimeSurface } from '../support/runtimeHarness.ts';
 
-test('R-MODULE-01 keeps optional Anima inert and round-trips its empty state', async () => {
+test('R-MODULE-01 keeps optional Anima inert and restores explicit state only within a live session', async () => {
   const value = runtimeHarness();
   value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
     modules: { anima: { enabled: true } },
@@ -39,9 +39,9 @@ test('R-MODULE-01 keeps optional Anima inert and round-trips its empty state', a
   const recovered = await value.create(invalidState);
   const errors: GraphSessionErrorV1[] = [];
   recovered.onError((error) => errors.push(error));
-  equal(errors[0]?.moduleId, 'anima', 'invalid optional module state should report the affected module');
-  equal(errors[0]?.recoverable, true, 'invalid optional state should disable only that module');
-  equal((await recovered.exportViewState()).moduleState.anima, undefined, 'rejected optional state should not persist into the next save');
+  equal(errors.length, 0, 'opening a new session should ignore persisted interaction and module state');
+  equal((await recovered.exportViewState()).moduleState.anima, null,
+    'the fresh session should export the active module default instead of restored module state');
   await recovered.dispose();
 });
 

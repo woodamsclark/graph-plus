@@ -112,6 +112,7 @@ interface GraphCommandBaseV1 {
 
 export type GraphRuntimeCommandV1 =
   | (GraphCommandBaseV1 & { readonly type: 'pan-by'; readonly deltaX: number; readonly deltaY: number })
+  | (GraphCommandBaseV1 & { readonly type: 'elastic-pan-by'; readonly deltaX: number; readonly deltaY: number })
   | (GraphCommandBaseV1 & { readonly type: 'orbit-by'; readonly deltaX: number; readonly deltaY: number })
   | (GraphCommandBaseV1 & { readonly type: 'zoom-by'; readonly deltaY: number; readonly anchor?: GraphScreenPointV1 })
   | (GraphCommandBaseV1 & { readonly type: 'center-camera' })
@@ -124,6 +125,7 @@ export type GraphRuntimeCommandV1 =
     })
   | (GraphCommandBaseV1 & { readonly type: 'set-selection'; readonly nodeIds: readonly string[] })
   | (GraphCommandBaseV1 & { readonly type: 'set-focus'; readonly nodeId?: string })
+  | (GraphCommandBaseV1 & { readonly type: 'enter-focus'; readonly nodeId: string })
   | (GraphCommandBaseV1 & { readonly type: 'selection-presentation-changed' })
   | (GraphCommandBaseV1 & {
       readonly type: 'activate-node';

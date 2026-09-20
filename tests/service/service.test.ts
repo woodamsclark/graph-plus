@@ -244,7 +244,10 @@ test('S-CONNECT-10 provider leases route registered actions into their mounted s
   const point = await projectedNodePoint(session, 'a');
   dispatchClick(value.runtime.window, canvas, point, 201);
   value.runtime.platform.flushFrame();
+  value.runtime.platform.advanceTime(400);
   dispatchClick(value.runtime.window, canvas, await projectedNodePoint(session, 'a'), 202);
+  value.runtime.platform.flushFrame();
+  dispatchClick(value.runtime.window, canvas, await projectedNodePoint(session, 'a'), 203);
   value.runtime.platform.flushFrame();
   equal(runs, 1, 'a session created through the lease should resolve that consumer action');
   await result.lease.release();

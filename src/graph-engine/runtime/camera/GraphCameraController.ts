@@ -227,19 +227,18 @@ export class GraphCameraController {
     minimumRadius = 0,
   ): void {
     if (!positions.length || this.viewport.width <= 0 || this.viewport.height <= 0) return;
-    const bounds = graphBounds(positions);
-    const target = center ? { ...center } : {
-      x: (bounds.min.x + bounds.max.x) / 2,
-      y: (bounds.min.y + bounds.max.y) / 2,
-      z: (bounds.min.z + bounds.max.z) / 2,
-    };
+    const target = center ? { ...center } : centroid(positions);
     if (this.state.projection === 'orthographic') {
-      const width = Math.max(1, minimumRadius * 2, center
-        ? 2 * Math.max(...positions.map((position) => Math.abs(position.x - target.x)))
-        : bounds.max.x - bounds.min.x);
-      const height = Math.max(1, minimumRadius * 2, center
-        ? 2 * Math.max(...positions.map((position) => Math.abs(position.y - target.y)))
-        : bounds.max.y - bounds.min.y);
+      const width = Math.max(
+        1,
+        minimumRadius * 2,
+        2 * Math.max(...positions.map((position) => Math.abs(position.x - target.x))),
+      );
+      const height = Math.max(
+        1,
+        minimumRadius * 2,
+        2 * Math.max(...positions.map((position) => Math.abs(position.y - target.y))),
+      );
       let zoom = clamp(Math.min(
         Math.max(1, this.viewport.width - paddingPx * 2) / width,
         Math.max(1, this.viewport.height - paddingPx * 2) / height,
@@ -265,12 +264,61 @@ export class GraphCameraController {
       position: add(target, scaleVector(backwards, distanceForFit)),
     };
   }
+
+  /** Prevent zooming farther out than a focus-centered world-space radius. */
+  constrainZoomOutToRadius(
+    radius: number,
+    paddingPx = 48,
+    initialFocusCamera?: GraphCameraStateV1,
+  ): void {
+    if (!Number.isFinite(radius) || radius < 0 || this.viewport.width <= 0 || this.viewport.height <= 0) return;
+    const safeRadius = Math.max(1, radius);
+    if (this.state.projection === 'orthographic') {
+      const radiusMinimumZoom = clamp(Math.min(
+        Math.max(1, this.viewport.width - paddingPx * 2) / (safeRadius * 2),
+        Math.max(1, this.viewport.height - paddingPx * 2) / (safeRadius * 2),
+      ), MIN_ZOOM, MAX_ZOOM);
+      const minimumZoom = initialFocusCamera?.projection === 'orthographic'
+        ? Math.min(radiusMinimumZoom, initialFocusCamera.zoom)
+        : radiusMinimumZoom;
+      if (this.state.zoom < minimumZoom) this.state = { ...this.state, zoom: minimumZoom };
+      return;
+    }
+    const radiusMaximumDistance = Math.max(
+      MIN_PERSPECTIVE_DISTANCE,
+      safeRadius * 2.4 * Math.max(MIN_ZOOM, this.state.zoom),
+    );
+    const initialDistance = initialFocusCamera?.projection === 'perspective'
+      ? distance(initialFocusCamera.position, initialFocusCamera.target)
+      : 0;
+    const maximumDistance = Math.max(radiusMaximumDistance, initialDistance);
+    const offset = subtract(this.state.position, this.state.target);
+    const currentDistance = Math.max(0.0001, length(offset));
+    if (currentDistance <= maximumDistance) return;
+    this.state = {
+      ...this.state,
+      position: add(this.state.target, scaleVector(offset, maximumDistance / currentDistance)),
+    };
+  }
 }
 
 interface CameraBasis {
   readonly right: Vec3;
   readonly up: Vec3;
   readonly forward: Vec3;
+}
+
+function centroid(positions: readonly Vec3[]): Vec3 {
+  const total = positions.reduce((sum, position) => ({
+    x: sum.x + position.x,
+    y: sum.y + position.y,
+    z: sum.z + position.z,
+  }), { x: 0, y: 0, z: 0 });
+  return {
+    x: total.x / positions.length,
+    y: total.y / positions.length,
+    z: total.z / positions.length,
+  };
 }
 
 function cameraBasis(state: GraphCameraStateV1): CameraBasis {
@@ -280,20 +328,6 @@ function cameraBasis(state: GraphCameraStateV1): CameraBasis {
   right = normalize(right);
   const up = normalize(cross(right, forward));
   return { right, up, forward };
-}
-
-function graphBounds(positions: readonly Vec3[]): { min: Vec3; max: Vec3 } {
-  const min = { ...positions[0] };
-  const max = { ...positions[0] };
-  for (const position of positions.slice(1)) {
-    min.x = Math.min(min.x, position.x);
-    min.y = Math.min(min.y, position.y);
-    min.z = Math.min(min.z, position.z);
-    max.x = Math.max(max.x, position.x);
-    max.y = Math.max(max.y, position.y);
-    max.z = Math.max(max.z, position.z);
-  }
-  return { min, max };
 }
 
 function rotateAroundAxis(vector: Vec3, axis: Vec3, angle: number): Vec3 {

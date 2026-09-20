@@ -798,60 +798,24 @@ Generic engine commands include operations such as:
 
 The reviewed input matrix is checked in as
 [Graph+ UI Interaction Matrix](graph-plus-ui-interaction-matrix.xlsx). It is the
-normative product-level input table; this section describes the matching engine model.
+normative product-level input table. The matching state, transition, camera, rendering,
+and persistence rules are defined in the
+[Graph Engine Interaction State Contract](graph-engine-interaction-state-contract.md).
 
-Selection, the calculated selection centroid, and camera focus are distinct:
+The internal fixed policy has three states: Overview (whole graph), Explore (selected
+constellation), and Focus (one local node). A one-node initial selection shortcuts to
+Focus. Focus does not imply selection membership, but it is valid only while some
+selection remains. Background activation exits Focus to Explore when two or more nodes
+remain selected, or clears a one-node selection and returns to Overview.
 
-- **selection** is the zero-or-more-node set explicitly chosen by the user or consumer;
-  it drives selected-node presentation and `selection-changed` intents;
-- the **selection centroid** is recalculated whenever membership or selected-node
-  positions change; and
-- the camera's **stored focus point** is its target. Initial selection sets it to the
-  selection centroid. Later membership edits recalculate the centroid without moving
-  the stored focus point. Pan changes their offset. Selected-node motion translates
-  the focus point by the same centroid delta.
+Center + Fit uses the arithmetic centroid for graph and selection targets and the
+focused node for a local target. It preserves camera angle and up vector. Explore
+follows selection-centroid motion; Focus follows focused-node motion. Reopen restores
+positions and pins only, then starts in Overview and fits the complete graph.
 
-`focusedNodeId` remains a public, optional node-specific state for programmatic and
-future interaction design. Ordinary pointer and touch selection does not assign it.
-Node-specific user focus is deferred until its interaction is separately formalized.
-
-Desktop primary background drag pans in both dimensions. Secondary drag orbits in
-`3d` and pans in `2d`; neither clears selection. Unmodified trackpad translation pans
-in `2d`. In `3d`, it pans in Overview and rotates in Explore. Trackpad pinch and
-Ctrl-wheel zoom around the input position.
-
-Mobile navigation is selection-sensitive in `3d`:
-
-- one-finger background drag pans with no selection and rotates when a selection exists;
-- one-finger drag moves a selected node; beginning over an unselected node while a
-  selection exists pans instead;
-- two-finger translation pans in `2d`;
-- in `3d` Overview, two-finger translation rotates;
-- in `3d` Explore, two-finger translation pans the camera-focus offset while retaining
-  selection; and
-- pinch changes zoom and takes precedence once its scale threshold is crossed.
-
-A stationary background right-click or long press performs Center + Fit. Center sets
-the camera target to the arithmetic centroid of the selected nodes, or of the complete
-visible graph when nothing is selected. Fit then adjusts zoom or camera distance to
-contain that same target. Angle, orientation, and up vector are preserved. The same
-stationary gesture on a node requests the node context menu instead.
-
-Ctrl is the selection modifier. While held, primary node clicks add or remove nodes
-without moving the camera. If Ctrl selection began empty, release performs Center + Fit
-on the result; if a selection already existed, release leaves the camera unchanged.
-Shift is not a selection modifier.
-
-Option is the transient neighbor-reveal modifier. While held, direct neighbors of the
-current selection and the links connecting those neighbors to the selection are
-highlighted with the same treatment used when the selected node is hovered. The reveal
-follows additions and removals from the selection. Releasing
-Option restores normal selection dimming without changing the selection, focus point,
-or camera.
-
-Tag nodes use the same selection semantics as ordinary nodes. Clicking a tag selects
-only that tag; its region members remain topology and layout structure and are not
-implicitly added to the selection or promoted to selected-label presentation.
+Ctrl edits selection. Option temporarily reveals direct selection neighbors and their
+connecting links. Cmd-wheel is not a zoom mechanic. Tag nodes use the same selection,
+Focus, label, and presentation rules as ordinary nodes.
 
 Graph+-specific actions such as opening an Obsidian file or using the current note as
 a Form root remain in Graph+.
@@ -864,9 +828,8 @@ safe-area-aware menu and supplies applicable generic actions such as `Mind map f
 here` and `Pin node` or `Unpin node`. Opening the menu does not itself change selection
 or focus.
 
-`Focus node` is reserved for the deferred node-specific focus design and is not part of
-the current default interaction contract. Current menu behavior may expose the other
-applicable actions without offering node focus.
+Focus is a core interaction state. Opening a context menu does not enter it; an explicit
+Focus action may do so through the same session operation used by ordinary interaction.
 
 The consumer may hide individual core actions and may contribute additional
 domain-specific actions. Graph+ can contribute `Open note` or `Open tag`; PatternSmith
@@ -920,22 +883,20 @@ profile stores only ordered action IDs. Duplicate IDs, unknown IDs, action excep
 and stale document revisions fail or no-op locally without corrupting the session or
 another consumer.
 
-Node primary-click behavior is:
+Node primary-click behavior is stateful:
 
-1. A stationary primary click with no existing selection selects the node and performs
-   Center + Fit on the result.
-2. A stationary primary click on an unselected node in Explore adds it and its
-   shortest-path bridge without moving the camera.
-3. A later stationary primary click on an already-selected node resolves the first
-   available action in `activationActionIds` and invokes it once.
-4. The resolved activation action is also the first item in that node's context menu.
-5. Enter invokes that action only when exactly one node is selected.
-6. If no registered activation action is available, the later click and Enter do
-   nothing; they never fall through to a generic view action.
+1. An initial stationary click selects one node and enters local Focus on it.
+2. In Explore, clicking a selected node enters Focus without changing selection.
+3. In Focus, clicking another locally visible node moves Focus without changing
+   selection.
+4. A single click on the focused node toggles only that node's selection membership.
+5. A double-click invokes the first available `activationActionIds` action only when
+   that node was already focused before the first click.
+6. Enter invokes that action only when exactly one node is selected.
 7. Crossing a drag or camera-gesture threshold cancels click activation.
 
-This is selection-state activation, not operating-system double-click timing. Graph+ may
-register `open-node` as its activation action; PatternSmith may register `start-drill`.
+Graph+ may register `open-node` as its activation action; PatternSmith may register
+`start-drill`.
 Their callbacks own those domain behaviors. The engine context menu places the resolved
 activation action first, then other applicable consumer `contextActionIds`, then its
 applicable core view actions. Opening the menu still does not change focus or selection.
@@ -1499,7 +1460,7 @@ force-layout: required
 filtering: required
 form: optional
 anima: optional, disabled by default in V1
-unmodified wheel: pan in Overview; rotate in Explore
+unmodified wheel: pan in Overview; rotate in Explore and Focus
 ```
 
 ### 18.3 PatternSmith

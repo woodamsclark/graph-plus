@@ -9,6 +9,7 @@ import type {
   GraphScreenPointV1,
   InputGraphIdentityV1,
 } from './GraphInteractionTypes.ts';
+import { graphInteractionPolicyV1, type GraphUxStateV1 } from './GraphInteractionStatePolicy.ts';
 
 interface PointerRecord {
   readonly id: number;
@@ -16,9 +17,11 @@ interface PointerRecord {
   point: GraphScreenPointV1;
 }
 
-interface PendingTouchTap {
+interface PendingTap {
   readonly event: Extract<GraphInputEventV1, { type: 'pointer-up' }>;
   readonly hit: GraphHitV1 | null;
+  readonly focusedNodeId?: string;
+  readonly deferred: boolean;
 }
 
 type SinglePointerMode =
@@ -32,11 +35,13 @@ type SinglePointerMode =
       lastPoint: GraphScreenPointV1;
       readonly hit: GraphHitV1 | null;
       readonly precisionZoomCandidate: boolean;
+      readonly doubleTapSource?: PendingTap;
     }
   | {
-      readonly kind: 'pan' | 'orbit';
+      readonly kind: 'pan' | 'elastic-pan' | 'orbit' | 'radial-zoom';
       readonly pointerId: number;
       lastPoint: GraphScreenPointV1;
+      lastRadius?: number;
     }
   | {
       readonly kind: 'drag';
@@ -50,9 +55,8 @@ type SinglePointerMode =
       readonly pointerId: number;
       readonly anchor: GraphScreenPointV1;
       lastPoint: GraphScreenPointV1;
+      lastRadius?: number;
     };
-
-type GraphInteractionViewMode = 'overview' | 'explore';
 
 interface TouchGesture {
   readonly pointerA: number;
@@ -70,7 +74,7 @@ interface TouchGesture {
 interface TrackpadPinchMomentum {
   readonly identity: InputGraphIdentityV1;
   readonly timestamp: number;
-  readonly anchor: GraphScreenPointV1;
+  readonly anchor?: GraphScreenPointV1;
   velocity: number;
 }
 
@@ -87,8 +91,8 @@ export class GraphInteractionInterpreter {
   private touchGesture: TouchGesture | null = null;
   private dimensions: GraphDimensionsV1;
   private pendingHover: Extract<GraphInputEventV1, { type: 'pointer-move' }> | null = null;
-  private pendingTouchTap: PendingTouchTap | null = null;
-  private pendingTouchTapTimer: number | null = null;
+  private pendingTap: PendingTap | null = null;
+  private pendingTapTimer: number | null = null;
   private trackpadPinchMomentum: TrackpadPinchMomentum | null = null;
   private trackpadPinchMomentumTimer: number | null = null;
   private readonly tagging = new GraphTaggingController();
@@ -100,6 +104,8 @@ export class GraphInteractionInterpreter {
     readonly commands: BufferedQueue<GraphRuntimeCommandV1>;
     readonly hitTest: (point: GraphScreenPointV1, pointerKind?: 'mouse' | 'touch' | 'pen') => GraphHitV1 | null;
     readonly getSelectedNodeIds: () => readonly string[];
+    readonly getFocusedNodeId: () => string | undefined;
+    readonly getFocusedNodeScreenPoint: () => GraphScreenPointV1 | undefined;
     readonly getNodeSelection: (nodeId: string) => readonly string[];
     readonly getSelectionBridge: (nodeId: string, selectedNodeIds: readonly string[]) => readonly string[];
     readonly getViewport: () => { readonly width: number; readonly height: number };
@@ -148,7 +154,7 @@ export class GraphInteractionInterpreter {
   }
 
   reset(): void {
-    this.clearPendingTouchTap();
+    this.clearPendingTap();
     this.cancelTrackpadPinchMomentum();
     this.pointers.clear();
     this.mode = { kind: 'idle' };
@@ -184,19 +190,20 @@ export class GraphInteractionInterpreter {
     }
     this.pointers.set(event.pointerId, { id: event.pointerId, kind: event.pointerKind, point: event.point });
     if (this.pointers.size === 2) {
-      this.clearPendingTouchTap();
+      this.clearPendingTap();
       this.mode = { kind: 'idle' };
       this.touchGesture = this.readTouchGesture();
       return;
     }
-    const precisionZoomCandidate = event.pointerKind === 'touch'
-      && event.button === 0
-      && this.matchesPendingTouchTap(event);
-    if (event.pointerKind === 'touch' && this.pendingTouchTap && !precisionZoomCandidate) {
-      this.resolvePendingTouchTap();
+    const hit = this.options.hitTest(event.point, event.pointerKind);
+    const doubleTapSource = event.button === 0 ? this.matchingPendingTap(event, hit) : undefined;
+    const effectiveHit = doubleTapSource?.hit && hit === null ? doubleTapSource.hit : hit;
+    const precisionZoomCandidate = event.pointerKind === 'touch' && doubleTapSource !== undefined;
+    if (this.pendingTap && !doubleTapSource) {
+      this.resolvePendingTap();
     }
-    if (precisionZoomCandidate) {
-      this.clearPendingTouchTap();
+    if (doubleTapSource) {
+      this.clearPendingTap();
       this.options.cancelLongPress();
     }
     this.mode = {
@@ -206,8 +213,9 @@ export class GraphInteractionInterpreter {
       button: event.button,
       downPoint: event.point,
       lastPoint: event.point,
-      hit: this.options.hitTest(event.point, event.pointerKind),
+      hit: effectiveHit,
       precisionZoomCandidate,
+      ...(doubleTapSource ? { doubleTapSource } : {}),
     };
   }
 
@@ -223,24 +231,43 @@ export class GraphInteractionInterpreter {
       const threshold = this.options.dragThresholdPx ?? 6;
       if (distanceSquared(this.mode.downPoint, event.point) <= threshold ** 2) return;
       if (this.mode.precisionZoomCandidate) {
-        const deltaY = event.point.y - this.mode.lastPoint.y;
-        if (Math.abs(deltaY) > 0) this.command(event, {
-          type: 'zoom-by', deltaY: -deltaY * 3, anchor: this.mode.downPoint,
-        });
+        const focusPoint = this.options.getFocusedNodeScreenPoint();
+        const state = this.viewMode();
+        const lastRadius = focusPoint ? pointDistance(this.mode.lastPoint, focusPoint) : undefined;
+        if (state === 'focus' && focusPoint && lastRadius !== undefined) {
+          this.radialZoom(event, lastRadius, pointDistance(event.point, focusPoint));
+        } else {
+          const deltaY = event.point.y - this.mode.lastPoint.y;
+          if (Math.abs(deltaY) > 0) this.command(event, {
+            type: 'zoom-by', deltaY: -deltaY * 3,
+          });
+          const deltaX = event.point.x - this.mode.lastPoint.x;
+          if (this.dimensions === '3d' && Math.abs(deltaX) > 0) {
+            this.command(event, { type: 'orbit-by', deltaX, deltaY: 0 });
+          }
+        }
         this.mode = {
           kind: 'precision-zoom', pointerId: event.pointerId,
           anchor: this.mode.downPoint, lastPoint: event.point,
+          ...(lastRadius === undefined ? {} : { lastRadius: pointDistance(event.point, focusPoint!) }),
         };
         return;
       }
       const selectedNodeIds = this.options.getSelectedNodeIds();
+      const policy = graphInteractionPolicyV1({
+        selectedNodeIds,
+        focusedNodeId: this.options.getFocusedNodeId(),
+      });
       const hitSelectedNode = this.mode.hit !== null && selectedNodeIds.includes(this.mode.hit.nodeId);
       const startsInitialNodeDrag = this.mode.hit !== null && selectedNodeIds.length === 0;
-      if (this.mode.hit && this.mode.button === 0 && (hitSelectedNode || startsInitialNodeDrag)) {
+      if (policy.state !== 'focus'
+        && this.mode.pointerKind !== 'touch'
+        && this.mode.hit
+        && this.mode.button === 0
+        && (hitSelectedNode || startsInitialNodeDrag)) {
         if (startsInitialNodeDrag) {
-          this.command(event, { type: 'set-focus' });
           this.command(event, { type: 'set-selection', nodeIds: [this.mode.hit.nodeId] });
-          this.command(event, { type: 'center-camera' });
+          this.command(event, { type: 'enter-focus', nodeId: this.mode.hit.nodeId });
         }
         this.command(event, { type: 'drag-start', nodeId: this.mode.hit.nodeId, point: this.mode.downPoint });
         this.command(event, { type: 'drag-update', nodeId: this.mode.hit.nodeId, point: event.point });
@@ -250,12 +277,24 @@ export class GraphInteractionInterpreter {
         };
         return;
       }
-      const orbit = this.dimensions === '3d'
-        && (this.mode.button === 2
-          || (this.mode.pointerKind !== 'mouse'
-            && this.mode.button === 0
-            && this.mode.hit === null
-            && selectedNodeIds.length > 0));
+      if (policy.state === 'focus' && this.mode.button === 2) {
+        const focusPoint = this.options.getFocusedNodeScreenPoint();
+        const lastRadius = focusPoint ? pointDistance(this.mode.lastPoint, focusPoint) : undefined;
+        if (focusPoint && lastRadius !== undefined) {
+          this.radialZoom(event, lastRadius, pointDistance(event.point, focusPoint));
+        }
+        this.mode = {
+          kind: 'radial-zoom', pointerId: event.pointerId, lastPoint: event.point,
+          ...(focusPoint ? { lastRadius: pointDistance(event.point, focusPoint) } : {}),
+        };
+        return;
+      }
+      const navigation = this.mode.pointerKind === 'touch'
+        ? (this.dimensions === '3d' ? 'rotate' : policy.primaryDrag[this.dimensions])
+        : this.mode.button === 2
+          ? 'rotate'
+          : policy.primaryDrag[this.dimensions];
+      const orbit = navigation === 'rotate' && this.dimensions === '3d';
       if (orbit) {
         this.command(event, {
           type: 'orbit-by',
@@ -264,27 +303,43 @@ export class GraphInteractionInterpreter {
         });
         this.mode = { kind: 'orbit', pointerId: event.pointerId, lastPoint: event.point };
       } else {
+        const type = navigation === 'elastic-pan' ? 'elastic-pan-by' : 'pan-by';
         this.command(event, {
-          type: 'pan-by',
+          type,
           deltaX: this.mode.lastPoint.x - event.point.x,
           deltaY: this.mode.lastPoint.y - event.point.y,
         });
-        this.mode = { kind: 'pan', pointerId: event.pointerId, lastPoint: event.point };
+        this.mode = { kind: navigation === 'elastic-pan' ? 'elastic-pan' : 'pan', pointerId: event.pointerId, lastPoint: event.point };
       }
       return;
     }
-    if ((this.mode.kind === 'pan' || this.mode.kind === 'orbit') && this.mode.pointerId === event.pointerId) {
-      const type = this.mode.kind === 'pan' ? 'pan-by' : 'orbit-by';
+    if ((this.mode.kind === 'pan' || this.mode.kind === 'elastic-pan' || this.mode.kind === 'orbit')
+      && this.mode.pointerId === event.pointerId) {
+      const type = this.mode.kind === 'pan'
+        ? 'pan-by'
+        : this.mode.kind === 'elastic-pan'
+          ? 'elastic-pan-by'
+          : 'orbit-by';
       this.command(event, {
         type,
-        deltaX: this.mode.kind === 'pan'
+        deltaX: this.mode.kind === 'pan' || this.mode.kind === 'elastic-pan'
           ? this.mode.lastPoint.x - event.point.x
           : event.point.x - this.mode.lastPoint.x,
-        deltaY: this.mode.kind === 'pan'
+        deltaY: this.mode.kind === 'pan' || this.mode.kind === 'elastic-pan'
           ? this.mode.lastPoint.y - event.point.y
           : this.mode.lastPoint.y - event.point.y,
       });
       this.mode.lastPoint = event.point;
+      return;
+    }
+    if (this.mode.kind === 'radial-zoom' && this.mode.pointerId === event.pointerId) {
+      const focusPoint = this.options.getFocusedNodeScreenPoint();
+      const nextRadius = focusPoint ? pointDistance(event.point, focusPoint) : undefined;
+      if (nextRadius !== undefined && this.mode.lastRadius !== undefined) {
+        this.radialZoom(event, this.mode.lastRadius, nextRadius);
+      }
+      this.mode.lastPoint = event.point;
+      this.mode.lastRadius = nextRadius;
       return;
     }
     if (this.mode.kind === 'drag' && this.mode.pointerId === event.pointerId) {
@@ -293,10 +348,19 @@ export class GraphInteractionInterpreter {
       return;
     }
     if (this.mode.kind === 'precision-zoom' && this.mode.pointerId === event.pointerId) {
-      const deltaY = event.point.y - this.mode.lastPoint.y;
-      if (Math.abs(deltaY) > 0) this.command(event, {
-        type: 'zoom-by', deltaY: -deltaY * 3, anchor: this.mode.anchor,
-      });
+      const focusPoint = this.options.getFocusedNodeScreenPoint();
+      if (this.viewMode() === 'focus' && focusPoint && this.mode.lastRadius !== undefined) {
+        const nextRadius = pointDistance(event.point, focusPoint);
+        this.radialZoom(event, this.mode.lastRadius, nextRadius);
+        this.mode.lastRadius = nextRadius;
+      } else {
+        const deltaY = event.point.y - this.mode.lastPoint.y;
+        if (Math.abs(deltaY) > 0) this.command(event, { type: 'zoom-by', deltaY: -deltaY * 3 });
+        const deltaX = event.point.x - this.mode.lastPoint.x;
+        if (this.dimensions === '3d' && Math.abs(deltaX) > 0) {
+          this.command(event, { type: 'orbit-by', deltaX, deltaY: 0 });
+        }
+      }
       this.mode.lastPoint = event.point;
       return;
     }
@@ -318,7 +382,9 @@ export class GraphInteractionInterpreter {
       this.mode = { kind: 'idle' };
       return;
     }
-    if ((this.mode.kind === 'pan' || this.mode.kind === 'orbit') && this.mode.pointerId === event.pointerId) {
+    if ((this.mode.kind === 'pan' || this.mode.kind === 'elastic-pan'
+      || this.mode.kind === 'orbit' || this.mode.kind === 'radial-zoom')
+      && this.mode.pointerId === event.pointerId) {
       this.mode = { kind: 'idle' };
       return;
     }
@@ -333,6 +399,7 @@ export class GraphInteractionInterpreter {
     const hit = this.mode.hit;
     const pointerKind = this.mode.pointerKind;
     const precisionZoomCandidate = this.mode.precisionZoomCandidate;
+    const doubleTapSource = this.mode.doubleTapSource;
     this.mode = { kind: 'idle' };
     if (event.button === 2) {
       if (hit) this.command(event, {
@@ -344,11 +411,16 @@ export class GraphInteractionInterpreter {
       else this.command(event, { type: 'center-and-fit-camera' });
       return;
     }
-    if (pointerKind === 'touch' && event.button === 0 && !precisionZoomCandidate) {
-      this.deferTouchTap(event, hit);
+    if (doubleTapSource && event.button === 0) {
+      this.resolveDoubleTap(event, hit, doubleTapSource);
+      return;
+    }
+    if (event.button === 0 && !precisionZoomCandidate && this.shouldDeferTap(pointerKind, hit)) {
+      this.deferTap(event, hit);
       return;
     }
     this.resolveTap(event, hit);
+    if (event.button === 0) this.rememberImmediateTap(event, hit);
   }
 
   private pointerCancel(event: Extract<GraphInputEventV1, { type: 'pointer-cancel' }>): void {
@@ -384,7 +456,7 @@ export class GraphInteractionInterpreter {
       const selectedNodeIds = this.options.getSelectedNodeIds();
       this.ctrlSelectionBaseline = undefined;
       if (baseline.size === 0 && selectedNodeIds.length > 0) {
-        this.command(event, { type: 'fit-camera', nodeIds: selectedNodeIds });
+        this.command(event, { type: 'center-and-fit-camera' });
       }
     }
     if (this.mode.kind !== 'idle' || this.pointers.size > 0 || this.touchGesture) return;
@@ -410,15 +482,24 @@ export class GraphInteractionInterpreter {
     const delta = this.normalizedWheel(event);
     if (event.ctrl && !event.meta) {
       const zoomDelta = delta.y * TRACKPAD_PINCH_ZOOM_MULTIPLIER;
-      this.command(event, { type: 'zoom-by', deltaY: zoomDelta, anchor: event.point });
-      this.captureTrackpadPinchMomentum(event, zoomDelta);
+      const anchor = this.viewMode() === 'focus' ? undefined : event.point;
+      this.command(event, { type: 'zoom-by', deltaY: zoomDelta, ...(anchor ? { anchor } : {}) });
+      this.captureTrackpadPinchMomentum(event, zoomDelta, anchor);
       return;
     }
-    if (this.dimensions === '3d' && this.viewMode() === 'explore') {
+    const policy = graphInteractionPolicyV1({
+      selectedNodeIds: this.options.getSelectedNodeIds(),
+      focusedNodeId: this.options.getFocusedNodeId(),
+    });
+    if (this.dimensions === '3d' && policy.wheel['3d'] === 'rotate') {
       this.command(event, { type: 'orbit-by', deltaX: -delta.x, deltaY: delta.y });
       return;
     }
-    this.command(event, { type: 'pan-by', deltaX: delta.x, deltaY: delta.y });
+    this.command(event, {
+      type: policy.wheel[this.dimensions] === 'elastic-pan' ? 'elastic-pan-by' : 'pan-by',
+      deltaX: delta.x,
+      deltaY: delta.y,
+    });
   }
 
   private longPress(event: Extract<GraphInputEventV1, { type: 'long-press' }>): void {
@@ -479,6 +560,29 @@ export class GraphInteractionInterpreter {
     const next = this.readTouchGesture();
     if (!next || !this.touchGesture) return;
     const previous = this.touchGesture;
+    if (this.viewMode() === 'focus') {
+      const focusPoint = this.options.getFocusedNodeScreenPoint();
+      if (focusPoint) {
+        this.radialZoom(
+          event,
+          pointDistance(previous.centroid, focusPoint),
+          pointDistance(next.centroid, focusPoint),
+        );
+      }
+      const pinchDelta = next.distance - previous.distance;
+      if (Math.abs(pinchDelta) >= 1) this.command(event, {
+        type: 'zoom-by', deltaY: -pinchDelta * 3,
+      });
+      this.touchGesture = {
+        ...next,
+        startCentroid: previous.startCentroid,
+        startDistance: previous.startDistance,
+        mode: 'navigation',
+        samples: previous.samples + 1,
+        navigationStarted: true,
+      };
+      return;
+    }
     const totalPan = Math.hypot(
       next.centroid.x - previous.startCentroid.x,
       next.centroid.y - previous.startCentroid.y,
@@ -520,57 +624,133 @@ export class GraphInteractionInterpreter {
     };
   }
 
-  private matchesPendingTouchTap(event: Extract<GraphInputEventV1, { type: 'pointer-down' }>): boolean {
-    const pending = this.pendingTouchTap;
-    if (!pending) return false;
+  private matchingPendingTap(
+    event: Extract<GraphInputEventV1, { type: 'pointer-down' }>,
+    hit: GraphHitV1 | null,
+  ): PendingTap | undefined {
+    const pending = this.pendingTap;
+    if (!pending) return undefined;
     return event.timestamp - pending.event.timestamp <= (this.options.doubleTapIntervalMs ?? 320)
-      && distanceSquared(event.point, pending.event.point) <= (this.options.doubleTapDistancePx ?? 24) ** 2;
+      && distanceSquared(event.point, pending.event.point) <= (this.options.doubleTapDistancePx ?? 24) ** 2
+      && (pending.hit?.nodeId === hit?.nodeId
+        || (hit === null && pending.hit?.nodeId === this.options.getFocusedNodeId()))
+      ? pending
+      : undefined;
   }
 
-  private deferTouchTap(
+  private shouldDeferTap(pointerKind: 'mouse' | 'touch' | 'pen', hit: GraphHitV1 | null): boolean {
+    return (hit !== null && hit.nodeId === this.options.getFocusedNodeId())
+      || (pointerKind === 'touch' && hit === null);
+  }
+
+  private deferTap(
     event: Extract<GraphInputEventV1, { type: 'pointer-up' }>,
     hit: GraphHitV1 | null,
   ): void {
-    this.clearPendingTouchTap();
-    this.pendingTouchTap = { event, hit };
-    this.pendingTouchTapTimer = this.options.setTimeout(() => {
-      const pending = this.pendingTouchTap;
-      this.pendingTouchTap = null;
-      this.pendingTouchTapTimer = null;
+    this.clearPendingTap();
+    this.pendingTap = {
+      event,
+      hit,
+      focusedNodeId: this.options.getFocusedNodeId(),
+      deferred: true,
+    };
+    this.pendingTapTimer = this.options.setTimeout(() => {
+      const pending = this.pendingTap;
+      this.pendingTap = null;
+      this.pendingTapTimer = null;
       if (!pending) return;
       this.resolveTap(pending.event, pending.hit);
       this.options.onDeferredCommand();
     }, this.options.doubleTapIntervalMs ?? 320);
   }
 
-  private resolvePendingTouchTap(): void {
-    const pending = this.pendingTouchTap;
-    this.clearPendingTouchTap();
-    if (pending) this.resolveTap(pending.event, pending.hit);
+  private rememberImmediateTap(
+    event: Extract<GraphInputEventV1, { type: 'pointer-up' }>,
+    hit: GraphHitV1 | null,
+  ): void {
+    this.clearPendingTap();
+    this.pendingTap = {
+      event,
+      hit,
+      focusedNodeId: this.options.getFocusedNodeId(),
+      deferred: false,
+    };
+    this.pendingTapTimer = this.options.setTimeout(() => {
+      this.pendingTap = null;
+      this.pendingTapTimer = null;
+    }, this.options.doubleTapIntervalMs ?? 320);
   }
 
-  private clearPendingTouchTap(): void {
-    if (this.pendingTouchTapTimer !== null) this.options.clearTimeout(this.pendingTouchTapTimer);
-    this.pendingTouchTapTimer = null;
-    this.pendingTouchTap = null;
+  private resolvePendingTap(): void {
+    const pending = this.pendingTap;
+    this.clearPendingTap();
+    if (pending?.deferred) this.resolveTap(pending.event, pending.hit);
+  }
+
+  private clearPendingTap(): void {
+    if (this.pendingTapTimer !== null) this.options.clearTimeout(this.pendingTapTimer);
+    this.pendingTapTimer = null;
+    this.pendingTap = null;
+  }
+
+  private resolveDoubleTap(
+    event: Extract<GraphInputEventV1, { type: 'pointer-up' }>,
+    hit: GraphHitV1 | null,
+    source: PendingTap,
+  ): void {
+    if (hit && source.hit?.nodeId === hit.nodeId && source.focusedNodeId === hit.nodeId) {
+      this.command(event, { type: 'activate-node', nodeId: hit.nodeId, activation: 'primary' });
+      return;
+    }
+    if (!hit && !source.hit && event.pointerKind === 'touch') {
+      this.command(event, { type: 'center-and-fit-camera' });
+    }
   }
 
   private resolveTap(
     event: Extract<GraphInputEventV1, { type: 'pointer-up' }>,
     hit: GraphHitV1 | null,
   ): void {
+    const selectedNodeIds = this.options.getSelectedNodeIds();
+    const focusedNodeId = this.options.getFocusedNodeId();
+    const state = this.viewMode();
     if (!hit) {
       this.tagging.reset();
-      this.command(event, { type: 'set-selection', nodeIds: [] });
-      this.command(event, { type: 'set-focus' });
+      if (state === 'focus' && selectedNodeIds.length > 1) {
+        this.command(event, { type: 'set-focus' });
+        this.command(event, { type: 'fit-camera', nodeIds: selectedNodeIds });
+      } else if (state !== 'overview') {
+        this.command(event, { type: 'set-selection', nodeIds: [] });
+        this.command(event, { type: 'set-focus' });
+        this.command(event, { type: 'fit-camera' });
+      } else {
+        this.command(event, { type: 'set-focus' });
+      }
       this.command(event, { type: 'activate-background' });
       return;
     }
-    const selectedNodeIds = this.options.getSelectedNodeIds();
-    if (!event.ctrl && selectedNodeIds.includes(hit.nodeId)) {
-      this.command(event, { type: 'activate-node', nodeId: hit.nodeId, activation: 'primary' });
+
+    if (!event.ctrl && state === 'focus') {
+      if (hit.nodeId !== focusedNodeId) {
+        this.command(event, { type: 'enter-focus', nodeId: hit.nodeId });
+        return;
+      }
+      const nextSelection = selectedNodeIds.includes(hit.nodeId)
+        ? selectedNodeIds.filter((nodeId) => nodeId !== hit.nodeId)
+        : [...selectedNodeIds, hit.nodeId];
+      this.command(event, { type: 'set-selection', nodeIds: nextSelection });
+      if (nextSelection.length === 0) {
+        this.command(event, { type: 'set-focus' });
+        this.command(event, { type: 'fit-camera' });
+      }
       return;
     }
+
+    if (!event.ctrl && state === 'explore' && selectedNodeIds.includes(hit.nodeId)) {
+      this.command(event, { type: 'enter-focus', nodeId: hit.nodeId });
+      return;
+    }
+
     if (event.ctrl && this.ctrlSelectionBaseline === undefined) {
       this.ctrlSelectionBaseline = new Set(selectedNodeIds);
     }
@@ -589,14 +769,31 @@ export class GraphInteractionInterpreter {
       event.ctrl,
     );
     this.command(event, { type: 'set-selection', nodeIds: result.selectedNodeIds });
-    if (selectedNodeIds.length === 0 && !event.ctrl && result.selectedNodeIds.length > 0) {
-      this.command(event, { type: 'fit-camera', nodeIds: result.selectedNodeIds });
+    if (result.selectedNodeIds.length === 0) {
+      this.command(event, { type: 'set-focus' });
+      this.command(event, { type: 'fit-camera' });
+    } else if (selectedNodeIds.length === 0 && !event.ctrl) {
+      this.command(event, { type: 'enter-focus', nodeId: hit.nodeId });
+    } else if (selectedNodeIds.length === 0 && event.ctrl && result.selectedNodeIds.length === 1) {
+      this.command(event, { type: 'enter-focus', nodeId: hit.nodeId });
     }
   }
 
-  private viewMode(): GraphInteractionViewMode {
-    const hasExploreState = this.options.getSelectedNodeIds().length > 0;
-    return hasExploreState ? 'explore' : 'overview';
+  private viewMode(): GraphUxStateV1 {
+    return graphInteractionPolicyV1({
+      selectedNodeIds: this.options.getSelectedNodeIds(),
+      focusedNodeId: this.options.getFocusedNodeId(),
+    }).state;
+  }
+
+  private radialZoom(
+    event: { readonly identity: InputGraphIdentityV1; readonly timestamp: number },
+    previousRadius: number,
+    nextRadius: number,
+  ): void {
+    const radiusDelta = nextRadius - previousRadius;
+    if (Math.abs(radiusDelta) < 0.25) return;
+    this.command(event, { type: 'zoom-by', deltaY: -radiusDelta * 3 });
   }
 
   private readTouchGesture(): TouchGesture | null {
@@ -631,6 +828,7 @@ export class GraphInteractionInterpreter {
   private captureTrackpadPinchMomentum(
     event: Extract<GraphInputEventV1, { type: 'wheel' }>,
     zoomDelta: number,
+    anchor: GraphScreenPointV1 | undefined,
   ): void {
     if (this.trackpadPinchMomentumTimer !== null) {
       this.options.clearTimeout(this.trackpadPinchMomentumTimer);
@@ -642,7 +840,7 @@ export class GraphInteractionInterpreter {
     this.trackpadPinchMomentum = {
       identity: { ...event.identity },
       timestamp: event.timestamp,
-      anchor: { ...event.point },
+      ...(anchor ? { anchor: { ...anchor } } : {}),
       velocity: sameDirection ? previousVelocity * 0.65 + zoomDelta * 0.35 : zoomDelta,
     };
     this.trackpadPinchMomentumTimer = this.options.setTimeout(() => {
@@ -659,7 +857,11 @@ export class GraphInteractionInterpreter {
       this.cancelTrackpadPinchMomentum();
       return;
     }
-    this.command(momentum, { type: 'zoom-by', deltaY: momentum.velocity, anchor: momentum.anchor });
+    this.command(momentum, {
+      type: 'zoom-by',
+      deltaY: momentum.velocity,
+      ...(momentum.anchor ? { anchor: momentum.anchor } : {}),
+    });
     momentum.velocity *= TRACKPAD_PINCH_MOMENTUM_DECAY;
     this.options.onDeferredCommand();
     this.trackpadPinchMomentumTimer = this.options.setTimeout(
@@ -687,6 +889,10 @@ export class GraphInteractionInterpreter {
 
 function distanceSquared(a: GraphScreenPointV1, b: GraphScreenPointV1): number {
   return (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
+}
+
+function pointDistance(a: GraphScreenPointV1, b: GraphScreenPointV1): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
 function clamp(value: number, min: number, max: number): number {

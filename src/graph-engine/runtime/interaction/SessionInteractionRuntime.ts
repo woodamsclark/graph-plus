@@ -2,6 +2,7 @@ import type {
   GraphDimensionsV1,
   GraphDocumentV1,
   GraphIntentV1,
+  GraphCameraStateV1,
   GraphViewStateV1,
   Vec3,
 } from '../../contracts/v1/index.ts';
@@ -15,6 +16,7 @@ import { animaPreviewTiming } from '../modules/shipped/AnimaPreviewPresentation.
 import { GraphCommander, GraphCommandRegistry } from './GraphCommander.ts';
 import { GraphInput } from './GraphInput.ts';
 import { GraphInteractionInterpreter } from './GraphInteractionInterpreter.ts';
+import { resolveGraphUxStateV1 } from './GraphInteractionStatePolicy.ts';
 import type {
   GraphInputEventV1,
   GraphRuntimeCommandV1,
@@ -37,6 +39,8 @@ export class SessionInteractionRuntime {
   private previewReleaseTimer: number | undefined;
   private hoverMod = false;
   private hoverPoint: GraphScreenPointV1 | undefined;
+  private elasticReturnTimer: number | undefined;
+  private focusZoomBaseline: { readonly nodeId: string; readonly camera: GraphCameraStateV1 } | undefined;
   private hitTestMs = 0;
   private hitTestCount = 0;
   private dragContext: {
@@ -92,9 +96,19 @@ export class SessionInteractionRuntime {
         const hit = this.options.hitTest(point, pointerKind);
         this.hitTestCount += 1;
         this.hitTestMs += Math.max(0, this.options.platform.now() - start);
-        return hit;
+        return hit && this.isNodeInteractiveInCurrentState(hit.nodeId) ? hit : null;
       },
       getSelectedNodeIds: () => this.options.getViewState().selectedNodeIds,
+      getFocusedNodeId: () => this.options.getViewState().focusedNodeId,
+      getFocusedNodeScreenPoint: () => {
+        const focusedNodeId = this.options.getViewState().focusedNodeId;
+        const position = focusedNodeId === undefined
+          ? undefined
+          : this.options.getInteractivePositions()[focusedNodeId];
+        if (!position) return undefined;
+        const projected = this.options.camera.worldToScreen(position);
+        return { x: projected.x, y: projected.y };
+      },
       getNodeSelection: (nodeId) => this.options.getNodeSelection(nodeId),
       getSelectionBridge: (nodeId, selectedNodeIds) => this.selectionBridge(nodeId, selectedNodeIds),
       getViewport: () => this.options.surface.getViewport(),
@@ -189,6 +203,7 @@ export class SessionInteractionRuntime {
   private registerCommandHandlers(): void {
     const types: readonly GraphRuntimeCommandV1['type'][] = [
       'pan-by',
+      'elastic-pan-by',
       'orbit-by',
       'zoom-by',
       'center-camera',
@@ -197,6 +212,7 @@ export class SessionInteractionRuntime {
       'fit-camera',
       'set-selection',
       'set-focus',
+      'enter-focus',
       'selection-presentation-changed',
       'activate-node',
       'activate-background',
@@ -217,12 +233,18 @@ export class SessionInteractionRuntime {
         this.options.camera.panByPixels(command.deltaX, command.deltaY);
         this.cameraChanged(command);
         return;
+      case 'elastic-pan-by':
+        this.elasticPan(command.deltaX, command.deltaY);
+        this.cameraChanged(command);
+        return;
       case 'orbit-by':
         this.options.camera.orbitByPixels(command.deltaX, command.deltaY);
         this.cameraChanged(command);
         return;
       case 'zoom-by':
+        this.captureFocusZoomBaseline();
         this.options.camera.zoomByWheel(command.deltaY, command.anchor);
+        this.constrainFocusZoomOut();
         this.cameraChanged(command);
         return;
       case 'center-camera':
@@ -230,7 +252,7 @@ export class SessionInteractionRuntime {
         this.cameraChanged(command);
         return;
       case 'center-and-fit-camera':
-        this.fitVisibleNodes(this.cameraTargetNodeIds());
+        this.fitStateTarget();
         this.emitViewportIntent(command);
         return;
       case 'reset-camera':
@@ -253,6 +275,9 @@ export class SessionInteractionRuntime {
         return;
       case 'set-focus':
         this.setFocus(command.nodeId, command);
+        return;
+      case 'enter-focus':
+        this.enterFocus(command.nodeId, command);
         return;
       case 'selection-presentation-changed':
         this.options.onViewStateChanged('interaction');
@@ -358,6 +383,113 @@ export class SessionInteractionRuntime {
     return shortestPathToAnyV1(nodeId, new Set(selectedNodeIds), relationships) ?? [];
   }
 
+  private isNodeInteractiveInCurrentState(nodeId: string): boolean {
+    const state = this.options.getViewState();
+    if (resolveGraphUxStateV1(state) !== 'focus' || !state.focusedNodeId) return true;
+    return this.focusVisibleNodeIds(state.focusedNodeId).includes(nodeId);
+  }
+
+  private focusVisibleNodeIds(focusedNodeId: string): readonly string[] {
+    const visible = this.options.getRenderSelection().nodeIds;
+    const selected = this.options.getViewState().selectedNodeIds.filter((nodeId) => visible.has(nodeId));
+    const neighbors = this.options.getDocument().edges.flatMap((edge) => {
+      if (!this.options.getRenderSelection().edgeIds.has(edge.id)) return [];
+      if (edge.sourceId === focusedNodeId && visible.has(edge.targetId)) return [edge.targetId];
+      if (edge.targetId === focusedNodeId && visible.has(edge.sourceId)) return [edge.sourceId];
+      return [];
+    });
+    return [...new Set([focusedNodeId, ...neighbors, ...selected])];
+  }
+
+  private focusNeighborhoodNodeIds(focusedNodeId: string): readonly string[] {
+    const visible = this.options.getRenderSelection().nodeIds;
+    const neighbors = this.options.getDocument().edges.flatMap((edge) => {
+      if (!this.options.getRenderSelection().edgeIds.has(edge.id)) return [];
+      if (edge.sourceId === focusedNodeId && visible.has(edge.targetId)) return [edge.targetId];
+      if (edge.targetId === focusedNodeId && visible.has(edge.sourceId)) return [edge.sourceId];
+      return [];
+    });
+    return [...new Set([focusedNodeId, ...neighbors])];
+  }
+
+  private fitStateTarget(): void {
+    const state = this.options.getViewState();
+    const uxState = resolveGraphUxStateV1(state);
+    if (uxState === 'focus' && state.focusedNodeId) {
+      this.fitVisibleNodes(this.focusNeighborhoodNodeIds(state.focusedNodeId), state.focusedNodeId);
+      return;
+    }
+    if (uxState === 'explore') {
+      this.fitVisibleNodes(state.selectedNodeIds);
+      return;
+    }
+    this.fitVisibleNodes([...this.options.getRenderSelection().nodeIds]);
+  }
+
+  private elasticPan(deltaX: number, deltaY: number): void {
+    this.options.camera.panByPixels(deltaX * 0.55, deltaY * 0.55);
+    const focusedNodeId = this.options.getViewState().focusedNodeId;
+    const focusedPosition = focusedNodeId
+      ? this.options.getInteractivePositions()[focusedNodeId]
+      : undefined;
+    if (!focusedPosition) return;
+    const target = this.options.camera.getState().target;
+    const pull = subtract(focusedPosition, target);
+    this.options.camera.translateBy({ x: pull.x * 0.22, y: pull.y * 0.22, z: pull.z * 0.22 });
+    this.scheduleElasticReturn();
+  }
+
+  private scheduleElasticReturn(): void {
+    if (this.elasticReturnTimer !== undefined) return;
+    this.elasticReturnTimer = this.options.platform.setTimeout(() => {
+      this.elasticReturnTimer = undefined;
+      const focusedNodeId = this.options.getViewState().focusedNodeId;
+      const focusedPosition = focusedNodeId
+        ? this.options.getInteractivePositions()[focusedNodeId]
+        : undefined;
+      if (!focusedPosition) return;
+      const target = this.options.camera.getState().target;
+      const pull = subtract(focusedPosition, target);
+      const remaining = vectorDistance(focusedPosition, target);
+      if (remaining < 0.01) {
+        this.options.camera.translateBy(pull);
+      } else {
+        this.options.camera.translateBy({ x: pull.x * 0.22, y: pull.y * 0.22, z: pull.z * 0.22 });
+      }
+      this.commitCamera();
+      this.options.onViewStateChanged('camera');
+      this.options.onInputQueued?.();
+      if (remaining >= 0.01) this.scheduleElasticReturn();
+    }, 16);
+  }
+
+  private constrainFocusZoomOut(): void {
+    const state = this.options.getViewState();
+    if (resolveGraphUxStateV1(state) !== 'focus' || !state.focusedNodeId) return;
+    const positions = this.options.getInteractivePositions();
+    const focusedPosition = positions[state.focusedNodeId];
+    if (!focusedPosition) return;
+    const radius = Math.max(0, ...state.selectedNodeIds.flatMap((nodeId) => {
+      const position = positions[nodeId];
+      return position ? [vectorDistance(position, focusedPosition)] : [];
+    }));
+    this.options.camera.constrainZoomOutToRadius(radius, 48, this.focusZoomBaseline?.camera);
+  }
+
+  private captureFocusZoomBaseline(): void {
+    const focusedNodeId = this.options.getViewState().focusedNodeId;
+    if (!focusedNodeId || this.focusZoomBaseline?.nodeId === focusedNodeId) return;
+    this.focusZoomBaseline = { nodeId: focusedNodeId, camera: this.options.camera.getState() };
+  }
+
+  private enterFocus(nodeId: string, command: GraphRuntimeCommandV1): void {
+    if (this.options.getViewState().selectedNodeIds.length === 0) return;
+    this.setFocus(nodeId, command);
+    this.fitVisibleNodes(this.focusNeighborhoodNodeIds(nodeId), nodeId);
+    this.focusZoomBaseline = { nodeId, camera: this.options.camera.getState() };
+    this.emitViewportIntent(command);
+  }
+
   private cameraChanged(command: GraphRuntimeCommandV1): void {
     this.commitCamera();
     this.options.onViewStateChanged('camera');
@@ -404,7 +536,10 @@ export class SessionInteractionRuntime {
     const state = this.options.getViewState();
     const known = new Set(this.options.getDocument().nodes.map((node) => node.id));
     const selectedNodeIds = [...new Set(nodeIds)].filter((id) => known.has(id));
-    if (sameIds(selectedNodeIds, state.selectedNodeIds)) return;
+    const desiredFocus = selectedNodeIds.length === 0
+      ? undefined
+      : state.focusedNodeId ?? (selectedNodeIds.length === 1 ? selectedNodeIds[0] : undefined);
+    if (sameIds(selectedNodeIds, state.selectedNodeIds) && desiredFocus === state.focusedNodeId) return;
     this.commit({ ...state, selectedNodeIds });
     this.options.onViewStateChanged('interaction');
     this.options.onIntent({
@@ -412,6 +547,7 @@ export class SessionInteractionRuntime {
       type: 'selection-changed',
       selectedNodeIds: [...selectedNodeIds],
     });
+    if (desiredFocus !== state.focusedNodeId) this.setFocus(desiredFocus, command);
   }
 
   private setFocus(nodeId: string | undefined, command: GraphRuntimeCommandV1): void {
@@ -442,6 +578,7 @@ export class SessionInteractionRuntime {
     if (focusChanged) {
       const { focusedNodeId: _focusedNodeId, ...withoutFocus } = state;
       this.commit(nodeId === undefined ? withoutFocus : { ...withoutFocus, focusedNodeId: nodeId });
+      if (nodeId === undefined) this.focusZoomBaseline = undefined;
     }
     this.options.onViewStateChanged('interaction');
     if (!focusChanged) return;
@@ -522,6 +659,8 @@ export class SessionInteractionRuntime {
 
   private resetTransientState(): void {
     this.cancelPreviewRelease();
+    if (this.elasticReturnTimer !== undefined) this.options.platform.clearTimeout(this.elasticReturnTimer);
+    this.elasticReturnTimer = undefined;
     const previewChanged = this.previewedNodeId !== undefined;
     this.interpreter.reset();
     this.inputEvents.clear();
@@ -593,6 +732,10 @@ function add(a: Vec3, b: Vec3): Vec3 {
 
 function subtract(a: Vec3, b: Vec3): Vec3 {
   return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+}
+
+function vectorDistance(a: Vec3, b: Vec3): number {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
 function selectionCentroid(

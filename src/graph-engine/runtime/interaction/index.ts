@@ -3,5 +3,6 @@ export * from './GraphCommander.ts';
 export * from './GraphHitTester.ts';
 export * from './GraphInput.ts';
 export * from './GraphInteractionInterpreter.ts';
+export * from './GraphInteractionStatePolicy.ts';
 export * from './GraphInteractionTypes.ts';
 export * from './SessionInteractionRuntime.ts';

@@ -3,6 +3,7 @@ import { shortestPathToAnyV1 } from '../../../core/topology/index.ts';
 import type { GraphVisualThemeV2 } from '../../theme/index.ts';
 import type { GraphModuleInstanceV1, GraphModuleProjectionPatchV1 } from '../GraphModuleTypes.ts';
 import { GraphLabelManager, type GraphLabelRequestV1 } from './GraphLabelManager.ts';
+import { resolveGraphUxStateV1 } from '../../interaction/GraphInteractionStatePolicy.ts';
 
 export class AnimaModule implements GraphModuleInstanceV1 {
   private nodeZoomContrast: number;
@@ -46,7 +47,13 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const focusedId = state.viewState.focusedNodeId;
     const selectedIds = new Set(state.viewState.selectedNodeIds);
     const taggedIds = new Set(selectedIds);
-    if (focusedId !== undefined) taggedIds.add(focusedId);
+    const uxState = resolveGraphUxStateV1(state.viewState);
+    const focusNeighborIds = focusedId === undefined
+      ? new Set<string>()
+      : new Set(relationships.get(focusedId) ?? []);
+    const focusVisibleIds = focusedId === undefined
+      ? new Set<string>()
+      : new Set([focusedId, ...focusNeighborIds, ...selectedIds]);
     const hoveredId = state.hoveredNodeId;
     const hoveredNeighborhood = hoveredId === undefined
       ? new Set<string>()
@@ -55,7 +62,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const transientNeighborhood = transientId === undefined
       ? undefined
       : new Set([transientId, ...(relationships.get(transientId) ?? [])]);
-    const exploreActive = taggedIds.size > 0 && state.selectionPresentationSuspended !== true;
+    const exploreActive = uxState !== 'overview' && state.selectionPresentationSuspended !== true;
     const hoveredIsTagged = hoveredId !== undefined && selectedIds.has(hoveredId);
     const pathTargetIds = selectedIds.size > 0 ? selectedIds : taggedIds;
     const exploreHoverPath = exploreActive && hoveredId !== undefined && !hoveredIsTagged
@@ -70,10 +77,14 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const revealedNeighborIds = state.selectionNeighborRevealActive === true
       ? new Set([...selectedIds].flatMap((nodeId) => [...(relationships.get(nodeId) ?? [])]))
       : new Set<string>();
-    const visibleIds = transientNeighborhood ?? (exploreActive
-      ? new Set([...taggedIds, ...exploreHoverIds, ...revealedNeighborIds])
-      : undefined);
-    const litNodeIds = transientId !== undefined
+    const visibleIds = uxState === 'focus'
+      ? focusVisibleIds
+      : transientNeighborhood ?? (exploreActive
+        ? new Set([...taggedIds, ...exploreHoverIds, ...revealedNeighborIds])
+        : undefined);
+    const litNodeIds = uxState === 'focus'
+      ? selectedIds
+      : transientId !== undefined
       ? new Set([transientId])
       : exploreActive
         ? new Set([...taggedIds, ...exploreHoverIds, ...revealedNeighborIds])
@@ -86,9 +97,10 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         .map((edge) => unorderedPair(edge.sourceId, edge.targetId)))
       : new Set<string>();
     const edgeIsLit = (sourceId: string, targetId: string): boolean => {
-      if (transientId !== undefined) return sourceId === transientId || targetId === transientId;
       const joinsTaggedStructure = taggedIds.has(sourceId) && taggedIds.has(targetId);
       if (joinsTaggedStructure) return true;
+      if (uxState === 'focus') return false;
+      if (transientId !== undefined) return sourceId === transientId || targetId === transientId;
       if (revealedNeighborLinkPairs.has(unorderedPair(sourceId, targetId))) return true;
       if (hoveredId === undefined) return false;
       if (!exploreActive || hoveredIsTagged) return sourceId === hoveredId || targetId === hoveredId;
@@ -130,6 +142,10 @@ export class AnimaModule implements GraphModuleInstanceV1 {
           : prior?.color ?? (node.tokens?.includes('kind:tag') ? this.palette.colors.tagNode : undefined) ?? this.palette.colors.node;
         const selected = state.viewState.selectedNodeIds.includes(node.id);
         const pinned = state.viewState.pinnedNodeIds.includes(node.id);
+        const visible = visibleIds === undefined || visibleIds.has(node.id);
+        const opacity = uxState === 'focus'
+          ? visible ? (selected ? 1 : 0.2) : 0
+          : visible ? 1 : 0.2;
         return [node.id, {
           ...prior,
           ...labelContributions[node.id],
@@ -137,7 +153,8 @@ export class AnimaModule implements GraphModuleInstanceV1 {
           nodeScaleExponent: lerp(0.5, maximumScaleExponent,
             normalize(radius, smallestRadius, largestRadius)),
           finalColor: color,
-          opacity: visibleIds === undefined || visibleIds.has(node.id) ? 1 : 0.2,
+          opacity,
+          ...(visible ? {} : { showLabel: false, labelOpacity: 0 }),
           ...(selected || pinned ? {
             strokeColor: this.palette.colors.nodeOutline,
             strokeWidth: pinned ? 2 : 1,
@@ -148,13 +165,21 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       const prior = state.edgeContributions[edge.id];
       const lit = edgeIsLit(edge.sourceId, edge.targetId);
       const revealed = revealedNeighborLinkPairs.has(unorderedPair(edge.sourceId, edge.targetId));
-      const visible = visibleIds === undefined || lit || revealed;
+      const focusLocalEdge = uxState === 'focus' && focusedId !== undefined && (
+        (edge.sourceId === focusedId && focusNeighborIds.has(edge.targetId))
+        || (edge.targetId === focusedId && focusNeighborIds.has(edge.sourceId))
+        || (selectedIds.has(edge.sourceId) && selectedIds.has(edge.targetId))
+      );
+      const visible = uxState === 'focus'
+        ? focusLocalEdge
+        : visibleIds === undefined || lit || revealed;
+      const opacity = uxState === 'focus' ? visible ? (lit ? 1 : 0.2) : 0 : visible ? 1 : 0.2;
       return [edge.id, {
         ...prior,
         thickness: positive(prior?.baseThicknessScale, 1) * positive(prior?.thicknessScale, 1),
-        opacity: visible ? 1 : 0.2,
+        opacity,
         arrowColor: this.palette.colors.arrow,
-        arrowOpacity: visible ? 1 : 0.2,
+        arrowOpacity: opacity,
         ...(lit ? { color: this.palette.colors.highlightedNode } : {}),
       }];
     }));

@@ -2,6 +2,12 @@
 
 Status: Implemented; automated suite passes, live desktop/mobile acceptance pending.
 
+Interaction update: The later
+[Graph Engine Interaction State Contract](graph-engine-interaction-state-contract.md)
+supersedes the V1.7 gesture and selection-camera clauses wherever they differ. The
+runtime, layout, recovery, and historical acceptance record in this document remain
+applicable.
+
 Date: 2026-09-06
 
 Depends on:
