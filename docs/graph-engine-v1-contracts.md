@@ -802,6 +802,11 @@ normative product-level input table. The matching state, transition, camera, ren
 and persistence rules are defined in the
 [Graph Engine Interaction State Contract](graph-engine-interaction-state-contract.md).
 
+The internal presentation architecture follows the
+[Animus / Anima Boundary](graph-engine-animus-anima-boundary.md): Animus produces an
+unstyled semantic snapshot, Anima resolves the complete visual scene, and renderer
+backends draw without interpreting graph state or semantic theme roles.
+
 The internal fixed policy has three states: Overview (whole graph), Explore (selected
 constellation), and Focus (one local node). A one-node initial selection shortcuts to
 Focus. Focus does not imply selection membership, but it is valid only while some
@@ -814,8 +819,11 @@ follows selection-centroid motion; Focus follows focused-node motion. Reopen res
 positions and pins only, then starts in Overview and fits the complete graph.
 
 Ctrl edits selection. Option temporarily reveals direct selection neighbors and their
-connecting links. Cmd-wheel is not a zoom mechanic. Tag nodes use the same selection,
-Focus, label, and presentation rules as ordinary nodes.
+connecting links. A Ctrl batch begun with zero or one selected node enters Focus when
+it ends with one node and Explore/Constellation when it ends with multiple nodes. The
+Focus-to-Explore release preserves the live camera framing. Cmd-wheel is not a zoom
+mechanic. Tag nodes use the same selection, Focus, label, and presentation rules as
+ordinary nodes.
 
 Graph+-specific actions such as opening an Obsidian file or using the current note as
 a Form root remain in Graph+.

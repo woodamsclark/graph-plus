@@ -6,16 +6,10 @@ import type {
   Vec3,
 } from '../../../contracts/v1/index.ts';
 import type {
-  GraphEdgeRenderContributionV1,
-  GraphNodeRenderContributionV1,
-} from '../../render/index.ts';
+  AnimusEdgeRoleV1,
+  AnimusNodeRoleV1,
+} from '../../animus/index.ts';
 import type { GraphModuleInstanceV1, GraphModulePipelineStateV1 } from '../GraphModuleTypes.ts';
-import { parseGraphColorV2, type GraphColorV2 } from '../../theme/index.ts';
-
-const BRANCH_COLORS: readonly GraphColorV2[] = [
-  '#e57373', '#ffb74d', '#ffd54f', '#81c784', '#4db6ac', '#4fc3f7',
-  '#64b5f6', '#7986cb', '#9575cd', '#ba68c8', '#f06292', '#a1887f',
-].map((value) => parseGraphColorV2(value)!);
 
 interface FormSettings {
   readonly rootNodeId?: string;
@@ -93,34 +87,35 @@ export class FormModule implements GraphModuleInstanceV1 {
     const projectedEdges = edges
       .filter((edge) => visibleIds.has(edge.sourceId) && visibleIds.has(edge.targetId))
       .filter((edge) => this.settings.showCrossLinks || treeEdgeIds.has(edge.id));
-    const branchColors = new Map(topBranches.map((id, index) => [id, BRANCH_COLORS[index % BRANCH_COLORS.length]]));
-    const colorFor = (id: string): GraphColorV2 | undefined => {
-      const branchId = branch.get(id);
-      if (!branchId || branchId === rootId) return undefined;
-      return branchColors.get(branchId) ?? BRANCH_COLORS[stableHash(branchId) % BRANCH_COLORS.length];
-    };
-    const nodeContributions: Record<string, GraphNodeRenderContributionV1> = {};
+    const branchIndexes = new Map(topBranches.map((id, index) => [id, index]));
+    const nodeRoles: Record<string, AnimusNodeRoleV1> = {};
     const childCounts = new Map<string, number>();
     for (const parentId of parent.values()) childCounts.set(parentId, (childCounts.get(parentId) ?? 0) + 1);
     for (const node of nodes) {
       const childCount = childCounts.get(node.id) ?? 0;
-      nodeContributions[node.id] = {
-        radiusScale: node.id === rootId ? 1.35 : childCount ? 1.12 : 1,
-        labelPriority: node.id === rootId ? 1000 : Math.max(0, 100 - (depth.get(node.id) ?? 0) * 10),
-        labelAlwaysVisible: node.id === rootId,
-        ...(this.settings.colorBranches && colorFor(node.id) ? { color: colorFor(node.id) } : {}),
-      };
+      const branchId = branch.get(node.id);
+      const nodeDepth = depth.get(node.id);
+      nodeRoles[node.id] = { form: {
+        kind: node.id === rootId ? 'root' : nodeDepth === undefined ? 'disconnected' : childCount ? 'branch' : 'leaf',
+        depth: nodeDepth ?? 0,
+        ...(branchId === undefined || branchId === rootId ? {} : { branchId }),
+        ...(branchId === undefined || branchId === rootId ? {} : { branchIndex: branchIndexes.get(branchId) }),
+        colorBranches: this.settings.colorBranches,
+      } };
     }
     const childByEdge = new Map([...parentEdge.entries()].map(([childId, edgeId]) => [edgeId, childId]));
-    const edgeContributions: Record<string, GraphEdgeRenderContributionV1> = {};
+    const edgeRoles: Record<string, AnimusEdgeRoleV1> = {};
     for (const edge of projectedEdges) {
       const tree = treeEdgeIds.has(edge.id);
       const childId = childByEdge.get(edge.id) ?? edge.targetId;
-      edgeContributions[edge.id] = {
-        thicknessScale: tree ? Math.max(1.15, 2.4 - (depth.get(childId) ?? 1) * 0.22) : 0.65,
-        dashed: !tree,
-        ...(this.settings.colorBranches && colorFor(childId) ? { color: colorFor(childId) } : {}),
-      };
+      const branchId = branch.get(childId);
+      edgeRoles[edge.id] = { form: {
+        kind: tree ? 'tree' : 'cross',
+        childDepth: depth.get(childId) ?? 1,
+        ...(branchId === undefined || branchId === rootId ? {} : { branchId }),
+        ...(branchId === undefined || branchId === rootId ? {} : { branchIndex: branchIndexes.get(branchId) }),
+        colorBranches: this.settings.colorBranches,
+      } };
     }
     const document = withTopology(source, nodes.map((node) => node.id), projectedEdges.map((edge) => edge.id));
     return {
@@ -131,8 +126,8 @@ export class FormModule implements GraphModuleInstanceV1 {
         edgeIds: new Set(document.edges.map((edge) => edge.id)),
       },
       formActive: true,
-      nodeContributions,
-      edgeContributions,
+      nodeRoles,
+      edgeRoles,
     };
   }
 }

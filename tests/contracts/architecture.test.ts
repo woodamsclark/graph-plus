@@ -41,6 +41,36 @@ test('Graph+ consumer imports only the public Graph Engine boundary', () => {
   deepEqual(violations, [], 'Graph+ should consume only contracts and the public client artifact');
 });
 
+test('Animus emits graph facts while Anima alone resolves visual presentation', () => {
+  const runtime = join(process.cwd(), 'src', 'graph-engine', 'runtime');
+  const violations: string[] = [];
+  for (const path of walk(join(runtime, 'animus'))) {
+    const source = readFileSync(path, 'utf8');
+    if (/from\s+['"][^'"]*(?:anima|render|theme)[^'"]*['"]/.test(source)) {
+      violations.push(`${path}: Animus imported presentation code`);
+    }
+  }
+  for (const name of ['FormModule.ts', 'NodeRegionsModule.ts']) {
+    const path = join(runtime, 'modules', 'shipped', name);
+    const source = readFileSync(path, 'utf8');
+    if (/from\s+['"][^'"]*(?:render|theme)[^'"]*['"]/.test(source)) {
+      violations.push(`${path}: semantic module imported visual types`);
+    }
+    if (/\b(?:color|opacity|stroke|fill|dashed|thicknessScale|radiusScale)\s*:/.test(source)) {
+      violations.push(`${path}: semantic module emitted visual properties`);
+    }
+  }
+  const rendererPath = join(runtime, 'render', 'CanvasGraphRenderer.ts');
+  const renderer = readFileSync(rendererPath, 'utf8');
+  if (/node\.(?:selected|focused|hovered)\b/.test(renderer)) {
+    violations.push(`${rendererPath}: renderer interpreted semantic interaction state`);
+  }
+  if (/frame\.theme\b/.test(renderer)) {
+    violations.push(`${rendererPath}: renderer interpreted semantic theme roles`);
+  }
+  deepEqual(violations, [], 'Animus, Anima, and renderer ownership must remain one-way');
+});
+
 function walk(directory: string): string[] {
   const result: string[] = [];
   for (const name of readdirSync(directory)) {

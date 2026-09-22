@@ -14,6 +14,12 @@ silently drift apart.
 
 The policy is fixed in V1. It is not a consumer-configurable public API.
 
+Animus owns the state and behavioral policy. Anima alone interprets that semantic
+state visually: Overview becomes normal graph context, Explore/Constellation becomes
+highlighted selection plus dimmed graph context, and Focus/Local becomes highlighted
+selection and neighborhood plus hidden graph context. Renderers receive only the
+resolved scene and never inspect selection, focus, or hover state.
+
 | State | User meaning | Invariant | Camera target | Center + Fit target |
 | --- | --- | --- | --- | --- |
 | Overview | View the whole graph | No selection and no focused node | Graph centroid | Whole visible graph |
@@ -47,9 +53,11 @@ double activation. Double-click or double-tap opens the primary node action only
 the node was already focused before the first activation. A double activation that
 begins on an unfocused node changes Focus but does not open the node.
 
-Ctrl edits selection without moving the camera. If Ctrl editing began with no
-selection, Ctrl release performs state-appropriate Center + Fit on the result. If a
-selection already existed, release leaves the camera unchanged.
+Ctrl edits selection without moving the camera while the key is held. If Ctrl editing
+began with no selection, Ctrl release performs state-appropriate Center + Fit on the
+result. Extending the initial one-node Focus into a constellation clears Focus and
+enters Explore while preserving the current framing. Editing an already established
+multi-node selection also leaves the camera unchanged.
 
 ## 3. Camera contract
 
@@ -77,17 +85,21 @@ is entered remains a valid baseline even when it is wider.
 
 In 2D Focus, navigation pan is elastic: it may temporarily offset the view and then
 returns the target to the focused node. Leaving Focus always performs a fresh
-selection or graph Center + Fit; the prior camera angle need not be restored.
+selection or graph Center + Fit; the prior camera angle need not be restored. The
+Ctrl-release transition from initial Focus into Explore is the exception: it preserves
+the live camera framing so global gray context does not jump out of view.
 
 ## 4. Rendering contract
 
 | State | Nodes | Links | Labels |
 | --- | --- | --- | --- |
 | Overview | Whole visible graph at normal presentation | Whole visible graph | Normal label policy |
-| Explore | Selected constellation lit; all other visible nodes dimmed | Selection links lit; other visible links dimmed | Selected labels emphasized |
-| Focus | Selected constellation lit; focused node, immediate neighbors, and constellation remain rendered; unselected members of that local set are gray; all other nodes hidden | Selected-to-selected and focused-to-neighbor links remain; unselected local links are gray; all other links hidden | Only labels allowed by the local render set and normal label policy |
+| Explore | Selected constellation lit; every other projected node remains visible but gray/dim, including non-neighbors | Selection links lit; every other projected link remains visible but gray/dim | Selected labels emphasized |
+| Focus | Focused node, immediate neighbors, and selected constellation remain rendered and highlighted; all other nodes hidden | Selected-to-selected and focused-to-neighbor links remain; every focused-neighborhood link is highlighted; all other links hidden | Only labels allowed by the local render set and normal label policy |
 
-An unselected focused node receives no special selection color. Holding Option
+Focus/Local highlighting is presentation only and does not add neighbors to the
+selection. Explore/Constellation never hides a projected node or link merely because
+it is outside the selected constellation or is not its neighbor. Holding Option
 temporarily reveals direct neighbors of the current selection and the connecting links
 with the same presentation used for hover. Option never changes selection or camera.
 Tag nodes follow exactly the same interaction and presentation rules as ordinary
@@ -121,7 +133,7 @@ in; moving toward the focused node zooms out.
 | Input | Behavior |
 | --- | --- |
 | Hold Ctrl + node clicks | Add or remove selection members; do not move camera during edits |
-| Release Ctrl after initial selection | State-appropriate Center + Fit |
+| Release Ctrl after first selected node | Enter Explore when the batch contains multiple nodes; preserve camera framing |
 | Release Ctrl after editing an existing selection | No camera change |
 | Hold Option | Reveal selection neighbors and connecting links; selection and camera unchanged |
 | Hold Space | Temporarily suspend ordinary selection dimming |

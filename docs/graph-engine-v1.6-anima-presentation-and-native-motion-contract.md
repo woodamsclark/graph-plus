@@ -174,11 +174,15 @@ absolute target. Color and discrete modes use priority-based replacement.
 
 The required presentation order is:
 
-1. Rendering establishes neutral primitive defaults.
-2. Structural metrics establish degree prominence and graph-wide display multipliers.
-3. Form, topology, and regions contribute structural role modifiers.
-4. Anima resolves theme roles and all final presentation values.
-5. Transient Anima states such as hover and drag receive the highest visual priority.
+1. Animus establishes the canonical graph, display membership, topology, positions,
+   interaction state, and structural roles.
+2. Form, topology, and regions annotate semantic roles without emitting colors or
+   other visual properties.
+3. Anima establishes neutral primitive defaults and resolves theme roles plus all
+   final presentation values.
+4. Transient Anima states such as hover and drag receive the highest visual priority.
+5. The renderer draws the resolved scene without interpreting graph state or theme
+   roles.
 
 Final fill precedence in Graph+ `new` mode is:
 
@@ -359,6 +363,13 @@ V1.6 preserves the existing focus-mode product behavior:
 Anima presents focus, selection, hover, drag, pin, and region state but does not alter
 their state-machine meaning.
 
+While Explore/Constellation is active, selected members and their structural links
+receive emphasis. Every other projected node and link, including unrelated
+non-neighbors, remains rendered with a clearly visible neutral gray treatment.
+Context nodes use the neutral outline role at `0.32` opacity and context links use
+their ordinary edge role at `0.6` opacity. Constellation presentation does not hide
+the surrounding graph.
+
 Hover/drag presentation should adopt the useful native visual pattern:
 
 - the active node, direct neighbors, and incident links target full opacity;
@@ -373,6 +384,9 @@ to a different node, and releases all neighborhood emphasis when focus clears. T
 movement and completed touch node drags never create a persistent hover target. Clearing
 interaction presentation is required even when the requested focus ID already matches
 the stored focus state; an idempotent focus command may not leave stale hover behind.
+While Focus/Local is active, the focused node, every immediate neighbor, and every
+focused-to-neighbor link receive the highlight treatment at full opacity. This is a
+presentation rule only; neighbors do not become selected.
 
 A small exponential interpolation may approach these opacity/color targets. It must
 stop scheduling frames once the resolved values reach their targets.

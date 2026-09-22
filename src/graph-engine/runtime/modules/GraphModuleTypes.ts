@@ -8,11 +8,12 @@ import type {
   Vec3,
 } from '../../contracts/v1/index.ts';
 import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
+import type { AnimusEdgeRoleV1, AnimusNodeRoleV1, AnimusRegionV1 } from '../animus/index.ts';
 import type {
   GraphEdgeRenderContributionV1,
   GraphNodeRenderContributionV1,
   GraphPresentationPolicyV2,
-  GraphRenderRegionV1,
+  GraphRegionRenderContributionV1,
 } from '../render/index.ts';
 import type { GraphVisualThemeV2 } from '../theme/index.ts';
 
@@ -58,10 +59,13 @@ export interface GraphModulePipelineStateV1 {
   readonly selectionNeighborRevealActive?: boolean;
   /** Runtime-only semantic preview state supplied independently from pointer hover. */
   readonly previewedNodeId?: string;
+  readonly nodeRoles: Readonly<Record<string, AnimusNodeRoleV1>>;
+  readonly edgeRoles: Readonly<Record<string, AnimusEdgeRoleV1>>;
+  readonly regions: readonly AnimusRegionV1[];
   readonly nodeContributions: Readonly<Record<string, GraphNodeRenderContributionV1>>;
   readonly edgeContributions: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
   readonly regionLayouts: readonly GraphNodeRegionLayoutV1[];
-  readonly regionContributions: readonly GraphRenderRegionV1[];
+  readonly regionContributions: readonly GraphRegionRenderContributionV1[];
   readonly theme: GraphVisualThemeV2;
   readonly presentationPolicy?: GraphPresentationPolicyV2;
   /** Declarative Anima/layout/camera targets; mechanisms remain owned by their runtimes. */
@@ -76,10 +80,13 @@ export interface GraphModuleProjectionPatchV1 {
   readonly projectionSelection?: GraphFilterSelectionV1;
   readonly renderSelection?: GraphFilterSelectionV1;
   readonly formActive?: boolean;
+  readonly nodeRoles?: Readonly<Record<string, AnimusNodeRoleV1>>;
+  readonly edgeRoles?: Readonly<Record<string, AnimusEdgeRoleV1>>;
+  readonly regions?: readonly AnimusRegionV1[];
   readonly nodeContributions?: Readonly<Record<string, GraphNodeRenderContributionV1>>;
   readonly edgeContributions?: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
   readonly regionLayouts?: readonly GraphNodeRegionLayoutV1[];
-  readonly regionContributions?: readonly GraphRenderRegionV1[];
+  readonly regionContributions?: readonly GraphRegionRenderContributionV1[];
   readonly theme?: GraphVisualThemeV2;
   readonly presentationPolicy?: GraphPresentationPolicyV2;
   readonly motionTargets?: GraphMotionTargetsV1;

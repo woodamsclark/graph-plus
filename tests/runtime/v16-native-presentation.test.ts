@@ -25,6 +25,20 @@ import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import { runtimeCanvas, runtimeHarness } from '../support/runtimeHarness.ts';
 
+const RESOLVED_NODE_STYLE = {
+  finalColor: DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
+  opacity: 1,
+  labelColor: DEFAULT_GRAPH_RENDER_THEME_V1.colors.label,
+  labelOpacity: 1,
+  labelFontSize: DEFAULT_GRAPH_RENDER_THEME_V1.labelFont.sizePx,
+  labelStatePriority: 0,
+} as const;
+
+const RESOLVED_FRAME_STYLE = {
+  backgroundColor: DEFAULT_GRAPH_RENDER_THEME_V1.colors.background,
+  labelFont: DEFAULT_GRAPH_RENDER_THEME_V1.labelFont,
+} as const;
+
 test('V1.6 Anima owns the exact visible-degree radius and composable structural scale', () => {
   const nodes = [graphNode('hub'), ...Array.from({ length: 9 }, (_, index) => graphNode(`leaf-${index}`))];
   const edges = Array.from({ length: 9 }, (_, index) => graphEdge(`edge-${index}`, 'hub', `leaf-${index}`, { directed: true }));
@@ -104,10 +118,16 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   });
   assert(taggedA?.nodeContributions && taggedA.edgeContributions, 'Explore presentation should resolve tagged nodes');
   equal(taggedA.nodeContributions.a.opacity, 1, 'the tagged node should remain fully visible');
-  equal(taggedA.nodeContributions.b.opacity, 0.2, 'tagging must not automatically reveal direct neighbors');
+  equal(taggedA.nodeContributions.b.opacity, 0.32, 'tagging must not automatically reveal direct neighbors');
+  equal(taggedA.nodeContributions.c.opacity, 0.32,
+    'Constellation should keep an unrelated non-neighbor visible but dimmed');
+  deepEqual(taggedA.nodeContributions.c.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.nodeOutline,
+    'an unrelated non-neighbor should retain the neutral node color');
   deepEqual(taggedA.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'the tagged node should light up');
-  equal(taggedA.edgeContributions['a-b'].opacity, 0.2, 'a single tag should not light its neighborhood links');
+  equal(taggedA.edgeContributions['a-b'].opacity, 0.6, 'a single tag should not light its neighborhood links');
+  equal(taggedA.edgeContributions['b-c'].opacity, 0.6,
+    'Constellation should keep an unrelated non-neighbor link visible but dimmed');
 
   const taggedStructure = anima.contributeFrame({
     ...state,
@@ -115,7 +135,8 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   });
   assert(taggedStructure?.edgeContributions, 'multi-tag presentation should include structural links');
   equal(taggedStructure.edgeContributions['a-b'].opacity, 1, 'a link between tagged nodes should remain bright');
-  equal(taggedStructure.edgeContributions['b-c'].opacity, 0.2, 'links outside the tagged structure should dim');
+  equal(taggedStructure.edgeContributions['b-c'].opacity, 1,
+    'Focus should brighten every focused-to-neighbor link');
 
   const exploredHover = anima.contributeFrame({
     ...state,
@@ -125,14 +146,14 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   assert(exploredHover?.nodeContributions && exploredHover.edgeContributions,
     'Explore hover should resolve a path back to the tagged structure');
   equal(exploredHover.nodeContributions.b.opacity, 1, 'an intermediate shortest-path node should be revealed');
-  equal(exploredHover.nodeContributions.d.opacity, 0.2, 'unrelated untagged nodes should remain dim');
+  equal(exploredHover.nodeContributions.d.opacity, 0.32, 'unrelated untagged nodes should remain dim');
   deepEqual(exploredHover.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'intermediate shortest-path nodes should light');
   deepEqual(exploredHover.nodeContributions.c.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'the hovered node should light independently from tagged nodes');
   equal(exploredHover.edgeContributions['b-c'].opacity, 1, 'the outer shortest-path link should be revealed');
   equal(exploredHover.edgeContributions['a-b'].opacity, 1, 'the shortest path should connect fully to the selection');
-  equal(exploredHover.edgeContributions['a-d'].opacity, 0.2, 'off-path links should remain dim');
+  equal(exploredHover.edgeContributions['a-d'].opacity, 0.6, 'off-path links should remain dim');
   equal(exploredHover.nodeContributions.c.labelForceVisible, true,
     'the hovered endpoint label should be forced at its normal size');
   equal(exploredHover.nodeContributions.c.labelFontSize, taggedA.nodeContributions.c.labelFontSize,
@@ -162,7 +183,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     'hovering a tagged node should light a direct neighbor');
   deepEqual(hoveredTag.nodeContributions.d.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'hovering a tagged node should light every direct neighbor');
-  equal(hoveredTag.nodeContributions.c.opacity, 0.2, 'nodes beyond the direct neighborhood should remain dim');
+  equal(hoveredTag.nodeContributions.c.opacity, 0.32, 'nodes beyond the direct neighborhood should remain dim');
   equal(hoveredTag.edgeContributions['a-b'].opacity, 1, 'direct neighborhood links should light');
   equal(hoveredTag.edgeContributions['a-d'].opacity, 1, 'all direct neighborhood links should light');
   equal(hoveredTag.nodeContributions.a.labelForceVisible, true,
@@ -189,12 +210,12 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     'Option neighbor reveal should contribute node and link presentation');
   equal(optionRevealed.nodeContributions.b.opacity, 1, 'Option should undim a direct neighbor');
   equal(optionRevealed.nodeContributions.d.opacity, 1, 'Option should undim every direct neighbor');
-  equal(optionRevealed.nodeContributions.c.opacity, 0.2, 'Option should leave non-neighbors dimmed');
+  equal(optionRevealed.nodeContributions.c.opacity, 0.32, 'Option should leave non-neighbors dimmed');
   equal(optionRevealed.edgeContributions['a-b'].opacity, 1,
     'Option should reveal a link from the selection to a direct neighbor');
   equal(optionRevealed.edgeContributions['a-d'].opacity, 1,
     'Option should reveal every link from the selection to a direct neighbor');
-  equal(optionRevealed.edgeContributions['b-c'].opacity, 0.2,
+  equal(optionRevealed.edgeContributions['b-c'].opacity, 0.6,
     'Option should leave links outside the revealed neighborhood dimmed');
   deepEqual(optionRevealed.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'Option should highlight a neighbor with the same treatment as selected-node hover');
@@ -210,7 +231,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   assert(updatedOptionReveal?.nodeContributions, 'Option reveal should recompute with selection edits');
   equal(updatedOptionReveal.nodeContributions.b.opacity, 1,
     'the updated selection should reveal its direct neighbor');
-  equal(updatedOptionReveal.nodeContributions.d.opacity, 0.2,
+  equal(updatedOptionReveal.nodeContributions.d.opacity, 0.32,
     'neighbors of the old selection should dim when no longer adjacent');
 
   const previewedA = anima.contributeFrame({
@@ -221,8 +242,14 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   assert(previewedA?.edgeContributions, 'semantic preview should produce Anima presentation');
   equal(previewedA.edgeContributions['a-b'].opacity, 0,
     'Focus should hide links outside the focused neighborhood');
-  equal(previewedA.edgeContributions['b-c'].opacity, 0.2,
-    'an unselected focused-neighborhood link should remain gray');
+  equal(previewedA.nodeContributions?.b.opacity, 1,
+    'a focused neighbor should remain fully visible');
+  deepEqual(previewedA.nodeContributions?.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
+    'a focused neighbor should receive the highlight treatment');
+  equal(previewedA.edgeContributions['b-c'].opacity, 1,
+    'a focused-neighborhood link should remain fully visible');
+  deepEqual(previewedA.edgeContributions['b-c'].color, DEFAULT_GRAPH_RENDER_THEME_V1.colors.highlightedNode,
+    'a focused-neighborhood link should receive the highlight treatment');
   equal(previewedA.edgeContributions['a-d'].opacity, 0,
     'Focus should ignore unrelated preview links outside its local rendering scope');
 
@@ -304,9 +331,9 @@ test('V1.6 Anima labels retain their CSS size across orthographic zoom', () => {
     regions: [], edges: [],
     nodes: [{
       id: 'hub', label: 'hub', position: { x: 0, y: 0, z: 0 }, radius: 24,
-      selected: false, focused: false, hovered: false, labelFontSize: 20,
+      ...RESOLVED_NODE_STYLE, labelFontSize: 20,
     }],
-    theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    ...RESOLVED_FRAME_STYLE,
     policy: {
       ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
       labelMode: 'all',
@@ -337,15 +364,15 @@ test('hover-forced labels are the only labels rendered while label mode is off',
   camera.setViewport(640, 360);
   const frames = new GraphFrameStore();
   frames.set({
-    regions: [], edges: [], theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    regions: [], edges: [], ...RESOLVED_FRAME_STYLE,
     nodes: [
       {
         id: 'hovered', label: 'hovered', position: { x: -40, y: 0, z: 0 }, radius: 8,
-        selected: false, focused: false, hovered: true, showLabel: true, labelForceVisible: true,
+        ...RESOLVED_NODE_STYLE, labelStatePriority: 2, showLabel: true, labelForceVisible: true,
       },
       {
         id: 'ordinary', label: 'ordinary', position: { x: 40, y: 0, z: 0 }, radius: 8,
-        selected: false, focused: false, hovered: false, showLabel: true,
+        ...RESOLVED_NODE_STYLE, showLabel: true,
       },
     ],
     policy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'off' },
@@ -370,12 +397,12 @@ test('node scaling supports calm, world, and exaggerated responses in 2D and 3D'
   renderer.resize(640, 360, 1);
   const node = {
     id: 'a', label: 'a', position: { x: 0, y: 0, z: 0 }, radius: 10,
-    selected: false, focused: false, hovered: false,
+    ...RESOLVED_NODE_STYLE,
   };
   const renderAt = (exponent: number): number => {
     arcRadii.length = 0;
     frames.set({
-      regions: [], edges: [], nodes: [node], theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+      regions: [], edges: [], nodes: [node], ...RESOLVED_FRAME_STYLE,
       policy: {
         ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
         nodeScaleMode: 'sqrt-orthographic',
@@ -390,7 +417,7 @@ test('node scaling supports calm, world, and exaggerated responses in 2D and 3D'
   equal(renderAt(2), 160, 'the high end should grow substantially beyond world-space size');
   arcRadii.length = 0;
   frames.set({
-    regions: [], edges: [], nodes: [{ ...node, nodeScaleExponent: 2 }], theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    regions: [], edges: [], nodes: [{ ...node, nodeScaleExponent: 2 }], ...RESOLVED_FRAME_STYLE,
     policy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, nodeScaleExponent: 0.5 },
   });
   renderer.render();
@@ -407,7 +434,7 @@ test('node scaling supports calm, world, and exaggerated responses in 2D and 3D'
   const renderPerspectiveAt = (exponent: number): number => {
     arcRadii.length = 0;
     perspectiveFrames.set({
-      regions: [], edges: [], nodes: [node], theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+      regions: [], edges: [], nodes: [node], ...RESOLVED_FRAME_STYLE,
       policy: {
         ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
         nodeScaleExponent: exponent,
@@ -438,18 +465,18 @@ test('V1.6 renderer anchors labels above or below the resolved node boundary', (
   renderer.resize(640, 360, 1);
   const node = {
     id: 'a', label: 'a', position: { x: 0, y: 0, z: 0 }, radius: 8,
-    selected: false, focused: false, hovered: false,
+    ...RESOLVED_NODE_STYLE,
   };
   frames.set({
     regions: [], edges: [], nodes: [node],
-    theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    ...RESOLVED_FRAME_STYLE,
     policy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'all', labelPosition: 'below' },
   });
   renderer.render();
   equal(fillTextY.pop(), 192, 'below should begin four pixels beneath the eight-pixel node');
   frames.set({
     regions: [], edges: [], nodes: [node],
-    theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    ...RESOLVED_FRAME_STYLE,
     policy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'all', labelPosition: 'above' },
   });
   renderer.render();
@@ -590,14 +617,14 @@ test('V1.6 new-mode 3D preserves depth while keeping nodes visible and finger-se
     nodes: [
       {
         id: 'a', label: 'a', position: { x: 0, y: 0, z: 0 }, radius: 8,
-        selected: false, focused: false, hovered: false,
+        ...RESOLVED_NODE_STYLE,
       },
       {
         id: 'hub', label: 'hub', position: { x: 1_000, y: 0, z: 0 }, radius: 24,
-        selected: false, focused: false, hovered: false,
+        ...RESOLVED_NODE_STYLE,
       },
     ],
-    theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    ...RESOLVED_FRAME_STYLE,
     policy: {
       ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
       minimumPerspectiveNodeRadius: 4,
@@ -638,15 +665,15 @@ test('V1.6 adaptive labels reserve overlap space for structural hubs before near
     nodes: [
       {
         id: 'z-hub', label: 'hub', position: { x: 0, y: 0, z: 0 }, radius: 24,
-        selected: false, focused: false, hovered: false, labelFontSize: 14,
+        ...RESOLVED_NODE_STYLE, labelFontSize: 14,
         labelOffset: { x: 0, y: -8 },
       },
       {
         id: 'a-leaf', label: 'leaf', position: { x: 0, y: 0, z: 4_500 }, radius: 8,
-        selected: false, focused: false, hovered: false, labelFontSize: 14,
+        ...RESOLVED_NODE_STYLE, labelFontSize: 14,
       },
     ],
-    theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    ...RESOLVED_FRAME_STYLE,
     policy: {
       ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
       labelMode: 'adaptive',
@@ -689,12 +716,10 @@ test('V1.6 adaptive label budget follows perspective distance and the active thr
           z: 0,
         },
         radius: 8,
-        selected: false,
-        focused: false,
-        hovered: false,
+        ...RESOLVED_NODE_STYLE,
         labelFontSize: 10,
       })),
-      theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+      ...RESOLVED_FRAME_STYLE,
       policy: {
         ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
         labelMode: 'adaptive',
@@ -1191,6 +1216,9 @@ function pipeline(
     projectionSelection: selection,
     renderSelection: selection,
     formActive: false,
+    nodeRoles: {},
+    edgeRoles: {},
+    regions: [],
     nodeContributions: {},
     edgeContributions: {},
     regionLayouts: [],

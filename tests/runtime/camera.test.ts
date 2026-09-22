@@ -23,11 +23,15 @@ test('R-CAMERA-01 orthographic zoom scales node projection and hit radius togeth
       label: 'a',
       position: { x: 0, y: 0, z: 0 },
       radius: 7,
-      selected: false,
-      focused: false,
-      hovered: false,
+      finalColor: DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
+      opacity: 1,
+      labelColor: DEFAULT_GRAPH_RENDER_THEME_V1.colors.label,
+      labelOpacity: 1,
+      labelFontSize: DEFAULT_GRAPH_RENDER_THEME_V1.labelFont.sizePx,
+      labelStatePriority: 0,
     }],
-    theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    backgroundColor: DEFAULT_GRAPH_RENDER_THEME_V1.colors.background,
+    labelFont: DEFAULT_GRAPH_RENDER_THEME_V1.labelFont,
   });
   const hitTester = new GraphHitTester(camera, frames);
   equal(camera.worldToScreen({ x: 0, y: 0, z: 0 }).scale, 1, 'baseline zoom should preserve the canonical node radius');

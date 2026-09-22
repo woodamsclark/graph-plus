@@ -30,6 +30,7 @@ import {
 } from '../core/state/index.ts';
 import { GraphCameraController } from './camera/index.ts';
 import {
+  graphInteractionPolicyV1,
   resolveGraphUxStateV1,
   SessionInteractionRuntime,
   type GraphRuntimeViewChangeV1,
@@ -1024,6 +1025,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       selectionPresentationSuspended: this.interaction?.isSelectionPresentationSuspended(),
       selectionNeighborRevealActive: this.interaction?.isSelectionNeighborRevealActive(),
       previewedNodeId: this.interaction?.getPreviewedNodeId(),
+      nodeRoles: {},
+      edgeRoles: {},
+      regions: [],
       nodeContributions: {},
       edgeContributions: {},
       regionLayouts: [],
@@ -1096,9 +1100,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         id: `label:${node.id}`,
         nodeId: node.id,
         text: node.label,
-        color: node.labelColor ?? frame.theme.colors.label,
-        opacity: node.labelOpacity ?? 1,
-        fontSizePx: node.labelFontSize ?? frame.theme.labelFont.sizePx,
+        color: node.labelColor,
+        opacity: node.labelOpacity,
+        fontSizePx: node.labelFontSize,
         offset: node.labelOffset ?? { x: 0, y: 0 },
         visible: node.showLabel !== false,
         priority: node.labelPriority ?? 0,
@@ -1152,19 +1156,19 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private resetCameraState(): void {
     this.camera.setState(defaultCamera(this.profile.dimensions, focalLengthMm(this.profile.profileSettings)));
     const document = this.store.readDocument();
-    const uxState = resolveGraphUxStateV1(this.viewState);
+    const policy = graphInteractionPolicyV1(this.viewState);
     const visibleSelectedNodeIds = this.viewState.selectedNodeIds
       .filter((id) => this.renderSelection.nodeIds.has(id));
-    const candidates = uxState === 'focus' && this.viewState.focusedNodeId
+    const candidates = policy.fitTarget === 'focused-neighborhood' && this.viewState.focusedNodeId
       ? this.focusNeighborhoodNodeIds(this.viewState.focusedNodeId)
-      : uxState === 'explore'
+      : policy.fitTarget === 'selection'
         ? visibleSelectedNodeIds
         : [...this.renderSelection.nodeIds];
     const positions = candidates
       .filter((id) => document.nodes.some((node) => node.id === id))
       .map((id) => this.moduleView.positions[id])
       .filter((position): position is Vec3 => position !== undefined);
-    const center = uxState === 'focus' && this.viewState.focusedNodeId
+    const center = policy.cameraTarget === 'focused-node' && this.viewState.focusedNodeId
       ? this.moduleView.positions[this.viewState.focusedNodeId]
       : undefined;
     this.camera.fit(positions, 48, undefined, center);

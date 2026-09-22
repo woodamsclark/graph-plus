@@ -4,7 +4,7 @@ import { FilteringModule } from './FilteringModule.ts';
 import { ForceLayoutModule, readForceSettings } from './ForceLayoutModule.ts';
 import { FormModule } from './FormModule.ts';
 import { LinearBuildOutLayoutModule } from './LinearBuildOutLayoutModule.ts';
-import { RenderingModule } from './RenderingModule.ts';
+import { AnimaBaselineModule } from '../../anima/index.ts';
 import { NodeRegionsModule } from './NodeRegionsModule.ts';
 import { DEFAULT_GRAPH_TOPOLOGY_LAYOUT_POLICY_V1 } from '../../../core/topology/index.ts';
 import type { JsonValue } from '../../../contracts/v1/index.ts';
@@ -38,7 +38,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
         tokenColors: {},
       },
     },
-    create: ({ themePalette, settings }) => new RenderingModule(themePalette, settings),
+    create: ({ themePalette, settings }) => new AnimaBaselineModule(themePalette, settings),
   });
   registry.register({
     order: 200,

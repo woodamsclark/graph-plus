@@ -315,8 +315,8 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
 
   private clear(frame: GraphRenderFrameV1): void {
     this.context.clearRect(0, 0, this.width, this.height);
-    if (frame.theme.colors.background.a > 0) {
-      this.context.fillStyle = this.colorCss(frame.theme.colors.background);
+    if (frame.backgroundColor.a > 0) {
+      this.context.fillStyle = this.colorCss(frame.backgroundColor);
       this.context.fillRect(0, 0, this.width, this.height);
     }
   }
@@ -338,7 +338,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       const startY = source.point.y + unitY * source.radius;
       const endX = target.point.x - unitX * target.radius;
       const endY = target.point.y - unitY * target.radius;
-      this.context.strokeStyle = this.colorCss(edge.color ?? frame.theme.colors.edge);
+      this.context.strokeStyle = this.colorCss(edge.color);
       this.context.globalAlpha = clampOpacity(edge.opacity);
       this.context.lineWidth = edge.thickness;
       this.context.setLineDash(edge.dashed ? [4, 5] : []);
@@ -346,8 +346,8 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       this.context.moveTo(startX, startY);
       this.context.lineTo(endX, endY);
       this.context.stroke();
-      this.context.fillStyle = this.colorCss(edge.arrowColor ?? edge.color ?? frame.theme.colors.arrow);
-      this.context.globalAlpha = clampOpacity(edge.arrowOpacity ?? edge.opacity);
+      this.context.fillStyle = this.colorCss(edge.arrowColor);
+      this.context.globalAlpha = clampOpacity(edge.arrowOpacity);
       if (edge.arrowAtTarget ?? edge.directed) drawArrow(this.context, endX, endY, unitX, unitY, Math.max(5, edge.thickness * 3));
       if (edge.arrowAtSource === true) drawArrow(this.context, startX, startY, -unitX, -unitY, Math.max(5, edge.thickness * 3));
     }
@@ -371,13 +371,13 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
         .filter((point) => point.depth > 0);
       if (projected.length < 3) continue;
       this.traceSmoothClosedPath(projected);
-      this.context.globalAlpha = clampOpacity(region.fillOpacity ?? 0.12);
-      this.context.fillStyle = this.colorCss(region.fillColor ?? region.color);
+      this.context.globalAlpha = clampOpacity(region.fillOpacity);
+      this.context.fillStyle = this.colorCss(region.fillColor);
       this.context.fill();
       this.traceSmoothClosedPath(projected);
-      this.context.globalAlpha = clampOpacity(region.strokeOpacity ?? 0.52);
-      this.context.strokeStyle = this.colorCss(region.strokeColor ?? region.color);
-      this.context.lineWidth = region.strokeWidth ?? 1.5;
+      this.context.globalAlpha = clampOpacity(region.strokeOpacity);
+      this.context.strokeStyle = this.colorCss(region.strokeColor);
+      this.context.lineWidth = region.strokeWidth;
       this.context.setLineDash([]);
       this.context.stroke();
     }
@@ -441,17 +441,13 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     this.context.save();
     for (const { node, point, radius } of nodes) {
       this.context.globalAlpha = clampOpacity(node.opacity);
-      this.context.fillStyle = this.colorCss(node.finalColor ?? (node.focused
-        ? frame.theme.colors.focusedNode
-        : node.selected
-          ? frame.theme.colors.selectedNode
-          : node.color ?? frame.theme.colors.node));
+      this.context.fillStyle = this.colorCss(node.finalColor);
       this.context.beginPath();
       this.context.arc(point.x, point.y, radius, 0, Math.PI * 2);
       this.context.fill();
-      if (node.focused || node.selected || node.strokeWidth !== undefined) {
-        this.context.strokeStyle = this.colorCss(node.strokeColor ?? frame.theme.colors.label);
-        this.context.lineWidth = node.strokeWidth ?? (node.focused ? 2 : 1);
+      if (node.strokeWidth !== undefined && node.strokeColor !== undefined) {
+        this.context.strokeStyle = this.colorCss(node.strokeColor);
+        this.context.lineWidth = node.strokeWidth;
         this.context.stroke();
       }
     }
@@ -463,8 +459,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     this.context.save();
     this.context.textAlign = 'center';
     this.context.textBaseline = 'top';
-    this.context.font = graphFontToCss(frame.theme.labelFont);
-    this.context.fillStyle = this.colorCss(frame.theme.colors.label);
+    this.context.font = graphFontToCss(frame.labelFont);
     const candidates = nodes
       .filter(({ node }) => node.showLabel !== false && (mode !== 'off' || node.labelForceVisible === true))
       .sort(compareLabelCandidates);
@@ -502,8 +497,8 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     const drawStart = this.now();
     for (const { node, point, radius } of acceptedCandidates) {
       const offset = node.labelOffset ?? { x: 0, y: 0 };
-      this.context.globalAlpha = clampOpacity(node.labelOpacity ?? node.opacity);
-      this.context.fillStyle = this.colorCss(node.labelColor ?? frame.theme.colors.label);
+      this.context.globalAlpha = clampOpacity(node.labelOpacity);
+      this.context.fillStyle = this.colorCss(node.labelColor);
       const font = nodeFont(frame, node, this.camera.getState().zoom, this.camera.getState().projection);
       this.context.font = font;
       this.context.fillText(node.label, point.x + offset.x, labelTop(frame, point.y, radius, font) + offset.y);
@@ -558,19 +553,11 @@ interface LabelBounds {
 }
 
 function compareLabelCandidates(a: ProjectedNode, b: ProjectedNode): number {
-  return labelStatePriority(b) - labelStatePriority(a)
+  return b.node.labelStatePriority - a.node.labelStatePriority
     || (b.node.labelPriority ?? 0) - (a.node.labelPriority ?? 0)
     || b.node.radius - a.node.radius
     || b.point.scale - a.point.scale
     || a.node.id.localeCompare(b.node.id);
-}
-
-function labelStatePriority(value: ProjectedNode): number {
-  if (value.node.focused) return 4;
-  if (value.node.selected) return 3;
-  if (value.node.hovered) return 2;
-  if (value.node.labelAlwaysVisible) return 1;
-  return 0;
 }
 
 function overlaps(a: LabelBounds, b: LabelBounds): boolean {
@@ -633,12 +620,11 @@ function nodeFont(
   zoom: number,
   projection: 'orthographic' | 'perspective',
 ): string {
-  if (node.labelFontSize === undefined) return graphFontToCss(frame.theme.labelFont);
   const scale = renderPolicy(frame).labelScaleMode === 'sqrt-orthographic' && projection === 'orthographic'
     ? Math.sqrt(Math.max(0, zoom))
     : 1;
   const size = Math.max(1, node.labelFontSize * scale);
-  const family = frame.theme.labelFont.family;
+  const family = frame.labelFont.family;
   return `${size}px ${family || 'sans-serif'}`;
 }
 
@@ -647,7 +633,7 @@ function graphFontToCss(font: GraphFontV2): string {
 }
 
 function renderPolicy(frame: GraphRenderFrameV1) {
-  return frame.policy ?? frame.theme as import('./GraphRenderTypes.ts').GraphPresentationPolicyV2;
+  return frame.policy ?? {};
 }
 
 function clampOpacity(value: number | undefined): number {

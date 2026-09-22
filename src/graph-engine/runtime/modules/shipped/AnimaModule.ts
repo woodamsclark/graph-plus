@@ -3,7 +3,23 @@ import { shortestPathToAnyV1 } from '../../../core/topology/index.ts';
 import type { GraphVisualThemeV2 } from '../../theme/index.ts';
 import type { GraphModuleInstanceV1, GraphModuleProjectionPatchV1 } from '../GraphModuleTypes.ts';
 import { GraphLabelManager, type GraphLabelRequestV1 } from './GraphLabelManager.ts';
-import { resolveGraphUxStateV1 } from '../../interaction/GraphInteractionStatePolicy.ts';
+import {
+  graphInteractionPolicyV1,
+} from '../../interaction/GraphInteractionStatePolicy.ts';
+import {
+  ANIMA_INTERACTION_PRESENTATION_V1,
+  type AnimaPresentationRoleV1,
+} from '../../anima/index.ts';
+
+const PRESENTATION_ROLE_OPACITY: Readonly<Record<
+  AnimaPresentationRoleV1,
+  Readonly<{ node: number; edge: number }>
+>> = {
+  normal: { node: 1, edge: 1 },
+  highlighted: { node: 1, edge: 1 },
+  dimmed: { node: 0.32, edge: 0.6 },
+  hidden: { node: 0, edge: 0 },
+};
 
 export class AnimaModule implements GraphModuleInstanceV1 {
   private nodeZoomContrast: number;
@@ -47,7 +63,10 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const focusedId = state.viewState.focusedNodeId;
     const selectedIds = new Set(state.viewState.selectedNodeIds);
     const taggedIds = new Set(selectedIds);
-    const uxState = resolveGraphUxStateV1(state.viewState);
+    const interactionPolicy = graphInteractionPolicyV1(state.viewState);
+    const interactionPresentation = ANIMA_INTERACTION_PRESENTATION_V1[interactionPolicy.state];
+    const localFocusActive = interactionPolicy.renderScope === 'focused-local-view';
+    const selectionEmphasisActive = interactionPolicy.renderScope === 'graph-with-selection-emphasis';
     const focusNeighborIds = focusedId === undefined
       ? new Set<string>()
       : new Set(relationships.get(focusedId) ?? []);
@@ -62,7 +81,8 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const transientNeighborhood = transientId === undefined
       ? undefined
       : new Set([transientId, ...(relationships.get(transientId) ?? [])]);
-    const exploreActive = uxState !== 'overview' && state.selectionPresentationSuspended !== true;
+    const exploreActive = selectionEmphasisActive
+      && state.selectionPresentationSuspended !== true;
     const hoveredIsTagged = hoveredId !== undefined && selectedIds.has(hoveredId);
     const pathTargetIds = selectedIds.size > 0 ? selectedIds : taggedIds;
     const exploreHoverPath = exploreActive && hoveredId !== undefined && !hoveredIsTagged
@@ -77,13 +97,13 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const revealedNeighborIds = state.selectionNeighborRevealActive === true
       ? new Set([...selectedIds].flatMap((nodeId) => [...(relationships.get(nodeId) ?? [])]))
       : new Set<string>();
-    const visibleIds = uxState === 'focus'
+    const visibleIds = localFocusActive
       ? focusVisibleIds
       : transientNeighborhood ?? (exploreActive
         ? new Set([...taggedIds, ...exploreHoverIds, ...revealedNeighborIds])
         : undefined);
-    const litNodeIds = uxState === 'focus'
-      ? selectedIds
+    const litNodeIds = localFocusActive
+      ? focusVisibleIds
       : transientId !== undefined
       ? new Set([transientId])
       : exploreActive
@@ -99,7 +119,12 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const edgeIsLit = (sourceId: string, targetId: string): boolean => {
       const joinsTaggedStructure = taggedIds.has(sourceId) && taggedIds.has(targetId);
       if (joinsTaggedStructure) return true;
-      if (uxState === 'focus') return false;
+      if (localFocusActive) {
+        return focusedId !== undefined && (
+          (sourceId === focusedId && focusNeighborIds.has(targetId))
+          || (targetId === focusedId && focusNeighborIds.has(sourceId))
+        );
+      }
       if (transientId !== undefined) return sourceId === transientId || targetId === transientId;
       if (revealedNeighborLinkPairs.has(unorderedPair(sourceId, targetId))) return true;
       if (hoveredId === undefined) return false;
@@ -137,15 +162,24 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const nodeContributions = Object.fromEntries(nodesWithRadius
       .map(({ node, prior, radius }) => {
         const isLit = litNodeIds.has(node.id);
-        const color = isLit
+        const visible = visibleIds === undefined || visibleIds.has(node.id);
+        const role = isLit
+          ? localFocusActive
+            ? interactionPresentation.focusedNeighborhood
+            : selectionEmphasisActive
+              ? interactionPresentation.selection
+              : 'highlighted'
+          : visible
+            ? 'normal'
+            : interactionPresentation.graphContext;
+        const color = role === 'highlighted'
           ? this.palette.colors.animaAccent
+          : role === 'dimmed'
+            ? this.palette.colors.nodeOutline
           : prior?.color ?? (node.tokens?.includes('kind:tag') ? this.palette.colors.tagNode : undefined) ?? this.palette.colors.node;
         const selected = state.viewState.selectedNodeIds.includes(node.id);
         const pinned = state.viewState.pinnedNodeIds.includes(node.id);
-        const visible = visibleIds === undefined || visibleIds.has(node.id);
-        const opacity = uxState === 'focus'
-          ? visible ? (selected ? 1 : 0.2) : 0
-          : visible ? 1 : 0.2;
+        const opacity = PRESENTATION_ROLE_OPACITY[role].node;
         return [node.id, {
           ...prior,
           ...labelContributions[node.id],
@@ -165,15 +199,24 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       const prior = state.edgeContributions[edge.id];
       const lit = edgeIsLit(edge.sourceId, edge.targetId);
       const revealed = revealedNeighborLinkPairs.has(unorderedPair(edge.sourceId, edge.targetId));
-      const focusLocalEdge = uxState === 'focus' && focusedId !== undefined && (
+      const focusLocalEdge = localFocusActive && focusedId !== undefined && (
         (edge.sourceId === focusedId && focusNeighborIds.has(edge.targetId))
         || (edge.targetId === focusedId && focusNeighborIds.has(edge.sourceId))
         || (selectedIds.has(edge.sourceId) && selectedIds.has(edge.targetId))
       );
-      const visible = uxState === 'focus'
+      const visible = localFocusActive
         ? focusLocalEdge
         : visibleIds === undefined || lit || revealed;
-      const opacity = uxState === 'focus' ? visible ? (lit ? 1 : 0.2) : 0 : visible ? 1 : 0.2;
+      const role = lit
+        ? localFocusActive
+          ? interactionPresentation.focusedNeighborhood
+          : selectionEmphasisActive
+            ? interactionPresentation.selection
+            : 'highlighted'
+        : visible
+          ? 'normal'
+          : interactionPresentation.graphContext;
+      const opacity = PRESENTATION_ROLE_OPACITY[role].edge;
       return [edge.id, {
         ...prior,
         thickness: positive(prior?.baseThicknessScale, 1) * positive(prior?.thicknessScale, 1),

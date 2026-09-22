@@ -3,6 +3,7 @@ import type {
   GraphSessionV1,
 } from '../../src/graph-engine/contracts/v1/index.ts';
 import {
+  ANIMA_INTERACTION_PRESENTATION_V1,
   GRAPH_INTERACTION_STATE_POLICIES_V1,
   GraphCameraController,
 } from '../../src/graph-engine/runtime/index.ts';
@@ -13,9 +14,10 @@ import {
   runtimeCanvas,
   runtimeHarness,
   runtimeRegistration,
+  runtimeSurface,
 } from '../support/runtimeHarness.ts';
 
-test('Overview, Explore, and Focus own fixed camera, render, and navigation policy', () => {
+test('Animus owns camera, render scope, and navigation while Anima owns presentation', () => {
   deepEqual(GRAPH_INTERACTION_STATE_POLICIES_V1, {
     overview: {
       state: 'overview', cameraTarget: 'graph', fitTarget: 'graph', renderScope: 'graph',
@@ -37,7 +39,12 @@ test('Overview, Explore, and Focus own fixed camera, render, and navigation poli
       wheel: { '2d': 'elastic-pan', '3d': 'rotate' },
       secondaryDrag: 'radial-zoom', mobileTwoFingerDrag: 'radial-zoom',
     },
-  }, 'state policy must remain aligned with the permanent UI matrix');
+  }, 'Animus state policy must remain aligned with the permanent interaction matrix');
+  deepEqual(ANIMA_INTERACTION_PRESENTATION_V1, {
+    overview: { selection: 'normal', focusedNeighborhood: 'normal', graphContext: 'normal' },
+    explore: { selection: 'highlighted', focusedNeighborhood: 'normal', graphContext: 'dimmed' },
+    focus: { selection: 'highlighted', focusedNeighborhood: 'highlighted', graphContext: 'hidden' },
+  }, 'Anima must remain the sole owner of visual state interpretation');
 });
 
 test('R-INPUT-01 pans Overview, rotates Focus trackpad scroll, and radial-zooms Focus secondary drag', async () => {
@@ -461,8 +468,20 @@ test('initial selection enters Focus, Explore clicks bridge, and Ctrl removes wi
   await session.dispose();
 });
 
-test('Ctrl extends an initial Focus selection without path hops', async () => {
+test('Ctrl builds an initial constellation without path hops and enters Explore on release', async () => {
+  const base = runtimeRegistration();
+  const registration = {
+    ...base,
+    profiles: base.profiles.map((profile) => ({
+      ...profile,
+      modules: {
+        ...profile.modules,
+        anima: { ...profile.modules.anima, defaultEnabled: true },
+      },
+    })),
+  };
   const value = runtimeHarness({
+    registration,
     document: graphDocument({
       nodes: ['a', 'b', 'c'].map((nodeId) => graphNode(nodeId)),
       edges: [graphEdge('a-b', 'a', 'b'), graphEdge('b-c', 'b', 'c')],
@@ -473,25 +492,35 @@ test('Ctrl extends an initial Focus selection without path hops', async () => {
   const wideView = await session.exportViewState();
   await session.restoreViewState({ ...wideView, camera: { ...wideView.camera, zoom: 0.1 } });
 
-  const beforeCtrl = await session.exportViewState();
-  modifier(value, 'keydown', true);
+  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 310 });
   value.platform.flushFrame();
-  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 311, ctrlKey: true });
+  const initialFocus = await session.exportViewState();
+  equal(initialFocus.focusedNodeId, 'a', 'the first selection should enter Local Focus');
+
+  modifier(value, 'keydown', true);
   value.platform.flushFrame();
   click(value, canvas, await nodePoint(session, 'b'), { pointerId: 312, ctrlKey: true });
   value.platform.flushFrame();
   const held = await session.exportViewState();
   deepEqual(held.selectedNodeIds, ['a', 'b'], 'Ctrl-click should add a visible clicked node without path hops');
   equal(held.focusedNodeId, 'a', 'the initial one-node selection should remain the Focus anchor');
-  assert(JSON.stringify(held.camera) !== JSON.stringify(beforeCtrl.camera),
-    'the initial one-node shortcut should fit its local Focus view');
 
+  const heldCamera = held.camera;
+  value.styleAssignments.length = 0;
   modifier(value, 'keyup', false);
   value.platform.flushFrame();
   const released = await session.exportViewState();
   deepEqual(released.selectedNodeIds, ['a', 'b'], 'Ctrl release should retain the batched selection');
-  deepEqual(released.camera.target, released.positions.a,
-    'Ctrl release in Focus should keep the focused node as the target');
+  equal(released.focusedNodeId, undefined,
+    'releasing a multi-node initial batch should enter Explore instead of retaining stale Focus');
+  deepEqual(released.camera, heldCamera,
+    'entering Constellation should preserve the current framing instead of fitting only the selection');
+  equal(runtimeSurface(value.container).dataset.renderedNodeCount, '3',
+    'entering Constellation should keep unrelated graph context in the render set');
+  equal(value.styleAssignments.includes('globalAlpha:0.32'), true,
+    'Constellation should render unrelated nodes as visible gray context');
+  equal(value.styleAssignments.includes('globalAlpha:0.6'), true,
+    'Constellation should render unrelated links as visible gray context');
   await session.dispose();
 });
 
@@ -538,15 +567,17 @@ test('Space suspends selection dimming while Ctrl edits selection and Option hig
   value.platform.flushFrame();
   const undimmed = await session.exportViewState();
   deepEqual(undimmed, explore, 'Space should change presentation without mutating Explore state');
-  equal(value.styleAssignments.includes('globalAlpha:0.2'), false,
+  equal(value.styleAssignments.includes('globalAlpha:0.32'), false,
     'the undimmed presentation should remove selection background opacity');
 
   value.styleAssignments.length = 0;
   keyRelease(value, ' ');
   value.platform.flushFrame();
   deepEqual(await session.exportViewState(), explore, 'Space release should preserve graph state');
-  equal(value.styleAssignments.includes('globalAlpha:0.2'), true,
-    'Space release should restore selection dimming');
+  equal(value.styleAssignments.includes('globalAlpha:0.32'), true,
+    'Space release should restore visible node context dimming');
+  equal(value.styleAssignments.includes('globalAlpha:0.6'), true,
+    'Space release should restore visible link context dimming');
   await session.dispose();
 });
 

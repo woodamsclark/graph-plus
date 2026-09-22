@@ -425,6 +425,12 @@ function applyProjectionPatch(
   return {
     ...state,
     ...patch,
+    nodeRoles: patch.nodeRoles
+      ? mergeRecords(state.nodeRoles, patch.nodeRoles)
+      : state.nodeRoles,
+    edgeRoles: patch.edgeRoles
+      ? mergeRecords(state.edgeRoles, patch.edgeRoles)
+      : state.edgeRoles,
     nodeContributions: patch.nodeContributions
       ? mergeContributions(state.nodeContributions, patch.nodeContributions)
       : state.nodeContributions,
@@ -435,6 +441,17 @@ function applyProjectionPatch(
       ? mergeMotionTargets(state.motionTargets ?? {}, patch.motionTargets)
       : state.motionTargets,
   };
+}
+
+function mergeRecords<T extends object>(
+  base: Readonly<Record<string, T>>,
+  addition: Readonly<Record<string, T>>,
+): Readonly<Record<string, T>> {
+  const result: Record<string, T> = { ...base };
+  for (const [id, value] of Object.entries(addition) as Array<[string, T]>) {
+    result[id] = { ...base[id], ...value } as T;
+  }
+  return result;
 }
 
 function mergeMotionTargets(

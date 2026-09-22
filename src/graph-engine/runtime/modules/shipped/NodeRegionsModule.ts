@@ -1,7 +1,6 @@
 import type { GraphDimensionsV1, JsonValue } from '../../../contracts/v1/index.ts';
 import { GraphNodeRegionIndexV1 } from '../../../core/regions/index.ts';
-import type { GraphRenderRegionV1 } from '../../render/index.ts';
-import { parseGraphColorV2, type GraphColorV2 } from '../../theme/index.ts';
+import type { AnimusRegionV1 } from '../../animus/index.ts';
 import type {
   GraphModuleInstanceV1,
   GraphModulePipelineStateV1,
@@ -31,7 +30,7 @@ export class NodeRegionsModule implements GraphModuleInstanceV1 {
 
   selectRender(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 {
     if (this.dimensions !== '2d' || !state.document.nodeRegions) {
-      return { regionContributions: [] };
+      return { regions: [] };
     }
     const index = new GraphNodeRegionIndexV1(state.document);
     const projected = index.project(state.renderSelection.nodeIds);
@@ -41,18 +40,18 @@ export class NodeRegionsModule implements GraphModuleInstanceV1 {
       membershipStrength: this.settings.membershipStrength,
       membershipDistance: this.settings.membershipDistance,
     }));
-    const regionContributions: GraphRenderRegionV1[] = projected.map((region) => ({
+    const regions: AnimusRegionV1[] = projected.map((region) => ({
       id: `node-region:${region.regionNodeId}`,
       regionNodeId: region.regionNodeId,
       memberNodeIds: [...region.memberNodeIds],
       directMemberNodeIds: [...region.directMemberNodeIds],
       connections: region.connections.map((connection) => ({ ...connection })),
-      color: regionColor(region.regionNodeId),
       padding: this.settings.boundaryPadding,
+      visible: this.settings.boundariesVisible,
     }));
     return {
       regionLayouts,
-      regionContributions: this.settings.boundariesVisible ? regionContributions : [],
+      regions,
     };
   }
 }
@@ -66,15 +65,6 @@ export function readNodeRegionSettingsV1(
     membershipDistance: finitePositive(settings.membershipDistance, 64),
     boundaryPadding: finitePositive(settings.boundaryPadding, 28),
   };
-}
-
-function regionColor(id: string): GraphColorV2 {
-  let hash = 2166136261;
-  for (const character of id) {
-    hash ^= character.charCodeAt(0);
-    hash = Math.imul(hash, 16777619);
-  }
-  return parseGraphColorV2(`hsl(${(hash >>> 0) % 360} 72% 64%)`)!;
 }
 
 function finitePositive(value: JsonValue | undefined, fallback: number): number {

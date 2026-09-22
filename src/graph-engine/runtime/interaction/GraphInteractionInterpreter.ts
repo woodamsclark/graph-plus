@@ -455,6 +455,10 @@ export class GraphInteractionInterpreter {
       const baseline = this.ctrlSelectionBaseline ?? new Set<string>();
       const selectedNodeIds = this.options.getSelectedNodeIds();
       this.ctrlSelectionBaseline = undefined;
+      const entersExplore = baseline.size <= 1
+        && selectedNodeIds.length > 1
+        && this.viewMode() === 'focus';
+      if (entersExplore) this.command(event, { type: 'set-focus' });
       if (baseline.size === 0 && selectedNodeIds.length > 0) {
         this.command(event, { type: 'center-and-fit-camera' });
       }

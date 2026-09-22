@@ -1,8 +1,9 @@
 import type { GraphViewStateV1 } from '../../contracts/v1/index.ts';
 import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
+import { compileAnimaSceneV1 } from '../anima/index.ts';
+import { createAnimusSnapshotV1 } from '../animus/index.ts';
 import type { GraphModuleHost, GraphModulePipelineStateV1 } from '../modules/index.ts';
 import {
-  composeGraphRenderFrameV1,
   GraphFrameStore,
   type GraphRendererV2,
   type GraphRenderTimingV1,
@@ -47,17 +48,27 @@ export class SessionProjectionCoordinatorV1 {
       selectionNeighborRevealActive: options.selectionNeighborRevealActive,
       previewedNodeId: options.previewedNodeId,
     });
-    this.frames.set(composeGraphRenderFrameV1({
+    const snapshot = createAnimusSnapshotV1({
       document: moduleView.document,
       viewState: options.viewState,
-      selection: options.selection,
+      displaySelection: moduleView.renderSelection,
       positions: moduleView.positions,
+      nodeRoles: moduleView.nodeRoles,
+      edgeRoles: moduleView.edgeRoles,
+      regions: moduleView.regions,
+      draggedNodeId: options.draggedNodeId,
+      hoveredNodeId: options.hoveredNodeId,
+      previewedNodeId: options.previewedNodeId,
+      selectionPresentationSuspended: options.selectionPresentationSuspended,
+      selectionNeighborRevealActive: options.selectionNeighborRevealActive,
+    });
+    this.frames.set(compileAnimaSceneV1({
+      snapshot,
       nodeContributions: moduleView.nodeContributions,
       edgeContributions: moduleView.edgeContributions,
       regionContributions: moduleView.regionContributions,
       theme: moduleView.theme,
       presentationPolicy: moduleView.presentationPolicy,
-      hoveredNodeId: options.hoveredNodeId,
       geometryRevision: this.geometryRevision,
     }));
     this.dirty = true;

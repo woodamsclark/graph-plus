@@ -1,0 +1,70 @@
+# Graph Engine Animus / Anima Boundary
+
+Status: Implemented architecture
+
+Date: 2026-09-22
+
+## Governing model
+
+Graph Engine has three one-way stages:
+
+1. **Animus** owns graph facts and runtime behavior.
+2. **Anima** compiles those facts into a completely resolved visual scene.
+3. **Renderer** realizes the scene as pixels and hit targets.
+
+The dependency direction is strictly `Animus -> Anima -> Renderer`.
+
+## Animus ownership
+
+Animus owns canonical nodes, tags and links; filtering and display membership;
+topology and structural roles; layout positions and pins; selection, focus, hover,
+drag and preview state; camera state; lifecycle; persistence; and diagnostics.
+
+`AnimusSnapshotV1` is the immutable semantic handoff. It intentionally contains no
+colors, opacity, strokes, fonts, dash patterns, or other renderer-facing values.
+
+Form now emits branch identity, depth, and tree/cross roles. Node regions emit
+membership, geometry, padding, and visibility. Neither subsystem chooses how those
+facts look.
+
+## Anima ownership
+
+Anima owns baseline theme application, node and edge material, region decoration,
+Form branch presentation, label presentation, interaction emphasis, visual geometry,
+and future time-varying transitions. The persisted `rendering` module ID remains as a
+compatibility key, but its implementation is `AnimaBaselineModule`.
+
+`compileAnimaSceneV1()` is the sole semantic-to-render-scene boundary. It resolves
+every node fill, opacity, outline and label value; every edge color, opacity, width and
+arrow value; region fill and stroke; label state priority; background; and font.
+
+Overview, Explore, and Focus remain Animus states. Their highlighted, dimmed, and
+hidden interpretations live in `ANIMA_INTERACTION_PRESENTATION_V1`.
+
+## Renderer ownership
+
+Renderers project, cull, cache, draw, and pick. They do not inspect selection, focus,
+hover, tags, Form roles, or semantic theme roles. `CanvasGraphRenderer` consumes only
+resolved colors, opacity, geometry, font values, label priority, and mechanical
+presentation policy.
+
+The renderer has no selected/focused color fallback. A missing visual decision is an
+Anima compilation defect, not something a backend repairs independently.
+
+## Compatibility
+
+Public Protocol V1 documents, profiles, persisted view state, module IDs, and settings
+keys remain unchanged. `composeGraphRenderFrameV1()` remains as a deprecated wrapper
+which constructs an Animus snapshot and delegates to the Anima compiler.
+
+Theme sampling remains in the Obsidian host adapter. It supplies immutable neutral
+tokens to Anima and does not style individual graph primitives.
+
+## Enforced invariants
+
+- Animus code may not import Anima, renderer, or theme implementations.
+- Form and node-region modules may not emit visual properties.
+- Renderers may not inspect semantic interaction state or theme roles.
+- Theme-only changes do not rebuild topology or physics.
+- Visual and hit-test geometry derive from the same resolved scene.
+- Canonical graph and persisted view state never contain Anima presentation values.

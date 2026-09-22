@@ -16,7 +16,7 @@ import { animaPreviewTiming } from '../modules/shipped/AnimaPreviewPresentation.
 import { GraphCommander, GraphCommandRegistry } from './GraphCommander.ts';
 import { GraphInput } from './GraphInput.ts';
 import { GraphInteractionInterpreter } from './GraphInteractionInterpreter.ts';
-import { resolveGraphUxStateV1 } from './GraphInteractionStatePolicy.ts';
+import { graphInteractionPolicyV1, resolveGraphUxStateV1 } from './GraphInteractionStatePolicy.ts';
 import type {
   GraphInputEventV1,
   GraphRuntimeCommandV1,
@@ -414,16 +414,16 @@ export class SessionInteractionRuntime {
 
   private fitStateTarget(): void {
     const state = this.options.getViewState();
-    const uxState = resolveGraphUxStateV1(state);
-    if (uxState === 'focus' && state.focusedNodeId) {
-      this.fitVisibleNodes(this.focusNeighborhoodNodeIds(state.focusedNodeId), state.focusedNodeId);
-      return;
-    }
-    if (uxState === 'explore') {
-      this.fitVisibleNodes(state.selectedNodeIds);
-      return;
-    }
-    this.fitVisibleNodes([...this.options.getRenderSelection().nodeIds]);
+    const policy = graphInteractionPolicyV1(state);
+    const nodeIds = policy.fitTarget === 'focused-neighborhood' && state.focusedNodeId
+      ? this.focusNeighborhoodNodeIds(state.focusedNodeId)
+      : policy.fitTarget === 'selection'
+        ? state.selectedNodeIds
+        : [...this.options.getRenderSelection().nodeIds];
+    const centerNodeId = policy.cameraTarget === 'focused-node'
+      ? state.focusedNodeId
+      : undefined;
+    this.fitVisibleNodes(nodeIds, centerNodeId);
   }
 
   private elasticPan(deltaX: number, deltaY: number): void {
@@ -500,7 +500,10 @@ export class SessionInteractionRuntime {
     this.commit({ ...this.options.getViewState(), camera: this.options.camera.getState() });
   }
 
-  private fitVisibleNodes(nodeIds?: readonly string[], centerNodeId?: string): void {
+  private fitVisibleNodes(
+    nodeIds?: readonly string[],
+    centerNodeId?: string,
+  ): void {
     const positionsById = this.options.getInteractivePositions();
     const candidates = nodeIds ?? [...this.options.getRenderSelection().nodeIds];
     const positions = [...new Set(candidates)]

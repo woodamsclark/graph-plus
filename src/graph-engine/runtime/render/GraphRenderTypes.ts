@@ -1,5 +1,10 @@
 import type { Vec3 } from '../../contracts/v1/index.ts';
-import { DEFAULT_GRAPH_VISUAL_THEME_V2, type GraphColorV2, type GraphVisualThemeV2 } from '../theme/index.ts';
+import {
+  DEFAULT_GRAPH_VISUAL_THEME_V2,
+  type GraphColorV2,
+  type GraphFontV2,
+  type GraphVisualThemeV2,
+} from '../theme/index.ts';
 
 export interface GraphRenderNodeV1 {
   readonly id: string;
@@ -8,18 +13,14 @@ export interface GraphRenderNodeV1 {
   readonly radius: number;
   /** Optional per-node exponent applied to projected camera scale. */
   readonly nodeScaleExponent?: number;
-  readonly selected: boolean;
-  readonly focused: boolean;
-  readonly hovered: boolean;
-  /** An authoritative presentation color that wins over renderer interaction fallbacks. */
-  readonly finalColor?: GraphColorV2;
-  readonly color?: GraphColorV2;
-  readonly opacity?: number;
+  /** Fully resolved by Anima. The renderer never infers color from graph state. */
+  readonly finalColor: GraphColorV2;
+  readonly opacity: number;
   readonly strokeColor?: GraphColorV2;
   readonly strokeWidth?: number;
-  readonly labelColor?: GraphColorV2;
-  readonly labelOpacity?: number;
-  readonly labelFontSize?: number;
+  readonly labelColor: GraphColorV2;
+  readonly labelOpacity: number;
+  readonly labelFontSize: number;
   /** Final screen-space offset from the normal centered label anchor. */
   readonly labelOffset?: { readonly x: number; readonly y: number };
   readonly showLabel?: boolean;
@@ -27,6 +28,8 @@ export interface GraphRenderNodeV1 {
   readonly labelForceVisible?: boolean;
   readonly labelPriority?: number;
   readonly labelAlwaysVisible?: boolean;
+  /** Resolved semantic priority; the renderer does not inspect interaction state. */
+  readonly labelStatePriority: number;
 }
 
 export interface GraphRenderEdgeV1 {
@@ -35,16 +38,34 @@ export interface GraphRenderEdgeV1 {
   readonly targetId: string;
   readonly directed: boolean;
   readonly thickness: number;
-  readonly color?: GraphColorV2;
-  readonly opacity?: number;
+  readonly color: GraphColorV2;
+  readonly opacity: number;
   readonly arrowAtSource?: boolean;
   readonly arrowAtTarget?: boolean;
-  readonly arrowColor?: GraphColorV2;
-  readonly arrowOpacity?: number;
+  readonly arrowColor: GraphColorV2;
+  readonly arrowOpacity: number;
   readonly dashed?: boolean;
 }
 
 export interface GraphRenderRegionV1 {
+  readonly id: string;
+  readonly regionNodeId: string;
+  readonly memberNodeIds: readonly string[];
+  readonly directMemberNodeIds: readonly string[];
+  readonly connections: readonly {
+    readonly sourceId: string;
+    readonly targetId: string;
+  }[];
+  readonly padding: number;
+  readonly fillColor: GraphColorV2;
+  readonly fillOpacity: number;
+  readonly strokeColor: GraphColorV2;
+  readonly strokeOpacity: number;
+  readonly strokeWidth: number;
+}
+
+/** Unresolved region input accepted from Animus structural modules. */
+export interface GraphRegionRenderContributionV1 {
   readonly id: string;
   readonly regionNodeId: string;
   readonly memberNodeIds: readonly string[];
@@ -127,7 +148,9 @@ export interface GraphRenderFrameV1 {
   readonly regions: readonly GraphRenderRegionV1[];
   readonly nodes: readonly GraphRenderNodeV1[];
   readonly edges: readonly GraphRenderEdgeV1[];
-  readonly theme: GraphVisualThemeV2;
+  /** Resolved global draw values. Semantic theme roles do not reach renderers. */
+  readonly backgroundColor: GraphColorV2;
+  readonly labelFont: GraphFontV2;
   readonly policy?: GraphPresentationPolicyV2;
 }
 
