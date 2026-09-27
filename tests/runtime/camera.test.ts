@@ -86,6 +86,32 @@ test('camera retarget changes the orbit origin without recentering or refitting'
     'orbiting after retarget should move the camera around the new pivot');
 });
 
+test('unanchored zoom uses the retargeted camera pivot instead of the framing center', () => {
+  for (const [dimensions, projection] of [
+    ['2d', 'orthographic'],
+    ['3d', 'perspective'],
+  ] as const) {
+    const camera = new GraphCameraController({
+      position: { x: 30, y: 20, z: 100 },
+      target: { x: 10, y: -5, z: 0 },
+      up: { x: 0, y: 1, z: 0 },
+      zoom: 50 / 24,
+      projection,
+    }, dimensions);
+    camera.setViewport(640, 360);
+    const pivot = { x: -40, y: 25, z: 10 };
+    camera.retarget(pivot);
+    const before = camera.worldToScreen(pivot);
+
+    camera.zoomByWheel(-60);
+
+    const after = camera.worldToScreen(pivot);
+    assert(Math.abs(after.x - before.x) < 1e-9 && Math.abs(after.y - before.y) < 1e-9,
+      `${projection} target-centered zoom should keep the retargeted pivot fixed on screen`);
+    deepEqual(camera.getOrbitTarget(), pivot, `${projection} zoom should retain the retargeted camera pivot`);
+  }
+});
+
 test('focus fitting caps magnification in orthographic and perspective cameras', () => {
   const orthographic = new GraphCameraController({
     position: { x: 0, y: 0, z: 1000 },

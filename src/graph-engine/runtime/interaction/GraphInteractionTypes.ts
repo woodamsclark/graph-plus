@@ -76,6 +76,7 @@ export type GraphInputEventV1 =
       readonly deltaY: number;
       readonly deltaMode: number;
       readonly ctrl: boolean;
+      readonly physicalCtrl: boolean;
       readonly meta: boolean;
       readonly shift: boolean;
     })

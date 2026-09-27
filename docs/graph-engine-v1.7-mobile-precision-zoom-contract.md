@@ -70,15 +70,17 @@ node context-menu behavior instead. Explicit Reset Camera remains a separate ope
 | Desktop primary background drag | Pan | Pan | Pan |
 | Desktop secondary drag | Pan | Rotate | Rotate |
 | Unmodified trackpad translation | Pan | Pan | Orbit |
-| Trackpad pinch or Ctrl-wheel | Zoom around input | Zoom around input | Zoom around input |
+| Trackpad pinch | Zoom around Retarget origin | Zoom around selection centroid | Zoom around focused node |
+| Physical Ctrl-wheel | Zoom around cursor | Zoom around cursor | Zoom around cursor |
 | Mobile one-finger background drag | Pan | Pan | Pan |
 | Mobile two-finger translation | Pan | Rotate | Rotate |
-| Mobile pinch | Zoom concurrently with pan | Zoom concurrently with rotate | Zoom concurrently with rotate |
+| Mobile pinch | Target-centered zoom concurrently with pan | Target-centered zoom concurrently with rotate | Target-centered zoom concurrently with rotate |
 | Double-tap, hold, vertical drag | Precision zoom | Precision zoom | Precision zoom |
 
 Mobile two-finger navigation begins after the movement threshold. Translation and
 pinch then compose: centroid movement pans in 2D or rotates in 3D while finger
-separation zooms. Two-finger rotate and pan retain selection.
+separation zooms around the selection-derived Retarget origin, not the touch centroid
+or serialized framing center. Two-finger rotate and pan retain selection.
 
 ## 4. Gesture arbitration
 
@@ -561,5 +563,5 @@ V1.7 does not require:
 - previewing tag nodes or implementing a Graph+-specific note renderer;
 - a camera-relative flattening plane or a hard planar constraint;
 - exposing a settling-speed control or raw solver-tuning console;
-- changing desktop wheel, trackpad pan, pinch, or Cmd-scroll behavior; or
+- changing desktop wheel, trackpad pan, pinch sensitivity, or Cmd-scroll behavior; or
 - changing focus, selection, node-drag, or activation semantics.

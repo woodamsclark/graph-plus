@@ -93,7 +93,7 @@ test('R-INPUT-01 pans Overview, rotates Focus trackpad scroll, and radial-zooms 
   await session.dispose();
 });
 
-test('Ctrl wheel preserves a pointer anchor in Overview and the locked target in Focus', async () => {
+test('physical Ctrl wheel preserves the cursor anchor even while Focus has a camera target', async () => {
   for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
     const value = runtimeHarness({ profileId });
     const session = await value.create();
@@ -101,11 +101,17 @@ test('Ctrl wheel preserves a pointer anchor in Overview and the locked target in
     await session.setSelection(['a']);
     await session.focusNode('a');
     const before = await session.exportViewState();
-    wheel(value, canvas, { x: 20, y: 20, deltaY: -60, ctrlKey: true });
+    const anchorBefore = await nodePoint(session, 'b');
+    modifier(value, 'keydown', true);
+    wheel(value, canvas, { ...anchorBefore, deltaY: -60, ctrlKey: true });
     value.platform.flushFrame();
+    modifier(value, 'keyup', false);
     const after = await session.exportViewState();
-    deepEqual(after.camera.target, before.camera.target,
-      `${profileId} Focus zoom should retain the locked focus target`);
+    const anchorAfter = await nodePoint(session, 'b');
+    assert(Math.abs(anchorAfter.x - anchorBefore.x) < 1e-6 && Math.abs(anchorAfter.y - anchorBefore.y) < 1e-6,
+      `${profileId} physical Ctrl zoom should keep the cursor's world point fixed on screen`);
+    assert(!sameVector(after.camera.target, before.camera.target),
+      `${profileId} physical Ctrl zoom should move the camera target to preserve its cursor anchor`);
     deepEqual(after.selectedNodeIds, ['a'], `${profileId} pointer-anchored zoom should preserve selection`);
     await session.dispose();
   }
@@ -115,12 +121,18 @@ test('desktop trackpad pinch carries bounded momentum and ordinary wheel input c
   const value = runtimeHarness();
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
+  await session.setSelection(['a']);
   const before = await session.exportViewState();
+  const targetBefore = await nodePoint(session, 'a');
 
   wheel(value, canvas, { x: 260, y: 140, deltaY: -1, ctrlKey: true });
   value.platform.flushFrame();
   const afterPinch = await session.exportViewState();
   assert(afterPinch.camera.zoom > before.camera.zoom, 'trackpad pinch should zoom immediately');
+  const targetAfterPinch = await nodePoint(session, 'a');
+  assert(Math.abs(targetAfterPinch.x - targetBefore.x) < 1e-6
+    && Math.abs(targetAfterPinch.y - targetBefore.y) < 1e-6,
+  'trackpad pinch should zoom around the selection-derived camera target instead of screen center');
   equal(value.platform.pendingTimers, 1, 'trackpad pinch should wait briefly before beginning momentum');
 
   value.platform.flushTimer();
@@ -128,11 +140,44 @@ test('desktop trackpad pinch carries bounded momentum and ordinary wheel input c
   const afterMomentum = await session.exportViewState();
   assert(afterMomentum.camera.zoom > afterPinch.camera.zoom,
     'trackpad pinch momentum should continue zooming in the original direction');
+  const targetAfterMomentum = await nodePoint(session, 'a');
+  assert(Math.abs(targetAfterMomentum.x - targetBefore.x) < 1e-6
+    && Math.abs(targetAfterMomentum.y - targetBefore.y) < 1e-6,
+  'trackpad pinch momentum should retain the selection-derived camera target');
 
   wheel(value, canvas, { deltaY: 1 });
   value.platform.flushFrame();
   equal(value.platform.pendingTimers, 0, 'ordinary wheel input should cancel trackpad pinch momentum');
   await session.dispose();
+});
+
+test('mobile pinch zooms around the existing camera target', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    const value = runtimeHarness({ profileId });
+    const session = await value.create();
+    const canvas = runtimeCanvas(value.container);
+    await session.setSelection(['a']);
+    const before = await session.exportViewState();
+    const targetBefore = await nodePoint(session, 'a');
+    pointer(value, canvas, 'pointerdown', 100, 100, { pointerId: 180, pointerType: 'touch' });
+    pointer(value, canvas, 'pointerdown', 200, 100, { pointerId: 181, pointerType: 'touch' });
+    pointer(value, canvas, 'pointermove', 90, 100, { pointerId: 180, pointerType: 'touch' });
+    pointer(value, canvas, 'pointermove', 210, 100, { pointerId: 181, pointerType: 'touch' });
+    value.platform.flushFrame();
+    const after = await session.exportViewState();
+    const targetAfter = await nodePoint(session, 'a');
+    assert(Math.abs(targetAfter.x - targetBefore.x) < 1e-6
+      && Math.abs(targetAfter.y - targetBefore.y) < 1e-6,
+    `${profileId} mobile pinch should retain the selection-derived camera target`);
+    if (profileId === 'two-dimensional') {
+      assert(after.camera.zoom !== before.camera.zoom, '2D mobile pinch should change orthographic zoom');
+    } else {
+      assert(vectorDistance(after.camera.position, after.camera.target)
+        !== vectorDistance(before.camera.position, before.camera.target),
+      '3D mobile pinch should change perspective distance');
+    }
+    await session.dispose();
+  }
 });
 
 test('explicit camera reset preserves focus and frames its immediate neighborhood', async () => {

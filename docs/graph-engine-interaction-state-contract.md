@@ -82,7 +82,9 @@ Retarget, Recenter, and Refit are three independent camera operations:
 
 1. **Retarget** changes the world-space origin used by future camera rotation. It does
    not change camera position, view direction, zoom, perspective distance, or the
-   current screen position of any graph content.
+   current screen position of any graph content. This selection-derived rotation target
+   is also the target for unanchored trackpad and mobile pinch zoom. It is distinct from
+   the serialized framing center retained for compatibility as `camera.target`.
 2. **Recenter** translates the camera framing to the arithmetic centroid of the target,
    or to the focused node in Focus. It does not reset camera angle or up vector.
 3. **Refit** adjusts orthographic zoom or perspective distance so the same target fits
@@ -154,7 +156,8 @@ Anima animation kit. Until that kit exists, hover eligibility is immediate.
 | Secondary drag, 3D | Rotate | Rotate | Radial zoom around focused node |
 | Two-finger scroll, 2D | Pan | Pan | Elastic pan |
 | Two-finger scroll, 3D | Pan | Rotate | Rotate |
-| Ctrl-wheel / trackpad pinch | Zoom around pointer | Zoom around pointer | Zoom while retaining focused-node target |
+| Physical Ctrl-wheel | Zoom around pointer | Zoom around pointer | Zoom around pointer |
+| Trackpad pinch | Zoom around Retarget origin | Zoom around selection centroid | Zoom around focused node |
 | Cmd-wheel | State navigation; never zoom | State navigation; never zoom | State navigation; never zoom |
 | Stationary background secondary click | Center + Fit graph | Center + Fit selection | Center + Fit local neighborhood |
 | Stationary node secondary click | Node context menu | Node context menu | Node context menu |
@@ -185,7 +188,7 @@ in; moving toward the focused node zooms out.
 | One-finger drag, 3D | Pan, including when starting over a node | Pan, including when starting over a node | Rotate, including when starting over a node |
 | Two-finger translation, 2D | Pan | Pan | Pan |
 | Two-finger translation, 3D | Rotate | Rotate | Rotate around the focused node |
-| Pinch | Zoom concurrently with two-finger pan/rotation | Zoom concurrently with two-finger pan/rotation | Zoom concurrently with two-finger pan/rotation |
+| Pinch | Target-centered zoom concurrently with two-finger pan/rotation | Target-centered zoom concurrently with two-finger pan/rotation | Target-centered zoom concurrently with two-finger pan/rotation |
 | Double-tap background | Center + Fit graph | Center + Fit selection | Center + Fit local neighborhood |
 | Double-tap drag, 2D | Vertical zoom | Vertical zoom | Radial zoom |
 | Double-tap drag, 3D | Horizontal rotate + vertical zoom | Horizontal rotate + vertical zoom | Radial zoom |
@@ -195,7 +198,9 @@ in; moving toward the focused node zooms out.
 
 Two-finger translation and pinch are simultaneous controls. In 3D, centroid movement
 rotates while finger separation zooms; in 2D, centroid movement pans while finger
-separation zooms. Focus retains its focused-node target during the combined 3D gesture.
+separation zooms. The pinch component always uses the current Retarget origin rather
+than the touch centroid or serialized framing center. Focus retains its focused-node
+target during the combined 3D gesture.
 
 ## 7. Persistence and reopen
 

@@ -73,7 +73,6 @@ interface TouchGesture {
 interface TrackpadPinchMomentum {
   readonly identity: InputGraphIdentityV1;
   readonly timestamp: number;
-  readonly anchor?: GraphScreenPointV1;
   velocity: number;
 }
 
@@ -162,7 +161,9 @@ export class GraphInteractionInterpreter {
   }
 
   private ingest(event: GraphInputEventV1): void {
-    if (event.type !== 'wheel' || !event.ctrl || event.meta) this.cancelTrackpadPinchMomentum();
+    if (event.type !== 'wheel' || !event.ctrl || event.meta || event.physicalCtrl) {
+      this.cancelTrackpadPinchMomentum();
+    }
     switch (event.type) {
       case 'pointer-down': this.pointerDown(event); return;
       case 'pointer-move': this.pointerMove(event); return;
@@ -458,9 +459,9 @@ export class GraphInteractionInterpreter {
     const delta = this.normalizedWheel(event);
     if (event.ctrl && !event.meta) {
       const zoomDelta = delta.y * TRACKPAD_PINCH_ZOOM_MULTIPLIER;
-      const anchor = this.viewMode() === 'focus' ? undefined : event.point;
+      const anchor = event.physicalCtrl ? event.point : undefined;
       this.command(event, { type: 'zoom-by', deltaY: zoomDelta, ...(anchor ? { anchor } : {}) });
-      this.captureTrackpadPinchMomentum(event, zoomDelta, anchor);
+      if (!event.physicalCtrl) this.captureTrackpadPinchMomentum(event, zoomDelta);
       return;
     }
     const policy = graphInteractionPolicyV1({
@@ -566,7 +567,6 @@ export class GraphInteractionInterpreter {
       if (Math.abs(distanceDelta) >= 1) this.command(event, {
         type: 'zoom-by',
         deltaY: -distanceDelta * 3,
-        ...(this.viewMode() === 'focus' ? {} : { anchor: next.centroid }),
       });
     }
     this.touchGesture = {
@@ -745,7 +745,6 @@ export class GraphInteractionInterpreter {
   private captureTrackpadPinchMomentum(
     event: Extract<GraphInputEventV1, { type: 'wheel' }>,
     zoomDelta: number,
-    anchor: GraphScreenPointV1 | undefined,
   ): void {
     if (this.trackpadPinchMomentumTimer !== null) {
       this.options.clearTimeout(this.trackpadPinchMomentumTimer);
@@ -757,7 +756,6 @@ export class GraphInteractionInterpreter {
     this.trackpadPinchMomentum = {
       identity: { ...event.identity },
       timestamp: event.timestamp,
-      ...(anchor ? { anchor: { ...anchor } } : {}),
       velocity: sameDirection ? previousVelocity * 0.65 + zoomDelta * 0.35 : zoomDelta,
     };
     this.trackpadPinchMomentumTimer = this.options.setTimeout(() => {
@@ -777,7 +775,6 @@ export class GraphInteractionInterpreter {
     this.command(momentum, {
       type: 'zoom-by',
       deltaY: momentum.velocity,
-      ...(momentum.anchor ? { anchor: momentum.anchor } : {}),
     });
     momentum.velocity *= TRACKPAD_PINCH_MOMENTUM_DECAY;
     this.options.onDeferredCommand();

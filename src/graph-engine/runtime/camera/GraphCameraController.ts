@@ -188,6 +188,10 @@ export class GraphCameraController {
 
   zoomByWheel(deltaY: number, anchor?: { readonly x: number; readonly y: number }): void {
     const validAnchor = anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y) ? anchor : undefined;
+    if (!validAnchor && this.orbitTarget) {
+      this.zoomAroundTarget(deltaY, this.orbitTarget);
+      return;
+    }
     const anchorWorld = validAnchor && this.viewport.width > 0 && this.viewport.height > 0
       ? this.screenToWorld(validAnchor.x, validAnchor.y, this.worldToScreen(this.state.target).depth)
       : undefined;
@@ -209,6 +213,36 @@ export class GraphCameraController {
     const zoom = clamp(this.state.zoom * Math.exp(-deltaY * 0.0015), MIN_ZOOM, MAX_ZOOM);
     this.state = { ...this.state, zoom };
     this.preserveAnchor(validAnchor, anchorWorld);
+  }
+
+  private zoomAroundTarget(deltaY: number, pivot: Vec3): void {
+    if (this.state.projection === 'perspective') {
+      const positionOffset = subtract(this.state.position, pivot);
+      const targetOffset = subtract(this.state.target, pivot);
+      const currentDistance = Math.max(0.0001, length(positionOffset));
+      const nextDistance = clamp(
+        currentDistance * Math.exp(deltaY * 0.0015),
+        MIN_PERSPECTIVE_DISTANCE,
+        MAX_PERSPECTIVE_DISTANCE,
+      );
+      const scale = nextDistance / currentDistance;
+      this.state = {
+        ...this.state,
+        position: add(pivot, scaleVector(positionOffset, scale)),
+        target: add(pivot, scaleVector(targetOffset, scale)),
+      };
+      return;
+    }
+    const before = this.worldToScreen(pivot);
+    const zoom = clamp(this.state.zoom * Math.exp(-deltaY * 0.0015), MIN_ZOOM, MAX_ZOOM);
+    this.state = { ...this.state, zoom };
+    const after = this.screenToWorld(before.x, before.y, before.depth);
+    const translation = subtract(pivot, after);
+    this.state = {
+      ...this.state,
+      position: add(this.state.position, translation),
+      target: add(this.state.target, translation),
+    };
   }
 
   private preserveAnchor(

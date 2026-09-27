@@ -15,6 +15,7 @@ export class GraphInput {
   private lastCtrl = false;
   private lastShift = false;
   private lastAlt = false;
+  private physicalCtrlHeld = false;
   private spaceHeld = false;
   private longPressPointer: { readonly pointerId: number; readonly point: GraphScreenPointV1 } | null = null;
   private readonly activePointers = new Set<number>();
@@ -45,6 +46,7 @@ export class GraphInput {
     this.lastCtrl = false;
     this.lastShift = false;
     this.lastAlt = false;
+    this.physicalCtrlHeld = false;
     this.spaceHeld = false;
     this.options.events.clear();
   }
@@ -160,6 +162,7 @@ export class GraphInput {
 
   private readonly onModifierChange = (event: KeyboardEvent): void => {
     if (!this.enabled || this.disposed) return;
+    if (event.key === 'Control') this.physicalCtrlHeld = event.type === 'keydown';
     const mod = platformMod(event, this.options.platform.window);
     const ctrl = event.ctrlKey;
     const shift = event.shiftKey;
@@ -228,6 +231,7 @@ export class GraphInput {
       deltaY: event.deltaY,
       deltaMode: event.deltaMode,
       ctrl: event.ctrlKey,
+      physicalCtrl: this.physicalCtrlHeld,
       meta: event.metaKey,
       shift: event.shiftKey,
     });
