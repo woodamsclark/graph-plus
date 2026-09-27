@@ -9,7 +9,7 @@ import type {
 import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
 import { shortestPathToAnyV1 } from '../../core/topology/index.ts';
 import type { Vision } from '../vision/index.ts';
-import type { Attention } from '../ego/index.ts';
+import type { Awareness } from '../ego/index.ts';
 import type { SessionRuntimePlatformV1 } from '../platform/index.ts';
 import type { SessionSurfaceV1 } from '../surface/index.ts';
 import { BufferedQueue } from './BufferedQueue.ts';
@@ -58,7 +58,7 @@ export class SessionInteractionRuntime {
     readonly surface: SessionSurfaceV1;
     readonly interactionElement: HTMLElement;
     readonly vision: Vision;
-    readonly getAttention: () => Attention;
+    readonly getAwareness: () => Awareness;
     readonly hitTest: (
       point: GraphScreenPointV1,
       pointerKind?: 'mouse' | 'touch' | 'pen',
@@ -240,12 +240,12 @@ export class SessionInteractionRuntime {
         this.cameraChanged(command);
         return;
       case 'orbit-by':
-        this.options.vision.orbitByPixels(command.deltaX, command.deltaY, this.options.getAttention().point);
+        this.options.vision.orbitByPixels(command.deltaX, command.deltaY, this.options.getAwareness().centroid);
         this.cameraChanged(command);
         return;
       case 'zoom-by':
         this.captureFocusZoomBaseline();
-        this.options.vision.zoomByWheel(command.deltaY, command.anchor, this.options.getAttention().point);
+        this.options.vision.zoomByWheel(command.deltaY, command.anchor, this.options.getAwareness().centroid);
         this.constrainFocusZoomOut();
         this.cameraChanged(command);
         return;
@@ -522,13 +522,13 @@ export class SessionInteractionRuntime {
 
   private centerCamera(): void {
     const positionsById = this.options.getInteractivePositions();
-    const candidates = this.attentionNodeIds();
+    const candidates = this.awarenessNodeIds();
     const centroid = selectionCentroid(candidates, positionsById);
     if (!centroid) return;
     this.options.vision.translateBy(subtract(centroid, this.options.vision.getState().target));
   }
 
-  private attentionNodeIds(): readonly string[] {
+  private awarenessNodeIds(): readonly string[] {
     const positionsById = this.options.getInteractivePositions();
     const selectedNodeIds = this.options.getViewState().selectedNodeIds
       .filter((nodeId) => positionsById[nodeId] !== undefined);

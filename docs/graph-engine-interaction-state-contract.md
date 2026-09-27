@@ -8,31 +8,29 @@ Normative matrix: [Graph+ UI Interaction Matrix](graph-plus-ui-interaction-matri
 
 ## 1. Purpose
 
-Graph Engine expresses a scale of attention through three internal UX states. The
+Graph Engine currently exposes three internal interaction states. The
 states own camera, rendering, and input policy so individual gesture handlers cannot
 silently drift apart.
 
 The policy is fixed in V1. It is not a consumer-configurable public API.
 
-Ego is the engine's singular UI awareness. It derives one immutable semantic context
-from Animus facts: active state, dimensions, selection, pins, focus, hover, drag,
-preview, and transient presentation conditions. Ego also resolves `Attention`: the
-selected node set and its current world-space centroid. The active Ego state contract
-owns attention, rendering-scope, navigation, and any state-scoped highlight override. Anima
-realizes Ego's semantic roles as concrete color, opacity, and geometry. Renderers
-receive only the resolved scene and never inspect selection, focus, or hover state.
+Ego owns only `Awareness`: the selected node set and its current world-space centroid.
+It does not own interaction state, gesture permissions, highlighting, label decisions,
+or rendering scope. The interaction framework owns state transitions and navigation
+policy. Anima consumes Ego Awareness plus ordinary Animus interaction facts and decides
+how Awareness is expressed as color, opacity, labels, and geometry. Renderers receive
+only the resolved scene.
 
-The application-wide highlight policy in `runtime/ego/GraphHighlightPolicy.ts` is
-external to UI state. Ego resolves that
-global truth together with the active state contract. An override is read directly
-from that contract and is never installed into the global policy, so it expires by
-construction as soon as the requesting UI state expires. Highlight policy does not
-force labels. Ego separately resolves label attention, and the label manager retains
-sizing, camera-range Saliency, and collision mechanics.
+The application-wide highlight policy in `runtime/anima/AnimaAwareness.ts` is external
+to interaction state. Anima resolves that global truth together with its active
+state-scoped presentation policy. An override is read directly from that policy and is
+never installed globally, so it expires with the requesting interaction state.
+Highlight policy does not force labels; Anima resolves label emphasis separately, and
+the label manager retains sizing, camera-range Saliency, and collision mechanics.
 
-| State | User meaning | Invariant | Ego attention | Center + Fit target |
+| State | User meaning | Invariant | Ego Awareness | Center + Fit target |
 | --- | --- | --- | --- | --- |
-| Overview | View the whole graph | No selection and no focused node | None; Vision retains its framing point | Whole visible graph |
+| Overview | View the whole graph | No selection and no focused node | Empty; Vision retains its framing point | Whole visible graph |
 | Explore | Work with a selected constellation | One or more selected nodes and no focused node | Selection centroid | Current selection |
 | Focus | Inspect one local node | A non-empty selection and one focused node | Selection centroid | Focused node plus immediate neighbors |
 
@@ -81,9 +79,9 @@ when no compatible saved view exists for a new session.
 
 Retarget, Recenter, and Refit are three independent operations:
 
-1. **Retarget** changes Ego's world-space Attention point. It does not mutate Vision,
+1. **Retarget** changes the nodes held in Ego Awareness and therefore its derived centroid. It does not mutate Vision,
    camera position, orientation, zoom, perspective distance, or the current screen
-   position of any graph content. Vision receives this point explicitly for future
+   position of any graph content. Vision receives the Awareness centroid explicitly for future
    rotation and unanchored trackpad or mobile pinch zoom. It is distinct from the
    serialized framing point retained for compatibility as `camera.target`.
 2. **Recenter** translates Vision framing to the arithmetic centroid of the target,
@@ -99,7 +97,7 @@ State-aware targets are:
 
 Explore follows selected-node motion by the selection-centroid delta while preserving
 framing. Every additive or subtractive selection edit recalculates the selection
-centroid and redirects Ego's Attention without Recentering or Refitting: one selected
+centroid and updates Ego Awareness without Recentering or Refitting: one selected
 node uses that node's position, while multiple selected nodes use their arithmetic
 centroid. Focus follows focused-node motion while preserving framing.
 
@@ -130,7 +128,7 @@ one hop or reveal a shortest path. Previews and Option do not expand the highlig
 set. Tag nodes follow exactly the same interaction and presentation rules as ordinary
 nodes.
 
-Ego resolves label attention in this order: hovered node, immediate hover neighbors,
+Anima resolves label emphasis in this order: hovered node, immediate hover neighbors,
 selected or focused node, dim-context suppression, then camera-range Saliency fallback.
 The hovered label overrides graph-wide label-off mode. Selected or focused labels bypass
 the adaptive collision budget. Hover neighbors remain adaptive, but Ego reduces their
@@ -158,7 +156,7 @@ Anima animation kit. Until that kit exists, hover eligibility is immediate.
 | Two-finger scroll, 2D | Pan | Pan | Elastic pan |
 | Two-finger scroll, 3D | Pan | Rotate | Rotate |
 | Physical Ctrl-wheel | Zoom around pointer | Zoom around pointer | Zoom around pointer |
-| Trackpad pinch | Zoom around retained Vision framing point | Zoom around Ego Attention | Zoom around Ego Attention |
+| Trackpad pinch | Zoom around retained Vision framing point | Zoom around Awareness centroid | Zoom around Awareness centroid |
 | Cmd-wheel | State navigation; never zoom | State navigation; never zoom | State navigation; never zoom |
 | Stationary background secondary click | Center + Fit graph | Center + Fit selection | Center + Fit local neighborhood |
 | Stationary node secondary click | Node context menu | Node context menu | Node context menu |
@@ -199,9 +197,9 @@ in; moving toward the focused node zooms out.
 
 Two-finger translation and pinch are simultaneous controls. In 3D, centroid movement
 rotates while finger separation zooms; in 2D, centroid movement pans while finger
-separation zooms. The pinch component uses Ego's current Attention point when selection
-exists, rather than the touch centroid or serialized framing point. Without directed
-Attention, Vision retains its current framing point.
+separation zooms. The pinch component uses Ego's current Awareness centroid when the
+selection is non-empty, rather than the touch centroid or serialized framing point.
+With empty Awareness, Vision retains its current framing point.
 
 ## 7. Persistence and reopen
 
@@ -229,18 +227,17 @@ transitions and tests; it is not the reopen persistence policy.
 
 ## 8. Code ownership and regression locks
 
-The authoritative Ego, Attention, state contracts, global highlight policy, and highlight
-resolver live in `src/graph-engine/runtime/ego/GraphEgo.ts`. `Vision` owns only pose,
-projection, and geometric viewpoint operations. Input dispatch and Vision
-fitting/follow consume the compatibility projection in
-`runtime/interaction/GraphInteractionStatePolicy.ts`; it aliases Ego and owns no
-sibling table. Anima consumes resolved Ego awareness rather than expanding highlight
-neighborhoods or inventing state presentation locally.
+The authoritative `Ego` and `Awareness` resolver live in
+`src/graph-engine/runtime/ego/Ego.ts`. Interaction state and gesture permissions live
+in `runtime/interaction/GraphInteractionStatePolicy.ts`. Anima owns state-scoped
+rendering policy, highlight expansion, dimming, and label decisions in
+`runtime/anima/AnimaAwareness.ts`. `Vision` owns only pose, projection, and geometric
+viewpoint operations.
 
-Runtime implementation names are unversioned (`Ego`, `Attention`, `Vision`, `Pose`,
+Runtime implementation names are unversioned (`Ego`, `Awareness`, `Vision`, `Pose`,
 and `Orientation`). Public and persisted compatibility types retain their protocol
 suffixes, including `GraphCameraStateV1`; Vision converts that legacy look-at point
-into a forward orientation and never treats it as Ego Attention.
+into a forward orientation and never treats it as Ego Awareness.
 
 Regression coverage is concentrated in:
 

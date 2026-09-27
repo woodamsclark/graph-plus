@@ -1,2 +1,1 @@
-export * from './GraphEgo.ts';
-export * from './GraphHighlightPolicy.ts';
+export * from './Ego.ts';

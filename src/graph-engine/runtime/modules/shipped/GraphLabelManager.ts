@@ -7,7 +7,7 @@ export interface GraphLabelRequestV1 {
   readonly forceVisible?: boolean;
   /** Persistent structure requests bypass the adaptive collision budget. */
   readonly alwaysVisible?: boolean;
-  /** Semantic ordering resolved by Ego before collision and slider fallback. */
+  /** Semantic ordering resolved by Anima before collision and slider fallback. */
   readonly statePriority?: number;
   /** Fraction by which this label's adaptive Saliency threshold is reduced. */
   readonly saliencyBoost?: number;

@@ -43,7 +43,7 @@ const MAX_PROJECTED_SCALE = 40;
 
 /**
  * Mechanical viewpoint and projection controller. Vision knows geometry, not
- * selection, focus, or why a world-space point has Ego's attention.
+ * selection, focus, or why a world-space point was supplied as a pivot.
  */
 export class Vision {
   private state: GraphCameraStateV1;
@@ -172,9 +172,9 @@ export class Vision {
     };
   }
 
-  orbitByPixels(deltaX: number, deltaY: number, attentionPoint?: Vec3): void {
+  orbitByPixels(deltaX: number, deltaY: number, pivotPoint?: Vec3): void {
     if (this.dimensions !== '3d' || this.state.projection !== 'perspective') return;
-    const pivot = validPoint(attentionPoint) ? attentionPoint : this.state.target;
+    const pivot = validPoint(pivotPoint) ? pivotPoint : this.state.target;
     const basis = cameraBasis(this.state);
     const yaw = -deltaX * 0.005;
     const pitch = -deltaY * 0.005;
@@ -206,11 +206,11 @@ export class Vision {
   zoomByWheel(
     deltaY: number,
     anchor?: { readonly x: number; readonly y: number },
-    attentionPoint?: Vec3,
+    pivotPoint?: Vec3,
   ): void {
     const validAnchor = anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y) ? anchor : undefined;
-    if (!validAnchor && validPoint(attentionPoint)) {
-      this.zoomAroundTarget(deltaY, attentionPoint);
+    if (!validAnchor && validPoint(pivotPoint)) {
+      this.zoomAroundTarget(deltaY, pivotPoint);
       return;
     }
     const anchorWorld = validAnchor && this.viewport.width > 0 && this.viewport.height > 0

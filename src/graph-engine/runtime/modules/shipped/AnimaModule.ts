@@ -2,10 +2,15 @@ import type { JsonValue } from '../../../contracts/v1/index.ts';
 import { desaturateGraphColorV2, type GraphVisualThemeV2 } from '../../theme/index.ts';
 import type { GraphModuleInstanceV1, GraphModuleProjectionPatchV1 } from '../GraphModuleTypes.ts';
 import { GraphLabelManager, type GraphLabelRequestV1 } from './GraphLabelManager.ts';
-import { createEgo, type EgoPresentationRoleV1 } from '../../ego/index.ts';
+import { createEgo } from '../../ego/index.ts';
+import {
+  createAnimaAwarenessPresentationV1,
+  type AnimaPresentationRoleV1,
+} from '../../anima/AnimaAwareness.ts';
+import { createGraphInteractionContextV1 } from '../../interaction/index.ts';
 
 const PRESENTATION_ROLE_OPACITY: Readonly<Record<
-  EgoPresentationRoleV1,
+  AnimaPresentationRoleV1,
   Readonly<{ node: number; edge: number }>
 >> = {
   normal: { node: 1, edge: 1 },
@@ -53,8 +58,6 @@ export class AnimaModule implements GraphModuleInstanceV1 {
   ): GraphModuleProjectionPatchV1 | void {
     const visibleNodes = state.renderSelection.nodeIds;
     const { visibleEdges, relationships, degree } = this.presentationTopology(state);
-    const selectedIds = new Set(state.viewState.selectedNodeIds);
-    const taggedIds = new Set(selectedIds);
     const hoveredId = state.hoveredNodeId;
     const transientId = state.draggedNodeId ?? state.previewedNodeId;
     const transientNeighborhood = transientId === undefined
@@ -63,25 +66,32 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const ego = state.ego ?? createEgo({
       viewState: state.viewState,
       positions: state.positions,
-      document: state.document,
-      visibleNodeIds: state.renderSelection.nodeIds,
-      visibleEdgeIds: state.renderSelection.edgeIds,
+    });
+    const interaction = createGraphInteractionContextV1({
+      viewState: state.viewState,
       ...(hoveredId === undefined ? {} : { hoveredNodeId: hoveredId }),
       ...(state.draggedNodeId === undefined ? {} : { draggedNodeId: state.draggedNodeId }),
       ...(state.previewedNodeId === undefined ? {} : { previewedNodeId: state.previewedNodeId }),
       selectionPresentationSuspended: state.selectionPresentationSuspended,
       selectionNeighborRevealActive: state.selectionNeighborRevealActive,
     });
-    const localFocusActive = ego.contract.renderScope === 'focused-local-view';
-    const selectionEmphasisActive = ego.contract.renderScope === 'graph-with-selection-emphasis';
-    const exploreActive = selectionEmphasisActive
+    const presentation = createAnimaAwarenessPresentationV1({
+      awareness: ego.awareness,
+      interaction,
+      document: state.document,
+      visibleNodeIds: state.renderSelection.nodeIds,
+      visibleEdgeIds: state.renderSelection.edgeIds,
+    });
+    const localFocusActive = presentation.statePolicy.renderScope === 'focused-local-view';
+    const awarenessEmphasisActive = presentation.statePolicy.renderScope === 'graph-with-awareness-emphasis';
+    const exploreActive = awarenessEmphasisActive
       && state.selectionPresentationSuspended !== true;
     const visibleIds = localFocusActive
-      ? ego.highlight.highlightedNodeIds
-      : selectionEmphasisActive
-        ? exploreActive ? taggedIds : undefined
+      ? presentation.highlight.highlightedNodeIds
+      : awarenessEmphasisActive
+        ? exploreActive ? ego.awareness.nodeIds : undefined
         : transientNeighborhood;
-    const litNodeIds = ego.highlight.highlightedNodeIds;
+    const litNodeIds = presentation.highlight.highlightedNodeIds;
     const nodesWithRadius = state.document.nodes
       .filter((node) => visibleNodes.has(node.id))
       .map((node) => {
@@ -99,7 +109,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       largestRadius = Math.max(largestRadius, radius);
     }
     const maximumScaleExponent = 0.5 + this.nodeZoomContrast * 1.5;
-    const labelRequests: GraphLabelRequestV1[] = Object.entries(ego.labelRaising.byNodeId)
+    const labelRequests: GraphLabelRequestV1[] = Object.entries(presentation.labelRaising.byNodeId)
       .filter(([, decision]) => decision.disposition === 'force'
         || decision.disposition === 'favor'
         || decision.disposition === 'raise')
@@ -120,10 +130,10 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         const isLit = litNodeIds.has(node.id);
         const visible = visibleIds === undefined || visibleIds.has(node.id);
         const role = isLit
-          ? ego.highlight.policy.highlightedRole
+          ? presentation.highlight.policy.highlightedRole
           : visible
             ? 'normal'
-            : ego.highlight.policy.contextRole;
+            : presentation.highlight.policy.contextRole;
         const ordinaryColor = prior?.color
           ?? (node.tokens?.includes('kind:tag') ? this.palette.colors.tagNode : undefined)
           ?? this.palette.colors.node;
@@ -135,7 +145,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         const selected = state.viewState.selectedNodeIds.includes(node.id);
         const pinned = state.viewState.pinnedNodeIds.includes(node.id);
         const opacity = PRESENTATION_ROLE_OPACITY[role].node;
-        const labelDecision = ego.labelRaising.byNodeId[node.id];
+        const labelDecision = presentation.labelRaising.byNodeId[node.id];
         return [node.id, {
           ...prior,
           ...labelContributions[node.id],
@@ -153,15 +163,15 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       }));
     const edgeContributions = Object.fromEntries(visibleEdges.map((edge) => {
       const prior = state.edgeContributions[edge.id];
-      const lit = ego.highlight.highlightedEdgeIds.has(edge.id);
+      const lit = presentation.highlight.highlightedEdgeIds.has(edge.id);
       const visible = localFocusActive
         ? lit
         : visibleIds === undefined || lit;
       const role = lit
-        ? ego.highlight.policy.highlightedRole
+        ? presentation.highlight.policy.highlightedRole
         : visible
           ? 'normal'
-          : ego.highlight.policy.contextRole;
+          : presentation.highlight.policy.contextRole;
       const opacity = PRESENTATION_ROLE_OPACITY[role].edge;
       return [edge.id, {
         ...prior,

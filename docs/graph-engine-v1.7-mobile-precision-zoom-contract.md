@@ -70,7 +70,7 @@ node context-menu behavior instead. Explicit Reset Camera remains a separate ope
 | Desktop primary background drag | Pan | Pan | Pan |
 | Desktop secondary drag | Pan | Rotate | Rotate |
 | Unmodified trackpad translation | Pan | Pan | Orbit |
-| Trackpad pinch | Zoom around retained Vision framing point | Zoom around Ego Attention | Zoom around Ego Attention |
+| Trackpad pinch | Zoom around retained Vision framing point | Zoom around Awareness centroid | Zoom around Awareness centroid |
 | Physical Ctrl-wheel | Zoom around cursor | Zoom around cursor | Zoom around cursor |
 | Mobile one-finger background drag | Pan | Pan | Pan |
 | Mobile two-finger translation | Pan | Rotate | Rotate |
@@ -79,7 +79,7 @@ node context-menu behavior instead. Explicit Reset Camera remains a separate ope
 
 Mobile two-finger navigation begins after the movement threshold. Translation and
 pinch then compose: centroid movement pans in 2D or rotates in 3D while finger
-separation zooms around Ego's selection-derived Attention point, not the touch centroid
+separation zooms around Ego's selection-derived Awareness centroid, not the touch centroid
 or serialized framing point. Two-finger rotate and pan retain selection.
 
 ## 4. Gesture arbitration

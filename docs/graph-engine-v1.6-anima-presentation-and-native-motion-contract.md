@@ -276,13 +276,13 @@ fontSize = 14 + worldRadius / 4
 Labels use their resolved font size in fixed CSS pixels in both 2D and 3D. They remain
 readable while the graph recedes, matching the accepted 3D overview treatment rather
 than shrinking with orthographic zoom. Adaptive collision rejection and budgeting
-remain enabled as a Graph+ enhancement. Ego forces hovered labels, gives immediate
+remain enabled as a Graph+ enhancement. Anima forces hovered labels, gives immediate
 hover-neighbor labels a 50% Saliency boost, and raises selected and focused labels
 above the adaptive budget. Form-required labels remain structurally forced candidates.
 
 Adaptive label collision slots are resolved in this stable order:
 
-1. Ego label attention: hover, immediate hover neighbor, then selected or focused;
+1. Anima interaction emphasis: hover, immediate hover neighbor, then aware or focused;
 2. explicit structural label priority, including Form roles;
 3. resolved Anima world radius, largest first;
 4. perspective proximity; and
@@ -360,9 +360,9 @@ The current interaction policy is constellation-first:
 - a stationary background activation clears selection and Focus without moving the camera; and
 - context actions remain available without changing focus merely by opening the menu.
 
-Ego resolves focus, selection, hover, drag, and preview into semantic UI roles without
-altering their state-machine meaning. Anima realizes those roles and presents pin and
-region state.
+Ego supplies Awareness membership. Anima resolves Awareness together with focus, hover,
+drag, and preview facts into semantic UI roles without altering their state-machine
+meaning, and also presents pin and region state.
 
 While Explore/Constellation is active, selected members and their structural links
 receive emphasis. Every other projected node and link, including unrelated
@@ -382,8 +382,8 @@ Hover/drag presentation should adopt the useful native visual pattern:
 Explore/Constellation overrides selection highlighting to selected nodes and
 selected-to-selected links only. Hover remains the higher-priority exception and applies
 the global one-hop policy to the hovered node, immediate neighbors, and incident links.
-Previews and Option do not add an Explore seed. Ego forces the hovered label, gives immediate
-hover-neighbor labels a 50% Saliency boost, raises selected or focused labels,
+Previews and Option do not add an Explore seed. Anima forces the hovered label, gives immediate
+hover-neighbor labels a 50% Saliency boost, raises aware or focused labels,
 suppresses unrelated dim labels, and delegates the remaining labels to camera-range
 Saliency. Dwell and
 movement resistance before a transient hover highlight belong to the future shared

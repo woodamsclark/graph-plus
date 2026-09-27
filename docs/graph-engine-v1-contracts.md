@@ -804,7 +804,8 @@ and persistence rules are defined in the
 
 The internal presentation architecture follows the
 [Animus / Anima Boundary](graph-engine-animus-anima-boundary.md): Animus produces graph
-facts, Ego resolves one semantic UI context and its policy contracts, Anima resolves
+facts, Ego defines Awareness membership and centroid, the interaction framework owns
+state policy, Anima resolves
 the complete visual scene, and renderer backends draw without interpreting graph state
 or semantic theme roles.
 
@@ -827,8 +828,8 @@ constellation member; Ctrl does not change that behavior. The external highlight
 can reveal a highlight seed, its immediate neighbors, and its incident links. Explore's
 state contract overrides selection to selected nodes and selected-to-selected links
 only; hover remains the one-hop exception. Focus scopes highlighting to selected
-structure plus the focused neighborhood. Ego forces the hovered label, gives its immediate neighbors
-a 50% Saliency boost, and raises selected or focused labels; unrelated dim labels are
+structure plus the focused neighborhood. Anima forces the hovered label, gives its immediate neighbors
+a 50% Saliency boost, and raises aware or focused labels; unrelated dim labels are
 suppressed, and remaining labels use camera-range Saliency. Dim context nodes use
 24% opacity and 80% desaturation. Cmd-wheel is not a zoom mechanic. Tag nodes use the
 same selection, Focus, label, and presentation rules as ordinary nodes.

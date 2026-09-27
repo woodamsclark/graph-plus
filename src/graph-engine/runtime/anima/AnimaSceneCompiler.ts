@@ -33,7 +33,7 @@ export function compileAnimaSceneV1(options: {
 }): GraphRenderFrameV1 {
   const theme = options.theme ?? DEFAULT_GRAPH_VISUAL_THEME_V2;
   const policy = options.presentationPolicy ?? DEFAULT_GRAPH_PRESENTATION_POLICY_V2;
-  const interaction = options.snapshot.ego;
+  const interaction = options.snapshot.interaction;
   return {
     geometryRevision: options.geometryRevision,
     regions: (options.regionContributions ?? []).map((region) => ({

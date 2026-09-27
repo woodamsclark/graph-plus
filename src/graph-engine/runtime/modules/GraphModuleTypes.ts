@@ -50,7 +50,7 @@ export interface GraphModulePipelineStateV1 {
   readonly projectionSelection: GraphFilterSelectionV1;
   readonly renderSelection: GraphFilterSelectionV1;
   readonly formActive: boolean;
-  /** Singular semantic UI awareness, installed for frame composition. */
+  /** Ego's Awareness membership and centroid, installed for frame composition. */
   readonly ego?: Ego;
   /** Runtime-only interaction state. It is never persisted or exported as graph data. */
   readonly draggedNodeId?: string;

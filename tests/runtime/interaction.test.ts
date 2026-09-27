@@ -3,7 +3,7 @@ import type {
   GraphSessionV1,
 } from '../../src/graph-engine/contracts/v1/index.ts';
 import {
-  EGO_UI_STATE_CONTRACTS_V1,
+  ANIMA_STATE_PRESENTATION_POLICIES_V1,
   GRAPH_INTERACTION_STATE_POLICIES_V1,
   GraphCameraController,
 } from '../../src/graph-engine/runtime/index.ts';
@@ -17,19 +17,17 @@ import {
   runtimeSurface,
 } from '../support/runtimeHarness.ts';
 
-test('Ego is the single state contract behind the interaction compatibility surface', () => {
-  equal(GRAPH_INTERACTION_STATE_POLICIES_V1, EGO_UI_STATE_CONTRACTS_V1,
-    'interaction consumers must read Ego contracts instead of maintaining a sibling policy table');
-  equal(EGO_UI_STATE_CONTRACTS_V1.overview.renderScope, 'graph',
-    'Overview must retain graph-wide rendering');
-  equal(EGO_UI_STATE_CONTRACTS_V1.explore.renderScope, 'graph-with-selection-emphasis',
-    'Explore must retain constellation emphasis');
-  equal(EGO_UI_STATE_CONTRACTS_V1.focus.renderScope, 'focused-local-view',
-    'Focus must retain its local rendering scope');
-  equal(EGO_UI_STATE_CONTRACTS_V1.explore.highlightOverride?.contextRole, 'dimmed',
-    'Explore must scope its context-dimming override to the active Ego contract');
-  equal(EGO_UI_STATE_CONTRACTS_V1.focus.highlightOverride?.contextRole, 'hidden',
-    'Focus must scope its context-hiding override to the active Ego contract');
+test('interaction and Anima own independent state policy tables outside Ego', () => {
+  equal(GRAPH_INTERACTION_STATE_POLICIES_V1.explore.wheel['3d'], 'rotate',
+    'interaction policy should own gesture behavior');
+  equal(GRAPH_INTERACTION_STATE_POLICIES_V1.focus.fitCenter, 'focused-node',
+    'interaction policy should own explicit framing behavior');
+  equal(ANIMA_STATE_PRESENTATION_POLICIES_V1.overview.renderScope, 'graph',
+    'Anima should own graph-wide rendering');
+  equal(ANIMA_STATE_PRESENTATION_POLICIES_V1.explore.highlightOverride?.contextRole, 'dimmed',
+    'Anima should own Explore context dimming');
+  equal(ANIMA_STATE_PRESENTATION_POLICIES_V1.focus.highlightOverride?.contextRole, 'hidden',
+    'Anima should own Focus context hiding');
 });
 
 test('R-INPUT-01 pans Overview, rotates Focus trackpad scroll, and radial-zooms Focus secondary drag', async () => {

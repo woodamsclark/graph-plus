@@ -108,7 +108,7 @@ export interface GraphNodeRenderContributionV1 {
   readonly labelForceVisible?: boolean;
   readonly labelPriority?: number;
   readonly labelAlwaysVisible?: boolean;
-  /** Ego-resolved label raising priority. */
+  /** Anima-resolved label raising priority. */
   readonly labelStatePriority?: number;
   /** Fraction by which this label's adaptive Saliency threshold is reduced. */
   readonly labelSaliencyBoost?: number;

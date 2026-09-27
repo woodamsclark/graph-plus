@@ -1,11 +1,8 @@
 import {
-  EGO_UI_STATE_CONTRACTS_V1,
-  type EgoPresentationRoleV1,
-  type EgoUiStateV1,
-} from '../ego/index.ts';
-
-/** @deprecated Presentation roles are semantic Ego output; Anima realizes them. */
-export type AnimaPresentationRoleV1 = EgoPresentationRoleV1;
+  ANIMA_STATE_PRESENTATION_POLICIES_V1,
+  type AnimaPresentationRoleV1,
+} from './AnimaAwareness.ts';
+import type { GraphUxStateV1 } from '../interaction/index.ts';
 
 export interface AnimaInteractionPresentationV1 {
   readonly selection: AnimaPresentationRoleV1;
@@ -14,8 +11,8 @@ export interface AnimaInteractionPresentationV1 {
   readonly graphContext: AnimaPresentationRoleV1;
 }
 
-/** @deprecated Compatibility projection of Ego's state-scoped highlight contracts. */
-export const ANIMA_INTERACTION_PRESENTATION_V1: Readonly<Record<EgoUiStateV1, AnimaInteractionPresentationV1>> = {
+/** @deprecated Compatibility projection of Anima's state-scoped presentation policy. */
+export const ANIMA_INTERACTION_PRESENTATION_V1: Readonly<Record<GraphUxStateV1, AnimaInteractionPresentationV1>> = {
   overview: {
     selection: 'normal',
     selectionNeighborhood: 'normal',
@@ -26,12 +23,12 @@ export const ANIMA_INTERACTION_PRESENTATION_V1: Readonly<Record<EgoUiStateV1, An
     selection: 'highlighted',
     selectionNeighborhood: 'highlighted',
     focusedNeighborhood: 'normal',
-    graphContext: EGO_UI_STATE_CONTRACTS_V1.explore.highlightOverride?.contextRole ?? 'normal',
+    graphContext: ANIMA_STATE_PRESENTATION_POLICIES_V1.explore.highlightOverride?.contextRole ?? 'normal',
   },
   focus: {
     selection: 'highlighted',
     selectionNeighborhood: 'hidden',
     focusedNeighborhood: 'highlighted',
-    graphContext: EGO_UI_STATE_CONTRACTS_V1.focus.highlightOverride?.contextRole ?? 'normal',
+    graphContext: ANIMA_STATE_PRESENTATION_POLICIES_V1.focus.highlightOverride?.contextRole ?? 'normal',
   },
 };

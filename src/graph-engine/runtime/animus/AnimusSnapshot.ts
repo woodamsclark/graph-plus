@@ -5,7 +5,10 @@ import type {
   Vec3,
 } from '../../contracts/v1/index.ts';
 import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
-import { createEgoUiContextV1, type EgoUiContextV1 } from '../ego/index.ts';
+import {
+  createGraphInteractionContextV1,
+  type GraphInteractionContextV1,
+} from '../interaction/GraphInteractionStatePolicy.ts';
 import type { AnimusEdgeRoleV1, AnimusNodeRoleV1, AnimusRegionV1 } from './AnimusRoles.ts';
 
 /**
@@ -21,14 +24,11 @@ export interface AnimusSnapshotV1 {
   readonly nodeRoles: Readonly<Record<string, AnimusNodeRoleV1>>;
   readonly edgeRoles: Readonly<Record<string, AnimusEdgeRoleV1>>;
   readonly regions: readonly AnimusRegionV1[];
-  /** The singular semantic UI context shared by the runtime handoff. */
-  readonly ego: EgoUiContextV1;
-  /** @deprecated Compatibility alias over the same Ego context object. */
-  readonly interaction: AnimusInteractionSnapshotV1;
+  readonly interaction: GraphInteractionContextV1;
   readonly view: AnimusViewSnapshotV1;
 }
 
-export type AnimusInteractionSnapshotV1 = EgoUiContextV1;
+export type AnimusInteractionSnapshotV1 = GraphInteractionContextV1;
 
 export interface AnimusViewSnapshotV1 {
   readonly dimensions: GraphDimensionsV1;
@@ -48,9 +48,8 @@ export function createAnimusSnapshotV1(options: {
   readonly previewedNodeId?: string;
   readonly selectionPresentationSuspended?: boolean;
   readonly selectionNeighborRevealActive?: boolean;
-  readonly egoContext?: EgoUiContextV1;
 }): AnimusSnapshotV1 {
-  const ego = options.egoContext ?? createEgoUiContextV1(options);
+  const interaction = createGraphInteractionContextV1(options);
   return {
     document: options.document,
     displaySelection: options.displaySelection,
@@ -58,8 +57,7 @@ export function createAnimusSnapshotV1(options: {
     nodeRoles: options.nodeRoles ?? {},
     edgeRoles: options.edgeRoles ?? {},
     regions: options.regions ?? [],
-    ego,
-    interaction: ego,
+    interaction,
     view: {
       dimensions: options.viewState.dimensions,
       camera: options.viewState.camera,

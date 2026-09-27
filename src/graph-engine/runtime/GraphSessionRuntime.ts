@@ -29,7 +29,7 @@ import {
   reconcileGraphViewStateV1,
 } from '../core/state/index.ts';
 import { Vision } from './vision/index.ts';
-import { resolveAttention } from './ego/index.ts';
+import { resolveAwareness } from './ego/index.ts';
 import {
   graphInteractionPolicyV1,
   resolveGraphUxStateV1,
@@ -363,7 +363,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         surface: this.surface,
         interactionElement: this.renderer.interactionElement,
         vision: this.vision,
-        getAttention: () => resolveAttention({
+        getAwareness: () => resolveAwareness({
           viewState: this.viewState,
           positions: this.moduleView?.positions ?? this.viewState.positions,
         }),

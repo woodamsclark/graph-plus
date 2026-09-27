@@ -44,14 +44,6 @@ export class SessionProjectionCoordinatorV1 {
     const ego = createEgo({
       viewState: options.viewState,
       positions: options.projectionView.positions,
-      document: options.projectionView.document,
-      visibleNodeIds: options.projectionView.renderSelection.nodeIds,
-      visibleEdgeIds: options.projectionView.renderSelection.edgeIds,
-      ...(options.draggedNodeId === undefined ? {} : { draggedNodeId: options.draggedNodeId }),
-      ...(options.hoveredNodeId === undefined ? {} : { hoveredNodeId: options.hoveredNodeId }),
-      ...(options.previewedNodeId === undefined ? {} : { previewedNodeId: options.previewedNodeId }),
-      selectionPresentationSuspended: options.selectionPresentationSuspended,
-      selectionNeighborRevealActive: options.selectionNeighborRevealActive,
     });
     const moduleView = options.host.contribute({
       ...options.projectionView,
@@ -75,7 +67,6 @@ export class SessionProjectionCoordinatorV1 {
       previewedNodeId: options.previewedNodeId,
       selectionPresentationSuspended: options.selectionPresentationSuspended,
       selectionNeighborRevealActive: options.selectionNeighborRevealActive,
-      egoContext: ego.context,
     });
     this.frames.set(compileAnimaSceneV1({
       snapshot,
