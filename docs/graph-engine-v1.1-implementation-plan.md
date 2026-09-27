@@ -140,9 +140,10 @@ shows a flat Mind Map rather than a 3D Form.
 
 ### 3.5 Touch mapping reflects the pre-trial contract
 
-The current interpreter makes a one-finger 3D background drag orbit and a two-finger
-translation pan. V1.1 trials one-finger background pan in both dimensions, 3D
-two-finger orbit, pinch-priority zoom, and no rotation in 2D.
+The pre-trial interpreter made a one-finger 3D background drag orbit and a two-finger
+translation pan. The accepted mapping uses one-finger background pan in Overview and
+Explore, Focus-only one-finger orbit in 3D, concurrent two-finger orbit plus pinch zoom
+in 3D, and concurrent two-finger pan plus pinch zoom in 2D.
 
 ### 3.6 Session override writes need one owner
 
@@ -512,7 +513,7 @@ Work:
 - preserve one-finger node-drag arbitration;
 - make two-finger translation orbit in 3D with the accepted direction mapping;
 - make the same gesture non-rotating in 2D, with centroid pan allowed;
-- give pinch zoom priority once its scale threshold is crossed;
+- allow pinch zoom and two-finger translation navigation to run concurrently;
 - keep long-press context behavior and cancel click/drag/orbit cleanly when another
   gesture wins;
 - preserve focus/selection during 3D two-finger orbit; clear them exactly once when a

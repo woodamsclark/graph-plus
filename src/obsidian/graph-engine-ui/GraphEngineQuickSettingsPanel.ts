@@ -1,4 +1,4 @@
-import { Notice, Setting, setIcon } from 'obsidian';
+import { Notice, Setting, setIcon, type SliderComponent } from 'obsidian';
 import {
   GRAPH_QUICK_SETTINGS_CONTROL_IDS_V1 as CONTROLS,
   GRAPH_QUICK_SETTINGS_SECTION_IDS_V1 as SECTIONS,
@@ -17,7 +17,11 @@ import {
 import { GraphEngineQuickSettingsDisclosureStateV1 } from './GraphEngineQuickSettingsDisclosureState.ts';
 import { isQuickSettingsToggleKeyV1 } from './GraphEngineQuickSettingsShortcut.ts';
 import { ObsidianGraphUiLayoutV1 } from './ObsidianGraphUiLayout.ts';
-import { graphSettingPresentationV1 } from '../settings/GraphEngineSettingsCatalog.ts';
+import {
+  graphSettingDisplayValueV1,
+  graphSettingPresentationV1,
+  graphSettingStoredValueV1,
+} from '../settings/GraphEngineSettingsCatalog.ts';
 
 const SECTION_TITLES: Readonly<Record<string, string>> = {
   [SECTIONS.filter]: 'Filter',
@@ -212,7 +216,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
         this.catalogSlider(
           body,
           'anima.nodeWorldScaleBlend',
-          readNumber(anima.settings.nodeWorldScaleBlend, 0) * 100,
+          readNumber(anima.settings.nodeWorldScaleBlend, 0),
           'Uniform ←→ Size-driven',
         );
       }
@@ -304,7 +308,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
           }));
       }
       if (anima?.enabled
-        && graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labelThreshold)) {
+        && graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labelSaliency)) {
         const thresholdKey = effective.dimensions === '3d'
           ? 'adaptiveLabelThreshold3d'
           : 'adaptiveLabelThreshold2d';
@@ -364,7 +368,12 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     setting.addSlider((slider) => {
       slider.setLimits(min, max, step).setValue(value).setDynamicTooltip();
       slider.sliderEl.addEventListener('input', () => {
-        void this.writeSessionSetting('form', key, slider.getValue());
+        const next = slider.getValue();
+        numberInput.value = formatSliderValue(next, step);
+        void this.writeSessionSetting('form', key, next);
+      });
+      const numberInput = this.sliderNumberInput(setting, slider, name, min, max, step, (next) => {
+        void this.writeSessionSetting('form', key, next);
       });
       slider.sliderEl.addEventListener('dblclick', (event) => {
         event.preventDefault();
@@ -405,7 +414,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
         && graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.axialSpringStiffness)) {
         axialStiffnessHost = div(body, 'graph-engine-conditional-control');
         axialStiffnessHost.hidden = readAxialAxis(settings.axialSpringAxis) === 'off';
-        this.catalogSlider(axialStiffnessHost, 'force-layout.axialSpringStiffness', readNumber(settings.axialSpringStiffness, 0) * 100);
+        this.catalogSlider(axialStiffnessHost, 'force-layout.axialSpringStiffness', readNumber(settings.axialSpringStiffness, 0));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.centerForce)) {
         this.catalogSlider(body, 'force-layout.centeringStrength', readNumber(settings.centeringStrength, 0.1));
@@ -452,7 +461,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     step: number,
     moduleId: string,
     key: string,
-    storageScale = 1,
+    toStoredValue: (value: number) => number = (value) => value,
     description?: string,
   ): void {
     const setting = new Setting(parent).setName(name);
@@ -461,7 +470,12 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     setting.addSlider((slider) => {
       slider.setLimits(min, max, step).setValue(value).setDynamicTooltip();
       slider.sliderEl.addEventListener('input', () => {
-        void this.writeProfileSetting(moduleId, key, slider.getValue() * storageScale);
+        const next = slider.getValue();
+        numberInput.value = formatSliderValue(next, step);
+        void this.writeProfileSetting(moduleId, key, toStoredValue(next));
+      });
+      const numberInput = this.sliderNumberInput(setting, slider, name, min, max, step, (next) => {
+        void this.writeProfileSetting(moduleId, key, toStoredValue(next));
       });
       slider.sliderEl.addEventListener('dblclick', async (event) => {
         event.preventDefault();
@@ -480,19 +494,55 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       }));
   }
 
+  private sliderNumberInput(
+    setting: Setting,
+    slider: SliderComponent,
+    name: string,
+    min: number,
+    max: number,
+    step: number,
+    onValue: (value: number) => void,
+  ): HTMLInputElement {
+    const input = setting.settingEl.ownerDocument.createElement('input');
+    input.className = 'graphplus-slider-number graph-engine-slider-number';
+    input.type = 'number';
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.value = formatSliderValue(slider.getValue(), step);
+    input.setAttribute('aria-label', `${name} value`);
+    input.addEventListener('input', () => {
+      const entered = input.valueAsNumber;
+      if (!Number.isFinite(entered)) return;
+      const next = normalizeSliderValue(entered, min, max, step);
+      slider.setValue(next);
+      onValue(next);
+    });
+    input.addEventListener('blur', () => {
+      input.value = formatSliderValue(slider.getValue(), step);
+    });
+    input.addEventListener('keydown', (event) => {
+      event.stopPropagation();
+      if (event.key === 'Enter') input.blur();
+    });
+    slider.sliderEl.after(input);
+    return input;
+  }
+
   private catalogSlider(parent: HTMLElement, id: string, value: number, description?: string): void {
     const presentation = graphSettingPresentationV1(id);
     if (presentation.control.type !== 'slider') throw new Error(`${id} is not a slider setting.`);
+    const displayValue = graphSettingDisplayValueV1(presentation, value);
     this.slider(
       parent,
       presentation.name,
-      value,
+      typeof displayValue === 'number' ? displayValue : presentation.control.min,
       presentation.control.min,
       presentation.control.max,
       presentation.control.step,
       presentation.moduleId,
       presentation.key,
-      presentation.control.storageScale ?? 1,
+      (next) => graphSettingStoredValueV1(presentation, next) as number,
       description,
     );
   }
@@ -636,4 +686,19 @@ function humanize(value: string): string {
 
 function stopPropagation(event: Event): void {
   event.stopPropagation();
+}
+
+function normalizeSliderValue(value: number, min: number, max: number, step: number): number {
+  const clamped = Math.min(max, Math.max(min, value));
+  const stepped = min + Math.round((clamped - min) / step) * step;
+  return Number(stepped.toFixed(sliderStepPrecision(step)));
+}
+
+function formatSliderValue(value: number, step: number): string {
+  return String(Number(value.toFixed(sliderStepPrecision(step))));
+}
+
+function sliderStepPrecision(step: number): number {
+  const decimal = String(step).split('.')[1];
+  return decimal?.length ?? 0;
 }

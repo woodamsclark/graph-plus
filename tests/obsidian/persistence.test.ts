@@ -54,6 +54,21 @@ test('Graph+ color overrides migrate additively and discard invalid values', () 
   }, 'valid color overrides should normalize while invalid saved values return to theme ownership');
 });
 
+test('Frank mode is opt-in and survives Graph+ settings migration', () => {
+  equal(migrateGraphPlusPluginDataV1({}).data.consumers.graphPlus.consumerSettings.frankMode, false,
+    'Frank mode should stay out of serious graphs unless someone finds and enables it');
+  const migrated = migrateGraphPlusPluginDataV1({
+    consumers: {
+      graphPlus: {
+        dataSchemaVersion: 1,
+        consumerSettings: { frankMode: true },
+      },
+    },
+  });
+  equal(migrated.data.consumers.graphPlus.consumerSettings.frankMode, true,
+    'an enabled prank should persist across reloads');
+});
+
 test('engine corruption recovers without replacing readable Graph+ consumer data', () => {
   const first = migrateGraphPlusPluginDataV1({ base: { showTags: false } });
   const namespaced = withEngineSettingsV1(first.data, { profileSettings: { theme: 'quiet' } }, {

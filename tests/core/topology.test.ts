@@ -356,7 +356,7 @@ test('R-DRAG-01 active node drag keeps the force layout responsive until release
   }
   const held = force.getDiagnostics();
   equal(held.running, true, 'a held drag should prevent force settlement');
-  assert(held.alpha >= 0.3, 'a held drag should retain the native interaction heat floor');
+  equal(held.alpha, 1, 'a held drag should retain the full interaction time scale');
 
   force.tick({ ...state, draggedNodeId: undefined }, 1 / 60);
   const released = force.getDiagnostics();

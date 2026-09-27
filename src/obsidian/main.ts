@@ -242,6 +242,7 @@ export default class GraphEnginePlugin extends Plugin {
       () => container,
       () => selectedCommunityTheme(this.app) === '',
       () => this.settings.colors,
+      () => this.settings.frankMode,
     ).getPalette();
   }
 

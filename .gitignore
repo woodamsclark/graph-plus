@@ -21,3 +21,7 @@ data.json
 
 # Compiled JavaScript files
 main.js
+
+# Runtime and review artifacts
+graph-plus-checkpoints/
+outputs/

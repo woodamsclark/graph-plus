@@ -8,7 +8,12 @@ import {
   type GraphRenderEdgeV1,
   type GraphRenderFrameV1,
 } from '../render/GraphRenderTypes.ts';
-import { DEFAULT_GRAPH_VISUAL_THEME_V2, type GraphVisualThemeV2 } from '../theme/index.ts';
+import {
+  DEFAULT_GRAPH_VISUAL_THEME_V2,
+  graphColorV2,
+  type GraphColorV2,
+  type GraphVisualThemeV2,
+} from '../theme/index.ts';
 
 /**
  * The sole semantic-to-visual compilation boundary.
@@ -28,7 +33,7 @@ export function compileAnimaSceneV1(options: {
 }): GraphRenderFrameV1 {
   const theme = options.theme ?? DEFAULT_GRAPH_VISUAL_THEME_V2;
   const policy = options.presentationPolicy ?? DEFAULT_GRAPH_PRESENTATION_POLICY_V2;
-  const interaction = options.snapshot.interaction;
+  const interaction = options.snapshot.ego;
   return {
     geometryRevision: options.geometryRevision,
     regions: (options.regionContributions ?? []).map((region) => ({
@@ -38,9 +43,9 @@ export function compileAnimaSceneV1(options: {
       directMemberNodeIds: region.directMemberNodeIds,
       connections: region.connections,
       padding: region.padding,
-      fillColor: region.fillColor ?? region.color,
+      fillColor: constrainedColor(region.fillColor ?? region.color, theme),
       fillOpacity: finiteOpacity(region.fillOpacity, 0.12),
-      strokeColor: region.strokeColor ?? region.color,
+      strokeColor: constrainedColor(region.strokeColor ?? region.color, theme),
       strokeOpacity: finiteOpacity(region.strokeOpacity, 0.52),
       strokeWidth: finitePositive(region.strokeWidth, 1.5),
     })),
@@ -61,17 +66,17 @@ export function compileAnimaSceneV1(options: {
           ...(contribution?.nodeScaleExponent === undefined
             ? {}
             : { nodeScaleExponent: contribution.nodeScaleExponent }),
-          finalColor: contribution?.finalColor ?? (focused
+          finalColor: constrainedColor(contribution?.finalColor ?? (focused
             ? theme.colors.focusedNode
             : selected
               ? theme.colors.selectedNode
-              : contribution?.color ?? theme.colors.node),
+              : contribution?.color ?? theme.colors.node), theme),
           opacity,
           ...(stroked ? {
-            strokeColor: contribution?.strokeColor ?? theme.colors.label,
+            strokeColor: constrainedColor(contribution?.strokeColor ?? theme.colors.label, theme),
             strokeWidth: contribution?.strokeWidth ?? (focused ? 2 : 1),
           } : {}),
-          labelColor: contribution?.labelColor ?? theme.colors.label,
+          labelColor: constrainedColor(contribution?.labelColor ?? theme.colors.label, theme),
           labelOpacity: finiteOpacity(contribution?.labelOpacity, opacity),
           labelFontSize: finitePositive(contribution?.labelFontSize, theme.labelFont.sizePx),
           ...(contribution?.labelOffset === undefined ? {} : { labelOffset: { ...contribution.labelOffset } }),
@@ -83,12 +88,16 @@ export function compileAnimaSceneV1(options: {
           ...(contribution?.labelAlwaysVisible === undefined
             ? {}
             : { labelAlwaysVisible: contribution.labelAlwaysVisible }),
-          labelStatePriority: focused ? 4 : selected ? 3 : hovered ? 2
-            : contribution?.labelAlwaysVisible === true ? 1 : 0,
+          ...(contribution?.labelSaliencyBoost === undefined
+            ? {}
+            : { labelSaliencyBoost: contribution.labelSaliencyBoost }),
+          labelStatePriority: contribution?.labelStatePriority
+            ?? (focused ? 4 : selected ? 3 : hovered ? 2
+              : contribution?.labelAlwaysVisible === true ? 1 : 0),
         };
       }),
     edges: compileEdges(options.snapshot, options.edgeContributions, theme, policy),
-    backgroundColor: theme.colors.background,
+    backgroundColor: constrainedColor(theme.colors.background, theme),
     labelFont: theme.labelFont,
     policy,
   };
@@ -105,7 +114,7 @@ function compileEdges(
     .map((edge) => {
       const contribution = contributions?.[edge.id];
       const explicitColor = contribution?.color;
-      const color = explicitColor ?? theme.colors.edge;
+      const color = constrainedColor(explicitColor ?? theme.colors.edge, theme);
       const opacity = finiteOpacity(contribution?.opacity, 1);
       return {
         id: edge.id,
@@ -121,7 +130,7 @@ function compileEdges(
         arrowAtTarget: policy.showArrows === false
           ? false
           : contribution?.arrowAtTarget ?? (edge.directed ?? false),
-        arrowColor: contribution?.arrowColor ?? explicitColor ?? theme.colors.arrow,
+        arrowColor: constrainedColor(contribution?.arrowColor ?? explicitColor ?? theme.colors.arrow, theme),
         arrowOpacity: finiteOpacity(contribution?.arrowOpacity, opacity),
       };
     });
@@ -151,6 +160,13 @@ function compileEdges(
         (edge.sourceId === sourceId && edge.arrowAtSource) || (edge.targetId === sourceId && edge.arrowAtTarget)),
     };
   });
+}
+
+function constrainedColor(color: GraphColorV2, theme: GraphVisualThemeV2): GraphColorV2 {
+  if (theme.colorConstraint !== 'red-green') return color;
+  return color.g > color.r
+    ? graphColorV2(0, 1, 0, color.a)
+    : graphColorV2(1, 0, 0, color.a);
 }
 
 function finitePositive(value: number | undefined, fallback: number): number {

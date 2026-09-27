@@ -271,7 +271,7 @@ export class SessionInteractionRuntime {
         this.emitViewportIntent(command);
         return;
       case 'set-selection':
-        this.setSelection(command.nodeIds, command);
+        this.setSelection(command.nodeIds, command, command.clearFocus);
         return;
       case 'set-focus':
         this.setFocus(command.nodeId, command);
@@ -293,7 +293,7 @@ export class SessionInteractionRuntime {
         });
         return;
       case 'activate-background':
-        this.options.onIntent({ ...this.intentBase(command), type: 'background-activated' });
+        this.activateBackground(command);
         return;
       case 'request-node-context':
         if (!this.options.getRenderSelection().nodeIds.has(command.nodeId)) return;
@@ -369,14 +369,14 @@ export class SessionInteractionRuntime {
 
   private selectionBridge(nodeId: string, selectedNodeIds: readonly string[]): readonly string[] {
     if (selectedNodeIds.length === 0) return [];
-    const visibleNodes = this.options.getRenderSelection().nodeIds;
-    if (!visibleNodes.has(nodeId)) return [];
+    const renderSelection = this.options.getRenderSelection();
+    if (!renderSelection.nodeIds.has(nodeId)) return [];
     const relationships = new Map<string, Set<string>>();
-    for (const visibleNodeId of visibleNodes) relationships.set(visibleNodeId, new Set());
+    for (const visibleNodeId of renderSelection.nodeIds) relationships.set(visibleNodeId, new Set());
     for (const edge of this.options.getDocument().edges) {
-      if (!this.options.getRenderSelection().edgeIds.has(edge.id)
-        || !visibleNodes.has(edge.sourceId)
-        || !visibleNodes.has(edge.targetId)) continue;
+      if (!renderSelection.edgeIds.has(edge.id)
+        || !renderSelection.nodeIds.has(edge.sourceId)
+        || !renderSelection.nodeIds.has(edge.targetId)) continue;
       relationships.get(edge.sourceId)?.add(edge.targetId);
       relationships.get(edge.targetId)?.add(edge.sourceId);
     }
@@ -435,7 +435,7 @@ export class SessionInteractionRuntime {
     if (!focusedPosition) return;
     const target = this.options.camera.getState().target;
     const pull = subtract(focusedPosition, target);
-    this.options.camera.translateBy({ x: pull.x * 0.22, y: pull.y * 0.22, z: pull.z * 0.22 });
+    this.options.camera.translateBy({ x: pull.x * 0.22, y: pull.y * 0.22, z: pull.z * 0.22 }, false);
     this.scheduleElasticReturn();
   }
 
@@ -452,9 +452,9 @@ export class SessionInteractionRuntime {
       const pull = subtract(focusedPosition, target);
       const remaining = vectorDistance(focusedPosition, target);
       if (remaining < 0.01) {
-        this.options.camera.translateBy(pull);
+        this.options.camera.translateBy(pull, false);
       } else {
-        this.options.camera.translateBy({ x: pull.x * 0.22, y: pull.y * 0.22, z: pull.z * 0.22 });
+        this.options.camera.translateBy({ x: pull.x * 0.22, y: pull.y * 0.22, z: pull.z * 0.22 }, false);
       }
       this.commitCamera();
       this.options.onViewStateChanged('camera');
@@ -523,7 +523,7 @@ export class SessionInteractionRuntime {
     const candidates = this.cameraTargetNodeIds();
     const centroid = selectionCentroid(candidates, positionsById);
     if (!centroid) return;
-    this.options.camera.translateBy(subtract(centroid, this.options.camera.getState().target));
+    this.options.camera.translateBy(subtract(centroid, this.options.camera.getState().target), false);
   }
 
   private cameraTargetNodeIds(): readonly string[] {
@@ -535,33 +535,63 @@ export class SessionInteractionRuntime {
       : [...this.options.getRenderSelection().nodeIds];
   }
 
-  private setSelection(nodeIds: readonly string[], command: GraphRuntimeCommandV1): void {
+  private setSelection(
+    nodeIds: readonly string[],
+    command: GraphRuntimeCommandV1,
+    clearFocus = false,
+  ): void {
     const state = this.options.getViewState();
     const known = new Set(this.options.getDocument().nodes.map((node) => node.id));
     const selectedNodeIds = [...new Set(nodeIds)].filter((id) => known.has(id));
-    const desiredFocus = selectedNodeIds.length === 0
+    const desiredFocus = selectedNodeIds.length === 0 || clearFocus
       ? undefined
-      : state.focusedNodeId ?? (selectedNodeIds.length === 1 ? selectedNodeIds[0] : undefined);
-    if (sameIds(selectedNodeIds, state.selectedNodeIds) && desiredFocus === state.focusedNodeId) return;
-    this.commit({ ...state, selectedNodeIds });
+      : state.focusedNodeId;
+    this.setInteractionState(selectedNodeIds, desiredFocus, command, desiredFocus !== state.focusedNodeId);
+  }
+
+  private setFocus(nodeId: string | undefined, command: GraphRuntimeCommandV1): void {
+    const document = this.options.getDocument();
+    if (nodeId !== undefined && !document.nodes.some((node) => node.id === nodeId)) return;
+    const state = this.options.getViewState();
+    this.setInteractionState(state.selectedNodeIds, nodeId, command, true);
+  }
+
+  private setInteractionState(
+    selectedNodeIds: readonly string[],
+    focusedNodeId: string | undefined,
+    command: GraphRuntimeCommandV1,
+    clearPresentation = false,
+  ): void {
+    const state = this.options.getViewState();
+    const selectionChanged = !sameIds(selectedNodeIds, state.selectedNodeIds);
+    const focusChanged = state.focusedNodeId !== focusedNodeId;
+    const presentationChanged = clearPresentation ? this.clearNodePresentation(command) : false;
+    if (!selectionChanged && !focusChanged && !presentationChanged) return;
+    if (selectionChanged || focusChanged) {
+      const { focusedNodeId: _focusedNodeId, ...withoutFocus } = state;
+      this.commit(focusedNodeId === undefined
+        ? { ...withoutFocus, selectedNodeIds }
+        : { ...withoutFocus, selectedNodeIds, focusedNodeId });
+      if (focusedNodeId === undefined) this.focusZoomBaseline = undefined;
+    }
     this.options.onViewStateChanged('interaction');
-    this.options.onIntent({
+    if (selectionChanged) this.options.onIntent({
       ...this.intentBase(command),
       type: 'selection-changed',
       selectedNodeIds: [...selectedNodeIds],
     });
-    if (desiredFocus !== state.focusedNodeId) this.setFocus(desiredFocus, command);
+    if (focusChanged) this.options.onIntent({
+      ...this.intentBase(command),
+      type: 'focus-changed',
+      ...(focusedNodeId === undefined ? {} : { focusedNodeId }),
+    });
   }
 
-  private setFocus(nodeId: string | undefined, command: GraphRuntimeCommandV1): void {
+  private clearNodePresentation(command: GraphRuntimeCommandV1): boolean {
     this.cancelPreviewRelease();
-    const document = this.options.getDocument();
-    if (nodeId !== undefined && !document.nodes.some((node) => node.id === nodeId)) return;
-    const state = this.options.getViewState();
-    const focusChanged = state.focusedNodeId !== nodeId;
     const hoverChanged = this.hoveredNodeId !== undefined || this.previewedNodeId !== undefined;
     const previewChanged = this.previewedNodeId !== undefined;
-    if (!focusChanged && !hoverChanged) return;
+    if (!hoverChanged) return false;
     this.hoveredNodeId = undefined;
     this.previewedNodeId = undefined;
     this.previewPoint = undefined;
@@ -578,18 +608,20 @@ export class SessionInteractionRuntime {
       ...this.intentBase(command),
       type: 'preview-changed',
     });
-    if (focusChanged) {
-      const { focusedNodeId: _focusedNodeId, ...withoutFocus } = state;
-      this.commit(nodeId === undefined ? withoutFocus : { ...withoutFocus, focusedNodeId: nodeId });
-      if (nodeId === undefined) this.focusZoomBaseline = undefined;
+    return true;
+  }
+
+  private activateBackground(command: GraphRuntimeCommandV1): void {
+    const state = this.options.getViewState();
+    const mode = resolveGraphUxStateV1(state);
+    if (mode === 'focus' && state.selectedNodeIds.length > 1) {
+      this.setInteractionState(state.selectedNodeIds, undefined, command, true);
+    } else if (mode !== 'overview') {
+      this.setInteractionState([], undefined, command, true);
+    } else {
+      this.setInteractionState(state.selectedNodeIds, undefined, command, true);
     }
-    this.options.onViewStateChanged('interaction');
-    if (!focusChanged) return;
-    this.options.onIntent({
-      ...this.intentBase(command),
-      type: 'focus-changed',
-      ...(nodeId === undefined ? {} : { focusedNodeId: nodeId }),
-    });
+    this.options.onIntent({ ...this.intentBase(command), type: 'background-activated' });
   }
 
   private beginNodeDrag(nodeId: string, point: GraphScreenPointV1): void {

@@ -62,12 +62,12 @@ consumer should report zero active sessions and zero mounted session elements.
 
 Continuous force work is wake-timer driven rather than display-refresh driven:
 
-- hot layout and active dragging request at most `30 Hz`;
-- cooling layout below alpha `0.01` requests at most `15 Hz`;
+- every active layout, including active dragging and cooling, requests at most `30 Hz`;
 - settled layout requests `0 Hz` and owns neither an animation frame nor a wake timer;
 - input, camera commands, document changes, and settings changes interrupt a sleeping
   physics delay and receive an immediate visual frame; and
-- each eligible force tick retains the existing D3-compatible fixed-step equation.
+- each eligible force tick computes the ordinary D3-compatible step and alpha blends the
+  whole state transition, giving an effective simulated rate from `30 Hz` down to `0 Hz`.
 
 Rendering a changed physics frame must not independently schedule an immediate
 follow-up that bypasses the requested solver delay. If another active module requests
@@ -101,7 +101,8 @@ At a native ratio of `3`, a `2` ratio cap reduces Canvas pixel count by approxim
 Automated tests must prove that:
 
 1. hot continuous force work sleeps at approximately `30 Hz`;
-2. cooling work transitions to `15 Hz` and settled work reaches `0 Hz`;
+2. cooling work remains smoothly scheduled at `30 Hz`, its effective simulated rate falls
+   with alpha, and settled work reaches `0 Hz`;
 3. continuous physics does not spin animation frames while waiting;
 4. immediate camera/input work interrupts a delayed physics wake;
 5. Automatic caps a large DPR-3 graph at DPR 2;

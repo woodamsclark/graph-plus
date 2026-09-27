@@ -9,6 +9,7 @@ import './core/topology.test.ts';
 import './core/tags.test.ts';
 import './core/view-state.test.ts';
 import './runtime/interaction.test.ts';
+import './runtime/ego.test.ts';
 import './runtime/camera.test.ts';
 import './runtime/modules.test.ts';
 import './runtime/v16-native-presentation.test.ts';

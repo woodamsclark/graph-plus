@@ -41,6 +41,34 @@ test('Graph+ consumer imports only the public Graph Engine boundary', () => {
   deepEqual(violations, [], 'Graph+ should consume only contracts and the public client artifact');
 });
 
+test('global and Local Graph+ keep distinct active-note ownership', () => {
+  const obsidianRoot = join(process.cwd(), 'src', 'obsidian');
+  const globalView = readFileSync(join(obsidianRoot, 'GraphView.ts'), 'utf8');
+  const localView = readFileSync(join(obsidianRoot, 'LocalGraphView.ts'), 'utf8');
+  const globalConsumer = readFileSync(
+    join(process.cwd(), 'src', 'graph-plus', 'consumer', 'GraphPlusConsumer.ts'),
+    'utf8',
+  );
+  const localConsumer = readFileSync(
+    join(process.cwd(), 'src', 'graph-plus', 'consumer', 'LocalGraphPlusConsumer.ts'),
+    'utf8',
+  );
+  const violations: string[] = [];
+  if (/requestActiveFileFollow|followActiveNode|workspace\.on\(['"]file-open['"]/.test(globalView)) {
+    violations.push('global Graph+ automatically follows the active note');
+  }
+  if (/followActiveNode\s*\(/.test(globalConsumer)) {
+    violations.push('global Graph+ consumer exposes automatic active-note following');
+  }
+  if (!/requestActiveFileFollow/.test(localView) || !/workspace\.on\(['"]file-open['"]/.test(localView)) {
+    violations.push('Local Graph+ does not subscribe to active-note changes');
+  }
+  if (!/followActiveNode\s*\(/.test(localConsumer)) {
+    violations.push('Local Graph+ consumer does not expose active-note following');
+  }
+  deepEqual(violations, [], 'only Local Graph+ should follow the active note automatically');
+});
+
 test('Animus emits graph facts while Anima alone resolves visual presentation', () => {
   const runtime = join(process.cwd(), 'src', 'graph-engine', 'runtime');
   const violations: string[] = [];

@@ -7,6 +7,10 @@ export interface GraphLabelRequestV1 {
   readonly forceVisible?: boolean;
   /** Persistent structure requests bypass the adaptive collision budget. */
   readonly alwaysVisible?: boolean;
+  /** Semantic ordering resolved by Ego before collision and slider fallback. */
+  readonly statePriority?: number;
+  /** Fraction by which this label's adaptive Saliency threshold is reduced. */
+  readonly saliencyBoost?: number;
   readonly scale?: number;
 }
 
@@ -46,6 +50,8 @@ export class GraphLabelManager {
         nodeId: request.nodeId,
         forceVisible: prior?.forceVisible === true || request.forceVisible === true,
         alwaysVisible: prior?.alwaysVisible === true || request.alwaysVisible === true,
+        statePriority: Math.max(prior?.statePriority ?? 0, request.statePriority ?? 0),
+        saliencyBoost: Math.max(prior?.saliencyBoost ?? 0, request.saliencyBoost ?? 0),
         scale: Math.min(prior?.scale ?? 1, request.scale ?? 1),
       });
     }
@@ -58,6 +64,8 @@ export class GraphLabelManager {
         labelFontSize: (14 + radius / 4) * (request?.scale ?? 1),
         labelForceVisible: forceVisible,
         labelAlwaysVisible: prior?.labelAlwaysVisible === true || request?.alwaysVisible === true || forceVisible,
+        labelStatePriority: request?.statePriority,
+        labelSaliencyBoost: request?.saliencyBoost,
       }];
     }));
   }
@@ -66,7 +74,7 @@ export class GraphLabelManager {
     return {
       labelScaleMode: 'fixed',
       labelPosition: this.labelPosition,
-      adaptiveLabelThreshold: dimensions === '3d'
+      adaptiveLabelSaliency: dimensions === '3d'
         ? this.adaptiveLabelThreshold3d
         : this.adaptiveLabelThreshold2d,
     };

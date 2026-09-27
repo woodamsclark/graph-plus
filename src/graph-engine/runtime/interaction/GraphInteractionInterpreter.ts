@@ -20,7 +20,6 @@ interface PointerRecord {
 interface PendingTap {
   readonly event: Extract<GraphInputEventV1, { type: 'pointer-up' }>;
   readonly hit: GraphHitV1 | null;
-  readonly focusedNodeId?: string;
   readonly deferred: boolean;
 }
 
@@ -66,7 +65,7 @@ interface TouchGesture {
   angle: number;
   readonly startCentroid: GraphScreenPointV1;
   readonly startDistance: number;
-  readonly mode: 'pending' | 'navigation' | 'pinch';
+  readonly mode: 'pending' | 'navigation';
   readonly samples: number;
   readonly navigationStarted: boolean;
 }
@@ -96,7 +95,6 @@ export class GraphInteractionInterpreter {
   private trackpadPinchMomentum: TrackpadPinchMomentum | null = null;
   private trackpadPinchMomentumTimer: number | null = null;
   private readonly tagging = new GraphTaggingController();
-  private ctrlSelectionBaseline: ReadonlySet<string> | undefined;
 
   constructor(private readonly options: {
     readonly dimensions: GraphDimensionsV1;
@@ -160,7 +158,6 @@ export class GraphInteractionInterpreter {
     this.mode = { kind: 'idle' };
     this.touchGesture = null;
     this.pendingHover = null;
-    this.ctrlSelectionBaseline = undefined;
     this.tagging.reset();
   }
 
@@ -181,10 +178,6 @@ export class GraphInteractionInterpreter {
   }
 
   private pointerDown(event: Extract<GraphInputEventV1, { type: 'pointer-down' }>): void {
-    if (event.ctrl && !this.tagging.isCtrlHeld()) {
-      this.ctrlSelectionBaseline = new Set(this.options.getSelectedNodeIds());
-      this.tagging.updateCtrl(true);
-    }
     if (event.alt && this.tagging.updateOptionReveal(true)) {
       this.command(event, { type: 'selection-presentation-changed' });
     }
@@ -265,10 +258,6 @@ export class GraphInteractionInterpreter {
         && this.mode.hit
         && this.mode.button === 0
         && (hitSelectedNode || startsInitialNodeDrag)) {
-        if (startsInitialNodeDrag) {
-          this.command(event, { type: 'set-selection', nodeIds: [this.mode.hit.nodeId] });
-          this.command(event, { type: 'enter-focus', nodeId: this.mode.hit.nodeId });
-        }
         this.command(event, { type: 'drag-start', nodeId: this.mode.hit.nodeId, point: this.mode.downPoint });
         this.command(event, { type: 'drag-update', nodeId: this.mode.hit.nodeId, point: event.point });
         this.mode = {
@@ -290,7 +279,7 @@ export class GraphInteractionInterpreter {
         return;
       }
       const navigation = this.mode.pointerKind === 'touch'
-        ? (this.dimensions === '3d' ? 'rotate' : policy.primaryDrag[this.dimensions])
+        ? policy.mobilePrimaryDrag[this.dimensions]
         : this.mode.button === 2
           ? 'rotate'
           : policy.primaryDrag[this.dimensions];
@@ -443,25 +432,8 @@ export class GraphInteractionInterpreter {
   }
 
   private modifierChange(event: Extract<GraphInputEventV1, { type: 'modifier-change' }>): void {
-    const wasCtrlHeld = this.tagging.isCtrlHeld();
-    if (!wasCtrlHeld && event.ctrl) {
-      this.ctrlSelectionBaseline = new Set(this.options.getSelectedNodeIds());
-    }
-    this.tagging.updateCtrl(event.ctrl);
     if (this.tagging.updateOptionReveal(event.alt)) {
       this.command(event, { type: 'selection-presentation-changed' });
-    }
-    if (wasCtrlHeld && !event.ctrl) {
-      const baseline = this.ctrlSelectionBaseline ?? new Set<string>();
-      const selectedNodeIds = this.options.getSelectedNodeIds();
-      this.ctrlSelectionBaseline = undefined;
-      const entersExplore = baseline.size <= 1
-        && selectedNodeIds.length > 1
-        && this.viewMode() === 'focus';
-      if (entersExplore) this.command(event, { type: 'set-focus' });
-      if (baseline.size === 0 && selectedNodeIds.length > 0) {
-        this.command(event, { type: 'center-and-fit-camera' });
-      }
     }
     if (this.mode.kind !== 'idle' || this.pointers.size > 0 || this.touchGesture) return;
     if (!event.pointerInside) {
@@ -538,8 +510,7 @@ export class GraphInteractionInterpreter {
     }
     if (event.key === 'Escape') {
       this.tagging.reset();
-      this.command(event, { type: 'set-selection', nodeIds: [] });
-      this.command(event, { type: 'set-focus' });
+      this.command(event, { type: 'set-selection', nodeIds: [], clearFocus: true });
       return;
     }
     if (event.key === ' ' || event.key === 'Spacebar') {
@@ -564,29 +535,6 @@ export class GraphInteractionInterpreter {
     const next = this.readTouchGesture();
     if (!next || !this.touchGesture) return;
     const previous = this.touchGesture;
-    if (this.viewMode() === 'focus') {
-      const focusPoint = this.options.getFocusedNodeScreenPoint();
-      if (focusPoint) {
-        this.radialZoom(
-          event,
-          pointDistance(previous.centroid, focusPoint),
-          pointDistance(next.centroid, focusPoint),
-        );
-      }
-      const pinchDelta = next.distance - previous.distance;
-      if (Math.abs(pinchDelta) >= 1) this.command(event, {
-        type: 'zoom-by', deltaY: -pinchDelta * 3,
-      });
-      this.touchGesture = {
-        ...next,
-        startCentroid: previous.startCentroid,
-        startDistance: previous.startDistance,
-        mode: 'navigation',
-        samples: previous.samples + 1,
-        navigationStarted: true,
-      };
-      return;
-    }
     const totalPan = Math.hypot(
       next.centroid.x - previous.startCentroid.x,
       next.centroid.y - previous.startCentroid.y,
@@ -596,26 +544,29 @@ export class GraphInteractionInterpreter {
     const threshold = this.options.dragThresholdPx ?? 6;
     let mode = previous.mode;
     if (mode === 'pending' && samples >= 2) {
-      if (totalDistance > threshold && totalDistance > totalPan * 0.75) mode = 'pinch';
-      else if (totalPan > threshold) mode = 'navigation';
-    } else if (mode === 'navigation' && totalDistance > threshold * 2 && totalDistance > totalPan * 0.75) {
-      mode = 'pinch';
+      if (totalPan > threshold || totalDistance > threshold) mode = 'navigation';
     }
     let navigationStarted = previous.navigationStarted;
     if (mode === 'navigation') {
       navigationStarted = true;
-      const origin = previous.mode === 'pending' ? previous.startCentroid : previous.centroid;
-      const deltaX = origin.x - next.centroid.x;
-      const deltaY = origin.y - next.centroid.y;
-      const selectionExists = this.options.getSelectedNodeIds().length > 0;
-      this.command(event, this.dimensions === '3d' && !selectionExists
-        ? { type: 'orbit-by', deltaX: -deltaX, deltaY }
-        : { type: 'pan-by', deltaX, deltaY });
-    } else if (mode === 'pinch') {
+      const policy = graphInteractionPolicyV1({
+        selectedNodeIds: this.options.getSelectedNodeIds(),
+        focusedNodeId: this.options.getFocusedNodeId(),
+      });
+      const originCentroid = previous.mode === 'pending' ? previous.startCentroid : previous.centroid;
+      const deltaX = originCentroid.x - next.centroid.x;
+      const deltaY = originCentroid.y - next.centroid.y;
+      if (Math.abs(deltaX) > 0 || Math.abs(deltaY) > 0) {
+        this.command(event, policy.mobileTwoFingerDrag[this.dimensions] === 'rotate-and-zoom'
+          ? { type: 'orbit-by', deltaX: -deltaX, deltaY }
+          : { type: 'pan-by', deltaX, deltaY });
+      }
       const originDistance = previous.mode === 'pending' ? previous.startDistance : previous.distance;
       const distanceDelta = next.distance - originDistance;
       if (Math.abs(distanceDelta) >= 1) this.command(event, {
-        type: 'zoom-by', deltaY: -distanceDelta * 3, anchor: next.centroid,
+        type: 'zoom-by',
+        deltaY: -distanceDelta * 3,
+        ...(this.viewMode() === 'focus' ? {} : { anchor: next.centroid }),
       });
     }
     this.touchGesture = {
@@ -655,7 +606,6 @@ export class GraphInteractionInterpreter {
     this.pendingTap = {
       event,
       hit,
-      focusedNodeId: this.options.getFocusedNodeId(),
       deferred: true,
     };
     this.pendingTapTimer = this.options.setTimeout(() => {
@@ -676,7 +626,6 @@ export class GraphInteractionInterpreter {
     this.pendingTap = {
       event,
       hit,
-      focusedNodeId: this.options.getFocusedNodeId(),
       deferred: false,
     };
     this.pendingTapTimer = this.options.setTimeout(() => {
@@ -702,7 +651,19 @@ export class GraphInteractionInterpreter {
     hit: GraphHitV1 | null,
     source: PendingTap,
   ): void {
-    if (hit && source.hit?.nodeId === hit.nodeId && source.focusedNodeId === hit.nodeId) {
+    if (hit && source.hit?.nodeId === hit.nodeId) {
+      const selectedNodeIds = this.options.getSelectedNodeIds();
+      if (!selectedNodeIds.includes(hit.nodeId)) {
+        this.command(event, {
+          type: 'set-selection',
+          nodeIds: [...new Set([
+            ...selectedNodeIds,
+            hit.nodeId,
+            ...this.options.getNodeSelection(hit.nodeId),
+            ...this.options.getSelectionBridge(hit.nodeId, selectedNodeIds),
+          ])],
+        });
+      }
       this.command(event, { type: 'activate-node', nodeId: hit.nodeId, activation: 'primary' });
       return;
     }
@@ -716,71 +677,23 @@ export class GraphInteractionInterpreter {
     hit: GraphHitV1 | null,
   ): void {
     const selectedNodeIds = this.options.getSelectedNodeIds();
-    const focusedNodeId = this.options.getFocusedNodeId();
-    const state = this.viewMode();
     if (!hit) {
       this.tagging.reset();
-      if (state === 'focus' && selectedNodeIds.length > 1) {
-        this.command(event, { type: 'set-focus' });
-        this.command(event, { type: 'fit-camera', nodeIds: selectedNodeIds });
-      } else if (state !== 'overview') {
-        this.command(event, { type: 'set-selection', nodeIds: [] });
-        this.command(event, { type: 'set-focus' });
-        this.command(event, { type: 'fit-camera' });
-      } else {
-        this.command(event, { type: 'set-focus' });
-      }
       this.command(event, { type: 'activate-background' });
       return;
     }
 
-    if (!event.ctrl && state === 'focus') {
-      if (hit.nodeId !== focusedNodeId) {
-        this.command(event, { type: 'enter-focus', nodeId: hit.nodeId });
-        return;
-      }
-      const nextSelection = selectedNodeIds.includes(hit.nodeId)
-        ? selectedNodeIds.filter((nodeId) => nodeId !== hit.nodeId)
-        : [...selectedNodeIds, hit.nodeId];
-      this.command(event, { type: 'set-selection', nodeIds: nextSelection });
-      if (nextSelection.length === 0) {
-        this.command(event, { type: 'set-focus' });
-        this.command(event, { type: 'fit-camera' });
-      }
-      return;
-    }
-
-    if (!event.ctrl && state === 'explore' && selectedNodeIds.includes(hit.nodeId)) {
-      this.command(event, { type: 'enter-focus', nodeId: hit.nodeId });
-      return;
-    }
-
-    if (event.ctrl && this.ctrlSelectionBaseline === undefined) {
-      this.ctrlSelectionBaseline = new Set(selectedNodeIds);
-    }
-    const removing = event.ctrl && selectedNodeIds.includes(hit.nodeId);
-    const nodeIds = removing
-      ? this.options.getNodeSelection(hit.nodeId)
-      : [
-          hit.nodeId,
-          ...this.options.getNodeSelection(hit.nodeId),
-          ...(event.ctrl ? [] : this.options.getSelectionBridge(hit.nodeId, selectedNodeIds)),
-        ];
-    const result = this.tagging.tag(
-      nodeIds,
+    const removing = selectedNodeIds.includes(hit.nodeId);
+    const nodeIds = [...new Set([
       hit.nodeId,
-      selectedNodeIds,
-      event.ctrl,
-    );
-    this.command(event, { type: 'set-selection', nodeIds: result.selectedNodeIds });
-    if (result.selectedNodeIds.length === 0) {
-      this.command(event, { type: 'set-focus' });
-      this.command(event, { type: 'fit-camera' });
-    } else if (selectedNodeIds.length === 0 && !event.ctrl) {
-      this.command(event, { type: 'enter-focus', nodeId: hit.nodeId });
-    } else if (selectedNodeIds.length === 0 && event.ctrl && result.selectedNodeIds.length === 1) {
-      this.command(event, { type: 'enter-focus', nodeId: hit.nodeId });
-    }
+      ...this.options.getNodeSelection(hit.nodeId),
+      ...(removing ? [] : this.options.getSelectionBridge(hit.nodeId, selectedNodeIds)),
+    ])];
+    const toggled = new Set(nodeIds);
+    const nextSelection = removing
+      ? selectedNodeIds.filter((nodeId) => !toggled.has(nodeId))
+      : [...new Set([...selectedNodeIds, ...nodeIds])];
+    this.command(event, { type: 'set-selection', nodeIds: nextSelection, clearFocus: true });
   }
 
   private viewMode(): GraphUxStateV1 {

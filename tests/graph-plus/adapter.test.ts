@@ -405,15 +405,15 @@ test('V1.7 layout reset replaces the live session while preserving document and 
   await core.dispose();
 });
 
-test('V1.7.1 global active-note following enters local Focus without changing the full projection', async () => {
+test('V1.7.1 explicit global reveal enters Focus without changing the full projection', async () => {
   const fixture = snapshot();
   const runtime = runtimeHarness({ registration: graphPlusRegistration });
   const core = new GraphEngineProviderCoreV1({
-    engineVersion: '1.7.1', engineInstanceId: 'graph-plus-active-note-test', capabilities: ['render'],
+    engineVersion: '1.7.1', engineInstanceId: 'graph-plus-explicit-reveal-test', capabilities: ['render'],
     profiles: runtime.profiles, sessions: runtime.factory,
   });
   const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
-  assert(lease.ok, 'Graph+ should obtain a lease for active-note following');
+  assert(lease.ok, 'Graph+ should obtain a lease for explicit reveal');
   const store = new MemoryStore();
   const consumer = new GraphPlusConsumerV1({
     lease: lease.lease,
@@ -427,18 +427,18 @@ test('V1.7.1 global active-note following enters local Focus without changing th
   await consumer.open();
   const alphaId = noteNodeId('Alpha.md');
   const session = consumer.getSession();
-  assert(session, 'the followed graph should expose its engine session');
-  const cameraBeforeFollow = (await session.exportViewState()).camera;
+  assert(session, 'the global graph should expose its engine session');
+  const cameraBeforeReveal = (await session.exportViewState()).camera;
   const surface = runtime.container.querySelector<HTMLElement>('[data-graph-engine-session]');
-  assert(surface, 'the followed graph should expose its mounted session surface');
+  assert(surface, 'the global graph should expose its mounted session surface');
 
-  equal(await consumer.followActiveNode(alphaId), true, 'a main-split graph should follow the active note');
+  equal(await consumer.revealAndFocusNode(alphaId), true, 'explicit global navigation should reveal and focus the requested note');
   equal((await consumer.getSession()?.exportViewState())?.focusedNodeId, alphaId,
-    'active-note following should use ordinary graph focus state');
-  const followed = await session.exportViewState();
-  deepEqual(followed.camera.target, followed.positions[alphaId],
+    'explicit global navigation should use ordinary graph focus state');
+  const revealed = await session.exportViewState();
+  deepEqual(revealed.camera.target, revealed.positions[alphaId],
     'programmatic Focus should center the active note');
-  assert(JSON.stringify(followed.camera) !== JSON.stringify(cameraBeforeFollow),
+  assert(JSON.stringify(revealed.camera) !== JSON.stringify(cameraBeforeReveal),
     'programmatic Focus should fit the active note neighborhood');
   await session.focusNode(null);
   const state = await session.exportViewState();
@@ -453,10 +453,10 @@ test('V1.7.1 global active-note following enters local Focus without changing th
   await Promise.resolve();
   const selected = await session.exportViewState();
   deepEqual(selected.selectedNodeIds, [alphaId], 'graph input should create an initial selection');
-  equal(selected.focusedNodeId, alphaId,
-    'an initial one-node selection should shortcut directly to Focus');
-  assert(JSON.stringify(selected.camera) !== JSON.stringify(cameraBeforeClick),
-    'entering Focus should refit the active note neighborhood');
+  equal(selected.focusedNodeId, undefined,
+    'an initial one-node selection should enter Constellation');
+  deepEqual(selected.camera, cameraBeforeClick,
+    'entering Constellation should preserve the current camera framing');
   await session.resetCamera();
   await Promise.resolve();
   deepEqual((await session.exportViewState()).selectedNodeIds, [alphaId],
@@ -466,7 +466,7 @@ test('V1.7.1 global active-note following enters local Focus without changing th
 
   await consumer.close();
   equal(store.value?.viewState?.activeFilters.projection, undefined,
-    'transient active-note reveal should not enter the durable checkpoint');
+    'transient explicit reveal should not enter the durable checkpoint');
   await core.dispose();
 });
 

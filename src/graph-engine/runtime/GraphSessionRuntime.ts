@@ -241,6 +241,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     }
     if (tickResult?.camera) {
       this.camera.setState(tickResult.camera);
+      this.retargetSelection();
       this.synchronizeCameraState();
       this.projectionView = { ...this.projectionView, viewState: this.viewState };
       this.moduleView = { ...this.moduleView, viewState: this.viewState };
@@ -318,13 +319,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         )
       : undefined;
     const freshOverview = this.createInitialViewState();
-    this.viewState = restoredLayout
-      ? {
-          ...freshOverview,
-          positions: restoredLayout.positions,
-          pinnedNodeIds: restoredLayout.pinnedNodeIds,
-        }
-      : freshOverview;
+    this.viewState = restoredLayout ?? freshOverview;
     this.projectionSelection = allOf(this.store.readDocument());
     this.renderSelection = allOf(this.store.readDocument());
 
@@ -393,7 +388,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       visibilityListenerInstalled = true;
       this.activity.setDocumentSuspension(this.platform.document.hidden);
       this.recomputeView();
-      this.fitPositions(Object.values(this.moduleView.positions));
+      if (!restoredLayout) this.fitPositions(Object.values(this.moduleView.positions));
+      this.retargetSelection();
       this.refreshFrame();
       this.updateRendererScene(['content']);
       this.renderer.render();
@@ -435,6 +431,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.moduleHost.documentChanged(next);
       this.moduleHost.viewChanged(this.viewState);
       this.recomputeView();
+      this.retargetSelection();
       this.emitGraphChanged({
         sessionId: this.sessionId,
         documentId: next.documentId,
@@ -647,6 +644,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.moduleHost.restoreState(this.viewState.moduleState);
       this.moduleHost.viewChanged(this.viewState);
       this.recomputeView();
+      this.retargetSelection();
     } catch (error) {
       this.emitError({
         code: 'incompatible-view-state',
@@ -775,6 +773,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.moduleHost.documentChanged(this.store.readDocument());
       this.moduleHost.viewChanged(this.viewState);
       this.recomputeView(false);
+      this.retargetSelection();
       this.refreshFrame();
       previousHost.dispose();
       for (const failure of deferredFailures) this.handleModuleFailure(failure);
@@ -789,6 +788,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       replacementHost.dispose();
       this.moduleHost.viewChanged(this.viewState);
       this.recomputeView(false);
+      this.retargetSelection();
       this.refreshFrame();
       throw error;
     } finally {
@@ -1126,6 +1126,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private handleRuntimeViewChange(change: GraphRuntimeViewChangeV1): void {
+    if (change === 'interaction') this.retargetSelection();
     const draggedNodeId = change === 'positions' ? this.interaction.getDraggedNodeId() : undefined;
     const draggedPosition = draggedNodeId ? this.viewState.positions[draggedNodeId] : undefined;
     this.projectionView = {
@@ -1198,18 +1199,24 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const selectedNodeIds = [...new Set(nodeIds)].filter((id) => this.store.hasNode(id));
     const focusedNodeId = selectedNodeIds.length === 0
       ? undefined
-      : this.viewState.focusedNodeId ?? (selectedNodeIds.length === 1 ? selectedNodeIds[0] : undefined);
+      : this.viewState.focusedNodeId;
     if (sameIds(selectedNodeIds, this.viewState.selectedNodeIds)
       && focusedNodeId === this.viewState.focusedNodeId) return;
     const { focusedNodeId: _focusedNodeId, ...withoutFocus } = this.viewState;
     this.viewState = focusedNodeId === undefined
       ? { ...withoutFocus, selectedNodeIds }
       : { ...withoutFocus, selectedNodeIds, focusedNodeId };
+    this.retargetSelection();
     this.projectionView = { ...this.projectionView, viewState: this.viewState };
     this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame(true, 'presentation');
     this.updateSurface();
+  }
+
+  private retargetSelection(): void {
+    const positions = this.moduleView?.positions ?? this.viewState.positions;
+    this.camera.retarget(selectionCentroid(this.viewState.selectedNodeIds, positions));
   }
 
   private setFocusState(nodeId: string | undefined): void {

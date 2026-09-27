@@ -295,6 +295,14 @@
   flex: 1 1 auto;
 }
 
+.graphplus-control-section-body .graphplus-slider-setting .graphplus-slider-number {
+  box-sizing: border-box;
+  flex: 0 0 5.5em;
+  min-width: 0;
+  width: 5.5em;
+  text-align: right;
+}
+
 .graphplus-control-section-body .graphplus-reform-setting {
   display: block;
 }

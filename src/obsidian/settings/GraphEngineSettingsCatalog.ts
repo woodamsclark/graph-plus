@@ -12,6 +12,8 @@ export type GraphSettingControlV1 =
       readonly unit?: string;
       /** Multiplies a displayed value before it is stored. */
       readonly storageScale?: number;
+      /** Raises a displayed value to this power before applying storageScale. */
+      readonly storageExponent?: number;
     };
 
 export interface GraphSettingPresentationV1 {
@@ -37,9 +39,9 @@ export const GRAPH_SETTING_PRESENTATIONS_V1: readonly GraphSettingPresentationV1
     { type: 'select', options: { adaptive: 'Adaptive', all: 'All', off: 'Off' } }),
   entry('anima.labelPosition', 'appearance', 'anima', 'labelPosition', 'Label position', 'Place labels above or below nodes.',
     { type: 'select', options: { above: 'Above', below: 'Below' } }),
-  entry('anima.adaptiveLabelThreshold2d', 'appearance', 'anima', 'adaptiveLabelThreshold2d', '2D label threshold', 'Higher values show fewer labels in 2D.',
+  entry('anima.adaptiveLabelThreshold2d', 'appearance', 'anima', 'adaptiveLabelThreshold2d', '2D label saliency', 'Higher values keep labels closer to the current focus of attention in 2D.',
     { type: 'slider', min: 0, max: 100, step: 5 }),
-  entry('anima.adaptiveLabelThreshold3d', 'appearance', 'anima', 'adaptiveLabelThreshold3d', '3D label threshold', 'Higher values show fewer labels in 3D.',
+  entry('anima.adaptiveLabelThreshold3d', 'appearance', 'anima', 'adaptiveLabelThreshold3d', '3D label saliency', 'Higher values keep labels closer to the current focus of attention in 3D.',
     { type: 'slider', min: 0, max: 100, step: 5 }),
   entry('anima.nodeWorldScaleBlend', 'appearance', 'anima', 'nodeWorldScaleBlend', 'Node zoom contrast', 'Keep small nodes restrained while larger nodes respond more dramatically to zoom and depth.',
     { type: 'slider', min: 0, max: 100, step: 5, unit: '%', storageScale: 0.01 }),
@@ -55,9 +57,9 @@ export const GRAPH_SETTING_PRESENTATIONS_V1: readonly GraphSettingPresentationV1
   entry('force-layout.centeringStrength', 'layout-motion', 'force-layout', 'centeringStrength', 'Center force', 'Pull the graph toward its center.',
     { type: 'slider', min: 0, max: 1, step: 0.001 }),
   entry('force-layout.repulsionStrength', 'layout-motion', 'force-layout', 'repulsionStrength', 'Repel force', 'Push nodes apart.',
-    { type: 'slider', min: 0, max: 50000, step: 250 }),
+    { type: 'slider', min: 0, max: 1, step: 0.001, storageScale: 50000, storageExponent: 2 }),
   entry('force-layout.springStrength', 'layout-motion', 'force-layout', 'springStrength', 'Link force', 'Control how strongly links pull connected nodes together.',
-    { type: 'slider', min: 0, max: 5, step: 0.05 }),
+    { type: 'slider', min: 0, max: 1, step: 0.001, storageScale: 5, storageExponent: 2 }),
   entry('force-layout.springLength', 'layout-motion', 'force-layout', 'springLength', 'Link distance', 'Set the preferred spacing of linked nodes.',
     { type: 'slider', min: 20, max: 500, step: 5 }),
   entry('force-layout.velocityDecay', 'layout-motion', 'force-layout', 'velocityDecay', 'Velocity decay', '0 keeps all motion; higher values calm movement sooner.',
@@ -85,7 +87,8 @@ export function graphSettingDisplayValueV1(
   value: JsonValue | undefined,
 ): JsonValue | undefined {
   if (presentation.control.type !== 'slider' || typeof value !== 'number') return value;
-  return value / (presentation.control.storageScale ?? 1);
+  const scaled = value / (presentation.control.storageScale ?? 1);
+  return Math.pow(scaled, 1 / (presentation.control.storageExponent ?? 1));
 }
 
 export function graphSettingStoredValueV1(
@@ -93,7 +96,8 @@ export function graphSettingStoredValueV1(
   value: JsonValue,
 ): JsonValue {
   if (presentation.control.type !== 'slider' || typeof value !== 'number') return value;
-  return value * (presentation.control.storageScale ?? 1);
+  return Math.pow(value, presentation.control.storageExponent ?? 1)
+    * (presentation.control.storageScale ?? 1);
 }
 
 function entry(

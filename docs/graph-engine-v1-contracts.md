@@ -803,27 +803,35 @@ and persistence rules are defined in the
 [Graph Engine Interaction State Contract](graph-engine-interaction-state-contract.md).
 
 The internal presentation architecture follows the
-[Animus / Anima Boundary](graph-engine-animus-anima-boundary.md): Animus produces an
-unstyled semantic snapshot, Anima resolves the complete visual scene, and renderer
-backends draw without interpreting graph state or semantic theme roles.
+[Animus / Anima Boundary](graph-engine-animus-anima-boundary.md): Animus produces graph
+facts, Ego resolves one semantic UI context and its policy contracts, Anima resolves
+the complete visual scene, and renderer backends draw without interpreting graph state
+or semantic theme roles.
 
 The internal fixed policy has three states: Overview (whole graph), Explore (selected
-constellation), and Focus (one local node). A one-node initial selection shortcuts to
-Focus. Focus does not imply selection membership, but it is valid only while some
-selection remains. Background activation exits Focus to Explore when two or more nodes
-remain selected, or clears a one-node selection and returns to Overview.
+constellation), and Focus (one local node). A one-node selection enters Explore. Focus
+is entered only by an explicit focus operation and does not imply selection membership,
+but it is valid only while some selection remains. Background activation exits Focus to
+Explore when two or more nodes remain selected, or clears a one-node selection and
+returns to Overview. Neither transition implicitly moves or fits the camera.
 
 Center + Fit uses the arithmetic centroid for graph and selection targets and the
 focused node for a local target. It preserves camera angle and up vector. Explore
 follows selection-centroid motion; Focus follows focused-node motion. Reopen restores
-positions and pins only, then starts in Overview and fits the complete graph.
+the complete compatible saved view, including camera and interaction state, without an
+implicit fit. Only a new or incompatible view starts in Overview and fits the graph.
 
-Ctrl edits selection. Option temporarily reveals direct selection neighbors and their
-connecting links. A Ctrl batch begun with zero or one selected node enters Focus when
-it ends with one node and Explore/Constellation when it ends with multiple nodes. The
-Focus-to-Explore release preserves the live camera framing. Cmd-wheel is not a zoom
-mechanic. Tag nodes use the same selection, Focus, label, and presentation rules as
-ordinary nodes.
+Every node click toggles constellation membership and preserves camera framing. Adding
+an unselected node also selects the shortest path from it to the nearest current
+constellation member; Ctrl does not change that behavior. The external highlight policy
+can reveal a highlight seed, its immediate neighbors, and its incident links. Explore's
+state contract overrides selection to selected nodes and selected-to-selected links
+only; hover remains the one-hop exception. Focus scopes highlighting to selected
+structure plus the focused neighborhood. Ego forces the hovered label, gives its immediate neighbors
+a 50% Saliency boost, and raises selected or focused labels; unrelated dim labels are
+suppressed, and remaining labels use camera-range Saliency. Dim context nodes use
+24% opacity and 80% desaturation. Cmd-wheel is not a zoom mechanic. Tag nodes use the
+same selection, Focus, label, and presentation rules as ordinary nodes.
 
 Graph+-specific actions such as opening an Obsidian file or using the current note as
 a Form root remain in Graph+.
@@ -891,17 +899,24 @@ profile stores only ordered action IDs. Duplicate IDs, unknown IDs, action excep
 and stale document revisions fail or no-op locally without corrupting the session or
 another consumer.
 
-Node primary-click behavior is stateful:
+Node primary-click behavior is constellation-first:
 
-1. An initial stationary click selects one node and enters local Focus on it.
-2. In Explore, clicking a selected node enters Focus without changing selection.
-3. In Focus, clicking another locally visible node moves Focus without changing
-   selection.
-4. A single click on the focused node toggles only that node's selection membership.
-5. A double-click invokes the first available `activationActionIds` action only when
-   that node was already focused before the first click.
+1. An initial stationary click selects one node and enters Explore/Constellation.
+2. Clicking an unselected node adds it and the shortest path back to the existing constellation.
+3. Clicking a selected node removes it from the constellation.
+4. Each toggle preserves camera framing and exits any explicit Focus.
+5. A double-click invokes the first available `activationActionIds` action on that node.
 6. Enter invokes that action only when exactly one node is selected.
 7. Crossing a drag or camera-gesture threshold cancels click activation.
+
+Selection changes are release-gated: pointer-down never selects, and pointer-up toggles
+selection only if no drag or navigation gesture crossed its threshold. Drag release
+ends the drag without also selecting or focusing the node.
+
+Input interpretation emits semantic transition commands. Camera fitting, framing
+preservation, presentation cleanup, and related consequences are owned by the state
+transition runtime rather than queued beside the command that initiates the transition.
+In particular, every background transition out of Focus or Explore preserves the camera.
 
 Graph+ may register `open-node` as its activation action; PatternSmith may register
 `start-drill`.

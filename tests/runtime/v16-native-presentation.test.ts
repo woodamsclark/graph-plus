@@ -6,7 +6,7 @@ import {
   DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
   GraphFrameStore,
 } from '../../src/graph-engine/runtime/render/index.ts';
-import { parseGraphColorV2 } from '../../src/graph-engine/runtime/theme/index.ts';
+import { desaturateGraphColorV2, parseGraphColorV2 } from '../../src/graph-engine/runtime/theme/index.ts';
 import { GraphCameraController } from '../../src/graph-engine/runtime/camera/index.ts';
 import { AnimaModule } from '../../src/graph-engine/runtime/modules/shipped/AnimaModule.ts';
 import {
@@ -107,7 +107,9 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   equal(overviewHover.nodeContributions.b.labelForceVisible, true,
     'overview hover should force the hovered node label');
   equal(overviewHover.nodeContributions.c.labelAlwaysVisible, false,
-    'overview hover should not promote a neighboring node label');
+    'overview hover should leave a neighboring node under adaptive saliency');
+  equal(overviewHover.nodeContributions.c.labelSaliencyBoost, 0.5,
+    'overview hover should halve the effective Saliency threshold for a neighboring label');
   equal(overviewHover.edgeContributions['a-d'].opacity, 1, 'overview hover must not dim unrelated links');
   deepEqual(overviewHover.edgeContributions['a-b'].color, DEFAULT_GRAPH_RENDER_THEME_V1.colors.highlightedNode,
     'overview hover should light incident links');
@@ -118,16 +120,26 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   });
   assert(taggedA?.nodeContributions && taggedA.edgeContributions, 'Explore presentation should resolve tagged nodes');
   equal(taggedA.nodeContributions.a.opacity, 1, 'the tagged node should remain fully visible');
-  equal(taggedA.nodeContributions.b.opacity, 0.32, 'tagging must not automatically reveal direct neighbors');
-  equal(taggedA.nodeContributions.c.opacity, 0.32,
+  equal(taggedA.nodeContributions.b.opacity, 0.24, 'Constellation should dim an unselected direct neighbor');
+  equal(taggedA.nodeContributions.d.opacity, 0.24, 'Constellation should dim every unselected neighbor');
+  equal(taggedA.nodeContributions.c.opacity, 0.24,
     'Constellation should keep an unrelated non-neighbor visible but dimmed');
-  deepEqual(taggedA.nodeContributions.c.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.nodeOutline,
-    'an unrelated non-neighbor should retain the neutral node color');
+  deepEqual(taggedA.nodeContributions.c.finalColor,
+    desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
+    'an unrelated non-neighbor should retain a strongly desaturated form of its theme color');
   deepEqual(taggedA.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'the tagged node should light up');
-  equal(taggedA.edgeContributions['a-b'].opacity, 0.6, 'a single tag should not light its neighborhood links');
+  deepEqual(taggedA.nodeContributions.b.finalColor,
+    desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
+    'an unselected direct neighbor should retain dim context presentation');
+  equal(taggedA.edgeContributions['a-b'].opacity, 0.6,
+    'a one-node Constellation should not light an unselected incident link');
+  equal(taggedA.edgeContributions['a-d'].opacity, 0.6,
+    'a one-node Constellation should leave every unselected incident link dimmed');
   equal(taggedA.edgeContributions['b-c'].opacity, 0.6,
     'Constellation should keep an unrelated non-neighbor link visible but dimmed');
+  equal(taggedA.nodeContributions.b.showLabel, false,
+    'an unselected dim neighbor should not receive a peripheral label');
 
   const taggedStructure = anima.contributeFrame({
     ...state,
@@ -144,25 +156,34 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     viewState: { ...state.viewState, selectedNodeIds: ['a'] },
   });
   assert(exploredHover?.nodeContributions && exploredHover.edgeContributions,
-    'Explore hover should resolve a path back to the tagged structure');
-  equal(exploredHover.nodeContributions.b.opacity, 1, 'an intermediate shortest-path node should be revealed');
-  equal(exploredHover.nodeContributions.d.opacity, 0.32, 'unrelated untagged nodes should remain dim');
+    'Explore hover should transiently light the inspected one-hop neighborhood');
+  equal(exploredHover.nodeContributions.b.opacity, 1,
+    'a node neighboring a highlight seed should remain lit');
+  equal(exploredHover.nodeContributions.d.opacity, 0.24,
+    'an unselected neighbor outside the hover neighborhood should remain dimmed');
   deepEqual(exploredHover.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
-    'intermediate shortest-path nodes should light');
+    'a one-hop neighbor should receive the highlight color');
+  equal(exploredHover.nodeContributions.c.opacity, 1,
+    'a hovered context node should become fully visible without joining the constellation');
   deepEqual(exploredHover.nodeContributions.c.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
-    'the hovered node should light independently from tagged nodes');
-  equal(exploredHover.edgeContributions['b-c'].opacity, 1, 'the outer shortest-path link should be revealed');
-  equal(exploredHover.edgeContributions['a-b'].opacity, 1, 'the shortest path should connect fully to the selection');
-  equal(exploredHover.edgeContributions['a-d'].opacity, 0.6, 'off-path links should remain dim');
+    'the hovered context node should receive the transient highlight');
+  equal(exploredHover.edgeContributions['b-c'].opacity, 1, 'the hovered node incident link should light');
+  equal(exploredHover.edgeContributions['a-b'].opacity, 0.6,
+    'a selected-to-unselected link outside the hover incidence should remain dimmed');
+  equal(exploredHover.edgeContributions['a-d'].opacity, 0.6,
+    'selected-node incidence alone should not light a Constellation link');
   equal(exploredHover.nodeContributions.c.labelForceVisible, true,
     'the hovered endpoint label should be forced at its normal size');
   equal(exploredHover.nodeContributions.c.labelFontSize, taggedA.nodeContributions.c.labelFontSize,
     'the hovered endpoint label should retain its normal size');
-  equal(exploredHover.nodeContributions.b.labelForceVisible, true,
-    'an intermediate hop label should be forced visible');
-  equal(exploredHover.nodeContributions.b.labelFontSize,
-    (taggedA.nodeContributions.b.labelFontSize ?? 0) * 0.5,
-    'an intermediate hop label should render at half size');
+  equal(exploredHover.nodeContributions.b.labelForceVisible, false,
+    'an intermediate hop label should not be forced visible');
+  equal(exploredHover.nodeContributions.b.labelAlwaysVisible, false,
+    'a hover neighbor should remain adaptive rather than forced in Constellation');
+  equal(exploredHover.nodeContributions.b.labelSaliencyBoost, 0.5,
+    'a Constellation hover neighbor should receive the same 50% Saliency threshold reduction');
+  equal(exploredHover.nodeContributions.b.showLabel, true,
+    'Constellation dimming must not suppress a hover-neighbor label');
   for (const nodeId of ['a', 'd']) {
     equal(exploredHover.nodeContributions[nodeId].showLabel, taggedA.nodeContributions[nodeId].showLabel,
       `hover should not change unrelated ${nodeId} label eligibility`);
@@ -178,21 +199,26 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     viewState: { ...state.viewState, selectedNodeIds: ['a'] },
   });
   assert(hoveredTag?.nodeContributions && hoveredTag.edgeContributions,
-    'hovering a tagged node should resolve its immediate neighborhood');
+    'hovering a tagged node should retain its one-hop neighborhood');
   deepEqual(hoveredTag.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
-    'hovering a tagged node should light a direct neighbor');
+    'hovering a tagged node should highlight a direct neighbor');
   deepEqual(hoveredTag.nodeContributions.d.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
-    'hovering a tagged node should light every direct neighbor');
-  equal(hoveredTag.nodeContributions.c.opacity, 0.32, 'nodes beyond the direct neighborhood should remain dim');
-  equal(hoveredTag.edgeContributions['a-b'].opacity, 1, 'direct neighborhood links should light');
-  equal(hoveredTag.edgeContributions['a-d'].opacity, 1, 'all direct neighborhood links should light');
+    'hovering a tagged node should highlight every direct neighbor');
+  equal(hoveredTag.nodeContributions.c.opacity, 0.24, 'all nodes outside the constellation should remain dim');
+  equal(hoveredTag.edgeContributions['a-b'].opacity, 1, 'direct neighborhood links should remain lit');
+  equal(hoveredTag.edgeContributions['a-d'].opacity, 1, 'all direct neighborhood links should remain lit');
   equal(hoveredTag.nodeContributions.a.labelForceVisible, true,
     'hovering a tagged node should force only its own label');
   equal(hoveredTag.nodeContributions.b.labelForceVisible, false,
     'a lit direct neighbor should not receive the hover label override');
+  equal(hoveredTag.nodeContributions.b.labelAlwaysVisible, false,
+    'a direct hover neighbor should not bypass adaptive collision policy');
+  equal(hoveredTag.nodeContributions.b.labelSaliencyBoost, 0.5,
+    'a direct hover neighbor should become more salient without being forced');
 
   const suspended = anima.contributeFrame({
     ...state,
+    hoveredNodeId: 'c',
     selectionPresentationSuspended: true,
     viewState: { ...state.viewState, selectedNodeIds: ['a', 'b'] },
   });
@@ -200,6 +226,8 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   equal(suspended.nodeContributions.c.opacity, 1, 'Space should suspend background dimming without clearing tags');
   deepEqual(suspended.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'tagged nodes should remain lit while selection presentation is suspended');
+  deepEqual(suspended.nodeContributions.c.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
+    'Space should retain the hovered nonmember highlight while suspending background dimming');
 
   const optionRevealed = anima.contributeFrame({
     ...state,
@@ -207,20 +235,21 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     viewState: { ...state.viewState, selectedNodeIds: ['a'] },
   });
   assert(optionRevealed?.nodeContributions && optionRevealed.edgeContributions,
-    'Option neighbor reveal should contribute node and link presentation');
-  equal(optionRevealed.nodeContributions.b.opacity, 1, 'Option should undim a direct neighbor');
-  equal(optionRevealed.nodeContributions.d.opacity, 1, 'Option should undim every direct neighbor');
-  equal(optionRevealed.nodeContributions.c.opacity, 0.32, 'Option should leave non-neighbors dimmed');
-  equal(optionRevealed.edgeContributions['a-b'].opacity, 1,
-    'Option should reveal a link from the selection to a direct neighbor');
-  equal(optionRevealed.edgeContributions['a-d'].opacity, 1,
-    'Option should reveal every link from the selection to a direct neighbor');
+    'Option should not override constellation-only presentation');
+  equal(optionRevealed.nodeContributions.b.opacity, 0.24,
+    'the ordinary Constellation should dim an unselected direct neighbor');
+  equal(optionRevealed.nodeContributions.d.opacity, 0.24,
+    'the ordinary Constellation should dim every unselected direct neighbor');
+  equal(optionRevealed.nodeContributions.c.opacity, 0.24, 'Option should leave non-neighbors dimmed');
+  equal(optionRevealed.edgeContributions['a-b'].opacity, 0.6,
+    'the ordinary Constellation should dim a selected-to-unselected link');
+  equal(optionRevealed.edgeContributions['a-d'].opacity, 0.6,
+    'the ordinary Constellation should dim every selected-to-unselected link');
   equal(optionRevealed.edgeContributions['b-c'].opacity, 0.6,
     'Option should leave links outside the revealed neighborhood dimmed');
-  deepEqual(optionRevealed.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
-    'Option should highlight a neighbor with the same treatment as selected-node hover');
-  deepEqual(optionRevealed.edgeContributions['a-b'].color, DEFAULT_GRAPH_RENDER_THEME_V1.colors.highlightedNode,
-    'Option should highlight a neighbor link with the same treatment as selected-node hover');
+  deepEqual(optionRevealed.nodeContributions.b.finalColor,
+    desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
+    'the ordinary Constellation should not highlight an unselected neighbor');
   equal(optionRevealed.nodeContributions.b.labelForceVisible, hoveredTag.nodeContributions.b.labelForceVisible,
     'Option should match hover label behavior instead of forcing every neighbor label visible');
   const updatedOptionReveal = anima.contributeFrame({
@@ -229,10 +258,25 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     viewState: { ...state.viewState, selectedNodeIds: ['c'] },
   });
   assert(updatedOptionReveal?.nodeContributions, 'Option reveal should recompute with selection edits');
-  equal(updatedOptionReveal.nodeContributions.b.opacity, 1,
-    'the updated selection should reveal its direct neighbor');
-  equal(updatedOptionReveal.nodeContributions.d.opacity, 0.32,
+  equal(updatedOptionReveal.nodeContributions.b.opacity, 0.24,
+    'the updated selection should continue dimming its unselected neighbor');
+  equal(updatedOptionReveal.nodeContributions.d.opacity, 0.24,
     'neighbors of the old selection should dim when no longer adjacent');
+
+  const exploredPreview = anima.contributeFrame({
+    ...state,
+    previewedNodeId: 'c',
+    viewState: { ...state.viewState, selectedNodeIds: ['a'] },
+  });
+  assert(exploredPreview?.nodeContributions && exploredPreview.edgeContributions,
+    'Explore preview should contribute constellation presentation');
+  equal(exploredPreview.nodeContributions.c.opacity, 0.24,
+    'previewing a nonmember should leave it dimmed');
+  deepEqual(exploredPreview.nodeContributions.c.finalColor,
+    desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
+    'previewing a nonmember should not give it the selection highlight');
+  equal(exploredPreview.edgeContributions['b-c'].opacity, 0.6,
+    'previewing a nonmember should leave its links dimmed');
 
   const previewedA = anima.contributeFrame({
     ...state,
@@ -600,6 +644,21 @@ test('Graph+ color overrides layer over the active Obsidian palette', () => {
     'unoverridden theme roles should retain their resolved palette values');
 });
 
+test('Frank mode forces the semantic palette to pure red and green', () => {
+  const value = runtimeHarness();
+  const palette = new ThemeStyleResolver(
+    () => value.document.body,
+    () => true,
+    () => ({ background: '#102030', noteNode: '#405060', tagNode: '#708090' }),
+    () => true,
+  ).getPalette(11);
+  const frankColors = new Set(Object.values(palette.colors).map((color) =>
+    `${color.r},${color.g},${color.b},${color.a}`));
+  deepEqual([...frankColors].sort(), ['0,1,0,1', '1,0,0,1'],
+    'Frank mode should override both Obsidian and user colors with only red and green');
+  equal(palette.revision, 11, 'Frank mode should retain normal theme revision behavior');
+});
+
 test('V1.6 new-mode 3D preserves depth while keeping nodes visible and finger-selectable', () => {
   const value = runtimeHarness();
   const canvas = value.document.createElement('canvas');
@@ -691,8 +750,8 @@ test('V1.6 adaptive labels reserve overlap space for structural hubs before near
   'world-space node prominence should win label collisions before perspective proximity');
 });
 
-test('V1.6 adaptive label budget follows perspective distance and the active threshold', () => {
-  const renderAtDistance = (distance: number, threshold = 50): number => {
+test('V1.6 adaptive label budget follows camera range and per-node Saliency', () => {
+  const renderAtDistance = (distance: number, saliency = 50, boost = 0): number => {
     const value = runtimeHarness();
     const canvas = value.document.createElement('canvas');
     const camera = new GraphCameraController({
@@ -718,13 +777,14 @@ test('V1.6 adaptive label budget follows perspective distance and the active thr
         radius: 8,
         ...RESOLVED_NODE_STYLE,
         labelFontSize: 10,
+        labelSaliencyBoost: boost,
       })),
       ...RESOLVED_FRAME_STYLE,
       policy: {
         ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
         labelMode: 'adaptive',
         labelPosition: 'below',
-        adaptiveLabelThreshold: threshold,
+        adaptiveLabelSaliency: saliency,
         minimumPerspectiveNodeRadius: 4,
         minimumPerspectiveNodeScale: 0.5,
       },
@@ -738,9 +798,12 @@ test('V1.6 adaptive label budget follows perspective distance and the active thr
   const far = renderAtDistance(5_000);
   const near = renderAtDistance(100);
   const stricter = renderAtDistance(100, 100);
+  const favored = renderAtDistance(100, 100, 0.5);
   equal(far, 12, 'a distant perspective overview should begin at the minimum label budget');
   assert(near > far, 'dollying closer should reveal additional adaptive labels');
-  assert(stricter < near, 'raising the active label threshold should reduce ordinary labels at the same zoom');
+  assert(stricter < near, 'raising Saliency should reduce peripheral labels at the same camera range');
+  assert(favored > stricter,
+    'a 50% per-node Saliency boost should reveal more labels without forcing them past collision policy');
 });
 
 test('V1.7 D3-compatible integration advances at most once after a delayed frame', () => {
@@ -768,7 +831,7 @@ test('V1.7 D3-compatible integration advances at most once after a delayed frame
     'a delayed callback must discard catch-up backlog instead of bursting through multiple simulation steps');
 });
 
-test('V1.6 D3-compatible link integration matches the reviewed one-tick equation', () => {
+test('V2 force integration uses a fixed gain independent of activity', () => {
   const document = graphDocument({
     nodes: [
       graphNode('left', { positionHint: { x: -200, y: 0, z: 0 } }),
@@ -776,23 +839,21 @@ test('V1.6 D3-compatible link integration matches the reviewed one-tick equation
     ],
     edges: [graphEdge('join', 'left', 'right')],
   });
-  const alphaDecay = 1 - Math.pow(0.001, 1 / 300);
   const force = new ForceLayoutModule('2d', readForceSettings({
     weightingMode: 'uniform', repulsionStrength: 0,
     centeringStrength: 0, collisionRadius: 0, springStrength: 1, springLength: 250,
-    velocityDecay: 0.4, alphaDecay,
+    velocityDecay: 0.4,
   }));
   const initial = pipeline(document, {
     nodeIds: new Set(['left', 'right']), edgeIds: new Set(['join']),
   });
   const result = force.tick(initial, 1 / 60);
   assert(result?.positions, 'one fixed tick should move the linked nodes');
-  const alpha = 1 - alphaDecay;
-  const expectedMovement = ((400 - 250) * alpha * 0.5) * 0.6;
+  const expectedMovement = ((400 - 250) * 0.6 * 0.5) * 0.6;
   assert(Math.abs(result.positions.left.x - (-200 + expectedMovement)) < 1e-10,
-    'source movement should match D3 link bias followed by velocity decay');
+    'source movement should match the fixed integration gain followed by velocity decay');
   assert(Math.abs(result.positions.right.x - (200 - expectedMovement)) < 1e-10,
-    'target movement should mirror the D3 link step');
+    'target movement should mirror the fixed-gain link step');
 });
 
 test('high link strength converges without crossing its target in one integration step', () => {
@@ -817,7 +878,7 @@ test('high link strength converges without crossing its target in one integratio
   assert(distance < 400, 'a high-strength spring should still move monotonically toward its target');
 });
 
-test('active drag scales heat down when its incident link strength is high', () => {
+test('active drag activity is constant and independent of incident link strength', () => {
   const document = graphDocument({
     nodes: [
       graphNode('left', { positionHint: { x: -200, y: 0, z: 0 } }),
@@ -841,12 +902,107 @@ test('active drag scales heat down when its incident link strength is high', () 
   strong.tick(state, 1 / 60);
   const ordinaryAlpha = ordinary.getDiagnostics().alpha;
   const strongAlpha = strong.getDiagnostics().alpha;
-  assert(Math.abs(ordinaryAlpha - 0.3) < 1e-12,
-    'ordinary incident links should retain the familiar active-drag heat');
-  assert(strongAlpha < ordinaryAlpha,
-    'strong incident links should reduce active-drag heat immediately, even from startup alpha 1');
-  assert(strongAlpha <= ordinaryAlpha / 2,
-    'high-strength drag heat should be materially lower than ordinary drag heat');
+  assert(Math.abs(ordinaryAlpha - 1) < 1e-12,
+    'ordinary incident links should use the configured drag activity');
+  assert(Math.abs(strongAlpha - ordinaryAlpha) < 1e-12,
+    'link strength must not influence drag activity');
+});
+
+test('activity under-relaxes the whole integration step without changing its destination', () => {
+  const document = graphDocument({
+    nodes: [
+      graphNode('left', { positionHint: { x: -200, y: 0, z: 0 } }),
+      graphNode('right', { positionHint: { x: 200, y: 0, z: 0 } }),
+    ],
+    edges: [graphEdge('join', 'left', 'right')],
+  });
+  const settings = readForceSettings({
+    weightingMode: 'uniform', repulsionStrength: 0, centeringStrength: 0,
+    collisionRadius: 0, springStrength: 1, springLength: 250, velocityDecay: 0.4,
+    alphaDecay: 0,
+  });
+  const hot = new ForceLayoutModule('2d', settings);
+  const cool = new ForceLayoutModule('2d', settings);
+  const restored = (alpha: number) => ({
+    schemaVersion: 1,
+    alpha,
+    alphaTarget: 0,
+    running: true,
+    velocities: {},
+  });
+  hot.restoreState(restored(1));
+  cool.restoreState(restored(0.5));
+  const state = pipeline(document, {
+    nodeIds: new Set(['left', 'right']), edgeIds: new Set(['join']),
+  });
+  const hotResult = hot.tick(state, 1 / 60);
+  const coolResult = cool.tick(state, 1 / 60);
+  assert(hotResult?.positions && coolResult?.positions, 'both activity levels should advance one step');
+  const startX = state.positions.left.x;
+  const hotMovement = hotResult.positions.left.x - startX;
+  const coolMovement = coolResult.positions.left.x - startX;
+  assert(Math.abs(coolMovement - hotMovement * 0.5) < 1e-10,
+    'half activity should apply exactly half of the ordinary integration step');
+  equal(hot.getDiagnostics().targetStepRateHz, 30, 'hot integration should run at 30 Hz');
+  equal(cool.getDiagnostics().targetStepRateHz, 30, 'cool integration should retain the smooth 30 Hz cadence');
+  equal(cool.getDiagnostics().effectiveStepRateHz, 15,
+    'half activity should report half the effective simulation rate');
+});
+
+test('activity is capped at one and linearly freezes over five seconds', () => {
+  const document = graphDocument({
+    nodes: [graphNode('left'), graphNode('right')],
+    edges: [],
+  });
+  const force = new ForceLayoutModule('2d', readForceSettings({
+    repulsionStrength: 0, springStrength: 0, centeringStrength: 0,
+    collisionRadius: 0, velocityDecay: 0, alphaDecay: 0.2, alphaMin: 0.001,
+  }));
+  force.restoreState({
+    schemaVersion: 1,
+    alpha: 4,
+    alphaTarget: 4,
+    running: true,
+    velocities: {
+      left: { x: 1, y: 0, z: 0 },
+      right: { x: -1, y: 0, z: 0 },
+    },
+  });
+  let state = pipeline(document, {
+    nodeIds: new Set(['left', 'right']), edgeIds: new Set(),
+  });
+  equal(force.getDiagnostics().alpha, 1, 'restored activity must be capped at one');
+  for (let step = 0; step < 75; step += 1) {
+    const result = force.tick(state, 1 / 30);
+    if (result?.positions) state = { ...state, positions: result.positions };
+  }
+  assert(Math.abs(force.getDiagnostics().alpha - 0.5) < 1e-10,
+    'default cooling should reach half speed after two and a half seconds');
+  for (let step = 0; step < 75; step += 1) {
+    const result = force.tick(state, 1 / 30);
+    if (result?.positions) state = { ...state, positions: result.positions };
+  }
+  equal(force.getDiagnostics().alpha, 0, 'default cooling should freeze after five seconds');
+  equal(force.getDiagnostics().running, false, 'a frozen layout should become inactive');
+  equal(force.getDiagnostics().targetStepRateHz, 0, 'a frozen layout should request no physics work');
+});
+
+test('a motionless layout settles even when its activity timer does not decay', () => {
+  const document = graphDocument({
+    nodes: [graphNode('left'), graphNode('right')],
+    edges: [],
+  });
+  const force = new ForceLayoutModule('2d', readForceSettings({
+    repulsionStrength: 0, springStrength: 0, centeringStrength: 0,
+    collisionRadius: 0, alphaDecay: 0,
+  }));
+  const state = pipeline(document, {
+    nodeIds: new Set(['left', 'right']), edgeIds: new Set(),
+  });
+  for (let index = 0; index < 12; index += 1) force.tick(state, 1 / 60);
+  const settled = force.exportState() as { readonly alpha: number; readonly running: boolean };
+  equal(settled.running, false, 'sustained negligible movement should stop the solver');
+  equal(settled.alpha, 0, 'settlement should clear the activity timer');
 });
 
 test('link distance does not change disconnected-component packing', () => {
@@ -992,7 +1148,7 @@ test('velocity-decay-only changes preserve a settled topology and do not reheat 
   const state = pipeline(document, {
     nodeIds: new Set(['left', 'right']), edgeIds: new Set(['join']),
   });
-  force.tick(state, 1 / 60);
+  for (let step = 0; step < 12; step += 1) force.tick(state, 1 / 60);
   const topologyAnalysisCount = force.getDiagnostics().topologyAnalysisCount;
   force.updateSettings({ ...settings, velocityDecay: 0.8 });
   const afterUpdate = force.exportState() as { readonly alpha: number; readonly running: boolean };

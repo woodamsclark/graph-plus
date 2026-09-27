@@ -120,7 +120,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
         springLength: 250,
         centeringStrength: 0.1,
         velocityDecay: 0.4,
-        alphaDecay: 0.02276277904418933,
+        alphaDecay: 0.2,
         alphaMin: 0.001,
         repulsionMinDistance: 30,
         barnesHutTheta: 0.9,

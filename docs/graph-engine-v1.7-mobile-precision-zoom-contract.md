@@ -71,13 +71,14 @@ node context-menu behavior instead. Explicit Reset Camera remains a separate ope
 | Desktop secondary drag | Pan | Rotate | Rotate |
 | Unmodified trackpad translation | Pan | Pan | Orbit |
 | Trackpad pinch or Ctrl-wheel | Zoom around input | Zoom around input | Zoom around input |
-| Mobile one-finger background drag | Pan | Pan | Orbit |
-| Mobile two-finger translation | Pan | Rotate | Pan camera-focus offset |
-| Mobile pinch | Zoom | Zoom | Zoom |
+| Mobile one-finger background drag | Pan | Pan | Pan |
+| Mobile two-finger translation | Pan | Rotate | Rotate |
+| Mobile pinch | Zoom concurrently with pan | Zoom concurrently with rotate | Zoom concurrently with rotate |
 | Double-tap, hold, vertical drag | Precision zoom | Precision zoom | Precision zoom |
 
-Mobile two-finger navigation is resolved only after pinch arbitration. A qualifying
-pinch always wins over translation. Two-finger rotate and pan retain selection.
+Mobile two-finger navigation begins after the movement threshold. Translation and
+pinch then compose: centroid movement pans in 2D or rotates in 3D while finger
+separation zooms. Two-finger rotate and pan retain selection.
 
 ## 4. Gesture arbitration
 

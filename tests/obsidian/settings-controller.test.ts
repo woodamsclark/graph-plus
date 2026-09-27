@@ -6,7 +6,11 @@ import {
 } from '../../src/graph-plus/consumer/index.ts';
 import { createShippedGraphModuleRegistryV1 } from '../../src/graph-engine/runtime/index.ts';
 import { GraphEngineSettingsControllerV1 } from '../../src/obsidian/settings/GraphEngineSettingsController.ts';
-import { GRAPH_SETTING_PRESENTATIONS_V1 } from '../../src/obsidian/settings/GraphEngineSettingsCatalog.ts';
+import {
+  GRAPH_SETTING_PRESENTATIONS_V1,
+  graphSettingDisplayValueV1,
+  graphSettingStoredValueV1,
+} from '../../src/obsidian/settings/GraphEngineSettingsCatalog.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 
 test('Graph+ releases dragged nodes while retaining explicit context-menu pinning', () => {
@@ -177,6 +181,32 @@ test('V1.7 settings catalog exposes only curated typed controls', () => {
   equal(nodeZoomResponse?.name, 'Node zoom contrast', 'the scaling control should describe its size-driven contrast');
   equal(nodeZoomResponse?.control.type === 'slider' ? nodeZoomResponse.control.storageScale : undefined, 0.01,
     'node zoom contrast should display as a percentage while storing a normalized response');
+  const repelForce = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'force-layout.repulsionStrength');
+  equal(repelForce?.control.type === 'slider' ? repelForce.control.max : undefined, 1,
+    'repel force should use a normalized slider range');
+  equal(repelForce?.control.type === 'slider' ? repelForce.control.step : undefined, 0.001,
+    'repel force should support fine normalized adjustments');
+  equal(repelForce?.control.type === 'slider' ? repelForce.control.storageExponent : undefined, 2,
+    'repel force should devote more slider travel to commonly tuned lower strengths');
+  if (repelForce) {
+    const displayed = graphSettingDisplayValueV1(repelForce, 1000);
+    assert(typeof displayed === 'number', 'repel force should map stored strengths to a numeric slider position');
+    equal(Math.abs(graphSettingStoredValueV1(repelForce, displayed) as number - 1000) < 1e-9, true,
+      'repel force normalization should round-trip existing stored strengths');
+  }
+  const linkForce = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'force-layout.springStrength');
+  equal(linkForce?.control.type === 'slider' ? linkForce.control.max : undefined, 1,
+    'link force should use a normalized slider range');
+  equal(linkForce?.control.type === 'slider' ? linkForce.control.step : undefined, 0.001,
+    'link force should support fine normalized adjustments');
+  equal(linkForce?.control.type === 'slider' ? linkForce.control.storageExponent : undefined, 2,
+    'link force should devote more slider travel to commonly tuned lower strengths');
+  if (linkForce) {
+    const displayed = graphSettingDisplayValueV1(linkForce, 1);
+    assert(typeof displayed === 'number', 'link force should map stored strengths to a numeric slider position');
+    equal(Math.abs(graphSettingStoredValueV1(linkForce, displayed) as number - 1) < 1e-9, true,
+      'link force normalization should round-trip existing stored strengths');
+  }
 });
 
 test('V1.7 global catalog values flow into Graph+ until its profile overrides them', async () => {

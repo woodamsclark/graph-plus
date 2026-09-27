@@ -1,15 +1,11 @@
-const HOT_LAYOUT_ALPHA = 0.01;
-const HOT_LAYOUT_INTERVAL_MS = 1_000 / 30;
-const COOLING_LAYOUT_INTERVAL_MS = 1_000 / 15;
+const ACTIVE_LAYOUT_STEP_RATE_HZ = 30;
+const ACTIVE_LAYOUT_INTERVAL_MS = 1_000 / ACTIVE_LAYOUT_STEP_RATE_HZ;
 
-/** Pure cooling policy shared by scheduling and diagnostics. */
-export function forceLayoutIntervalMsV1(alpha: number, dragActive: boolean): number {
-  return dragActive || alpha >= HOT_LAYOUT_ALPHA
-    ? HOT_LAYOUT_INTERVAL_MS
-    : COOLING_LAYOUT_INTERVAL_MS;
+/** Active physics keeps a smooth fixed cadence; alpha scales the integration step. */
+export function forceLayoutIntervalMsV1(_alpha: number, _dragActive: boolean): number {
+  return ACTIVE_LAYOUT_INTERVAL_MS;
 }
 
-export function forceLayoutTargetStepRateHzV1(alpha: number, running: boolean): 0 | 15 | 30 {
-  if (!running) return 0;
-  return alpha >= HOT_LAYOUT_ALPHA ? 30 : 15;
+export function forceLayoutTargetStepRateHzV1(_alpha: number, running: boolean): 0 | 30 {
+  return running ? ACTIVE_LAYOUT_STEP_RATE_HZ : 0;
 }

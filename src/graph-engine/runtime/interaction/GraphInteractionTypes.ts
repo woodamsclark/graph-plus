@@ -123,7 +123,11 @@ export type GraphRuntimeCommandV1 =
       readonly nodeIds?: readonly string[];
       readonly centerNodeId?: string;
     })
-  | (GraphCommandBaseV1 & { readonly type: 'set-selection'; readonly nodeIds: readonly string[] })
+  | (GraphCommandBaseV1 & {
+      readonly type: 'set-selection';
+      readonly nodeIds: readonly string[];
+      readonly clearFocus?: boolean;
+    })
   | (GraphCommandBaseV1 & { readonly type: 'set-focus'; readonly nodeId?: string })
   | (GraphCommandBaseV1 & { readonly type: 'enter-focus'; readonly nodeId: string })
   | (GraphCommandBaseV1 & { readonly type: 'selection-presentation-changed' })

@@ -215,11 +215,11 @@ For ordinary colliding labels, explicit structural priority wins first, then lar
 Anima world radius, then perspective proximity, then stable node ID. A distant hub
 therefore reserves space before a nearer low-degree leaf. In perspective 3D, compare
 far and near camera-target scales and assert that dollying closer increases the
-ordinary label budget while keeping the threshold-adjusted result inside `4` through
+ordinary label budget while keeping the Saliency-adjusted result inside `4` through
 `120`.
 
-Graph+ defaults Label threshold to `65` in 2D and `50` in 3D. At one fixed camera and
-viewport, raising the active dimension's threshold reduces ordinary accepted labels
+Graph+ defaults Label saliency to `65` in 2D and `50` in 3D. At one fixed camera and
+viewport, raising the active dimension's Saliency reduces ordinary accepted labels
 without hiding forced labels or changing the other dimension's setting. The control
 is present only while label mode is Adaptive and updates without remounting.
 
@@ -301,11 +301,14 @@ range.
 - Unmodified wheel input pans in 2D.
 - Platform pinch/modified wheel input zooms.
 - Touch pinch zooms.
-- An unfocused one-finger background drag pans 3D.
+- A one-finger background drag pans 3D Overview and Explore.
 - A focused one-finger drag orbits and retains focus/selection even when it begins on
   another node; that node does not move and does not acquire neighborhood emphasis.
 - A stationary tap on that node still transfers focus.
-- Focused two-finger translation pans the camera offset and retains focus/selection.
+- In 3D, two-finger centroid movement orbits while finger separation zooms during the
+  same gesture; Focus retains its target and focus/selection.
+- In 2D, two-finger centroid movement pans while finger separation zooms during the
+  same gesture.
 - A stationary background touch miss clears focus and selection.
 - Existing desktop 3D wheel and secondary-drag behavior remains as contracted.
 
@@ -359,10 +362,11 @@ Drag a hub for at least one second:
 - screen pointer error remains at most one CSS pixel;
 - neighbors respond while the drag remains held;
 - no persistent pin is added for an initially unpinned node;
-- drag heat targets `0.3`;
+- drag alpha remains exactly `1` and never exceeds it;
 - release causes no position discontinuity;
-- release returns the heat target to zero without raising alpha to `1`; and
-- the graph cools to rest.
+- release returns the alpha target to zero; and
+- the graph continuously slows and freezes within five seconds without changing its force
+  equilibrium.
 
 An explicitly pinned node remains pinned after the same gesture.
 
@@ -374,7 +378,7 @@ After settlement:
   near their centroid with bounded jitter;
 - add a disconnected batch and assert it starts around/outside the occupied cloud;
 - remove a node and assert surviving positions are retained; and
-- assert each change raises heat to at least `0.3` without a full reset.
+- assert each change thaws alpha to `1` without resetting coordinates.
 
 ### A-V16-FORCE-08 — Large-graph responsiveness
 

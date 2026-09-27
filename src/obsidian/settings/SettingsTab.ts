@@ -20,6 +20,7 @@ export class GraphEngineSettingTab extends PluginSettingTab {
       this.renderGeneral(containerEl);
       enginePanel.renderGlobal(containerEl, () => this.display());
       this.renderRecovery(containerEl);
+      this.renderMiscellany(containerEl);
     });
   }
 
@@ -106,6 +107,18 @@ export class GraphEngineSettingTab extends PluginSettingTab {
         .setWarning()
         .setDisabled(!canReset)
         .onClick(() => new GraphLayoutResetModal(this.app, this.graphPlus).open()));
+  }
+
+  private renderMiscellany(parent: HTMLElement): void {
+    parent.createEl('h3', { text: 'Miscellany' });
+    new Setting(parent)
+      .setName('Frank mode')
+      .setDesc('Force every graph color to be red or green. This is a prank.')
+      .addToggle((toggle) => toggle
+        .setValue(this.graphPlus.settings.frankMode)
+        .onChange(async (frankMode) => {
+          await this.graphPlus.updateGraphPlusSettings({ ...this.graphPlus.settings, frankMode });
+        }));
   }
 }
 

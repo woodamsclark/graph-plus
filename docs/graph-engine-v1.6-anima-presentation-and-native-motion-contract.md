@@ -276,12 +276,13 @@ fontSize = 14 + worldRadius / 4
 Labels use their resolved font size in fixed CSS pixels in both 2D and 3D. They remain
 readable while the graph recedes, matching the accepted 3D overview treatment rather
 than shrinking with orthographic zoom. Adaptive collision rejection and budgeting
-remain enabled as a Graph+ enhancement. Focused, hovered, selected, dragged, and
-Form-required labels remain forced candidates.
+remain enabled as a Graph+ enhancement. Ego forces hovered labels, gives immediate
+hover-neighbor labels a 50% Saliency boost, and raises selected and focused labels
+above the adaptive budget. Form-required labels remain structurally forced candidates.
 
 Adaptive label collision slots are resolved in this stable order:
 
-1. forced interaction and required labels;
+1. Ego label attention: hover, immediate hover neighbor, then selected or focused;
 2. explicit structural label priority, including Form roles;
 3. resolved Anima world radius, largest first;
 4. perspective proximity; and
@@ -298,16 +299,17 @@ perspective scale at the camera target, so dollying closer reveals progressively
 ordinary labels and dollying away returns to the hub-first overview. Collision
 rejection remains active at every budget.
 
-Graph+ exposes **Label threshold** in Display while label mode is Adaptive. The value
+Graph+ exposes **Label saliency** in Display while label mode is Adaptive. The value
 is stored independently as `adaptiveLabelThreshold2d` and
-`adaptiveLabelThreshold3d`, each from `0` through `100`. Higher values delay ordinary
-labels; forced labels are unaffected. Graph+ defaults to `65` in 2D and `50` in 3D.
-For threshold `t`, the renderer applies:
+`adaptiveLabelThreshold3d` for compatibility, each from `0` through `100`. Higher
+values narrow the visible periphery by delaying ordinary labels; direct cursor focus
+is unaffected. Graph+ defaults to `65` in 2D and `50` in 3D. For Saliency `s`, the
+renderer applies:
 
 ```text
-thresholdFactor = 2 ^ ((50 - t) / 50)
-minimumBudget = clamp(round(12 * thresholdFactor), 4, 24)
-budget = clamp(round(baseAdaptiveBudget * thresholdFactor), minimumBudget, 120)
+saliencyFactor = 2 ^ ((50 - s) / 50)
+minimumBudget = clamp(round(12 * saliencyFactor), 4, 24)
+budget = clamp(round(baseAdaptiveBudget * saliencyFactor), minimumBudget, 120)
 ```
 
 Thus `50` preserves the accepted curve, `100` halves its ordinary-label budget at a
@@ -350,25 +352,24 @@ Their scales compose with, rather than replace, the global edge settings.
 
 ## 8. Interaction presentation
 
-V1.6 preserves the existing focus-mode product behavior:
+The current interaction policy is constellation-first:
 
-- the first stationary click on an unfocused node selects and focuses it and may fit
-  the camera;
-- a later stationary click on the still-focused node invokes the profile's first
-  activation action;
-- Enter activates the focused node;
-- a background tap or committed background pan clears selection and focus; and
+- the first stationary click selects one node and enters Explore without moving the camera;
+- later stationary clicks toggle membership and add the nearest visible path when adding;
+- Enter activates only when exactly one node is selected;
+- a stationary background activation clears selection and Focus without moving the camera; and
 - context actions remain available without changing focus merely by opening the menu.
 
-Anima presents focus, selection, hover, drag, pin, and region state but does not alter
-their state-machine meaning.
+Ego resolves focus, selection, hover, drag, and preview into semantic UI roles without
+altering their state-machine meaning. Anima realizes those roles and presents pin and
+region state.
 
 While Explore/Constellation is active, selected members and their structural links
 receive emphasis. Every other projected node and link, including unrelated
-non-neighbors, remains rendered with a clearly visible neutral gray treatment.
-Context nodes use the neutral outline role at `0.32` opacity and context links use
-their ordinary edge role at `0.6` opacity. Constellation presentation does not hide
-the surrounding graph.
+non-neighbors, remains rendered as subdued graph context. Context nodes use their
+ordinary node or tag theme color with 80% desaturation at `0.24` opacity, and context
+links retain their ordinary edge role at `0.6` opacity. Constellation
+presentation does not hide the surrounding graph.
 
 Hover/drag presentation should adopt the useful native visual pattern:
 
@@ -377,6 +378,16 @@ Hover/drag presentation should adopt the useful native visual pattern:
 - the active node and incident links receive the highlight role;
 - the active label is forced visible; and
 - no hover-only change affects physics or persistence.
+
+Explore/Constellation overrides selection highlighting to selected nodes and
+selected-to-selected links only. Hover remains the higher-priority exception and applies
+the global one-hop policy to the hovered node, immediate neighbors, and incident links.
+Previews and Option do not add an Explore seed. Ego forces the hovered label, gives immediate
+hover-neighbor labels a 50% Saliency boost, raises selected or focused labels,
+suppresses unrelated dim labels, and delegates the remaining labels to camera-range
+Saliency. Dwell and
+movement resistance before a transient hover highlight belong to the future shared
+Anima animation kit; the interim implementation highlights immediately.
 
 For neighborhood emphasis, active-node precedence is drag, then focus, then hover.
 Focus therefore owns the highlighted neighborhood after a click, follows a later click
@@ -399,15 +410,18 @@ Graph view input behavior:
 - unmodified trackpad/mouse wheel pans in an unfocused 2D graph;
 - trackpad pinch, represented by the platform's modified wheel gesture, zooms;
 - touch pinch zooms;
-- background pointer drag pans in 2D and in unfocused 3D;
+- one-finger background drag pans in 2D and in 3D Overview/Explore;
 - in focused 3D, one-finger primary drag orbits around the focus while retaining
   selection and focus, even when the gesture begins inside another node's hit target;
 - node dragging is disabled while 3D focus is active; a stationary tap on another node
   still transfers focus normally;
-- in focused 3D, two-finger translation pans the camera/focus offset while retaining
-  selection and focus;
+- in 3D, two-finger centroid movement orbits while finger-separation change zooms at
+  the same time; Focus retains its target, selection, and focus;
+- in 2D, two-finger centroid movement pans while finger-separation change zooms at the
+  same time;
 - a stationary background tap whose hit test misses clears selection and focus;
-- pinch continues to zoom in both focused and unfocused states;
+- pinch continues to zoom in both focused and unfocused states without suppressing
+  simultaneous two-finger navigation;
 - current focus-follow, fit, reset, keyboard, and desktop 3D orbit behaviors remain
   unless separately reviewed; and
 - V1.6 does not require native Graph view pan inertia or native plain-wheel zoom.
@@ -507,7 +521,8 @@ Graph+'s new uniform 2D mode uses:
 - base link strength: `1 / min(sourceDegree, targetDegree)`;
 - degree-biased endpoint motion;
 - collision radius: `60`;
-- collision strength: `0.5`; and
+- collision strength: `0.5`;
+- fixed force-integration gain: `0.6`; and
 - one iteration of link and collision forces per tick.
 
 The force order is origin position, link, many-body, collision, velocity damping, and
@@ -518,20 +533,103 @@ Simulation results must be independent of display refresh. The runtime uses a fi
 step accumulator or an equivalent time-correct method and bounds catch-up work after a
 long suspension.
 
-### 11.2 Heat and drag
+### 11.2 Activity, force, and settlement contract
 
-- Fresh layout starts at alpha `1`.
-- Document and force-setting changes raise alpha to at least `0.3` without reducing a
-  currently hotter simulation.
-- Active node drag sets alpha target to `0.3`.
-- The dragged node is a transient kinematic constraint distinct from explicit pins.
-- Drag release clears the transient constraint and returns alpha target to `0` without
-  reheating to `1`.
-- An explicitly pinned node remains pinned after drag.
-- The solver stops when alpha falls below the configured minimum; a single low-velocity
-  frame does not end it early.
+V2 separates the force field from the speed at which the solver advances through it. The
+persisted and diagnostic field continues to be named `alpha` for compatibility, but its
+normative meaning is a bounded **integration time scale**, or thaw/freeze state. Alpha
+`1` applies one ordinary solver step, alpha `0.5` applies half of that whole state
+transition, and alpha `0` is frozen.
 
-### 11.3 Incremental placement
+The following invariants are release requirements:
+
+1. Alpha is always clamped to `0..1`. It scales the whole integration state transition,
+   never an individual force or force family.
+2. Origin, link, many-body repulsion, region membership, component packing, axial, Anima
+   motion-target, and collision forces use the fixed force-integration gain `0.6`.
+3. Given identical document, positions, velocities, pins, settings, and motion targets,
+   the solver computes the same ordinary full step at every alpha, then blends both
+   position and velocity from the prior state toward that result by alpha. All positive
+   alpha values therefore retain the same force field and fixed points while moving at
+   different speeds.
+4. Link correction retains its numerical cap of `1` per step, but that cap is computed
+   from fixed integration gain and resolved link strength only. Activity cannot enter the
+   cap.
+5. Reheating may set `running`, alpha, and alpha target. Reheating does not directly
+   change positions, velocities, force settings, topology weights, or the fixed integration
+   gain.
+6. Active drag uses the constant alpha and alpha target `1`. Link Force, incident-link strength,
+   node degree, topology, Anima, and all other pipeline state must not derive or modify that
+   target.
+7. Drag alpha must not be localized, amplified, or attenuated by graph state in V2.
+   Anima-owned local activity is deferred to the 3.0 motion contract.
+
+The activity lifecycle is:
+
+- Fresh layout, document changes, relevant force-setting changes, and drag start thaw alpha
+  to `1`.
+- While drag remains active, the solver remains running with alpha and alpha target `1`.
+- Drag release clears the transient kinematic constraint and returns the alpha target to
+  `0`; wall-clock cooling then begins.
+- With the default decay `0.2` per second, alpha decreases linearly from `1` to `0` over
+  five seconds. Halfway through that interval, each integration step advances halfway
+  toward the ordinary full-step result.
+- Every running layout requests the constant `30 Hz` solver cadence. Alpha changes the
+  effective amount of simulated time per tick, not the callback frequency.
+- The solver stops when alpha falls below `alphaMin`, or when maximum unpinned-node
+  movement is at most `0.001` for `12` consecutive integration steps.
+- Stopping sets alpha to `0`, marks the solver idle, clears the step accumulator, and
+  clears residual velocities so later activity cannot replay old momentum.
+
+The dragged node is a transient kinematic constraint distinct from explicit pins. An
+explicitly pinned node remains pinned after drag.
+
+### 11.3 Force-setting definitions
+
+Force settings define one stable force field. Alpha changes how far the solver advances
+toward each ordinary step while leaving that field and its equilibrium unchanged.
+
+| Setting | V2 default | Contractual meaning |
+|---|---:|---|
+| `centeringStrength` / **Center force** | `0.1` | Per-axis attraction toward the world origin. The impulse is proportional to displacement and the fixed integration gain. |
+| `repulsionStrength` / **Repel force** | `1000` | Nonnegative node-to-node many-body repulsion. It is spatial, not a force emitted by the graph center. |
+| `springStrength` / **Link force** | `1` | Baseline stiffness of physical endpoint-pair springs before degree normalization, topology weighting, and bounded motion-target modifiers. It never controls activity. |
+| `springLength` / **Link distance** | `250` | Baseline preferred world-space distance between linked endpoints before bounded topology and motion-target modifiers. |
+| `velocityDecay` / **Velocity decay** | `0.4` | Fraction of velocity removed after forces each step. Retained velocity is `1 - velocityDecay`; the default therefore retains `0.6`. This is damping, not activity decay. |
+| `collisionRadius` / **Collision spacing** | `60` | Uniform collision radius in world units. Two ordinary nodes begin collision correction below center distance `2 * collisionRadius`. |
+| `axialSpringAxis` / **Axial spring** | `off` | Optional 3D world axis pulled toward coordinate zero. It is inert in 2D and when set to `off`. |
+| `axialSpringStiffness` / **Axial stiffness** | `0` | Bounded strength of the selected 3D axial spring. It never changes activity. |
+| region `membershipStrength` / **Region attraction** | profile-defined | Attraction between a region owner and its direct members. Overlapping membership is coordinated independently from activity. |
+
+The UI-to-storage mappings are also contractual:
+
+- **Center force** exposes stored values `0..1` directly.
+- **Repel force** exposes normalized UI value `u` in `0..1` and stores `50000 * u²`.
+- **Link force** exposes normalized UI value `u` in `0..1` and stores `5 * u²`.
+- **Link distance** stores world units directly over `20..500`.
+- **Velocity decay** stores `0..0.9` directly.
+- **Collision spacing** stores collision radius `0..200` directly.
+- **Axial stiffness** exposes `0..90%` and stores `0..0.9`.
+- **Region attraction** stores `0..2` directly.
+
+Advanced module settings have these meanings:
+
+| Setting | V2 default | Contractual meaning |
+|---|---:|---|
+| `alphaDecay` | `0.2` | Linear alpha removed per wall-clock second after interaction. The default thaws from `1` to frozen in five seconds. |
+| `alphaMin` | `0.001` | Alpha-only fallback stopping threshold. |
+| `repulsionMinDistance` | `30` | Lower-distance softening bound for many-body repulsion. |
+| `barnesHutTheta` | `0.9` | Accuracy/performance threshold for aggregate many-body cells. |
+| `maxSpeed` | `260` | Per-node, per-step velocity safety bound after force accumulation. |
+| `componentPadding` | `80` | Additional world-space separation used by disconnected-component packing targets. |
+| `collisionStrength` | `0.5` | Fractional collision correction before the fixed integration gain. |
+| `topologyLayoutPolicy` | shipped policy | Bounded affinity-to-spring transformation; it may change link stiffness and target distance but never activity. |
+
+The fixed force-integration gain is an internal V2 calibration constant, not a profile or
+Anima setting. Changing it is a force-model contract change and requires force-equation,
+stability, and interaction acceptance review.
+
+### 11.4 Incremental placement
 
 Existing positions survive document changes. A new connected node begins near the
 mean of its already-positioned visible neighbors with bounded deterministic jitter. A
@@ -553,7 +651,7 @@ Graph Engine's solver supports 3D by extending the same mechanics:
 - many-body approximation uses the engine's 3D spatial tree;
 - collision uses spheres instead of circles;
 - drag constrains the node on the engine's selected interaction plane/depth;
-- damping, alpha, heat, pins, and incremental placement retain the same lifecycle; and
+- damping, activity, pins, and incremental placement retain the same lifecycle; and
 - the perspective camera and depth-aware rendering remain Graph Engine mechanisms.
 
 Uniform 3D uses the same declared force settings as uniform 2D unless a profile
@@ -583,7 +681,7 @@ Topology-weighted mode composes bounded affinity over the new link force:
 - affinity `1` reproduces the uniform pair's baseline target and strength;
 - stronger affinity creates a bounded shorter/stiffer pair;
 - weaker affinity creates a bounded longer/softer pair;
-- topology may not replace collision, degree bias, heat, damping, or drag semantics;
+- topology may not replace collision, degree bias, activity, damping, or drag semantics;
 - canonical edges and all V1.4 evidence remain unchanged; and
 - component handling, topology weighting, and region attraction have independent
   effective settings even when the Graph+ UI presents a simplified default.
@@ -599,7 +697,9 @@ transition, but V1.6 requires no Form animation.
 
 ## 14. Settings and controls
 
-Graph+ exposes familiar display and force settings in its profile namespace.
+Graph+ exposes familiar display and force settings in its profile namespace. Section
+11.3 defines their normative meanings, defaults, units, mappings, and independence from
+activity.
 
 At minimum:
 

@@ -27,11 +27,31 @@ export const DEFAULT_OBSIDIAN_GRAPH_PLUS_THEME_V2: GraphVisualThemeV2 = freezeGr
   labelFont: DEFAULT_GRAPH_VISUAL_THEME_V2.labelFont,
 });
 
+export const FRANK_GRAPH_PLUS_THEME_V2: GraphVisualThemeV2 = freezeGraphVisualThemeV2({
+  revision: 0,
+  colorConstraint: 'red-green',
+  colors: {
+    background: graphColorV2(1, 0, 0),
+    node: graphColorV2(0, 1, 0),
+    tagNode: graphColorV2(1, 0, 0),
+    selectedNode: graphColorV2(1, 0, 0),
+    focusedNode: graphColorV2(0, 1, 0),
+    highlightedNode: graphColorV2(1, 0, 0),
+    nodeOutline: graphColorV2(0, 1, 0),
+    edge: graphColorV2(0, 1, 0),
+    arrow: graphColorV2(1, 0, 0),
+    label: graphColorV2(0, 1, 0),
+    animaAccent: graphColorV2(1, 0, 0),
+  },
+  labelFont: DEFAULT_GRAPH_VISUAL_THEME_V2.labelFont,
+});
+
 export class ThemeStyleResolver {
   constructor(
     private getRoot: () => HTMLElement = () => document.body,
     private isDefaultObsidianTheme: () => boolean = () => false,
     private getOverrides: () => GraphPlusColorOverridesV1 = () => ({}),
+    private isFrankMode: () => boolean = () => false,
   ) {}
 
   private read(styles: CSSStyleDeclaration, ...vars: string[]): string {
@@ -85,6 +105,11 @@ export class ThemeStyleResolver {
   getPalette(revision = 0): GraphVisualThemeV2 {
     const root = this.getRoot();
     const styles = root.ownerDocument.defaultView?.getComputedStyle(root);
+    if (this.isFrankMode()) return freezeGraphVisualThemeV2({
+      ...FRANK_GRAPH_PLUS_THEME_V2,
+      revision,
+      labelFont: styles ? font(styles) : FRANK_GRAPH_PLUS_THEME_V2.labelFont,
+    });
     if (!styles) return this.withOverrides({ ...DEFAULT_GRAPH_VISUAL_THEME_V2, revision });
     if (this.isDefaultObsidianTheme()) {
       return this.withOverrides({

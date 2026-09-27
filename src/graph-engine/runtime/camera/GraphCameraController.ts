@@ -27,6 +27,7 @@ const MAX_PROJECTED_SCALE = 40;
 
 export class GraphCameraController {
   private state: GraphCameraStateV1;
+  private orbitTarget?: Vec3;
   private viewport: GraphViewportV1 = { width: 0, height: 0 };
 
   constructor(state: GraphCameraStateV1, private dimensions: GraphDimensionsV1) {
@@ -39,10 +40,12 @@ export class GraphCameraController {
 
   setState(state: GraphCameraStateV1): void {
     this.state = cloneCamera(state);
+    this.orbitTarget = undefined;
   }
 
   reconfigure(state: GraphCameraStateV1, dimensions: GraphDimensionsV1): void {
     this.state = cloneCamera(state);
+    this.orbitTarget = undefined;
     this.dimensions = dimensions;
   }
 
@@ -128,32 +131,57 @@ export class GraphCameraController {
   }
 
   /** Preserve framing while inheriting a world-space translation. */
-  translateBy(delta: Vec3): void {
+  translateBy(delta: Vec3, moveOrbitTarget = true): void {
     if (![delta.x, delta.y, delta.z].every(Number.isFinite)) return;
     this.state = {
       ...this.state,
       position: add(this.state.position, delta),
       target: add(this.state.target, delta),
     };
+    if (moveOrbitTarget && this.orbitTarget) this.orbitTarget = add(this.orbitTarget, delta);
+  }
+
+  /** Change only the future orbit origin; preserve the current camera framing exactly. */
+  retarget(point: Vec3 | undefined): void {
+    if (point === undefined) {
+      this.orbitTarget = undefined;
+      return;
+    }
+    if (![point.x, point.y, point.z].every(Number.isFinite)) return;
+    this.orbitTarget = { ...point };
+  }
+
+  getOrbitTarget(): Vec3 {
+    return { ...(this.orbitTarget ?? this.state.target) };
   }
 
   orbitByPixels(deltaX: number, deltaY: number): void {
     if (this.dimensions !== '3d' || this.state.projection !== 'perspective') return;
+    const pivot = this.orbitTarget ?? this.state.target;
     const basis = cameraBasis(this.state);
     const yaw = -deltaX * 0.005;
     const pitch = -deltaY * 0.005;
-    let offset = subtract(this.state.position, this.state.target);
-    let up = this.state.up;
-    offset = rotateAroundAxis(offset, basis.up, yaw);
-    const yawedForward = normalize(scaleVector(offset, -1));
-    const yawedRight = normalize(cross(yawedForward, basis.up));
-    const pitchedOffset = rotateAroundAxis(offset, yawedRight, pitch);
-    const pitchedUp = normalize(rotateAroundAxis(up, yawedRight, pitch));
-    const nextForward = normalize(scaleVector(pitchedOffset, -1));
+    let positionOffset = subtract(this.state.position, pivot);
+    let targetOffset = subtract(this.state.target, pivot);
+    const up = this.state.up;
+    positionOffset = rotateAroundAxis(positionOffset, basis.up, yaw);
+    targetOffset = rotateAroundAxis(targetOffset, basis.up, yaw);
+    const yawedUp = normalize(rotateAroundAxis(up, basis.up, yaw));
+    const yawedRight = cameraBasis({
+      ...this.state,
+      position: add(pivot, positionOffset),
+      target: add(pivot, targetOffset),
+      up: yawedUp,
+    }).right;
+    const pitchedPositionOffset = rotateAroundAxis(positionOffset, yawedRight, pitch);
+    const pitchedTargetOffset = rotateAroundAxis(targetOffset, yawedRight, pitch);
+    const pitchedUp = normalize(rotateAroundAxis(yawedUp, yawedRight, pitch));
+    const nextForward = normalize(subtract(pitchedTargetOffset, pitchedPositionOffset));
     if (Math.abs(dot(nextForward, pitchedUp)) > 0.999) return;
     this.state = {
       ...this.state,
-      position: add(this.state.target, pitchedOffset),
+      position: add(pivot, pitchedPositionOffset),
+      target: add(pivot, pitchedTargetOffset),
       up: pitchedUp,
     };
   }
@@ -217,6 +245,7 @@ export class GraphCameraController {
       target: { ...target },
       position: preserveView ? add(this.state.position, translation) : this.state.position,
     };
+    this.orbitTarget = undefined;
   }
 
   fit(
@@ -248,6 +277,7 @@ export class GraphCameraController {
       }
       const offset = subtract(this.state.position, this.state.target);
       this.state = { ...this.state, target, position: add(target, offset), zoom };
+      this.orbitTarget = undefined;
       return;
     }
 
@@ -263,6 +293,7 @@ export class GraphCameraController {
       target,
       position: add(target, scaleVector(backwards, distanceForFit)),
     };
+    this.orbitTarget = undefined;
   }
 
   /** Prevent zooming farther out than a focus-centered world-space radius. */

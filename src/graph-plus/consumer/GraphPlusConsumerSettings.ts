@@ -2,6 +2,7 @@ export interface GraphPlusConsumerSettingsV1 {
   readonly enabled: boolean;
   readonly showTags: boolean;
   readonly countDuplicateLinks: boolean;
+  readonly frankMode: boolean;
   readonly colors: GraphPlusColorOverridesV1;
 }
 
@@ -15,6 +16,7 @@ export const DEFAULT_GRAPH_PLUS_CONSUMER_SETTINGS_V1: GraphPlusConsumerSettingsV
   enabled: true,
   showTags: true,
   countDuplicateLinks: true,
+  frankMode: false,
   colors: {},
 };
 
@@ -29,6 +31,7 @@ export function coerceGraphPlusConsumerSettingsV1(value: unknown): GraphPlusCons
     countDuplicateLinks: typeof source.countDuplicateLinks === 'boolean'
       ? source.countDuplicateLinks
       : typeof legacyBase.countDuplicateLinks === 'boolean' ? legacyBase.countDuplicateLinks : true,
+    frankMode: source.frankMode === true,
     colors: coerceColorOverrides(source.colors),
   };
 }

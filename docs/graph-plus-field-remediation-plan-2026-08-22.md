@@ -72,9 +72,9 @@ defaults, product controls, and persistence.
    apparent target scale; retain consumer override support.
 3. On desktop, primary background drag pans; secondary drag orbits in 3D without
    clearing focus or selection.
-4. On mobile, retain selection-sensitive one-finger navigation and pinch zoom priority. In
-   2D, two-finger translation pans. In 3D, two-finger background translation orbits
-   in Overview and pans the camera-focus offset in Explore.
+4. On mobile, one-finger navigation pans in Overview/Explore and rotates only in 3D
+   Focus. Two-finger centroid movement pans in 2D or rotates in 3D while finger
+   separation zooms concurrently.
 5. Emit a generic node context-request from stationary secondary click or long-press;
    movement beyond threshold cancels the request in favor of the mapped gesture.
 6. Make free-graph drag kinematic and pointer-locked. Graph+ pins on release and exposes
@@ -134,9 +134,9 @@ defaults, product controls, and persistence.
 
 - [ ] Vertical orbit direction matches the approved mapping on mouse, trackpad, and touch.
 - [ ] Horizontal orbit behavior is unchanged.
-- [ ] One-finger background movement pans in Overview and rotates in 3D Explore.
-- [ ] Two-finger translation pans in 2D, rotates in 3D Overview, and pans in 3D Explore.
-- [ ] Pinch retains zoom priority and mobile rotation retains selection.
+- [ ] One-finger background movement pans in Overview/Explore and rotates in 3D Focus.
+- [ ] Two-finger centroid movement pans in 2D and rotates in 3D in every state.
+- [ ] Pinch zoom composes with two-finger navigation, and mobile rotation retains selection.
 - [ ] Fresh Graph+ 3D profiles use a 50 mm-equivalent perspective.
 - [ ] Perspective migration preserves apparent target scale.
 

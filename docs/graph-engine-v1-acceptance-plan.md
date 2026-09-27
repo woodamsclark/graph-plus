@@ -488,19 +488,18 @@ callback, custom drag physics, or replacement camera-control hook.
 
 #### R-INPUT-17 — Mobile dimension-consistent primary pan trial
 
-Given either a `2d` or `3d` mobile session and a one-finger drag beginning on the
-background, when the pan threshold is crossed, then the camera pans, focus/selection
-clear exactly once, and no orbit occurs. A one-finger drag beginning on a draggable
-node continues to use node-drag arbitration.
+Given a mobile Overview or Explore session and a one-finger drag beginning on the
+background or over a node, when the pan threshold is crossed, then the camera pans and
+no orbit or node drag occurs. Explore retains its constellation. Given 3D Focus, the
+same gesture orbits around the focused target and retains focus/selection.
 
 #### R-INPUT-18 — Mobile two-finger dimensional behavior
 
-Given a `3d` mobile session, when a two-finger drag crosses the translation threshold
-without qualifying as pinch, then the camera orbits with the same directional mapping
-whether or not a node is focused and retains focus/selection. Given a `2d` session, the
-same gesture never rotates the camera and may translate the pan centroid. In either
-dimension, crossing the pinch scale threshold gives zoom priority and does not also
-produce an accidental node drag or discontinuous orbit.
+Given a `3d` mobile session, when a two-finger gesture crosses the movement threshold,
+centroid translation orbits with the same directional mapping whether or not a node is
+focused, while finger-separation change zooms during that same gesture. Given a `2d`
+session, centroid movement pans while finger-separation change zooms. Neither dimension
+produces an accidental node drag, and Focus retains focus/selection.
 
 ### R-UI — Engine-owned configurable session UI
 
@@ -1054,8 +1053,8 @@ Approval of this revision confirms:
    capabilities.
 2. Consumer extensibility is limited to semantic node click actions in V1.1; drag,
    edge, background, raw-input, and camera remapping remain deferred.
-3. Focused-node click and Enter invoke the same primary action displayed first in the
-   context menu.
+3. Node double-click and single-selection Enter invoke the same primary action displayed
+   first in the context menu.
 4. Dimensions are profile-backed, constrainable, live-switchable, and isolated by
    consumer/profile/session precedence.
 5. Mind Map is planar in 2D and genuinely spatial in 3D while preserving the same

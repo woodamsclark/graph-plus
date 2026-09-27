@@ -472,20 +472,25 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       const zoom = cameraState.projection === 'perspective'
         ? this.camera.worldToScreen(cameraState.target).scale
         : Math.max(0.1, cameraState.zoom);
-      const threshold = Math.max(0, Math.min(100, renderPolicy(frame).adaptiveLabelThreshold ?? 50));
-      const thresholdFactor = 2 ** ((50 - threshold) / 50);
-      const minimumBudget = clampInteger(Math.round(12 * thresholdFactor), 4, 24);
-      const budget = clampInteger(
-        Math.round(this.width * this.height / 12000 * Math.sqrt(zoom) * thresholdFactor),
-        minimumBudget,
-        120,
-      );
+      const saliency = Math.max(0, Math.min(100,
+        renderPolicy(frame).adaptiveLabelSaliency
+          ?? renderPolicy(frame).adaptiveLabelThreshold
+          ?? 50));
       const occupied: LabelBounds[] = [];
       const accepted: ProjectedNode[] = [];
       for (const candidate of candidates) {
         const forced = candidate.node.labelForceVisible === true
           || candidate.node.labelAlwaysVisible === true;
-        if (!forced && accepted.length >= budget) continue;
+        const boost = Math.max(0, Math.min(1, candidate.node.labelSaliencyBoost ?? 0));
+        const effectiveSaliency = saliency * (1 - boost);
+        const saliencyFactor = 2 ** ((50 - effectiveSaliency) / 50);
+        const minimumBudget = clampInteger(Math.round(12 * saliencyFactor), 4, 24);
+        const candidateBudget = clampInteger(
+          Math.round(this.width * this.height / 12000 * Math.sqrt(zoom) * saliencyFactor),
+          minimumBudget,
+          120,
+        );
+        if (!forced && accepted.length >= candidateBudget) continue;
         const bounds = this.labelBounds(frame, candidate);
         if (!forced && occupied.some((other) => overlaps(bounds, other))) continue;
         occupied.push(bounds);

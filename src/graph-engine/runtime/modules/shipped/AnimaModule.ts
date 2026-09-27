@@ -1,23 +1,16 @@
 import type { JsonValue } from '../../../contracts/v1/index.ts';
-import { shortestPathToAnyV1 } from '../../../core/topology/index.ts';
-import type { GraphVisualThemeV2 } from '../../theme/index.ts';
+import { desaturateGraphColorV2, type GraphVisualThemeV2 } from '../../theme/index.ts';
 import type { GraphModuleInstanceV1, GraphModuleProjectionPatchV1 } from '../GraphModuleTypes.ts';
 import { GraphLabelManager, type GraphLabelRequestV1 } from './GraphLabelManager.ts';
-import {
-  graphInteractionPolicyV1,
-} from '../../interaction/GraphInteractionStatePolicy.ts';
-import {
-  ANIMA_INTERACTION_PRESENTATION_V1,
-  type AnimaPresentationRoleV1,
-} from '../../anima/index.ts';
+import { createEgoAwarenessV1, type EgoPresentationRoleV1 } from '../../ego/index.ts';
 
 const PRESENTATION_ROLE_OPACITY: Readonly<Record<
-  AnimaPresentationRoleV1,
+  EgoPresentationRoleV1,
   Readonly<{ node: number; edge: number }>
 >> = {
   normal: { node: 1, edge: 1 },
   highlighted: { node: 1, edge: 1 },
-  dimmed: { node: 0.32, edge: 0.6 },
+  dimmed: { node: 0.24, edge: 0.6 },
   hidden: { node: 0, edge: 0 },
 };
 
@@ -60,77 +53,34 @@ export class AnimaModule implements GraphModuleInstanceV1 {
   ): GraphModuleProjectionPatchV1 | void {
     const visibleNodes = state.renderSelection.nodeIds;
     const { visibleEdges, relationships, degree } = this.presentationTopology(state);
-    const focusedId = state.viewState.focusedNodeId;
     const selectedIds = new Set(state.viewState.selectedNodeIds);
     const taggedIds = new Set(selectedIds);
-    const interactionPolicy = graphInteractionPolicyV1(state.viewState);
-    const interactionPresentation = ANIMA_INTERACTION_PRESENTATION_V1[interactionPolicy.state];
-    const localFocusActive = interactionPolicy.renderScope === 'focused-local-view';
-    const selectionEmphasisActive = interactionPolicy.renderScope === 'graph-with-selection-emphasis';
-    const focusNeighborIds = focusedId === undefined
-      ? new Set<string>()
-      : new Set(relationships.get(focusedId) ?? []);
-    const focusVisibleIds = focusedId === undefined
-      ? new Set<string>()
-      : new Set([focusedId, ...focusNeighborIds, ...selectedIds]);
     const hoveredId = state.hoveredNodeId;
-    const hoveredNeighborhood = hoveredId === undefined
-      ? new Set<string>()
-      : new Set([hoveredId, ...(relationships.get(hoveredId) ?? [])]);
     const transientId = state.draggedNodeId ?? state.previewedNodeId;
     const transientNeighborhood = transientId === undefined
       ? undefined
       : new Set([transientId, ...(relationships.get(transientId) ?? [])]);
+    const ego = state.ego ?? createEgoAwarenessV1({
+      viewState: state.viewState,
+      document: state.document,
+      visibleNodeIds: state.renderSelection.nodeIds,
+      visibleEdgeIds: state.renderSelection.edgeIds,
+      ...(hoveredId === undefined ? {} : { hoveredNodeId: hoveredId }),
+      ...(state.draggedNodeId === undefined ? {} : { draggedNodeId: state.draggedNodeId }),
+      ...(state.previewedNodeId === undefined ? {} : { previewedNodeId: state.previewedNodeId }),
+      selectionPresentationSuspended: state.selectionPresentationSuspended,
+      selectionNeighborRevealActive: state.selectionNeighborRevealActive,
+    });
+    const localFocusActive = ego.contract.renderScope === 'focused-local-view';
+    const selectionEmphasisActive = ego.contract.renderScope === 'graph-with-selection-emphasis';
     const exploreActive = selectionEmphasisActive
       && state.selectionPresentationSuspended !== true;
-    const hoveredIsTagged = hoveredId !== undefined && selectedIds.has(hoveredId);
-    const pathTargetIds = selectedIds.size > 0 ? selectedIds : taggedIds;
-    const exploreHoverPath = exploreActive && hoveredId !== undefined && !hoveredIsTagged
-      ? shortestPathToAnyV1(hoveredId, pathTargetIds, relationships)
-      : undefined;
-    const hopLabelIds = new Set(exploreHoverPath?.slice(1, -1) ?? []);
-    const exploreHoverIds = hoveredId === undefined
-      ? new Set<string>()
-      : hoveredIsTagged
-        ? hoveredNeighborhood
-        : new Set(exploreHoverPath ?? [hoveredId]);
-    const revealedNeighborIds = state.selectionNeighborRevealActive === true
-      ? new Set([...selectedIds].flatMap((nodeId) => [...(relationships.get(nodeId) ?? [])]))
-      : new Set<string>();
     const visibleIds = localFocusActive
-      ? focusVisibleIds
-      : transientNeighborhood ?? (exploreActive
-        ? new Set([...taggedIds, ...exploreHoverIds, ...revealedNeighborIds])
-        : undefined);
-    const litNodeIds = localFocusActive
-      ? focusVisibleIds
-      : transientId !== undefined
-      ? new Set([transientId])
-      : exploreActive
-        ? new Set([...taggedIds, ...exploreHoverIds, ...revealedNeighborIds])
-        : new Set([...taggedIds, ...hoveredNeighborhood]);
-    const pathEdgePairs = edgePairs(exploreHoverPath);
-    const revealedNeighborLinkPairs = state.selectionNeighborRevealActive === true
-      ? new Set(visibleEdges
-        .filter((edge) => (selectedIds.has(edge.sourceId) && revealedNeighborIds.has(edge.targetId))
-          || (selectedIds.has(edge.targetId) && revealedNeighborIds.has(edge.sourceId)))
-        .map((edge) => unorderedPair(edge.sourceId, edge.targetId)))
-      : new Set<string>();
-    const edgeIsLit = (sourceId: string, targetId: string): boolean => {
-      const joinsTaggedStructure = taggedIds.has(sourceId) && taggedIds.has(targetId);
-      if (joinsTaggedStructure) return true;
-      if (localFocusActive) {
-        return focusedId !== undefined && (
-          (sourceId === focusedId && focusNeighborIds.has(targetId))
-          || (targetId === focusedId && focusNeighborIds.has(sourceId))
-        );
-      }
-      if (transientId !== undefined) return sourceId === transientId || targetId === transientId;
-      if (revealedNeighborLinkPairs.has(unorderedPair(sourceId, targetId))) return true;
-      if (hoveredId === undefined) return false;
-      if (!exploreActive || hoveredIsTagged) return sourceId === hoveredId || targetId === hoveredId;
-      return pathEdgePairs.has(unorderedPair(sourceId, targetId));
-    };
+      ? ego.highlight.highlightedNodeIds
+      : selectionEmphasisActive
+        ? exploreActive ? taggedIds : undefined
+        : transientNeighborhood;
+    const litNodeIds = ego.highlight.highlightedNodeIds;
     const nodesWithRadius = state.document.nodes
       .filter((node) => visibleNodes.has(node.id))
       .map((node) => {
@@ -148,12 +98,17 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       largestRadius = Math.max(largestRadius, radius);
     }
     const maximumScaleExponent = 0.5 + this.nodeZoomContrast * 1.5;
-    const labelRequests: GraphLabelRequestV1[] = [
-      ...[...selectedIds].map((nodeId) => ({ nodeId, alwaysVisible: true })),
-      ...(focusedId === undefined ? [] : [{ nodeId: focusedId, alwaysVisible: true }]),
-      ...(hoveredId === undefined ? [] : [{ nodeId: hoveredId, forceVisible: true }]),
-      ...[...hopLabelIds].map((nodeId) => ({ nodeId, forceVisible: true, scale: 0.5 })),
-    ];
+    const labelRequests: GraphLabelRequestV1[] = Object.entries(ego.labelRaising.byNodeId)
+      .filter(([, decision]) => decision.disposition === 'force'
+        || decision.disposition === 'favor'
+        || decision.disposition === 'raise')
+      .map(([nodeId, decision]) => ({
+        nodeId,
+        forceVisible: decision.disposition === 'force',
+        alwaysVisible: decision.disposition === 'force' || decision.disposition === 'raise',
+        statePriority: decision.priority,
+        saliencyBoost: decision.saliencyBoost,
+      }));
     const labelContributions = this.labels.resolve(nodesWithRadius.map(({ node, prior, radius }) => ({
       nodeId: node.id,
       radius,
@@ -164,22 +119,22 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         const isLit = litNodeIds.has(node.id);
         const visible = visibleIds === undefined || visibleIds.has(node.id);
         const role = isLit
-          ? localFocusActive
-            ? interactionPresentation.focusedNeighborhood
-            : selectionEmphasisActive
-              ? interactionPresentation.selection
-              : 'highlighted'
+          ? ego.highlight.policy.highlightedRole
           : visible
             ? 'normal'
-            : interactionPresentation.graphContext;
+            : ego.highlight.policy.contextRole;
+        const ordinaryColor = prior?.color
+          ?? (node.tokens?.includes('kind:tag') ? this.palette.colors.tagNode : undefined)
+          ?? this.palette.colors.node;
         const color = role === 'highlighted'
           ? this.palette.colors.animaAccent
           : role === 'dimmed'
-            ? this.palette.colors.nodeOutline
-          : prior?.color ?? (node.tokens?.includes('kind:tag') ? this.palette.colors.tagNode : undefined) ?? this.palette.colors.node;
+            ? desaturateGraphColorV2(ordinaryColor, 0.8)
+            : ordinaryColor;
         const selected = state.viewState.selectedNodeIds.includes(node.id);
         const pinned = state.viewState.pinnedNodeIds.includes(node.id);
         const opacity = PRESENTATION_ROLE_OPACITY[role].node;
+        const labelDecision = ego.labelRaising.byNodeId[node.id];
         return [node.id, {
           ...prior,
           ...labelContributions[node.id],
@@ -188,7 +143,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
             normalize(radius, smallestRadius, largestRadius)),
           finalColor: color,
           opacity,
-          ...(visible ? {} : { showLabel: false, labelOpacity: 0 }),
+          ...(labelDecision?.disposition === 'suppress' ? { showLabel: false, labelOpacity: 0 } : {}),
           ...(selected || pinned ? {
             strokeColor: this.palette.colors.nodeOutline,
             strokeWidth: pinned ? 2 : 1,
@@ -197,25 +152,15 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       }));
     const edgeContributions = Object.fromEntries(visibleEdges.map((edge) => {
       const prior = state.edgeContributions[edge.id];
-      const lit = edgeIsLit(edge.sourceId, edge.targetId);
-      const revealed = revealedNeighborLinkPairs.has(unorderedPair(edge.sourceId, edge.targetId));
-      const focusLocalEdge = localFocusActive && focusedId !== undefined && (
-        (edge.sourceId === focusedId && focusNeighborIds.has(edge.targetId))
-        || (edge.targetId === focusedId && focusNeighborIds.has(edge.sourceId))
-        || (selectedIds.has(edge.sourceId) && selectedIds.has(edge.targetId))
-      );
+      const lit = ego.highlight.highlightedEdgeIds.has(edge.id);
       const visible = localFocusActive
-        ? focusLocalEdge
-        : visibleIds === undefined || lit || revealed;
+        ? lit
+        : visibleIds === undefined || lit;
       const role = lit
-        ? localFocusActive
-          ? interactionPresentation.focusedNeighborhood
-          : selectionEmphasisActive
-            ? interactionPresentation.selection
-            : 'highlighted'
+        ? ego.highlight.policy.highlightedRole
         : visible
           ? 'normal'
-          : interactionPresentation.graphContext;
+          : ego.highlight.policy.contextRole;
       const opacity = PRESENTATION_ROLE_OPACITY[role].edge;
       return [edge.id, {
         ...prior,
@@ -298,19 +243,6 @@ function normalize(value: number, min: number, max: number): number {
 
 function lerp(start: number, end: number, amount: number): number {
   return start + (end - start) * amount;
-}
-
-function edgePairs(path: readonly string[] | undefined): ReadonlySet<string> {
-  const pairs = new Set<string>();
-  if (!path) return pairs;
-  for (let index = 1; index < path.length; index += 1) {
-    pairs.add(unorderedPair(path[index - 1], path[index]));
-  }
-  return pairs;
-}
-
-function unorderedPair(left: string, right: string): string {
-  return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
 }
 
 function positive(value: JsonValue | number | undefined, fallback: number): number {

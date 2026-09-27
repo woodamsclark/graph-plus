@@ -2,7 +2,7 @@ import type { GraphCameraStateV1 } from '../../src/graph-engine/contracts/v1/ind
 import { GraphCameraController } from '../../src/graph-engine/runtime/camera/index.ts';
 import { GraphFrameStore, DEFAULT_GRAPH_RENDER_THEME_V1 } from '../../src/graph-engine/runtime/render/index.ts';
 import { GraphHitTester } from '../../src/graph-engine/runtime/interaction/GraphHitTester.ts';
-import { assert, equal, test } from '../support/harness.ts';
+import { assert, deepEqual, equal, test } from '../support/harness.ts';
 
 test('R-CAMERA-01 orthographic zoom scales node projection and hit radius together', () => {
   const state: GraphCameraStateV1 = {
@@ -55,6 +55,35 @@ test('R-CAMERA-02 perspective dolly scales nodes without changing the default si
   equal(camera.worldToScreen({ x: 0, y: 0, z: 0 }).scale, 1, 'the stock perspective camera should retain its established node size');
   camera.setState({ ...state, position: { x: 0, y: 0, z: 50 } });
   equal(camera.worldToScreen({ x: 0, y: 0, z: 0 }).scale, 2, 'dollying to half the depth should double projected node radius');
+});
+
+test('camera retarget changes the orbit origin without recentering or refitting', () => {
+  const initial: GraphCameraStateV1 = {
+    position: { x: 30, y: 20, z: 100 },
+    target: { x: 10, y: -5, z: 0 },
+    up: { x: 0, y: 1, z: 0 },
+    zoom: 50 / 24,
+    projection: 'perspective',
+  };
+  const camera = new GraphCameraController(initial, '3d');
+  camera.setViewport(640, 360);
+  const pivot = { x: -40, y: 25, z: 10 };
+  const pivotBefore = camera.worldToScreen(pivot);
+  const ordinaryPoint = { x: 80, y: -15, z: 5 };
+  const ordinaryBefore = camera.worldToScreen(ordinaryPoint);
+
+  camera.retarget(pivot);
+  deepEqual(camera.getState(), initial, 'retarget must preserve the complete serialized camera framing');
+  deepEqual(camera.worldToScreen(pivot), pivotBefore, 'retarget must not move its new pivot on screen');
+  deepEqual(camera.worldToScreen(ordinaryPoint), ordinaryBefore, 'retarget must not move any graph content on screen');
+  deepEqual(camera.getOrbitTarget(), pivot, 'retarget should retain the requested future orbit origin');
+
+  camera.orbitByPixels(28, -16);
+  const pivotAfter = camera.worldToScreen(pivot);
+  assert(Math.abs(pivotAfter.x - pivotBefore.x) < 1e-9 && Math.abs(pivotAfter.y - pivotBefore.y) < 1e-9,
+    'orbiting after retarget should keep the off-center pivot fixed on screen');
+  assert(JSON.stringify(camera.getState().position) !== JSON.stringify(initial.position),
+    'orbiting after retarget should move the camera around the new pivot');
 });
 
 test('focus fitting caps magnification in orthographic and perspective cameras', () => {

@@ -30,6 +30,8 @@ export interface GraphRenderNodeV1 {
   readonly labelAlwaysVisible?: boolean;
   /** Resolved semantic priority; the renderer does not inspect interaction state. */
   readonly labelStatePriority: number;
+  /** Fraction by which this node's adaptive Saliency threshold is reduced. */
+  readonly labelSaliencyBoost?: number;
 }
 
 export interface GraphRenderEdgeV1 {
@@ -106,6 +108,10 @@ export interface GraphNodeRenderContributionV1 {
   readonly labelForceVisible?: boolean;
   readonly labelPriority?: number;
   readonly labelAlwaysVisible?: boolean;
+  /** Ego-resolved label raising priority. */
+  readonly labelStatePriority?: number;
+  /** Fraction by which this label's adaptive Saliency threshold is reduced. */
+  readonly labelSaliencyBoost?: number;
 }
 
 export interface GraphEdgeRenderContributionV1 {
@@ -127,6 +133,8 @@ export interface GraphPresentationPolicyV2 {
   readonly labelMode?: 'adaptive' | 'all' | 'off';
   readonly labelPosition?: 'above' | 'below';
   /** Higher values delay ordinary adaptive labels; interaction-required labels remain visible. */
+  readonly adaptiveLabelSaliency?: number;
+  /** @deprecated Compatibility spelling for adaptiveLabelSaliency. */
   readonly adaptiveLabelThreshold?: number;
   readonly nodeScaleMode?: 'linear' | 'sqrt-orthographic';
   /** Exponent applied to projected camera scale when resolving node radius. */

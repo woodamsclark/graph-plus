@@ -14,19 +14,29 @@ silently drift apart.
 
 The policy is fixed in V1. It is not a consumer-configurable public API.
 
-Animus owns the state and behavioral policy. Anima alone interprets that semantic
-state visually: Overview becomes normal graph context, Explore/Constellation becomes
-highlighted selection plus dimmed graph context, and Focus/Local becomes highlighted
-selection and neighborhood plus hidden graph context. Renderers receive only the
-resolved scene and never inspect selection, focus, or hover state.
+Ego is the engine's singular UI awareness. It derives one immutable semantic context
+from Animus facts: active state, dimensions, selection, pins, focus, hover, drag,
+preview, and transient presentation conditions. The active Ego state contract owns
+camera, rendering-scope, navigation, and any state-scoped highlight override. Anima
+realizes Ego's semantic roles as concrete color, opacity, and geometry. Renderers
+receive only the resolved scene and never inspect selection, focus, or hover state.
 
-| State | User meaning | Invariant | Camera target | Center + Fit target |
+The application-wide highlight policy in `runtime/ego/GraphHighlightPolicy.ts` is
+external to UI state. Ego resolves that
+global truth together with the active state contract. An override is read directly
+from that contract and is never installed into the global policy, so it expires by
+construction as soon as the requesting UI state expires. Highlight policy does not
+force labels. Ego separately resolves label attention, and the label manager retains
+sizing, camera-range Saliency, and collision mechanics.
+
+| State | User meaning | Invariant | Rotation target | Center + Fit target |
 | --- | --- | --- | --- | --- |
 | Overview | View the whole graph | No selection and no focused node | Graph centroid | Whole visible graph |
-| Explore | Work with a selected constellation | One or more selected nodes and no focused node | Stored selection-centroid focus | Current selection |
+| Explore | Work with a selected constellation | One or more selected nodes and no focused node | Selection centroid | Current selection |
 | Focus | Inspect one local node | A non-empty selection and one focused node | Focused node | Focused node plus immediate neighbors |
 
-A one-node initial selection shortcuts directly from Overview to Focus. Focus is
+A one-node selection is a constellation and enters Explore. Focus is entered only by
+an explicit focus operation; ordinary node clicks do not enter or move Focus. Focus is
 independent of selection membership: a focused node may be unselected while the
 constellation remains non-empty.
 
@@ -37,36 +47,46 @@ The terms Overview, Explore, and Focus are canonical. “Kosmos,” “Constella
 
 | Current state | Input | Result |
 | --- | --- | --- |
-| Overview | Click or tap a node | Select that node, enter Focus on it, center it, and fit its immediate neighborhood |
-| Overview | Ctrl-click a node | Add it; a one-node result enters Focus |
-| Explore | Click an unselected node | Add the node and shortest-path bridge; keep Explore and preserve camera framing |
-| Explore | Click a selected node | Enter Focus on that node without changing selection |
-| Explore | Click or tap background | Clear selection and enter Overview; fit the graph |
-| Focus | Click or tap a different visible node | Move Focus to that node without changing selection |
-| Focus | Single-click or tap the focused node | Toggle only that node's selection membership; Focus remains if the constellation is still non-empty |
-| Focus | Click or tap background with two or more selected nodes | Exit Focus, retain the constellation, enter Explore, and center + fit the selection |
-| Focus | Click or tap background with one selected node | Clear selection, enter Overview, and center + fit the graph |
+| Overview | Click or tap a node | Add that node to the constellation, enter Explore, and preserve camera framing |
+| Overview | Ctrl-click a node | Same as an ordinary click |
+| Explore | Click an unselected node | Add the node and the shortest path back to the existing constellation; preserve camera framing |
+| Explore | Click a selected node | Remove the node from the constellation and preserve camera framing |
+| Explore | Click or tap background | Clear selection and enter Overview; preserve camera framing |
+| Focus | Click or tap any node | Exit Focus and toggle that node's constellation membership |
+| Focus | Click or tap background with two or more selected nodes | Exit Focus, retain the constellation, enter Explore, and preserve camera framing |
+| Focus | Click or tap background with one selected node | Clear selection, enter Overview, and preserve camera framing |
 | Any state | Escape | Clear selection and Focus; enter Overview |
 
-Single activation on the focused node is delayed only long enough to arbitrate a
-double activation. Double-click or double-tap opens the primary node action only when
-the node was already focused before the first activation. A double activation that
-begins on an unfocused node changes Focus but does not open the node.
+Double-click or double-tap on the same node opens its primary action and leaves that
+node in the constellation.
 
-Ctrl edits selection without moving the camera while the key is held. If Ctrl editing
-began with no selection, Ctrl release performs state-appropriate Center + Fit on the
-result. Extending the initial one-node Focus into a constellation clears Focus and
-enters Explore while preserving the current framing. Editing an already established
-multi-node selection also leaves the camera unchanged.
+Selection is committed only on primary-button or tap release, after the pointer stays
+within the drag threshold and no drag or navigation gesture has begun. Pointer-down
+never selects. Once movement crosses the drag threshold, release ends that gesture and
+must not also toggle selection or enter Focus.
+
+Ctrl does not change node-click semantics. Node clicks toggle constellation membership
+without moving the camera. Adding an unselected node also selects the shortest path from
+that node to any current constellation member. Releasing Ctrl leaves selection and
+framing unchanged.
+
+Input handlers request semantic state transitions rather than pairing state commands
+with sibling camera commands. Each transition owns its consequences: Focus to Explore
+preserves the camera, and clearing the constellation to return to Overview also
+preserves the camera. Center + Fit occurs only through an explicit framing action or
+when no compatible saved view exists for a new session.
 
 ## 3. Camera contract
 
-Center and Fit are separate operations performed in sequence:
+Retarget, Recenter, and Refit are three independent camera operations:
 
-1. **Center** translates the camera target to the arithmetic centroid of the target,
+1. **Retarget** changes the world-space origin used by future camera rotation. It does
+   not change camera position, view direction, zoom, perspective distance, or the
+   current screen position of any graph content.
+2. **Recenter** translates the camera framing to the arithmetic centroid of the target,
    or to the focused node in Focus. It does not reset camera angle or up vector.
-2. **Fit** adjusts orthographic zoom or perspective distance so the same target fits
-   with padding.
+3. **Refit** adjusts orthographic zoom or perspective distance so the same target fits
+   with padding. An explicit Center + Fit action performs Recenter and Refit together.
 
 State-aware targets are:
 
@@ -75,35 +95,50 @@ State-aware targets are:
 - Focus: the focused node and its immediate neighbors, centered on the focused node.
 
 Explore follows selected-node motion by the selection-centroid delta while preserving
-framing. Later additive or subtractive selection edits recalculate the centroid but do
-not move the stored camera target automatically. Focus follows focused-node motion
-while preserving framing.
+framing. Every additive or subtractive selection edit recalculates the selection
+centroid and Retargets the camera to it without Recentering or Refitting: one selected
+node uses that node's position, while multiple selected nodes use their arithmetic
+centroid. Focus follows focused-node motion while preserving framing.
 
 Focus limits zooming out using the longest world-space distance from the focused node
 to any selected node, plus padding. The local-neighborhood fit established when Focus
 is entered remains a valid baseline even when it is wider.
 
 In 2D Focus, navigation pan is elastic: it may temporarily offset the view and then
-returns the target to the focused node. Leaving Focus always performs a fresh
-selection or graph Center + Fit; the prior camera angle need not be restored. The
-Ctrl-release transition from initial Focus into Explore is the exception: it preserves
-the live camera framing so global gray context does not jump out of view.
+returns the target to the focused node. Explicit Focus entry may establish a
+local-neighborhood fit. Node clicks that return to Explore preserve the live camera
+framing so global gray context does not jump.
 
 ## 4. Rendering contract
 
 | State | Nodes | Links | Labels |
 | --- | --- | --- | --- |
 | Overview | Whole visible graph at normal presentation | Whole visible graph | Normal label policy |
-| Explore | Selected constellation lit; every other projected node remains visible but gray/dim, including non-neighbors | Selection links lit; every other projected link remains visible but gray/dim | Selected labels emphasized |
+| Explore | Only selected constellation nodes are durably lit; every unselected projected node remains visible at 24% opacity with its ordinary theme color 80% desaturated | Only selected-to-selected links are durably lit; every other projected link remains visible and dimmed | Selected labels emphasized; unselected labels suppressed while dim unless hover takes precedence |
 | Focus | Focused node, immediate neighbors, and selected constellation remain rendered and highlighted; all other nodes hidden | Selected-to-selected and focused-to-neighbor links remain; every focused-neighborhood link is highlighted; all other links hidden | Only labels allowed by the local render set and normal label policy |
 
 Focus/Local highlighting is presentation only and does not add neighbors to the
 selection. Explore/Constellation never hides a projected node or link merely because
-it is outside the selected constellation or is not its neighbor. Holding Option
-temporarily reveals direct neighbors of the current selection and the connecting links
-with the same presentation used for hover. Option never changes selection or camera.
-Tag nodes follow exactly the same interaction and presentation rules as ordinary
+it is outside the selected constellation. Only selected nodes and links whose endpoints
+are both selected remain durably highlighted. Unselected neighbors stay dimmed.
+Hovering any dim context node may transiently light that node, its immediate neighbors,
+and its incident links without selecting them. The highlight does not propagate beyond
+one hop or reveal a shortest path. Previews and Option do not expand the highlighted
+set. Tag nodes follow exactly the same interaction and presentation rules as ordinary
 nodes.
+
+Ego resolves label attention in this order: hovered node, immediate hover neighbors,
+selected or focused node, dim-context suppression, then camera-range Saliency fallback.
+The hovered label overrides graph-wide label-off mode. Selected or focused labels bypass
+the adaptive collision budget. Hover neighbors remain adaptive, but Ego reduces their
+effective Saliency value by 50%, making them more likely to appear without defeating
+collision handling. Unselected selection neighbors remain dim and suppressed. Unrelated
+dimmed nodes are likewise suppressed before Saliency is evaluated, unless direct cursor
+focus or its immediate neighborhood takes precedence.
+
+The intended Anima interaction language adds dwell and movement resistance before a
+dim context node becomes lit. That timing and interpolation belong to the future shared
+Anima animation kit. Until that kit exists, hover eligibility is immediate.
 
 ## 5. Desktop input matrix
 
@@ -112,9 +147,9 @@ nodes.
 | Input | Overview | Explore | Focus |
 | --- | --- | --- | --- |
 | Primary background drag, 2D | Pan | Pan | Elastic pan |
-| Primary background drag, 3D | Pan | Rotate | Rotate |
+| Primary background drag, 3D | Pan | Pan | Rotate |
 | Primary drag on selected node | Drag node | Drag node | Navigate; stationary activation owns selection toggle |
-| Primary drag on unselected node | Select and drag from Overview | Pan in 2D; rotate in 3D | Navigate; stationary activation hops Focus |
+| Primary drag on unselected node | Drag node without selecting | Pan | Navigate; stationary activation exits Focus and toggles selection |
 | Secondary drag, 2D | Pan | Pan | Radial zoom around focused node |
 | Secondary drag, 3D | Rotate | Rotate | Radial zoom around focused node |
 | Two-finger scroll, 2D | Pan | Pan | Elastic pan |
@@ -123,7 +158,7 @@ nodes.
 | Cmd-wheel | State navigation; never zoom | State navigation; never zoom | State navigation; never zoom |
 | Stationary background secondary click | Center + Fit graph | Center + Fit selection | Center + Fit local neighborhood |
 | Stationary node secondary click | Node context menu | Node context menu | Node context menu |
-| Double-click focused node | Primary node action | Primary node action | Primary node action |
+| Double-click node | Primary node action | Primary node action | Primary node action |
 
 Focus radial zoom measures pointer distance from the focused node. Moving away zooms
 in; moving toward the focused node zooms out.
@@ -132,10 +167,9 @@ in; moving toward the focused node zooms out.
 
 | Input | Behavior |
 | --- | --- |
-| Hold Ctrl + node clicks | Add or remove selection members; do not move camera during edits |
-| Release Ctrl after first selected node | Enter Explore when the batch contains multiple nodes; preserve camera framing |
-| Release Ctrl after editing an existing selection | No camera change |
-| Hold Option | Reveal selection neighbors and connecting links; selection and camera unchanged |
+| Hold Ctrl + node clicks | Same toggle behavior as ordinary node clicks; do not move camera |
+| Release Ctrl | No selection or camera change |
+| Hold Option | Preserve constellation-only highlighting; selection and camera unchanged |
 | Hold Space | Temporarily suspend ordinary selection dimming |
 | Arrow keys | Pan |
 | Shift + arrow keys in 3D | Rotate |
@@ -148,39 +182,61 @@ in; moving toward the focused node zooms out.
 | Input | Overview | Explore | Focus |
 | --- | --- | --- | --- |
 | One-finger drag, 2D | Pan | Pan | Elastic pan |
-| One-finger drag, 3D | Rotate, including when starting over a node | Rotate, including when starting over a node | Rotate, including when starting over a node |
-| Two-finger translation, 2D | Pan | Pan | Radial zoom from the gesture centroid |
-| Two-finger translation, 3D | Rotate | Pan | Radial zoom from the gesture centroid |
-| Pinch | Zoom | Zoom | Zoom combined with radial two-finger translation |
+| One-finger drag, 3D | Pan, including when starting over a node | Pan, including when starting over a node | Rotate, including when starting over a node |
+| Two-finger translation, 2D | Pan | Pan | Pan |
+| Two-finger translation, 3D | Rotate | Rotate | Rotate around the focused node |
+| Pinch | Zoom concurrently with two-finger pan/rotation | Zoom concurrently with two-finger pan/rotation | Zoom concurrently with two-finger pan/rotation |
 | Double-tap background | Center + Fit graph | Center + Fit selection | Center + Fit local neighborhood |
 | Double-tap drag, 2D | Vertical zoom | Vertical zoom | Radial zoom |
 | Double-tap drag, 3D | Horizontal rotate + vertical zoom | Horizontal rotate + vertical zoom | Radial zoom |
 | Long press background | Center + Fit graph | Center + Fit selection | Center + Fit local neighborhood |
 | Long press node | Node context menu | Node context menu | Node context menu |
-| Double-tap focused node | Primary node action | Primary node action | Primary node action |
+| Double-tap node | Primary node action | Primary node action | Primary node action |
 
-Focus two-finger translation and pinch are simultaneous controls. Translation uses
-the gesture centroid's distance from the focused node; pinch uses finger separation.
+Two-finger translation and pinch are simultaneous controls. In 3D, centroid movement
+rotates while finger separation zooms; in 2D, centroid movement pans while finger
+separation zooms. Focus retains its focused-node target during the combined 3D gesture.
 
 ## 7. Persistence and reopen
 
-Graph reopen restores graph data, finite node positions, and explicit pins only.
-Selection, Focus, camera, filters, Form, and other interaction state are not restored.
-Every graph opens in fresh Overview and fits the whole graph.
+Graph reopen restores the complete compatible saved view state: finite positions,
+explicit pins, camera framing, selection, Focus, filters, Form/module state, and other
+durable interaction state. Reopen does not implicitly center or fit the camera. A graph
+with no compatible saved view starts in fresh Overview and fits the whole graph.
+
+Global Graph+ and Local Graph+ have deliberately different active-note ownership:
+
+- Global Graph+ never follows the active note automatically. Opening, revealing, or
+  switching to the global view preserves the complete restored graph and its saved
+  interaction and camera state. An explicit `showFile()` request may reveal, select,
+  focus, and frame one requested note, but ordinary `file-open` and
+  `active-leaf-change` events must not do so.
+- Local Graph+ follows the active Markdown note automatically. The active note becomes
+  the root of its depth-bounded local projection, and file or leaf changes may replace
+  that local projection.
+
+The two behaviors are separate host contracts. Shared lifecycle, reconciliation, or UI
+code must not make global Graph+ inherit Local Graph+ active-note following.
 
 Explicit same-session `restoreViewState()` remains a runtime operation for controlled
 transitions and tests; it is not the reopen persistence policy.
 
 ## 8. Code ownership and regression locks
 
-The state policy lives in
-`src/graph-engine/runtime/interaction/GraphInteractionStatePolicy.ts`. Input dispatch,
-camera fitting/follow, and Anima presentation consume that shared state rather than
-redefining it locally.
+The authoritative context, state contracts, global highlight policy, and highlight
+resolver live in `src/graph-engine/runtime/ego/GraphEgo.ts`. Input dispatch and camera
+fitting/follow consume the compatibility projection in
+`runtime/interaction/GraphInteractionStatePolicy.ts`; it aliases Ego and owns no
+sibling table. Anima consumes resolved Ego awareness rather than expanding highlight
+neighborhoods or inventing state presentation locally.
 
 Regression coverage is concentrated in:
 
+- `tests/contracts/architecture.test.ts` for the global-versus-Local active-note
+  ownership boundary;
 - `tests/runtime/interaction.test.ts` for transitions and desktop/mobile gestures;
+- `tests/runtime/ego.test.ts` for the singular context, global highlight truth, and
+  automatic override expiry;
 - `tests/runtime/session.test.ts` for centering, fitting, and reopen behavior;
 - `tests/runtime/modules.test.ts` and
   `tests/runtime/v16-native-presentation.test.ts` for state presentation; and

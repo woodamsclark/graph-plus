@@ -24,6 +24,8 @@ export const GRAPH_QUICK_SETTINGS_CONTROL_IDS_V1 = Object.freeze({
   formCrossLinks: 'form.cross-links',
   formDisconnected: 'form.disconnected',
   labels: 'display.labels',
+  labelSaliency: 'display.label-threshold',
+  /** @deprecated Compatibility spelling for labelSaliency. */
   labelThreshold: 'display.label-threshold',
   labelPosition: 'display.label-position',
   nodeSize: 'display.node-size',

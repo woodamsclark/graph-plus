@@ -10,6 +10,8 @@ export interface GraphFontV2 {
 
 export interface GraphVisualThemeV2 {
   readonly revision: number;
+  /** Optional final-palette constraint applied after module color contributions. */
+  readonly colorConstraint?: 'red-green';
   readonly colors: {
     readonly background: GraphColorV2;
     readonly node: GraphColorV2;

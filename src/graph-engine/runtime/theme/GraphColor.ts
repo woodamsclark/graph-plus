@@ -41,6 +41,17 @@ export function multiplyGraphColorAlphaV2(color: GraphColorV2, opacity: number):
   return graphColorV2(color.r, color.g, color.b, color.a * channel(opacity));
 }
 
+export function desaturateGraphColorV2(color: GraphColorV2, amount: number): GraphColorV2 {
+  const mix = channel(amount);
+  const gray = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
+  return graphColorV2(
+    color.r + (gray - color.r) * mix,
+    color.g + (gray - color.g) * mix,
+    color.b + (gray - color.b) * mix,
+    color.a,
+  );
+}
+
 export function graphColorsEqualV2(left: GraphColorV2, right: GraphColorV2): boolean {
   return left.r === right.r && left.g === right.g && left.b === right.b && left.a === right.a;
 }

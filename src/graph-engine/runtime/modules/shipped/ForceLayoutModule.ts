@@ -74,18 +74,23 @@ export interface ForceLayoutDiagnosticsV1 {
   readonly alpha: number;
   readonly running: boolean;
   readonly targetStepRateHz: number;
+  readonly effectiveStepRateHz: number;
   readonly integrationStepCount: number;
 }
 
-const NATIVE_ACTIVE_DRAG_ALPHA = 0.3;
-const MAX_ACTIVE_DRAG_LINK_CORRECTION = 0.5;
+const ACTIVE_DRAG_ACTIVITY = 1;
+const FORCE_INTEGRATION_GAIN = 0.6;
 const FIXED_STEP_SECONDS = 1 / 60;
+const DEFAULT_ALPHA_DECAY_PER_SECOND = 1 / 5;
 const RESTORED_SPEED_REJECTION_MULTIPLIER = 4;
 const MAX_LINK_CORRECTION_PER_STEP = 1;
 const COMPONENT_PACKING_BASE_DISTANCE = 250;
+const SETTLED_MOVEMENT_EPSILON = 0.001;
+const SETTLED_STEP_COUNT = 12;
 
 export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private readonly velocities = new Map<string, MutableVec3>();
+  private readonly previousVelocities = new Map<string, MutableVec3>();
   private readonly forces = new Map<string, MutableVec3>();
   private positions: Record<string, MutableVec3> = {};
   private positionSource: Readonly<Record<string, Vec3>> | null = null;
@@ -110,6 +115,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private dragWasActive = false;
   private restoredStatePending = false;
   private integrationStepCount = 0;
+  private settledStepCount = 0;
 
   constructor(
     private readonly dimensions: GraphDimensionsV1,
@@ -170,13 +176,15 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       this.alpha = 1;
       this.alphaTarget = 0;
       this.running = true;
+      this.settledStepCount = 0;
       this.restoredStatePending = false;
       return;
     }
     for (const [id, velocity] of restoredVelocities) this.velocities.set(id, velocity);
-    this.alpha = Math.max(0, state.alpha);
-    this.alphaTarget = finiteCoordinate(state.alphaTarget) ? Math.max(0, state.alphaTarget) : 0;
+    this.alpha = clampNumber(state.alpha, 0, 1, 0);
+    this.alphaTarget = finiteCoordinate(state.alphaTarget) ? clampNumber(state.alphaTarget, 0, 1, 0) : 0;
     this.running = state.running;
+    this.settledStepCount = 0;
     this.restoredStatePending = true;
   }
 
@@ -292,7 +300,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   private applyComponentCentering(): void {
-    const amount = this.settings.centeringStrength * this.alpha;
+    const amount = this.settings.centeringStrength * FORCE_INTEGRATION_GAIN;
     if (amount <= 0) return;
     for (const component of this.topology?.components ?? []) {
       if (component.nodeIds.some((nodeId) => this.pinned.has(nodeId))) continue;
@@ -342,7 +350,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
         const length = Math.max(0.001, Math.hypot(dx, dy, dz));
         const amount = region.membershipStrength
           * Math.tanh((length - region.membershipDistance) / 36)
-          * this.alpha / length;
+          * FORCE_INTEGRATION_GAIN / length;
         const memberDivisor = Math.max(1, memberCounts.get(memberId) ?? 1);
         ownerForce.x += dx * amount / ownerDivisor;
         ownerForce.y += dy * amount / ownerDivisor;
@@ -359,25 +367,43 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     deltaSeconds: number,
     dragActive: boolean,
   ): GraphModuleTickResultV1 | undefined {
-    this.alphaTarget = dragActive ? this.activeDragAlpha(state) : 0;
-    // Drag begins a bounded interactive heating phase. Do not carry hotter
-    // startup or document-change heat into direct manipulation, where it would
-    // compound with deliberately strong incident links.
-    if (dragActive && !this.dragWasActive) this.alpha = this.alphaTarget;
+    this.alphaTarget = dragActive ? ACTIVE_DRAG_ACTIVITY : 0;
+    // Alpha is a bounded simulation-time scale. Forces always calculate one
+    // ordinary step, then the whole state transition is blended by alpha so
+    // reheating changes only speed, never the force field or its equilibrium.
+    if (dragActive) this.alpha = ACTIVE_DRAG_ACTIVITY;
     this.dragWasActive = dragActive;
-    this.accumulatorSeconds += Math.max(0, Math.min(0.25, deltaSeconds || FIXED_STEP_SECONDS));
-    if (this.accumulatorSeconds + 1e-12 < FIXED_STEP_SECONDS) return {
-      requestNextFrame: true,
-      nextFrameDelayMs: this.targetFrameIntervalMs(dragActive),
-    };
+    if (dragActive) this.settledStepCount = 0;
+    const elapsedSeconds = Math.max(0, Math.min(0.25, deltaSeconds || FIXED_STEP_SECONDS));
+    if (!dragActive && this.alpha < this.settings.alphaMin) {
+      this.stop();
+      return { requestNextFrame: false };
+    }
+    this.accumulatorSeconds += elapsedSeconds;
+    if (this.accumulatorSeconds + 1e-12 < FIXED_STEP_SECONDS) {
+      this.coolBy(elapsedSeconds, dragActive);
+      return {
+        requestNextFrame: this.running,
+        ...(this.running ? { nextFrameDelayMs: this.targetFrameIntervalMs(dragActive) } : {}),
+      };
+    }
     this.accumulatorSeconds = Math.min(
       FIXED_STEP_SECONDS - 1e-12,
       Math.max(0, this.accumulatorSeconds - FIXED_STEP_SECONDS),
     );
     let changed = false;
+    let maximumMovement = 0;
     {
       this.integrationStepCount += 1;
-      this.alpha += (this.alphaTarget - this.alpha) * this.settings.alphaDecay;
+      const integrationScale = clampNumber(this.alpha, 0, 1, 0);
+      for (const node of state.document.nodes) {
+        const velocity = this.velocities.get(node.id)!;
+        let previous = this.previousVelocities.get(node.id);
+        if (!previous) this.previousVelocities.set(node.id, previous = { x: 0, y: 0, z: 0 });
+        previous.x = velocity.x;
+        previous.y = velocity.y;
+        previous.z = velocity.z;
+      }
       this.applyD3Origin(state);
       this.applyD3Links(state);
       this.applyD3ManyBody();
@@ -394,23 +420,32 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
         velocity.y *= 1 - this.settings.velocityDecay;
         velocity.z = this.dimensions === '2d' ? 0 : velocity.z * (1 - this.settings.velocityDecay);
         clampVelocity(velocity, this.settings.maxSpeed, this.dimensions);
+        const previous = this.previousVelocities.get(node.id)!;
+        const fullStepVelocity = { x: velocity.x, y: velocity.y, z: velocity.z };
+        velocity.x = previous.x + (fullStepVelocity.x - previous.x) * integrationScale;
+        velocity.y = previous.y + (fullStepVelocity.y - previous.y) * integrationScale;
+        velocity.z = this.dimensions === '2d'
+          ? 0
+          : previous.z + (fullStepVelocity.z - previous.z) * integrationScale;
         const position = this.positions[node.id];
-        const movement = Math.hypot(velocity.x, velocity.y, velocity.z);
+        const movementX = fullStepVelocity.x * integrationScale;
+        const movementY = fullStepVelocity.y * integrationScale;
+        const movementZ = this.dimensions === '2d' ? 0 : fullStepVelocity.z * integrationScale;
+        const movement = Math.hypot(movementX, movementY, movementZ);
+        maximumMovement = Math.max(maximumMovement, movement);
         if (movement > 0.00001) changed = true;
-        position.x += velocity.x;
-        position.y += velocity.y;
-        position.z = this.dimensions === '2d' ? 0 : position.z + velocity.z;
+        position.x += movementX;
+        position.y += movementY;
+        position.z = this.dimensions === '2d' ? 0 : position.z + movementZ;
       }
     }
-    if (!dragActive && this.alpha < this.settings.alphaMin) {
-      this.running = false;
-      this.alpha = 0;
-      this.accumulatorSeconds = 0;
-      // Alpha controls how long a simulation runs. Without clearing the
-      // velocity reservoir, a zero-decay layout can store momentum forever
-      // and replay it on the next otherwise-unrelated reheat.
-      this.velocities.clear();
+    if (!dragActive) {
+      this.settledStepCount = maximumMovement <= SETTLED_MOVEMENT_EPSILON
+        ? this.settledStepCount + 1
+        : 0;
     }
+    this.coolBy(elapsedSeconds, dragActive);
+    if (!dragActive && this.settledStepCount >= SETTLED_STEP_COUNT) this.stop();
     return {
       ...(changed ? { positions: this.positions } : {}),
       requestNextFrame: this.running,
@@ -423,7 +458,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   private applyD3Origin(state: GraphModulePipelineStateV1): void {
-    const strength = this.settings.centeringStrength * this.alpha;
+    const strength = this.settings.centeringStrength * FORCE_INTEGRATION_GAIN;
     for (const node of state.document.nodes) {
       const position = this.positions[node.id];
       const velocity = this.velocities.get(node.id)!;
@@ -435,12 +470,12 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       const target = state.motionTargets?.nodePositions?.[node.id];
       const offset = state.motionTargets?.nodePositionOffsets?.[node.id];
       if (target) {
-        const targetStrength = clampNumber(state.motionTargets?.nodePositionStrength, 0, 1, 0.1) * this.alpha;
+        const targetStrength = clampNumber(state.motionTargets?.nodePositionStrength, 0, 1, 0.1) * FORCE_INTEGRATION_GAIN;
         velocity.x += (target.x - position.x) * targetStrength;
         velocity.y += (target.y - position.y) * targetStrength;
         if (this.dimensions === '3d') velocity.z += (target.z - position.z) * targetStrength;
       } else if (offset) {
-        const targetStrength = clampNumber(state.motionTargets?.nodePositionStrength, 0, 1, 0.1) * this.alpha;
+        const targetStrength = clampNumber(state.motionTargets?.nodePositionStrength, 0, 1, 0.1) * FORCE_INTEGRATION_GAIN;
         velocity.x += offset.x * targetStrength;
         velocity.y += offset.y * targetStrength;
         if (this.dimensions === '3d') velocity.z += offset.z * targetStrength;
@@ -473,7 +508,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       // step and feeds an inverted error into the next one. Preserve the
       // reviewed force equation throughout its stable range, while treating 1
       // as the strongest meaningful per-step positional correction.
-      const correction = Math.min(MAX_LINK_CORRECTION_PER_STEP, this.alpha * strength);
+      const correction = Math.min(MAX_LINK_CORRECTION_PER_STEP, FORCE_INTEGRATION_GAIN * strength);
       const amount = (length - targetLength) / length * correction;
       dx *= amount; dy *= amount; dz *= amount;
       targetVelocity.x -= dx * pair.bias; targetVelocity.y -= dy * pair.bias; targetVelocity.z -= dz * pair.bias;
@@ -481,21 +516,6 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       clampVelocity(sourceVelocity, this.settings.maxSpeed, this.dimensions);
       clampVelocity(targetVelocity, this.settings.maxSpeed, this.dimensions);
     }
-  }
-
-  private activeDragAlpha(state: GraphModulePipelineStateV1): number {
-    const draggedNodeId = state.draggedNodeId;
-    if (!draggedNodeId) return NATIVE_ACTIVE_DRAG_ALPHA;
-    let strongestIncidentLink = 0;
-    for (const pair of this.springs) {
-      if (pair.sourceId !== draggedNodeId && pair.targetId !== draggedNodeId) continue;
-      strongestIncidentLink = Math.max(strongestIncidentLink, this.resolvedLinkStrength(pair, state));
-    }
-    if (strongestIncidentLink <= 0) return NATIVE_ACTIVE_DRAG_ALPHA;
-    return Math.min(
-      NATIVE_ACTIVE_DRAG_ALPHA,
-      MAX_ACTIVE_DRAG_LINK_CORRECTION / strongestIncidentLink,
-    );
   }
 
   private resolvedLinkStrength(
@@ -539,7 +559,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     const size = cell.halfSize * 2;
     if (!cell.children || size * size / squared < thetaSquared) {
       if (squared < minimumSquared) squared = Math.sqrt(minimumSquared * squared);
-      const factor = this.settings.repulsionStrength * cell.mass * this.alpha / squared;
+      const factor = this.settings.repulsionStrength * cell.mass * FORCE_INTEGRATION_GAIN / squared;
       velocity.x += dx * factor;
       velocity.y += dy * factor;
       velocity.z += dz * factor;
@@ -565,7 +585,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   private applyAxialSpring(): void {
     if (this.dimensions !== '3d' || this.settings.axialSpringAxis === 'off') return;
-    const amount = this.settings.axialSpringStiffness * 0.1 * this.alpha;
+    const amount = this.settings.axialSpringStiffness * 0.1 * FORCE_INTEGRATION_GAIN;
     if (amount <= 0) return;
     const axis = this.settings.axialSpringAxis;
     for (const [nodeId, position] of Object.entries(this.positions)) {
@@ -631,7 +651,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       dx = jitter.x * 1e-6; dy = jitter.y * 1e-6; dz = jitter.z * 1e-6;
       distance = Math.hypot(dx, dy, dz);
     }
-    const amount = (minimum - distance) / distance * this.settings.collisionStrength * 0.5;
+    const amount = (minimum - distance) / distance
+      * this.settings.collisionStrength * 0.5 * FORCE_INTEGRATION_GAIN;
     const av = this.velocities.get(nodeId)!;
     const bv = this.velocities.get(otherId)!;
     av.x += dx * amount; av.y += dy * amount; av.z += dz * amount;
@@ -642,6 +663,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   dispose(): void {
     this.velocities.clear();
+    this.previousVelocities.clear();
     this.forces.clear();
     this.positions = {};
     this.positionSource = null;
@@ -663,6 +685,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       alpha: this.alpha,
       running: this.running,
       targetStepRateHz: forceLayoutTargetStepRateHzV1(this.alpha, this.running),
+      effectiveStepRateHz: this.running ? 30 * clampNumber(this.alpha, 0, 1, 0) : 0,
       integrationStepCount: this.integrationStepCount,
     };
   }
@@ -676,6 +699,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     if (topologyChanged) {
       for (const id of Object.keys(this.positions)) if (!known.has(id)) delete this.positions[id];
       for (const id of [...this.velocities.keys()]) if (!known.has(id)) this.velocities.delete(id);
+      for (const id of [...this.previousVelocities.keys()]) if (!known.has(id)) this.previousVelocities.delete(id);
       for (const id of [...this.forces.keys()]) if (!known.has(id)) this.forces.delete(id);
     }
     for (const node of state.document.nodes) {
@@ -694,8 +718,26 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   private reheatForChange(): void {
-    this.alpha = Math.max(this.alpha, 0.3);
+    this.alpha = 1;
     this.running = true;
+    this.settledStepCount = 0;
+  }
+
+  private coolBy(elapsedSeconds: number, dragActive: boolean): void {
+    if (dragActive) return;
+    this.alpha = Math.max(0, this.alpha - this.settings.alphaDecay * elapsedSeconds);
+    if (this.alpha < this.settings.alphaMin) this.stop();
+  }
+
+  private stop(): void {
+    this.running = false;
+    this.alpha = 0;
+    this.alphaTarget = 0;
+    this.accumulatorSeconds = 0;
+    this.settledStepCount = 0;
+    // Frozen layouts cannot retain momentum that might replay on a later thaw.
+    this.velocities.clear();
+    this.previousVelocities.clear();
   }
 }
 
@@ -710,7 +752,7 @@ export function readForceSettings(settings: Readonly<Record<string, JsonValue>>)
     springLength: finitePositive(settings.springLength, 250),
     centeringStrength: finiteNonNegative(settings.centeringStrength, 0.1),
     velocityDecay: clampNumber(settings.velocityDecay ?? settings.damping, 0, 1, 0.4),
-    alphaDecay: clampNumber(settings.alphaDecay, 0, 1, 0.02276277904418933),
+    alphaDecay: clampNumber(settings.alphaDecay, 0, 1, DEFAULT_ALPHA_DECAY_PER_SECOND),
     alphaMin: finitePositive(settings.alphaMin, 0.001),
     repulsionMinDistance: finitePositive(settings.repulsionMinDistance, 30),
     barnesHutTheta: finitePositive(settings.barnesHutTheta, 0.9),

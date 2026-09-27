@@ -210,18 +210,6 @@ export class GraphPlusConsumerV1<TFile> {
     return true;
   }
 
-  async followActiveNode(nodeId: string): Promise<boolean> {
-    if (!this.session || !this.document) return false;
-    if (!this.document.nodes.some((node) => node.id === nodeId)) await this.reconcile();
-    if (!this.session || !this.document?.nodes.some((node) => node.id === nodeId)) return false;
-    this.transientRevealNodeId = nodeId;
-    await this.session.clearPreview();
-    await this.applyFilter();
-    await this.session.setSelection([nodeId]);
-    await this.session.focusNode(nodeId);
-    return true;
-  }
-
   async mindMapFromNode(nodeId: string): Promise<void> {
     if (!this.document?.nodes.some((node) => node.id === nodeId)) return;
     const next: GraphPlusLensStateV1 = {
