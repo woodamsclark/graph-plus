@@ -1,4 +1,4 @@
-import { GraphCameraController, type ProjectedGraphPointV1 } from '../camera/index.ts';
+import { Vision, type ProjectedGraphPointV1 } from '../vision/index.ts';
 import type { GraphFrameStore } from './GraphFrameStore.ts';
 import type {
   GraphPickRequestV2,
@@ -39,7 +39,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   readonly backendId = 'canvas2d' as const;
   readonly interactionElement: HTMLElement;
   private context!: CanvasRenderingContext2D;
-  private camera!: GraphCameraController;
+  private vision!: Vision;
   private frames?: GraphFrameStore;
   private scene: GraphRenderSceneV2 | null = null;
   private readonly now: () => number;
@@ -49,9 +49,9 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   private readonly hitGrid = new Map<string, ProjectedNode[]>();
   private readonly hitCellSize = 32;
   private indexedFrame: GraphRenderFrameV1 | null = null;
-  private indexedCameraKey = '';
+  private indexedVisionKey = '';
   private projectedGeometryRevision = -1;
-  private projectedGeometryCameraKey = '';
+  private projectedGeometryVisionKey = '';
   private projectedGeometry: readonly ProjectedGeometry[] = [];
   private projectionCacheHits = 0;
   private readonly regionContourCache = new Map<string, {
@@ -62,17 +62,17 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   private height = 0;
 
   constructor(canvas: HTMLCanvasElement, now: () => number);
-  constructor(canvas: HTMLCanvasElement, camera: GraphCameraController, frames: GraphFrameStore, now: () => number);
+  constructor(canvas: HTMLCanvasElement, vision: Vision, frames: GraphFrameStore, now: () => number);
   constructor(
     private readonly canvas: HTMLCanvasElement,
-    cameraOrNow: GraphCameraController | (() => number),
+    visionOrNow: Vision | (() => number),
     frames?: GraphFrameStore,
     now?: () => number,
   ) {
     this.interactionElement = canvas;
-    this.now = typeof cameraOrNow === 'function' ? cameraOrNow : (now ?? (() => performance.now()));
-    if (typeof cameraOrNow !== 'function') {
-      this.camera = cameraOrNow;
+    this.now = typeof visionOrNow === 'function' ? visionOrNow : (now ?? (() => performance.now()));
+    if (typeof visionOrNow !== 'function') {
+      this.vision = visionOrNow;
       this.frames = frames;
       this.initialize();
     }
@@ -104,7 +104,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     if (!frame) {
       this.hitGrid.clear();
       this.indexedFrame = null;
-      this.indexedCameraKey = '';
+      this.indexedVisionKey = '';
       return emptyRenderTiming();
     }
     this.clear(frame);
@@ -115,7 +115,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     const visible = projected.filter(({ point, radius }) => circleIntersectsViewport(point.x, point.y, radius + 4, this.width, this.height));
     this.rebuildHitGrid(visible);
     this.indexedFrame = frame;
-    this.indexedCameraKey = this.cameraKey();
+    this.indexedVisionKey = this.visionKey();
     const projectionMs = elapsed(projectionStart, this.now());
     const regionStart = this.now();
     this.drawRegions(frame, renderNodeById);
@@ -136,18 +136,18 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     readonly depth: number;
   } | null {
     const frame = this.currentFrame();
-    const cameraKey = this.cameraKey();
-    if (frame && (frame !== this.indexedFrame || cameraKey !== this.indexedCameraKey)) {
+    const visionKey = this.visionKey();
+    if (frame && (frame !== this.indexedFrame || visionKey !== this.indexedVisionKey)) {
       const visible = this.projectFrame(frame)
         .filter(({ point: projected, radius }) =>
           circleIntersectsViewport(projected.x, projected.y, radius + 4, this.width, this.height));
       this.rebuildHitGrid(visible);
       this.indexedFrame = frame;
-      this.indexedCameraKey = cameraKey;
+      this.indexedVisionKey = visionKey;
     }
     const minimumTouchRadius = pointerKind === 'touch' && frame !== null
       && renderPolicy(frame).minimumPerspectiveTouchHitRadius !== undefined
-      && this.camera.getState().projection === 'perspective'
+      && this.vision.getState().projection === 'perspective'
       ? renderPolicy(frame).minimumPerspectiveTouchHitRadius!
       : 0;
     const candidates = this.hitCandidates(point.x, point.y, minimumTouchRadius);
@@ -194,9 +194,9 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
 
   updateScene(scene: GraphRenderSceneV2): void {
     this.scene = scene;
-    if (!this.camera) this.camera = new GraphCameraController(scene.view.camera, scene.view.dimensions);
-    else this.camera.setState(scene.view.camera);
-    this.camera.setViewport(scene.view.viewport.width, scene.view.viewport.height);
+    if (!this.vision) this.vision = new Vision(scene.view.camera, scene.view.dimensions);
+    else this.vision.setState(scene.view.camera);
+    this.vision.setViewport(scene.view.viewport.width, scene.view.viewport.height);
   }
 
   pick(request: GraphPickRequestV2) {
@@ -232,15 +232,15 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   }
 
   private projectFrame(frame: GraphRenderFrameV1): readonly ProjectedNode[] {
-    const cameraKey = this.cameraKey();
+    const visionKey = this.visionKey();
     if (
       frame.geometryRevision !== undefined
       && frame.geometryRevision === this.projectedGeometryRevision
-      && cameraKey === this.projectedGeometryCameraKey
+      && visionKey === this.projectedGeometryVisionKey
     ) {
       this.projectionCacheHits += 1;
       const nodes = new Map(frame.nodes.map((node) => [node.id, node] as const));
-      const projection = this.camera.getState().projection;
+      const projection = this.vision.getState().projection;
       return this.projectedGeometry.flatMap(({ id, point }) => {
         const node = nodes.get(id);
         return node ? [{ node, point, radius: projectedRadius(
@@ -248,10 +248,10 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
         ) }] : [];
       });
     }
-    const projection = this.camera.getState().projection;
+    const projection = this.vision.getState().projection;
     const projected = frame.nodes
       .map((node) => {
-        const point = this.camera.worldToScreen(node.position);
+        const point = this.vision.worldToScreen(node.position);
         return { node, point, radius: projectedRadius(
           frame, node.radius, point.scale, projection, node.nodeScaleExponent,
         ) };
@@ -259,7 +259,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       .filter(({ point }) => point.depth > 0)
       .sort((a, b) => b.point.depth - a.point.depth);
     this.projectedGeometryRevision = frame.geometryRevision ?? -1;
-    this.projectedGeometryCameraKey = cameraKey;
+    this.projectedGeometryVisionKey = visionKey;
     this.projectedGeometry = projected.map(({ node, point }) => ({ id: node.id, point }));
     return projected;
   }
@@ -302,9 +302,9 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     return `${Math.floor(x / this.hitCellSize)}:${Math.floor(y / this.hitCellSize)}`;
   }
 
-  private cameraKey(): string {
-    const state = this.camera.getState();
-    const viewport = this.camera.getViewport();
+  private visionKey(): string {
+    const state = this.vision.getState();
+    const viewport = this.vision.getViewport();
     return [
       state.position.x, state.position.y, state.position.z,
       state.target.x, state.target.y, state.target.z,
@@ -367,7 +367,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       right.memberNodeIds.length - left.memberNodeIds.length || left.id.localeCompare(right.id))) {
       const contour = this.regionContour(region, nodes);
       const projected = contour
-        .map((position) => this.camera.worldToScreen(position))
+        .map((position) => this.vision.worldToScreen(position))
         .filter((point) => point.depth > 0);
       if (projected.length < 3) continue;
       this.traceSmoothClosedPath(projected);
@@ -468,9 +468,9 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     if (mode === 'all' || mode === 'off') {
       acceptedCandidates = candidates;
     } else {
-      const cameraState = this.camera.getState();
+      const cameraState = this.vision.getState();
       const zoom = cameraState.projection === 'perspective'
-        ? this.camera.worldToScreen(cameraState.target).scale
+        ? this.vision.worldToScreen(cameraState.target).scale
         : Math.max(0.1, cameraState.zoom);
       const saliency = Math.max(0, Math.min(100,
         renderPolicy(frame).adaptiveLabelSaliency
@@ -504,7 +504,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       const offset = node.labelOffset ?? { x: 0, y: 0 };
       this.context.globalAlpha = clampOpacity(node.labelOpacity);
       this.context.fillStyle = this.colorCss(node.labelColor);
-      const font = nodeFont(frame, node, this.camera.getState().zoom, this.camera.getState().projection);
+      const font = nodeFont(frame, node, this.vision.getState().zoom, this.vision.getState().projection);
       this.context.font = font;
       this.context.fillText(node.label, point.x + offset.x, labelTop(frame, point.y, radius, font) + offset.y);
     }
@@ -514,7 +514,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   }
 
   private labelBounds(frame: GraphRenderFrameV1, value: ProjectedNode): LabelBounds {
-    this.context.font = nodeFont(frame, value.node, this.camera.getState().zoom, this.camera.getState().projection);
+    this.context.font = nodeFont(frame, value.node, this.vision.getState().zoom, this.vision.getState().projection);
     const cacheKey = `${this.context.font}\u0000${value.node.label}`;
     let width = this.textWidthCache.get(cacheKey);
     if (width === undefined) {

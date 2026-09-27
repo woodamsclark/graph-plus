@@ -16,6 +16,22 @@ export interface ProjectedGraphPointV1 {
   readonly scale: number;
 }
 
+export interface Orientation {
+  readonly forward: Vec3;
+  readonly up: Vec3;
+}
+
+export interface Pose {
+  readonly position: Vec3;
+  readonly orientation: Orientation;
+}
+
+export interface VisionState {
+  readonly pose: Pose;
+  readonly zoom: number;
+  readonly projection: GraphCameraStateV1['projection'];
+}
+
 const MIN_ZOOM = 0.02;
 const MAX_ZOOM = 40;
 const MIN_PERSPECTIVE_DISTANCE = 10;
@@ -25,9 +41,12 @@ const DEFAULT_PERSPECTIVE_ZOOM = 50 / 24;
 const MIN_PROJECTED_SCALE = 0.02;
 const MAX_PROJECTED_SCALE = 40;
 
-export class GraphCameraController {
+/**
+ * Mechanical viewpoint and projection controller. Vision knows geometry, not
+ * selection, focus, or why a world-space point has Ego's attention.
+ */
+export class Vision {
   private state: GraphCameraStateV1;
-  private orbitTarget?: Vec3;
   private viewport: GraphViewportV1 = { width: 0, height: 0 };
 
   constructor(state: GraphCameraStateV1, private dimensions: GraphDimensionsV1) {
@@ -38,14 +57,27 @@ export class GraphCameraController {
     return cloneCamera(this.state);
   }
 
+  getVisionState(): VisionState {
+    const basis = cameraBasis(this.state);
+    return {
+      pose: {
+        position: { ...this.state.position },
+        orientation: {
+          forward: { ...basis.forward },
+          up: { ...basis.up },
+        },
+      },
+      zoom: this.state.zoom,
+      projection: this.state.projection,
+    };
+  }
+
   setState(state: GraphCameraStateV1): void {
     this.state = cloneCamera(state);
-    this.orbitTarget = undefined;
   }
 
   reconfigure(state: GraphCameraStateV1, dimensions: GraphDimensionsV1): void {
     this.state = cloneCamera(state);
-    this.orbitTarget = undefined;
     this.dimensions = dimensions;
   }
 
@@ -131,33 +163,18 @@ export class GraphCameraController {
   }
 
   /** Preserve framing while inheriting a world-space translation. */
-  translateBy(delta: Vec3, moveOrbitTarget = true): void {
+  translateBy(delta: Vec3): void {
     if (![delta.x, delta.y, delta.z].every(Number.isFinite)) return;
     this.state = {
       ...this.state,
       position: add(this.state.position, delta),
       target: add(this.state.target, delta),
     };
-    if (moveOrbitTarget && this.orbitTarget) this.orbitTarget = add(this.orbitTarget, delta);
   }
 
-  /** Change only the future orbit origin; preserve the current camera framing exactly. */
-  retarget(point: Vec3 | undefined): void {
-    if (point === undefined) {
-      this.orbitTarget = undefined;
-      return;
-    }
-    if (![point.x, point.y, point.z].every(Number.isFinite)) return;
-    this.orbitTarget = { ...point };
-  }
-
-  getOrbitTarget(): Vec3 {
-    return { ...(this.orbitTarget ?? this.state.target) };
-  }
-
-  orbitByPixels(deltaX: number, deltaY: number): void {
+  orbitByPixels(deltaX: number, deltaY: number, attentionPoint?: Vec3): void {
     if (this.dimensions !== '3d' || this.state.projection !== 'perspective') return;
-    const pivot = this.orbitTarget ?? this.state.target;
+    const pivot = validPoint(attentionPoint) ? attentionPoint : this.state.target;
     const basis = cameraBasis(this.state);
     const yaw = -deltaX * 0.005;
     const pitch = -deltaY * 0.005;
@@ -186,10 +203,14 @@ export class GraphCameraController {
     };
   }
 
-  zoomByWheel(deltaY: number, anchor?: { readonly x: number; readonly y: number }): void {
+  zoomByWheel(
+    deltaY: number,
+    anchor?: { readonly x: number; readonly y: number },
+    attentionPoint?: Vec3,
+  ): void {
     const validAnchor = anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y) ? anchor : undefined;
-    if (!validAnchor && this.orbitTarget) {
-      this.zoomAroundTarget(deltaY, this.orbitTarget);
+    if (!validAnchor && validPoint(attentionPoint)) {
+      this.zoomAroundTarget(deltaY, attentionPoint);
       return;
     }
     const anchorWorld = validAnchor && this.viewport.width > 0 && this.viewport.height > 0
@@ -279,7 +300,6 @@ export class GraphCameraController {
       target: { ...target },
       position: preserveView ? add(this.state.position, translation) : this.state.position,
     };
-    this.orbitTarget = undefined;
   }
 
   fit(
@@ -311,7 +331,6 @@ export class GraphCameraController {
       }
       const offset = subtract(this.state.position, this.state.target);
       this.state = { ...this.state, target, position: add(target, offset), zoom };
-      this.orbitTarget = undefined;
       return;
     }
 
@@ -327,7 +346,6 @@ export class GraphCameraController {
       target,
       position: add(target, scaleVector(backwards, distanceForFit)),
     };
-    this.orbitTarget = undefined;
   }
 
   /** Prevent zooming farther out than a focus-centered world-space radius. */
@@ -366,6 +384,7 @@ export class GraphCameraController {
     };
   }
 }
+
 
 interface CameraBasis {
   readonly right: Vec3;
@@ -450,6 +469,10 @@ function distance(a: Vec3, b: Vec3): number {
 function normalize(vector: Vec3): Vec3 {
   const magnitude = length(vector);
   return magnitude > 0.000001 ? scaleVector(vector, 1 / magnitude) : { x: 0, y: 0, z: -1 };
+}
+
+function validPoint(point: Vec3 | undefined): point is Vec3 {
+  return point !== undefined && [point.x, point.y, point.z].every(Number.isFinite);
 }
 
 function clamp(value: number, min: number, max: number): number {

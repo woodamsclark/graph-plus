@@ -1,5 +1,5 @@
 import type { GraphCameraStateV1 } from '../../src/graph-engine/contracts/v1/index.ts';
-import { GraphCameraController } from '../../src/graph-engine/runtime/camera/index.ts';
+import { GraphCameraController, Vision } from '../../src/graph-engine/runtime/camera/index.ts';
 import { GraphFrameStore, DEFAULT_GRAPH_RENDER_THEME_V1 } from '../../src/graph-engine/runtime/render/index.ts';
 import { GraphHitTester } from '../../src/graph-engine/runtime/interaction/GraphHitTester.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
@@ -57,7 +57,7 @@ test('R-CAMERA-02 perspective dolly scales nodes without changing the default si
   equal(camera.worldToScreen({ x: 0, y: 0, z: 0 }).scale, 2, 'dollying to half the depth should double projected node radius');
 });
 
-test('camera retarget changes the orbit origin without recentering or refitting', () => {
+test('Vision orbits around explicit Ego attention without storing or reframing it', () => {
   const initial: GraphCameraStateV1 = {
     position: { x: 30, y: 20, z: 100 },
     target: { x: 10, y: -5, z: 0 },
@@ -65,51 +65,69 @@ test('camera retarget changes the orbit origin without recentering or refitting'
     zoom: 50 / 24,
     projection: 'perspective',
   };
-  const camera = new GraphCameraController(initial, '3d');
-  camera.setViewport(640, 360);
+  const vision = new Vision(initial, '3d');
+  vision.setViewport(640, 360);
   const pivot = { x: -40, y: 25, z: 10 };
-  const pivotBefore = camera.worldToScreen(pivot);
+  const pivotBefore = vision.worldToScreen(pivot);
   const ordinaryPoint = { x: 80, y: -15, z: 5 };
-  const ordinaryBefore = camera.worldToScreen(ordinaryPoint);
+  const ordinaryBefore = vision.worldToScreen(ordinaryPoint);
 
-  camera.retarget(pivot);
-  deepEqual(camera.getState(), initial, 'retarget must preserve the complete serialized camera framing');
-  deepEqual(camera.worldToScreen(pivot), pivotBefore, 'retarget must not move its new pivot on screen');
-  deepEqual(camera.worldToScreen(ordinaryPoint), ordinaryBefore, 'retarget must not move any graph content on screen');
-  deepEqual(camera.getOrbitTarget(), pivot, 'retarget should retain the requested future orbit origin');
+  deepEqual(vision.getState(), initial, 'supplying attention must not mutate serialized framing before an operation');
+  deepEqual(vision.worldToScreen(pivot), pivotBefore, 'attention alone must not move its pivot on screen');
+  deepEqual(vision.worldToScreen(ordinaryPoint), ordinaryBefore, 'attention alone must not move graph content');
 
-  camera.orbitByPixels(28, -16);
-  const pivotAfter = camera.worldToScreen(pivot);
+  vision.orbitByPixels(28, -16, pivot);
+  const pivotAfter = vision.worldToScreen(pivot);
   assert(Math.abs(pivotAfter.x - pivotBefore.x) < 1e-9 && Math.abs(pivotAfter.y - pivotBefore.y) < 1e-9,
-    'orbiting after retarget should keep the off-center pivot fixed on screen');
-  assert(JSON.stringify(camera.getState().position) !== JSON.stringify(initial.position),
-    'orbiting after retarget should move the camera around the new pivot');
+    'orbiting around attention should keep the off-center pivot fixed on screen');
+  assert(JSON.stringify(vision.getState().position) !== JSON.stringify(initial.position),
+    'orbiting around attention should move Vision around the supplied pivot');
 });
 
-test('unanchored zoom uses the retargeted camera pivot instead of the framing center', () => {
+test('unanchored zoom uses explicit Ego attention instead of the serialized framing center', () => {
   for (const [dimensions, projection] of [
     ['2d', 'orthographic'],
     ['3d', 'perspective'],
   ] as const) {
-    const camera = new GraphCameraController({
+    const vision = new Vision({
       position: { x: 30, y: 20, z: 100 },
       target: { x: 10, y: -5, z: 0 },
       up: { x: 0, y: 1, z: 0 },
       zoom: 50 / 24,
       projection,
     }, dimensions);
-    camera.setViewport(640, 360);
+    vision.setViewport(640, 360);
     const pivot = { x: -40, y: 25, z: 10 };
-    camera.retarget(pivot);
-    const before = camera.worldToScreen(pivot);
+    const before = vision.worldToScreen(pivot);
 
-    camera.zoomByWheel(-60);
+    vision.zoomByWheel(-60, undefined, pivot);
 
-    const after = camera.worldToScreen(pivot);
+    const after = vision.worldToScreen(pivot);
     assert(Math.abs(after.x - before.x) < 1e-9 && Math.abs(after.y - before.y) < 1e-9,
-      `${projection} target-centered zoom should keep the retargeted pivot fixed on screen`);
-    deepEqual(camera.getOrbitTarget(), pivot, `${projection} zoom should retain the retargeted camera pivot`);
+      `${projection} target-centered zoom should keep Ego attention fixed on screen`);
   }
+});
+
+test('Vision exposes pose orientation without treating the serialized look-at point as attention', () => {
+  const vision = new Vision({
+    position: { x: 10, y: 20, z: 30 },
+    target: { x: 10, y: 20, z: 20 },
+    up: { x: 0, y: 1, z: 0 },
+    zoom: 2,
+    projection: 'perspective',
+  }, '3d');
+
+  deepEqual(vision.getVisionState(), {
+    pose: {
+      position: { x: 10, y: 20, z: 30 },
+      orientation: {
+        forward: { x: 0, y: 0, z: -1 },
+        up: { x: 0, y: 1, z: 0 },
+      },
+    },
+    zoom: 2,
+    projection: 'perspective',
+  }, 'runtime Vision should expose position plus forward/up orientation');
 });
 
 test('focus fitting caps magnification in orthographic and perspective cameras', () => {

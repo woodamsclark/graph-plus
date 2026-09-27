@@ -1,10 +1,10 @@
-import type { GraphCameraController } from '../camera/index.ts';
+import type { Vision } from '../vision/index.ts';
 import type { GraphFrameStore } from '../render/index.ts';
 import type { GraphHitV1, GraphScreenPointV1 } from './GraphInteractionTypes.ts';
 
 export class GraphHitTester {
   constructor(
-    private readonly camera: GraphCameraController,
+    private readonly vision: Vision,
     private readonly frames: GraphFrameStore,
   ) {}
 
@@ -14,7 +14,7 @@ export class GraphHitTester {
     let best: GraphHitV1 | null = null;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (const node of frame.nodes) {
-      const projected = this.camera.worldToScreen(node.position);
+      const projected = this.vision.worldToScreen(node.position);
       if (projected.depth <= 0) continue;
       const radius = node.radius * projected.scale;
       const distance = (point.x - projected.x) ** 2 + (point.y - projected.y) ** 2;

@@ -9,7 +9,7 @@ import type {
 } from '../../contracts/v1/index.ts';
 import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
 import type { AnimusEdgeRoleV1, AnimusNodeRoleV1, AnimusRegionV1 } from '../animus/index.ts';
-import type { EgoAwarenessV1 } from '../ego/index.ts';
+import type { Ego } from '../ego/index.ts';
 import type {
   GraphEdgeRenderContributionV1,
   GraphNodeRenderContributionV1,
@@ -51,7 +51,7 @@ export interface GraphModulePipelineStateV1 {
   readonly renderSelection: GraphFilterSelectionV1;
   readonly formActive: boolean;
   /** Singular semantic UI awareness, installed for frame composition. */
-  readonly ego?: EgoAwarenessV1;
+  readonly ego?: Ego;
   /** Runtime-only interaction state. It is never persisted or exported as graph data. */
   readonly draggedNodeId?: string;
   /** Runtime-only hover state supplied to presentation modules. */

@@ -1,6 +1,7 @@
 import {
   EGO_HIGHLIGHT_POLICY_V1,
   createAnimusSnapshotV1,
+  createEgo,
   createEgoAwarenessV1,
   createEgoUiContextV1,
   resolveEgoHighlightPolicyV1,
@@ -21,6 +22,20 @@ const baseViewState = {
   selectedNodeIds: [] as string[],
   pinnedNodeIds: [] as string[],
 };
+
+test('Ego owns selection attention while Vision remains outside the semantic model', () => {
+  const ego = createEgo({
+    viewState: { ...baseViewState, selectedNodeIds: ['a', 'c'] },
+    positions: {
+      a: { x: -10, y: 20, z: 4 },
+      c: { x: 30, y: 0, z: -2 },
+    },
+    document,
+  });
+
+  deepEqual([...ego.attention.nodeIds], ['a', 'c'], 'attention should retain its semantic node subjects');
+  deepEqual(ego.attention.point, { x: 10, y: 10, z: 1 }, 'attention should resolve the selected centroid');
+});
 
 test('Ego scopes Constellation highlighting to selected nodes', () => {
   const viewState = {

@@ -8,7 +8,8 @@ import type {
 } from '../../contracts/v1/index.ts';
 import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
 import { shortestPathToAnyV1 } from '../../core/topology/index.ts';
-import type { GraphCameraController } from '../camera/index.ts';
+import type { Vision } from '../vision/index.ts';
+import type { Attention } from '../ego/index.ts';
 import type { SessionRuntimePlatformV1 } from '../platform/index.ts';
 import type { SessionSurfaceV1 } from '../surface/index.ts';
 import { BufferedQueue } from './BufferedQueue.ts';
@@ -56,7 +57,8 @@ export class SessionInteractionRuntime {
     readonly platform: SessionRuntimePlatformV1;
     readonly surface: SessionSurfaceV1;
     readonly interactionElement: HTMLElement;
-    readonly camera: GraphCameraController;
+    readonly vision: Vision;
+    readonly getAttention: () => Attention;
     readonly hitTest: (
       point: GraphScreenPointV1,
       pointerKind?: 'mouse' | 'touch' | 'pen',
@@ -106,7 +108,7 @@ export class SessionInteractionRuntime {
           ? undefined
           : this.options.getInteractivePositions()[focusedNodeId];
         if (!position) return undefined;
-        const projected = this.options.camera.worldToScreen(position);
+        const projected = this.options.vision.worldToScreen(position);
         return { x: projected.x, y: projected.y };
       },
       getNodeSelection: (nodeId) => this.options.getNodeSelection(nodeId),
@@ -230,7 +232,7 @@ export class SessionInteractionRuntime {
     if (!this.commandBelongsToActiveDocument(command)) return;
     switch (command.type) {
       case 'pan-by':
-        this.options.camera.panByPixels(command.deltaX, command.deltaY);
+        this.options.vision.panByPixels(command.deltaX, command.deltaY);
         this.cameraChanged(command);
         return;
       case 'elastic-pan-by':
@@ -238,12 +240,12 @@ export class SessionInteractionRuntime {
         this.cameraChanged(command);
         return;
       case 'orbit-by':
-        this.options.camera.orbitByPixels(command.deltaX, command.deltaY);
+        this.options.vision.orbitByPixels(command.deltaX, command.deltaY, this.options.getAttention().point);
         this.cameraChanged(command);
         return;
       case 'zoom-by':
         this.captureFocusZoomBaseline();
-        this.options.camera.zoomByWheel(command.deltaY, command.anchor);
+        this.options.vision.zoomByWheel(command.deltaY, command.anchor, this.options.getAttention().point);
         this.constrainFocusZoomOut();
         this.cameraChanged(command);
         return;
@@ -420,22 +422,22 @@ export class SessionInteractionRuntime {
       : policy.fitTarget === 'selection'
         ? state.selectedNodeIds
         : [...this.options.getRenderSelection().nodeIds];
-    const centerNodeId = policy.cameraTarget === 'focused-node'
+    const centerNodeId = policy.fitCenter === 'focused-node'
       ? state.focusedNodeId
       : undefined;
     this.fitVisibleNodes(nodeIds, centerNodeId);
   }
 
   private elasticPan(deltaX: number, deltaY: number): void {
-    this.options.camera.panByPixels(deltaX * 0.55, deltaY * 0.55);
+    this.options.vision.panByPixels(deltaX * 0.55, deltaY * 0.55);
     const focusedNodeId = this.options.getViewState().focusedNodeId;
     const focusedPosition = focusedNodeId
       ? this.options.getInteractivePositions()[focusedNodeId]
       : undefined;
     if (!focusedPosition) return;
-    const target = this.options.camera.getState().target;
+    const target = this.options.vision.getState().target;
     const pull = subtract(focusedPosition, target);
-    this.options.camera.translateBy({ x: pull.x * 0.22, y: pull.y * 0.22, z: pull.z * 0.22 }, false);
+    this.options.vision.translateBy({ x: pull.x * 0.22, y: pull.y * 0.22, z: pull.z * 0.22 });
     this.scheduleElasticReturn();
   }
 
@@ -448,13 +450,13 @@ export class SessionInteractionRuntime {
         ? this.options.getInteractivePositions()[focusedNodeId]
         : undefined;
       if (!focusedPosition) return;
-      const target = this.options.camera.getState().target;
+      const target = this.options.vision.getState().target;
       const pull = subtract(focusedPosition, target);
       const remaining = vectorDistance(focusedPosition, target);
       if (remaining < 0.01) {
-        this.options.camera.translateBy(pull, false);
+        this.options.vision.translateBy(pull);
       } else {
-        this.options.camera.translateBy({ x: pull.x * 0.22, y: pull.y * 0.22, z: pull.z * 0.22 }, false);
+        this.options.vision.translateBy({ x: pull.x * 0.22, y: pull.y * 0.22, z: pull.z * 0.22 });
       }
       this.commitCamera();
       this.options.onViewStateChanged('camera');
@@ -473,20 +475,20 @@ export class SessionInteractionRuntime {
       const position = positions[nodeId];
       return position ? [vectorDistance(position, focusedPosition)] : [];
     }));
-    this.options.camera.constrainZoomOutToRadius(radius, 48, this.focusZoomBaseline?.camera);
+    this.options.vision.constrainZoomOutToRadius(radius, 48, this.focusZoomBaseline?.camera);
   }
 
   private captureFocusZoomBaseline(): void {
     const focusedNodeId = this.options.getViewState().focusedNodeId;
     if (!focusedNodeId || this.focusZoomBaseline?.nodeId === focusedNodeId) return;
-    this.focusZoomBaseline = { nodeId: focusedNodeId, camera: this.options.camera.getState() };
+    this.focusZoomBaseline = { nodeId: focusedNodeId, camera: this.options.vision.getState() };
   }
 
   private enterFocus(nodeId: string, command: GraphRuntimeCommandV1): void {
     if (this.options.getViewState().selectedNodeIds.length === 0) return;
     this.setFocus(nodeId, command);
     this.fitVisibleNodes(this.focusNeighborhoodNodeIds(nodeId), nodeId);
-    this.focusZoomBaseline = { nodeId, camera: this.options.camera.getState() };
+    this.focusZoomBaseline = { nodeId, camera: this.options.vision.getState() };
     this.emitViewportIntent(command);
   }
 
@@ -497,7 +499,7 @@ export class SessionInteractionRuntime {
   }
 
   private commitCamera(): void {
-    this.commit({ ...this.options.getViewState(), camera: this.options.camera.getState() });
+    this.commit({ ...this.options.getViewState(), camera: this.options.vision.getState() });
   }
 
   private fitVisibleNodes(
@@ -513,20 +515,20 @@ export class SessionInteractionRuntime {
     const center = centerNodeId === undefined
       ? selectionCentroid(candidates, positionsById)
       : positionsById[centerNodeId];
-    this.options.camera.fit(positions, 48, nodeIds === undefined ? undefined : 1.75, center);
+    this.options.vision.fit(positions, 48, nodeIds === undefined ? undefined : 1.75, center);
     this.commitCamera();
     this.options.onViewStateChanged('camera');
   }
 
   private centerCamera(): void {
     const positionsById = this.options.getInteractivePositions();
-    const candidates = this.cameraTargetNodeIds();
+    const candidates = this.attentionNodeIds();
     const centroid = selectionCentroid(candidates, positionsById);
     if (!centroid) return;
-    this.options.camera.translateBy(subtract(centroid, this.options.camera.getState().target), false);
+    this.options.vision.translateBy(subtract(centroid, this.options.vision.getState().target));
   }
 
-  private cameraTargetNodeIds(): readonly string[] {
+  private attentionNodeIds(): readonly string[] {
     const positionsById = this.options.getInteractivePositions();
     const selectedNodeIds = this.options.getViewState().selectedNodeIds
       .filter((nodeId) => positionsById[nodeId] !== undefined);
@@ -629,8 +631,8 @@ export class SessionInteractionRuntime {
     if (!this.options.isNodeDraggable(nodeId)) return;
     const position = this.options.getInteractivePositions()[nodeId];
     if (!position) return;
-    const projected = this.options.camera.worldToScreen(position);
-    const underPointer = this.options.camera.screenToWorld(point.x, point.y, projected.depth);
+    const projected = this.options.vision.worldToScreen(position);
+    const underPointer = this.options.vision.screenToWorld(point.x, point.y, projected.depth);
     const state = this.options.getViewState();
     const wasPinned = state.pinnedNodeIds.includes(nodeId);
     this.dragContext = {
@@ -649,14 +651,14 @@ export class SessionInteractionRuntime {
   private updateNodeDrag(nodeId: string, point: GraphScreenPointV1): void {
     if (!this.dragContext || this.dragContext.nodeId !== nodeId) return;
     const state = this.options.getViewState();
-    const underPointer = this.options.camera.screenToWorld(point.x, point.y, this.dragContext.depth);
+    const underPointer = this.options.vision.screenToWorld(point.x, point.y, this.dragContext.depth);
     const position = add(underPointer, this.dragContext.offset);
     const previousCentroid = selectionCentroid(state.selectedNodeIds, state.positions);
     const positions = { ...state.positions, [nodeId]: position };
     const nextCentroid = selectionCentroid(state.selectedNodeIds, positions);
     this.commit({ ...state, positions });
     if (previousCentroid && nextCentroid) {
-      this.options.camera.translateBy(subtract(nextCentroid, previousCentroid));
+      this.options.vision.translateBy(subtract(nextCentroid, previousCentroid));
     }
     this.commitCamera();
     this.options.onViewStateChanged('positions');
@@ -737,7 +739,7 @@ export class SessionInteractionRuntime {
     this.options.onIntent({
       ...this.intentBase(command),
       type: 'viewport-changed',
-      camera: this.options.camera.getState(),
+      camera: this.options.vision.getState(),
     });
   }
 

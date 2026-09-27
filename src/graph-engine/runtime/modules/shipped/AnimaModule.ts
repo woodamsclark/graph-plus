@@ -2,7 +2,7 @@ import type { JsonValue } from '../../../contracts/v1/index.ts';
 import { desaturateGraphColorV2, type GraphVisualThemeV2 } from '../../theme/index.ts';
 import type { GraphModuleInstanceV1, GraphModuleProjectionPatchV1 } from '../GraphModuleTypes.ts';
 import { GraphLabelManager, type GraphLabelRequestV1 } from './GraphLabelManager.ts';
-import { createEgoAwarenessV1, type EgoPresentationRoleV1 } from '../../ego/index.ts';
+import { createEgo, type EgoPresentationRoleV1 } from '../../ego/index.ts';
 
 const PRESENTATION_ROLE_OPACITY: Readonly<Record<
   EgoPresentationRoleV1,
@@ -60,8 +60,9 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const transientNeighborhood = transientId === undefined
       ? undefined
       : new Set([transientId, ...(relationships.get(transientId) ?? [])]);
-    const ego = state.ego ?? createEgoAwarenessV1({
+    const ego = state.ego ?? createEgo({
       viewState: state.viewState,
+      positions: state.positions,
       document: state.document,
       visibleNodeIds: state.renderSelection.nodeIds,
       visibleEdgeIds: state.renderSelection.edgeIds,

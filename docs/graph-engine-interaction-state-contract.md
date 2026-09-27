@@ -16,8 +16,9 @@ The policy is fixed in V1. It is not a consumer-configurable public API.
 
 Ego is the engine's singular UI awareness. It derives one immutable semantic context
 from Animus facts: active state, dimensions, selection, pins, focus, hover, drag,
-preview, and transient presentation conditions. The active Ego state contract owns
-camera, rendering-scope, navigation, and any state-scoped highlight override. Anima
+preview, and transient presentation conditions. Ego also resolves `Attention`: the
+selected node set and its current world-space centroid. The active Ego state contract
+owns attention, rendering-scope, navigation, and any state-scoped highlight override. Anima
 realizes Ego's semantic roles as concrete color, opacity, and geometry. Renderers
 receive only the resolved scene and never inspect selection, focus, or hover state.
 
@@ -29,11 +30,11 @@ construction as soon as the requesting UI state expires. Highlight policy does n
 force labels. Ego separately resolves label attention, and the label manager retains
 sizing, camera-range Saliency, and collision mechanics.
 
-| State | User meaning | Invariant | Rotation target | Center + Fit target |
+| State | User meaning | Invariant | Ego attention | Center + Fit target |
 | --- | --- | --- | --- | --- |
-| Overview | View the whole graph | No selection and no focused node | Graph centroid | Whole visible graph |
+| Overview | View the whole graph | No selection and no focused node | None; Vision retains its framing point | Whole visible graph |
 | Explore | Work with a selected constellation | One or more selected nodes and no focused node | Selection centroid | Current selection |
-| Focus | Inspect one local node | A non-empty selection and one focused node | Focused node | Focused node plus immediate neighbors |
+| Focus | Inspect one local node | A non-empty selection and one focused node | Selection centroid | Focused node plus immediate neighbors |
 
 A one-node selection is a constellation and enters Explore. Focus is entered only by
 an explicit focus operation; ordinary node clicks do not enter or move Focus. Focus is
@@ -76,18 +77,18 @@ preserves the camera, and clearing the constellation to return to Overview also
 preserves the camera. Center + Fit occurs only through an explicit framing action or
 when no compatible saved view exists for a new session.
 
-## 3. Camera contract
+## 3. Ego and Vision contract
 
-Retarget, Recenter, and Refit are three independent camera operations:
+Retarget, Recenter, and Refit are three independent operations:
 
-1. **Retarget** changes the world-space origin used by future camera rotation. It does
-   not change camera position, view direction, zoom, perspective distance, or the
-   current screen position of any graph content. This selection-derived rotation target
-   is also the target for unanchored trackpad and mobile pinch zoom. It is distinct from
-   the serialized framing center retained for compatibility as `camera.target`.
-2. **Recenter** translates the camera framing to the arithmetic centroid of the target,
+1. **Retarget** changes Ego's world-space Attention point. It does not mutate Vision,
+   camera position, orientation, zoom, perspective distance, or the current screen
+   position of any graph content. Vision receives this point explicitly for future
+   rotation and unanchored trackpad or mobile pinch zoom. It is distinct from the
+   serialized framing point retained for compatibility as `camera.target`.
+2. **Recenter** translates Vision framing to the arithmetic centroid of the target,
    or to the focused node in Focus. It does not reset camera angle or up vector.
-3. **Refit** adjusts orthographic zoom or perspective distance so the same target fits
+3. **Refit** adjusts Vision's orthographic zoom or perspective distance so the same target fits
    with padding. An explicit Center + Fit action performs Recenter and Refit together.
 
 State-aware targets are:
@@ -98,7 +99,7 @@ State-aware targets are:
 
 Explore follows selected-node motion by the selection-centroid delta while preserving
 framing. Every additive or subtractive selection edit recalculates the selection
-centroid and Retargets the camera to it without Recentering or Refitting: one selected
+centroid and redirects Ego's Attention without Recentering or Refitting: one selected
 node uses that node's position, while multiple selected nodes use their arithmetic
 centroid. Focus follows focused-node motion while preserving framing.
 
@@ -157,7 +158,7 @@ Anima animation kit. Until that kit exists, hover eligibility is immediate.
 | Two-finger scroll, 2D | Pan | Pan | Elastic pan |
 | Two-finger scroll, 3D | Pan | Rotate | Rotate |
 | Physical Ctrl-wheel | Zoom around pointer | Zoom around pointer | Zoom around pointer |
-| Trackpad pinch | Zoom around Retarget origin | Zoom around selection centroid | Zoom around focused node |
+| Trackpad pinch | Zoom around retained Vision framing point | Zoom around Ego Attention | Zoom around Ego Attention |
 | Cmd-wheel | State navigation; never zoom | State navigation; never zoom | State navigation; never zoom |
 | Stationary background secondary click | Center + Fit graph | Center + Fit selection | Center + Fit local neighborhood |
 | Stationary node secondary click | Node context menu | Node context menu | Node context menu |
@@ -198,9 +199,9 @@ in; moving toward the focused node zooms out.
 
 Two-finger translation and pinch are simultaneous controls. In 3D, centroid movement
 rotates while finger separation zooms; in 2D, centroid movement pans while finger
-separation zooms. The pinch component always uses the current Retarget origin rather
-than the touch centroid or serialized framing center. Focus retains its focused-node
-target during the combined 3D gesture.
+separation zooms. The pinch component uses Ego's current Attention point when selection
+exists, rather than the touch centroid or serialized framing point. Without directed
+Attention, Vision retains its current framing point.
 
 ## 7. Persistence and reopen
 
@@ -228,12 +229,18 @@ transitions and tests; it is not the reopen persistence policy.
 
 ## 8. Code ownership and regression locks
 
-The authoritative context, state contracts, global highlight policy, and highlight
-resolver live in `src/graph-engine/runtime/ego/GraphEgo.ts`. Input dispatch and camera
+The authoritative Ego, Attention, state contracts, global highlight policy, and highlight
+resolver live in `src/graph-engine/runtime/ego/GraphEgo.ts`. `Vision` owns only pose,
+projection, and geometric viewpoint operations. Input dispatch and Vision
 fitting/follow consume the compatibility projection in
 `runtime/interaction/GraphInteractionStatePolicy.ts`; it aliases Ego and owns no
 sibling table. Anima consumes resolved Ego awareness rather than expanding highlight
 neighborhoods or inventing state presentation locally.
+
+Runtime implementation names are unversioned (`Ego`, `Attention`, `Vision`, `Pose`,
+and `Orientation`). Public and persisted compatibility types retain their protocol
+suffixes, including `GraphCameraStateV1`; Vision converts that legacy look-at point
+into a forward orientation and never treats it as Ego Attention.
 
 Regression coverage is concentrated in:
 

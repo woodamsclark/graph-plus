@@ -5,6 +5,7 @@ export * from './anima/index.ts';
 export * from './animus/index.ts';
 export * from './host/index.ts';
 export * from './camera/index.ts';
+export * from './vision/index.ts';
 export * from './ego/index.ts';
 export * from './interaction/index.ts';
 export * from './modules/index.ts';

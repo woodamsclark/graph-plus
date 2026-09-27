@@ -32,7 +32,8 @@ facts look.
 
 ## Ego ownership
 
-Ego is the UI's center of activity: one `EgoUiContextV1` contains the current semantic
+Ego is the UI's center of activity. The unversioned runtime `Ego` contains the resolved
+`Attention` subject and point alongside one `EgoUiContextV1`, which contains the current semantic
 state and every durable or transient fact that can affect UI interpretation. One
 `EgoUiStateContractV1` then supplies the active camera, navigation, render-scope, and
 state-scoped policy contract. `AnimusSnapshotV1.ego` carries that same context object
@@ -46,10 +47,23 @@ mutates or replaces the global policy, so an override cannot outlive the state t
 requested it. The resolved `EgoHighlightResultV1` is the one authority for highlighted
 nodes and links. Its label disposition is always `delegate`.
 
-Ego owns semantic roles such as highlighted, dimmed, and hidden, plus label attention:
+Ego owns semantic roles such as highlighted, dimmed, and hidden, plus graph Attention
+and label attention:
 direct focus, peripheral Saliency boosts, raising, or suppression. It does not own
 colors, opacity values, label size, camera-range budgeting, collision layout, drawing,
 or animation curves; those remain Anima and label-manager responsibilities.
+
+## Vision ownership
+
+The unversioned runtime `Vision` owns a mechanical `Pose` (position and forward/up
+orientation), zoom, projection, and world/screen geometry. It receives Ego's Attention
+point explicitly when an interaction rotates or zooms around what Ego attends to.
+Vision never inspects selection, Focus, saliency, or node meaning, and it does not retain
+a hidden attention target.
+
+`GraphCameraStateV1` remains the persisted and public compatibility shape. Its `target`
+is a look-at point used to reconstruct Vision orientation, not Ego Attention. Protocol
+types keep version suffixes; runtime domain objects use the plain Ego/Vision language.
 
 ## Anima ownership
 

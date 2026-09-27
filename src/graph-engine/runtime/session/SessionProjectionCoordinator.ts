@@ -2,7 +2,7 @@ import type { GraphViewStateV1 } from '../../contracts/v1/index.ts';
 import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
 import { compileAnimaSceneV1 } from '../anima/index.ts';
 import { createAnimusSnapshotV1 } from '../animus/index.ts';
-import { createEgoAwarenessV1 } from '../ego/index.ts';
+import { createEgo } from '../ego/index.ts';
 import type { GraphModuleHost, GraphModulePipelineStateV1 } from '../modules/index.ts';
 import {
   GraphFrameStore,
@@ -41,8 +41,9 @@ export class SessionProjectionCoordinatorV1 {
   }): GraphModulePipelineStateV1 {
     this.onComposition();
     if (options.invalidation === 'geometry' || options.invalidation === 'content') this.geometryRevision += 1;
-    const ego = createEgoAwarenessV1({
+    const ego = createEgo({
       viewState: options.viewState,
+      positions: options.projectionView.positions,
       document: options.projectionView.document,
       visibleNodeIds: options.projectionView.renderSelection.nodeIds,
       visibleEdgeIds: options.projectionView.renderSelection.edgeIds,

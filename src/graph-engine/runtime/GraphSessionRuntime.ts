@@ -28,7 +28,8 @@ import {
   convertGraphViewStateDimensionsV1,
   reconcileGraphViewStateV1,
 } from '../core/state/index.ts';
-import { GraphCameraController } from './camera/index.ts';
+import { Vision } from './vision/index.ts';
+import { resolveAttention } from './ego/index.ts';
 import {
   graphInteractionPolicyV1,
   resolveGraphUxStateV1,
@@ -161,7 +162,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly nodeActions?: GraphNodeActionRuntimeV1;
   private readonly modules: GraphModuleRegistry;
   private surface!: SessionSurfaceV1;
-  private camera!: GraphCameraController;
+  private vision!: Vision;
   private projection!: SessionProjectionCoordinatorV1;
   private renderer!: GraphRendererV2;
   private rendererSelection!: GraphRendererSelectionV2;
@@ -228,7 +229,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       const nextCameraFollowPoint = cameraFollowPoint(this.viewState, positions);
       this.viewState = { ...this.viewState, positions };
       if (previousCameraFollowPoint && nextCameraFollowPoint) {
-        this.camera.translateBy(subtractVec(nextCameraFollowPoint, previousCameraFollowPoint));
+        this.vision.translateBy(subtractVec(nextCameraFollowPoint, previousCameraFollowPoint));
         this.synchronizeCameraState();
       }
       this.projectionView = { ...this.projectionView, positions, viewState: this.viewState };
@@ -240,8 +241,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       }
     }
     if (tickResult?.camera) {
-      this.camera.setState(tickResult.camera);
-      this.retargetSelection();
+      this.vision.setState(tickResult.camera);
       this.synchronizeCameraState();
       this.projectionView = { ...this.projectionView, viewState: this.viewState };
       this.moduleView = { ...this.moduleView, viewState: this.viewState };
@@ -325,7 +325,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
     let visibilityListenerInstalled = false;
     try {
-      this.camera = new GraphCameraController(this.viewState.camera, this.profile.dimensions);
+      this.vision = new Vision(this.viewState.camera, this.profile.dimensions);
       this.surface = new CanvasSessionSurface({
         sessionId: this.sessionId,
         dimensions: this.profile.dimensions,
@@ -347,10 +347,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.renderer = this.rendererSelection.renderer;
       this.surface.setRendererBackend(this.renderer.backendId);
       const viewport = this.surface.getViewport();
-      this.camera.setViewport(viewport.width, viewport.height);
+      this.vision.setViewport(viewport.width, viewport.height);
       this.renderer.resize(viewport);
       this.surfaceResizeSubscription = this.surface.onResize((next) => {
-        this.camera.setViewport(next.width, next.height);
+        this.vision.setViewport(next.width, next.height);
         this.renderer.resize(next);
         this.projection.markDirty();
         this.scheduleFrame(0, 'camera');
@@ -362,7 +362,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         platform: this.platform,
         surface: this.surface,
         interactionElement: this.renderer.interactionElement,
-        camera: this.camera,
+        vision: this.vision,
+        getAttention: () => resolveAttention({
+          viewState: this.viewState,
+          positions: this.moduleView?.positions ?? this.viewState.positions,
+        }),
         hitTest: (point, pointerKind) => {
           this.updateRendererScene([]);
           return this.renderer.pick({ point, pointerKind });
@@ -389,7 +393,6 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.activity.setDocumentSuspension(this.platform.document.hidden);
       this.recomputeView();
       if (!restoredLayout) this.fitPositions(Object.values(this.moduleView.positions));
-      this.retargetSelection();
       this.refreshFrame();
       this.updateRendererScene(['content']);
       this.renderer.render();
@@ -413,7 +416,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   async replaceDocument(document: GraphDocumentV1): Promise<void> {
     this.requireActive();
     const previous = this.store.readDocument();
-    const previousCamera = this.camera.getState();
+    const previousCamera = this.vision.getState();
     try {
       const nextStore = new GraphDocumentStore(document);
       const next = nextStore.readDocument();
@@ -427,11 +430,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
             usesGeneratedInitialPositions(this.profile.profileSettings),
           )
         : { ...this.createInitialViewState(), camera: previousCamera };
-      this.camera.setState(this.viewState.camera);
+      this.vision.setState(this.viewState.camera);
       this.moduleHost.documentChanged(next);
       this.moduleHost.viewChanged(this.viewState);
       this.recomputeView();
-      this.retargetSelection();
       this.emitGraphChanged({
         sessionId: this.sessionId,
         documentId: next.documentId,
@@ -640,11 +642,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         usesGeneratedInitialPositions(this.profile.profileSettings),
       ), this.profile.dimensions, focalLengthMm(this.profile.profileSettings));
       this.viewState = restoredViewState;
-      this.camera.setState(this.viewState.camera);
+      this.vision.setState(this.viewState.camera);
       this.moduleHost.restoreState(this.viewState.moduleState);
       this.moduleHost.viewChanged(this.viewState);
       this.recomputeView();
-      this.retargetSelection();
     } catch (error) {
       this.emitError({
         code: 'incompatible-view-state',
@@ -728,7 +729,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       return;
     }
     this.moduleHost.updateProfile(next);
-    this.camera.setPerspectiveZoom(focalLengthMm(next.profileSettings) / 24);
+    this.vision.setPerspectiveZoom(focalLengthMm(next.profileSettings) / 24);
     this.synchronizeCameraState();
     this.profile = next;
     this.refreshRenderQuality();
@@ -739,7 +740,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const previousProfile = this.profile;
     this.synchronizeModuleState();
     const previousViewState = cloneGraphViewStateV1(this.viewState);
-    const previousCamera = this.camera.getState();
+    const previousCamera = this.vision.getState();
     const previousHost = this.moduleHost;
     const viewport = this.surface.getViewport();
     const converted = convertGraphViewStateDimensionsV1(this.viewState, {
@@ -762,7 +763,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.viewState = converted;
       this.profile = next;
       this.refreshRenderQuality();
-      this.camera.reconfigure(converted.camera, next.dimensions);
+      this.vision.reconfigure(converted.camera, next.dimensions);
       this.interaction.setDimensions(next.dimensions);
       this.surface.setDimensions(next.dimensions);
       this.moduleHost = replacementHost;
@@ -773,7 +774,6 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.moduleHost.documentChanged(this.store.readDocument());
       this.moduleHost.viewChanged(this.viewState);
       this.recomputeView(false);
-      this.retargetSelection();
       this.refreshFrame();
       previousHost.dispose();
       for (const failure of deferredFailures) this.handleModuleFailure(failure);
@@ -782,13 +782,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.profile = previousProfile;
       this.refreshRenderQuality();
       this.viewState = previousViewState;
-      this.camera.reconfigure(previousCamera, previousProfile.dimensions);
+      this.vision.reconfigure(previousCamera, previousProfile.dimensions);
       this.interaction.setDimensions(previousProfile.dimensions);
       this.surface.setDimensions(previousProfile.dimensions);
       replacementHost.dispose();
       this.moduleHost.viewChanged(this.viewState);
       this.recomputeView(false);
-      this.retargetSelection();
       this.refreshFrame();
       throw error;
     } finally {
@@ -1044,7 +1043,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         positions: this.moduleView.positions,
       });
       if (previousCameraFollowPoint && nextCameraFollowPoint) {
-        this.camera.translateBy(subtractVec(nextCameraFollowPoint, previousCameraFollowPoint));
+        this.vision.translateBy(subtractVec(nextCameraFollowPoint, previousCameraFollowPoint));
         this.synchronizeCameraState();
       }
       this.moduleView = {
@@ -1093,7 +1092,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       presentationRevision: this.presentationRevision,
       view: {
         dimensions: this.profile.dimensions,
-        camera: this.camera.getState(),
+        camera: this.vision.getState(),
         viewport: this.surface.getViewport(),
       },
       labels: frame.policy?.labelMode === 'off' ? [] : frame.nodes.map((node) => ({
@@ -1126,7 +1125,6 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private handleRuntimeViewChange(change: GraphRuntimeViewChangeV1): void {
-    if (change === 'interaction') this.retargetSelection();
     const draggedNodeId = change === 'positions' ? this.interaction.getDraggedNodeId() : undefined;
     const draggedPosition = draggedNodeId ? this.viewState.positions[draggedNodeId] : undefined;
     this.projectionView = {
@@ -1151,11 +1149,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private synchronizeCameraState(): void {
-    this.viewState = { ...this.viewState, camera: this.camera.getState() };
+    this.viewState = { ...this.viewState, camera: this.vision.getState() };
   }
 
   private resetCameraState(): void {
-    this.camera.setState(defaultCamera(this.profile.dimensions, focalLengthMm(this.profile.profileSettings)));
+    this.vision.setState(defaultCamera(this.profile.dimensions, focalLengthMm(this.profile.profileSettings)));
     const document = this.store.readDocument();
     const policy = graphInteractionPolicyV1(this.viewState);
     const visibleSelectedNodeIds = this.viewState.selectedNodeIds
@@ -1169,10 +1167,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       .filter((id) => document.nodes.some((node) => node.id === id))
       .map((id) => this.moduleView.positions[id])
       .filter((position): position is Vec3 => position !== undefined);
-    const center = policy.cameraTarget === 'focused-node' && this.viewState.focusedNodeId
+    const center = policy.fitCenter === 'focused-node' && this.viewState.focusedNodeId
       ? this.moduleView.positions[this.viewState.focusedNodeId]
       : undefined;
-    this.camera.fit(positions, 48, undefined, center);
+    this.vision.fit(positions, 48, undefined, center);
   }
 
   private focusNeighborhoodNodeIds(focusedNodeId: string): readonly string[] {
@@ -1187,7 +1185,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   private fitPositions(positions: readonly Vec3[], center?: Vec3, minimumRadius?: number): void {
     if (!positions.length) return;
-    this.camera.fit(positions, 48, undefined, center, minimumRadius);
+    this.vision.fit(positions, 48, undefined, center, minimumRadius);
     this.synchronizeCameraState();
     this.projectionView = { ...this.projectionView, viewState: this.viewState };
     this.moduleView = { ...this.moduleView, viewState: this.viewState };
@@ -1206,17 +1204,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.viewState = focusedNodeId === undefined
       ? { ...withoutFocus, selectedNodeIds }
       : { ...withoutFocus, selectedNodeIds, focusedNodeId };
-    this.retargetSelection();
     this.projectionView = { ...this.projectionView, viewState: this.viewState };
     this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame(true, 'presentation');
     this.updateSurface();
-  }
-
-  private retargetSelection(): void {
-    const positions = this.moduleView?.positions ?? this.viewState.positions;
-    this.camera.retarget(selectionCentroid(this.viewState.selectedNodeIds, positions));
   }
 
   private setFocusState(nodeId: string | undefined): void {

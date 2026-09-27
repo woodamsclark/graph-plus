@@ -2,6 +2,7 @@ import type {
   GraphDimensionsV1,
   GraphDocumentV1,
   GraphViewStateV1,
+  Vec3,
 } from '../../contracts/v1/index.ts';
 import { EGO_HIGHLIGHT_POLICY_V1 } from './GraphHighlightPolicy.ts';
 
@@ -46,8 +47,9 @@ export interface EgoUiContextV1 {
 
 export interface EgoUiStateContractV1 {
   readonly state: EgoUiStateV1;
-  readonly cameraTarget: 'graph' | 'selection-centroid' | 'focused-node';
+  readonly attentionTarget: 'none' | 'selection-centroid';
   readonly fitTarget: 'graph' | 'selection' | 'focused-neighborhood';
+  readonly fitCenter: 'centroid' | 'focused-node';
   readonly renderScope: 'graph' | 'graph-with-selection-emphasis' | 'focused-local-view';
   readonly primaryDrag: Readonly<Record<GraphDimensionsV1, 'pan' | 'rotate' | 'elastic-pan'>>;
   readonly mobilePrimaryDrag: Readonly<Record<GraphDimensionsV1, 'pan' | 'rotate' | 'elastic-pan'>>;
@@ -80,12 +82,21 @@ export interface EgoLabelRaisingV1 {
   readonly byNodeId: Readonly<Record<string, EgoLabelDecisionV1>>;
 }
 
-export interface EgoAwarenessV1 {
+export interface Attention {
+  readonly nodeIds: ReadonlySet<string>;
+  readonly point?: Vec3;
+}
+
+export interface Ego {
   readonly context: EgoUiContextV1;
   readonly contract: EgoUiStateContractV1;
+  readonly attention: Attention;
   readonly highlight: EgoHighlightResultV1;
   readonly labelRaising: EgoLabelRaisingV1;
 }
+
+/** @deprecated Compatibility name. Runtime code should use Ego. */
+export type EgoAwarenessV1 = Ego;
 
 /**
  * Ego is the single semantic UI-state contract. Animus supplies facts to it;
@@ -94,8 +105,9 @@ export interface EgoAwarenessV1 {
 export const EGO_UI_STATE_CONTRACTS_V1: Readonly<Record<EgoUiStateV1, EgoUiStateContractV1>> = {
   overview: {
     state: 'overview',
-    cameraTarget: 'graph',
+    attentionTarget: 'none',
     fitTarget: 'graph',
+    fitCenter: 'centroid',
     renderScope: 'graph',
     primaryDrag: { '2d': 'pan', '3d': 'pan' },
     mobilePrimaryDrag: { '2d': 'pan', '3d': 'pan' },
@@ -112,8 +124,9 @@ export const EGO_UI_STATE_CONTRACTS_V1: Readonly<Record<EgoUiStateV1, EgoUiState
   },
   explore: {
     state: 'explore',
-    cameraTarget: 'selection-centroid',
+    attentionTarget: 'selection-centroid',
     fitTarget: 'selection',
+    fitCenter: 'centroid',
     renderScope: 'graph-with-selection-emphasis',
     primaryDrag: { '2d': 'pan', '3d': 'pan' },
     mobilePrimaryDrag: { '2d': 'pan', '3d': 'pan' },
@@ -131,8 +144,9 @@ export const EGO_UI_STATE_CONTRACTS_V1: Readonly<Record<EgoUiStateV1, EgoUiState
   },
   focus: {
     state: 'focus',
-    cameraTarget: 'focused-node',
+    attentionTarget: 'selection-centroid',
     fitTarget: 'focused-neighborhood',
+    fitCenter: 'focused-node',
     renderScope: 'focused-local-view',
     primaryDrag: { '2d': 'elastic-pan', '3d': 'rotate' },
     mobilePrimaryDrag: { '2d': 'elastic-pan', '3d': 'rotate' },
@@ -270,12 +284,35 @@ export function resolveEgoHighlightV1(options: {
   return { policy, seedNodeIds, highlightedNodeIds, highlightedEdgeIds };
 }
 
-export function createEgoAwarenessV1(options: Parameters<typeof createEgoUiContextV1>[0] & {
+export function resolveAttention(options: {
+  readonly viewState: Pick<GraphViewStateV1, 'selectedNodeIds'>;
+  readonly positions: Readonly<Record<string, Vec3>>;
+}): Attention {
+  const nodeIds = new Set(options.viewState.selectedNodeIds.filter((nodeId) => options.positions[nodeId] !== undefined));
+  const selectedPositions = [...nodeIds].map((nodeId) => options.positions[nodeId] as Vec3);
+  if (selectedPositions.length === 0) return { nodeIds };
+  const total = selectedPositions.reduce((sum, position) => ({
+    x: sum.x + position.x,
+    y: sum.y + position.y,
+    z: sum.z + position.z,
+  }), { x: 0, y: 0, z: 0 });
+  return {
+    nodeIds,
+    point: {
+      x: total.x / selectedPositions.length,
+      y: total.y / selectedPositions.length,
+      z: total.z / selectedPositions.length,
+    },
+  };
+}
+
+export function createEgo(options: Parameters<typeof createEgoUiContextV1>[0] & {
   readonly document: GraphDocumentV1;
+  readonly positions?: Readonly<Record<string, Vec3>>;
   readonly visibleNodeIds?: ReadonlySet<string>;
   readonly visibleEdgeIds?: ReadonlySet<string>;
   readonly globalHighlightPolicy?: EgoHighlightPolicyV1;
-}): EgoAwarenessV1 {
+}): Ego {
   const context = createEgoUiContextV1(options);
   const contract = EGO_UI_STATE_CONTRACTS_V1[context.state];
   const highlight = resolveEgoHighlightV1({
@@ -288,6 +325,10 @@ export function createEgoAwarenessV1(options: Parameters<typeof createEgoUiConte
   return {
     context,
     contract,
+    attention: resolveAttention({
+      viewState: options.viewState,
+      positions: options.positions ?? {},
+    }),
     highlight,
     labelRaising: resolveEgoLabelRaisingV1({
       context,
@@ -298,6 +339,9 @@ export function createEgoAwarenessV1(options: Parameters<typeof createEgoUiConte
     }),
   };
 }
+
+/** @deprecated Compatibility constructor. Runtime code should use createEgo. */
+export const createEgoAwarenessV1 = createEgo;
 
 export function resolveEgoLabelRaisingV1(options: {
   readonly context: EgoUiContextV1;
