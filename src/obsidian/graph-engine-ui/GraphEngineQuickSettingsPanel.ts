@@ -226,9 +226,6 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       const selectedId = viewState.selectedNodeIds.length === 1 ? viewState.selectedNodeIds[0] : undefined;
       new Setting(body)
         .setName('Mind map')
-        .setDesc(form?.enabled
-          ? 'Active'
-          : selectedId ? 'Ready' : 'Select a node')
         .addToggle((toggle) => toggle
           .setValue(form?.enabled === true)
           .setDisabled(form?.enabled !== true && !selectedId)
