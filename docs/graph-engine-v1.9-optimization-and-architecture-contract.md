@@ -135,6 +135,11 @@ Acceptance:
 
 ## 7. Shared Graph+ host lifecycle
 
+> Historical note: the current ownership model is defined by
+> [Graph+ application architecture](graph-plus-application-architecture.md). It
+> supersedes this section's separate-product-boundary requirement while preserving
+> separate presentation sessions and the legacy view identities.
+
 Global Graph+ and Local Graph+ shall share small, composable host services for:
 
 - preview controller construction and Markdown rendering lifecycle;

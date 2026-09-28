@@ -292,9 +292,12 @@ the focused node. Crossing the drag threshold cancels stationary-click activatio
 ### A-V16-FOCUS-02 — Mobile release and restrained framing
 
 A stationary background finger tap clears selection and focus in perspective 3D.
-Focus-triggered fitting magnifies the current camera by no more than `1.75` times in
-both orthographic and perspective modes. Fit-all and reset retain their ordinary
-range.
+Focus-triggered fitting frames the complete focused neighborhood in one action in both
+orthographic and perspective modes, using a centered square safe frame based on the
+viewport's shorter dimension. The current neighborhood fit is the Focus zoom-out
+boundary, and repeated Center + Fit actions are idempotent.
+During initial force settling the fit tracks the focused neighborhood, unless direct
+user camera or node-drag input cancels that automatic framing.
 
 ### A-V16-INPUT-01 — Canvas-like wheel and pinch remain
 

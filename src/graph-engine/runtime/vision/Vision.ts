@@ -32,6 +32,8 @@ export interface VisionState {
   readonly projection: GraphCameraStateV1['projection'];
 }
 
+export type VisionFitFrame = 'viewport' | 'square';
+
 const MIN_ZOOM = 0.02;
 const MAX_ZOOM = 40;
 const MIN_PERSPECTIVE_DISTANCE = 10;
@@ -305,12 +307,17 @@ export class Vision {
   fit(
     positions: readonly Vec3[],
     paddingPx = 48,
-    maxMagnification?: number,
     center?: Vec3,
     minimumRadius = 0,
+    frame: VisionFitFrame = 'viewport',
   ): void {
     if (!positions.length || this.viewport.width <= 0 || this.viewport.height <= 0) return;
     const target = center ? { ...center } : centroid(positions);
+    const frameSize = frame === 'square'
+      ? Math.min(this.viewport.width, this.viewport.height)
+      : undefined;
+    const fitWidth = frameSize ?? this.viewport.width;
+    const fitHeight = frameSize ?? this.viewport.height;
     if (this.state.projection === 'orthographic') {
       const width = Math.max(
         1,
@@ -322,13 +329,10 @@ export class Vision {
         minimumRadius * 2,
         2 * Math.max(...positions.map((position) => Math.abs(position.y - target.y))),
       );
-      let zoom = clamp(Math.min(
-        Math.max(1, this.viewport.width - paddingPx * 2) / width,
-        Math.max(1, this.viewport.height - paddingPx * 2) / height,
+      const zoom = clamp(Math.min(
+        Math.max(1, fitWidth - paddingPx * 2) / width,
+        Math.max(1, fitHeight - paddingPx * 2) / height,
       ), MIN_ZOOM, MAX_ZOOM);
-      if (maxMagnification !== undefined && Number.isFinite(maxMagnification) && maxMagnification > 0) {
-        zoom = Math.min(zoom, this.state.zoom * maxMagnification);
-      }
       const offset = subtract(this.state.position, this.state.target);
       this.state = { ...this.state, target, position: add(target, offset), zoom };
       return;
@@ -336,11 +340,10 @@ export class Vision {
 
     const radius = Math.max(1, minimumRadius, ...positions.map((position) => distance(position, target)));
     const backwards = normalize(subtract(this.state.position, this.state.target));
-    let distanceForFit = Math.max(10, radius * 2.4 * Math.max(MIN_ZOOM, this.state.zoom));
-    if (maxMagnification !== undefined && Number.isFinite(maxMagnification) && maxMagnification > 0) {
-      const currentDistance = Math.max(MIN_PERSPECTIVE_DISTANCE, distance(this.state.position, this.state.target));
-      distanceForFit = Math.max(distanceForFit, currentDistance / maxMagnification);
-    }
+    const distanceForFit = frame === 'square'
+      ? Math.max(10, radius * Math.max(1, this.viewport.height) * Math.max(MIN_ZOOM, this.state.zoom)
+        / Math.max(1, fitHeight / 2 - paddingPx))
+      : Math.max(10, radius * 2.4 * Math.max(MIN_ZOOM, this.state.zoom));
     this.state = {
       ...this.state,
       target,
@@ -348,33 +351,36 @@ export class Vision {
     };
   }
 
-  /** Prevent zooming farther out than a focus-centered world-space radius. */
-  constrainZoomOutToRadius(
-    radius: number,
+  /** Prevent zooming farther out than the exact fit for the supplied positions. */
+  constrainZoomOutToFit(
+    positions: readonly Vec3[],
     paddingPx = 48,
-    initialFocusCamera?: GraphCameraStateV1,
+    center?: Vec3,
+    frame: VisionFitFrame = 'viewport',
   ): void {
-    if (!Number.isFinite(radius) || radius < 0 || this.viewport.width <= 0 || this.viewport.height <= 0) return;
-    const safeRadius = Math.max(1, radius);
+    if (!positions.length || this.viewport.width <= 0 || this.viewport.height <= 0) return;
+    const target = center ? { ...center } : centroid(positions);
+    const frameSize = frame === 'square'
+      ? Math.min(this.viewport.width, this.viewport.height)
+      : undefined;
+    const fitWidth = frameSize ?? this.viewport.width;
+    const fitHeight = frameSize ?? this.viewport.height;
     if (this.state.projection === 'orthographic') {
-      const radiusMinimumZoom = clamp(Math.min(
-        Math.max(1, this.viewport.width - paddingPx * 2) / (safeRadius * 2),
-        Math.max(1, this.viewport.height - paddingPx * 2) / (safeRadius * 2),
+      const width = Math.max(1, 2 * Math.max(...positions.map((position) => Math.abs(position.x - target.x))));
+      const height = Math.max(1, 2 * Math.max(...positions.map((position) => Math.abs(position.y - target.y))));
+      const minimumZoom = clamp(Math.min(
+        Math.max(1, fitWidth - paddingPx * 2) / width,
+        Math.max(1, fitHeight - paddingPx * 2) / height,
       ), MIN_ZOOM, MAX_ZOOM);
-      const minimumZoom = initialFocusCamera?.projection === 'orthographic'
-        ? Math.min(radiusMinimumZoom, initialFocusCamera.zoom)
-        : radiusMinimumZoom;
       if (this.state.zoom < minimumZoom) this.state = { ...this.state, zoom: minimumZoom };
       return;
     }
-    const radiusMaximumDistance = Math.max(
-      MIN_PERSPECTIVE_DISTANCE,
-      safeRadius * 2.4 * Math.max(MIN_ZOOM, this.state.zoom),
-    );
-    const initialDistance = initialFocusCamera?.projection === 'perspective'
-      ? distance(initialFocusCamera.position, initialFocusCamera.target)
-      : 0;
-    const maximumDistance = Math.max(radiusMaximumDistance, initialDistance);
+    const radius = Math.max(1, ...positions.map((position) => distance(position, target)));
+    const maximumDistance = frame === 'square'
+      ? Math.max(MIN_PERSPECTIVE_DISTANCE,
+        radius * Math.max(1, this.viewport.height) * Math.max(MIN_ZOOM, this.state.zoom)
+          / Math.max(1, fitHeight / 2 - paddingPx))
+      : Math.max(MIN_PERSPECTIVE_DISTANCE, radius * 2.4 * Math.max(MIN_ZOOM, this.state.zoom));
     const offset = subtract(this.state.position, this.state.target);
     const currentDistance = Math.max(0.0001, length(offset));
     if (currentDistance <= maximumDistance) return;

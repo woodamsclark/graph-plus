@@ -2,7 +2,6 @@ import type {
   GraphDimensionsV1,
   GraphDocumentV1,
   GraphIntentV1,
-  GraphCameraStateV1,
   GraphViewStateV1,
   Vec3,
 } from '../../contracts/v1/index.ts';
@@ -17,7 +16,11 @@ import { animaPreviewTiming } from '../modules/shipped/AnimaPreviewPresentation.
 import { GraphCommander, GraphCommandRegistry } from './GraphCommander.ts';
 import { GraphInput } from './GraphInput.ts';
 import { GraphInteractionInterpreter } from './GraphInteractionInterpreter.ts';
-import { graphInteractionPolicyV1, resolveGraphUxStateV1 } from './GraphInteractionStatePolicy.ts';
+import {
+  FOCUS_FIT_PADDING_PX,
+  graphInteractionPolicyV1,
+  resolveGraphUxStateV1,
+} from './GraphInteractionStatePolicy.ts';
 import type {
   GraphInputEventV1,
   GraphRuntimeCommandV1,
@@ -41,7 +44,6 @@ export class SessionInteractionRuntime {
   private hoverMod = false;
   private hoverPoint: GraphScreenPointV1 | undefined;
   private elasticReturnTimer: number | undefined;
-  private focusZoomBaseline: { readonly nodeId: string; readonly camera: GraphCameraStateV1 } | undefined;
   private hitTestMs = 0;
   private hitTestCount = 0;
   private dragContext: {
@@ -77,6 +79,8 @@ export class SessionInteractionRuntime {
     readonly onIntent: (intent: GraphIntentV1) => void;
     readonly onActivateNode: (nodeId: string) => boolean;
     readonly onInputQueued?: () => void;
+    readonly onFocusFramingRequested?: () => void;
+    readonly onUserCameraInput?: () => void;
   }) {
     this.registerCommandHandlers();
     this.input = new GraphInput({
@@ -232,19 +236,22 @@ export class SessionInteractionRuntime {
     if (!this.commandBelongsToActiveDocument(command)) return;
     switch (command.type) {
       case 'pan-by':
+        this.options.onUserCameraInput?.();
         this.options.vision.panByPixels(command.deltaX, command.deltaY);
         this.cameraChanged(command);
         return;
       case 'elastic-pan-by':
+        this.options.onUserCameraInput?.();
         this.elasticPan(command.deltaX, command.deltaY);
         this.cameraChanged(command);
         return;
       case 'orbit-by':
+        this.options.onUserCameraInput?.();
         this.options.vision.orbitByPixels(command.deltaX, command.deltaY, this.options.getAwareness().centroid);
         this.cameraChanged(command);
         return;
       case 'zoom-by':
-        this.captureFocusZoomBaseline();
+        this.options.onUserCameraInput?.();
         this.options.vision.zoomByWheel(command.deltaY, command.anchor, this.options.getAwareness().centroid);
         this.constrainFocusZoomOut();
         this.cameraChanged(command);
@@ -255,6 +262,7 @@ export class SessionInteractionRuntime {
         return;
       case 'center-and-fit-camera':
         this.fitStateTarget();
+        this.options.onFocusFramingRequested?.();
         this.emitViewportIntent(command);
         return;
       case 'reset-camera':
@@ -351,6 +359,7 @@ export class SessionInteractionRuntime {
         });
         return;
       case 'drag-start':
+        this.options.onUserCameraInput?.();
         this.beginNodeDrag(command.nodeId, command.point);
         return;
       case 'drag-update':
@@ -425,7 +434,7 @@ export class SessionInteractionRuntime {
     const centerNodeId = policy.fitCenter === 'focused-node'
       ? state.focusedNodeId
       : undefined;
-    this.fitVisibleNodes(nodeIds, centerNodeId);
+    this.fitVisibleNodes(nodeIds, centerNodeId, policy.fitTarget === 'focused-neighborhood');
   }
 
   private elasticPan(deltaX: number, deltaY: number): void {
@@ -471,24 +480,18 @@ export class SessionInteractionRuntime {
     const positions = this.options.getInteractivePositions();
     const focusedPosition = positions[state.focusedNodeId];
     if (!focusedPosition) return;
-    const radius = Math.max(0, ...state.selectedNodeIds.flatMap((nodeId) => {
-      const position = positions[nodeId];
-      return position ? [vectorDistance(position, focusedPosition)] : [];
-    }));
-    this.options.vision.constrainZoomOutToRadius(radius, 48, this.focusZoomBaseline?.camera);
-  }
-
-  private captureFocusZoomBaseline(): void {
-    const focusedNodeId = this.options.getViewState().focusedNodeId;
-    if (!focusedNodeId || this.focusZoomBaseline?.nodeId === focusedNodeId) return;
-    this.focusZoomBaseline = { nodeId: focusedNodeId, camera: this.options.vision.getState() };
+    const neighborhoodPositions = this.focusNeighborhoodNodeIds(state.focusedNodeId)
+      .map((nodeId) => positions[nodeId])
+      .filter(isVec3);
+    this.options.vision.constrainZoomOutToFit(
+      neighborhoodPositions, FOCUS_FIT_PADDING_PX, focusedPosition, 'square');
   }
 
   private enterFocus(nodeId: string, command: GraphRuntimeCommandV1): void {
     if (this.options.getViewState().selectedNodeIds.length === 0) return;
     this.setFocus(nodeId, command);
-    this.fitVisibleNodes(this.focusNeighborhoodNodeIds(nodeId), nodeId);
-    this.focusZoomBaseline = { nodeId, camera: this.options.vision.getState() };
+    this.fitVisibleNodes(this.focusNeighborhoodNodeIds(nodeId), nodeId, true);
+    this.options.onFocusFramingRequested?.();
     this.emitViewportIntent(command);
   }
 
@@ -505,6 +508,7 @@ export class SessionInteractionRuntime {
   private fitVisibleNodes(
     nodeIds?: readonly string[],
     centerNodeId?: string,
+    squareFrame = false,
   ): void {
     const positionsById = this.options.getInteractivePositions();
     const candidates = nodeIds ?? [...this.options.getRenderSelection().nodeIds];
@@ -515,7 +519,13 @@ export class SessionInteractionRuntime {
     const center = centerNodeId === undefined
       ? selectionCentroid(candidates, positionsById)
       : positionsById[centerNodeId];
-    this.options.vision.fit(positions, 48, nodeIds === undefined ? undefined : 1.75, center);
+    this.options.vision.fit(
+      positions,
+      squareFrame ? FOCUS_FIT_PADDING_PX : 48,
+      center,
+      0,
+      squareFrame ? 'square' : 'viewport',
+    );
     this.commitCamera();
     this.options.onViewStateChanged('camera');
   }
@@ -574,7 +584,6 @@ export class SessionInteractionRuntime {
       this.commit(focusedNodeId === undefined
         ? { ...withoutFocus, selectedNodeIds }
         : { ...withoutFocus, selectedNodeIds, focusedNodeId });
-      if (focusedNodeId === undefined) this.focusZoomBaseline = undefined;
     }
     this.options.onViewStateChanged('interaction');
     if (selectionChanged) this.options.onIntent({

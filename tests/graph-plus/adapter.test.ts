@@ -8,6 +8,11 @@ import {
   noteNodeId,
   tagNodeId,
 } from '../../src/graph-plus/adapter/index.ts';
+import {
+  GraphPlusVaultModelV1,
+  graphPlusExperiencePolicyV1,
+  projectGraphPlusExperienceDocumentV1,
+} from '../../src/graph-plus/application/index.ts';
 import { GraphPlusConsumerV1, LocalGraphPlusConsumerV1 } from '../../src/graph-plus/consumer/index.ts';
 import {
   GraphPlusCheckpointControllerV1,
@@ -78,6 +83,78 @@ function snapshot() {
     },
   } as const;
 }
+
+test('Graph+ modes share one canonical vault read and reconciliation', async () => {
+  const fixture = snapshot();
+  let reads = 0;
+  const model = new GraphPlusVaultModelV1({
+    read: async () => {
+      reads += 1;
+      await Promise.resolve();
+      return fixture.value;
+    },
+  }, { countDuplicateLinks: true });
+
+  const [global, local] = await Promise.all([model.open(), model.open()]);
+  equal(reads, 1, 'simultaneous Graph+ modes should share the initial vault adaptation');
+  equal(global.document, local.document, 'both modes should observe one canonical document instance');
+
+  const [globalNext, localNext] = await Promise.all([model.reconcile(), model.reconcile()]);
+  equal(reads, 2, 'simultaneous mode reconciliation should perform one additional vault read');
+  equal(globalNext.document, localNext.document, 'both modes should receive the same reconciled revision');
+});
+
+test('Graph+ vault model coalesces initial open and saved-checkpoint reconciliation', async () => {
+  const fixture = snapshot();
+  let reads = 0;
+  let releaseRead!: () => void;
+  const readReleased = new Promise<void>((resolve) => { releaseRead = resolve; });
+  const model = new GraphPlusVaultModelV1({
+    read: async () => {
+      reads += 1;
+      await readReleased;
+      return fixture.value;
+    },
+  }, { countDuplicateLinks: true });
+
+  const localOpen = model.open();
+  const globalSavedReconcile = model.reconcile();
+  releaseRead();
+  const [local, global] = await Promise.all([localOpen, globalSavedReconcile]);
+  equal(reads, 1, 'initial Global and Local startup should share one vault read across operation names');
+  equal(local.document, global.document, 'both startup paths should receive the same canonical snapshot');
+});
+
+test('Graph+ experience policy derives Global and Local documents from one canonical model', async () => {
+  const fixture = snapshot();
+  const model = new GraphPlusVaultModelV1({ read: () => fixture.value }, { countDuplicateLinks: true });
+  const canonical = await model.open();
+  const lens = createDefaultGraphPlusLensV1();
+  const globalPolicy = graphPlusExperiencePolicyV1('global');
+  const localPolicy = graphPlusExperiencePolicyV1('local');
+  const global = projectGraphPlusExperienceDocumentV1({
+    policy: globalPolicy,
+    canonicalDocument: canonical.document,
+    depth: 1,
+    lens,
+    searchIndex: canonical.searchIndex,
+  });
+  const alphaId = noteNodeId('Alpha.md');
+  const local = projectGraphPlusExperienceDocumentV1({
+    policy: localPolicy,
+    canonicalDocument: canonical.document,
+    rootNodeId: alphaId,
+    depth: 1,
+    lens,
+    searchIndex: canonical.searchIndex,
+  });
+
+  equal(global, canonical.document, 'Global policy should present the canonical vault document directly');
+  equal(local.nodes[0]?.id, alphaId, 'Local policy should place its active-note subject first');
+  equal(local.nodes.length, 3, 'Local policy should derive only the configured root neighborhood');
+  deepEqual(localPolicy.allowedInteractionStates, ['focus'], 'Local policy should expose Focus as its only state');
+  equal(localPolicy.persistence, 'ephemeral', 'Local policy must not inherit the Global checkpoint');
+});
 
 test('G-ADAPTER projects only notes and tags with stable IDs and private file lookup', () => {
   const fixture = snapshot();
@@ -415,6 +492,13 @@ test('V1.7.1 explicit global reveal enters Focus without changing the full proje
   const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
   assert(lease.ok, 'Graph+ should obtain a lease for explicit reveal');
   const store = new MemoryStore();
+  let releaseLoad!: () => void;
+  const loadReleased = new Promise<void>((resolve) => { releaseLoad = resolve; });
+  const load = store.load.bind(store);
+  store.load = async () => {
+    await loadReleased;
+    return load();
+  };
   const consumer = new GraphPlusConsumerV1({
     lease: lease.lease,
     container: runtime.container,
@@ -424,13 +508,18 @@ test('V1.7.1 explicit global reveal enters Focus without changing the full proje
     navigator: { openNote: async () => undefined, openTag: async () => undefined },
     countDuplicateLinks: true,
   });
-  await consumer.open();
+  const opening = consumer.open();
+  const navigationWait = consumer.open();
+  releaseLoad();
+  await Promise.all([opening, navigationWait]);
   const alphaId = noteNodeId('Alpha.md');
   const session = consumer.getSession();
   assert(session, 'the global graph should expose its engine session');
   const cameraBeforeReveal = (await session.exportViewState()).camera;
   const surface = runtime.container.querySelector<HTMLElement>('[data-graph-engine-session]');
   assert(surface, 'the global graph should expose its mounted session surface');
+  equal(runtime.container.querySelectorAll('[data-graph-engine-session]').length, 1,
+    'navigation waiting on startup should share the in-flight consumer mount');
 
   equal(await consumer.revealAndFocusNode(alphaId), true, 'explicit global navigation should reveal and focus the requested note');
   equal((await consumer.getSession()?.exportViewState())?.focusedNodeId, alphaId,
@@ -541,6 +630,20 @@ test('V1.7.1 Local Graph+ owns an ephemeral rooted document, layout, and depth',
     'local active-note following should refit the new root neighborhood');
   deepEqual(state?.camera.target, state?.positions[betaId],
     'local active-note following should center the new root');
+
+  assert(state, 'Local Graph+ should export its rooted Focus state');
+  const localCamera = new GraphCameraController(state.camera, state.dimensions);
+  localCamera.setViewport(640, 360);
+  const alphaPoint = localCamera.worldToScreen(state.positions[alphaId]);
+  dispatchGraphClick(runtime.window, runtimeCanvas(runtime.container), alphaPoint.x, alphaPoint.y, 941);
+  runtime.platform.flushFrame();
+  await Promise.resolve();
+  await Promise.resolve();
+  const policyRestored = await session.exportViewState();
+  deepEqual(policyRestored.selectedNodeIds, [betaId],
+    'Local policy should restore the active-note subject after ordinary graph selection');
+  equal(policyRestored.focusedNodeId, betaId,
+    'Local policy should prevent graph input from leaving Focus');
   await session.resetCamera();
   await Promise.resolve();
   equal((await session.exportViewState()).focusedNodeId, betaId,

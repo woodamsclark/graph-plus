@@ -426,10 +426,13 @@ Graph view input behavior:
   unless separately reviewed; and
 - V1.6 does not require native Graph view pan inertia or native plain-wheel zoom.
 
-A node-focus fit may magnify the current view by at most `1.75` times per focus
-activation in both projection modes. It may still zoom out as needed to frame a large
-focus set. Explicit fit-all and reset commands remain uncapped. This keeps focus
-legible without placing the camera effectively on top of a single node.
+A node-focus fit frames the complete focused neighborhood in one deterministic action.
+It uses a centered square safe frame based on the viewport's shorter dimension. While
+Focus remains active, that live fit is the zoom-out boundary: users may zoom in, but
+seeing a wider field requires leaving Focus. Explicit Center + Fit and reset actions
+return directly to the boundary without incremental magnification.
+The fit follows the newly focused neighborhood during a bounded settling window and
+stops immediately when the user directly manipulates the camera or a node.
 
 The 2D square-root node scaling in section 6.2 changes only how large nodes look under
 the existing camera zoom.

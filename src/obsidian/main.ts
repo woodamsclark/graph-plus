@@ -20,6 +20,7 @@ import {
 import type { GraphPlusCheckpointStoreV1 } from '../graph-plus/persistence/index.ts';
 import type { GraphPlusLensStateV1 } from '../graph-plus/query/index.ts';
 import { ObsidianVaultGraphSourceV1 } from '../graph-plus/adapter/index.ts';
+import { GraphPlusVaultModelV1 } from '../graph-plus/application/index.ts';
 import {
   asObsidianWorkspaceEventsV1,
   ObsidianWorkspaceEventBusV1,
@@ -48,6 +49,7 @@ export default class GraphEnginePlugin extends Plugin {
   private graphPlusLease?: GraphEngineLeaseV1;
   private checkpointFileStore?: GraphPlusCheckpointFileStoreV1;
   private vaultGraphSource?: ObsidianVaultGraphSourceV1;
+  private vaultGraphModel?: GraphPlusVaultModelV1<TFile>;
   private refreshActiveThemes?: () => void;
   private saveQueue: Promise<void> = Promise.resolve();
 
@@ -56,6 +58,9 @@ export default class GraphEnginePlugin extends Plugin {
     this.pluginData = migration.data;
     this.settings = this.pluginData.consumers.graphPlus.consumerSettings;
     this.vaultGraphSource = new ObsidianVaultGraphSourceV1(this.app);
+    this.vaultGraphModel = new GraphPlusVaultModelV1(this.vaultGraphSource, {
+      countDuplicateLinks: this.settings.countDuplicateLinks,
+    });
     const pluginDirectory = this.manifest.dir
       ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
     this.checkpointFileStore = new GraphPlusCheckpointFileStoreV1({
@@ -223,6 +228,7 @@ export default class GraphEnginePlugin extends Plugin {
     this.graphEngineProvider = undefined;
     this.graphEngineCore = undefined;
     this.vaultGraphSource = undefined;
+    this.vaultGraphModel = undefined;
     this.refreshActiveThemes = undefined;
   }
 
@@ -298,6 +304,11 @@ export default class GraphEnginePlugin extends Plugin {
   get graphPlusVaultSource(): ObsidianVaultGraphSourceV1 {
     if (!this.vaultGraphSource) throw new Error('graph+ vault source is unavailable.');
     return this.vaultGraphSource;
+  }
+
+  get graphPlusVaultModel(): GraphPlusVaultModelV1<TFile> {
+    if (!this.vaultGraphModel) throw new Error('graph+ vault model is unavailable.');
+    return this.vaultGraphModel;
   }
 
   readonly graphPlusCheckpointStore: GraphPlusCheckpointStoreV1 = {

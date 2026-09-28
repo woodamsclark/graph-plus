@@ -2,6 +2,9 @@ import type { GraphDimensionsV1, GraphViewStateV1 } from '../../contracts/v1/ind
 
 export type GraphUxStateV1 = 'overview' | 'explore' | 'focus';
 
+/** Focus uses the full square safe frame without an additional camera inset. */
+export const FOCUS_FIT_PADDING_PX = 0;
+
 export interface GraphInteractionContextV1 {
   readonly state: GraphUxStateV1;
   /** @deprecated Compatibility spelling for legacy interaction readers. */

@@ -101,9 +101,14 @@ centroid and updates Ego Awareness without Recentering or Refitting: one selecte
 node uses that node's position, while multiple selected nodes use their arithmetic
 centroid. Focus follows focused-node motion while preserving framing.
 
-Focus limits zooming out using the longest world-space distance from the focused node
-to any selected node, plus padding. The local-neighborhood fit established when Focus
-is entered remains a valid baseline even when it is wider.
+Focus limits zooming out to the current local-neighborhood fit: the focused node and
+all immediate neighbors, centered on the focused node with normal fit padding. The
+fit uses a centered square safe frame whose side is the viewport's shorter dimension,
+so narrow sidebars retain vertical breathing room and wide leaves retain horizontal
+breathing room. The boundary is derived from current positions, so it follows layout
+changes. Focus may zoom inward freely; seeing a wider field requires leaving Focus.
+For a newly focused neighborhood, framing follows force-layout settling for a bounded
+window. Direct user camera or node-drag input ends that automatic framing immediately.
 
 In 2D Focus, navigation pan is elastic: it may temporarily offset the view and then
 returns the target to the focused node. Explicit Focus entry may establish a

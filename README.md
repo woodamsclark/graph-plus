@@ -45,8 +45,9 @@ Graph+ has two related views:
 
 The global graph is the place for broad discovery and spatial organization. The local
 graph is the place for following one idea, note, or thread without loading the entire
-vault into your immediate view. Both views use the same Graph+ interaction model and
-persist their own graph state.
+vault into your immediate view. They are two presentation modes of the same Graph+
+application: Global can move among Overview, Explore, and Focus and saves its vault
+layout; Local stays in Focus around the active note and keeps its layout ephemeral.
 
 ### Explore and navigate
 

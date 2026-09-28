@@ -4,6 +4,10 @@ Status: Implemented; automated suite passes, live Obsidian acceptance pending.
 
 Date: 2026-09-06
 
+> Historical note: the current ownership and active-note policy is defined by
+> [Graph+ application architecture](graph-plus-application-architecture.md). It
+> supersedes this document's two-consumer boundary and Global active-note following.
+
 ## Purpose
 
 V1.7.1 establishes the installed Obsidian plugin as **graph-engine** while retaining

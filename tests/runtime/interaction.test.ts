@@ -196,7 +196,7 @@ test('explicit camera reset preserves focus and frames its immediate neighborhoo
   await session.dispose();
 });
 
-test('the camera translates with the focused node while force layout settles', async () => {
+test('Focus framing follows the focused neighborhood while force layout settles', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   value.profiles.setUserOverrides('synthetic-consumer', 'three-dimensional', {
     modules: {
@@ -213,6 +213,7 @@ test('the camera translates with the focused node while force layout settles', a
     },
   });
   const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
   await session.setSelection(['a', 'b']);
   await session.focusNode('a');
   const before = await session.exportViewState();
@@ -221,14 +222,24 @@ test('the camera translates with the focused node while force layout settles', a
 
   assert(!sameVector(after.positions.a, before.positions.a), 'the fixture node should move during force settling');
   equal(after.focusedNodeId, 'a', 'force settling must preserve focus identity');
-  const focusDelta = subtractVector(after.positions.a, before.positions.a);
-  deepEqual(after.camera.target, addVector(before.camera.target, focusDelta),
-    'the camera target should inherit only the focused-node translation');
-  deepEqual(after.camera.position, addVector(before.camera.position, focusDelta),
-    'the camera position should translate with the target to preserve framing');
-  deepEqual(cameraOffset(after.camera), cameraOffset(before.camera),
-    'focused-node following should preserve camera orientation and distance');
-  equal(after.camera.zoom, before.camera.zoom, 'focused-node following should preserve zoom');
+  deepEqual(after.camera.target, after.positions.a,
+    'settling-aware framing should remain centered on the focused node');
+  assert(sameDirection(cameraOffset(after.camera), cameraOffset(before.camera)),
+    'settling-aware framing should preserve camera orientation');
+  assert(vectorDistance(after.camera.position, after.camera.target)
+    !== vectorDistance(before.camera.position, before.camera.target),
+  'settling-aware framing may change distance to keep the moving neighborhood visible');
+  equal(after.camera.zoom, before.camera.zoom, 'perspective settling should retain focal zoom');
+
+  wheel(value, canvas, { deltaY: 20 });
+  value.platform.flushFrame(150);
+  const userControlled = await session.exportViewState();
+  value.platform.flushFrame(300);
+  const later = await session.exportViewState();
+  assert(!sameVector(later.positions.a, userControlled.positions.a),
+    'the fixture should continue settling after direct camera input');
+  deepEqual(cameraOffset(later.camera), cameraOffset(userControlled.camera),
+    'direct camera input should cancel automatic refitting while focused-node translation continues');
   await session.dispose();
 });
 
@@ -1376,6 +1387,19 @@ test('stationary background right-click Centers + Fits the active Focus neighbor
   const canvas = runtimeCanvas(value.container);
   await session.setSelection(['a', 'b']);
   await session.focusNode('a');
+  const focused = await session.exportViewState();
+  const focusedOffset = cameraOffset(focused.camera);
+  await session.restoreViewState({
+    ...focused,
+    camera: {
+      ...focused.camera,
+      position: {
+        x: focused.camera.target.x + focusedOffset.x * 10,
+        y: focused.camera.target.y + focusedOffset.y * 10,
+        z: focused.camera.target.z + focusedOffset.z * 10,
+      },
+    },
+  });
   pointer(value, canvas, 'pointerdown', -100, -100, { pointerId: 360 });
   pointer(value, canvas, 'pointermove', -50, -70, { pointerId: 360 });
   pointer(value, canvas, 'pointerup', -50, -70, { pointerId: 360 });
@@ -1391,6 +1415,15 @@ test('stationary background right-click Centers + Fits the active Focus neighbor
   assert(vectorDistance(centered.camera.position, centered.camera.target)
     !== vectorDistance(beforeCenter.camera.position, beforeCenter.camera.target),
   'background right-click should fit camera distance to the selected target');
+  click(value, canvas, { x: -100, y: -100 }, { pointerId: 362, button: 2 });
+  value.platform.flushFrame();
+  const repeated = (await session.exportViewState()).camera;
+  assert(vectorDistance(repeated.position, centered.camera.position) < 0.000001
+    && vectorDistance(repeated.target, centered.camera.target) < 0.000001
+    && vectorDistance(repeated.up, centered.camera.up) < 0.000001
+    && repeated.zoom === centered.camera.zoom
+    && repeated.projection === centered.camera.projection,
+  'a completed Center + Fit should be idempotent instead of ratcheting inward');
   await session.dispose();
 });
 

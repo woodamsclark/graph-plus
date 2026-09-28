@@ -4,6 +4,10 @@ import { GraphFrameStore, DEFAULT_GRAPH_RENDER_THEME_V1 } from '../../src/graph-
 import { GraphHitTester } from '../../src/graph-engine/runtime/interaction/GraphHitTester.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 
+function vectorDistance(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): number {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
 test('R-CAMERA-01 orthographic zoom scales node projection and hit radius together', () => {
   const state: GraphCameraStateV1 = {
     position: { x: 0, y: 0, z: 10 },
@@ -130,36 +134,44 @@ test('Vision exposes pose orientation without treating the serialized look-at po
   }, 'runtime Vision should expose position plus forward/up orientation');
 });
 
-test('focus fitting caps magnification in orthographic and perspective cameras', () => {
+test('focus zoom-out constraint uses the current exact neighborhood fit', () => {
+  const positions = [{ x: 0, y: 0, z: 0 }, { x: 100, y: 40, z: 0 }];
+  const center = positions[0];
   const orthographic = new GraphCameraController({
-    position: { x: 0, y: 0, z: 1000 },
-    target: { x: 0, y: 0, z: 0 },
-    up: { x: 0, y: 1, z: 0 },
-    zoom: 1,
-    projection: 'orthographic',
+    position: { x: 0, y: 0, z: 1000 }, target: center,
+    up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic',
   }, '2d');
-  orthographic.setViewport(640, 360);
-  orthographic.fit([{ x: 100, y: 50, z: 0 }], 48, 1.75);
-  equal(orthographic.getState().zoom, 1.75,
-    'single-node focus should not magnify a 2D view by more than the supplied cap');
+  orthographic.setViewport(360, 640);
+  orthographic.fit(positions, 48, center, 0, 'square');
+  const orthographicFit = orthographic.getState();
+  equal(orthographicFit.zoom, 1.32,
+    'a tall Focus leaf should fit into a square based on its narrower width');
+  orthographic.setState({ ...orthographicFit, zoom: orthographicFit.zoom / 10 });
+  orthographic.constrainZoomOutToFit(positions, 48, center, 'square');
+  equal(orthographic.getState().zoom, orthographicFit.zoom,
+    '2D Focus should not zoom farther out than its exact neighborhood fit');
+
+  const wideOrthographic = new GraphCameraController({
+    position: { x: 0, y: 0, z: 1000 }, target: center,
+    up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic',
+  }, '2d');
+  wideOrthographic.setViewport(640, 360);
+  wideOrthographic.fit(positions, 48, center, 0, 'square');
+  equal(wideOrthographic.getState().zoom, orthographicFit.zoom,
+    'wide and tall Focus leaves with the same short side should use the same square fit');
 
   const perspective = new GraphCameraController({
-    position: { x: 0, y: 0, z: 1000 },
-    target: { x: 0, y: 0, z: 0 },
-    up: { x: 0, y: 1, z: 0 },
-    zoom: 50 / 24,
-    projection: 'perspective',
+    position: { x: 0, y: 0, z: 1000 }, target: center,
+    up: { x: 0, y: 1, z: 0 }, zoom: 50 / 24, projection: 'perspective',
   }, '3d');
-  perspective.setViewport(640, 360);
-  perspective.fit([{ x: 100, y: 50, z: 0 }], 48, 1.75);
-  const state = perspective.getState();
-  const fittedDistance = Math.hypot(
-    state.position.x - state.target.x,
-    state.position.y - state.target.y,
-    state.position.z - state.target.z,
-  );
-  assert(Math.abs(fittedDistance - (1000 / 1.75)) < 1e-9,
-    'single-node focus should not dolly a 3D camera closer than the supplied cap');
+  perspective.setViewport(360, 640);
+  perspective.fit(positions, 48, center, 0, 'square');
+  const perspectiveFit = perspective.getState();
+  perspective.setState({ ...perspectiveFit, position: { x: 0, y: 0, z: 10_000 } });
+  perspective.constrainZoomOutToFit(positions, 48, center, 'square');
+  equal(vectorDistance(perspective.getState().position, perspective.getState().target),
+    vectorDistance(perspectiveFit.position, perspectiveFit.target),
+    '3D Focus should not dolly farther out than its exact neighborhood fit');
 });
 
 test('camera fitting can reserve a stable world-space radius before nodes expand', () => {
@@ -168,7 +180,7 @@ test('camera fitting can reserve a stable world-space radius before nodes expand
     up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic',
   }, '2d');
   orthographic.setViewport(640, 360);
-  orthographic.fit([{ x: 0, y: 0, z: 0 }], 48, undefined, { x: 0, y: 0, z: 0 }, 500);
+  orthographic.fit([{ x: 0, y: 0, z: 0 }], 48, { x: 0, y: 0, z: 0 }, 500);
   assert(Math.abs(orthographic.getState().zoom - 0.264) < 1e-9,
     'a 2D predictive fit should reserve the requested radius even while nodes remain near the origin');
 
@@ -177,7 +189,7 @@ test('camera fitting can reserve a stable world-space radius before nodes expand
     up: { x: 0, y: 1, z: 0 }, zoom: 50 / 24, projection: 'perspective',
   }, '3d');
   perspective.setViewport(640, 360);
-  perspective.fit([{ x: 0, y: 0, z: 0 }], 48, undefined, { x: 0, y: 0, z: 0 }, 500);
+  perspective.fit([{ x: 0, y: 0, z: 0 }], 48, { x: 0, y: 0, z: 0 }, 500);
   const state = perspective.getState();
   equal(Math.hypot(
     state.position.x - state.target.x,
