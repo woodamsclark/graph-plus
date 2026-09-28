@@ -234,6 +234,7 @@ test('Focus framing follows the focused neighborhood while force layout settles'
   wheel(value, canvas, { deltaY: 20 });
   value.platform.flushFrame(150);
   const userControlled = await session.exportViewState();
+  value.platform.flushTimer();
   value.platform.flushFrame(300);
   const later = await session.exportViewState();
   assert(!sameVector(later.positions.a, userControlled.positions.a),
