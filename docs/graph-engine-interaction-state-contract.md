@@ -4,6 +4,15 @@ Status: Approved and implemented
 
 Date: 2026-09-20
 
+Migration note: selection, Ego, Awareness, and centroid ownership below are superseded
+by
+[Graph Engine agency and Awareness ontology](graph-engine-agency-awareness-ontology.md).
+Phases 2 through 7 have migrated conscious-state ownership, centroid derivation,
+endogenous routing, neutral experience constraints, exogenous Attention changes, and
+explicit Anima classification with enforced projection/presentation ordering.
+The selection protocol and interaction mechanics below remain implemented
+compatibility behavior until later migration phases.
+
 Normative matrix: [Graph+ UI Interaction Matrix](graph-plus-ui-interaction-matrix.xlsx)
 
 ## 1. Purpose
@@ -12,14 +21,18 @@ Graph Engine currently exposes three internal interaction states. The
 states own camera, rendering, and input policy so individual gesture handlers cannot
 silently drift apart.
 
-The policy is fixed in V1. It is not a consumer-configurable public API.
+The shipped state mechanics remain the default. A consumer may now narrow allowed
+states, Attention cardinality, Awareness expansion, endogenous capabilities, and
+framing through the host-neutral `GraphExperienceContractV1`; it cannot replace the
+gesture interpreter or inject host concepts into the runtime.
 
-Ego owns only `Awareness`: the selected node set and its current world-space centroid.
-It does not own interaction state, gesture permissions, highlighting, label decisions,
-or rendering scope. The interaction framework owns state transitions and navigation
-policy. Anima consumes Ego Awareness plus ordinary Animus interaction facts and decides
-how Awareness is expressed as color, opacity, labels, and geometry. Renderers receive
-only the resolved scene.
+Consciousness owns Ego, Attention, and geometry-free Awareness for each presentation.
+Ego proposes endogenous intent; it does not own interaction state, gesture permissions,
+highlighting, label decisions, or rendering scope. The interaction framework owns
+state transitions and navigation policy. Anima consumes explicit Attention and
+Awareness plus ordinary Animus interaction facts and decides how those classes are
+expressed as color, opacity, labels, and geometry. Renderers receive only the resolved
+scene.
 
 The application-wide highlight policy in `runtime/anima/AnimaAwareness.ts` is external
 to interaction state. Anima resolves that global truth together with its active
@@ -154,8 +167,8 @@ Anima animation kit. Until that kit exists, hover eligibility is immediate.
 | --- | --- | --- | --- |
 | Primary background drag, 2D | Pan | Pan | Elastic pan |
 | Primary background drag, 3D | Pan | Pan | Rotate |
-| Primary drag on selected node | Drag node | Drag node | Navigate; stationary activation owns selection toggle |
-| Primary drag on unselected node | Drag node without selecting | Pan | Navigate; stationary activation exits Focus and toggles selection |
+| Primary drag on selected node | Drag node | Drag node | Drag after stable mouse hover; otherwise navigate |
+| Primary drag on unselected node | Drag node without selecting | Pan | Drag a visible direct neighbor after stable mouse hover; otherwise navigate |
 | Secondary drag, 2D | Pan | Pan | Radial zoom around focused node |
 | Secondary drag, 3D | Rotate | Rotate | Radial zoom around focused node |
 | Two-finger scroll, 2D | Pan | Pan | Elastic pan |
@@ -169,6 +182,13 @@ Anima animation kit. Until that kit exists, hover eligibility is immediate.
 
 Focus radial zoom measures pointer distance from the focused node. Moving away zooms
 in; moving toward the focused node zooms out.
+
+Focus node dragging is deliberately narrower than ordinary navigation. A desktop
+mouse may drag the focused subject or a visible direct neighbor when that exact node
+was already the stable semantic hover target at pointer-down. The drag retains the
+existing Attention and Focus; Vision follows when the focused subject itself moves.
+Without stable hover, the same motion remains camera navigation. Touch and pen retain
+the Focus navigation gesture and do not enter this node-drag path.
 
 ### 5.2 Keyboard and modifiers
 
@@ -232,8 +252,8 @@ transitions and tests; it is not the reopen persistence policy.
 
 ## 8. Code ownership and regression locks
 
-The authoritative `Ego` and `Awareness` resolver live in
-`src/graph-engine/runtime/ego/Ego.ts`. Interaction state and gesture permissions live
+The authoritative `Consciousness`, `Ego`, `Attention`, and `Awareness` values live in
+`src/graph-engine/runtime/consciousness/Consciousness.ts`. Interaction state and gesture permissions live
 in `runtime/interaction/GraphInteractionStatePolicy.ts`. Anima owns state-scoped
 rendering policy, highlight expansion, dimming, and label decisions in
 `runtime/anima/AnimaAwareness.ts`. `Vision` owns only pose, projection, and geometric

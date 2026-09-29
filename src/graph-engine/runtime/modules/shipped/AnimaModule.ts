@@ -1,10 +1,9 @@
 import type { JsonValue } from '../../../contracts/v1/index.ts';
 import { desaturateGraphColorV2, type GraphVisualThemeV2 } from '../../theme/index.ts';
-import type { GraphModuleInstanceV1, GraphModuleProjectionPatchV1 } from '../GraphModuleTypes.ts';
+import type { GraphModuleInstanceV1, GraphModulePresentationPatchV1 } from '../GraphModuleTypes.ts';
 import { GraphLabelManager, type GraphLabelRequestV1 } from './GraphLabelManager.ts';
-import { createEgo } from '../../ego/index.ts';
 import {
-  createAnimaAwarenessPresentationV1,
+  createAnimaConsciousnessPresentationV1,
   type AnimaPresentationRoleV1,
 } from '../../anima/AnimaAwareness.ts';
 import { createGraphInteractionContextV1 } from '../../interaction/index.ts';
@@ -55,7 +54,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
 
   contributeFrame(
     state: Parameters<NonNullable<GraphModuleInstanceV1['contributeFrame']>>[0],
-  ): GraphModuleProjectionPatchV1 | void {
+  ): GraphModulePresentationPatchV1 | void {
     const visibleNodes = state.renderSelection.nodeIds;
     const { visibleEdges, relationships, degree } = this.presentationTopology(state);
     const hoveredId = state.hoveredNodeId;
@@ -63,10 +62,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const transientNeighborhood = transientId === undefined
       ? undefined
       : new Set([transientId, ...(relationships.get(transientId) ?? [])]);
-    const ego = state.ego ?? createEgo({
-      viewState: state.viewState,
-      positions: state.positions,
-    });
+    const consciousness = state.consciousness;
     const interaction = createGraphInteractionContextV1({
       viewState: state.viewState,
       ...(hoveredId === undefined ? {} : { hoveredNodeId: hoveredId }),
@@ -75,8 +71,9 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       selectionPresentationSuspended: state.selectionPresentationSuspended,
       selectionNeighborRevealActive: state.selectionNeighborRevealActive,
     });
-    const presentation = createAnimaAwarenessPresentationV1({
-      awareness: ego.awareness,
+    const presentation = createAnimaConsciousnessPresentationV1({
+      attention: consciousness.attention,
+      awareness: consciousness.awareness,
       interaction,
       document: state.document,
       visibleNodeIds: state.renderSelection.nodeIds,
@@ -89,7 +86,12 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const visibleIds = localFocusActive
       ? presentation.highlight.highlightedNodeIds
       : awarenessEmphasisActive
-        ? exploreActive ? ego.awareness.nodeIds : undefined
+        ? exploreActive
+          ? new Set([
+            ...presentation.consciousnessClasses.attendedNodeIds,
+            ...presentation.consciousnessClasses.peripherallyAwareNodeIds,
+          ])
+          : undefined
         : transientNeighborhood;
     const litNodeIds = presentation.highlight.highlightedNodeIds;
     const nodesWithRadius = state.document.nodes
@@ -142,7 +144,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
           : role === 'dimmed'
             ? desaturateGraphColorV2(ordinaryColor, 0.8)
             : ordinaryColor;
-        const selected = state.viewState.selectedNodeIds.includes(node.id);
+        const selected = presentation.consciousnessClasses.byNodeId[node.id] === 'attended';
         const pinned = state.viewState.pinnedNodeIds.includes(node.id);
         const opacity = PRESENTATION_ROLE_OPACITY[role].node;
         const labelDecision = presentation.labelRaising.byNodeId[node.id];

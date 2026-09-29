@@ -1,4 +1,5 @@
 import type { GraphDocumentV1 } from './document.ts';
+import type { GraphExperienceContractV1 } from './experience.ts';
 import type { GraphFilterRequestV1, GraphFilterScopeV1 } from './filter.ts';
 import type { ApplyGraphPatchResultV1, GraphPatchV1 } from './patch.ts';
 import type { GraphEffectiveSettingsV1, GraphSettingsOverridesV1 } from './profile.ts';
@@ -11,6 +12,8 @@ export interface GraphSessionOptionsV1 {
   readonly profileId: string;
   readonly container: HTMLElement;
   readonly document: GraphDocumentV1;
+  /** Optional host-neutral experience constraints; defaults to the unrestricted engine experience. */
+  readonly experience?: GraphExperienceContractV1;
   readonly restoreViewState?: GraphViewStateV1;
   readonly sessionOverrides?: GraphSettingsOverridesV1;
   readonly ui?: GraphSessionUiOptionsV1;
@@ -32,6 +35,10 @@ export interface GraphSessionV1 {
 
   setSelection(nodeIds: readonly string[]): Promise<void>;
   focusNode(nodeId: string | null): Promise<void>;
+  /** Apply host-translated truth without representing it as endogenous Ego intent. */
+  applyExternalInfluence(
+    influence: GraphExternalInfluenceV1,
+  ): Promise<GraphExternalInfluenceResultV1>;
   /** Retain semantic preview while the pointer is inside a consumer preview surface. */
   setPreviewSurfaceActive(active: boolean): Promise<void>;
   /** Dismiss transient semantic preview without changing hover, focus, or selection. */
@@ -54,6 +61,24 @@ export interface GraphSessionV1 {
   setSuspended(suspended: boolean): void;
   dispose(): Promise<void>;
 }
+
+export interface GraphReplaceAttentionExternalInfluenceV1 {
+  readonly schemaVersion: 1;
+  readonly type: 'replace-attention';
+  readonly nodeIds: readonly string[];
+  readonly focusNodeId?: string;
+  readonly framing?: 'preserve' | 'fit-state';
+}
+
+export type GraphExternalInfluenceV1 = GraphReplaceAttentionExternalInfluenceV1;
+
+export type GraphExternalInfluenceResultV1 =
+  | {
+      readonly status: 'accepted' | 'adjusted';
+      readonly attentionNodeIds: readonly string[];
+      readonly focusedNodeId?: string;
+    }
+  | { readonly status: 'rejected'; readonly reason: string };
 
 export interface GraphFramePerformanceV1 {
   readonly interactionMs: number;

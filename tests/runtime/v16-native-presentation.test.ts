@@ -1,4 +1,6 @@
-import type { GraphModulePipelineStateV1 } from '../../src/graph-engine/runtime/modules/index.ts';
+import type {
+  GraphModulePresentationStateV1,
+} from '../../src/graph-engine/runtime/modules/index.ts';
 import {
   CanvasGraphRenderer,
   composeGraphRenderFrameV1,
@@ -8,6 +10,7 @@ import {
 } from '../../src/graph-engine/runtime/render/index.ts';
 import { desaturateGraphColorV2, parseGraphColorV2 } from '../../src/graph-engine/runtime/theme/index.ts';
 import { GraphCameraController } from '../../src/graph-engine/runtime/camera/index.ts';
+import { resolveConsciousness } from '../../src/graph-engine/runtime/consciousness/index.ts';
 import { AnimaModule } from '../../src/graph-engine/runtime/modules/shipped/AnimaModule.ts';
 import {
   ForceLayoutModule,
@@ -116,7 +119,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
 
   const taggedA = anima.contributeFrame({
     ...state,
-    viewState: { ...state.viewState, selectedNodeIds: ['a'] },
+    ...withConsciousness(state, ['a']),
   });
   assert(taggedA?.nodeContributions && taggedA.edgeContributions, 'Explore presentation should resolve tagged nodes');
   equal(taggedA.nodeContributions.a.opacity, 1, 'the tagged node should remain fully visible');
@@ -143,7 +146,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
 
   const taggedStructure = anima.contributeFrame({
     ...state,
-    viewState: { ...state.viewState, selectedNodeIds: ['a', 'b'], focusedNodeId: 'b' },
+    ...withConsciousness(state, ['a', 'b'], 'b'),
   });
   assert(taggedStructure?.edgeContributions, 'multi-tag presentation should include structural links');
   equal(taggedStructure.edgeContributions['a-b'].opacity, 1, 'a link between tagged nodes should remain bright');
@@ -153,7 +156,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   const exploredHover = anima.contributeFrame({
     ...state,
     hoveredNodeId: 'c',
-    viewState: { ...state.viewState, selectedNodeIds: ['a'] },
+    ...withConsciousness(state, ['a']),
   });
   assert(exploredHover?.nodeContributions && exploredHover.edgeContributions,
     'Explore hover should transiently light the inspected one-hop neighborhood');
@@ -196,7 +199,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   const hoveredTag = anima.contributeFrame({
     ...state,
     hoveredNodeId: 'a',
-    viewState: { ...state.viewState, selectedNodeIds: ['a'] },
+    ...withConsciousness(state, ['a']),
   });
   assert(hoveredTag?.nodeContributions && hoveredTag.edgeContributions,
     'hovering a tagged node should retain its one-hop neighborhood');
@@ -220,7 +223,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     ...state,
     hoveredNodeId: 'c',
     selectionPresentationSuspended: true,
-    viewState: { ...state.viewState, selectedNodeIds: ['a', 'b'] },
+    ...withConsciousness(state, ['a', 'b']),
   });
   assert(suspended?.nodeContributions, 'a Space-toggled undimmed view should contribute presentation');
   equal(suspended.nodeContributions.c.opacity, 1, 'Space should suspend background dimming without clearing tags');
@@ -232,7 +235,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   const optionRevealed = anima.contributeFrame({
     ...state,
     selectionNeighborRevealActive: true,
-    viewState: { ...state.viewState, selectedNodeIds: ['a'] },
+    ...withConsciousness(state, ['a']),
   });
   assert(optionRevealed?.nodeContributions && optionRevealed.edgeContributions,
     'Option should not override constellation-only presentation');
@@ -255,7 +258,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   const updatedOptionReveal = anima.contributeFrame({
     ...state,
     selectionNeighborRevealActive: true,
-    viewState: { ...state.viewState, selectedNodeIds: ['c'] },
+    ...withConsciousness(state, ['c']),
   });
   assert(updatedOptionReveal?.nodeContributions, 'Option reveal should recompute with selection edits');
   equal(updatedOptionReveal.nodeContributions.b.opacity, 0.24,
@@ -266,7 +269,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   const exploredPreview = anima.contributeFrame({
     ...state,
     previewedNodeId: 'c',
-    viewState: { ...state.viewState, selectedNodeIds: ['a'] },
+    ...withConsciousness(state, ['a']),
   });
   assert(exploredPreview?.nodeContributions && exploredPreview.edgeContributions,
     'Explore preview should contribute constellation presentation');
@@ -281,7 +284,7 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   const previewedA = anima.contributeFrame({
     ...state,
     previewedNodeId: 'a',
-    viewState: { ...state.viewState, selectedNodeIds: ['c'], focusedNodeId: 'c' },
+    ...withConsciousness(state, ['c'], 'c'),
   });
   assert(previewedA?.edgeContributions, 'semantic preview should produce Anima presentation');
   equal(previewedA.edgeContributions['a-b'].opacity, 0,
@@ -315,7 +318,7 @@ test('V2 adaptive labels remain continuously eligible and accept interaction req
   const adaptive = anima.contributeFrame({
     ...state,
     presentationPolicy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'adaptive' },
-    viewState: { ...state.viewState, selectedNodeIds: ['a'], focusedNodeId: 'a' },
+    ...withConsciousness(state, ['a'], 'a'),
   });
   assert(adaptive?.nodeContributions, 'tagged adaptive presentation should contribute nodes');
   equal(adaptive.nodeContributions.a.showLabel, true, 'the tagged node label should remain eligible');
@@ -330,7 +333,7 @@ test('V2 adaptive labels remain continuously eligible and accept interaction req
     ...state,
     hoveredNodeId: 'b',
     presentationPolicy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'adaptive' },
-    viewState: { ...state.viewState, selectedNodeIds: ['a'], focusedNodeId: 'a' },
+    ...withConsciousness(state, ['a'], 'a'),
   });
   equal(inspected?.nodeContributions?.b.showLabel, true,
     'hover should force label eligibility in Explore mode');
@@ -342,7 +345,7 @@ test('V2 adaptive labels remain continuously eligible and accept interaction req
   const all = anima.contributeFrame({
     ...state,
     presentationPolicy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'all' },
-    viewState: { ...state.viewState, selectedNodeIds: ['a'], focusedNodeId: 'a' },
+    ...withConsciousness(state, ['a'], 'a'),
   });
   equal(all?.nodeContributions?.c.showLabel, false,
     'Focus rendering scope should remain authoritative even when label mode is All');
@@ -627,6 +630,25 @@ test('V2 default Obsidian theme uses the Graph+ kosmos palette without affecting
   const communityPalette = new ThemeStyleResolver(() => value.document.body, () => false).getPalette();
   deepEqual(communityPalette.colors.node, parseGraphColorV2('rgb(12, 34, 56)'),
     'a selected community theme should continue to own its graph node color');
+});
+
+test('Local Graph+ resolves its canvas background from the Local surface color', () => {
+  const value = runtimeHarness();
+  value.document.body.style.setProperty('--graph-plus-surface-background', '#0f0f0f');
+
+  const defaultPalette = new ThemeStyleResolver(
+    () => value.document.body,
+    () => true,
+  ).getPalette();
+  deepEqual(defaultPalette.colors.background, parseGraphColorV2('#0f0f0f'),
+    'the Local surface should replace the stock Graph+ field with its exact background');
+
+  const communityPalette = new ThemeStyleResolver(
+    () => value.document.body,
+    () => false,
+  ).getPalette();
+  deepEqual(communityPalette.colors.background, parseGraphColorV2('#0f0f0f'),
+    'the Local surface should replace a community graph field with its exact background');
 });
 
 test('Graph+ color overrides layer over the active Obsidian palette', () => {
@@ -1362,7 +1384,7 @@ test('V1.6 a background finger tap clears focus in 3D', async () => {
 function pipeline(
   document: ReturnType<typeof graphDocument>,
   selection: { nodeIds: Set<string>; edgeIds: Set<string> },
-): GraphModulePipelineStateV1 {
+): GraphModulePresentationStateV1 {
   const state = viewState(document);
   return {
     sourceDocument: document,
@@ -1372,6 +1394,10 @@ function pipeline(
     projectionSelection: selection,
     renderSelection: selection,
     formActive: false,
+    consciousness: resolveConsciousness({
+      attentionNodeIds: state.selectedNodeIds,
+      availableNodeIds: selection.nodeIds,
+    }),
     nodeRoles: {},
     edgeRoles: {},
     regions: [],
@@ -1380,6 +1406,24 @@ function pipeline(
     regionLayouts: [],
     regionContributions: [],
     theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+  };
+}
+
+function withConsciousness(
+  state: GraphModulePresentationStateV1,
+  attentionNodeIds: readonly string[],
+  focusedNodeId?: string,
+): Pick<GraphModulePresentationStateV1, 'viewState' | 'consciousness'> {
+  const { focusedNodeId: _priorFocus, ...withoutFocus } = state.viewState;
+  const viewState = focusedNodeId === undefined
+    ? { ...withoutFocus, selectedNodeIds: [...attentionNodeIds] }
+    : { ...withoutFocus, selectedNodeIds: [...attentionNodeIds], focusedNodeId };
+  return {
+    viewState,
+    consciousness: resolveConsciousness({
+      attentionNodeIds,
+      availableNodeIds: state.renderSelection.nodeIds,
+    }),
   };
 }
 

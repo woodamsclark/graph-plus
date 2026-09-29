@@ -9,6 +9,7 @@ import {
   sameGraphPlusExperienceDocumentV1,
 } from './GraphPlusDocumentProjection.ts';
 import {
+  graphPlusEngineExperienceContractV1,
   graphPlusExperiencePolicyV1,
   type GraphPlusExperienceModeV1,
   type GraphPlusExperiencePolicyV1,
@@ -32,7 +33,7 @@ export interface GraphPlusNavigatorV1<TFile> {
   openTag(tag: string): Promise<void>;
 }
 
-export interface GraphPlusApplicationOptionsV1<TFile> {
+export interface GraphPlusPresentationOptionsV1<TFile> {
   readonly mode?: GraphPlusExperienceModeV1;
   readonly lease: GraphEngineLeaseV1;
   readonly container: HTMLElement;
@@ -60,8 +61,8 @@ export interface GraphPlusApplicationOptionsV1<TFile> {
   }) => void;
 }
 
-/** One Graph+ application whose behavior is selected by experience policy. */
-export class GraphPlusApplicationV1<TFile> {
+/** One presentation session whose behavior is selected by experience policy. */
+export class GraphPlusPresentationV1<TFile> {
   private readonly policy: GraphPlusExperiencePolicyV1;
   private readonly model: GraphPlusVaultModelV1<TFile>;
   private readonly checkpoint?: GraphPlusCheckpointControllerV1;
@@ -87,7 +88,7 @@ export class GraphPlusApplicationV1<TFile> {
   private depth: number;
   private enforcingPolicy = false;
 
-  constructor(private readonly options: GraphPlusApplicationOptionsV1<TFile>) {
+  constructor(private readonly options: GraphPlusPresentationOptionsV1<TFile>) {
     this.policy = graphPlusExperiencePolicyV1(options.mode ?? 'global');
     if (!options.model && !options.source) throw new Error('Graph+ requires a vault model or vault source.');
     this.model = options.model ?? new GraphPlusVaultModelV1(options.source!, {
@@ -149,7 +150,7 @@ export class GraphPlusApplicationV1<TFile> {
         profileId: this.profileId, dimensions: this.dimensions,
       });
       await this.mount(saved.document, migrated);
-      await this.reconcile();
+      await this.applyCanonicalSnapshot(await this.model.open());
       return;
     }
     const model = await this.model.open();
@@ -171,19 +172,24 @@ export class GraphPlusApplicationV1<TFile> {
   async reconcile(): Promise<void> {
     if (this.resettingLayout || !this.session) return;
     try {
-      const model = await this.model.reconcile();
-      this.adoptModel(model);
-      if (this.policy.documentScope === 'vault') {
-        if (model.document !== this.document) {
-          await this.session.replaceDocument(model.document);
-          this.document = model.document;
-        }
-        await this.applyFilter();
-        this.checkpoint?.schedule();
-      } else {
-        await this.replaceProjectedDocument();
-      }
+      await this.applyCanonicalSnapshot(await this.model.reconcile());
     } catch (error) { this.options.onError?.(asError(error)); }
+  }
+
+  /** Receives canonical vault truth from the shared Graph+ application. */
+  async applyCanonicalSnapshot(model: GraphPlusVaultModelSnapshotV1<TFile>): Promise<void> {
+    if (this.resettingLayout || !this.session) return;
+    this.adoptModel(model);
+    if (this.policy.documentScope === 'vault') {
+      if (model.document !== this.document) {
+        await this.session.replaceDocument(model.document);
+        this.document = model.document;
+      }
+      await this.applyFilter();
+      this.checkpoint?.schedule();
+    } else {
+      await this.replaceProjectedDocument();
+    }
   }
 
   setLens(next: GraphPlusLensStateV1): Promise<void> {
@@ -227,8 +233,17 @@ export class GraphPlusApplicationV1<TFile> {
     await this.replaceProjectedDocument();
   }
 
-  async followActiveNode(nodeId: string): Promise<boolean> {
+  async followActiveNode(nodeId?: string): Promise<boolean> {
     if (!this.policy.followActiveNote || !this.session) return false;
+    if (nodeId === undefined) {
+      if (this.rootNodeId === undefined && this.document?.nodes.length === 0) {
+        await this.enforceExperiencePolicy();
+        return true;
+      }
+      this.rootNodeId = undefined;
+      await this.replaceProjectedDocument(true);
+      return true;
+    }
     if (!this.canonicalDocument?.nodes.some((node) => node.id === nodeId)) await this.reconcile();
     if (!this.canonicalDocument?.nodes.some((node) => node.id === nodeId)) return false;
     if (this.rootNodeId === nodeId) {
@@ -236,7 +251,7 @@ export class GraphPlusApplicationV1<TFile> {
       return true;
     }
     this.rootNodeId = nodeId;
-    await this.replaceProjectedDocument();
+    await this.replaceProjectedDocument(true);
     return true;
   }
 
@@ -254,7 +269,7 @@ export class GraphPlusApplicationV1<TFile> {
     if (!(this.canonicalDocument ?? this.document)?.nodes.some((node) => node.id === nodeId)) return false;
     if (this.policy.documentScope === 'root-neighborhood') {
       this.rootNodeId = nodeId;
-      await this.replaceProjectedDocument();
+      await this.replaceProjectedDocument(true);
       return true;
     }
     this.transientRevealNodeId = nodeId;
@@ -335,7 +350,8 @@ export class GraphPlusApplicationV1<TFile> {
     const compatibleViewState = restoreViewState ? this.compatibleViewState(document, restoreViewState) : undefined;
     const session = await this.options.lease.createSession({
       consumerId: 'graph-plus', profileId: this.profileId, container: this.options.container,
-      document, restoreViewState: compatibleViewState,
+      document, experience: graphPlusEngineExperienceContractV1(this.policy),
+      restoreViewState: compatibleViewState,
       sessionOverrides: graphPlusSessionOverridesV1(this.lens), ui: this.options.ui,
       onSessionOverridesChanged: (overrides) => this.adoptSessionOverrides(overrides),
     });
@@ -362,8 +378,6 @@ export class GraphPlusApplicationV1<TFile> {
         });
       }
     }
-    if ((intent.type === 'focus-changed' || intent.type === 'selection-changed')
-      && this.policy.rootInvariant !== 'none') void this.enforceExperiencePolicy();
     if (intent.type === 'focus-changed' && intent.focusedNodeId !== this.transientRevealNodeId
       && this.transientRevealNodeId) {
       this.transientRevealNodeId = undefined;
@@ -377,14 +391,22 @@ export class GraphPlusApplicationV1<TFile> {
     this.searchIndex = model.searchIndex;
   }
 
-  private async replaceProjectedDocument(): Promise<void> {
+  private async replaceProjectedDocument(enforceCanonicalRoot = false): Promise<void> {
     if (!this.session) return;
     const projected = this.projectDocument();
     if (!sameGraphPlusExperienceDocumentV1(this.document, projected)) {
       await this.session.replaceDocument(projected);
       this.document = projected;
     }
-    await this.enforceExperiencePolicy();
+    if (enforceCanonicalRoot) {
+      await this.enforceExperiencePolicy();
+      return;
+    }
+    const state = await this.session.exportViewState();
+    const focusRemainsValid = state.focusedNodeId !== undefined
+      && state.selectedNodeIds.includes(state.focusedNodeId)
+      && projected.nodes.some((node) => node.id === state.focusedNodeId);
+    if (!focusRemainsValid) await this.enforceExperiencePolicy();
   }
 
   private projectDocument(): GraphDocumentV1 {
@@ -400,17 +422,31 @@ export class GraphPlusApplicationV1<TFile> {
   }
 
   private async enforceExperiencePolicy(): Promise<void> {
-    if (this.enforcingPolicy || this.policy.rootInvariant === 'none') return;
+    if (this.enforcingPolicy || this.policy.canonicalRootState === 'none') return;
     const root = this.rootNodeId;
-    if (!root || !this.session || !this.document?.nodes.some((node) => node.id === root)) return;
+    if (!this.session) return;
+    if (root && !this.document?.nodes.some((node) => node.id === root)) return;
     this.enforcingPolicy = true;
     try {
       const state = await this.session.exportViewState();
-      if (!state.pinnedNodeIds.includes(root)) await this.session.setNodePinned(root, true);
-      if (state.selectedNodeIds.length !== 1 || state.selectedNodeIds[0] !== root) {
-        await this.session.setSelection([root]);
+      const consciousStateChanged = root
+        ? state.selectedNodeIds.length !== 1
+          || state.selectedNodeIds[0] !== root
+          || state.focusedNodeId !== root
+        : state.selectedNodeIds.length > 0 || state.focusedNodeId !== undefined;
+      const result = await this.session.applyExternalInfluence({
+        schemaVersion: 1,
+        type: 'replace-attention',
+        nodeIds: root ? [root] : [],
+        ...(root ? { focusNodeId: root } : {}),
+        framing: consciousStateChanged ? 'fit-state' : 'preserve',
+      });
+      if (result.status === 'rejected') {
+        throw new Error(`Graph+ experience rejected canonical subject: ${result.reason}`);
       }
-      if (state.focusedNodeId !== root) await this.session.focusNode(root);
+      if (root) {
+        if (!state.pinnedNodeIds.includes(root)) await this.session.setNodePinned(root, true);
+      }
     } finally { this.enforcingPolicy = false; }
   }
 
@@ -449,11 +485,149 @@ export class GraphPlusApplicationV1<TFile> {
   private disposeSessionSubscriptions(): void {
     this.sessionSubscriptions.splice(0).forEach((subscription) => subscription.dispose());
   }
+
 }
 
-/** @deprecated Use GraphPlusApplicationV1 with an experience mode. */
-export const GraphPlusConsumerV1 = GraphPlusApplicationV1;
-export type GraphPlusConsumerOptionsV1<TFile> = GraphPlusApplicationOptionsV1<TFile>;
+export interface GraphPlusApplicationOptionsV1<TFile> {
+  readonly model: GraphPlusVaultModelV1<TFile>;
+  readonly navigator: GraphPlusNavigatorV1<TFile>;
+  readonly onError?: (error: Error) => void;
+}
+
+export type GraphPlusPresentationAttachOptionsV1<TFile> = Omit<
+  GraphPlusPresentationOptionsV1<TFile>,
+  'model' | 'navigator' | 'source' | 'countDuplicateLinks'
+>;
+
+export type GraphPlusHostEventV1 =
+  | { readonly type: 'canonical-vault-invalidated' }
+  | { readonly type: 'active-note-changed'; readonly nodeId?: string };
+
+/**
+ * The single Graph+ application. It owns canonical vault reconciliation and
+ * distributes received truth to independent Global and Local presentations.
+ */
+export class GraphPlusApplicationV1<TFile> {
+  private readonly presentations = new Set<GraphPlusPresentationV1<TFile>>();
+  private readonly hostActivityListeners = new Set<() => void>();
+  private reconcileTimer?: ReturnType<typeof setTimeout>;
+  private reconcileRunning?: Promise<void>;
+  private reconcileAgain = false;
+  private activeNodeQueued = false;
+  private pendingActiveNodeId?: string;
+  private activeNodeFollow?: Promise<void>;
+
+  constructor(private readonly options: GraphPlusApplicationOptionsV1<TFile>) {}
+
+  createPresentation(
+    options: GraphPlusPresentationAttachOptionsV1<TFile>,
+  ): GraphPlusPresentationV1<TFile> {
+    const presentation = new GraphPlusPresentationV1({
+      ...options,
+      model: this.options.model,
+      navigator: this.options.navigator,
+    });
+    this.presentations.add(presentation);
+    return presentation;
+  }
+
+  async closePresentation(presentation: GraphPlusPresentationV1<TFile>): Promise<void> {
+    if (!this.presentations.delete(presentation)) return;
+    await presentation.close();
+  }
+
+  onHostActivity(listener: () => void): Disposable {
+    this.hostActivityListeners.add(listener);
+    return { dispose: () => this.hostActivityListeners.delete(listener) };
+  }
+
+  receiveHostEvent(event: GraphPlusHostEventV1): void {
+    if (event.type === 'canonical-vault-invalidated') {
+      this.scheduleReconcile();
+      return;
+    }
+    if (event.type === 'active-note-changed') this.queueActiveNode(event.nodeId);
+    for (const listener of this.hostActivityListeners) listener();
+  }
+
+  scheduleReconcile(delayMs = 180): void {
+    if (this.reconcileTimer !== undefined) clearTimeout(this.reconcileTimer);
+    this.reconcileTimer = setTimeout(() => {
+      this.reconcileTimer = undefined;
+      void this.reconcile();
+    }, delayMs);
+  }
+
+  async reconcile(): Promise<void> {
+    if (this.reconcileTimer !== undefined) clearTimeout(this.reconcileTimer);
+    this.reconcileTimer = undefined;
+    if (this.reconcileRunning) {
+      this.reconcileAgain = true;
+      return this.reconcileRunning;
+    }
+    const operation = this.reconcileUntilSettled();
+    this.reconcileRunning = operation;
+    try { await operation; } finally {
+      if (this.reconcileRunning === operation) this.reconcileRunning = undefined;
+    }
+  }
+
+  async followActiveNode(nodeId?: string): Promise<void> {
+    const locals = [...this.presentations].filter((presentation) => presentation.experiencePolicy.followActiveNote);
+    if (nodeId && !this.options.model.read()?.document.nodes.some((node) => node.id === nodeId)) {
+      await this.reconcile();
+    }
+    await Promise.all(locals.map((presentation) => presentation.followActiveNode(nodeId)));
+  }
+
+  async dispose(): Promise<void> {
+    if (this.reconcileTimer !== undefined) clearTimeout(this.reconcileTimer);
+    this.reconcileTimer = undefined;
+    await this.reconcileRunning?.catch(() => undefined);
+    await this.activeNodeFollow?.catch(() => undefined);
+    await Promise.all([...this.presentations].map((presentation) => presentation.close()));
+    this.presentations.clear();
+    this.hostActivityListeners.clear();
+  }
+
+  private async reconcileUntilSettled(): Promise<void> {
+    do {
+      this.reconcileAgain = false;
+      try {
+        const snapshot = await this.options.model.reconcile();
+        await Promise.all([...this.presentations].map(
+          (presentation) => presentation.applyCanonicalSnapshot(snapshot),
+        ));
+      } catch (error) {
+        this.options.onError?.(asError(error));
+      }
+    } while (this.reconcileAgain);
+  }
+
+  private queueActiveNode(nodeId?: string): void {
+    this.pendingActiveNodeId = nodeId;
+    this.activeNodeQueued = true;
+    if (this.activeNodeFollow) return;
+    const operation = this.drainActiveNodeQueue();
+    this.activeNodeFollow = operation;
+    void operation.catch((error) => this.options.onError?.(asError(error))).finally(() => {
+      if (this.activeNodeFollow === operation) this.activeNodeFollow = undefined;
+      if (this.activeNodeQueued) this.queueActiveNode(this.pendingActiveNodeId);
+    });
+  }
+
+  private async drainActiveNodeQueue(): Promise<void> {
+    while (this.activeNodeQueued) {
+      const nodeId = this.pendingActiveNodeId;
+      this.activeNodeQueued = false;
+      await this.followActiveNode(nodeId);
+    }
+  }
+}
+
+/** @deprecated Use GraphPlusApplicationV1 to create managed presentations. */
+export const GraphPlusConsumerV1 = GraphPlusPresentationV1;
+export type GraphPlusConsumerOptionsV1<TFile> = GraphPlusPresentationOptionsV1<TFile>;
 
 function localDepth(value: number | undefined): number {
   return typeof value === 'number' && Number.isFinite(value)

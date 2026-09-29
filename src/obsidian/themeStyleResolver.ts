@@ -112,11 +112,11 @@ export class ThemeStyleResolver {
     });
     if (!styles) return this.withOverrides({ ...DEFAULT_GRAPH_VISUAL_THEME_V2, revision });
     if (this.isDefaultObsidianTheme()) {
-      return this.withOverrides({
+      return this.withOverrides(this.withSurfaceBackground(root, styles, {
         ...DEFAULT_OBSIDIAN_GRAPH_PLUS_THEME_V2,
         revision,
         labelFont: font(styles),
-      });
+      }));
     }
 
     const accent = this.read(
@@ -149,6 +149,7 @@ export class ThemeStyleResolver {
     const arrow = this.color(root, this.probe(root, 'color-arrow') || this.read(styles, '--graph-line'), edge);
     const background = this.color(root, this.read(
         styles,
+        '--graph-plus-surface-background',
         '--graph-background',
         "--background-primary"
       ), fallback.background);
@@ -197,6 +198,22 @@ export class ThemeStyleResolver {
         ...(tagNode ? { tagNode } : {}),
       },
     });
+  }
+
+  private withSurfaceBackground(
+    root: HTMLElement,
+    styles: CSSStyleDeclaration,
+    theme: GraphVisualThemeV2,
+  ): GraphVisualThemeV2 {
+    const value = this.read(styles, '--graph-plus-surface-background');
+    if (!value) return theme;
+    return {
+      ...theme,
+      colors: {
+        ...theme.colors,
+        background: this.color(root, value, theme.colors.background),
+      },
+    };
   }
 
   private color(root: HTMLElement, value: string, fallback: GraphColorV2): GraphColorV2 {

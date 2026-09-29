@@ -124,6 +124,7 @@ export class SessionFactory {
       profileId: options.profileId,
       container: options.container,
       document: options.document,
+      experience: options.experience,
       profile,
       initialSessionOverrides: options.sessionOverrides,
       resolveProfile: (sessionOverrides) => this.profiles.resolve(options.consumerId, options.profileId, {

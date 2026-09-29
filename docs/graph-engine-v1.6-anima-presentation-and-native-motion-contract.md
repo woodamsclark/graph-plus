@@ -4,6 +4,12 @@ Status: Accepted in live desktop/mobile use; legacy comparison retired.
 
 Date: 2026-09-05
 
+Migration note: the selection/Ego/Awareness ownership in this contract is superseded by
+[Graph Engine agency and Awareness ontology](graph-engine-agency-awareness-ontology.md).
+Phases 2 through 7 have migrated conscious-state ownership, policy, exogenous
+influence, and explicit Anima classification while retaining compatible presentation
+behavior and enforcing projection-before-presentation module stages.
+
 Depends on:
 
 - [Graph+ and Graph Engine V1.1 Architecture and Contracts](graph-engine-v1-contracts.md)
@@ -360,9 +366,10 @@ The current interaction policy is constellation-first:
 - a stationary background activation clears selection and Focus without moving the camera; and
 - context actions remain available without changing focus merely by opening the menu.
 
-Ego supplies Awareness membership. Anima resolves Awareness together with focus, hover,
-drag, and preview facts into semantic UI roles without altering their state-machine
-meaning, and also presents pin and region state.
+Consciousness supplies explicit Attention and Awareness membership. Anima classifies
+projected nodes as attended, peripherally aware, or unaware context, then resolves
+those classes with focus, hover, drag, and preview facts into semantic UI roles without
+altering their state-machine meaning, and also presents pin and region state.
 
 While Explore/Constellation is active, selected members and their structural links
 receive emphasis. Every other projected node and link, including unrelated

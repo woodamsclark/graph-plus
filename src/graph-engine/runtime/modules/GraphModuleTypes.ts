@@ -9,7 +9,7 @@ import type {
 } from '../../contracts/v1/index.ts';
 import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
 import type { AnimusEdgeRoleV1, AnimusNodeRoleV1, AnimusRegionV1 } from '../animus/index.ts';
-import type { Ego } from '../ego/index.ts';
+import type { ConsciousnessSnapshot } from '../consciousness/index.ts';
 import type {
   GraphEdgeRenderContributionV1,
   GraphNodeRenderContributionV1,
@@ -50,8 +50,8 @@ export interface GraphModulePipelineStateV1 {
   readonly projectionSelection: GraphFilterSelectionV1;
   readonly renderSelection: GraphFilterSelectionV1;
   readonly formActive: boolean;
-  /** Ego's Awareness membership and centroid, installed for frame composition. */
-  readonly ego?: Ego;
+  /** Presentation-scoped Attention and Awareness, installed for frame composition. */
+  readonly consciousness?: ConsciousnessSnapshot;
   /** Runtime-only interaction state. It is never persisted or exported as graph data. */
   readonly draggedNodeId?: string;
   /** Runtime-only hover state supplied to presentation modules. */
@@ -77,6 +77,27 @@ export interface GraphModulePipelineStateV1 {
   readonly commitPositions?: boolean;
 }
 
+/** Structural input visible before Consciousness reconciliation or Anima styling. */
+export type GraphModuleProjectionStateV1 = Pick<GraphModulePipelineStateV1,
+  | 'sourceDocument'
+  | 'document'
+  | 'viewState'
+  | 'positions'
+  | 'projectionSelection'
+  | 'renderSelection'
+  | 'formActive'
+  | 'nodeRoles'
+  | 'edgeRoles'
+  | 'regions'
+  | 'regionLayouts'
+  | 'commitPositions'
+>;
+
+/** Downstream frame input after projection and Consciousness reconciliation. */
+export type GraphModulePresentationStateV1 = GraphModulePipelineStateV1 & {
+  readonly consciousness: ConsciousnessSnapshot;
+};
+
 export interface GraphModuleProjectionPatchV1 {
   readonly document?: GraphDocumentV1;
   readonly positions?: Readonly<Record<string, Vec3>>;
@@ -86,14 +107,20 @@ export interface GraphModuleProjectionPatchV1 {
   readonly nodeRoles?: Readonly<Record<string, AnimusNodeRoleV1>>;
   readonly edgeRoles?: Readonly<Record<string, AnimusEdgeRoleV1>>;
   readonly regions?: readonly AnimusRegionV1[];
+  readonly regionLayouts?: readonly GraphNodeRegionLayoutV1[];
+  readonly commitPositions?: boolean;
+}
+
+export interface GraphModulePresentationPatchV1 {
   readonly nodeContributions?: Readonly<Record<string, GraphNodeRenderContributionV1>>;
   readonly edgeContributions?: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
-  readonly regionLayouts?: readonly GraphNodeRegionLayoutV1[];
   readonly regionContributions?: readonly GraphRegionRenderContributionV1[];
   readonly theme?: GraphVisualThemeV2;
   readonly presentationPolicy?: GraphPresentationPolicyV2;
+}
+
+export interface GraphModuleChoreographyPatchV1 {
   readonly motionTargets?: GraphMotionTargetsV1;
-  readonly commitPositions?: boolean;
 }
 
 export interface GraphNodeRegionLayoutV1 {
@@ -141,14 +168,14 @@ export interface GraphModuleInstanceV1 {
   onDocumentChanged?(document: GraphDocumentV1): void;
   onViewChanged?(state: GraphViewStateV1): void;
   onThemeChanged?(theme: GraphVisualThemeV2): void;
-  projectSource?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
-  projectTopology?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
-  selectRender?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
-  choreograph?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
+  projectSource?(state: GraphModuleProjectionStateV1): GraphModuleProjectionPatchV1 | void;
+  projectTopology?(state: GraphModuleProjectionStateV1): GraphModuleProjectionPatchV1 | void;
+  selectRender?(state: GraphModuleProjectionStateV1): GraphModuleProjectionPatchV1 | void;
+  choreograph?(state: GraphModulePipelineStateV1): GraphModuleChoreographyPatchV1 | void;
   /** `null` means idle; a number throttles continuous ticks; `undefined` is unthrottled. */
   preferredTickIntervalMs?(state: GraphModulePipelineStateV1): number | null | undefined;
   tick?(state: GraphModulePipelineStateV1, deltaSeconds: number): GraphModuleTickResultV1 | void;
-  contributeFrame?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
+  contributeFrame?(state: GraphModulePresentationStateV1): GraphModulePresentationPatchV1 | void;
   exportState?(): JsonValue;
   /** Compact, read-only runtime evidence for lifecycle and performance diagnosis. */
   getDiagnostics?(): unknown;

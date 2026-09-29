@@ -1129,7 +1129,7 @@ test('mobile Focus navigation rotates, then node taps exit Focus and toggle cons
   await session.dispose();
 });
 
-test('desktop drag on an unselected direct neighbor rotates Focus instead of moving the node', async () => {
+test('desktop drag on a stably hovered direct neighbor moves it without changing Focus', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
@@ -1145,10 +1145,56 @@ test('desktop drag on an unselected direct neighbor rotates Focus instead of mov
   pointer(value, canvas, 'pointerup', neighborPoint.x + 40, neighborPoint.y + 25, { pointerId: 371, pointerType: 'mouse' });
   value.platform.flushFrame();
   const after = await session.exportViewState();
-  deepEqual(after.positions.b, before.positions.b, 'an unselected direct neighbor should not move');
-  deepEqual(after.selectedNodeIds, ['a'], 'neighbor navigation should retain the original selection');
-  deepEqual(after.camera.target, before.camera.target, 'neighbor navigation should retain the focused-node target');
-  assert(!sameVector(after.camera.position, before.camera.position), 'neighbor navigation should rotate the camera');
+  assert(!sameVector(after.positions.b, before.positions.b), 'the stably hovered direct neighbor should move');
+  deepEqual(after.selectedNodeIds, ['a'], 'neighbor dragging should retain the original selection');
+  equal(after.focusedNodeId, 'a', 'neighbor dragging should retain the original Focus subject');
+  deepEqual(after.camera, before.camera, 'neighbor dragging should not rotate or pan the Focus camera');
+  await session.dispose();
+});
+
+test('desktop drag on the stably hovered focused node moves it while Vision follows', async () => {
+  const value = runtimeHarness({ profileId: 'three-dimensional' });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  await session.setSelection(['a']);
+  await session.focusNode('a');
+  const focusedPoint = await nodePoint(session, 'a');
+  pointer(value, canvas, 'pointermove', focusedPoint.x, focusedPoint.y, { pointerId: 372, pointerType: 'mouse' });
+  value.platform.flushFrame();
+  const before = await session.exportViewState();
+  pointer(value, canvas, 'pointerdown', focusedPoint.x, focusedPoint.y, { pointerId: 373, pointerType: 'mouse' });
+  pointer(value, canvas, 'pointermove', focusedPoint.x + 35, focusedPoint.y + 20, { pointerId: 373, pointerType: 'mouse' });
+  value.platform.flushFrame();
+  pointer(value, canvas, 'pointerup', focusedPoint.x + 35, focusedPoint.y + 20, { pointerId: 373, pointerType: 'mouse' });
+  value.platform.flushFrame();
+  const after = await session.exportViewState();
+  assert(!sameVector(after.positions.a, before.positions.a), 'the focused node should move under a desktop drag');
+  deepEqual(after.selectedNodeIds, ['a'], 'dragging the focused node should retain Attention');
+  equal(after.focusedNodeId, 'a', 'dragging the focused node should retain Focus');
+  assert(!sameVector(after.camera.target, before.camera.target), 'Vision should follow the moved Focus subject');
+  assert(sameDirection(cameraOffset(after.camera), cameraOffset(before.camera)),
+    'following the moved Focus subject should preserve camera orientation');
+  await session.dispose();
+});
+
+test('desktop Focus drag without stable hover remains camera navigation', async () => {
+  const value = runtimeHarness({ profileId: 'three-dimensional' });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  await session.setSelection(['a']);
+  await session.focusNode('a');
+  const neighborPoint = await nodePoint(session, 'b');
+  const before = await session.exportViewState();
+  pointer(value, canvas, 'pointerdown', neighborPoint.x, neighborPoint.y, { pointerId: 374, pointerType: 'mouse' });
+  pointer(value, canvas, 'pointermove', neighborPoint.x + 40, neighborPoint.y + 25, { pointerId: 374, pointerType: 'mouse' });
+  value.platform.flushFrame();
+  pointer(value, canvas, 'pointerup', neighborPoint.x + 40, neighborPoint.y + 25, { pointerId: 374, pointerType: 'mouse' });
+  value.platform.flushFrame();
+  const after = await session.exportViewState();
+  deepEqual(after.positions.b, before.positions.b, 'an unstable Focus hit should not move the node');
+  deepEqual(after.selectedNodeIds, ['a'], 'camera navigation should retain the original selection');
+  deepEqual(after.camera.target, before.camera.target, 'camera navigation should retain the focused target');
+  assert(!sameVector(after.camera.position, before.camera.position), 'the fallback gesture should rotate the camera');
   await session.dispose();
 });
 

@@ -9,7 +9,7 @@ import type {
   AnimusEdgeRoleV1,
   AnimusNodeRoleV1,
 } from '../../animus/index.ts';
-import type { GraphModuleInstanceV1, GraphModulePipelineStateV1 } from '../GraphModuleTypes.ts';
+import type { GraphModuleInstanceV1, GraphModuleProjectionStateV1 } from '../GraphModuleTypes.ts';
 
 interface FormSettings {
   readonly rootNodeId?: string;
@@ -36,7 +36,7 @@ export class FormModule implements GraphModuleInstanceV1 {
     this.settings = readSettings(settings);
   }
 
-  projectTopology(state: GraphModulePipelineStateV1) {
+  projectTopology(state: GraphModuleProjectionStateV1) {
     const source = state.document;
     if (!source.nodes.length) return { formActive: true };
     const edges = this.settings.edgeToken

@@ -3,8 +3,8 @@ import { GraphNodeRegionIndexV1 } from '../../../core/regions/index.ts';
 import type { AnimusRegionV1 } from '../../animus/index.ts';
 import type {
   GraphModuleInstanceV1,
-  GraphModulePipelineStateV1,
   GraphModuleProjectionPatchV1,
+  GraphModuleProjectionStateV1,
 } from '../GraphModuleTypes.ts';
 
 interface NodeRegionSettingsV1 {
@@ -28,7 +28,7 @@ export class NodeRegionsModule implements GraphModuleInstanceV1 {
     this.settings = readNodeRegionSettingsV1(settings);
   }
 
-  selectRender(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 {
+  selectRender(state: GraphModuleProjectionStateV1): GraphModuleProjectionPatchV1 {
     if (this.dimensions !== '2d' || !state.document.nodeRegions) {
       return { regions: [] };
     }

@@ -3,8 +3,8 @@ import type {
   GraphPlusVaultSourceV1,
 } from '../application/index.ts';
 import {
-  GraphPlusApplicationV1,
-  type GraphPlusApplicationOptionsV1,
+  GraphPlusPresentationV1,
+  type GraphPlusPresentationOptionsV1,
   type GraphPlusNavigatorV1,
 } from '../application/GraphPlusApplication.ts';
 import type {
@@ -27,14 +27,14 @@ export interface LocalGraphPlusConsumerOptionsV1<TFile> {
   readonly profileId?: string;
   readonly ui?: GraphSessionUiOptionsV1;
   readonly onError?: (error: GraphSessionErrorV1 | Error) => void;
-  readonly onNotePreview?: GraphPlusApplicationOptionsV1<TFile>['onNotePreview'];
+  readonly onNotePreview?: GraphPlusPresentationOptionsV1<TFile>['onNotePreview'];
 }
 
 /**
  * Compatibility constructor for external callers. Production Global and Local
- * surfaces both instantiate GraphPlusApplicationV1 directly with a mode policy.
+ * surfaces are managed by GraphPlusApplicationV1 with a mode policy.
  */
-export class LocalGraphPlusConsumerV1<TFile> extends GraphPlusApplicationV1<TFile> {
+export class LocalGraphPlusConsumerV1<TFile> extends GraphPlusPresentationV1<TFile> {
   constructor(options: LocalGraphPlusConsumerOptionsV1<TFile>) {
     super({ ...options, mode: 'local' });
   }

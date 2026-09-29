@@ -13,11 +13,15 @@ import type {
 import type { GraphModuleRegistry } from './GraphModuleRegistry.ts';
 import type {
   ActiveGraphModuleV1,
+  GraphModuleChoreographyPatchV1,
   GraphModuleFailureV1,
   GraphModuleHookV1,
   GraphModuleInstanceV1,
   GraphModulePipelineStateV1,
+  GraphModulePresentationPatchV1,
+  GraphModulePresentationStateV1,
   GraphModuleProjectionPatchV1,
+  GraphModuleProjectionStateV1,
 } from './GraphModuleTypes.ts';
 
 export class GraphRequiredModuleErrorV1 extends Error {
@@ -218,7 +222,7 @@ export class GraphModuleHost {
     this.active.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   }
 
-  project(initial: GraphModulePipelineStateV1): GraphModulePipelineStateV1 {
+  project(initial: GraphModuleProjectionStateV1): GraphModuleProjectionStateV1 {
     let state = initial;
     state = this.runProjectionHook(state, 'projectSource', 'project-source');
     state = { ...state, renderSelection: allOf(state.document) };
@@ -228,13 +232,13 @@ export class GraphModuleHost {
     return state;
   }
 
-  contribute(state: GraphModulePipelineStateV1): GraphModulePipelineStateV1 {
-    return this.runProjectionHook(state, 'contributeFrame', 'contribute-frame');
+  contribute(state: GraphModulePresentationStateV1): GraphModulePresentationStateV1 {
+    return this.runPresentationHook(state);
   }
 
   tick(state: GraphModulePipelineStateV1, deltaSeconds: number): import('./GraphModuleTypes.ts').GraphModuleTickResultV1 | undefined {
     if (this.fatal || this.disposed) return undefined;
-    const choreographed = this.runProjectionHook(state, 'choreograph', 'choreograph');
+    const choreographed = this.runChoreographyHook(state);
     let positions = choreographed.positions;
     let changed = false;
     let requestNextFrame = false;
@@ -358,10 +362,10 @@ export class GraphModuleHost {
   private failureListener: ((failure: GraphModuleFailureV1) => void) | undefined;
 
   private runProjectionHook(
-    initial: GraphModulePipelineStateV1,
-    method: 'projectSource' | 'projectTopology' | 'selectRender' | 'contributeFrame' | 'choreograph',
+    initial: GraphModuleProjectionStateV1,
+    method: 'projectSource' | 'projectTopology' | 'selectRender',
     hook: GraphModuleHookV1,
-  ): GraphModulePipelineStateV1 {
+  ): GraphModuleProjectionStateV1 {
     if (this.fatal || this.disposed) return initial;
     let state = initial;
     for (const module of [...this.active]) {
@@ -372,6 +376,44 @@ export class GraphModuleHost {
         if (patch) state = applyProjectionPatch(state, patch);
       } catch (error) {
         this.failActiveModule(module, hook, error);
+        if (this.fatal) break;
+      }
+    }
+    return state;
+  }
+
+  private runPresentationHook(
+    initial: GraphModulePresentationStateV1,
+  ): GraphModulePresentationStateV1 {
+    if (this.fatal || this.disposed) return initial;
+    let state = initial;
+    for (const module of [...this.active]) {
+      const callback = module.instance.contributeFrame;
+      if (!callback) continue;
+      try {
+        const patch = callback.call(module.instance, state);
+        if (patch) state = applyPresentationPatch(state, patch);
+      } catch (error) {
+        this.failActiveModule(module, 'contribute-frame', error);
+        if (this.fatal) break;
+      }
+    }
+    return state;
+  }
+
+  private runChoreographyHook(
+    initial: GraphModulePipelineStateV1,
+  ): GraphModulePipelineStateV1 {
+    if (this.fatal || this.disposed) return initial;
+    let state = initial;
+    for (const module of [...this.active]) {
+      const callback = module.instance.choreograph;
+      if (!callback) continue;
+      try {
+        const patch = callback.call(module.instance, state);
+        if (patch) state = applyChoreographyPatch(state, patch);
+      } catch (error) {
+        this.failActiveModule(module, 'choreograph', error);
         if (this.fatal) break;
       }
     }
@@ -419,24 +461,52 @@ export class GraphModuleHost {
 }
 
 function applyProjectionPatch(
-  state: GraphModulePipelineStateV1,
+  state: GraphModuleProjectionStateV1,
   patch: GraphModuleProjectionPatchV1,
-): GraphModulePipelineStateV1 {
+): GraphModuleProjectionStateV1 {
   return {
     ...state,
-    ...patch,
+    document: patch.document ?? state.document,
+    positions: patch.positions ?? state.positions,
+    projectionSelection: patch.projectionSelection ?? state.projectionSelection,
+    renderSelection: patch.renderSelection ?? state.renderSelection,
+    formActive: patch.formActive ?? state.formActive,
     nodeRoles: patch.nodeRoles
       ? mergeRecords(state.nodeRoles, patch.nodeRoles)
       : state.nodeRoles,
     edgeRoles: patch.edgeRoles
       ? mergeRecords(state.edgeRoles, patch.edgeRoles)
       : state.edgeRoles,
+    regions: patch.regions ?? state.regions,
+    regionLayouts: patch.regionLayouts ?? state.regionLayouts,
+    commitPositions: patch.commitPositions ?? state.commitPositions,
+  };
+}
+
+function applyPresentationPatch(
+  state: GraphModulePresentationStateV1,
+  patch: GraphModulePresentationPatchV1,
+): GraphModulePresentationStateV1 {
+  return {
+    ...state,
     nodeContributions: patch.nodeContributions
       ? mergeContributions(state.nodeContributions, patch.nodeContributions)
       : state.nodeContributions,
     edgeContributions: patch.edgeContributions
       ? mergeContributions(state.edgeContributions, patch.edgeContributions)
       : state.edgeContributions,
+    regionContributions: patch.regionContributions ?? state.regionContributions,
+    theme: patch.theme ?? state.theme,
+    presentationPolicy: patch.presentationPolicy ?? state.presentationPolicy,
+  };
+}
+
+function applyChoreographyPatch(
+  state: GraphModulePipelineStateV1,
+  patch: GraphModuleChoreographyPatchV1,
+): GraphModulePipelineStateV1 {
+  return {
+    ...state,
     motionTargets: patch.motionTargets
       ? mergeMotionTargets(state.motionTargets ?? {}, patch.motionTargets)
       : state.motionTargets,

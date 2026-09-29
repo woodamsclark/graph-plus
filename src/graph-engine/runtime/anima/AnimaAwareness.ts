@@ -1,5 +1,5 @@
 import type { GraphDocumentV1 } from '../../contracts/v1/index.ts';
-import type { Awareness } from '../ego/index.ts';
+import type { Attention, Awareness } from '../consciousness/index.ts';
 import type { GraphInteractionContextV1, GraphUxStateV1 } from '../interaction/index.ts';
 
 export type AnimaPresentationRoleV1 = 'normal' | 'highlighted' | 'dimmed' | 'hidden';
@@ -37,7 +37,16 @@ export interface AnimaHighlightResultV1 {
 }
 
 export type AnimaLabelDispositionV1 = 'force' | 'favor' | 'raise' | 'suppress' | 'fallback';
-export type AnimaLabelReasonV1 = 'hover' | 'hover-neighbor' | 'aware' | 'dimmed' | 'slider';
+export type AnimaConsciousnessClassV1 = 'attended' | 'peripherally-aware' | 'unaware-context';
+
+export interface AnimaConsciousnessClassesV1 {
+  readonly byNodeId: Readonly<Record<string, AnimaConsciousnessClassV1>>;
+  readonly attendedNodeIds: ReadonlySet<string>;
+  readonly peripherallyAwareNodeIds: ReadonlySet<string>;
+  readonly unawareContextNodeIds: ReadonlySet<string>;
+}
+
+export type AnimaLabelReasonV1 = 'hover' | 'hover-neighbor' | 'attended' | 'aware' | 'dimmed' | 'slider';
 
 export interface AnimaLabelDecisionV1 {
   readonly disposition: AnimaLabelDispositionV1;
@@ -50,11 +59,15 @@ export interface AnimaLabelRaisingV1 {
   readonly byNodeId: Readonly<Record<string, AnimaLabelDecisionV1>>;
 }
 
-export interface AnimaAwarenessPresentationV1 {
+export interface AnimaConsciousnessPresentationV1 {
   readonly statePolicy: AnimaStatePresentationPolicyV1;
+  readonly consciousnessClasses: AnimaConsciousnessClassesV1;
   readonly highlight: AnimaHighlightResultV1;
   readonly labelRaising: AnimaLabelRaisingV1;
 }
+
+/** @deprecated Use AnimaConsciousnessPresentationV1. */
+export type AnimaAwarenessPresentationV1 = AnimaConsciousnessPresentationV1;
 
 export const ANIMA_HIGHLIGHT_POLICY_V1: AnimaHighlightPolicyV1 = Object.freeze({
   sources: Object.freeze({
@@ -102,20 +115,55 @@ export const ANIMA_STATE_PRESENTATION_POLICIES_V1: Readonly<
   },
 };
 
-export function createAnimaAwarenessPresentationV1(options: {
+export function createAnimaConsciousnessPresentationV1(options: {
+  readonly attention: Attention;
   readonly awareness: Awareness;
   readonly interaction: GraphInteractionContextV1;
   readonly document: GraphDocumentV1;
   readonly visibleNodeIds?: ReadonlySet<string>;
   readonly visibleEdgeIds?: ReadonlySet<string>;
-}): AnimaAwarenessPresentationV1 {
+}): AnimaConsciousnessPresentationV1 {
   const statePolicy = ANIMA_STATE_PRESENTATION_POLICIES_V1[options.interaction.state];
+  const visibleNodeIds = options.visibleNodeIds ?? new Set(options.document.nodes.map((node) => node.id));
+  const consciousnessClasses = classifyAnimaConsciousnessV1({
+    attention: options.attention,
+    awareness: options.awareness,
+    projectedNodeIds: visibleNodeIds,
+  });
   const highlight = resolveAnimaHighlightV1({ ...options, statePolicy });
   return {
     statePolicy,
+    consciousnessClasses,
     highlight,
-    labelRaising: resolveAnimaLabelRaisingV1({ ...options, highlight }),
+    labelRaising: resolveAnimaLabelRaisingV1({ ...options, consciousnessClasses, highlight }),
   };
+}
+
+/** @deprecated Use createAnimaConsciousnessPresentationV1. */
+export const createAnimaAwarenessPresentationV1 = createAnimaConsciousnessPresentationV1;
+
+/** Classifies every projected subject before Anima assigns any visual expression. */
+export function classifyAnimaConsciousnessV1(options: {
+  readonly attention: Attention;
+  readonly awareness: Awareness;
+  readonly projectedNodeIds: ReadonlySet<string>;
+}): AnimaConsciousnessClassesV1 {
+  const attendedNodeIds = new Set<string>();
+  const peripherallyAwareNodeIds = new Set<string>();
+  const unawareContextNodeIds = new Set<string>();
+  const byNodeId: Record<string, AnimaConsciousnessClassV1> = {};
+  for (const nodeId of options.projectedNodeIds) {
+    const classification: AnimaConsciousnessClassV1 = options.attention.nodeIds.has(nodeId)
+      ? 'attended'
+      : options.awareness.nodeIds.has(nodeId)
+        ? 'peripherally-aware'
+        : 'unaware-context';
+    byNodeId[nodeId] = classification;
+    if (classification === 'attended') attendedNodeIds.add(nodeId);
+    else if (classification === 'peripherally-aware') peripherallyAwareNodeIds.add(nodeId);
+    else unawareContextNodeIds.add(nodeId);
+  }
+  return { byNodeId, attendedNodeIds, peripherallyAwareNodeIds, unawareContextNodeIds };
 }
 
 export function resolveAnimaHighlightPolicyV1(
@@ -189,8 +237,8 @@ function resolveAnimaHighlightV1(options: {
 }
 
 function resolveAnimaLabelRaisingV1(options: {
-  readonly awareness: Awareness;
   readonly interaction: GraphInteractionContextV1;
+  readonly consciousnessClasses: AnimaConsciousnessClassesV1;
   readonly highlight: AnimaHighlightResultV1;
   readonly document: GraphDocumentV1;
   readonly visibleNodeIds?: ReadonlySet<string>;
@@ -215,7 +263,11 @@ function resolveAnimaLabelRaisingV1(options: {
     if (hoverNeighbors.has(nodeId)) {
       return [nodeId, { disposition: 'favor', reason: 'hover-neighbor', priority: 4, saliencyBoost: 0.5 }];
     }
-    if (options.awareness.nodeIds.has(nodeId) || nodeId === options.interaction.focusedNodeId) {
+    if (options.consciousnessClasses.byNodeId[nodeId] === 'attended') {
+      return [nodeId, { disposition: 'raise', reason: 'attended', priority: 3 }];
+    }
+    if (options.consciousnessClasses.byNodeId[nodeId] === 'peripherally-aware'
+      || nodeId === options.interaction.focusedNodeId) {
       return [nodeId, { disposition: 'raise', reason: 'aware', priority: 3 }];
     }
     if (suppresses && !options.highlight.highlightedNodeIds.has(nodeId)) {

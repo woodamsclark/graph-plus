@@ -102,6 +102,7 @@ export class GraphInteractionInterpreter {
     readonly hitTest: (point: GraphScreenPointV1, pointerKind?: 'mouse' | 'touch' | 'pen') => GraphHitV1 | null;
     readonly getSelectedNodeIds: () => readonly string[];
     readonly getFocusedNodeId: () => string | undefined;
+    readonly getHoveredNodeId: () => string | undefined;
     readonly getFocusedNodeScreenPoint: () => GraphScreenPointV1 | undefined;
     readonly getNodeSelection: (nodeId: string) => readonly string[];
     readonly getSelectionBridge: (nodeId: string, selectedNodeIds: readonly string[]) => readonly string[];
@@ -254,11 +255,15 @@ export class GraphInteractionInterpreter {
       });
       const hitSelectedNode = this.mode.hit !== null && selectedNodeIds.includes(this.mode.hit.nodeId);
       const startsInitialNodeDrag = this.mode.hit !== null && selectedNodeIds.length === 0;
-      if (policy.state !== 'focus'
+      const startsStableFocusDrag = policy.state === 'focus'
+        && this.mode.pointerKind === 'mouse'
+        && this.mode.hit !== null
+        && this.options.getHoveredNodeId() === this.mode.hit.nodeId;
+      const startsOrdinaryNodeDrag = policy.state !== 'focus'
         && this.mode.pointerKind !== 'touch'
-        && this.mode.hit
-        && this.mode.button === 0
-        && (hitSelectedNode || startsInitialNodeDrag)) {
+        && (hitSelectedNode || startsInitialNodeDrag);
+      if (this.mode.hit && this.mode.button === 0
+        && (startsOrdinaryNodeDrag || startsStableFocusDrag)) {
         this.command(event, { type: 'drag-start', nodeId: this.mode.hit.nodeId, point: this.mode.downPoint });
         this.command(event, { type: 'drag-update', nodeId: this.mode.hit.nodeId, point: event.point });
         this.mode = {
@@ -511,7 +516,7 @@ export class GraphInteractionInterpreter {
     }
     if (event.key === 'Escape') {
       this.tagging.reset();
-      this.command(event, { type: 'set-selection', nodeIds: [], clearFocus: true });
+      this.command(event, { type: 'direct-attention', nodeIds: [], clearFocus: true });
       return;
     }
     if (event.key === ' ' || event.key === 'Spacebar') {
@@ -655,13 +660,14 @@ export class GraphInteractionInterpreter {
       const selectedNodeIds = this.options.getSelectedNodeIds();
       if (!selectedNodeIds.includes(hit.nodeId)) {
         this.command(event, {
-          type: 'set-selection',
+          type: 'direct-attention',
           nodeIds: [...new Set([
             ...selectedNodeIds,
             hit.nodeId,
             ...this.options.getNodeSelection(hit.nodeId),
             ...this.options.getSelectionBridge(hit.nodeId, selectedNodeIds),
           ])],
+          subjectNodeId: hit.nodeId,
         });
       }
       this.command(event, { type: 'activate-node', nodeId: hit.nodeId, activation: 'primary' });
@@ -693,7 +699,12 @@ export class GraphInteractionInterpreter {
     const nextSelection = removing
       ? selectedNodeIds.filter((nodeId) => !toggled.has(nodeId))
       : [...new Set([...selectedNodeIds, ...nodeIds])];
-    this.command(event, { type: 'set-selection', nodeIds: nextSelection, clearFocus: true });
+    this.command(event, {
+      type: 'direct-attention',
+      nodeIds: nextSelection,
+      subjectNodeId: hit.nodeId,
+      clearFocus: true,
+    });
   }
 
   private viewMode(): GraphUxStateV1 {

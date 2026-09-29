@@ -4,6 +4,7 @@ import {
   GraphSessionProfileErrorV1,
   createSessionRuntimePlatformV1,
 } from '../../src/graph-engine/runtime/index.ts';
+import { DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import {
@@ -206,6 +207,85 @@ test('R-SHELL-03 restores the compatible saved view without implicit reframing a
   }
   equal(aborted, true, 'camera commands should respect an already-aborted transition');
   await restored.dispose();
+});
+
+test('neutral experience policy constrains programmatic Attention without exposing host concepts', async () => {
+  const value = harness({
+    experience: {
+      ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1,
+      allowedStates: ['focus'],
+      attention: { maximumNodeCount: 1, overflow: 'preserve-intent-subject' },
+      awareness: { attentionNeighborhoodDepth: 1 },
+    },
+  });
+  const session = await value.create();
+
+  await session.setSelection(['a', 'b']);
+
+  deepEqual((await session.exportViewState()).selectedNodeIds, ['b'],
+    'a single-subject experience should retain only the most recent Attention subject');
+  await session.dispose();
+});
+
+test('exogenous influence bypasses Ego intent while obeying experience invariants', async () => {
+  const value = harness({
+    experience: {
+      ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1,
+      allowedStates: ['focus'],
+      attention: { maximumNodeCount: 1, overflow: 'preserve-intent-subject' },
+      awareness: { attentionNeighborhoodDepth: 1 },
+    },
+  });
+  const session = await value.create();
+  const intents: string[] = [];
+  session.onIntent((intent) => intents.push(intent.type));
+
+  const applied = await session.applyExternalInfluence({
+    schemaVersion: 1,
+    type: 'replace-attention',
+    nodeIds: ['a', 'b'],
+    focusNodeId: 'a',
+    framing: 'fit-state',
+  });
+
+  deepEqual(applied, { status: 'adjusted', attentionNodeIds: ['a'], focusedNodeId: 'a' },
+    'canonical outside truth should preserve its Focus subject while policy reduces Attention');
+  const state = await session.exportViewState();
+  deepEqual(state.selectedNodeIds, ['a'], 'the compatibility selection mirror should follow exogenous Attention');
+  equal(state.focusedNodeId, 'a', 'exogenous framing should establish the permitted Focus subject');
+  deepEqual(state.camera.target, state.positions.a, 'fit-state should frame the externally supplied Focus subject');
+  deepEqual(intents, [], 'outside truth must not be reported as endogenous user intent');
+
+  const rejected = await session.applyExternalInfluence({
+    schemaVersion: 1,
+    type: 'replace-attention',
+    nodeIds: [],
+  });
+  deepEqual(rejected, { status: 'rejected', reason: 'state-not-permitted:overview' },
+    'outside influence should remain constrained by the active experience');
+  deepEqual((await session.exportViewState()).selectedNodeIds, ['a'],
+    'a rejected outside influence must not mutate conscious state');
+  await session.dispose();
+});
+
+test('a Focus-only experience accepts empty exogenous Attention for an empty projection', async () => {
+  const value = harness({
+    document: graphDocument({ documentId: 'blank', nodes: [], edges: [] }),
+    experience: {
+      ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1,
+      allowedStates: ['focus'],
+      attention: { maximumNodeCount: 1, overflow: 'preserve-intent-subject' },
+    },
+  });
+  const session = await value.create();
+
+  deepEqual(await session.applyExternalInfluence({
+    schemaVersion: 1,
+    type: 'replace-attention',
+    nodeIds: [],
+  }), { status: 'accepted', attentionNodeIds: [] },
+  'rootless Focus may remain blank instead of inventing an attended subject');
+  await session.dispose();
 });
 
 function midpoint(

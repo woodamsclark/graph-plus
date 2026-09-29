@@ -125,9 +125,13 @@ export type GraphRuntimeCommandV1 =
       readonly centerNodeId?: string;
     })
   | (GraphCommandBaseV1 & {
-      readonly type: 'set-selection';
+      readonly type: 'direct-attention';
       readonly nodeIds: readonly string[];
+      /** Primary subject of the interpreted intent, used when policy must reduce cardinality. */
+      readonly subjectNodeId?: string;
       readonly clearFocus?: boolean;
+      /** Policy-adjusted Focus target when the experience does not permit Explore. */
+      readonly focusNodeId?: string;
     })
   | (GraphCommandBaseV1 & { readonly type: 'set-focus'; readonly nodeId?: string })
   | (GraphCommandBaseV1 & { readonly type: 'enter-focus'; readonly nodeId: string })

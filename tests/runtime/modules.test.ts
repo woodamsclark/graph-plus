@@ -46,6 +46,52 @@ test('R-MODULE-01 keeps optional Anima inert and restores compatible persisted m
   await recovered.dispose();
 });
 
+test('projection and presentation module phases cannot mutate across their boundary', async () => {
+  const registry = createShippedGraphModuleRegistryV1();
+  let projectionSawDownstreamState = false;
+  let presentationSawConsciousness = false;
+  registry.register(definition('projection-boundary-probe', 50, {
+    projectSource: (state: Record<string, unknown>) => {
+      projectionSawDownstreamState = 'consciousness' in state
+        || 'nodeContributions' in state
+        || 'theme' in state;
+      return {
+        nodeContributions: { a: { finalColor: parseGraphColorV2('#010203') } },
+      } as never;
+    },
+  }));
+  registry.register(definition('presentation-boundary-probe', 600, {
+    contributeFrame: (state: Record<string, unknown>) => {
+      presentationSawConsciousness = 'consciousness' in state;
+      return {
+        document: graphDocument({ nodes: [], edges: [] }),
+        renderSelection: { nodeIds: new Set(), edgeIds: new Set() },
+      } as never;
+    },
+  }));
+  const value = runtimeHarness({
+    document: graphDocument({ nodes: [graphNode('a')], edges: [] }),
+    modules: registry,
+    registration: withModules({
+      'projection-boundary-probe': { policy: 'required' },
+      'presentation-boundary-probe': { policy: 'required' },
+    }),
+  });
+  const session = await value.create();
+
+  equal(runtimeSurface(value.container).dataset.renderedNodeCount, '1',
+    'presentation hooks must not replace projected graph membership');
+  equal(projectionSawDownstreamState, false,
+    'projection hooks should run before Consciousness and presentation state exist');
+  equal(presentationSawConsciousness, true,
+    'presentation hooks should receive reconciled Consciousness after projection');
+  assert(value.drawCalls.includes('arc'),
+    'presentation hooks must not remove nodes chosen by projection');
+  assert(!value.styleAssignments.includes('fillStyle:rgb(1, 2, 3)'),
+    'projection hooks must not inject downstream Anima styling');
+  await session.dispose();
+});
+
 test('R-MODULE-02 isolates optional setup and tick failures to one session', async () => {
   const registry = createShippedGraphModuleRegistryV1();
   let fragileInstance = 0;

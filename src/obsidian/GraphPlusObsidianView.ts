@@ -1,17 +1,13 @@
-import {
-  ItemView, MarkdownView,
-  type Plugin, type TFile, type ViewStateResult, type WorkspaceLeaf,
-} from 'obsidian';
+import { ItemView, type Plugin, type TFile, type ViewStateResult, type WorkspaceLeaf } from 'obsidian';
 import { mountGraphEngineUnavailableSurfaceV1, type Disposable } from '../graph-engine/public.ts';
 import { noteNodeId } from '../graph-plus/adapter/index.ts';
 import {
-  GraphPlusApplicationV1,
+  GraphPlusPresentationV1,
   type GraphPlusExperienceModeV1,
 } from '../graph-plus/application/index.ts';
 import {
   coerceGraphPlusLensStateV1, createDefaultGraphPlusLensV1, type GraphPlusLensStateV1,
 } from '../graph-plus/query/index.ts';
-import { GraphPlusObsidianNavigatorV1 } from './GraphPlusObsidianNavigator.ts';
 import { GraphPlusNotePreviewControllerV1 } from './GraphPlusNotePreviewController.ts';
 import { createGraphPlusNotePreviewControllerV1 } from './createGraphPlusNotePreviewController.ts';
 import { GraphPlusViewLifecycleV1 } from './GraphPlusViewLifecycle.ts';
@@ -22,15 +18,13 @@ import type GraphEnginePlugin from './main.ts';
 export abstract class GraphPlusObsidianViewV1 extends ItemView {
   protected readonly plugin: GraphEnginePlugin;
   protected readonly experienceMode: GraphPlusExperienceModeV1;
-  private application?: GraphPlusApplicationV1<TFile>;
+  private application?: GraphPlusPresentationV1<TFile>;
   private fallback?: Disposable;
   private lifecycle?: GraphPlusViewLifecycleV1;
   private pendingLens: GraphPlusLensStateV1 = createDefaultGraphPlusLensV1();
   private pendingDepth = 1;
   private stateRestored = false;
   private notePreview?: GraphPlusNotePreviewControllerV1<TFile>;
-  private activeFileToFollow?: TFile;
-  private followRunning = false;
 
   constructor(leaf: WorkspaceLeaf, plugin: Plugin, experienceMode: GraphPlusExperienceModeV1) {
     super(leaf);
@@ -47,7 +41,7 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
     this.lifecycle = new GraphPlusViewLifecycleV1(this.contentEl, {
       setSuspended: (suspended) => this.application?.setSuspended(suspended),
       clearPreview: () => this.notePreview?.clear(),
-      reconcile: () => this.application?.reconcile(),
+      reconcile: () => this.plugin.graphPlusApplication.reconcile(),
     });
     this.notePreview = createGraphPlusNotePreviewControllerV1({
       app: this.app,
@@ -59,17 +53,12 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
     if (!this.stateRestored) this.pendingLens = { ...this.pendingLens, showTags: this.plugin.settings.showTags };
     try {
       this.pendingLens = await this.plugin.migrateLegacyLensSettings(this.pendingLens);
-      const activeFile = this.experienceMode === 'local'
-        ? this.activeMarkdownFile() ?? this.app.workspace.getActiveFile()
-        : null;
       const lease = this.plugin.acquireGraphPlusLease();
-      let application!: GraphPlusApplicationV1<TFile>;
-      application = new GraphPlusApplicationV1({
+      let application!: GraphPlusPresentationV1<TFile>;
+      application = this.plugin.graphPlusApplication.createPresentation({
         mode: this.experienceMode,
         lease,
         container,
-        model: this.plugin.graphPlusVaultModel,
-        navigator: new GraphPlusObsidianNavigatorV1(this.app),
         ...(this.experienceMode === 'global' ? {
           vaultId: this.app.vault.getName(),
           checkpointStore: this.plugin.graphPlusCheckpointStore,
@@ -77,7 +66,7 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
           restoreSavedLens: !this.stateRestored,
           clock: createWindowClock(container),
         } : {
-          initialRootNodeId: activeFile?.extension === 'md' ? noteNodeId(activeFile.path) : undefined,
+          initialRootNodeId: this.plugin.obsidianGraphBridge.activeNoteNodeId(),
           initialDepth: this.pendingDepth,
         }),
         initialLens: this.pendingLens,
@@ -94,12 +83,14 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
       });
       this.application = application;
       await application.open();
-      this.registerHostEvents();
+      const activity = this.plugin.graphPlusApplication.onHostActivity(() => this.synchronizeLeafVisibility());
+      this.lifecycle.register(() => activity.dispose());
       this.synchronizeLeafVisibility();
-      if (this.experienceMode === 'local') this.requestActiveFileFollow(activeFile);
     } catch (error) {
       console.error(`[${this.experienceMode} graph+] failed to open`, error);
-      await this.application?.close().catch(() => undefined);
+      if (this.application) {
+        await this.plugin.graphPlusApplication.closePresentation(this.application).catch(() => undefined);
+      }
       this.application = undefined;
       this.fallback = mountGraphEngineUnavailableSurfaceV1(container, {
         code: 'initialization-failed',
@@ -111,12 +102,10 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
   async onClose(): Promise<void> {
     this.lifecycle?.dispose();
     this.lifecycle = undefined;
-    await this.application?.close();
+    if (this.application) await this.plugin.graphPlusApplication.closePresentation(this.application);
     this.application = undefined;
     this.fallback?.dispose();
     this.fallback = undefined;
-    this.activeFileToFollow = undefined;
-    this.followRunning = false;
     this.notePreview?.dispose();
     this.notePreview = undefined;
   }
@@ -131,7 +120,6 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
       listenerCount: this.lifecycle?.listenerCount ?? 0,
       rebuildScheduled: this.lifecycle?.rebuildScheduled ?? false,
       reconcilePending: this.lifecycle?.hasReconcilePending ?? false,
-      ...(this.experienceMode === 'local' ? { followRunning: this.followRunning } : {}),
     };
   }
 
@@ -173,62 +161,8 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
     return this.application?.resetLayoutData() ?? false;
   }
 
-  private registerHostEvents(): void {
-    if (!this.lifecycle || this.lifecycle.listenerCount > 0) return;
-    const schedule = (): void => this.lifecycle?.scheduleReconcile();
-    const createRef = this.app.vault.on('create', schedule);
-    const modifyRef = this.app.vault.on('modify', schedule);
-    const deleteRef = this.app.vault.on('delete', schedule);
-    const renameRef = this.app.vault.on('rename', schedule);
-    const metadataRef = this.app.metadataCache.on('changed', schedule);
-    const activeLeafRef = this.app.workspace.on('active-leaf-change', () => {
-      this.synchronizeLeafVisibility();
-      if (this.experienceMode === 'local') this.requestActiveFileFollow(this.activeMarkdownFile());
-    });
-    this.lifecycle.register(
-      () => this.app.vault.offref(createRef),
-      () => this.app.vault.offref(modifyRef),
-      () => this.app.vault.offref(deleteRef),
-      () => this.app.vault.offref(renameRef),
-      () => this.app.metadataCache.offref(metadataRef),
-      () => this.app.workspace.offref(activeLeafRef),
-    );
-    if (this.experienceMode === 'local') {
-      const fileOpenRef = this.app.workspace.on('file-open', (file) => this.requestActiveFileFollow(file));
-      this.lifecycle.register(() => this.app.workspace.offref(fileOpenRef));
-    }
-  }
-
   private synchronizeLeafVisibility(): void {
-    if (!this.lifecycle?.synchronizeVisibility() || this.experienceMode !== 'local') return;
-    this.requestActiveFileFollow(this.activeFileToFollow ?? this.app.workspace.getActiveFile());
-  }
-
-  private activeMarkdownFile(): TFile | null {
-    return this.app.workspace.getActiveViewOfType(MarkdownView)?.file ?? null;
-  }
-
-  private requestActiveFileFollow(file: TFile | null): void {
-    if (this.experienceMode !== 'local' || !file || file.extension !== 'md') return;
-    this.activeFileToFollow = file;
-    if (!this.lifecycle?.isVisible || this.followRunning || !this.application) return;
-    this.followRunning = true;
-    void this.drainActiveFileFollow();
-  }
-
-  private async drainActiveFileFollow(): Promise<void> {
-    try {
-      while (this.lifecycle?.isVisible && this.application && this.activeFileToFollow) {
-        const file = this.activeFileToFollow;
-        this.activeFileToFollow = undefined;
-        await this.application.followActiveNode(noteNodeId(file.path));
-      }
-    } finally {
-      this.followRunning = false;
-      if (this.lifecycle?.isVisible && this.application && this.activeFileToFollow) {
-        this.requestActiveFileFollow(this.activeFileToFollow);
-      }
-    }
+    this.lifecycle?.synchronizeVisibility();
   }
 }
 

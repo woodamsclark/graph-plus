@@ -1,6 +1,7 @@
 import type {
   GraphDimensionsV1,
   GraphDocumentV1,
+  GraphExperienceContractV1,
   GraphIntentV1,
   GraphViewStateV1,
   Vec3,
@@ -8,7 +9,8 @@ import type {
 import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
 import { shortestPathToAnyV1 } from '../../core/topology/index.ts';
 import type { Vision } from '../vision/index.ts';
-import type { Awareness } from '../ego/index.ts';
+import type { Attention, Ego, EgoIntentOutcome } from '../consciousness/index.ts';
+import { adjudicateGraphExperienceCommandV1 } from '../experience/index.ts';
 import type { SessionRuntimePlatformV1 } from '../platform/index.ts';
 import type { SessionSurfaceV1 } from '../surface/index.ts';
 import { BufferedQueue } from './BufferedQueue.ts';
@@ -18,7 +20,6 @@ import { GraphInput } from './GraphInput.ts';
 import { GraphInteractionInterpreter } from './GraphInteractionInterpreter.ts';
 import {
   FOCUS_FIT_PADDING_PX,
-  graphInteractionPolicyV1,
   resolveGraphUxStateV1,
 } from './GraphInteractionStatePolicy.ts';
 import type {
@@ -33,7 +34,7 @@ export class SessionInteractionRuntime {
   private readonly inputEvents = new BufferedQueue<GraphInputEventV1>();
   private readonly commands = new BufferedQueue<GraphRuntimeCommandV1>();
   private readonly commandRegistry = new GraphCommandRegistry();
-  private readonly commander = new GraphCommander(this.commands, this.commandRegistry);
+  private readonly commander: GraphCommander;
   private readonly input: GraphInput;
   private readonly interpreter: GraphInteractionInterpreter;
   private hoveredNodeId: string | undefined;
@@ -60,7 +61,10 @@ export class SessionInteractionRuntime {
     readonly surface: SessionSurfaceV1;
     readonly interactionElement: HTMLElement;
     readonly vision: Vision;
-    readonly getAwareness: () => Awareness;
+    readonly experience: GraphExperienceContractV1;
+    readonly ego: Ego;
+    readonly getAttention: () => Attention;
+    readonly setAttention: (nodeIds: readonly string[]) => readonly string[];
     readonly hitTest: (
       point: GraphScreenPointV1,
       pointerKind?: 'mouse' | 'touch' | 'pen',
@@ -83,6 +87,11 @@ export class SessionInteractionRuntime {
     readonly onUserCameraInput?: () => void;
   }) {
     this.registerCommandHandlers();
+    this.commander = new GraphCommander(
+      this.commands,
+      this.commandRegistry,
+      (command) => this.routeEndogenousCommand(command),
+    );
     this.input = new GraphInput({
       element: this.options.interactionElement,
       platform: this.options.platform,
@@ -104,8 +113,9 @@ export class SessionInteractionRuntime {
         this.hitTestMs += Math.max(0, this.options.platform.now() - start);
         return hit && this.isNodeInteractiveInCurrentState(hit.nodeId) ? hit : null;
       },
-      getSelectedNodeIds: () => this.options.getViewState().selectedNodeIds,
+      getSelectedNodeIds: () => this.attentionNodeIds(),
       getFocusedNodeId: () => this.options.getViewState().focusedNodeId,
+      getHoveredNodeId: () => this.hoveredNodeId,
       getFocusedNodeScreenPoint: () => {
         const focusedNodeId = this.options.getViewState().focusedNodeId;
         const position = focusedNodeId === undefined
@@ -216,7 +226,7 @@ export class SessionInteractionRuntime {
       'center-and-fit-camera',
       'reset-camera',
       'fit-camera',
-      'set-selection',
+      'direct-attention',
       'set-focus',
       'enter-focus',
       'selection-presentation-changed',
@@ -233,7 +243,6 @@ export class SessionInteractionRuntime {
   }
 
   private applyCommand(command: GraphRuntimeCommandV1): void {
-    if (!this.commandBelongsToActiveDocument(command)) return;
     switch (command.type) {
       case 'pan-by':
         this.options.onUserCameraInput?.();
@@ -247,12 +256,16 @@ export class SessionInteractionRuntime {
         return;
       case 'orbit-by':
         this.options.onUserCameraInput?.();
-        this.options.vision.orbitByPixels(command.deltaX, command.deltaY, this.options.getAwareness().centroid);
+        this.options.vision.orbitByPixels(
+          command.deltaX,
+          command.deltaY,
+          this.attentionCentroid(),
+        );
         this.cameraChanged(command);
         return;
       case 'zoom-by':
         this.options.onUserCameraInput?.();
-        this.options.vision.zoomByWheel(command.deltaY, command.anchor, this.options.getAwareness().centroid);
+        this.options.vision.zoomByWheel(command.deltaY, command.anchor, this.attentionCentroid());
         this.constrainFocusZoomOut();
         this.cameraChanged(command);
         return;
@@ -280,8 +293,8 @@ export class SessionInteractionRuntime {
         this.fitVisibleNodes(command.nodeIds, command.centerNodeId);
         this.emitViewportIntent(command);
         return;
-      case 'set-selection':
-        this.setSelection(command.nodeIds, command, command.clearFocus);
+      case 'direct-attention':
+        this.setAttention(command.nodeIds, command, command.clearFocus, command.focusNodeId);
         return;
       case 'set-focus':
         this.setFocus(command.nodeId, command);
@@ -372,6 +385,34 @@ export class SessionInteractionRuntime {
     }
   }
 
+  private attentionCentroid(): Vec3 | undefined {
+    return this.options.vision.deriveCentroid(
+      this.options.getAttention().nodeIds,
+      this.options.getInteractivePositions(),
+    );
+  }
+
+  private routeEndogenousCommand(
+    command: GraphRuntimeCommandV1,
+  ): EgoIntentOutcome<GraphRuntimeCommandV1> {
+    return this.options.ego.consider(
+      this.options.ego.intend(command),
+      (intent) => {
+        if (!this.commandBelongsToActiveDocument(intent.directive)) {
+          return { status: 'rejected', reason: 'stale-document' };
+        }
+        const state = this.options.getViewState();
+        return adjudicateGraphExperienceCommandV1({
+          command: intent.directive,
+          experience: this.options.experience,
+          currentState: resolveGraphUxStateV1(state),
+          attentionNodeIds: this.attentionNodeIds(),
+          focusedNodeId: state.focusedNodeId,
+        });
+      },
+    );
+  }
+
   private commandBelongsToActiveDocument(command: GraphRuntimeCommandV1): boolean {
     const document = this.options.getDocument();
     return command.identity.documentId === document.documentId
@@ -402,7 +443,7 @@ export class SessionInteractionRuntime {
 
   private focusVisibleNodeIds(focusedNodeId: string): readonly string[] {
     const visible = this.options.getRenderSelection().nodeIds;
-    const selected = this.options.getViewState().selectedNodeIds.filter((nodeId) => visible.has(nodeId));
+    const selected = this.attentionNodeIds().filter((nodeId) => visible.has(nodeId));
     const neighbors = this.options.getDocument().edges.flatMap((edge) => {
       if (!this.options.getRenderSelection().edgeIds.has(edge.id)) return [];
       if (edge.sourceId === focusedNodeId && visible.has(edge.targetId)) return [edge.targetId];
@@ -425,16 +466,16 @@ export class SessionInteractionRuntime {
 
   private fitStateTarget(): void {
     const state = this.options.getViewState();
-    const policy = graphInteractionPolicyV1(state);
-    const nodeIds = policy.fitTarget === 'focused-neighborhood' && state.focusedNodeId
+    const policy = this.options.experience.framing[resolveGraphUxStateV1(state)];
+    const nodeIds = policy.target === 'focused-neighborhood' && state.focusedNodeId
       ? this.focusNeighborhoodNodeIds(state.focusedNodeId)
-      : policy.fitTarget === 'selection'
-        ? state.selectedNodeIds
+      : policy.target === 'attention'
+        ? this.attentionNodeIds()
         : [...this.options.getRenderSelection().nodeIds];
-    const centerNodeId = policy.fitCenter === 'focused-node'
+    const centerNodeId = policy.center === 'focused-node'
       ? state.focusedNodeId
       : undefined;
-    this.fitVisibleNodes(nodeIds, centerNodeId, policy.fitTarget === 'focused-neighborhood');
+    this.fitVisibleNodes(nodeIds, centerNodeId, policy.target === 'focused-neighborhood');
   }
 
   private elasticPan(deltaX: number, deltaY: number): void {
@@ -488,7 +529,7 @@ export class SessionInteractionRuntime {
   }
 
   private enterFocus(nodeId: string, command: GraphRuntimeCommandV1): void {
-    if (this.options.getViewState().selectedNodeIds.length === 0) return;
+    if (this.options.getAttention().nodeIds.size === 0) return;
     this.setFocus(nodeId, command);
     this.fitVisibleNodes(this.focusNeighborhoodNodeIds(nodeId), nodeId, true);
     this.options.onFocusFramingRequested?.();
@@ -540,56 +581,66 @@ export class SessionInteractionRuntime {
 
   private awarenessNodeIds(): readonly string[] {
     const positionsById = this.options.getInteractivePositions();
-    const selectedNodeIds = this.options.getViewState().selectedNodeIds
+    const selectedNodeIds = this.attentionNodeIds()
       .filter((nodeId) => positionsById[nodeId] !== undefined);
     return selectedNodeIds.length > 0
       ? selectedNodeIds
       : [...this.options.getRenderSelection().nodeIds];
   }
 
-  private setSelection(
+  private setAttention(
     nodeIds: readonly string[],
     command: GraphRuntimeCommandV1,
     clearFocus = false,
+    focusNodeId?: string,
   ): void {
     const state = this.options.getViewState();
     const known = new Set(this.options.getDocument().nodes.map((node) => node.id));
     const selectedNodeIds = [...new Set(nodeIds)].filter((id) => known.has(id));
     const desiredFocus = selectedNodeIds.length === 0 || clearFocus
       ? undefined
-      : state.focusedNodeId;
+      : focusNodeId ?? state.focusedNodeId;
+    const focusChanged = desiredFocus !== state.focusedNodeId;
     this.setInteractionState(selectedNodeIds, desiredFocus, command, desiredFocus !== state.focusedNodeId);
+    if (focusChanged && desiredFocus !== undefined) {
+      this.fitVisibleNodes(this.focusNeighborhoodNodeIds(desiredFocus), desiredFocus, true);
+      this.options.onFocusFramingRequested?.();
+      this.emitViewportIntent(command);
+    }
   }
 
   private setFocus(nodeId: string | undefined, command: GraphRuntimeCommandV1): void {
     const document = this.options.getDocument();
     if (nodeId !== undefined && !document.nodes.some((node) => node.id === nodeId)) return;
-    const state = this.options.getViewState();
-    this.setInteractionState(state.selectedNodeIds, nodeId, command, true);
+    this.setInteractionState(this.attentionNodeIds(), nodeId, command, true);
   }
 
   private setInteractionState(
-    selectedNodeIds: readonly string[],
+    attentionNodeIds: readonly string[],
     focusedNodeId: string | undefined,
     command: GraphRuntimeCommandV1,
     clearPresentation = false,
   ): void {
     const state = this.options.getViewState();
-    const selectionChanged = !sameIds(selectedNodeIds, state.selectedNodeIds);
+    const currentAttentionNodeIds = this.attentionNodeIds();
+    const attentionChanged = !sameIds(attentionNodeIds, currentAttentionNodeIds);
+    const realizedAttentionNodeIds = attentionChanged
+      ? this.options.setAttention(attentionNodeIds)
+      : currentAttentionNodeIds;
     const focusChanged = state.focusedNodeId !== focusedNodeId;
     const presentationChanged = clearPresentation ? this.clearNodePresentation(command) : false;
-    if (!selectionChanged && !focusChanged && !presentationChanged) return;
-    if (selectionChanged || focusChanged) {
+    if (!attentionChanged && !focusChanged && !presentationChanged) return;
+    if (attentionChanged || focusChanged) {
       const { focusedNodeId: _focusedNodeId, ...withoutFocus } = state;
       this.commit(focusedNodeId === undefined
-        ? { ...withoutFocus, selectedNodeIds }
-        : { ...withoutFocus, selectedNodeIds, focusedNodeId });
+        ? { ...withoutFocus, selectedNodeIds: realizedAttentionNodeIds }
+        : { ...withoutFocus, selectedNodeIds: realizedAttentionNodeIds, focusedNodeId });
     }
     this.options.onViewStateChanged('interaction');
-    if (selectionChanged) this.options.onIntent({
+    if (attentionChanged) this.options.onIntent({
       ...this.intentBase(command),
       type: 'selection-changed',
-      selectedNodeIds: [...selectedNodeIds],
+      selectedNodeIds: [...realizedAttentionNodeIds],
     });
     if (focusChanged) this.options.onIntent({
       ...this.intentBase(command),
@@ -624,13 +675,14 @@ export class SessionInteractionRuntime {
 
   private activateBackground(command: GraphRuntimeCommandV1): void {
     const state = this.options.getViewState();
+    const attentionNodeIds = this.attentionNodeIds();
     const mode = resolveGraphUxStateV1(state);
-    if (mode === 'focus' && state.selectedNodeIds.length > 1) {
-      this.setInteractionState(state.selectedNodeIds, undefined, command, true);
+    if (mode === 'focus' && attentionNodeIds.length > 1) {
+      this.setInteractionState(attentionNodeIds, undefined, command, true);
     } else if (mode !== 'overview') {
       this.setInteractionState([], undefined, command, true);
     } else {
-      this.setInteractionState(state.selectedNodeIds, undefined, command, true);
+      this.setInteractionState(attentionNodeIds, undefined, command, true);
     }
     this.options.onIntent({ ...this.intentBase(command), type: 'background-activated' });
   }
@@ -660,11 +712,12 @@ export class SessionInteractionRuntime {
   private updateNodeDrag(nodeId: string, point: GraphScreenPointV1): void {
     if (!this.dragContext || this.dragContext.nodeId !== nodeId) return;
     const state = this.options.getViewState();
+    const attentionNodeIds = this.attentionNodeIds();
     const underPointer = this.options.vision.screenToWorld(point.x, point.y, this.dragContext.depth);
     const position = add(underPointer, this.dragContext.offset);
-    const previousCentroid = selectionCentroid(state.selectedNodeIds, state.positions);
+    const previousCentroid = selectionCentroid(attentionNodeIds, state.positions);
     const positions = { ...state.positions, [nodeId]: position };
-    const nextCentroid = selectionCentroid(state.selectedNodeIds, positions);
+    const nextCentroid = selectionCentroid(attentionNodeIds, positions);
     this.commit({ ...state, positions });
     if (previousCentroid && nextCentroid) {
       this.options.vision.translateBy(subtract(nextCentroid, previousCentroid));
@@ -750,6 +803,10 @@ export class SessionInteractionRuntime {
       type: 'viewport-changed',
       camera: this.options.vision.getState(),
     });
+  }
+
+  private attentionNodeIds(): string[] {
+    return [...this.options.getAttention().nodeIds];
   }
 
   private commit(state: GraphViewStateV1): void {

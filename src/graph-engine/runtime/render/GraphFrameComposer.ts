@@ -2,6 +2,7 @@ import type { GraphDocumentV1, GraphViewStateV1, Vec3 } from '../../contracts/v1
 import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
 import { compileAnimaSceneV1 } from '../anima/AnimaSceneCompiler.ts';
 import { createAnimusSnapshotV1 } from '../animus/AnimusSnapshot.ts';
+import { resolveConsciousness } from '../consciousness/index.ts';
 import type { GraphVisualThemeV2 } from '../theme/index.ts';
 import type {
   GraphEdgeRenderContributionV1,
@@ -28,7 +29,12 @@ export function composeGraphRenderFrameV1(options: {
   readonly hoveredNodeId?: string;
   readonly geometryRevision?: number;
 }): GraphRenderFrameV1 {
+  const consciousness = resolveConsciousness({
+    attentionNodeIds: options.viewState.selectedNodeIds,
+    availableNodeIds: options.selection.nodeIds,
+  });
   return compileAnimaSceneV1({
+    consciousness,
     snapshot: createAnimusSnapshotV1({
       document: options.document,
       viewState: options.viewState,

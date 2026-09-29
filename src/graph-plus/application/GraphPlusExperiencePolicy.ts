@@ -1,14 +1,21 @@
+import {
+  DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1,
+  type GraphExperienceContractV1,
+} from '../../graph-engine/contracts/v1/index.ts';
+
 export type GraphPlusExperienceModeV1 = 'global' | 'local';
 export type GraphPlusInteractionStateV1 = 'overview' | 'explore' | 'focus';
 
 export interface GraphPlusExperiencePolicyV1 {
   readonly mode: GraphPlusExperienceModeV1;
   readonly documentScope: 'vault' | 'root-neighborhood';
-  readonly subjectOwnership: 'user' | 'active-note';
+  readonly subjectSources: readonly ('ego' | 'active-note')[];
   readonly allowedInteractionStates: readonly GraphPlusInteractionStateV1[];
+  readonly attentionCardinality: 'constellation' | 'single-subject';
+  readonly attentionAwarenessDepth: number;
   readonly persistence: 'checkpoint' | 'ephemeral';
   readonly followActiveNote: boolean;
-  readonly rootInvariant: 'none' | 'selected-focused-pinned';
+  readonly canonicalRootState: 'none' | 'selected-focused-pinned';
 }
 
 export const GRAPH_PLUS_EXPERIENCE_POLICIES_V1: Readonly<
@@ -17,20 +24,24 @@ export const GRAPH_PLUS_EXPERIENCE_POLICIES_V1: Readonly<
   global: {
     mode: 'global',
     documentScope: 'vault',
-    subjectOwnership: 'user',
+    subjectSources: ['ego'],
     allowedInteractionStates: ['overview', 'explore', 'focus'],
+    attentionCardinality: 'constellation',
+    attentionAwarenessDepth: 0,
     persistence: 'checkpoint',
     followActiveNote: false,
-    rootInvariant: 'none',
+    canonicalRootState: 'none',
   },
   local: {
     mode: 'local',
     documentScope: 'root-neighborhood',
-    subjectOwnership: 'active-note',
+    subjectSources: ['ego', 'active-note'],
     allowedInteractionStates: ['focus'],
+    attentionCardinality: 'single-subject',
+    attentionAwarenessDepth: 1,
     persistence: 'ephemeral',
     followActiveNote: true,
-    rootInvariant: 'selected-focused-pinned',
+    canonicalRootState: 'selected-focused-pinned',
   },
 };
 
@@ -38,4 +49,25 @@ export function graphPlusExperiencePolicyV1(
   mode: GraphPlusExperienceModeV1,
 ): GraphPlusExperiencePolicyV1 {
   return GRAPH_PLUS_EXPERIENCE_POLICIES_V1[mode];
+}
+
+/** Translate Graph+ product policy into the host-neutral contract consumed by Graph Engine. */
+export function graphPlusEngineExperienceContractV1(
+  policy: GraphPlusExperiencePolicyV1,
+): GraphExperienceContractV1 {
+  return {
+    ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1,
+    allowedStates: [...policy.allowedInteractionStates],
+    attention: {
+      ...(policy.attentionCardinality === 'single-subject' ? { maximumNodeCount: 1 } : {}),
+      overflow: 'preserve-intent-subject',
+    },
+    awareness: { attentionNeighborhoodDepth: policy.attentionAwarenessDepth },
+    permittedInteractions: [...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1.permittedInteractions],
+    framing: {
+      overview: { ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1.framing.overview },
+      explore: { ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1.framing.explore },
+      focus: { ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1.framing.focus },
+    },
+  };
 }

@@ -61,7 +61,24 @@ test('R-CAMERA-02 perspective dolly scales nodes without changing the default si
   equal(camera.worldToScreen({ x: 0, y: 0, z: 0 }).scale, 2, 'dollying to half the depth should double projected node radius');
 });
 
-test('Vision orbits around an explicit Awareness centroid without storing or reframing it', () => {
+test('Vision derives an Attention centroid without putting geometry in Consciousness', () => {
+  const vision = new Vision({
+    position: { x: 0, y: 0, z: 10 },
+    target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 },
+    zoom: 1,
+    projection: 'orthographic',
+  }, '2d');
+
+  deepEqual(vision.deriveCentroid(new Set(['a', 'missing', 'c']), {
+    a: { x: -10, y: 20, z: 4 },
+    c: { x: 30, y: 0, z: -2 },
+  }), { x: 10, y: 10, z: 1 }, 'Vision should derive the pivot from available attended positions');
+  equal(vision.deriveCentroid(new Set(['missing']), {}), undefined,
+    'Vision should leave an empty spatial target unresolved');
+});
+
+test('Vision orbits around an explicit Attention centroid without storing or reframing it', () => {
   const initial: GraphCameraStateV1 = {
     position: { x: 30, y: 20, z: 100 },
     target: { x: 10, y: -5, z: 0 },
@@ -77,18 +94,18 @@ test('Vision orbits around an explicit Awareness centroid without storing or ref
   const ordinaryBefore = vision.worldToScreen(ordinaryPoint);
 
   deepEqual(vision.getState(), initial, 'supplying a pivot must not mutate serialized framing before an operation');
-  deepEqual(vision.worldToScreen(pivot), pivotBefore, 'an Awareness centroid alone must not move on screen');
-  deepEqual(vision.worldToScreen(ordinaryPoint), ordinaryBefore, 'Awareness alone must not move graph content');
+  deepEqual(vision.worldToScreen(pivot), pivotBefore, 'an Attention centroid alone must not move on screen');
+  deepEqual(vision.worldToScreen(ordinaryPoint), ordinaryBefore, 'Attention alone must not move graph content');
 
   vision.orbitByPixels(28, -16, pivot);
   const pivotAfter = vision.worldToScreen(pivot);
   assert(Math.abs(pivotAfter.x - pivotBefore.x) < 1e-9 && Math.abs(pivotAfter.y - pivotBefore.y) < 1e-9,
-    'orbiting around Awareness should keep the off-center pivot fixed on screen');
+    'orbiting around Attention should keep the off-center pivot fixed on screen');
   assert(JSON.stringify(vision.getState().position) !== JSON.stringify(initial.position),
-    'orbiting around Awareness should move Vision around the supplied pivot');
+    'orbiting around Attention should move Vision around the supplied pivot');
 });
 
-test('unanchored zoom uses the Awareness centroid instead of the serialized framing center', () => {
+test('unanchored zoom uses the Attention centroid instead of the serialized framing center', () => {
   for (const [dimensions, projection] of [
     ['2d', 'orthographic'],
     ['3d', 'perspective'],
@@ -108,11 +125,11 @@ test('unanchored zoom uses the Awareness centroid instead of the serialized fram
 
     const after = vision.worldToScreen(pivot);
     assert(Math.abs(after.x - before.x) < 1e-9 && Math.abs(after.y - before.y) < 1e-9,
-      `${projection} target-centered zoom should keep the Awareness centroid fixed on screen`);
+      `${projection} target-centered zoom should keep the Attention centroid fixed on screen`);
   }
 });
 
-test('Vision exposes pose orientation without treating the serialized look-at point as Awareness', () => {
+test('Vision exposes pose orientation without treating the serialized look-at point as Attention', () => {
   const vision = new Vision({
     position: { x: 10, y: 20, z: 30 },
     target: { x: 10, y: 20, z: 20 },

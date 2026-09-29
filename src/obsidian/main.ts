@@ -2,7 +2,7 @@ import { Notice, Plugin, TFile, type WorkspaceLeaf } from 'obsidian';
 import { GraphPlusView, GRAPH_PLUS_TYPE } from './GraphView.ts';
 import { LocalGraphPlusView, LOCAL_GRAPH_PLUS_TYPE } from './LocalGraphView.ts';
 import { GraphEngineSettingTab } from './settings/SettingsTab.ts';
-import type { GraphEngineLeaseV1 } from '../graph-engine/contracts/v1/index.ts';
+import type { Disposable, GraphEngineLeaseV1 } from '../graph-engine/contracts/v1/index.ts';
 import { ConsumerProfileRegistry } from '../graph-engine/core/profile/index.ts';
 import { SessionFactory } from '../graph-engine/runtime/index.ts';
 import { createShippedGraphModuleRegistryV1 } from '../graph-engine/runtime/modules/index.ts';
@@ -20,7 +20,7 @@ import {
 import type { GraphPlusCheckpointStoreV1 } from '../graph-plus/persistence/index.ts';
 import type { GraphPlusLensStateV1 } from '../graph-plus/query/index.ts';
 import { ObsidianVaultGraphSourceV1 } from '../graph-plus/adapter/index.ts';
-import { GraphPlusVaultModelV1 } from '../graph-plus/application/index.ts';
+import { GraphPlusApplicationV1, GraphPlusVaultModelV1 } from '../graph-plus/application/index.ts';
 import {
   asObsidianWorkspaceEventsV1,
   ObsidianWorkspaceEventBusV1,
@@ -37,6 +37,7 @@ import {
   type GraphPlusPluginDataV1,
 } from './settings/GraphPlusPluginDataStore.ts';
 import { GraphPlusCheckpointFileStoreV1 } from './settings/GraphPlusCheckpointFileStore.ts';
+import { ObsidianGraphBridgeV1 } from './ObsidianGraphBridge.ts';
 
 
 export default class GraphEnginePlugin extends Plugin {
@@ -50,6 +51,9 @@ export default class GraphEnginePlugin extends Plugin {
   private checkpointFileStore?: GraphPlusCheckpointFileStoreV1;
   private vaultGraphSource?: ObsidianVaultGraphSourceV1;
   private vaultGraphModel?: GraphPlusVaultModelV1<TFile>;
+  private sharedGraphPlusApplication?: GraphPlusApplicationV1<TFile>;
+  private graphBridge?: ObsidianGraphBridgeV1;
+  private graphBridgeConnection?: Disposable;
   private refreshActiveThemes?: () => void;
   private saveQueue: Promise<void> = Promise.resolve();
 
@@ -61,6 +65,15 @@ export default class GraphEnginePlugin extends Plugin {
     this.vaultGraphModel = new GraphPlusVaultModelV1(this.vaultGraphSource, {
       countDuplicateLinks: this.settings.countDuplicateLinks,
     });
+    this.graphBridge = new ObsidianGraphBridgeV1(this.app);
+    this.sharedGraphPlusApplication = new GraphPlusApplicationV1({
+      model: this.vaultGraphModel,
+      navigator: this.graphBridge,
+      onError: (error) => console.error('[graph+] application error', error),
+    });
+    this.graphBridgeConnection = this.graphBridge.start(
+      (event) => this.sharedGraphPlusApplication?.receiveHostEvent(event),
+    );
     const pluginDirectory = this.manifest.dir
       ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
     this.checkpointFileStore = new GraphPlusCheckpointFileStoreV1({
@@ -222,6 +235,8 @@ export default class GraphEnginePlugin extends Plugin {
   }
 
   onunload() {
+    this.graphBridgeConnection?.dispose();
+    void this.sharedGraphPlusApplication?.dispose();
     void this.graphPlusLease?.release();
     void this.graphEngineProvider?.stop();
     this.graphPlusLease = undefined;
@@ -229,6 +244,9 @@ export default class GraphEnginePlugin extends Plugin {
     this.graphEngineCore = undefined;
     this.vaultGraphSource = undefined;
     this.vaultGraphModel = undefined;
+    this.sharedGraphPlusApplication = undefined;
+    this.graphBridge = undefined;
+    this.graphBridgeConnection = undefined;
     this.refreshActiveThemes = undefined;
   }
 
@@ -309,6 +327,16 @@ export default class GraphEnginePlugin extends Plugin {
   get graphPlusVaultModel(): GraphPlusVaultModelV1<TFile> {
     if (!this.vaultGraphModel) throw new Error('graph+ vault model is unavailable.');
     return this.vaultGraphModel;
+  }
+
+  get graphPlusApplication(): GraphPlusApplicationV1<TFile> {
+    if (!this.sharedGraphPlusApplication) throw new Error('graph+ application is unavailable.');
+    return this.sharedGraphPlusApplication;
+  }
+
+  get obsidianGraphBridge(): ObsidianGraphBridgeV1 {
+    if (!this.graphBridge) throw new Error('Obsidian graph bridge is unavailable.');
+    return this.graphBridge;
   }
 
   readonly graphPlusCheckpointStore: GraphPlusCheckpointStoreV1 = {

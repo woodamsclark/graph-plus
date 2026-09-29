@@ -4,17 +4,25 @@ Status: Implemented architecture
 
 Date: 2026-09-23
 
+Migration note: the former Ego/Awareness ownership below is superseded by
+[Graph Engine agency and Awareness ontology](graph-engine-agency-awareness-ontology.md).
+Phases 2 through 7 have implemented Consciousness, geometry-free Attention/Awareness,
+Vision-owned centroid derivation, neutral policy, exogenous Attention input, and
+explicit Anima consciousness classes, plus enforced projection/presentation ordering.
+Remaining sections are retained for compatibility mechanics that have not yet migrated.
+
 ## Governing model
 
 Graph Engine has four semantic roles:
 
 1. **Animus** owns graph facts and runtime behavior.
-2. **Ego** defines which graph nodes are held in Awareness.
-3. **Anima** decides how Animus facts and Ego Awareness are expressed visually.
+2. **Consciousness** holds Ego, Attention, and binary Awareness for one presentation.
+3. **Anima** decides how Animus facts, Attention, and Awareness are expressed visually.
 4. **Renderer** realizes the scene as pixels and hit targets.
 
-The primary dependency direction is `Animus -> Ego Awareness -> Anima -> Renderer`.
-Vision separately consumes the Awareness centroid as an explicit manipulation pivot.
+The primary dependency direction is
+`Animus + Consciousness -> Anima -> Renderer`. Vision separately derives spatial
+targets from conscious-state membership without storing geometry in Awareness.
 
 ## Animus ownership
 
@@ -30,24 +38,24 @@ Form now emits branch identity, depth, and tree/cross roles. Node regions emit
 membership, geometry, padding, and visibility. Neither subsystem chooses how those
 facts look.
 
-## Ego ownership
+## Consciousness and Ego ownership
 
-The unversioned runtime `Ego` owns exactly one value: `Awareness`. Awareness contains
-the selected node IDs and their derived world-space centroid. Ego does not own hover,
-drag, preview, Focus state, gesture permissions, highlighting, label decisions,
-rendering scope, colors, or animation.
+Each presentation-scoped `Consciousness` owns its Ego, Attention, and Awareness. Ego
+proposes endogenous intent; it does not declare realized truth. Attention contains the
+subjects at the center of conscious activity. Awareness is a geometry-free binary node
+set containing Attention plus permitted peripheral subjects.
 
-Persisted `selectedNodeIds` remain the Protocol V1 compatibility representation from
-which Awareness is resolved. Future influences may change how Ego chooses Awareness,
-but consumers remain Vision and Anima rather than presentation logic inside Ego.
+Persisted `selectedNodeIds` remain the Protocol V1 compatibility mirror of Attention.
+Exogenous inputs may replace Attention without passing through Ego. Experience policy
+adjudicates both paths and expands realized Attention into Awareness.
 
 ## Vision ownership
 
 The unversioned runtime `Vision` owns a mechanical `Pose` (position and forward/up
-orientation), zoom, projection, and world/screen geometry. It receives Ego's Awareness
-centroid explicitly when an interaction rotates or zooms around the aware nodes.
-Vision never inspects selection, Focus, saliency, or node meaning, and it does not retain
-a hidden semantic target.
+orientation), zoom, projection, and world/screen geometry. It receives an explicit
+centroid derived from Attention when an interaction rotates or zooms around attended
+nodes. Vision never inspects selection, Focus, saliency, or node meaning, and it does
+not retain a hidden semantic target.
 
 `GraphCameraStateV1` remains the persisted and public compatibility shape. Its `target`
 is a look-at point used to reconstruct Vision orientation, not Ego Awareness. Protocol
@@ -55,15 +63,26 @@ types keep version suffixes; runtime domain objects use the plain Ego/Vision lan
 
 ## Anima ownership
 
-Anima owns baseline theme application, Awareness highlighting and dimming, label
-raising and suppression, node and edge material, region decoration,
-Form branch presentation, label presentation, interaction emphasis, visual geometry,
-and future time-varying transitions. The persisted `rendering` module ID remains as a
-compatibility key, but its implementation is `AnimaBaselineModule`.
+Anima consumes explicit Attention and Awareness and first classifies every projected
+node as attended, peripherally aware, or unaware context. It owns baseline theme
+application, Awareness highlighting and dimming, label raising and suppression, node
+and edge material, region decoration, Form branch presentation, label presentation,
+interaction emphasis, visual geometry, and future time-varying transitions. The
+persisted `rendering` module ID remains as a compatibility key, but its implementation
+is `AnimaBaselineModule`.
 
-`compileAnimaSceneV1()` is the sole semantic-to-render-scene boundary. It resolves
-every node fill, opacity, outline and label value; every edge color, opacity, width and
-arrow value; region fill and stroke; label state priority; background; and font.
+`compileAnimaSceneV1()` is the sole semantic-to-render-scene boundary. It receives
+Consciousness explicitly rather than inferring it from compatibility selection and
+resolves every node fill, opacity, outline and label value; every edge color, opacity,
+width and arrow value; region fill and stroke; label state priority; background; and
+font.
+
+Module stages preserve the same direction. Projection hooks receive only structural
+projection state and may emit only structural patches. After projection completes,
+Consciousness reconciles against the projected document. Presentation hooks then
+receive required Consciousness and may emit only Anima-facing contributions. The host
+applies these as explicit allowlists, so dynamically supplied modules cannot cross the
+boundary by returning extra fields.
 
 Overview, Explore, and Focus remain graph-engine interaction states. Gesture and framing
 rules live in `GRAPH_INTERACTION_STATE_POLICIES_V1`; Anima's independent state-scoped
@@ -83,7 +102,8 @@ Anima compilation defect, not something a backend repairs independently.
 
 Public Protocol V1 documents, profiles, persisted view state, module IDs, and settings
 keys remain unchanged. `composeGraphRenderFrameV1()` remains as a deprecated wrapper
-which constructs an Animus snapshot and delegates to the Anima compiler.
+which translates legacy selection into a temporary Consciousness snapshot, constructs
+an Animus snapshot, and delegates to the Anima compiler.
 
 Theme sampling remains in the Obsidian host adapter. It supplies immutable neutral
 tokens to Anima and does not style individual graph primitives.
@@ -91,8 +111,10 @@ tokens to Anima and does not style individual graph primitives.
 ## Enforced invariants
 
 - Animus code may not import Anima, renderer, or theme implementations.
-- Ego may resolve node membership and centroid for Awareness, but may not own
-  interaction policy, presentation roles, colors, labels, or renderer mechanics.
+- Consciousness may resolve Attention and Awareness membership, but neither value owns
+  geometry, presentation roles, colors, labels, or renderer mechanics.
+- Anima and renderers may not infer Attention or Awareness from styling or compatibility
+  selection facts.
 - Form and node-region modules may not emit visual properties.
 - Renderers may not inspect semantic interaction state or theme roles.
 - Theme-only changes do not rebuild topology or physics.

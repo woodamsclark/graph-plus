@@ -94,6 +94,28 @@ export class Vision {
     return { ...this.viewport };
   }
 
+  /** Derive a spatial pivot without adding geometry to Attention or Awareness. */
+  deriveCentroid(
+    nodeIds: Iterable<string>,
+    positions: Readonly<Record<string, Vec3>>,
+  ): Vec3 | undefined {
+    const points = [...nodeIds].flatMap((nodeId) => {
+      const position = positions[nodeId];
+      return position === undefined ? [] : [position];
+    });
+    if (points.length === 0) return undefined;
+    const total = points.reduce((sum, point) => ({
+      x: sum.x + point.x,
+      y: sum.y + point.y,
+      z: sum.z + point.z,
+    }), { x: 0, y: 0, z: 0 });
+    return {
+      x: total.x / points.length,
+      y: total.y / points.length,
+      z: total.z / points.length,
+    };
+  }
+
   worldToScreen(world: Vec3): ProjectedGraphPointV1 {
     const basis = cameraBasis(this.state);
     const relative = subtract(world, this.state.position);

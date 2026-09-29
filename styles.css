@@ -16,6 +16,11 @@
   background: transparent;
 }
 
+.graphplus-local-view {
+  --graph-plus-surface-background: #0f0f0f;
+  background: #0f0f0f;
+}
+
 .workspace-leaf-content[data-type="graph-plus"],
 .workspace-leaf-content[data-type="graph-plus-local"],
 .workspace-leaf-content[data-type="graph-plus"] > .view-content,

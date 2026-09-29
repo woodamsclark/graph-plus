@@ -1,4 +1,5 @@
 import type { AnimusSnapshotV1 } from '../animus/index.ts';
+import type { ConsciousnessSnapshot } from '../consciousness/index.ts';
 import {
   DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
   type GraphEdgeRenderContributionV1,
@@ -14,6 +15,7 @@ import {
   type GraphColorV2,
   type GraphVisualThemeV2,
 } from '../theme/index.ts';
+import { classifyAnimaConsciousnessV1 } from './AnimaAwareness.ts';
 
 /**
  * The sole semantic-to-visual compilation boundary.
@@ -24,6 +26,7 @@ import {
  */
 export function compileAnimaSceneV1(options: {
   readonly snapshot: AnimusSnapshotV1;
+  readonly consciousness: ConsciousnessSnapshot;
   readonly nodeContributions?: Readonly<Record<string, GraphNodeRenderContributionV1>>;
   readonly edgeContributions?: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
   readonly regionContributions?: readonly GraphRegionRenderContributionV1[];
@@ -34,6 +37,11 @@ export function compileAnimaSceneV1(options: {
   const theme = options.theme ?? DEFAULT_GRAPH_VISUAL_THEME_V2;
   const policy = options.presentationPolicy ?? DEFAULT_GRAPH_PRESENTATION_POLICY_V2;
   const interaction = options.snapshot.interaction;
+  const consciousnessClasses = classifyAnimaConsciousnessV1({
+    attention: options.consciousness.attention,
+    awareness: options.consciousness.awareness,
+    projectedNodeIds: options.snapshot.displaySelection.nodeIds,
+  });
   return {
     geometryRevision: options.geometryRevision,
     regions: (options.regionContributions ?? []).map((region) => ({
@@ -53,11 +61,11 @@ export function compileAnimaSceneV1(options: {
       .filter((node) => options.snapshot.displaySelection.nodeIds.has(node.id))
       .map((node) => {
         const contribution = options.nodeContributions?.[node.id];
-        const selected = interaction.selectedNodeIds.has(node.id);
+        const attended = consciousnessClasses.byNodeId[node.id] === 'attended';
         const focused = interaction.focusedNodeId === node.id;
         const hovered = interaction.hoveredNodeId === node.id;
         const opacity = finiteOpacity(contribution?.opacity, 1);
-        const stroked = focused || selected || contribution?.strokeWidth !== undefined;
+        const stroked = focused || attended || contribution?.strokeWidth !== undefined;
         return {
           id: node.id,
           label: node.label ?? node.id,
@@ -68,7 +76,7 @@ export function compileAnimaSceneV1(options: {
             : { nodeScaleExponent: contribution.nodeScaleExponent }),
           finalColor: constrainedColor(contribution?.finalColor ?? (focused
             ? theme.colors.focusedNode
-            : selected
+            : attended
               ? theme.colors.selectedNode
               : contribution?.color ?? theme.colors.node), theme),
           opacity,
@@ -92,7 +100,7 @@ export function compileAnimaSceneV1(options: {
             ? {}
             : { labelSaliencyBoost: contribution.labelSaliencyBoost }),
           labelStatePriority: contribution?.labelStatePriority
-            ?? (focused ? 4 : selected ? 3 : hovered ? 2
+            ?? (focused ? 4 : attended ? 3 : hovered ? 2
               : contribution?.labelAlwaysVisible === true ? 1 : 0),
         };
       }),

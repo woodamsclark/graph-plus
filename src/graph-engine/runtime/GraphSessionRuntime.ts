@@ -6,6 +6,9 @@ import type {
   GraphChangedEventV1,
   GraphDocumentV1,
   GraphEffectiveSettingsV1,
+  GraphExperienceContractV1,
+  GraphExternalInfluenceResultV1,
+  GraphExternalInfluenceV1,
   GraphFilterRequestV1,
   GraphFilterScopeV1,
   GraphIntentV1,
@@ -28,8 +31,12 @@ import {
   convertGraphViewStateDimensionsV1,
   reconcileGraphViewStateV1,
 } from '../core/state/index.ts';
+import { Consciousness } from './consciousness/index.ts';
+import {
+  resolveGraphExperienceContractV1,
+  resolveGraphExternalInfluenceV1,
+} from './experience/index.ts';
 import { Vision } from './vision/index.ts';
-import { resolveAwareness } from './ego/index.ts';
 import {
   FOCUS_FIT_PADDING_PX,
   graphInteractionPolicyV1,
@@ -42,7 +49,8 @@ import {
   GraphRequiredModuleErrorV1,
   SHIPPED_GRAPH_MODULE_IDS_V1,
   type GraphModuleFailureV1,
-  type GraphModulePipelineStateV1,
+  type GraphModulePresentationStateV1,
+  type GraphModuleProjectionStateV1,
   type GraphModuleRegistry,
 } from './modules/index.ts';
 import type { SessionRuntimePlatformV1 } from './platform/index.ts';
@@ -82,6 +90,7 @@ export interface GraphSessionRuntimeOptionsV1 {
   readonly profileId: string;
   readonly container: HTMLElement;
   readonly document: GraphDocumentV1;
+  readonly experience?: GraphExperienceContractV1;
   readonly profile: EffectiveConsumerProfileV1;
   readonly initialSessionOverrides?: GraphSettingsOverridesV1;
   readonly resolveProfile: (overrides: GraphSettingsOverridesV1) => EffectiveConsumerProfileV1;
@@ -169,6 +178,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly nodeActions?: GraphNodeActionRuntimeV1;
   private readonly modules: GraphModuleRegistry;
   private surface!: SessionSurfaceV1;
+  private readonly experience: GraphExperienceContractV1;
+  private readonly consciousness: Consciousness;
   private vision!: Vision;
   private projection!: SessionProjectionCoordinatorV1;
   private renderer!: GraphRendererV2;
@@ -177,8 +188,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private presentationRevision = 0;
   private interaction!: SessionInteractionRuntime;
   private moduleHost!: GraphModuleHost;
-  private projectionView!: GraphModulePipelineStateV1;
-  private moduleView!: GraphModulePipelineStateV1;
+  private projectionView!: GraphModuleProjectionStateV1;
+  private moduleView!: GraphModulePresentationStateV1;
   private surfaceResizeSubscription: Disposable | null = null;
   private store: GraphDocumentStore;
   private viewState: GraphViewStateV1;
@@ -295,6 +306,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.resolveThemePalette = options.resolveThemePalette;
     this.nodeActions = options.nodeActions;
     this.modules = options.modules;
+    this.experience = resolveGraphExperienceContractV1(options.experience);
+    this.consciousness = new Consciousness(this.experience);
     this.scheduler = new SessionFrameSchedulerV1(
       this.platform,
       () => !this.isSuspended(),
@@ -329,6 +342,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       : undefined;
     const freshOverview = this.createInitialViewState();
     this.viewState = restoredLayout ?? freshOverview;
+    this.viewState = withAttention(
+      this.viewState,
+      this.reconcileAttention(this.viewState.selectedNodeIds),
+    );
     this.projectionSelection = allOf(this.store.readDocument());
     this.renderSelection = allOf(this.store.readDocument());
 
@@ -365,6 +382,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         this.scheduleFrame(0, 'camera');
       });
       this.moduleHost = this.createModuleHost(this.profile, this.viewState.moduleState);
+      this.consciousness.reconcile({
+        attentionNodeIds: this.viewState.selectedNodeIds,
+        availableNodeIds: new Set(Object.keys(this.viewState.positions)),
+        relationships: documentRelationships(this.store.readDocument()),
+      });
       this.interaction = new SessionInteractionRuntime({
         sessionId: this.sessionId,
         dimensions: this.profile.dimensions,
@@ -372,10 +394,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         surface: this.surface,
         interactionElement: this.renderer.interactionElement,
         vision: this.vision,
-        getAwareness: () => resolveAwareness({
-          viewState: this.viewState,
-          positions: this.moduleView?.positions ?? this.viewState.positions,
-        }),
+        experience: this.experience,
+        ego: this.consciousness.ego,
+        getAttention: () => this.consciousness.attention,
+        setAttention: (nodeIds) => this.reconcileAttention(nodeIds),
         hitTest: (point, pointerKind) => {
           this.updateRendererScene([]);
           return this.renderer.pick({ point, pointerKind });
@@ -441,6 +463,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
             usesGeneratedInitialPositions(this.profile.profileSettings),
           )
         : { ...this.createInitialViewState(), camera: previousCamera };
+      this.viewState = withAttention(
+        this.viewState,
+        this.reconcileAttention(this.viewState.selectedNodeIds),
+      );
       this.vision.setState(this.viewState.camera);
       this.moduleHost.documentChanged(next);
       this.moduleHost.viewChanged(this.viewState);
@@ -481,6 +507,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.store.readDocument(),
       this.profile.dimensions,
       usesGeneratedInitialPositions(this.profile.profileSettings),
+    );
+    this.viewState = withAttention(
+      this.viewState,
+      this.reconcileAttention(this.viewState.selectedNodeIds),
     );
     this.moduleHost.documentChanged(this.store.readDocument());
     this.moduleHost.viewChanged(this.viewState);
@@ -562,6 +592,55 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.fitPositions(positions, this.moduleView.positions[nodeId], undefined, true);
       this.beginFocusSettlingFrame(nodeId);
     }
+  }
+
+  async applyExternalInfluence(
+    influence: GraphExternalInfluenceV1,
+  ): Promise<GraphExternalInfluenceResultV1> {
+    this.requireActive();
+    const document = this.store.readDocument();
+    const availableNodeIds = new Set(document.nodes.map((node) => node.id));
+    const resolution = resolveGraphExternalInfluenceV1({
+      influence,
+      experience: this.experience,
+      availableNodeIds,
+    });
+    if (resolution.result.status === 'rejected' || resolution.attentionNodeIds === undefined) {
+      return resolution.result;
+    }
+    const consciousness = this.consciousness.receiveExogenous({
+      source: 'exogenous',
+      type: 'replace-attention',
+      nodeIds: resolution.attentionNodeIds,
+    }, {
+      availableNodeIds,
+      relationships: documentRelationships(document),
+    });
+    const attentionNodeIds = [...consciousness.attention.nodeIds];
+    const focusedNodeId = resolution.focusedNodeId !== undefined
+      && consciousness.attention.nodeIds.has(resolution.focusedNodeId)
+      ? resolution.focusedNodeId
+      : undefined;
+    const stateChanged = !sameIds(attentionNodeIds, this.viewState.selectedNodeIds)
+      || focusedNodeId !== this.viewState.focusedNodeId;
+    if (stateChanged) {
+      const { focusedNodeId: _focusedNodeId, ...withoutFocus } = this.viewState;
+      this.viewState = focusedNodeId === undefined
+        ? { ...withoutFocus, selectedNodeIds: attentionNodeIds }
+        : { ...withoutFocus, selectedNodeIds: attentionNodeIds, focusedNodeId };
+      this.moduleHost.viewChanged(this.viewState);
+      this.recomputeView();
+    }
+    if (influence.framing === 'fit-state') {
+      if (focusedNodeId !== undefined) await this.focusNode(focusedNodeId);
+      else if (attentionNodeIds.length > 0) await this.fitNodes(attentionNodeIds);
+      else await this.fitNodes();
+    }
+    return {
+      ...resolution.result,
+      attentionNodeIds,
+      ...(focusedNodeId === undefined ? {} : { focusedNodeId }),
+    };
   }
 
   async setPreviewSurfaceActive(active: boolean): Promise<void> {
@@ -657,6 +736,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         usesGeneratedInitialPositions(this.profile.profileSettings),
       ), this.profile.dimensions, focalLengthMm(this.profile.profileSettings));
       this.viewState = restoredViewState;
+      this.viewState = withAttention(
+        this.viewState,
+        this.reconcileAttention(this.viewState.selectedNodeIds),
+      );
       this.vision.setState(this.viewState.camera);
       this.moduleHost.restoreState(this.viewState.moduleState);
       this.moduleHost.viewChanged(this.viewState);
@@ -720,8 +803,6 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const next = freezeGraphVisualThemeV2({ ...resolved, revision: this.themePalette.revision + 1 });
     this.themePalette = next;
     this.moduleHost.themeChanged(next);
-    this.projectionView = { ...this.projectionView, theme: next };
-    this.moduleView = { ...this.moduleView, theme: next };
     this.renderer.updateTheme(next);
     this.refreshFrame(true, 'presentation');
   }
@@ -1035,43 +1116,31 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       projectionSelection: allOf(document),
       renderSelection: allOf(document),
       formActive: false,
-      hoveredNodeId: this.interaction?.getHoveredNodeId(),
-      selectionPresentationSuspended: this.interaction?.isSelectionPresentationSuspended(),
-      selectionNeighborRevealActive: this.interaction?.isSelectionNeighborRevealActive(),
-      previewedNodeId: this.interaction?.getPreviewedNodeId(),
       nodeRoles: {},
       edgeRoles: {},
       regions: [],
-      nodeContributions: {},
-      edgeContributions: {},
       regionLayouts: [],
-      regionContributions: [],
-      theme: this.themePalette,
-      presentationPolicy: DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
-      motionTargets: {},
     });
-    this.moduleView = this.projectionView;
-    if (this.moduleView.commitPositions) {
-      const nextCameraFollowPoint = cameraFollowPoint(this.viewState, this.moduleView.positions);
+    if (this.projectionView.commitPositions) {
+      const nextCameraFollowPoint = cameraFollowPoint(this.viewState, this.projectionView.positions);
       this.viewState = cloneGraphViewStateV1({
         ...this.viewState,
-        positions: this.moduleView.positions,
+        positions: this.projectionView.positions,
       });
       if (previousCameraFollowPoint && nextCameraFollowPoint) {
         this.vision.translateBy(subtractVec(nextCameraFollowPoint, previousCameraFollowPoint));
         this.synchronizeCameraState();
       }
-      this.moduleView = {
-        ...this.moduleView,
+      this.projectionView = {
+        ...this.projectionView,
         positions: this.viewState.positions,
         viewState: this.viewState,
         commitPositions: false,
       };
-      this.projectionView = this.moduleView;
       this.moduleHost.viewChanged(this.viewState);
     }
-    this.projectionSelection = this.moduleView.projectionSelection;
-    this.renderSelection = this.moduleView.renderSelection;
+    this.projectionSelection = this.projectionView.projectionSelection;
+    this.renderSelection = this.projectionView.renderSelection;
     this.refreshFrame(true, 'content');
     this.updateSurface();
   }
@@ -1084,9 +1153,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.activeFrameInvalidations?.add(invalidation);
     this.moduleView = this.projection.compose({
       host: this.moduleHost,
+      consciousness: this.consciousness,
       projectionView: this.projectionView,
       viewState: this.viewState,
-      selection: this.renderSelection,
+      theme: this.themePalette,
+      presentationPolicy: DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
       draggedNodeId: this.interaction?.getDraggedNodeId(),
       hoveredNodeId: this.interaction?.getHoveredNodeId(),
       selectionPresentationSuspended: this.interaction?.isSelectionPresentationSuspended(),
@@ -1275,7 +1346,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private setSelectionState(nodeIds: readonly string[]): void {
-    const selectedNodeIds = [...new Set(nodeIds)].filter((id) => this.store.hasNode(id));
+    const selectedNodeIds = this.reconcileAttention(
+      [...new Set(nodeIds)].filter((id) => this.store.hasNode(id)),
+    );
     const focusedNodeId = selectedNodeIds.length === 0
       ? undefined
       : this.viewState.focusedNodeId;
@@ -1290,6 +1363,15 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame(true, 'presentation');
     this.updateSurface();
+  }
+
+  private reconcileAttention(nodeIds: readonly string[]): string[] {
+    const availableNodeIds = new Set(this.store.readDocument().nodes.map((node) => node.id));
+    return [...this.consciousness.reconcile({
+      attentionNodeIds: nodeIds,
+      availableNodeIds,
+      relationships: documentRelationships(this.store.readDocument()),
+    }).attention.nodeIds];
   }
 
   private setFocusState(nodeId: string | undefined): void {
@@ -1653,6 +1735,25 @@ function defaultNodePosition(index: number, dimensions: '2d' | '3d'): Vec3 {
     y: Math.sin(angle) * radius,
     z: dimensions === '3d' ? ((index * 47) % 101) - 50 : 0,
   };
+}
+
+function withAttention(state: GraphViewStateV1, selectedNodeIds: readonly string[]): GraphViewStateV1 {
+  if (selectedNodeIds.length > 0) return { ...state, selectedNodeIds: [...selectedNodeIds] };
+  const { focusedNodeId: _focusedNodeId, ...withoutFocus } = state;
+  return { ...withoutFocus, selectedNodeIds: [] };
+}
+
+function documentRelationships(
+  document: GraphDocumentV1,
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const relationships = new Map<string, Set<string>>(
+    document.nodes.map((node) => [node.id, new Set<string>()]),
+  );
+  for (const edge of document.edges) {
+    relationships.get(edge.sourceId)?.add(edge.targetId);
+    relationships.get(edge.targetId)?.add(edge.sourceId);
+  }
+  return relationships;
 }
 
 function sameIds(a: readonly string[], b: readonly string[]): boolean {

@@ -6,6 +6,12 @@ Baseline: V1 extraction implemented; V1.1 adds shared UI and node-click actions
 
 Date: 2026-08-22
 
+Migration note: the selection/Ego/Awareness ownership in this contract is superseded by
+[Graph Engine agency and Awareness ontology](graph-engine-agency-awareness-ontology.md).
+Phases 2 through 5 have migrated internal conscious-state ownership, endogenous policy
+routing, and a neutral external-influence input while preserving the public V1
+selection contract as compatibility behavior.
+
 ## 1. Purpose
 
 V1.1 is additive to the V1 service. Existing public type names retain their `V1`

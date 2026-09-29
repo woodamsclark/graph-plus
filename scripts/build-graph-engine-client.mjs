@@ -12,6 +12,7 @@ const publicFiles = [
   'src/graph-engine/public.ts',
   'src/graph-engine/contracts/v1/action.ts',
   'src/graph-engine/contracts/v1/document.ts',
+  'src/graph-engine/contracts/v1/experience.ts',
   'src/graph-engine/contracts/v1/filter.ts',
   'src/graph-engine/contracts/v1/layout.ts',
   'src/graph-engine/contracts/v1/index.ts',
