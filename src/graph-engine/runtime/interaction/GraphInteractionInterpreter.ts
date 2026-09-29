@@ -256,11 +256,11 @@ export class GraphInteractionInterpreter {
       const hitSelectedNode = this.mode.hit !== null && selectedNodeIds.includes(this.mode.hit.nodeId);
       const startsInitialNodeDrag = this.mode.hit !== null && selectedNodeIds.length === 0;
       const startsStableFocusDrag = policy.state === 'focus'
-        && this.mode.pointerKind === 'mouse'
         && this.mode.hit !== null
-        && this.options.getHoveredNodeId() === this.mode.hit.nodeId;
+        && (this.mode.pointerKind === 'touch'
+          || (this.mode.pointerKind === 'mouse'
+            && this.options.getHoveredNodeId() === this.mode.hit.nodeId));
       const startsOrdinaryNodeDrag = policy.state !== 'focus'
-        && this.mode.pointerKind !== 'touch'
         && (hitSelectedNode || startsInitialNodeDrag);
       if (this.mode.hit && this.mode.button === 0
         && (startsOrdinaryNodeDrag || startsStableFocusDrag)) {

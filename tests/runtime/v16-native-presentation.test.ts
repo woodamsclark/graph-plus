@@ -632,7 +632,7 @@ test('V2 default Obsidian theme uses the Graph+ kosmos palette without affecting
     'a selected community theme should continue to own its graph node color');
 });
 
-test('Local Graph+ resolves its canvas background from the Local surface color', () => {
+test('Graph+ resolves its canvas background from the shared presentation surface color', () => {
   const value = runtimeHarness();
   value.document.body.style.setProperty('--graph-plus-surface-background', '#0f0f0f');
 
@@ -641,14 +641,14 @@ test('Local Graph+ resolves its canvas background from the Local surface color',
     () => true,
   ).getPalette();
   deepEqual(defaultPalette.colors.background, parseGraphColorV2('#0f0f0f'),
-    'the Local surface should replace the stock Graph+ field with its exact background');
+    'the Graph+ surface should replace the stock graph field with its exact background');
 
   const communityPalette = new ThemeStyleResolver(
     () => value.document.body,
     () => false,
   ).getPalette();
   deepEqual(communityPalette.colors.background, parseGraphColorV2('#0f0f0f'),
-    'the Local surface should replace a community graph field with its exact background');
+    'the Graph+ surface should replace a community graph field with its exact background');
 });
 
 test('Graph+ color overrides layer over the active Obsidian palette', () => {

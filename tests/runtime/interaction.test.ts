@@ -1076,7 +1076,7 @@ test('R-INPUT-17 mobile one-finger background drag pans 3D Overview and Explore 
   await focusedSession.dispose();
 });
 
-test('mobile one-finger drag pans through a node instead of selecting or dragging it', async () => {
+test('mobile one-finger drag moves a directly touched node without selecting it', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
@@ -1087,15 +1087,15 @@ test('mobile one-finger drag pans through a node instead of selecting or draggin
   pointer(value, canvas, 'pointerup', node.x + 45, node.y + 20, { pointerId: 341, pointerType: 'touch' });
   value.platform.flushFrame();
   const after = await session.exportViewState();
-  deepEqual(after.selectedNodeIds, [], 'mobile one-finger navigation through a node should not select it');
-  deepEqual(after.positions.a, before.positions.a, 'mobile one-finger navigation through a node should not drag it');
-  assert(!sameVector(after.camera.target, before.camera.target), 'mobile one-finger drag should pan 3D Overview');
-  assert(sameDirection(cameraOffset(after.camera), cameraOffset(before.camera)),
-    'mobile one-finger pan should retain camera orientation');
+  deepEqual(after.selectedNodeIds, [], 'a mobile node drag should not also select the node');
+  assert(!sameVector(after.positions.a, before.positions.a),
+    'a direct mobile touch beginning on an Overview node should move that node');
+  deepEqual(after.camera, before.camera,
+    'dragging an unattended node should preserve Vision framing');
   await session.dispose();
 });
 
-test('mobile Focus navigation rotates, then node taps exit Focus and toggle constellation membership', async () => {
+test('mobile Focus drags a directly touched node while background gestures retain navigation', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
@@ -1108,11 +1108,12 @@ test('mobile Focus navigation rotates, then node taps exit Focus and toggle cons
   value.platform.flushFrame();
   pointer(value, canvas, 'pointerup', otherPoint.x + 50, otherPoint.y + 25, { pointerId: 35, pointerType: 'touch' });
   value.platform.flushFrame();
-  const afterPan = await session.exportViewState();
-  deepEqual(afterPan.selectedNodeIds, ['a'], 'the original selection should survive navigation');
-  deepEqual(afterPan.positions.b, before.positions.b, 'an unselected hit node must not enter node drag');
-  deepEqual(afterPan.camera.target, before.camera.target, 'Focus rotation should retain the focused-node target');
-  assert(!sameVector(afterPan.camera.position, before.camera.position), 'the same gesture should rotate the camera');
+  const afterDrag = await session.exportViewState();
+  deepEqual(afterDrag.selectedNodeIds, ['a'], 'the original Attention should survive a peripheral-node drag');
+  assert(!sameVector(afterDrag.positions.b, before.positions.b),
+    'a direct touch gesture beginning on a Focus node should move that node');
+  deepEqual(afterDrag.camera, before.camera,
+    'dragging a peripheral Focus node should preserve Vision framing');
 
   const stationaryOtherPoint = await nodePoint(session, 'b');
   click(value, canvas, stationaryOtherPoint, { pointerId: 36, pointerType: 'touch' });

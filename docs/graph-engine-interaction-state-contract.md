@@ -185,10 +185,12 @@ in; moving toward the focused node zooms out.
 
 Focus node dragging is deliberately narrower than ordinary navigation. A desktop
 mouse may drag the focused subject or a visible direct neighbor when that exact node
-was already the stable semantic hover target at pointer-down. The drag retains the
-existing Attention and Focus; Vision follows when the focused subject itself moves.
-Without stable hover, the same motion remains camera navigation. Touch and pen retain
-the Focus navigation gesture and do not enter this node-drag path.
+was already the stable semantic hover target at pointer-down. A direct touch beginning
+on either node may also drag it because the contact itself supplies the missing hover
+intent. The drag retains the existing Attention and Focus; Vision follows when the
+focused subject itself moves. Mouse movement without stable hover and touch movement
+beginning on the background remain camera navigation. Pen retains the Focus navigation
+gesture and does not enter this node-drag path.
 
 ### 5.2 Keyboard and modifiers
 
@@ -208,8 +210,8 @@ the Focus navigation gesture and do not enter this node-drag path.
 
 | Input | Overview | Explore | Focus |
 | --- | --- | --- | --- |
-| One-finger drag, 2D | Pan | Pan | Elastic pan |
-| One-finger drag, 3D | Pan, including when starting over a node | Pan, including when starting over a node | Rotate, including when starting over a node |
+| One-finger drag, 2D | Drag a directly touched node; pan from background | Drag an attended node; pan otherwise | Drag a directly touched node; elastic-pan from background |
+| One-finger drag, 3D | Drag a directly touched node; pan from background | Drag an attended node; pan otherwise | Drag a directly touched node; rotate from background |
 | Two-finger translation, 2D | Pan | Pan | Pan |
 | Two-finger translation, 3D | Rotate | Rotate | Rotate around the focused node |
 | Pinch | Target-centered zoom concurrently with two-finger pan/rotation | Target-centered zoom concurrently with two-finger pan/rotation | Target-centered zoom concurrently with two-finger pan/rotation |

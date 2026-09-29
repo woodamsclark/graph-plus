@@ -1,11 +1,12 @@
 .graphplus-view,
 .greater-graph-view {
+  --graph-plus-surface-background: #0f0f0f;
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: transparent;
+  background: #0f0f0f;
 }
 
 .graphplus-view canvas {
@@ -14,11 +15,6 @@
   height: 100%;
   touch-action: none;
   background: transparent;
-}
-
-.graphplus-local-view {
-  --graph-plus-surface-background: #0f0f0f;
-  background: #0f0f0f;
 }
 
 .workspace-leaf-content[data-type="graph-plus"],
