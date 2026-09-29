@@ -1,3 +1,4 @@
+import { Window } from 'happy-dom';
 import {
   GRAPH_QUICK_SETTINGS_CONTROL_IDS_V1 as CONTROLS,
   GRAPH_QUICK_SETTINGS_SECTION_IDS_V1 as SECTIONS,
@@ -10,6 +11,7 @@ import {
 } from '../../src/obsidian/graph-engine-ui/GraphEngineUiPolicy.ts';
 import { GraphEngineQuickSettingsDisclosureStateV1 } from '../../src/obsidian/graph-engine-ui/GraphEngineQuickSettingsDisclosureState.ts';
 import { isQuickSettingsToggleKeyV1 } from '../../src/obsidian/graph-engine-ui/GraphEngineQuickSettingsShortcut.ts';
+import { ObsidianGraphUiLayoutV1 } from '../../src/obsidian/graph-engine-ui/ObsidianGraphUiLayout.ts';
 import { equal, test } from '../support/harness.ts';
 
 function descriptor(): ConsumerProfileDescriptorV1 {
@@ -76,6 +78,33 @@ test('R-UI-04 quick-setting disclosures retain their user state across panel ren
   equal(disclosures.resolve(SECTIONS.filter, true), false, 'a closed default-open section should remain closed after controls rerender');
 });
 
+test('R-UI-11 collapsed launcher clears the Obsidian mobile header row', () => {
+  const window = new Window();
+  const document = window.document as unknown as Document;
+  const leaf = document.createElement('div');
+  const header = document.createElement('div');
+  const hostAction = document.createElement('button');
+  const container = document.createElement('div');
+  const launcher = document.createElement('div');
+  leaf.className = 'workspace-leaf-content';
+  header.className = 'view-header';
+  hostAction.className = 'view-action';
+  launcher.className = 'is-collapsed';
+  document.body.className = 'is-mobile';
+  leaf.append(header, container);
+  header.append(hostAction);
+  container.append(launcher);
+  document.body.append(leaf);
+  container.getBoundingClientRect = () => rect(0, 72, 390, 720);
+  header.getBoundingClientRect = () => rect(0, 72, 390, 44);
+
+  const layout = new ObsidianGraphUiLayoutV1(container, launcher, []);
+
+  equal(launcher.style.getPropertyValue('--graph-engine-controls-top'), '52px',
+    'the launcher should sit below the owning mobile header with an 8px gap');
+  layout.dispose();
+});
+
 test('Tab toggles Quick Settings from the graph without consuming control navigation', () => {
   const event = (overrides: Partial<KeyboardEvent> = {}) => ({
     key: 'Tab', defaultPrevented: false, repeat: false, isComposing: false,
@@ -92,3 +121,14 @@ test('Tab toggles Quick Settings from the graph without consuming control naviga
     target: { closest: () => ({}) } as unknown as EventTarget,
   })), false, 'Tab on an interactive Quick Settings control should retain normal focus navigation');
 });
+
+function rect(left: number, top: number, width: number, height: number): DOMRect {
+  return {
+    left, top, width, height,
+    right: left + width,
+    bottom: top + height,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}

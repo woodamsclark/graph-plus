@@ -2,6 +2,7 @@ import type { Disposable, GraphUiOcclusionV1 } from '../../graph-engine/contract
 
 const HOST_OCCLUSION_SELECTORS = [
   '.view-actions',
+  '.view-header .view-action',
   '.view-header-nav-buttons',
   '.mobile-navbar',
   '.workspace-leaf-content > .view-header .clickable-icon',
@@ -76,7 +77,12 @@ export class ObsidianGraphUiLayoutV1 implements Disposable {
     const host = Array.from(this.container.ownerDocument.querySelectorAll<HTMLElement>(HOST_OCCLUSION_SELECTORS))
       .filter((element) => !this.root.contains(element))
       .map((element) => element.getBoundingClientRect());
-    let top = gap;
+    const mobileHeader = this.container.ownerDocument.body.classList.contains('is-mobile')
+      ? this.container.closest<HTMLElement>('.workspace-leaf-content')?.querySelector<HTMLElement>('.view-header')
+      : null;
+    let top = mobileHeader
+      ? Math.max(gap, mobileHeader.getBoundingClientRect().bottom - bounds.top + 8)
+      : gap;
     for (const blocked of [...explicit, ...host]) {
       if (!intersects(candidate, blocked)) continue;
       top = Math.max(top, blocked.bottom - bounds.top + 8);
