@@ -48,6 +48,13 @@ export class GraphEngineContextMenuV1 implements Disposable {
         void this.context.session.focusNode(intent.nodeId);
       }));
     }
+    if (graphCoreActionIsShownV1(this.policy, CORE.toggleConstellation)) {
+      const member = viewState.selectedNodeIds.includes(intent.nodeId);
+      menu.addItem((item) => item.setTitle(member ? 'Remove from constellation' : 'Add to constellation')
+        .setIcon(member ? 'minus' : 'plus').onClick(() => {
+          this.context.controls.toggleConstellationNode(intent.nodeId, intent.modality);
+        }));
+    }
     if (graphCoreActionIsShownV1(this.policy, CORE.mindMapNode)) {
       menu.addItem((item) => item.setTitle('Mind map from here').setIcon('git-fork').onClick(() => {
         void this.context.controls.setModuleSetting('form', 'rootNodeId', intent.nodeId)

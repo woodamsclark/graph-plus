@@ -1,6 +1,13 @@
 import type { GraphDimensionsV1 } from '../../contracts/v1/index.ts';
+import { GRAPH_VIEW_DEFINITIONS_V1 } from '../../contracts/v1/index.ts';
 import type { BufferedQueue } from './BufferedQueue.ts';
 import { GraphTaggingController } from './GraphTaggingController.ts';
+import {
+  appendInteractionReceiptEventV1,
+  type InteractionReceiptEventV1,
+  type InteractionReceiptV1,
+} from './InteractionReceipt.ts';
+import { ReflexV1 } from './Reflex.ts';
 import type {
   GraphHitV1,
   GraphInputEventV1,
@@ -9,7 +16,7 @@ import type {
   GraphScreenPointV1,
   InputGraphIdentityV1,
 } from './GraphInteractionTypes.ts';
-import { graphInteractionPolicyV1, type GraphUxStateV1 } from './GraphInteractionStatePolicy.ts';
+import { GRAPH_INTERACTION_STATE_POLICIES_V1, canDragGraphNodeV1, graphInteractionPolicyV1, type GraphUxStateV1 } from './GraphInteractionStatePolicy.ts';
 
 interface PointerRecord {
   readonly id: number;
@@ -17,11 +24,30 @@ interface PointerRecord {
   point: GraphScreenPointV1;
 }
 
-interface PendingTap {
-  readonly event: Extract<GraphInputEventV1, { type: 'pointer-up' }>;
-  readonly hit: GraphHitV1 | null;
-  readonly deferred: boolean;
+interface InteractionStateSnapshot {
+  readonly selectedNodeIds: readonly string[];
+  readonly focusedNodeId?: string;
+  readonly viewMode: GraphUxStateV1;
 }
+
+interface PrimaryTapReceiptPayload {
+  readonly hit: GraphHitV1 | null;
+  readonly before: InteractionStateSnapshot;
+}
+
+type PrimaryTapReceiptEvent = InteractionReceiptEventV1<
+  'press' | 'release',
+  {
+    readonly pointerId: number;
+    readonly pointerKind: 'mouse' | 'touch' | 'pen';
+    readonly button: number;
+    readonly point: GraphScreenPointV1;
+  }
+>;
+
+type PrimaryTapReceipt = InteractionReceiptV1<'primary-tap', PrimaryTapReceiptPayload> & {
+  readonly events: readonly PrimaryTapReceiptEvent[];
+};
 
 type SinglePointerMode =
   | { readonly kind: 'idle' }
@@ -30,11 +56,12 @@ type SinglePointerMode =
       readonly pointerId: number;
       readonly pointerKind: 'mouse' | 'touch' | 'pen';
       readonly button: number;
+      readonly downEvent: Extract<GraphInputEventV1, { type: 'pointer-down' }>;
       readonly downPoint: GraphScreenPointV1;
       lastPoint: GraphScreenPointV1;
       readonly hit: GraphHitV1 | null;
       readonly precisionZoomCandidate: boolean;
-      readonly doubleTapSource?: PendingTap;
+      readonly receiptSource?: PrimaryTapReceipt;
     }
   | {
       readonly kind: 'pan' | 'elastic-pan' | 'orbit' | 'radial-zoom';
@@ -55,6 +82,18 @@ type SinglePointerMode =
       readonly anchor: GraphScreenPointV1;
       lastPoint: GraphScreenPointV1;
       lastRadius?: number;
+    }
+  | {
+      readonly kind: 'focus-hold';
+      readonly pointerId: number;
+    }
+  | {
+      readonly kind: 'focus-transition';
+      readonly pointerId: number;
+      readonly pointerKind: 'mouse' | 'touch' | 'pen';
+      readonly nodeId: string;
+      readonly origin: GraphScreenPointV1;
+      progress: number;
     };
 
 interface TouchGesture {
@@ -71,6 +110,7 @@ interface TouchGesture {
 }
 
 interface TrackpadPinchMomentum {
+  readonly anchor?: GraphScreenPointV1;
   readonly identity: InputGraphIdentityV1;
   readonly timestamp: number;
   velocity: number;
@@ -82,15 +122,19 @@ const TRACKPAD_PINCH_MOMENTUM_INTERVAL_MS = 16;
 const TRACKPAD_PINCH_MOMENTUM_INITIAL_SCALE = 0.35;
 const TRACKPAD_PINCH_MOMENTUM_DECAY = 0.78;
 const TRACKPAD_PINCH_MOMENTUM_MIN_DELTA = 0.1;
+const DEFAULT_PRIMARY_TAP_RECEIPT_WINDOW_MS = 240;
+const DEFAULT_PRIMARY_TAP_FOCUS_HOLD_MS = 450;
+const DEFAULT_FOCUS_TRANSITION_DISTANCE_RATIO = 0.35;
 
 export class GraphInteractionInterpreter {
   private readonly pointers = new Map<number, PointerRecord>();
   private mode: SinglePointerMode = { kind: 'idle' };
   private touchGesture: TouchGesture | null = null;
   private dimensions: GraphDimensionsV1;
+  private lastPointerPoint: GraphScreenPointV1 | undefined;
   private pendingHover: Extract<GraphInputEventV1, { type: 'pointer-move' }> | null = null;
-  private pendingTap: PendingTap | null = null;
-  private pendingTapTimer: number | null = null;
+  private readonly primaryTapReflex = new ReflexV1<PrimaryTapReceipt>();
+  private primaryTapFocusHoldTimer: number | null = null;
   private trackpadPinchMomentum: TrackpadPinchMomentum | null = null;
   private trackpadPinchMomentumTimer: number | null = null;
   private readonly tagging = new GraphTaggingController();
@@ -102,14 +146,16 @@ export class GraphInteractionInterpreter {
     readonly hitTest: (point: GraphScreenPointV1, pointerKind?: 'mouse' | 'touch' | 'pen') => GraphHitV1 | null;
     readonly getSelectedNodeIds: () => readonly string[];
     readonly getFocusedNodeId: () => string | undefined;
+    readonly getViewMode: () => GraphUxStateV1;
     readonly getHoveredNodeId: () => string | undefined;
     readonly getFocusedNodeScreenPoint: () => GraphScreenPointV1 | undefined;
-    readonly getNodeSelection: (nodeId: string) => readonly string[];
-    readonly getSelectionBridge: (nodeId: string, selectedNodeIds: readonly string[]) => readonly string[];
+    readonly getNodeScreenPoint: (nodeId: string) => GraphScreenPointV1 | undefined;
     readonly getViewport: () => { readonly width: number; readonly height: number };
     readonly dragThresholdPx?: number;
-    readonly doubleTapIntervalMs?: number;
-    readonly doubleTapDistancePx?: number;
+    readonly primaryTapReceiptWindowMs?: number;
+    readonly primaryTapReceiptDistancePx?: number;
+    readonly primaryTapFocusHoldMs?: number;
+    readonly focusTransitionDistanceRatio?: number;
     readonly setTimeout: (callback: () => void, delayMs: number) => number;
     readonly clearTimeout: (handle: number) => void;
     readonly onDeferredCommand: () => void;
@@ -133,7 +179,10 @@ export class GraphInteractionInterpreter {
       this.command(hoverEvent, {
         type: 'set-hover',
         ...(hover ? { nodeId: hover.nodeId, point: hoverEvent.point } : {}),
-        mod: hoverEvent.mod,
+        mod: hoverEvent.mod, ctrl: hoverEvent.ctrl,
+        input: { phase: 'hover', target: hover ? { kind: 'node', nodeId: hover.nodeId } : { kind: 'background' },
+          modality: hoverEvent.pointerKind, modifiers: { ctrl: hoverEvent.ctrl === true, meta: hoverEvent.meta === true,
+            shift: hoverEvent.shift === true, alt: hoverEvent.alt === true } },
       });
       if (hoverEvent.pointerKind === 'mouse' && hoverEvent.mod && hover) {
         this.command(hoverEvent, { type: 'set-preview-hover', nodeId: hover.nodeId, point: hoverEvent.point });
@@ -141,6 +190,10 @@ export class GraphInteractionInterpreter {
         this.command(hoverEvent, { type: 'set-preview-hover' });
       }
     }
+  }
+
+  isViewProposalSuspended(): boolean {
+    return (this.mode.kind !== 'idle' && this.mode.kind !== 'press') || this.touchGesture !== null;
   }
 
   isSelectionPresentationSuspended(): boolean {
@@ -152,16 +205,23 @@ export class GraphInteractionInterpreter {
   }
 
   reset(): void {
-    this.clearPendingTap();
+    this.cancelPrimaryTapFocusHold();
+    this.clearPrimaryTapReceipt();
     this.cancelTrackpadPinchMomentum();
     this.pointers.clear();
     this.mode = { kind: 'idle' };
     this.touchGesture = null;
     this.pendingHover = null;
+    this.lastPointerPoint = undefined;
     this.tagging.reset();
   }
 
   private ingest(event: GraphInputEventV1): void {
+    if (event.type === 'wheel' || event.type === 'pointer-move' || event.type === 'pointer-down') {
+      this.lastPointerPoint = event.point;
+    } else if (event.type === 'pointer-leave' || event.type === 'pointer-cancel') {
+      this.lastPointerPoint = undefined;
+    }
     if (event.type !== 'wheel' || !event.ctrl || event.meta || event.physicalCtrl) {
       this.cancelTrackpadPinchMomentum();
     }
@@ -185,33 +245,42 @@ export class GraphInteractionInterpreter {
     }
     this.pointers.set(event.pointerId, { id: event.pointerId, kind: event.pointerKind, point: event.point });
     if (this.pointers.size === 2) {
-      this.clearPendingTap();
+      this.cancelPrimaryTapFocusHold();
+      this.clearPrimaryTapReceipt();
       this.mode = { kind: 'idle' };
       this.touchGesture = this.readTouchGesture();
       return;
     }
     const hit = this.options.hitTest(event.point, event.pointerKind);
-    const doubleTapSource = event.button === 0 ? this.matchingPendingTap(event, hit) : undefined;
-    const effectiveHit = doubleTapSource?.hit && hit === null ? doubleTapSource.hit : hit;
-    const precisionZoomCandidate = event.pointerKind === 'touch' && doubleTapSource !== undefined;
-    if (this.pendingTap && !doubleTapSource) {
-      this.resolvePendingTap();
-    }
-    if (doubleTapSource) {
-      this.clearPendingTap();
+    const matchingReceipt = event.button === 0 && !event.ctrl && !event.meta && !event.shift && !event.alt
+      ? this.matchingPrimaryTapReceipt(event, hit)
+      : undefined;
+    const receiptSource = matchingReceipt
+      ? this.appendPrimaryTapReceiptEvent(matchingReceipt, 'press', event)
+      : undefined;
+    const effectiveHit = receiptSource?.payload.hit && hit === null ? receiptSource.payload.hit : hit;
+    const precisionZoomCandidate = event.pointerKind === 'touch' && receiptSource !== undefined;
+    if (event.button === 0 && !receiptSource) this.clearPrimaryTapReceipt();
+    if (receiptSource) {
+      this.clearPrimaryTapReceipt();
       this.options.cancelLongPress();
+      this.reconcilePrimaryTapReceipt(event, effectiveHit, receiptSource);
     }
     this.mode = {
       kind: 'press',
       pointerId: event.pointerId,
       pointerKind: event.pointerKind,
       button: event.button,
+      downEvent: event,
       downPoint: event.point,
       lastPoint: event.point,
       hit: effectiveHit,
       precisionZoomCandidate,
-      ...(doubleTapSource ? { doubleTapSource } : {}),
+      ...(receiptSource ? { receiptSource } : {}),
     };
+    if (event.button === 0 && effectiveHit) {
+      this.armNodeFocusHold(event, effectiveHit.nodeId);
+    }
   }
 
   private pointerMove(event: Extract<GraphInputEventV1, { type: 'pointer-move' }>): void {
@@ -225,16 +294,44 @@ export class GraphInteractionInterpreter {
     if (this.mode.kind === 'press' && this.mode.pointerId === event.pointerId) {
       const threshold = this.options.dragThresholdPx ?? 6;
       if (distanceSquared(this.mode.downPoint, event.point) <= threshold ** 2) return;
+      this.cancelPrimaryTapFocusHold();
+      const receiptNodeId = this.mode.receiptSource?.payload.hit?.nodeId;
+      if (receiptNodeId && this.mode.hit?.nodeId === receiptNodeId) {
+        const progress = this.focusTransitionProgress(this.mode.downPoint, event.point);
+        this.command(event, {
+          type: 'transition-focus',
+          nodeId: receiptNodeId,
+          progress,
+          complete: false,
+          modality: this.mode.pointerKind,
+        });
+        this.mode = {
+          kind: 'focus-transition',
+          pointerId: event.pointerId,
+          pointerKind: this.mode.pointerKind,
+          nodeId: receiptNodeId,
+          origin: this.mode.downPoint,
+          progress,
+        };
+        return;
+      }
       if (this.mode.precisionZoomCandidate) {
-        const focusPoint = this.options.getFocusedNodeScreenPoint();
-        const state = this.viewMode();
+        const receipt = this.mode.receiptSource;
+        const receiptNodeId = receipt?.payload.hit?.nodeId;
+        const receiptState = receipt?.payload.before;
+        const restoresFocus = receiptNodeId !== undefined
+          && receiptState?.focusedNodeId === receiptNodeId;
+        const focusPoint = restoresFocus
+          ? this.options.getNodeScreenPoint(receiptNodeId)
+          : this.options.getFocusedNodeScreenPoint();
+        const focusMode = restoresFocus || this.viewMode() === 'focus';
         const lastRadius = focusPoint ? pointDistance(this.mode.lastPoint, focusPoint) : undefined;
-        if (state === 'focus' && focusPoint && lastRadius !== undefined) {
+        if (focusMode && focusPoint && lastRadius !== undefined) {
           this.radialZoom(event, lastRadius, pointDistance(event.point, focusPoint));
         } else {
           const deltaY = event.point.y - this.mode.lastPoint.y;
           if (Math.abs(deltaY) > 0) this.command(event, {
-            type: 'zoom-by', deltaY: -deltaY * 3,
+            type: 'zoom-by', deltaY: -deltaY * 3, anchor: this.pointerZoomAnchor(this.mode.downPoint),
           });
           const deltaX = event.point.x - this.mode.lastPoint.x;
           if (this.dimensions === '3d' && Math.abs(deltaX) > 0) {
@@ -249,20 +346,21 @@ export class GraphInteractionInterpreter {
         return;
       }
       const selectedNodeIds = this.options.getSelectedNodeIds();
-      const policy = graphInteractionPolicyV1({
+      const committedView = {
         selectedNodeIds,
         focusedNodeId: this.options.getFocusedNodeId(),
-      });
-      const hitSelectedNode = this.mode.hit !== null && selectedNodeIds.includes(this.mode.hit.nodeId);
-      const startsInitialNodeDrag = this.mode.hit !== null && selectedNodeIds.length === 0;
+        viewMode: this.options.getViewMode(),
+      };
+      const policy = graphInteractionPolicyV1(committedView);
+      const hitDraggableNode = this.mode.hit !== null && canDragGraphNodeV1(this.mode.hit.nodeId, committedView);
       const startsStableFocusDrag = policy.state === 'focus'
         && this.mode.hit !== null
         && (this.mode.pointerKind === 'touch'
           || (this.mode.pointerKind === 'mouse'
             && this.options.getHoveredNodeId() === this.mode.hit.nodeId));
       const startsOrdinaryNodeDrag = policy.state !== 'focus'
-        && (hitSelectedNode || startsInitialNodeDrag);
-      if (this.mode.hit && this.mode.button === 0
+        && hitDraggableNode;
+      if (this.mode.hit && hitDraggableNode && this.mode.button === 0
         && (startsOrdinaryNodeDrag || startsStableFocusDrag)) {
         this.command(event, { type: 'drag-start', nodeId: this.mode.hit.nodeId, point: this.mode.downPoint });
         this.command(event, { type: 'drag-update', nodeId: this.mode.hit.nodeId, point: event.point });
@@ -350,7 +448,7 @@ export class GraphInteractionInterpreter {
         this.mode.lastRadius = nextRadius;
       } else {
         const deltaY = event.point.y - this.mode.lastPoint.y;
-        if (Math.abs(deltaY) > 0) this.command(event, { type: 'zoom-by', deltaY: -deltaY * 3 });
+        if (Math.abs(deltaY) > 0) this.command(event, { type: 'zoom-by', deltaY: -deltaY * 3, anchor: this.pointerZoomAnchor(this.mode.anchor) });
         const deltaX = event.point.x - this.mode.lastPoint.x;
         if (this.dimensions === '3d' && Math.abs(deltaX) > 0) {
           this.command(event, { type: 'orbit-by', deltaX, deltaY: 0 });
@@ -359,10 +457,23 @@ export class GraphInteractionInterpreter {
       this.mode.lastPoint = event.point;
       return;
     }
+    if (this.mode.kind === 'focus-transition' && this.mode.pointerId === event.pointerId) {
+      const progress = this.focusTransitionProgress(this.mode.origin, event.point);
+      this.command(event, {
+        type: 'transition-focus',
+        nodeId: this.mode.nodeId,
+        progress,
+        complete: false,
+        modality: this.mode.pointerKind,
+      });
+      this.mode.progress = progress;
+      return;
+    }
     if (this.mode.kind === 'idle' && this.pointers.size === 0) this.pendingHover = event;
   }
 
   private pointerUp(event: Extract<GraphInputEventV1, { type: 'pointer-up' }>): void {
+    this.cancelPrimaryTapFocusHold();
     this.pointers.delete(event.pointerId);
     if (this.touchGesture) {
       if (this.pointers.size < 2) this.touchGesture = null;
@@ -387,14 +498,29 @@ export class GraphInteractionInterpreter {
       this.mode = { kind: 'idle' };
       return;
     }
+    if (this.mode.kind === 'focus-hold' && this.mode.pointerId === event.pointerId) {
+      this.mode = { kind: 'idle' };
+      return;
+    }
+    if (this.mode.kind === 'focus-transition' && this.mode.pointerId === event.pointerId) {
+      this.command(event, {
+        type: 'transition-focus',
+        nodeId: this.mode.nodeId,
+        progress: this.mode.progress,
+        complete: true,
+        modality: this.mode.pointerKind,
+      });
+      this.mode = { kind: 'idle' };
+      return;
+    }
     if (this.mode.kind !== 'press' || this.mode.pointerId !== event.pointerId) {
       this.mode = { kind: 'idle' };
       return;
     }
     const hit = this.mode.hit;
     const pointerKind = this.mode.pointerKind;
-    const precisionZoomCandidate = this.mode.precisionZoomCandidate;
-    const doubleTapSource = this.mode.doubleTapSource;
+    const downEvent = this.mode.downEvent;
+    const receiptSource = this.mode.receiptSource;
     this.mode = { kind: 'idle' };
     if (event.button === 2) {
       if (hit) this.command(event, {
@@ -403,22 +529,24 @@ export class GraphInteractionInterpreter {
         point: event.point,
         modality: pointerKind,
       });
-      else this.command(event, { type: 'center-and-fit-camera' });
+      else this.command(event, { type: 'center-and-fit-camera', modality: pointerKind });
       return;
     }
-    if (doubleTapSource && event.button === 0) {
-      this.resolveDoubleTap(event, hit, doubleTapSource);
+    if (receiptSource && event.button === 0) {
+      const completedReceipt = this.appendPrimaryTapReceiptEvent(receiptSource, 'release', event);
+      this.resolvePrimaryTapReceipt(event, hit, completedReceipt);
       return;
     }
-    if (event.button === 0 && !precisionZoomCandidate && this.shouldDeferTap(pointerKind, hit)) {
-      this.deferTap(event, hit);
-      return;
-    }
+    const before = this.interactionStateSnapshot();
     this.resolveTap(event, hit);
-    if (event.button === 0) this.rememberImmediateTap(event, hit);
+    if (event.button === 0 && !downEvent.ctrl && !downEvent.meta && !downEvent.shift && !downEvent.alt) {
+      this.issuePrimaryTapReceipt(downEvent, event, hit, before);
+    }
   }
 
   private pointerCancel(event: Extract<GraphInputEventV1, { type: 'pointer-cancel' }>): void {
+    this.pendingHover = null;
+    this.cancelPrimaryTapFocusHold();
     this.pointers.delete(event.pointerId);
     if (this.mode.kind === 'drag' && this.mode.pointerId === event.pointerId) {
       this.command(event, {
@@ -427,11 +555,13 @@ export class GraphInteractionInterpreter {
       });
     }
     this.mode = { kind: 'idle' };
+    this.command(event, { type: 'set-hover', mod: false });
+    this.command(event, { type: 'set-preview-hover' });
     if (this.pointers.size < 2) this.touchGesture = null;
   }
 
   private pointerLeave(event: Extract<GraphInputEventV1, { type: 'pointer-leave' }>): void {
-    if (event.pointerKind !== 'mouse' || this.mode.kind !== 'idle') return;
+    if (event.pointerKind === 'touch') return;
     this.pendingHover = null;
     this.command(event, { type: 'set-preview-hover' });
     this.command(event, { type: 'set-hover', mod: false });
@@ -451,7 +581,9 @@ export class GraphInteractionInterpreter {
     this.command(event, {
       type: 'set-hover',
       ...(hover ? { nodeId: hover.nodeId, point: event.point } : {}),
-      mod: event.mod,
+      mod: event.mod, ctrl: event.ctrl,
+      input: { phase: 'hover', target: hover ? { kind: 'node', nodeId: hover.nodeId } : { kind: 'background' },
+        modality: 'mouse', modifiers: { ctrl: event.ctrl, meta: event.meta === true, shift: event.shift, alt: event.alt } },
     });
     if (event.mod && hover) {
       this.command(event, { type: 'set-preview-hover', nodeId: hover.nodeId, point: event.point });
@@ -460,18 +592,23 @@ export class GraphInteractionInterpreter {
     }
   }
 
+  private pointerZoomAnchor(point?: GraphScreenPointV1): GraphScreenPointV1 | undefined {
+    return GRAPH_INTERACTION_STATE_POLICIES_V1[this.viewMode()].zoomAnchor === 'pointer' ? point : undefined;
+  }
+
   private wheel(event: Extract<GraphInputEventV1, { type: 'wheel' }>): void {
     const delta = this.normalizedWheel(event);
     if (event.ctrl && !event.meta) {
       const zoomDelta = delta.y * TRACKPAD_PINCH_ZOOM_MULTIPLIER;
-      const anchor = event.physicalCtrl ? event.point : undefined;
+      const anchor = event.physicalCtrl ? event.point : this.pointerZoomAnchor(event.point);
       this.command(event, { type: 'zoom-by', deltaY: zoomDelta, ...(anchor ? { anchor } : {}) });
-      if (!event.physicalCtrl) this.captureTrackpadPinchMomentum(event, zoomDelta);
+      if (!event.physicalCtrl) this.captureTrackpadPinchMomentum(event, zoomDelta, anchor);
       return;
     }
     const policy = graphInteractionPolicyV1({
       selectedNodeIds: this.options.getSelectedNodeIds(),
       focusedNodeId: this.options.getFocusedNodeId(),
+      viewMode: this.options.getViewMode(),
     });
     if (this.dimensions === '3d' && policy.wheel['3d'] === 'rotate') {
       this.command(event, { type: 'orbit-by', deltaX: -delta.x, deltaY: delta.y });
@@ -485,16 +622,12 @@ export class GraphInteractionInterpreter {
   }
 
   private longPress(event: Extract<GraphInputEventV1, { type: 'long-press' }>): void {
+    this.cancelPrimaryTapFocusHold();
     const hit = this.options.hitTest(event.point, event.pointerKind);
     if (this.mode.kind === 'press' && this.mode.pointerId === event.pointerId) this.mode = { kind: 'idle' };
     if (hit) {
-      this.command(event, {
-        type: 'request-node-context',
-        nodeId: hit.nodeId,
-        point: event.point,
-        modality: event.pointerKind,
-      });
-    } else this.command(event, { type: 'center-and-fit-camera' });
+      this.focusNode(event, hit.nodeId);
+    } else this.command(event, { type: 'center-and-fit-camera', modality: event.pointerKind });
   }
 
   private keyDown(event: Extract<GraphInputEventV1, { type: 'key-down' }>): void {
@@ -507,20 +640,25 @@ export class GraphInteractionInterpreter {
       return;
     }
     if (event.key === '+' || event.key === '=') {
-      this.command(event, { type: 'zoom-by', deltaY: -120 });
+      this.command(event, { type: 'zoom-by', deltaY: -120, anchor: this.pointerZoomAnchor(this.lastPointerPoint) });
       return;
     }
     if (event.key === '-' || event.key === '_') {
-      this.command(event, { type: 'zoom-by', deltaY: 120 });
+      this.command(event, { type: 'zoom-by', deltaY: 120, anchor: this.pointerZoomAnchor(this.lastPointerPoint) });
       return;
     }
     if (event.key === 'Escape') {
       this.tagging.reset();
-      this.command(event, { type: 'direct-attention', nodeIds: [], clearFocus: true });
+      this.command(event, { type: 'activate-view', input: { phase: 'activate', target: { kind: 'background' },
+        modality: 'keyboard', modifiers: { ctrl: event.ctrl, meta: event.meta, shift: event.shift, alt: event.alt } } });
       return;
     }
     if (event.key === ' ' || event.key === 'Spacebar') {
       if (event.repeat || event.composing || event.ctrl || event.meta || event.shift || event.alt) return;
+      if (GRAPH_VIEW_DEFINITIONS_V1[this.viewMode()].interactions.spaceActivation === 'clear-constellation') {
+        this.command(event, { type: 'direct-attention', nodeIds: [], clearFocus: true, viewMode: 'overview' });
+        return;
+      }
       if (this.tagging.updateSpace(true)) this.command(event, { type: 'selection-presentation-changed' });
       return;
     }
@@ -558,12 +696,17 @@ export class GraphInteractionInterpreter {
       const policy = graphInteractionPolicyV1({
         selectedNodeIds: this.options.getSelectedNodeIds(),
         focusedNodeId: this.options.getFocusedNodeId(),
+        viewMode: this.options.getViewMode(),
       });
       const originCentroid = previous.mode === 'pending' ? previous.startCentroid : previous.centroid;
       const deltaX = originCentroid.x - next.centroid.x;
       const deltaY = originCentroid.y - next.centroid.y;
       if (Math.abs(deltaX) > 0 || Math.abs(deltaY) > 0) {
-        this.command(event, policy.mobileTwoFingerDrag[this.dimensions] === 'rotate-and-zoom'
+        // On mobile, a two-finger drag in 3D Constellation mode must orbit, never pan.
+        const navigation = policy.state === 'explore' && this.dimensions === '3d'
+          ? 'rotate-and-zoom'
+          : policy.mobileTwoFingerDrag[this.dimensions];
+        this.command(event, navigation === 'rotate-and-zoom'
           ? { type: 'orbit-by', deltaX: -deltaX, deltaY }
           : { type: 'pan-by', deltaX, deltaY });
       }
@@ -572,6 +715,7 @@ export class GraphInteractionInterpreter {
       if (Math.abs(distanceDelta) >= 1) this.command(event, {
         type: 'zoom-by',
         deltaY: -distanceDelta * 3,
+        anchor: this.pointerZoomAnchor(next.centroid),
       });
     }
     this.touchGesture = {
@@ -584,134 +728,180 @@ export class GraphInteractionInterpreter {
     };
   }
 
-  private matchingPendingTap(
+  private armNodeFocusHold(
+    event: Extract<GraphInputEventV1, { type: 'pointer-down' }>,
+    nodeId: string,
+  ): void {
+    this.cancelPrimaryTapFocusHold();
+    this.primaryTapFocusHoldTimer = this.options.setTimeout(() => {
+      this.primaryTapFocusHoldTimer = null;
+      if (this.mode.kind !== 'press' || this.mode.pointerId !== event.pointerId
+        || this.mode.hit?.nodeId !== nodeId) return;
+      this.focusNode(event, nodeId);
+      this.mode = { kind: 'focus-hold', pointerId: event.pointerId };
+      this.options.onDeferredCommand();
+    }, this.options.primaryTapFocusHoldMs ?? DEFAULT_PRIMARY_TAP_FOCUS_HOLD_MS);
+  }
+
+  private cancelPrimaryTapFocusHold(): void {
+    if (this.primaryTapFocusHoldTimer !== null) {
+      this.options.clearTimeout(this.primaryTapFocusHoldTimer);
+    }
+    this.primaryTapFocusHoldTimer = null;
+  }
+
+  private focusTransitionProgress(
+    origin: GraphScreenPointV1,
+    point: GraphScreenPointV1,
+  ): number {
+    const viewport = this.options.getViewport();
+    const ratio = this.options.focusTransitionDistanceRatio
+      ?? DEFAULT_FOCUS_TRANSITION_DISTANCE_RATIO;
+    const distance = Math.max(48, Math.min(viewport.width, viewport.height) * ratio);
+    return Math.max(0, Math.min(1, pointDistance(origin, point) / distance));
+  }
+
+  private focusNode(
+    event: { readonly identity: InputGraphIdentityV1; readonly timestamp: number },
+    nodeId: string,
+  ): void {
+    this.command(event, {
+      type: 'direct-attention',
+      nodeIds: [...new Set([...this.options.getSelectedNodeIds(), nodeId])],
+      subjectNodeId: nodeId,
+      focusNodeId: nodeId,
+    });
+  }
+
+  private matchingPrimaryTapReceipt(
     event: Extract<GraphInputEventV1, { type: 'pointer-down' }>,
     hit: GraphHitV1 | null,
-  ): PendingTap | undefined {
-    const pending = this.pendingTap;
-    if (!pending) return undefined;
-    return event.timestamp - pending.event.timestamp <= (this.options.doubleTapIntervalMs ?? 320)
-      && distanceSquared(event.point, pending.event.point) <= (this.options.doubleTapDistancePx ?? 24) ** 2
-      && (pending.hit?.nodeId === hit?.nodeId
-        || (hit === null && pending.hit?.nodeId === this.options.getFocusedNodeId()))
-      ? pending
-      : undefined;
-  }
-
-  private shouldDeferTap(pointerKind: 'mouse' | 'touch' | 'pen', hit: GraphHitV1 | null): boolean {
-    return (hit !== null && hit.nodeId === this.options.getFocusedNodeId())
-      || (pointerKind === 'touch' && hit === null);
-  }
-
-  private deferTap(
-    event: Extract<GraphInputEventV1, { type: 'pointer-up' }>,
-    hit: GraphHitV1 | null,
-  ): void {
-    this.clearPendingTap();
-    this.pendingTap = {
+  ): PrimaryTapReceipt | undefined {
+    const decision = this.primaryTapReflex.recognize(
       event,
-      hit,
-      deferred: true,
-    };
-    this.pendingTapTimer = this.options.setTimeout(() => {
-      const pending = this.pendingTap;
-      this.pendingTap = null;
-      this.pendingTapTimer = null;
-      if (!pending) return;
-      this.resolveTap(pending.event, pending.hit);
-      this.options.onDeferredCommand();
-    }, this.options.doubleTapIntervalMs ?? 320);
+      (receipt, candidate) => {
+        const source = receipt.payload;
+        const release = [...receipt.events].reverse().find((entry) => entry.phase === 'release');
+        if (!release || release.payload.pointerKind !== candidate.pointerKind) return false;
+        if (source.hit !== null && hit !== null && source.hit.nodeId === hit.nodeId) return true;
+        if (distanceSquared(candidate.point, release.payload.point)
+          > (this.options.primaryTapReceiptDistancePx ?? 24) ** 2) return false;
+        if (source.hit === null && hit === null) return candidate.pointerKind === 'touch';
+        return source.hit !== null && hit === null;
+      },
+    );
+    return decision.status === 'matched' ? decision.receipt : undefined;
   }
 
-  private rememberImmediateTap(
+  private issuePrimaryTapReceipt(
+    downEvent: Extract<GraphInputEventV1, { type: 'pointer-down' }>,
     event: Extract<GraphInputEventV1, { type: 'pointer-up' }>,
     hit: GraphHitV1 | null,
+    before: InteractionStateSnapshot,
   ): void {
-    this.clearPendingTap();
-    this.pendingTap = {
-      event,
-      hit,
-      deferred: false,
-    };
-    this.pendingTapTimer = this.options.setTimeout(() => {
-      this.pendingTap = null;
-      this.pendingTapTimer = null;
-    }, this.options.doubleTapIntervalMs ?? 320);
+    this.primaryTapReflex.remember({
+      schemaVersion: 1,
+      kind: 'primary-tap',
+      identity: { ...event.identity },
+      issuedAt: event.timestamp,
+      expiresAt: event.timestamp
+        + (this.options.primaryTapReceiptWindowMs ?? DEFAULT_PRIMARY_TAP_RECEIPT_WINDOW_MS),
+      events: [
+        this.primaryTapReceiptEvent('press', downEvent),
+        this.primaryTapReceiptEvent('release', event),
+      ],
+      payload: { hit, before },
+    });
   }
 
-  private resolvePendingTap(): void {
-    const pending = this.pendingTap;
-    this.clearPendingTap();
-    if (pending?.deferred) this.resolveTap(pending.event, pending.hit);
+  private clearPrimaryTapReceipt(): void {
+    this.primaryTapReflex.forget();
   }
 
-  private clearPendingTap(): void {
-    if (this.pendingTapTimer !== null) this.options.clearTimeout(this.pendingTapTimer);
-    this.pendingTapTimer = null;
-    this.pendingTap = null;
+  private reconcilePrimaryTapReceipt(
+    event: Extract<GraphInputEventV1, { type: 'pointer-down' }>,
+    hit: GraphHitV1 | null,
+    source: PrimaryTapReceipt,
+  ): void {
+    const sourceHit = source.payload.hit;
+    if (hit && sourceHit?.nodeId === hit.nodeId) {
+      // The first release already committed its View transition. The matching
+      // second press consumes that receipt without replaying or undoing it.
+      return;
+    }
+    if (!hit && !sourceHit && event.pointerKind === 'touch') {
+      const before = source.payload.before;
+      this.command(event, {
+        type: 'reconcile-interaction-state',
+        nodeIds: before.selectedNodeIds,
+        viewMode: before.viewMode,
+        ...(before.focusedNodeId === undefined ? {} : { focusedNodeId: before.focusedNodeId }),
+      });
+    }
   }
 
-  private resolveDoubleTap(
+  private resolvePrimaryTapReceipt(
     event: Extract<GraphInputEventV1, { type: 'pointer-up' }>,
     hit: GraphHitV1 | null,
-    source: PendingTap,
+    source: PrimaryTapReceipt,
   ): void {
-    if (hit && source.hit?.nodeId === hit.nodeId) {
-      const selectedNodeIds = this.options.getSelectedNodeIds();
-      if (!selectedNodeIds.includes(hit.nodeId)) {
-        this.command(event, {
-          type: 'direct-attention',
-          nodeIds: [...new Set([
-            ...selectedNodeIds,
-            hit.nodeId,
-            ...this.options.getNodeSelection(hit.nodeId),
-            ...this.options.getSelectionBridge(hit.nodeId, selectedNodeIds),
-          ])],
-          subjectNodeId: hit.nodeId,
-        });
-      }
+    const sourceHit = source.payload.hit;
+    if (hit && sourceHit?.nodeId === hit.nodeId) {
       this.command(event, { type: 'activate-node', nodeId: hit.nodeId, activation: 'primary' });
       return;
     }
-    if (!hit && !source.hit && event.pointerKind === 'touch') {
-      this.command(event, { type: 'center-and-fit-camera' });
+    if (!hit && !sourceHit && event.pointerKind === 'touch') {
+      this.command(event, { type: 'center-and-fit-camera', modality: event.pointerKind });
     }
+  }
+
+  private appendPrimaryTapReceiptEvent(
+    receipt: PrimaryTapReceipt,
+    phase: PrimaryTapReceiptEvent['phase'],
+    event: Extract<GraphInputEventV1, { type: 'pointer-down' | 'pointer-up' }>,
+  ): PrimaryTapReceipt {
+    return appendInteractionReceiptEventV1(receipt, this.primaryTapReceiptEvent(phase, event));
+  }
+
+  private primaryTapReceiptEvent(
+    phase: PrimaryTapReceiptEvent['phase'],
+    event: Extract<GraphInputEventV1, { type: 'pointer-down' | 'pointer-up' }>,
+  ): PrimaryTapReceiptEvent {
+    return {
+      phase,
+      timestamp: event.timestamp,
+      payload: {
+        pointerId: event.pointerId,
+        pointerKind: event.pointerKind,
+        button: event.button,
+        point: event.point,
+      },
+    };
+  }
+
+  private interactionStateSnapshot(): InteractionStateSnapshot {
+    const focusedNodeId = this.options.getFocusedNodeId();
+    return {
+      selectedNodeIds: [...this.options.getSelectedNodeIds()],
+      viewMode: this.options.getViewMode(),
+      ...(focusedNodeId === undefined ? {} : { focusedNodeId }),
+    };
   }
 
   private resolveTap(
     event: Extract<GraphInputEventV1, { type: 'pointer-up' }>,
     hit: GraphHitV1 | null,
   ): void {
-    const selectedNodeIds = this.options.getSelectedNodeIds();
-    if (!hit) {
-      this.tagging.reset();
-      this.command(event, { type: 'activate-background' });
-      return;
-    }
-
-    const removing = selectedNodeIds.includes(hit.nodeId);
-    const nodeIds = [...new Set([
-      hit.nodeId,
-      ...this.options.getNodeSelection(hit.nodeId),
-      ...(removing ? [] : this.options.getSelectionBridge(hit.nodeId, selectedNodeIds)),
-    ])];
-    const toggled = new Set(nodeIds);
-    const nextSelection = removing
-      ? selectedNodeIds.filter((nodeId) => !toggled.has(nodeId))
-      : [...new Set([...selectedNodeIds, ...nodeIds])];
-    this.command(event, {
-      type: 'direct-attention',
-      nodeIds: nextSelection,
-      subjectNodeId: hit.nodeId,
-      clearFocus: true,
-    });
+    if (!hit) this.tagging.reset();
+    this.command(event, { type: 'activate-view', input: {
+      phase: 'activate', target: hit ? { kind: 'node', nodeId: hit.nodeId } : { kind: 'background' },
+      modality: event.pointerKind,
+      modifiers: { ctrl: event.ctrl, meta: event.meta, shift: event.shift, alt: event.alt },
+    } });
   }
 
   private viewMode(): GraphUxStateV1 {
-    return graphInteractionPolicyV1({
-      selectedNodeIds: this.options.getSelectedNodeIds(),
-      focusedNodeId: this.options.getFocusedNodeId(),
-    }).state;
+    return this.options.getViewMode();
   }
 
   private radialZoom(
@@ -756,6 +946,7 @@ export class GraphInteractionInterpreter {
   private captureTrackpadPinchMomentum(
     event: Extract<GraphInputEventV1, { type: 'wheel' }>,
     zoomDelta: number,
+    anchor?: GraphScreenPointV1,
   ): void {
     if (this.trackpadPinchMomentumTimer !== null) {
       this.options.clearTimeout(this.trackpadPinchMomentumTimer);
@@ -767,6 +958,7 @@ export class GraphInteractionInterpreter {
     this.trackpadPinchMomentum = {
       identity: { ...event.identity },
       timestamp: event.timestamp,
+      ...(anchor ? { anchor: { ...anchor } } : {}),
       velocity: sameDirection ? previousVelocity * 0.65 + zoomDelta * 0.35 : zoomDelta,
     };
     this.trackpadPinchMomentumTimer = this.options.setTimeout(() => {
@@ -786,6 +978,7 @@ export class GraphInteractionInterpreter {
     this.command(momentum, {
       type: 'zoom-by',
       deltaY: momentum.velocity,
+      ...(momentum.anchor ? { anchor: momentum.anchor } : {}),
     });
     momentum.velocity *= TRACKPAD_PINCH_MOMENTUM_DECAY;
     this.options.onDeferredCommand();

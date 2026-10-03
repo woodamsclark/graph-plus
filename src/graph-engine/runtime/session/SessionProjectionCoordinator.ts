@@ -1,4 +1,5 @@
-import type { GraphViewStateV1 } from '../../contracts/v1/index.ts';
+import type { GraphViewObjectPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
+import type { GraphViewStateV1, GraphExperienceContractV1 } from '../../contracts/v1/index.ts';
 import { compileAnimaSceneV1 } from '../anima/index.ts';
 import { createAnimusSnapshotV1 } from '../animus/index.ts';
 import type { Consciousness } from '../consciousness/index.ts';
@@ -35,6 +36,8 @@ export class SessionProjectionCoordinatorV1 {
   compose(options: {
     readonly host: GraphModuleHost;
     readonly consciousness: Consciousness;
+    readonly experience?: GraphExperienceContractV1;
+    readonly resolveObjectActivationPreview?: () => GraphViewObjectPreviewV1 | null;
     readonly projectionView: GraphModuleProjectionStateV1;
     readonly viewState: GraphViewStateV1;
     readonly theme: GraphVisualThemeV2;
@@ -53,10 +56,13 @@ export class SessionProjectionCoordinatorV1 {
       availableNodeIds: new Set(options.projectionView.document.nodes.map((node) => node.id)),
       relationships: documentRelationships(options.projectionView.document),
     });
+    const objectActivationPreview = options.resolveObjectActivationPreview?.();
     const moduleView = options.host.contribute({
       ...options.projectionView,
       viewState: options.viewState,
       consciousness,
+      experience: options.experience,
+      objectActivationPreview,
       draggedNodeId: options.draggedNodeId,
       hoveredNodeId: options.hoveredNodeId,
       selectionPresentationSuspended: options.selectionPresentationSuspended,
@@ -86,6 +92,8 @@ export class SessionProjectionCoordinatorV1 {
     this.frames.set(compileAnimaSceneV1({
       snapshot,
       consciousness,
+      experience: options.experience,
+      objectActivationPreview,
       nodeContributions: moduleView.nodeContributions,
       edgeContributions: moduleView.edgeContributions,
       regionContributions: moduleView.regionContributions,

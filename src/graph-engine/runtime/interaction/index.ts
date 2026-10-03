@@ -2,6 +2,8 @@ export * from './BufferedQueue.ts';
 export * from './GraphCommander.ts';
 export * from './GraphHitTester.ts';
 export * from './GraphInput.ts';
+export * from './InteractionReceipt.ts';
+export * from './Reflex.ts';
 export * from './GraphInteractionInterpreter.ts';
 export * from './GraphInteractionStatePolicy.ts';
 export * from './GraphInteractionTypes.ts';

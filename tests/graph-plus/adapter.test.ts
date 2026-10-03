@@ -695,8 +695,10 @@ test('V1.7.1 explicit global reveal enters Focus without changing the full proje
     'programmatic Focus should fit the active note neighborhood');
   await session.focusNode(null);
   const state = await session.exportViewState();
-  deepEqual(state.selectedNodeIds, [],
-    'exiting a one-node Focus should return directly to Overview');
+  deepEqual(state.selectedNodeIds, [alphaId],
+    'exiting a one-node Focus retains its constellation');
+  equal(state.viewMode, 'explore', 'a singleton follows the same View hierarchy');
+  await session.setView('overview');
   const cameraBeforeClick = state.camera;
   const camera = new GraphCameraController(state.camera, state.dimensions);
   camera.setViewport(640, 360);
@@ -823,11 +825,20 @@ test('V1.7.1 Local Graph+ owns an ephemeral rooted document, layout, and depth',
     'the clicked Local subject should become Attention');
   equal(consciouslyFocused.focusedNodeId, alphaId,
     'single-subject Local Attention should remain in Focus');
-  deepEqual(consciouslyFocused.camera.target, consciouslyFocused.positions[alphaId],
-    'Local single click should move camera Focus within the existing constellation');
+  assert(Math.hypot(
+    consciouslyFocused.camera.target.x - consciouslyFocused.positions[alphaId].x,
+    consciouslyFocused.camera.target.y - consciouslyFocused.positions[alphaId].y,
+    consciouslyFocused.camera.target.z - consciouslyFocused.positions[alphaId].z,
+  ) < 1e-9, 'Local single click should move camera Focus within the existing constellation');
   equal(openedPath, undefined, 'a Local single click must not request an Obsidian reveal');
 
-  dispatchGraphClick(runtime.window, runtimeCanvas(runtime.container), alphaPoint.x, alphaPoint.y, 942);
+  runtime.platform.advanceTime(400);
+  const focusedCamera = new GraphCameraController(consciouslyFocused.camera, consciouslyFocused.dimensions);
+  focusedCamera.setViewport(640, 360);
+  const focusedAlphaPoint = focusedCamera.worldToScreen(consciouslyFocused.positions[alphaId]);
+  dispatchGraphClick(runtime.window, runtimeCanvas(runtime.container), focusedAlphaPoint.x, focusedAlphaPoint.y, 942);
+  runtime.platform.flushFrame();
+  dispatchGraphClick(runtime.window, runtimeCanvas(runtime.container), focusedAlphaPoint.x, focusedAlphaPoint.y, 943);
   runtime.platform.flushFrame();
   await Promise.resolve();
   equal(openedPath, 'Alpha.md', 'the second click should add the outbound note-reveal operation');

@@ -170,7 +170,7 @@ test('R-SHELL-03 restores the compatible saved view without implicit reframing a
   });
   await session.fitNodes(['a', 'b']);
   const saved = await session.exportViewState();
-  deepEqual(saved.selectedNodeIds, ['b'], 'selection should deduplicate and reconcile unknown IDs');
+  deepEqual(saved.selectedNodeIds, ['a'], 'focus admits its subject and filtering removes unavailable members');
   equal(saved.focusedNodeId, 'a', 'focus should export by stable node ID');
   deepEqual(saved.camera.target, { x: 20, y: 30, z: 0 }, 'fit command should target known saved positions');
   await session.fitNodes(['a', 'b'], { centerNodeId: 'a' });
@@ -192,7 +192,7 @@ test('R-SHELL-03 restores the compatible saved view without implicit reframing a
   equal(surface(second.container).dataset.renderedNodeCount, '2', 'the restored render filter should remain active');
   await restored.focusNode(null);
   const visibleState = await restored.exportViewState();
-  const expectedTarget = averageVector(['a', 'c'].map((nodeId) => visibleState.positions[nodeId]));
+  const expectedTarget = visibleState.positions.a;
   await restored.resetCamera();
   deepEqual((await restored.exportViewState()).camera.target, expectedTarget,
     'an unfocused reset should restore the profile angle and fit the complete visible graph');
@@ -265,6 +265,21 @@ test('exogenous influence bypasses Ego intent while obeying experience invariant
     'outside influence should remain constrained by the active experience');
   deepEqual((await session.exportViewState()).selectedNodeIds, ['a'],
     'a rejected outside influence must not mutate conscious state');
+  await session.dispose();
+});
+
+test('remembered subjects influence Anima without becoming selected', async () => {
+  const value = harness();
+  const session = await value.create();
+
+  deepEqual(await session.applyExternalInfluence({
+    schemaVersion: 1,
+    type: 'replace-remembered-subjects',
+    nodeIds: ['a', 'missing', 'b'],
+  }), { status: 'adjusted', rememberedNodeIds: ['a', 'b'] },
+  'external Memory should discard subjects absent from the current document');
+  deepEqual((await session.exportViewState()).selectedNodeIds, [],
+    'remembering subjects must not turn them into Attention or compatibility selection');
   await session.dispose();
 });
 
@@ -606,7 +621,7 @@ test('R-DIM-02..04 switches dimensions on one resource-stable session and preser
   equal(spatial.camera.projection, 'perspective', '3d should reconfigure the camera to perspective');
   assert(Object.values(spatial.positions).every((position) => Number.isFinite(position.x + position.y + position.z)), 'all converted positions should remain finite');
   assert(Object.values(spatial.positions).some((position) => position.z !== 0), 'free 3d layout should gain finite depth');
-  deepEqual(spatial.selectedNodeIds, ['b'], 'selection should survive live conversion');
+  deepEqual(spatial.selectedNodeIds, ['a'], 'the available active composition should survive live conversion');
   equal(spatial.focusedNodeId, 'a', 'focus should survive live conversion');
   deepEqual(spatial.pinnedNodeIds, ['b'], 'pins should survive live conversion');
   equal(spatial.activeFilters.render?.scope, 'render', 'active filters should survive live conversion');
@@ -622,7 +637,7 @@ test('R-DIM-02..04 switches dimensions on one resource-stable session and preser
   const flat = await session.exportViewState();
   equal(flat.camera.projection, 'orthographic', '2d should reconfigure the camera to orthographic');
   equal(Object.values(flat.positions).every((position) => position.z === 0), true, '2d conversion should flatten every position');
-  deepEqual(flat.selectedNodeIds, ['b'], 'selection should survive the return conversion');
+  deepEqual(flat.selectedNodeIds, ['a'], 'the available composition should survive the return conversion');
   equal(flat.focusedNodeId, 'a', 'focus should survive the return conversion');
   equal(value.platform.pendingFrames, 1, 'repeated switching should still retain one scheduled frame');
   equal(value.platform.visibilityListenerAdds, 1, 'repeated switching should not multiply listeners');
@@ -665,7 +680,7 @@ test('R-MOUNT-07 restores saved interaction state in the active dimension', asyn
   const state = await restored.exportViewState();
   equal(state.dimensions, '3d', 'restore should convert a saved allowed dimension into the active profile dimension');
   equal(state.camera.projection, 'perspective', 'converted restore should use the destination projection');
-  deepEqual(state.selectedNodeIds, ['b'], 'restore conversion should preserve selection');
+  deepEqual(state.selectedNodeIds, ['b', 'a'], 'restore preserves the composition including its admitted Focus subject');
   equal(state.focusedNodeId, 'a', 'restore conversion should preserve Focus');
   deepEqual(state.pinnedNodeIds, ['b'], 'restore conversion should preserve pins');
   await restored.dispose();

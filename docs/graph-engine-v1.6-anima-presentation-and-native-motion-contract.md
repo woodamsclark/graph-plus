@@ -4,6 +4,10 @@ Status: Accepted in live desktop/mobile use; legacy comparison retired.
 
 Date: 2026-09-05
 
+View update: the [View and Scene Contract](graph-engine-view-scene-contract.md)
+supersedes the historical click, hover, Focus scene, and implicit framing rules below.
+Hover now previews the admitted ordinary object activation; only click commits it.
+
 Migration note: the selection/Ego/Awareness ownership in this contract is superseded by
 [Graph Engine agency and Awareness ontology](graph-engine-agency-awareness-ontology.md).
 Phases 2 through 7 have migrated conscious-state ownership, policy, exogenous
@@ -229,23 +233,28 @@ worldRadius = nodeSizeMultiplier * clamp(3 * sqrt(visibleDegree + 1), 8, 30)
 Graph Engine derives and caches the neutral degree metric. Anima consumes it and owns
 the resulting geometric presentation. Consumers do not calculate display radii.
 
-The Node size setting is a positive global multiplier. Form root/branch prominence and
+The Node size setting is a positive global multiplier, defaulting to `1.00`. Form root/branch prominence and
 future Anima resizing multiply the base radius rather than replacing the user's global
 setting.
 
 ### 6.2 Two-dimensional zoom response
 
+Node zoom contrast is fixed at the former slider's `100%` effect. There is no
+contrast control, and legacy `nodeWorldScaleBlend` values are ignored. Within the
+visible radius range, the smallest node receives exponent `0.5`, the largest
+receives `2`, and intermediate nodes interpolate by normalized world radius.
+Equal-sized nodes retain exponent `0.5`.
+
 In an orthographic 2D view, the effective screen radius is:
 
 ```text
-screenRadius = worldRadius * sqrt(cameraZoom)
+screenRadius = worldRadius * cameraZoom ^ nodeScaleExponent
 ```
 
 Node coordinates continue to use the camera's ordinary linear world-to-screen
-projection. This partial compensation makes nodes shrink more slowly when zooming out
-and grow more slowly when zooming in. At zoom `0.25`, `1`, and `4`, a node's screen
-radius is respectively `0.5`, `1`, and `2` times its radius at zoom `1`, rather than
-`0.25`, `1`, and `4` times.
+projection. Small nodes respond gently to zoom, while larger nodes respond more
+strongly. The former square-root response remains the smallest-node and equal-size
+fallback.
 
 This is presentation scaling, not a change to wheel/pinch behavior, camera bounds,
 node positions, force mass, collision radius, or topology.
@@ -257,7 +266,7 @@ flattening degree prominence when the whole graph is framed, Anima declares both
 radius:
 
 ```text
-screenRadius = max(worldRadius * perspectiveScale, 4, worldRadius * 0.5)
+screenRadius = max(worldRadius * perspectiveScale ^ nodeScaleExponent, 4, worldRadius * 0.5)
 ```
 
 The relative floor means a minimum-degree node bottoms out at `4` CSS pixels while a
@@ -282,13 +291,13 @@ fontSize = 14 + worldRadius / 4
 Labels use their resolved font size in fixed CSS pixels in both 2D and 3D. They remain
 readable while the graph recedes, matching the accepted 3D overview treatment rather
 than shrinking with orthographic zoom. Adaptive collision rejection and budgeting
-remain enabled as a Graph+ enhancement. Anima forces hovered labels, gives immediate
-hover-neighbor labels a 50% Saliency boost, and raises selected and focused labels
-above the adaptive budget. Form-required labels remain structurally forced candidates.
+remain enabled as a Graph+ enhancement. Anima forces labels for highlighted nodes,
+leaves standard nodes under the adaptive label policy, and suppresses labels for dimmed
+or void nodes. Form-required labels remain structurally forced candidates.
 
 Adaptive label collision slots are resolved in this stable order:
 
-1. Anima interaction emphasis: hover, immediate hover neighbor, then aware or focused;
+1. Anima highlighted subjects, including hover, Attention, and session Memory;
 2. explicit structural label priority, including Form roles;
 3. resolved Anima world radius, largest first;
 4. perspective proximity; and
@@ -375,7 +384,7 @@ While Explore/Constellation is active, selected members and their structural lin
 receive emphasis. Every other projected node and link, including unrelated
 non-neighbors, remains rendered as subdued graph context. Context nodes use their
 ordinary node or tag theme color with 80% desaturation at `0.24` opacity, and context
-links retain their ordinary edge role at `0.6` opacity. Constellation
+links use the same 80% desaturation policy at `0.6` opacity. Constellation
 presentation does not hide the surrounding graph.
 
 Hover/drag presentation should adopt the useful native visual pattern:
@@ -386,25 +395,38 @@ Hover/drag presentation should adopt the useful native visual pattern:
 - the active label is forced visible; and
 - no hover-only change affects physics or persistence.
 
-Explore/Constellation overrides selection highlighting to selected nodes and
-selected-to-selected links only. Hover remains the higher-priority exception and applies
-the global one-hop policy to the hovered node, immediate neighbors, and incident links.
-Previews and Option do not add an Explore seed. Anima forces the hovered label, gives immediate
-hover-neighbor labels a 50% Saliency boost, raises aware or focused labels,
-suppresses unrelated dim labels, and delegates the remaining labels to camera-range
-Saliency. Dwell and
+Explore/Constellation highlights aware nodes plus links internal to that constellation.
+Hover also highlights the shortest path from its subject to the nearest aware node;
+immediate neighbors and incident links outside that path rise to standard presentation.
+None of those transient subjects become selected. Previews and Option do
+not add an Explore seed. Highlighted labels are forced, standard labels use camera-range
+Saliency, and dimmed or void labels are suppressed. Dwell and
 movement resistance before a transient hover highlight belong to the future shared
 Anima animation kit; the interim implementation highlights immediately.
 
+Anima resolves every projected node and link to one ordered presentation phase:
+`void`, `dimmed`, `standard`, or `highlighted`. Memory contributes to Awareness before
+presentation resolution, so remembered session subjects remain highlighted across Focus,
+Explore, and Overview without becoming selected. Selection remains an Attention and interaction concern rather than a synonym
+for visual highlighting. A link has no independent phase: it inherits the weaker phase
+of its two endpoints. Consequently, a highlighted hovered node connected to a standard
+neighbor produces a standard, fully visible link.
+
 For neighborhood emphasis, active-node precedence is drag, then focus, then hover.
-Focus therefore owns the highlighted neighborhood after a click, follows a later click
-to a different node, and releases all neighborhood emphasis when focus clears. Touch
+Focus preserves the selected constellation after entry, follows a later click to a
+different node without replacing that constellation, and releases focus-only emphasis
+when focus clears. Touch
 movement and completed touch node drags never create a persistent hover target. Clearing
 interaction presentation is required even when the requested focus ID already matches
 the stored focus state; an idempotent focus command may not leave stale hover behind.
-While Focus/Local is active, the focused node, every immediate neighbor, and every
-focused-to-neighbor link receive the highlight treatment at full opacity. This is a
-presentation rule only; neighbors do not become selected.
+While Focus/Local is active, constellation nodes and links whose endpoints are both in
+the constellation receive the highlight treatment at full opacity. Immediate neighbors
+of any constellation node remain rendered as a dim frontier with their labels suppressed;
+they do not become selected. Any dimmed node in the Focus scope remains hoverable.
+Hover temporarily highlights that node and its shortest path to the nearest aware
+constellation subject while the rest of the visible scope remains dim. Clicking a
+frontier node adds it to the constellation. Background activation exits
+Focus to Explore while retaining the constellation.
 
 A small exponential interpolation may approach these opacity/color targets. It must
 stop scheduling frames once the resolved values reach their targets.
@@ -417,7 +439,8 @@ Graph view input behavior:
 - unmodified trackpad/mouse wheel pans in an unfocused 2D graph;
 - trackpad pinch, represented by the platform's modified wheel gesture, zooms;
 - touch pinch zooms;
-- one-finger background drag pans in 2D and in 3D Overview/Explore;
+- one-finger background drag pans in 2D and in 3D Overview; 3D Explore orbits
+  around the selected constellation;
 - in focused 3D, one-finger primary drag orbits around the focus while retaining
   selection and focus, even when the gesture begins inside another node's hit target;
 - node dragging is disabled while 3D focus is active; a stationary tap on another node

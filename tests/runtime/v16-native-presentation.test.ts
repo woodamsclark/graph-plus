@@ -65,26 +65,120 @@ test('V1.6 Anima owns the exact visible-degree radius and composable structural 
   equal(patch.presentationPolicy?.labelScaleMode, 'fixed', 'Anima labels should remain screen-readable in both dimensions');
 });
 
-test('Anima maps node size to a hybrid zoom-response gradient', () => {
+test('Awareness and Focus presentation do not resize nodes or change their zoom response', () => {
+  const document = graphDocument({ nodes: [graphNode('a'), graphNode('b')], edges: [graphEdge('ab', 'a', 'b')] });
+  const state = pipeline(document, { nodeIds: new Set(['a', 'b']), edgeIds: new Set(['ab']) });
+  const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, {});
+  const baseline = anima.contributeFrame(state)!.nodeContributions!;
+  for (const viewMode of ['overview', 'explore', 'focus'] as const) {
+    const conscious = withConsciousness(state, ['a'], viewMode === 'focus' ? 'a' : undefined);
+    const next = anima.contributeFrame({ ...state, ...conscious, viewState: { ...conscious.viewState, viewMode } })!.nodeContributions!;
+    for (const id of ['a', 'b']) {
+      equal(next[id].radius, baseline[id].radius, 'semantic illumination does not change the structural radius');
+      equal(next[id].nodeScaleExponent, baseline[id].nodeScaleExponent, 'semantic illumination does not change zoom scaling');
+    }
+  }
+});
+
+test('Anima fixes node zoom contrast at its former 100 percent effect, ignoring saved tuning', () => {
   const document = graphDocument({ nodes: [graphNode('small'), graphNode('large')], edges: [] });
   const state = {
     ...pipeline(document, { nodeIds: new Set(['small', 'large']), edgeIds: new Set() }),
     nodeContributions: { large: { radiusScale: 2 } },
-  };
+};
+
+test('Canvas picking stays bounded by the viewport at tight zoom in both projections', () => {
+  for (const projection of ['orthographic', 'perspective'] as const) {
+    const value = runtimeHarness();
+    const camera = new GraphCameraController({
+      position: { x: 0, y: 0, z: 100 }, target: { x: 0, y: 0, z: 0 },
+      up: { x: 0, y: 1, z: 0 }, zoom: 1, projection,
+    }, projection === 'perspective' ? '3d' : '2d');
+    camera.setViewport(640, 360);
+    const frames = new GraphFrameStore();
+    frames.set({
+      regions: [], edges: [],
+      nodes: [{ id: 'hub', label: 'hub', position: { x: 0, y: 0, z: 0 },
+        radius: 24, nodeScaleExponent: 2, ...RESOLVED_NODE_STYLE }],
+      ...RESOLVED_FRAME_STYLE,
+      policy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'off' },
+    });
+    const renderer = new CanvasGraphRenderer(value.document.createElement('canvas'), camera, frames, () => 0);
+    renderer.resize(640, 360, 1);
+    // Check the moderate regression case before the maximum to fail without a huge allocation.
+    for (const scale of [12, 40]) {
+      camera.setState({ ...camera.getState(), zoom: projection === 'perspective' ? scale * (50 / 24) : scale });
+      // The first pick also exercises rebuilding before any render at this camera position.
+      equal(renderer.hitTest({ x: 0, y: 0 })?.nodeId, 'hub', 'a large visible disc remains pickable at the corner');
+      assert(renderer.getDiagnostics().hitGridCells <= 252, 'offscreen disc coverage cannot allocate offscreen cells');
+      renderer.render();
+      assert(renderer.getDiagnostics().hitGridCells <= 252, 'render-time indexing obeys the same bound');
+      equal(renderer.hitTest({ x: 640, y: 360 }, 'touch')?.nodeId, 'hub', 'touch picking includes the viewport boundary');
+    }
+    renderer.dispose();
+  }
+});
+
+test('Canvas void nodes do not allocate picking cells or obscure a visible node', () => {
+  const value = runtimeHarness();
+  const camera = new GraphCameraController({
+    position: { x: 0, y: 0, z: 100 }, target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 }, zoom: 12, projection: 'orthographic',
+  }, '2d');
+  camera.setViewport(640, 360);
+  const frames = new GraphFrameStore();
+  const voidNode = { id: 'void', label: 'void', position: { x: 0, y: 0, z: 10 },
+    radius: 24, nodeScaleExponent: 2, ...RESOLVED_NODE_STYLE, opacity: 0 };
+  frames.set({ ...RESOLVED_FRAME_STYLE, regions: [], edges: [], nodes: [voidNode] });
+  const renderer = new CanvasGraphRenderer(value.document.createElement('canvas'), camera, frames, () => 0);
+  renderer.resize(640, 360, 1);
+  renderer.render();
+  equal(renderer.getDiagnostics().hitGridCells, 0, 'void-only presentation has no picking cells');
+  equal(renderer.hitTest({ x: 320, y: 180 }), null, 'void nodes cannot produce mouse hits');
+  equal(renderer.hitTest({ x: 320, y: 180 }, 'touch'), null, 'void nodes cannot produce touch hits');
+  frames.set({ ...RESOLVED_FRAME_STYLE, regions: [], edges: [], nodes: [voidNode,
+    { id: 'visible', label: 'visible', position: { x: 0, y: 0, z: 0 }, radius: 4, ...RESOLVED_NODE_STYLE }] });
+  equal(renderer.hitTest({ x: 320, y: 180 })?.nodeId, 'visible', 'a nearer void node cannot intercept a visible node');
+  renderer.dispose();
+});
+
+test('Canvas viewport clipping preserves offscreen-center discs and exact circle misses', () => {
+  const value = runtimeHarness();
+  const camera = new GraphCameraController({
+    position: { x: 0, y: 0, z: 100 }, target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic',
+  }, '2d');
+  camera.setViewport(640, 360);
+  const frames = new GraphFrameStore();
+  frames.set({ ...RESOLVED_FRAME_STYLE, regions: [], edges: [], nodes: [
+    { id: 'edge', label: 'edge', position: camera.screenToWorld(-20, 180, 100), radius: 24, ...RESOLVED_NODE_STYLE },
+  ] });
+  const renderer = new CanvasGraphRenderer(value.document.createElement('canvas'), camera, frames, () => 0);
+  renderer.resize(640, 360, 1);
+  renderer.render();
+  equal(renderer.hitTest({ x: 0, y: 180 })?.nodeId, 'edge', 'the visible sliver of an offscreen-center disc remains pickable');
+  equal(renderer.hitTest({ x: 0, y: 180 }, 'touch')?.nodeId, 'edge', 'touch retains the same visible sliver');
+  equal(renderer.hitTest({ x: 0, y: 200 }), null, 'being in its bounding box does not replace the exact circle check');
+  renderer.resize(64, 32, 1);
+  camera.setViewport(64, 32);
+  renderer.render();
+  assert(renderer.getDiagnostics().hitGridCells <= 6, 'resizing updates the picking bounds');
+  renderer.dispose();
+});
   const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, { nodeWorldScaleBlend: 0.5 });
   const midpoint = anima.contributeFrame(state);
   equal(midpoint?.nodeContributions?.small.nodeScaleExponent, 0.5,
     'the smallest node should retain the gentle response');
-  equal(midpoint?.nodeContributions?.large.nodeScaleExponent, 1.25,
-    'the largest node should receive the midpoint maximum response');
+  equal(midpoint?.nodeContributions?.large.nodeScaleExponent, 2,
+    'the largest node should receive the former maximum response despite saved midpoint tuning');
   equal(midpoint?.presentationPolicy?.nodeScaleExponent, 0.5,
     'nodes without a usable size range should retain the gentle fallback');
-  anima.updateSettings({ nodeWorldScaleBlend: 4 });
+  anima.updateSettings({ nodeWorldScaleBlend: 0 });
   const maximum = anima.contributeFrame(state);
   equal(maximum?.nodeContributions?.small.nodeScaleExponent, 0.5,
     'maximum contrast should still keep the smallest node restrained');
   equal(maximum?.nodeContributions?.large.nodeScaleExponent, 2,
-    'maximum contrast should let the largest node grow dramatically');
+    'saved zero contrast must not reduce the baked-in maximum effect');
 });
 
 test('Anima separates undimmed overview hover from tagged Explore presentation', () => {
@@ -103,19 +197,19 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     'overview hover should produce node and edge presentation');
   equal(overviewHover.nodeContributions.a.opacity, 1, 'a hovered node neighbor should remain fully visible');
   equal(overviewHover.nodeContributions.d.opacity, 1, 'overview hover must not dim unrelated nodes');
-  deepEqual(overviewHover.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
-    'overview hover should light direct neighbors');
+  deepEqual(overviewHover.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
+    'overview hover should leave direct neighbors at standard presentation');
   deepEqual(overviewHover.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'overview hover should light the hovered node');
   equal(overviewHover.nodeContributions.b.labelForceVisible, true,
     'overview hover should force the hovered node label');
   equal(overviewHover.nodeContributions.c.labelAlwaysVisible, false,
     'overview hover should leave a neighboring node under adaptive saliency');
-  equal(overviewHover.nodeContributions.c.labelSaliencyBoost, 0.5,
-    'overview hover should halve the effective Saliency threshold for a neighboring label');
+  equal(overviewHover.nodeContributions.c.labelSaliencyBoost, undefined,
+    'overview hover should leave neighboring labels under ordinary automatic policy');
   equal(overviewHover.edgeContributions['a-d'].opacity, 1, 'overview hover must not dim unrelated links');
-  deepEqual(overviewHover.edgeContributions['a-b'].color, DEFAULT_GRAPH_RENDER_THEME_V1.colors.highlightedNode,
-    'overview hover should light incident links');
+  equal(overviewHover.edgeContributions['a-b'].opacity, 1,
+    'overview hover should return incident links to standard presentation');
 
   const taggedA = anima.contributeFrame({
     ...state,
@@ -139,6 +233,9 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     'a one-node Constellation should not light an unselected incident link');
   equal(taggedA.edgeContributions['a-d'].opacity, 0.6,
     'a one-node Constellation should leave every unselected incident link dimmed');
+  deepEqual(taggedA.edgeContributions['a-d'].color,
+    desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.edge, 0.8),
+    'a dimmed link should receive the same desaturation treatment as a dimmed node');
   equal(taggedA.edgeContributions['b-c'].opacity, 0.6,
     'Constellation should keep an unrelated non-neighbor link visible but dimmed');
   equal(taggedA.nodeContributions.b.showLabel, false,
@@ -150,8 +247,8 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   });
   assert(taggedStructure?.edgeContributions, 'multi-tag presentation should include structural links');
   equal(taggedStructure.edgeContributions['a-b'].opacity, 1, 'a link between tagged nodes should remain bright');
-  equal(taggedStructure.edgeContributions['b-c'].opacity, 1,
-    'Focus should brighten every focused-to-neighbor link');
+  equal(taggedStructure.edgeContributions['b-c'].opacity, 0.6,
+    'Focus should keep a connection to its non-constellation frontier dimmed');
 
   const exploredHover = anima.contributeFrame({
     ...state,
@@ -159,42 +256,16 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     ...withConsciousness(state, ['a']),
   });
   assert(exploredHover?.nodeContributions && exploredHover.edgeContributions,
-    'Explore hover should transiently light the inspected one-hop neighborhood');
-  equal(exploredHover.nodeContributions.b.opacity, 1,
-    'a node neighboring a highlight seed should remain lit');
-  equal(exploredHover.nodeContributions.d.opacity, 0.24,
-    'an unselected neighbor outside the hover neighborhood should remain dimmed');
-  deepEqual(exploredHover.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
-    'a one-hop neighbor should receive the highlight color');
-  equal(exploredHover.nodeContributions.c.opacity, 1,
-    'a hovered context node should become fully visible without joining the constellation');
-  deepEqual(exploredHover.nodeContributions.c.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
-    'the hovered context node should receive the transient highlight');
-  equal(exploredHover.edgeContributions['b-c'].opacity, 1, 'the hovered node incident link should light');
-  equal(exploredHover.edgeContributions['a-b'].opacity, 0.6,
-    'a selected-to-unselected link outside the hover incidence should remain dimmed');
-  equal(exploredHover.edgeContributions['a-d'].opacity, 0.6,
-    'selected-node incidence alone should not light a Constellation link');
-  equal(exploredHover.nodeContributions.c.labelForceVisible, true,
-    'the hovered endpoint label should be forced at its normal size');
-  equal(exploredHover.nodeContributions.c.labelFontSize, taggedA.nodeContributions.c.labelFontSize,
-    'the hovered endpoint label should retain its normal size');
-  equal(exploredHover.nodeContributions.b.labelForceVisible, false,
-    'an intermediate hop label should not be forced visible');
-  equal(exploredHover.nodeContributions.b.labelAlwaysVisible, false,
-    'a hover neighbor should remain adaptive rather than forced in Constellation');
-  equal(exploredHover.nodeContributions.b.labelSaliencyBoost, 0.5,
-    'a Constellation hover neighbor should receive the same 50% Saliency threshold reduction');
-  equal(exploredHover.nodeContributions.b.showLabel, true,
-    'Constellation dimming must not suppress a hover-neighbor label');
-  for (const nodeId of ['a', 'd']) {
-    equal(exploredHover.nodeContributions[nodeId].showLabel, taggedA.nodeContributions[nodeId].showLabel,
-      `hover should not change unrelated ${nodeId} label eligibility`);
-    equal(exploredHover.nodeContributions[nodeId].labelOpacity, taggedA.nodeContributions[nodeId].labelOpacity,
-      `hover should not change unrelated ${nodeId} label opacity`);
-    equal(exploredHover.nodeContributions[nodeId].labelAlwaysVisible, taggedA.nodeContributions[nodeId].labelAlwaysVisible,
-      `hover should not promote the unrelated ${nodeId} label`);
-  }
+    'hover should retain the scene phases while exposing the direct label');
+  equal(exploredHover.nodeContributions.a.opacity, 1, 'members stay highlighted');
+  equal(exploredHover.nodeContributions.c.opacity, 1, 'hover previews admission of the prospective subject');
+  equal(exploredHover.nodeContributions.b.opacity, 1, 'the hover route is highlighted');
+  equal(exploredHover.nodeContributions.d.opacity, 0.24, 'admission preview keeps unrelated Constellation context dimmed');
+  equal(exploredHover.edgeContributions['a-b'].opacity, 1, 'route links are highlighted');
+  equal(exploredHover.edgeContributions['b-c'].opacity, 1, 'the complete route is highlighted');
+  equal(exploredHover.edgeContributions['a-d'].opacity, 0.6, 'links outside the route stay dimmed');
+  equal(exploredHover.nodeContributions.c.labelForceVisible, true, 'the prospective subject label is readable');
+  equal(exploredHover.nodeContributions.b.showLabel, true, 'highlighted route labels are readable');
 
   const hoveredTag = anima.contributeFrame({
     ...state,
@@ -203,21 +274,21 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   });
   assert(hoveredTag?.nodeContributions && hoveredTag.edgeContributions,
     'hovering a tagged node should retain its one-hop neighborhood');
-  deepEqual(hoveredTag.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
-    'hovering a tagged node should highlight a direct neighbor');
-  deepEqual(hoveredTag.nodeContributions.d.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
-    'hovering a tagged node should highlight every direct neighbor');
-  equal(hoveredTag.nodeContributions.c.opacity, 0.24, 'all nodes outside the constellation should remain dim');
-  equal(hoveredTag.edgeContributions['a-b'].opacity, 1, 'direct neighborhood links should remain lit');
-  equal(hoveredTag.edgeContributions['a-d'].opacity, 1, 'all direct neighborhood links should remain lit');
+  deepEqual(hoveredTag.nodeContributions.b.finalColor, desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
+    'hovering a member preserves direct-neighbor dimming');
+  deepEqual(hoveredTag.nodeContributions.d.finalColor, desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
+    'hovering a member preserves every neighbor phase');
+  equal(hoveredTag.nodeContributions.c.opacity, 0, 'non-neighbors are void during the Focus preview');
+  equal(hoveredTag.edgeContributions['a-b'].opacity, 0.6, 'direct context links remain dimmed');
+  equal(hoveredTag.edgeContributions['a-d'].opacity, 0.6, 'all direct context links remain dimmed');
   equal(hoveredTag.nodeContributions.a.labelForceVisible, true,
     'hovering a tagged node should force only its own label');
   equal(hoveredTag.nodeContributions.b.labelForceVisible, false,
     'a lit direct neighbor should not receive the hover label override');
   equal(hoveredTag.nodeContributions.b.labelAlwaysVisible, false,
     'a direct hover neighbor should not bypass adaptive collision policy');
-  equal(hoveredTag.nodeContributions.b.labelSaliencyBoost, 0.5,
-    'a direct hover neighbor should become more salient without being forced');
+  equal(hoveredTag.nodeContributions.b.labelSaliencyBoost, undefined,
+    'a direct hover neighbor should use ordinary automatic label policy');
 
   const suspended = anima.contributeFrame({
     ...state,
@@ -226,11 +297,11 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     ...withConsciousness(state, ['a', 'b']),
   });
   assert(suspended?.nodeContributions, 'a Space-toggled undimmed view should contribute presentation');
-  equal(suspended.nodeContributions.c.opacity, 1, 'Space should suspend background dimming without clearing tags');
+  equal(suspended.nodeContributions.c.opacity, 1, 'Space preserves the object activation preview');
   deepEqual(suspended.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'tagged nodes should remain lit while selection presentation is suspended');
   deepEqual(suspended.nodeContributions.c.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
-    'Space should retain the hovered nonmember highlight while suspending background dimming');
+    'Space does not suppress prospective subject highlighting');
 
   const optionRevealed = anima.contributeFrame({
     ...state,
@@ -289,16 +360,53 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   assert(previewedA?.edgeContributions, 'semantic preview should produce Anima presentation');
   equal(previewedA.edgeContributions['a-b'].opacity, 0,
     'Focus should hide links outside the focused neighborhood');
-  equal(previewedA.nodeContributions?.b.opacity, 1,
-    'a focused neighbor should remain fully visible');
-  deepEqual(previewedA.nodeContributions?.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
-    'a focused neighbor should receive the highlight treatment');
-  equal(previewedA.edgeContributions['b-c'].opacity, 1,
-    'a focused-neighborhood link should remain fully visible');
-  deepEqual(previewedA.edgeContributions['b-c'].color, DEFAULT_GRAPH_RENDER_THEME_V1.colors.highlightedNode,
-    'a focused-neighborhood link should receive the highlight treatment');
+  equal(previewedA.nodeContributions?.b.opacity, 0.24,
+    'a focused frontier neighbor should remain visible but dimmed');
+  deepEqual(previewedA.nodeContributions?.b.finalColor,
+    desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
+    'a focused frontier neighbor should retain dim context presentation');
+  equal(previewedA.edgeContributions['b-c'].opacity, 0.6,
+    'a focused-to-frontier link should remain dimmed');
   equal(previewedA.edgeContributions['a-d'].opacity, 0,
     'Focus should ignore unrelated preview links outside its local rendering scope');
+
+  const hoveredFocusedNeighbor = anima.contributeFrame({
+    ...state,
+    hoveredNodeId: 'b',
+    ...withConsciousness(state, ['a'], 'a'),
+    consciousness: resolveConsciousness({
+      attentionNodeIds: ['a'],
+      availableNodeIds: state.renderSelection.nodeIds,
+      peripheralAwarenessNodeIds: ['b', 'd'],
+    }),
+  });
+  assert(hoveredFocusedNeighbor?.nodeContributions && hoveredFocusedNeighbor.edgeContributions,
+    'hovering a non-root node in Focus should contribute an isolated root-to-node presentation');
+  equal(hoveredFocusedNeighbor.nodeContributions.a.opacity, 1,
+    'the focused root should remain fully visible while a neighbor is hovered');
+  equal(hoveredFocusedNeighbor.nodeContributions.b.opacity, 1,
+    'the prospective subject is highlighted');
+  equal(hoveredFocusedNeighbor.nodeContributions.d.opacity, 0,
+    'the previous subject-only context is void');
+  equal(hoveredFocusedNeighbor.nodeContributions.d.showLabel, false,
+    'a dimmed non-hovered focus neighbor should not retain its Awareness-raised label');
+  equal(hoveredFocusedNeighbor.nodeContributions.d.labelOpacity, 0,
+    'a dimmed non-hovered focus neighbor label should be fully transparent');
+  equal(hoveredFocusedNeighbor.nodeContributions.c.opacity, 0.24,
+    'hover reveals the prospective subject neighborhood');
+  equal(hoveredFocusedNeighbor.nodeContributions.c.showLabel, false,
+    'revealed dim context labels stay suppressed');
+  equal(hoveredFocusedNeighbor.nodeContributions.c.labelOpacity, 0,
+    'revealed dim context labels stay transparent');
+  equal(hoveredFocusedNeighbor.edgeContributions['a-b'].opacity, 1,
+    'the prospective member connection is highlighted');
+  deepEqual(hoveredFocusedNeighbor.edgeContributions['a-b'].color,
+    DEFAULT_GRAPH_RENDER_THEME_V1.colors.highlightedNode,
+    'the prospective member connection is highlighted');
+  equal(hoveredFocusedNeighbor.edgeContributions['a-d'].opacity, 0,
+    'links to previous subject-only context are void');
+  equal(hoveredFocusedNeighbor.edgeContributions['b-c'].opacity, 0.6,
+    'links to the prospective subject neighbors are dimmed');
 
   const cleared = anima.contributeFrame(state);
   assert(cleared?.edgeContributions, 'cleared focus should still resolve baseline edge presentation');
@@ -322,8 +430,8 @@ test('V2 adaptive labels remain continuously eligible and accept interaction req
   });
   assert(adaptive?.nodeContributions, 'tagged adaptive presentation should contribute nodes');
   equal(adaptive.nodeContributions.a.showLabel, true, 'the tagged node label should remain eligible');
-  equal(adaptive.nodeContributions.b.showLabel, true,
-    'adaptive policy should continue managing a neighbor label independently of selection');
+  equal(adaptive.nodeContributions.b.showLabel, false,
+    'Focus should suppress the label of a dimmed frontier neighbor');
   equal(adaptive.nodeContributions.c.showLabel, false,
     'Focus should suppress labels outside the local node, its neighbors, and the constellation');
   equal(adaptive.nodeContributions.c.labelOpacity, 0,
@@ -1355,7 +1463,7 @@ test('V1.6 keeps Canvas-like pan, Cmd-scroll navigation, and transient drag sepa
   await session.dispose();
 });
 
-test('V1.6 a background finger tap clears focus in 3D', async () => {
+test('V1.6 a background finger tap exits focus into its constellation in 3D', async () => {
   const document = graphDocument({
     nodes: [graphNode('a'), graphNode('b')],
     edges: [graphEdge('join', 'a', 'b')],
@@ -1366,6 +1474,7 @@ test('V1.6 a background finger tap clears focus in 3D', async () => {
   });
   value.profiles.setUserOverrides('graph-plus', 'default', { dimensions: '3d' });
   const session = await value.create();
+  await session.setSelection(['a']);
   await session.focusNode('a');
   equal((await session.exportViewState()).focusedNodeId, 'a', 'the fixture should begin focused');
 
@@ -1377,7 +1486,8 @@ test('V1.6 a background finger tap clears focus in 3D', async () => {
   value.platform.flushFrame(34);
   const cleared = await session.exportViewState();
   equal(cleared.focusedNodeId, undefined, 'a 3D background finger tap should release focus');
-  deepEqual(cleared.selectedNodeIds, [], 'background release should also clear selection');
+  deepEqual(cleared.selectedNodeIds, ['a'],
+    'background release should retain the one-node constellation');
   await session.dispose();
 });
 

@@ -17,6 +17,7 @@ export const GRAPH_QUICK_SETTINGS_CONTROL_IDS_V1 = Object.freeze({
   clearFilter: 'filter.clear',
   mindMap: 'form.mind-map',
   formDimensions: 'form.dimensions',
+  /** @deprecated Retired control; node zoom contrast is fixed at its former 100% effect. */
   formNodeZoomSize: 'form.node-zoom-size',
   formDirection: 'form.direction',
   formDepth: 'form.depth',
@@ -46,6 +47,7 @@ export const GRAPH_CORE_CONTEXT_ACTION_IDS_V1 = Object.freeze({
   focusNode: 'focus-node',
   mindMapNode: 'mind-map-node',
   togglePin: 'toggle-pin',
+  toggleConstellation: 'toggle-constellation',
 } as const);
 
 export interface GraphSessionUiOptionsV1 {

@@ -43,8 +43,6 @@ export const GRAPH_SETTING_PRESENTATIONS_V1: readonly GraphSettingPresentationV1
     { type: 'slider', min: 0, max: 100, step: 5 }),
   entry('anima.adaptiveLabelThreshold3d', 'appearance', 'anima', 'adaptiveLabelThreshold3d', '3D label saliency', 'Higher values keep labels closer to the most visually salient nodes in 3D.',
     { type: 'slider', min: 0, max: 100, step: 5 }),
-  entry('anima.nodeWorldScaleBlend', 'appearance', 'anima', 'nodeWorldScaleBlend', 'Node zoom contrast', 'Keep small nodes restrained while larger nodes respond more dramatically to zoom and depth.',
-    { type: 'slider', min: 0, max: 100, step: 5, unit: '%', storageScale: 0.01 }),
   entry('rendering.nodeRadiusScale', 'appearance', 'rendering', 'nodeRadiusScale', 'Node size', 'Scale all node sizes.',
     { type: 'slider', min: 0.5, max: 4, step: 0.1 }),
   entry('rendering.edgeThicknessScale', 'appearance', 'rendering', 'edgeThicknessScale', 'Link thickness', 'Scale all link widths.',

@@ -9,6 +9,10 @@ targets. Initial card presentation is immediate, with no continuous animation lo
 
 Date: 2026-09-07
 
+View update: the [View and Scene Contract](graph-engine-view-scene-contract.md)
+supersedes the historical click, hover, Focus scene, and implicit framing rules below.
+Hover now previews the admitted ordinary object activation; only click commits it.
+
 Depends on:
 
 - [Graph Engine V1.6 Anima Presentation and Native Motion Contract](graph-engine-v1.6-anima-presentation-and-native-motion-contract.md)
@@ -92,9 +96,11 @@ the focus controller.
 
 Ordinary hover remains useful during focus without replacing focus. When the pointer
 rests on a visible direct neighbor of the focused node, Anima temporarily presents
-that neighbor as the inspected node and illuminates its direct neighborhood. Hovering
+the focused node, that neighbor, and their connecting link as the inspected path. The
+rest of the visible focus scope remains dim and its labels stay suppressed, so hover
+cannot reveal labels belonging to hidden second-hop nodes. Hovering
 a node outside the focused node's direct neighborhood leaves focused presentation
-unchanged. Removing the pointer restores the focused node's neighborhood.
+unchanged. Removing the pointer restores the session constellation and dim frontier.
 
 When a node is focused, wheel or pinch zoom is anchored to that focused node rather
 than the pointer position. The camera continues to track the focused node while its

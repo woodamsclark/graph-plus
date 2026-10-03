@@ -283,10 +283,14 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   private rebuildHitGrid(nodes: readonly ProjectedNode[]): void {
     this.hitGrid.clear();
     for (const node of nodes) {
-      const minX = Math.floor((node.point.x - node.radius) / this.hitCellSize);
-      const maxX = Math.floor((node.point.x + node.radius) / this.hitCellSize);
-      const minY = Math.floor((node.point.y - node.radius) / this.hitCellSize);
-      const maxY = Math.floor((node.point.y + node.radius) / this.hitCellSize);
+      if (node.node.opacity <= 0) continue;
+      // Picking only needs cells on the canvas, even when zoom makes a disc enormous.
+      const minX = Math.max(0, Math.floor((node.point.x - node.radius) / this.hitCellSize));
+      const maxX = Math.min(Math.floor(this.width / this.hitCellSize),
+        Math.floor((node.point.x + node.radius) / this.hitCellSize));
+      const minY = Math.max(0, Math.floor((node.point.y - node.radius) / this.hitCellSize));
+      const maxY = Math.min(Math.floor(this.height / this.hitCellSize),
+        Math.floor((node.point.y + node.radius) / this.hitCellSize));
       for (let x = minX; x <= maxX; x += 1) {
         for (let y = minY; y <= maxY; y += 1) {
           const key = `${x}:${y}`;

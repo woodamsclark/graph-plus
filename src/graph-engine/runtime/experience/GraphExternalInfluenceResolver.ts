@@ -9,6 +9,7 @@ export interface ResolvedGraphExternalInfluenceV1 {
   readonly result: GraphExternalInfluenceResultV1;
   readonly attentionNodeIds?: readonly string[];
   readonly focusedNodeId?: string;
+  readonly rememberedNodeIds?: readonly string[];
 }
 
 /** Resolve host-translated truth against neutral experience invariants without consulting Ego. */
@@ -19,6 +20,16 @@ export function resolveGraphExternalInfluenceV1(options: {
 }): ResolvedGraphExternalInfluenceV1 {
   if (options.influence.schemaVersion !== 1) {
     return { result: { status: 'rejected', reason: 'unsupported-external-influence-version' } };
+  }
+  if (options.influence.type === 'replace-remembered-subjects') {
+    const requestedNodeIds = [...new Set(options.influence.nodeIds)];
+    const rememberedNodeIds = requestedNodeIds
+      .filter((nodeId) => options.availableNodeIds.has(nodeId));
+    const status = rememberedNodeIds.length === requestedNodeIds.length ? 'accepted' : 'adjusted';
+    return {
+      result: { status, rememberedNodeIds },
+      rememberedNodeIds,
+    };
   }
   const requestedNodeIds = [...new Set(options.influence.nodeIds)];
   const knownNodeIds = requestedNodeIds.filter((nodeId) => options.availableNodeIds.has(nodeId));

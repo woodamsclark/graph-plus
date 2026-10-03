@@ -6,6 +6,9 @@ import {
   ANIMA_STATE_PRESENTATION_POLICIES_V1,
   GRAPH_INTERACTION_STATE_POLICIES_V1,
   GraphCameraController,
+  ReflexV1,
+  appendInteractionReceiptEventV1,
+  decideInteractionReceiptV1,
 } from '../../src/graph-engine/runtime/index.ts';
 import { ConsumerNodeActionRegistryV1 } from '../../src/graph-engine/service/index.ts';
 import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures.ts';
@@ -18,6 +21,10 @@ import {
 } from '../support/runtimeHarness.ts';
 
 test('interaction and Anima own independent state policy tables outside Ego', () => {
+  equal(GRAPH_INTERACTION_STATE_POLICIES_V1.overview.cameraTracking, 'none',
+    'Overview must have no tracked navigation subjects');
+  equal(GRAPH_INTERACTION_STATE_POLICIES_V1.overview.zoomAnchor, 'pointer',
+    'Overview zoom must use direct input location');
   equal(GRAPH_INTERACTION_STATE_POLICIES_V1.explore.wheel['3d'], 'rotate',
     'interaction policy should own gesture behavior');
   equal(GRAPH_INTERACTION_STATE_POLICIES_V1.focus.fitCenter, 'focused-node',
@@ -26,8 +33,59 @@ test('interaction and Anima own independent state policy tables outside Ego', ()
     'Anima should own graph-wide rendering');
   equal(ANIMA_STATE_PRESENTATION_POLICIES_V1.explore.highlightOverride?.contextRole, 'dimmed',
     'Anima should own Explore context dimming');
-  equal(ANIMA_STATE_PRESENTATION_POLICIES_V1.focus.highlightOverride?.contextRole, 'hidden',
-    'Anima should own Focus context hiding');
+  equal(ANIMA_STATE_PRESENTATION_POLICIES_V1.focus.highlightOverride?.contextRole, 'void',
+    'Anima should own the Focus context void');
+});
+
+test('interaction receipts are immutable evidence adjudicated by a pure matcher', () => {
+  const identity = { documentId: 'fixture', documentRevision: 3 };
+  const receipt = Object.freeze({
+    schemaVersion: 1 as const,
+    kind: 'example',
+    identity,
+    issuedAt: 100,
+    expiresAt: 340,
+    events: Object.freeze([Object.freeze({
+      phase: 'press',
+      timestamp: 90,
+      payload: Object.freeze({ subjectId: 'a' }),
+    })]),
+    payload: Object.freeze({ subjectId: 'a' }),
+  });
+  const matcher = (source: typeof receipt, candidate: { subjectId: string }) =>
+    source.payload.subjectId === candidate.subjectId;
+
+  equal(decideInteractionReceiptV1(receipt, {
+    identity, timestamp: 200, subjectId: 'a',
+  }, matcher).status, 'matched', 'a related interaction inside the window should match');
+  equal(decideInteractionReceiptV1(receipt, {
+    identity, timestamp: 200, subjectId: 'b',
+  }, matcher).status, 'unmatched', 'an unrelated interaction should not match');
+  equal(decideInteractionReceiptV1(receipt, {
+    identity, timestamp: 341, subjectId: 'a',
+  }, matcher).status, 'expired', 'a late interaction should expire the receipt');
+  equal(decideInteractionReceiptV1(receipt, {
+    identity: { ...identity, documentRevision: 4 }, timestamp: 200, subjectId: 'a',
+  }, matcher).status, 'expired', 'a new document revision should invalidate the receipt');
+  equal(decideInteractionReceiptV1(null, {
+    identity, timestamp: 200, subjectId: 'a',
+  }, (_source, _candidate) => true).status, 'empty', 'absence of history should remain explicit');
+
+  const extended = appendInteractionReceiptEventV1(receipt, {
+    phase: 'release', timestamp: 100, payload: { subjectId: 'a' },
+  });
+  equal(receipt.events.length, 1, 'extending evidence must not mutate the prior receipt');
+  deepEqual(extended.events.map((event) => [event.phase, event.timestamp]), [
+    ['press', 90], ['release', 100],
+  ], 'receipt evidence should retain ordered press and release timing');
+
+  const reflex = new ReflexV1<typeof receipt>();
+  reflex.remember(receipt);
+  equal(reflex.recognize({ identity, timestamp: 200, subjectId: 'a' }, matcher).status, 'matched',
+    'a Reflex should recognize later local stimulus from its retained receipt');
+  reflex.forget();
+  equal(reflex.recognize({ identity, timestamp: 200, subjectId: 'a' }, matcher).status, 'empty',
+    'a Reflex should forget its autonomic evidence without changing global memory');
 });
 
 test('R-INPUT-01 pans Overview, rotates Focus trackpad scroll, and radial-zooms Focus secondary drag', async () => {
@@ -39,7 +97,9 @@ test('R-INPUT-01 pans Overview, rotates Focus trackpad scroll, and radial-zooms 
     if (intent.type === 'viewport-changed') viewportIntents.push(intent);
   });
 
+  await session.setSelection(['b']);
   const initial = await session.exportViewState();
+  equal(initial.viewMode, 'overview', 'programmatic Attention should leave Overview explicitly active');
   wheel(value, canvas, { deltaX: 24, deltaY: 12 });
   value.platform.flushFrame();
   const panned = await session.exportViewState();
@@ -91,6 +151,30 @@ test('R-INPUT-01 pans Overview, rotates Focus trackpad scroll, and radial-zooms 
   await session.dispose();
 });
 
+test('Focus trackpad orbit stays centered on the focused node with a multi-node constellation', async () => {
+  const value = runtimeHarness({ profileId: 'three-dimensional' });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+
+  await session.setSelection(['a', 'b']);
+  await session.focusNode('a');
+  value.platform.flushFrame();
+  const before = await session.exportViewState();
+  assert(vectorDistance(before.camera.target, before.positions.a) < 1e-6,
+    'Focus should initially center the camera target on the focused node');
+
+  wheel(value, canvas, { deltaX: 24, deltaY: 12 });
+  value.platform.flushFrame();
+  const after = await session.exportViewState();
+  assert(vectorDistance(after.camera.target, after.positions.a) < 1e-6,
+    'Focus orbit should pivot around the focused node rather than the constellation centroid');
+  assert(!sameVector(after.camera.position, before.camera.position),
+    'Focus trackpad movement should still orbit the camera');
+  deepEqual(after.selectedNodeIds, ['a', 'b'], 'Focus orbit should preserve the constellation');
+  equal(after.focusedNodeId, 'a', 'Focus orbit should preserve the focused node');
+  await session.dispose();
+});
+
 test('physical Ctrl wheel preserves the cursor anchor even while Focus has a camera target', async () => {
   for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
     const value = runtimeHarness({ profileId });
@@ -120,6 +204,8 @@ test('desktop trackpad pinch carries bounded momentum and ordinary wheel input c
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
   await session.setSelection(['a']);
+  await session.setView('explore');
+  value.platform.flushFrame();
   const before = await session.exportViewState();
   const targetBefore = await nodePoint(session, 'a');
 
@@ -155,6 +241,8 @@ test('mobile pinch zooms around the existing camera target', async () => {
     const session = await value.create();
     const canvas = runtimeCanvas(value.container);
     await session.setSelection(['a']);
+    await session.setView('explore');
+    value.platform.flushFrame();
     const before = await session.exportViewState();
     const targetBefore = await nodePoint(session, 'a');
     pointer(value, canvas, 'pointerdown', 100, 100, { pointerId: 180, pointerType: 'touch' });
@@ -178,6 +266,158 @@ test('mobile pinch zooms around the existing camera target', async () => {
   }
 });
 
+test('Overview trackpad zoom and momentum follow the cursor with dormant Attention or remembered Awareness', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    for (const source of ['attention', 'memory'] as const) {
+      const value = runtimeHarness({ profileId });
+      const session = await value.create();
+      const canvas = runtimeCanvas(value.container);
+      if (source === 'attention') await session.setSelection(['a']);
+      else await session.applyExternalInfluence({ schemaVersion: 1, type: 'replace-remembered-subjects', nodeIds: ['a'] });
+      const before = await session.exportViewState();
+      equal(before.viewMode, 'overview', 'lighting a subject must leave Overview untracked');
+      const camera = new GraphCameraController(before.camera, profileId === 'two-dimensional' ? '2d' : '3d');
+      camera.setViewport(640, 360);
+      const cursor = { x: 260, y: 140 };
+      const world = camera.screenToWorld(cursor.x, cursor.y, camera.worldToScreen(before.camera.target).depth);
+      wheel(value, canvas, { ...cursor, deltaY: -1, ctrlKey: true });
+      value.platform.flushFrame();
+      const after = await session.exportViewState();
+      assert(!sameVector(after.camera.target, before.camera.target), 'Overview cursor zoom must translate framing');
+      const assertAnchor = async () => {
+        camera.setState((await session.exportViewState()).camera);
+        const projected = camera.worldToScreen(world);
+        assert(Math.abs(projected.x - cursor.x) < 1e-6 && Math.abs(projected.y - cursor.y) < 1e-6,
+          `${profileId} ${source} must not override the Overview cursor anchor`);
+      };
+      await assertAnchor();
+      value.platform.flushTimer();
+      value.platform.flushFrame();
+      await assertAnchor();
+      deepEqual((await session.exportViewState()).selectedNodeIds, before.selectedNodeIds,
+        'zoom must preserve dormant Attention');
+      await session.dispose();
+    }
+  }
+});
+
+test('Overview mobile pinch anchors at the touch midpoint without tracking lit subjects', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    const value = runtimeHarness({ profileId });
+    const session = await value.create();
+    const canvas = runtimeCanvas(value.container);
+    await session.setSelection(['a']);
+    const before = await session.exportViewState();
+    const camera = new GraphCameraController(before.camera, profileId === 'two-dimensional' ? '2d' : '3d');
+    camera.setViewport(640, 360);
+    const midpoint = { x: 150, y: 100 };
+    const world = camera.screenToWorld(midpoint.x, midpoint.y, camera.worldToScreen(before.camera.target).depth);
+    pointer(value, canvas, 'pointerdown', 100, 100, { pointerId: 780, pointerType: 'touch' });
+    pointer(value, canvas, 'pointerdown', 200, 100, { pointerId: 781, pointerType: 'touch' });
+    pointer(value, canvas, 'pointermove', 90, 100, { pointerId: 780, pointerType: 'touch' });
+    pointer(value, canvas, 'pointermove', 210, 100, { pointerId: 781, pointerType: 'touch' });
+    value.platform.flushFrame();
+    camera.setState((await session.exportViewState()).camera);
+    const projected = camera.worldToScreen(world);
+    assert(Math.abs(projected.x - midpoint.x) < 1e-6 && Math.abs(projected.y - midpoint.y) < 1e-6,
+      `${profileId} Overview pinch must keep its touch midpoint fixed`);
+    await session.dispose();
+  }
+});
+
+test('Overview rotation retains camera framing instead of orbiting remembered or attended subjects', async () => {
+  const value = runtimeHarness({ profileId: 'three-dimensional' });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  await session.setSelection(['a']);
+  const before = await session.exportViewState();
+  pointer(value, canvas, 'pointerdown', -100, -100, { pointerId: 782, button: 2 });
+  pointer(value, canvas, 'pointermove', -60, -75, { pointerId: 782, button: 2 });
+  value.platform.flushFrame();
+  const after = await session.exportViewState();
+  deepEqual(after.camera.target, before.camera.target, 'Overview rotation must retain the free framing point');
+  assert(!sameVector(after.camera.position, before.camera.position), 'Overview must still allow rotation');
+  await session.dispose();
+});
+
+test('Overview node dragging never translates the camera even with dormant Attention', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    const value = runtimeHarness({ profileId });
+    const session = await value.create();
+    const canvas = runtimeCanvas(value.container);
+    await session.setSelection(['a', 'b']);
+    const before = await session.exportViewState();
+    const point = await nodePoint(session, 'a');
+    pointer(value, canvas, 'pointerdown', point.x, point.y, { pointerId: 783 });
+    pointer(value, canvas, 'pointermove', point.x + 50, point.y + 20, { pointerId: 783 });
+    value.platform.flushFrame();
+    const after = await session.exportViewState();
+    assert(!sameVector(after.positions.a, before.positions.a), 'the attended node must remain draggable');
+    deepEqual(after.camera, before.camera, 'Overview node motion must not pull the camera');
+    await session.dispose();
+  }
+});
+
+test('View drag eligibility allows every visible node without changing constellation membership', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    for (const pointerType of ['mouse', 'touch'] as const) {
+      for (const viewMode of ['overview', 'explore', 'focus'] as const) {
+        const value = runtimeHarness({ profileId });
+        const session = await value.create();
+        const canvas = runtimeCanvas(value.container);
+        await session.setSelection(['a']);
+        await session.setView(viewMode === 'focus' ? 'explore' : viewMode);
+        if (viewMode === 'focus') await session.focusNode('a');
+        const point = await nodePoint(session, 'b');
+        // Mouse hover can prospectively highlight a dim candidate, but cannot grant dragging.
+        if (pointerType === 'mouse') {
+          pointer(value, canvas, 'pointermove', point.x, point.y, { pointerId: 810, pointerType });
+          value.platform.flushFrame();
+        }
+        const before = await session.exportViewState();
+        pointer(value, canvas, 'pointerdown', point.x, point.y, { pointerId: 811, pointerType });
+        pointer(value, canvas, 'pointermove', point.x + 35, point.y + 20, { pointerId: 811, pointerType });
+        pointer(value, canvas, 'pointerup', point.x + 35, point.y + 20, { pointerId: 811, pointerType });
+        value.platform.flushFrame();
+        const after = await session.exportViewState();
+        assert(!sameVector(after.positions.b, before.positions.b), 'visible nodes remain draggable regardless of membership or dimming');
+        deepEqual(after.camera, before.camera, 'dragging an unattended node does not move the tracked camera');
+        deepEqual(after.selectedNodeIds, ['a'], 'dragging never admits the target');
+        equal(after.focusedNodeId, before.focusedNodeId, 'navigation never descends or changes Focus');
+        equal(session.getActiveView().id, viewMode, 'drag eligibility uses the committed View');
+        await session.dispose();
+      }
+    }
+  }
+});
+
+test('layout motion follows Awareness only in Constellation and never in Overview', async () => {
+  for (const viewMode of ['overview', 'explore'] as const) {
+    const value = runtimeHarness({ profileId: 'three-dimensional' });
+    value.profiles.setUserOverrides('synthetic-consumer', 'three-dimensional', {
+      modules: { 'force-layout': { enabled: true, settings: {
+        repulsionStrength: 0, springStrength: 0, centeringStrength: 0.5,
+        collisionRadius: 0, velocityDecay: 0,
+      } } },
+    });
+    const session = await value.create();
+    await session.setSelection(['a']);
+    const selected = await session.exportViewState();
+    await session.restoreViewState({ ...selected, viewMode });
+    const before = await session.exportViewState();
+    value.platform.flushFrame();
+    const after = await session.exportViewState();
+    assert(!sameVector(after.positions.a, before.positions.a), 'layout must actually move the aware subject');
+    if (viewMode === 'overview') deepEqual(after.camera, before.camera, 'Overview must not follow force layout');
+    else {
+      const delta = subtractVector(after.positions.a, before.positions.a);
+      deepEqual(after.camera.target, addVector(before.camera.target, delta), 'Constellation must follow Awareness motion');
+      assert(vectorDistance(cameraOffset(after.camera), cameraOffset(before.camera)) < 1e-9, 'following must preserve framing');
+    }
+    await session.dispose();
+  }
+});
+
 test('explicit camera reset preserves focus and frames its immediate neighborhood', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
@@ -196,7 +436,7 @@ test('explicit camera reset preserves focus and frames its immediate neighborhoo
   await session.dispose();
 });
 
-test('Focus framing follows the focused neighborhood while force layout settles', async () => {
+test('Focus follows its subject while force layout settles without refitting', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   value.profiles.setUserOverrides('synthetic-consumer', 'three-dimensional', {
     modules: {
@@ -227,8 +467,8 @@ test('Focus framing follows the focused neighborhood while force layout settles'
   assert(sameDirection(cameraOffset(after.camera), cameraOffset(before.camera)),
     'settling-aware framing should preserve camera orientation');
   assert(vectorDistance(after.camera.position, after.camera.target)
-    !== vectorDistance(before.camera.position, before.camera.target),
-  'settling-aware framing may change distance to keep the moving neighborhood visible');
+    === vectorDistance(before.camera.position, before.camera.target),
+  'subject motion must preserve perspective distance rather than refit neighbors');
   equal(after.camera.zoom, before.camera.zoom, 'perspective settling should retain focal zoom');
 
   wheel(value, canvas, { deltaY: 20 });
@@ -239,8 +479,8 @@ test('Focus framing follows the focused neighborhood while force layout settles'
   const later = await session.exportViewState();
   assert(!sameVector(later.positions.a, userControlled.positions.a),
     'the fixture should continue settling after direct camera input');
-  deepEqual(cameraOffset(later.camera), cameraOffset(userControlled.camera),
-    'direct camera input should cancel automatic refitting while focused-node translation continues');
+  assert(vectorDistance(cameraOffset(later.camera), cameraOffset(userControlled.camera)) < 1e-9,
+    'focused-node translation should preserve the user camera offset without refitting');
   await session.dispose();
 });
 
@@ -311,34 +551,49 @@ test('background activation exits Focus to Explore without moving the camera', a
   await session.dispose();
 });
 
-test('background activation exits a constellation without moving the camera', async () => {
+test('background toggles Overview and Constellation while Escape stops at Overview', async () => {
   const value = runtimeHarness();
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
-  const intents: GraphIntentV1[] = [];
-  session.onIntent((intent) => intents.push(intent));
-
   await session.setSelection(['a', 'b']);
-  const exploreCamera = (await session.exportViewState()).camera;
+  await session.focusNode('a');
+  const before = await session.exportViewState();
   click(value, canvas, { x: -100, y: -100 }, { pointerId: 504 });
   value.platform.flushFrame();
-  const overview = await session.exportViewState();
-  deepEqual(overview.selectedNodeIds, [], 'background activation should clear the constellation');
-  deepEqual(overview.camera, exploreCamera, 'Explore-to-Overview must preserve camera framing');
-  equal(intents.filter((intent) => intent.type === 'viewport-changed').length, 0,
-    'exiting a constellation must emit no camera action');
-
-  await session.setSelection(['a']);
-  await session.focusNode('a');
-  const focusCamera = (await session.exportViewState()).camera;
-  click(value, canvas, { x: -1_000, y: -1_000 }, { pointerId: 505 });
+  equal(session.getActiveView().id, 'explore', 'background should release singular Focus');
+  key(value, canvas, 'Escape');
   value.platform.flushFrame();
-  const clearedFocus = await session.exportViewState();
-  deepEqual(clearedFocus.selectedNodeIds, [], 'background activation should clear a one-node Focus constellation');
-  equal(clearedFocus.focusedNodeId, undefined, 'background activation should clear Focus');
-  deepEqual(clearedFocus.camera, focusCamera, 'Focus-to-Overview must preserve camera framing');
-  equal(intents.filter((intent) => intent.type === 'viewport-changed').length, 0,
-    'clearing a focused constellation must emit no camera action');
+  equal(session.getActiveView().id, 'overview', 'Escape should go up one tier');
+  click(value, canvas, { x: -100, y: -100 }, { pointerId: 506 });
+  value.platform.flushFrame();
+  const after = await session.exportViewState();
+  equal(after.viewMode, 'explore', 'background at Overview returns to the retained constellation');
+  deepEqual(after.selectedNodeIds, ['a', 'b'], 'Back must retain the composition');
+  deepEqual(after.camera, before.camera, 'all Back operations preserve framing');
+  key(value, canvas, 'Escape');
+  value.platform.flushFrame();
+  key(value, canvas, 'Escape');
+  value.platform.flushFrame();
+  equal(session.getActiveView().id, 'overview', 'Escape remains at the top instead of toggling');
+  await session.dispose();
+});
+
+test('Overview background enters an empty Constellation without selecting remembered subjects', async () => {
+  const value = runtimeHarness();
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  await session.applyExternalInfluence({ schemaVersion: 1, type: 'replace-remembered-subjects', nodeIds: ['a', 'b'] });
+  const before = await session.exportViewState();
+  click(value, canvas, { x: -100, y: -100 }, { pointerId: 507 });
+  value.platform.flushFrame();
+  const after = await session.exportViewState();
+  equal(session.getActiveView().id, 'explore', 'background enters the build View even without user membership');
+  deepEqual(after.selectedNodeIds, [], 'Memory never becomes user membership through background activation');
+  deepEqual(after.camera, before.camera, 'the View toggle preserves framing');
+  value.platform.advanceTime(400);
+  click(value, canvas, { x: -100, y: -100 }, { pointerId: 508 });
+  value.platform.flushFrame();
+  equal(session.getActiveView().id, 'overview', 'a second ordinary background click returns to Overview');
   await session.dispose();
 });
 
@@ -373,12 +628,16 @@ test('R-INPUT-03, R-INPUT-04, and R-INPUT-08 use selection-state consumer activa
   equal(intents.filter((intent) => intent.type === 'focus-changed').length, 0,
     'an initial one-node selection should not enter Focus');
   deepEqual((await session.exportViewState()).selectedNodeIds, ['a'], 'single click should select its neutral node ID');
+  equal((await session.exportViewState()).viewMode, 'explore',
+    'single click selection should invoke Constellation');
   equal((await session.exportViewState()).focusedNodeId, undefined,
-    'the initial selected node should create a constellation');
+    'the initial selected node should not enter Focus');
 
   value.platform.advanceTime(5_000);
   click(value, canvas, await nodePoint(session, 'a'), { pointerId: 2 });
   value.platform.flushFrame();
+  deepEqual((await session.exportViewState()).selectedNodeIds, ['a'],
+    'the first eager click of a selected-node double click should retain selection');
   click(value, canvas, await nodePoint(session, 'a'), { pointerId: 3 });
   value.platform.flushFrame();
   equal(actionRuns, 1, 'a node double click should run the primary action');
@@ -408,6 +667,171 @@ test('R-INPUT-03, R-INPUT-04, and R-INPUT-08 use selection-state consumer activa
   await session.dispose();
   actions.dispose();
 
+});
+
+test('mobile node double-tap reconciles an eager first tap and activates once', async () => {
+  let actionRuns = 0;
+  const actions = new ConsumerNodeActionRegistryV1();
+  actions.register('synthetic-consumer', {}, [{
+    id: 'open-node',
+    label: 'Open node',
+    run: () => { actionRuns += 1; },
+  }]);
+  const base = runtimeRegistration();
+  const value = runtimeHarness({
+    registration: {
+      ...base,
+      profiles: base.profiles.map((profile) => ({
+        ...profile,
+        interaction: { activationActionIds: ['open-node'] },
+      })),
+    },
+    nodeActions: actions.runtimeFor('synthetic-consumer'),
+  });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  const intents: GraphIntentV1[] = [];
+  session.onIntent((intent) => intents.push(intent));
+  const point = await nodePoint(session, 'a');
+
+  click(value, canvas, point, { pointerId: 101, pointerType: 'touch' });
+  value.platform.flushFrame();
+  deepEqual((await session.exportViewState()).selectedNodeIds, ['a'],
+    'the first mobile tap should select immediately');
+  equal(actionRuns, 0, 'the first mobile tap should not activate the node');
+
+  click(value, canvas, point, { pointerId: 102, pointerType: 'touch' });
+  value.platform.flushFrame();
+  deepEqual((await session.exportViewState()).selectedNodeIds, ['a'],
+    'double-tap activation should retain the eager first tap selection');
+  equal(actionRuns, 1, 'the matching second mobile tap should activate exactly once');
+  equal(intents.filter((intent) => intent.type === 'selection-changed').length, 1,
+    'mobile double-tap from an unselected node should need only the eager selection change');
+  equal(intents.filter((intent) => intent.type === 'node-activated').length, 1,
+    'mobile double-tap should emit one activation intent');
+
+  await session.dispose();
+  actions.dispose();
+});
+
+test('selected Focus double click preserves its eager hop state before activation', async () => {
+  let actionRuns = 0;
+  const actions = new ConsumerNodeActionRegistryV1();
+  actions.register('synthetic-consumer', {}, [{
+    id: 'open-node',
+    label: 'Open node',
+    run: () => { actionRuns += 1; },
+  }]);
+  const base = runtimeRegistration();
+  const value = runtimeHarness({
+    registration: {
+      ...base,
+      profiles: base.profiles.map((profile) => ({
+        ...profile,
+        interaction: { activationActionIds: ['open-node'] },
+      })),
+    },
+    nodeActions: actions.runtimeFor('synthetic-consumer'),
+  });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  await session.setSelection(['a']);
+  await session.focusNode('a');
+  const before = await session.exportViewState();
+  const point = await nodePoint(session, 'a');
+
+  click(value, canvas, point, { pointerId: 111 });
+  value.platform.flushFrame();
+  const eager = await session.exportViewState();
+  deepEqual(eager.selectedNodeIds, ['a'], 'the eager first click should retain the focused subject');
+  equal(eager.focusedNodeId, 'a', 'the eager first click should remain in Focus');
+  deepEqual(eager.camera, before.camera, 'clicking the current Focus subject should preserve framing');
+
+  pointer(value, canvas, 'pointerdown', point.x, point.y, { pointerId: 112 });
+  value.platform.flushFrame();
+  const pressed = await session.exportViewState();
+  deepEqual(pressed.selectedNodeIds, ['a'], 'the matching second press should restore the original selection');
+  equal(pressed.focusedNodeId, 'a', 'the matching second press should restore the original Focus subject');
+  deepEqual(pressed.camera, before.camera, 'press-time receipt reconciliation should not add camera behavior');
+  equal(actionRuns, 0, 'press-time reconciliation should not activate before stationary release');
+
+  pointer(value, canvas, 'pointerup', point.x, point.y, { pointerId: 112 });
+  value.platform.flushFrame();
+  const reconciled = await session.exportViewState();
+  deepEqual(reconciled.selectedNodeIds, ['a'], 'stationary release should retain the reconciled selection');
+  equal(reconciled.focusedNodeId, 'a', 'stationary release should retain the reconciled Focus subject');
+  deepEqual(reconciled.camera, before.camera, 'stationary release should preserve camera framing');
+  equal(actionRuns, 1, 'the reconciled second release should activate exactly once');
+
+  await session.dispose();
+  actions.dispose();
+});
+
+test('primary long click and press enter Focus without activating the node', async () => {
+  for (const pointerType of ['mouse', 'touch'] as const) {
+    let actionRuns = 0;
+    const actions = new ConsumerNodeActionRegistryV1();
+    actions.register('synthetic-consumer', {}, [{
+      id: 'open-node',
+      label: 'Open node',
+      run: () => { actionRuns += 1; },
+    }]);
+    const base = runtimeRegistration();
+    const value = runtimeHarness({
+      registration: {
+        ...base,
+        profiles: base.profiles.map((profile) => ({
+          ...profile,
+          interaction: { activationActionIds: ['open-node'] },
+        })),
+      },
+      nodeActions: actions.runtimeFor('synthetic-consumer'),
+    });
+    const session = await value.create();
+    const canvas = runtimeCanvas(value.container);
+    const point = await nodePoint(session, 'a');
+    pointer(value, canvas, 'pointerdown', point.x, point.y, { pointerId: 130, pointerType });
+    value.platform.flushFrame();
+    value.platform.advanceTime(450);
+    value.platform.flushTimer();
+    value.platform.flushFrame();
+    const held = await session.exportViewState();
+    equal(held.focusedNodeId, 'a', `${pointerType} hold should enter Focus`);
+    deepEqual(held.selectedNodeIds, ['a'], `${pointerType} hold should retain Attention`);
+    equal(actionRuns, 0, `${pointerType} hold must not activate the node`);
+    pointer(value, canvas, 'pointerup', point.x, point.y, { pointerId: 130, pointerType });
+    value.platform.flushFrame();
+    equal(actionRuns, 0, `${pointerType} release after the hold must remain non-activating`);
+    await session.dispose();
+    actions.dispose();
+  }
+});
+
+test('mobile background double tap restores its eager receipt state before Center + Fit', async () => {
+  const value = runtimeHarness({ profileId: 'three-dimensional' });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  await session.setSelection(['a', 'b']);
+  const selected = await session.exportViewState();
+  await session.restoreViewState({ ...selected, viewMode: 'explore' });
+  const before = await session.exportViewState();
+
+  click(value, canvas, { x: -100, y: -100 }, { pointerId: 121, pointerType: 'touch' });
+  value.platform.flushFrame();
+  const eager = await session.exportViewState();
+  deepEqual(eager.selectedNodeIds, ['a', 'b'],
+    'the eager first background tap must retain selection');
+  equal(eager.viewMode, 'overview', 'the eager first background tap should exit to Overview');
+
+  click(value, canvas, { x: -100, y: -100 }, { pointerId: 122, pointerType: 'touch' });
+  value.platform.flushFrame();
+  const reconciled = await session.exportViewState();
+  deepEqual(reconciled.selectedNodeIds, ['a', 'b'],
+    'the matching background receipt should restore the pre-tap selection');
+  deepEqual(reconciled.camera.target, averageVector([before.positions.a, before.positions.b]),
+    'Center + Fit should run against the restored selection');
+
+  await session.dispose();
 });
 
 test('tag nodes use ordinary single-node selection without selecting region members', async () => {
@@ -477,6 +901,7 @@ test('tag nodes use ordinary single-node selection without selecting region memb
   deepEqual(actionContext, {
     nodeId: 'tag',
     selectedNodeIds: ['tag'],
+    focusedNodeId: 'tag',
   }, 'node double click should invoke the consumer action with only the selected tag');
   await session.dispose();
   actions.dispose();
@@ -496,65 +921,136 @@ test('tag nodes use ordinary single-node selection without selecting region memb
   await projectionSession.dispose();
 });
 
-test('node clicks toggle constellation membership without entering Focus or reframing', async () => {
-  const value = runtimeHarness({
-    document: graphDocument({
-      nodes: [
-        graphNode('a', { positionHint: { x: -40, y: 0, z: 0 } }),
-        graphNode('b', { positionHint: { x: 40, y: 0, z: 0 } }),
-        graphNode('c', { positionHint: { x: 900, y: 0, z: 0 } }),
-        graphNode('d', { positionHint: { x: 1_000, y: 0, z: 0 } }),
-      ],
-      edges: [
-        graphEdge('a-b', 'a', 'b'),
-        graphEdge('b-c', 'b', 'c'),
-        graphEdge('c-d', 'c', 'd'),
-      ],
-    }),
-  });
+test('Constellation admits dim candidates without focusing, then presents a member while retaining camera scale', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    const value = runtimeHarness({ profileId, document: graphDocument({
+      nodes: ['a', 'b', 'c', 'd'].map((id) => graphNode(id)),
+      edges: [graphEdge('ab', 'a', 'b'), graphEdge('bc', 'b', 'c'), graphEdge('cd', 'c', 'd')],
+    }) });
+    const session = await value.create();
+    const canvas = runtimeCanvas(value.container);
+    click(value, canvas, await nodePoint(session, 'a'), { pointerId: 301 });
+    value.platform.flushFrame();
+    const before = await session.exportViewState();
+    equal(before.viewMode, 'explore', 'first click chooses a constellation');
+    click(value, canvas, await nodePoint(session, 'c'), { pointerId: 302 });
+    value.platform.flushFrame();
+    const admitted = await session.exportViewState();
+    equal(admitted.viewMode, 'explore', 'a dim candidate stays in Constellation');
+    equal(admitted.focusedNodeId, undefined, 'admission does not assign Focus');
+    deepEqual(admitted.camera, before.camera, 'admission preserves the camera');
+    deepEqual(admitted.selectedNodeIds, ['a', 'c', 'b'], 'admission selects the candidate and its connecting path');
+    value.platform.advanceTime(400);
+    click(value, canvas, await nodePoint(session, 'c'), { pointerId: 305 });
+    value.platform.flushFrame();
+    for (let i = 0; i < 12; i += 1) value.platform.flushTimer();
+    const focused = await session.exportViewState();
+    deepEqual(focused.selectedNodeIds, ['a', 'c', 'b'], 'member presentation retains the previously admitted path');
+    equal(focused.focusedNodeId, 'c', 'Constellation click presents its subject');
+    assert(sameVector(focused.camera.target, focused.positions.c), 'Focus recenters the subject');
+    equal(focused.camera.zoom, before.camera.zoom, 'Focus preserves zoom');
+    assert(vectorDistance(cameraOffset(focused.camera), cameraOffset(before.camera)) < 1e-9, 'Focus preserves angle and distance');
+    click(value, canvas, await nodePoint(session, 'a'), { pointerId: 303, ctrlKey: true });
+    value.platform.flushFrame();
+    deepEqual((await session.exportViewState()).selectedNodeIds, ['c', 'b'], 'Ctrl-click removes only that member without descent');
+    equal(session.getActiveView().id, 'focus', 'removing a different member retains Focus');
+    value.platform.advanceTime(400);
+    click(value, canvas, await nodePoint(session, 'b'), { pointerId: 306, ctrlKey: true });
+    value.platform.flushFrame();
+    deepEqual((await session.exportViewState()).selectedNodeIds, ['c'], 'a route member can be removed independently');
+    value.platform.advanceTime(400);
+    click(value, canvas, await nodePoint(session, 'c'), { pointerId: 304, ctrlKey: true });
+    value.platform.flushFrame();
+    equal(session.getActiveView().id, 'overview', 'removing the last member returns to Overview');
+    await session.dispose();
+  }
+});
+
+test('Constellation retains the Vision focal point after returning from Focus', async () => {
+  const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
-  const wideView = await session.exportViewState();
-  await session.restoreViewState({
-    ...wideView,
-    camera: { ...wideView.camera, zoom: 0.1 },
-  });
-  const beforeTags = await session.exportViewState();
-
-  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 301 });
+  await session.setSelection(['a', 'b']);
+  await session.focusNode('a');
+  const focused = await session.exportViewState();
+  click(value, canvas, { x: -100, y: -100 }, { pointerId: 306 });
   value.platform.flushFrame();
-  equal(canvas.ownerDocument.activeElement, canvas,
-    'pointer interaction should retain graph keyboard-shortcut scope');
-  const initialTag = await session.exportViewState();
-  deepEqual(initialTag.selectedNodeIds, ['a'], 'the first click should create a one-node constellation');
-  equal(initialTag.focusedNodeId, undefined, 'the first click should enter Explore instead of Focus');
-  deepEqual(initialTag.camera, beforeTags.camera, 'the first constellation click should preserve camera framing');
-
-  click(value, canvas, await nodePoint(session, 'c'), { pointerId: 302 });
+  const before = await session.exportViewState();
+  deepEqual(before.camera, focused.camera, 'Focus exit preserves the complete camera pose');
+  pointer(value, canvas, 'pointerdown', -100, -100, { pointerId: 308, button: 2 });
+  pointer(value, canvas, 'pointermove', -45, -70, { pointerId: 308, button: 2 });
   value.platform.flushFrame();
-  const added = await session.exportViewState();
-  deepEqual(new Set(added.selectedNodeIds), new Set(['a', 'b', 'c']),
-    'clicking a distant node should add the nearest path back to the constellation');
-  equal(added.focusedNodeId, undefined, 'adding constellation members should not create node-specific focus');
-  deepEqual(added.camera, initialTag.camera, 'adding later constellation members should preserve camera framing');
-
-  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 303 });
-  value.platform.flushFrame();
-  const removed = await session.exportViewState();
-  deepEqual(new Set(removed.selectedNodeIds), new Set(['b', 'c']),
-    'clicking a constellation member should remove only it and retain selected bridge nodes');
-  deepEqual(removed.camera, added.camera, 'removing a constellation member should preserve camera framing');
-
-  await session.focusNode('c');
-  const explicitFocus = await session.exportViewState();
-  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 304 });
-  value.platform.flushFrame();
-  const exitedFocus = await session.exportViewState();
-  deepEqual(new Set(exitedFocus.selectedNodeIds), new Set(['a', 'b', 'c']),
-    'clicking from explicit Focus should add the clicked node and nearest path to the constellation');
-  equal(exitedFocus.focusedNodeId, undefined, 'a node click should exit explicit Focus');
-  deepEqual(exitedFocus.camera, explicitFocus.camera, 'the Focus-to-Explore click should preserve camera framing');
+  const after = await session.exportViewState();
+  assert(vectorDistance(after.camera.target, before.camera.target) < 1e-9,
+    'the next orbit retains the last focal point instead of switching to the constellation centroid');
+  assert(!sameVector(after.camera.position, before.camera.position), 'orbit actually moves the camera');
   await session.dispose();
+});
+
+test('Every Focus exit retains the focal point through subsequent Constellation zoom', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    for (const exit of ['background', 'escape', 'set-view', 'remove-subject', 'filter'] as const) {
+      const value = runtimeHarness({ profileId });
+      const session = await value.create();
+      const canvas = runtimeCanvas(value.container);
+      await session.setSelection(['a', 'b']);
+      await session.focusNode('b');
+      const focused = await session.exportViewState();
+      if (exit === 'background') {
+        click(value, canvas, { x: -100, y: -100 }, { pointerId: 330 });
+        value.platform.flushFrame();
+      } else if (exit === 'escape') {
+        canvas.dispatchEvent(new value.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }) as unknown as Event);
+        value.platform.flushFrame();
+      } else if (exit === 'set-view') await session.setView('explore');
+      else if (exit === 'remove-subject') await session.setSelection(['a']);
+      else await session.applyFilter({ schemaVersion: 1, scope: 'render', node: { op: 'has-token', token: 'keep' } });
+      equal(session.getActiveView().id, 'explore', `${exit} releases Focus`);
+      deepEqual((await session.exportViewState()).camera, focused.camera, `${exit} retains the full camera pose`);
+      wheel(value, canvas, { deltaY: -12, ctrlKey: true });
+      value.platform.flushFrame();
+      const zoomed = await session.exportViewState();
+      assert(vectorDistance(zoomed.camera.target, focused.camera.target) < 1e-9,
+        `${profileId} ${exit} zoom retains the focal point instead of redirecting to membership`);
+      await session.focusNode('a');
+      const refocused = await session.exportViewState();
+      assert(vectorDistance(refocused.camera.target, refocused.positions.a) < 1e-9,
+        'an explicit new Focus establishes its own focal subject');
+      await session.dispose();
+    }
+  }
+});
+
+test('Retained focal intent survives View toggles and node dragging until explicit Center + Fit', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    const value = runtimeHarness({ profileId });
+    const session = await value.create();
+    const canvas = runtimeCanvas(value.container);
+    await session.setSelection(['a', 'b']);
+    await session.focusNode('b');
+    await session.setView('explore');
+    await session.setView('overview');
+    await session.setView('explore');
+    const before = await session.exportViewState();
+    const point = await nodePoint(session, 'a');
+    pointer(value, canvas, 'pointermove', point.x, point.y, { pointerId: 331 });
+    value.platform.flushFrame();
+    pointer(value, canvas, 'pointerdown', point.x, point.y, { pointerId: 331 });
+    pointer(value, canvas, 'pointermove', point.x + 40, point.y + 20, { pointerId: 331 });
+    value.platform.flushFrame();
+    pointer(value, canvas, 'pointerup', point.x + 40, point.y + 20, { pointerId: 331 });
+    value.platform.flushFrame();
+    const dragged = await session.exportViewState();
+    assert(!sameVector(dragged.positions.a, before.positions.a), 'the node actually moves');
+    deepEqual(dragged.camera, before.camera, 'constellation movement cannot displace a retained focal point');
+    pointer(value, canvas, 'pointerdown', -100, -100, { pointerId: 332, button: 2 });
+    pointer(value, canvas, 'pointerup', -100, -100, { pointerId: 332, button: 2 });
+    value.platform.flushFrame();
+    const fit = await session.exportViewState();
+    assert(vectorDistance(fit.camera.target, midpoint(fit.positions.a, fit.positions.b)) < 1e-9,
+      'explicit Center + Fit chooses the current constellation centroid');
+    await session.dispose();
+  }
 });
 
 test('a one-node constellation keeps all graph context rendered and dimmed', async () => {
@@ -593,24 +1089,22 @@ test('a one-node constellation keeps all graph context rendered and dimmed', asy
   equal(value.styleAssignments.includes('globalAlpha:0.6'), true,
     'Constellation should render unrelated links as visible dimmed context');
 
-  modifier(value, 'keydown', true);
+  click(value, canvas, await nodePoint(session, 'b'), { pointerId: 311 });
   value.platform.flushFrame();
+  deepEqual((await session.exportViewState()).selectedNodeIds, ['a', 'b'],
+    'ordinary clicking a dim node should highlight it');
+
   const beforeCtrlClick = await session.exportViewState();
   click(value, canvas, await nodePoint(session, 'b'), { pointerId: 312, ctrlKey: true });
   value.platform.flushFrame();
-  const held = await session.exportViewState();
-  deepEqual(held.selectedNodeIds, ['a', 'b'], 'Ctrl-click should use the same constellation toggle');
-  equal(held.focusedNodeId, undefined, 'Ctrl-click should remain in Explore');
-  deepEqual(held.camera, beforeCtrlClick.camera, 'Ctrl-click should preserve camera framing');
-
-  modifier(value, 'keyup', false);
-  value.platform.flushFrame();
-  const released = await session.exportViewState();
-  deepEqual(released, held, 'Ctrl release should not mutate selection, Focus, or camera');
+  const deselected = await session.exportViewState();
+  deepEqual(deselected.selectedNodeIds, ['a'], 'Ctrl-click should deselect the clicked node');
+  equal(deselected.focusedNodeId, undefined, 'Ctrl-click should remain in Explore');
+  deepEqual(deselected.camera, beforeCtrlClick.camera, 'Ctrl-click should preserve camera framing');
   await session.dispose();
 });
 
-test('Space suspends selection dimming while Ctrl and Option preserve constellation state', async () => {
+test('Space, Ctrl and Option preserve strict constellation presentation', async () => {
   const base = runtimeRegistration();
   const registration = {
     ...base,
@@ -626,6 +1120,8 @@ test('Space suspends selection dimming while Ctrl and Option preserve constellat
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
   await session.setSelection(['b']);
+  await session.setView('explore');
+  value.platform.flushFrame();
   const explore = await session.exportViewState();
 
   value.styleAssignments.length = 0;
@@ -653,8 +1149,8 @@ test('Space suspends selection dimming while Ctrl and Option preserve constellat
   value.platform.flushFrame();
   const undimmed = await session.exportViewState();
   deepEqual(undimmed, explore, 'Space should change presentation without mutating Explore state');
-  equal(value.styleAssignments.includes('globalAlpha:0.24'), false,
-    'the undimmed presentation should remove selection background opacity');
+  equal(value.styleAssignments.includes('globalAlpha:0.24'), true,
+    'Space must preserve the View scene dimming');
 
   value.styleAssignments.length = 0;
   keyRelease(value, ' ');
@@ -807,6 +1303,8 @@ test('R-INPUT-06 updates view position and emits one revision-bearing drag inten
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
   await session.setSelection(['a', 'b']);
+  await session.setView('explore');
+  value.platform.flushFrame();
   const before = await session.exportViewState();
   const point = await nodePoint(session, 'a');
   const intents: GraphIntentV1[] = [];
@@ -959,13 +1457,14 @@ test('desktop primary drag pans Overview and Explore while Explore secondary dra
   const overview = runtimeHarness({ profileId: 'three-dimensional' });
   const overviewSession = await overview.create();
   const overviewCanvas = runtimeCanvas(overview.container);
+  await overviewSession.setSelection(['a']);
   const overviewBefore = await overviewSession.exportViewState();
   pointer(overview, overviewCanvas, 'pointerdown', -100, -100, { pointerId: 320 });
   pointer(overview, overviewCanvas, 'pointermove', -60, -75, { pointerId: 320 });
   overview.platform.flushFrame();
   const overviewAfter = await overviewSession.exportViewState();
   assert(!sameVector(overviewAfter.camera.target, overviewBefore.camera.target),
-    'unselected Overview navigation should pan the camera target');
+    'Overview primary drag should pan even while Attention is non-empty');
   deepEqual(cameraOffset(overviewAfter.camera), cameraOffset(overviewBefore.camera),
     'Overview pan should preserve the camera orientation');
   await overviewSession.dispose();
@@ -974,6 +1473,8 @@ test('desktop primary drag pans Overview and Explore while Explore secondary dra
   const exploreSession = await explore.create();
   const exploreCanvas = runtimeCanvas(explore.container);
   await exploreSession.setSelection(['a', 'b']);
+  await exploreSession.setView('explore');
+  explore.platform.flushFrame();
   const exploreBefore = await exploreSession.exportViewState();
   pointer(explore, exploreCanvas, 'pointerdown', -100, -100, { pointerId: 321 });
   pointer(explore, exploreCanvas, 'pointermove', -60, -75, { pointerId: 321 });
@@ -1024,7 +1525,7 @@ test('desktop primary drag pans Overview and Explore while Explore secondary dra
   await suspendedSession.dispose();
 });
 
-test('R-INPUT-17 mobile one-finger background drag pans 3D Overview and Explore but rotates Focus', async () => {
+test('R-INPUT-17 mobile one-finger background drag pans Overview but orbits selected 3D states', async () => {
   const unfocused = runtimeHarness({ profileId: 'three-dimensional' });
   const unfocusedSession = await unfocused.create();
   const unfocusedCanvas = runtimeCanvas(unfocused.container);
@@ -1045,17 +1546,35 @@ test('R-INPUT-17 mobile one-finger background drag pans 3D Overview and Explore 
   await exploreSession.setSelection(['a', 'b']);
   await exploreSession.focusNode(null);
   const exploreBefore = await exploreSession.exportViewState();
+  const exploreCentroidBefore = projectedSelectionCentroid(exploreBefore, ['a', 'b']);
   pointer(explore, exploreCanvas, 'pointerdown', -100, -100, { pointerId: 34, pointerType: 'touch' });
   pointer(explore, exploreCanvas, 'pointermove', -40, -70, { pointerId: 34, pointerType: 'touch' });
   explore.platform.flushFrame();
   const exploreAfter = await exploreSession.exportViewState();
-  assert(!sameVector(exploreAfter.camera.target, exploreBefore.camera.target),
-    'an Explore one-finger background drag should pan 3D');
-  assert(sameDirection(cameraOffset(exploreAfter.camera), cameraOffset(exploreBefore.camera)),
-    'an Explore one-finger pan should retain camera orientation');
-  deepEqual(exploreAfter.selectedNodeIds, ['a', 'b'], 'Explore panning should retain the constellation');
-  equal(exploreAfter.focusedNodeId, undefined, 'Explore panning should not create Focus');
+  const exploreCentroidAfter = projectedSelectionCentroid(exploreAfter, ['a', 'b']);
+  assert(Math.abs(exploreCentroidAfter.x - exploreCentroidBefore.x) < 0.000001
+    && Math.abs(exploreCentroidAfter.y - exploreCentroidBefore.y) < 0.000001,
+  'an Explore one-finger background drag should orbit around the selected constellation');
+  assert(!sameVector(exploreAfter.camera.position, exploreBefore.camera.position),
+    'an Explore one-finger background drag should rotate the 3D camera');
+  deepEqual(exploreAfter.selectedNodeIds, ['a', 'b'], 'Explore orbiting should retain the constellation');
+  equal(exploreAfter.focusedNodeId, undefined, 'Explore orbiting should not create Focus');
   await exploreSession.dispose();
+
+  const flat = runtimeHarness({ profileId: 'two-dimensional' });
+  const flatSession = await flat.create();
+  const flatCanvas = runtimeCanvas(flat.container);
+  await flatSession.setSelection(['a', 'b']);
+  const flatBefore = await flatSession.exportViewState();
+  pointer(flat, flatCanvas, 'pointerdown', -100, -100, { pointerId: 36, pointerType: 'touch' });
+  pointer(flat, flatCanvas, 'pointermove', -40, -70, { pointerId: 36, pointerType: 'touch' });
+  flat.platform.flushFrame();
+  const flatAfter = await flatSession.exportViewState();
+  assert(!sameVector(flatAfter.camera.target, flatBefore.camera.target),
+    'a 2D Explore one-finger background drag should continue to pan');
+  deepEqual(cameraOffset(flatAfter.camera), cameraOffset(flatBefore.camera),
+    'a 2D Explore one-finger background drag should not rotate');
+  await flatSession.dispose();
 
   const focused = runtimeHarness({ profileId: 'three-dimensional' });
   const focusedSession = await focused.create();
@@ -1095,7 +1614,7 @@ test('mobile one-finger drag moves a directly touched node without selecting it'
   await session.dispose();
 });
 
-test('mobile Focus drags a directly touched node while background gestures retain navigation', async () => {
+test('mobile Focus drags a directly touched dim neighbor while background gestures retain navigation', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
@@ -1118,19 +1637,22 @@ test('mobile Focus drags a directly touched node while background gestures retai
   const stationaryOtherPoint = await nodePoint(session, 'b');
   click(value, canvas, stationaryOtherPoint, { pointerId: 36, pointerType: 'touch' });
   value.platform.flushFrame();
-  equal((await session.exportViewState()).focusedNodeId, undefined,
-    'the first stationary node tap should exit explicit Focus');
-  deepEqual((await session.exportViewState()).selectedNodeIds, ['a', 'b'],
-    'the first stationary node tap should add that node to the constellation');
+  const hopped = await session.exportViewState();
+  equal(hopped.focusedNodeId, 'b', 'a stationary node tap should transfer Focus');
+  deepEqual(hopped.selectedNodeIds, ['a', 'b'],
+    'a Focus hop should preserve the constellation while adding the destination to Attention');
+  for (let i = 0; i < 12; i += 1) value.platform.flushTimer();
+  const landed = await session.exportViewState();
+  assert(sameVector(landed.camera.target, landed.positions.b), 'a Focus hop should immediately reach the destination');
   value.platform.advanceTime(400);
   click(value, canvas, await nodePoint(session, 'b'), { pointerId: 37, pointerType: 'touch' });
   value.platform.flushFrame();
-  deepEqual((await session.exportViewState()).selectedNodeIds, ['a'],
-    'a later tap on a constellation member should remove it');
+  deepEqual((await session.exportViewState()).selectedNodeIds, ['a', 'b'],
+    'a later tap on the current Focus subject should retain the constellation');
   await session.dispose();
 });
 
-test('desktop drag on a stably hovered direct neighbor moves it without changing Focus', async () => {
+test('desktop drag on a stably hovered dim neighbor moves it without changing Focus', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
@@ -1150,6 +1672,58 @@ test('desktop drag on a stably hovered direct neighbor moves it without changing
   deepEqual(after.selectedNodeIds, ['a'], 'neighbor dragging should retain the original selection');
   equal(after.focusedNodeId, 'a', 'neighbor dragging should retain the original Focus subject');
   deepEqual(after.camera, before.camera, 'neighbor dragging should not rotate or pan the Focus camera');
+  await session.dispose();
+});
+
+test('Focus hit testing excludes non-neighbors even beside a constellation member', async () => {
+  const base = runtimeRegistration();
+  const value = runtimeHarness({
+    registration: {
+      ...base,
+      profiles: base.profiles.map((profile) => ({
+        ...profile,
+        modules: {
+          ...profile.modules,
+          anima: { ...profile.modules.anima, defaultEnabled: true },
+        },
+      })),
+    },
+    document: graphDocument({
+      nodes: [
+        graphNode('root', { positionHint: { x: -30, y: 0, z: 0 } }),
+        graphNode('root-neighbor', { positionHint: { x: 30, y: 0, z: 0 } }),
+        graphNode('aware', { positionHint: { x: 0, y: 0, z: 0 } }),
+        graphNode('aware-neighbor', { positionHint: { x: 10, y: 0, z: 0 } }),
+      ],
+      edges: [
+        graphEdge('root-edge', 'root', 'root-neighbor'),
+        graphEdge('aware-edge', 'aware', 'aware-neighbor'),
+      ],
+    }),
+  });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  const intents: GraphIntentV1[] = [];
+  session.onIntent((intent) => intents.push(intent));
+  const initial = await session.exportViewState();
+  await session.restoreViewState({
+    ...initial,
+    positions: {
+      root: { x: -30, y: 0, z: 0 },
+      'root-neighbor': { x: 30, y: 0, z: 0 },
+      aware: { x: 0, y: 0, z: 0 },
+      'aware-neighbor': { x: 10, y: 0, z: 0 },
+    },
+  });
+  await session.setSelection(['root', 'aware']);
+  await session.focusNode('root');
+
+  const point = await nodePoint(session, 'aware-neighbor');
+  pointer(value, canvas, 'pointermove', point.x, point.y, { pointerId: 376, pointerType: 'mouse' });
+  value.platform.flushFrame();
+  const hover = [...intents].reverse().find((intent) => intent.type === 'node-hover-changed');
+  equal(hover?.type === 'node-hover-changed' ? hover.nodeId : undefined, undefined,
+    'a neighbor of another member is void outside the focused subject neighborhood');
   await session.dispose();
 });
 
@@ -1194,12 +1768,13 @@ test('desktop Focus drag without stable hover remains camera navigation', async 
   const after = await session.exportViewState();
   deepEqual(after.positions.b, before.positions.b, 'an unstable Focus hit should not move the node');
   deepEqual(after.selectedNodeIds, ['a'], 'camera navigation should retain the original selection');
-  deepEqual(after.camera.target, before.camera.target, 'camera navigation should retain the focused target');
-  assert(!sameVector(after.camera.position, before.camera.position), 'the fallback gesture should rotate the camera');
+  assert(!sameVector(after.camera.target, before.camera.target), 'primary camera navigation pans its target');
+  assert(vectorDistance(cameraOffset(after.camera), cameraOffset(before.camera)) < 1e-9, 'primary pan preserves orientation and distance');
+  assert(!sameVector(after.camera.position, before.camera.position), 'the fallback gesture should translate the camera');
   await session.dispose();
 });
 
-test('V1.7 double tap hold and vertical drag owns precision zoom in 2D and focused 3D', async () => {
+test('double tap drag reversibly slides the camera into Focus in 2D and 3D', async () => {
   const flat = runtimeHarness();
   const flatSession = await flat.create();
   const flatCanvas = runtimeCanvas(flat.container);
@@ -1207,22 +1782,23 @@ test('V1.7 double tap hold and vertical drag owns precision zoom in 2D and focus
   click(flat, flatCanvas, flatPoint, { pointerId: 100, pointerType: 'touch' });
   flat.platform.flushFrame();
   const flatBefore = await flatSession.exportViewState();
-  const flatFocusPoint = await nodePoint(flatSession, 'a');
-  const flatDirection = radialDirection(flatFocusPoint, flatPoint);
   const flatAway = {
-    x: flatPoint.x + flatDirection.x * 30,
-    y: flatPoint.y + flatDirection.y * 30,
+    x: flatPoint.x + 140,
+    y: flatPoint.y,
   };
   pointer(flat, flatCanvas, 'pointerdown', flatPoint.x, flatPoint.y, { pointerId: 101, pointerType: 'touch' });
   pointer(flat, flatCanvas, 'pointermove', flatAway.x, flatAway.y, { pointerId: 101, pointerType: 'touch' });
   flat.platform.flushFrame();
   const flatIn = await flatSession.exportViewState();
-  assert(flatIn.camera.zoom > flatBefore.camera.zoom, 'pulling down should zoom a 2D graph in');
-  deepEqual(flatIn.selectedNodeIds, flatBefore.selectedNodeIds, 'precision zoom over a node must not select it');
+  equal(flatIn.focusedNodeId, 'a', 'dragging the matching second tap should enter Focus');
+  deepEqual(flatIn.selectedNodeIds, ['a'], 'focus transition should retain the receipt subject');
+  deepEqual(flatIn.camera.target, flatIn.positions.a,
+    'a full-distance 2D transition should reach the canonical Focus target');
   pointer(flat, flatCanvas, 'pointermove', flatPoint.x, flatPoint.y, { pointerId: 101, pointerType: 'touch' });
   flat.platform.flushFrame();
   const flatReversed = await flatSession.exportViewState();
-  assert(flatReversed.camera.zoom < flatIn.camera.zoom, 'reversing upward should reverse zoom continuously');
+  deepEqual(flatReversed.camera, flatBefore.camera, 'returning to the origin should reverse the camera transition');
+  equal(flatReversed.focusedNodeId, 'a', 'reversing the slider should retain Focus state');
   pointer(flat, flatCanvas, 'pointerup', flatPoint.x, flatPoint.y, { pointerId: 101, pointerType: 'touch' });
   flat.platform.flushFrame();
   equal(flat.platform.pendingTimers, 0, 'completed precision zoom should leave no touch timer behind');
@@ -1237,21 +1813,24 @@ test('V1.7 double tap hold and vertical drag owns precision zoom in 2D and focus
   click(spatial, spatialCanvas, spatialPoint, { pointerId: 102, pointerType: 'touch' });
   spatial.platform.flushFrame();
   const spatialBefore = await spatialSession.exportViewState();
-  const spatialFocusPoint = await nodePoint(spatialSession, 'b');
-  const spatialDirection = radialDirection(spatialFocusPoint, spatialPoint);
   pointer(spatial, spatialCanvas, 'pointerdown', spatialPoint.x, spatialPoint.y, { pointerId: 103, pointerType: 'touch' });
+  spatial.platform.flushFrame();
+  const spatialPressed = await spatialSession.exportViewState();
+  deepEqual(spatialPressed.selectedNodeIds, ['b'], 'the matching second press should restore selection before movement');
+  equal(spatialPressed.focusedNodeId, 'b', 'the matching second press should restore Focus before movement');
+  deepEqual(spatialPressed.camera, spatialBefore.camera, 'press-time receipt reconciliation must preserve camera framing');
   pointer(spatial, spatialCanvas, 'pointermove',
-    spatialPoint.x + spatialDirection.x * 30,
-    spatialPoint.y + spatialDirection.y * 30,
+    spatialPoint.x + 140,
+    spatialPoint.y,
     { pointerId: 103, pointerType: 'touch' });
   spatial.platform.flushFrame();
   const spatialAfter = await spatialSession.exportViewState();
-  assert(vectorDistance(spatialAfter.camera.position, spatialAfter.camera.target)
-    < vectorDistance(spatialBefore.camera.position, spatialBefore.camera.target),
-  'pulling down should dolly a perspective graph in');
-  equal(spatialAfter.focusedNodeId, 'b', 'focused 3D precision zoom must retain the node reached by the first tap');
-  deepEqual(spatialAfter.positions.b, spatialBefore.positions.b, 'precision zoom beginning over a node must not drag it');
-  pointer(spatial, spatialCanvas, 'pointerup', spatialPoint.x, spatialPoint.y + 30, { pointerId: 103, pointerType: 'touch' });
+  equal(spatialAfter.focusedNodeId, 'b', '3D focus transition should retain its receipt subject');
+  deepEqual(spatialAfter.camera.target, spatialAfter.positions.b,
+    'a full-distance 3D transition should reach the canonical Focus target');
+  deepEqual(spatialAfter.positions.b, spatialBefore.positions.b,
+    'focus transition beginning over a node must not drag it');
+  pointer(spatial, spatialCanvas, 'pointerup', spatialPoint.x + 140, spatialPoint.y, { pointerId: 103, pointerType: 'touch' });
   spatial.platform.flushFrame();
   await spatialSession.dispose();
 });
@@ -1348,6 +1927,24 @@ test('V1.8 preview surface ownership holds Anima preview through Mod release', a
 });
 
 test('R-INPUT-18 mobile two-finger drag rotates and pinches concurrently in 3D', async () => {
+  const constellation = runtimeHarness({ profileId: 'three-dimensional' });
+  const constellationSession = await constellation.create();
+  const constellationCanvas = runtimeCanvas(constellation.container);
+  await constellationSession.setSelection(['a']);
+  const selectedConstellation = await constellationSession.exportViewState();
+  await constellationSession.restoreViewState({ ...selectedConstellation, viewMode: 'explore' });
+  const constellationBefore = await constellationSession.exportViewState();
+  equal(constellationBefore.viewMode, 'explore', 'selection should put the session in Constellation mode');
+  pointer(constellation, constellationCanvas, 'pointerdown', 100, 100, { pointerId: 66, pointerType: 'touch' });
+  pointer(constellation, constellationCanvas, 'pointerdown', 200, 100, { pointerId: 67, pointerType: 'touch' });
+  pointer(constellation, constellationCanvas, 'pointermove', 110, 90, { pointerId: 66, pointerType: 'touch' });
+  pointer(constellation, constellationCanvas, 'pointermove', 240, 110, { pointerId: 67, pointerType: 'touch' });
+  constellation.platform.flushFrame();
+  const constellationAfter = await constellationSession.exportViewState();
+  assert(!sameDirection(cameraOffset(constellationAfter.camera), cameraOffset(constellationBefore.camera)),
+    'mobile two-finger drag in Constellation mode must orbit, not pan');
+  await constellationSession.dispose();
+
   const unfocused = runtimeHarness({ profileId: 'three-dimensional' });
   const unfocusedSession = await unfocused.create();
   const unfocusedCanvas = runtimeCanvas(unfocused.container);
@@ -1413,7 +2010,7 @@ test('R-INPUT-18 mobile two-finger drag rotates and pinches concurrently in 3D',
   await flatSession.dispose();
 });
 
-test('stationary mobile long-press requests node context without selecting or focusing', async () => {
+test('stationary mobile long-press enters Focus without opening node context', async () => {
   const value = runtimeHarness();
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
@@ -1423,10 +2020,60 @@ test('stationary mobile long-press requests node context without selecting or fo
   pointer(value, canvas, 'pointerdown', point.x, point.y, { pointerId: 35, pointerType: 'touch' });
   value.platform.flushTimer();
   value.platform.flushFrame();
-  equal(intents.filter((intent) => intent.type === 'node-context-requested').length, 1, 'long press should emit one context request');
-  equal((await session.exportViewState()).focusedNodeId, undefined, 'opening context should not focus');
-  deepEqual((await session.exportViewState()).selectedNodeIds, [], 'opening context should not select');
+  equal(intents.filter((intent) => intent.type === 'node-context-requested').length, 0,
+    'primary long press should not emit a context request');
+  equal((await session.exportViewState()).focusedNodeId, 'a', 'primary long press should focus its node');
+  deepEqual((await session.exportViewState()).selectedNodeIds, ['a'],
+    'primary long press should make its node the sole Attention subject');
   await session.dispose();
+});
+
+test('Overview Space clears membership without framing, while Center + Fit preserves membership', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    const value = runtimeHarness({ profileId, document: graphDocument({
+      nodes: ['a', 'b', 'c'].map((id) => graphNode(id)),
+      edges: [graphEdge('ab', 'a', 'b'), graphEdge('bc', 'b', 'c')],
+    }) });
+    const session = await value.create();
+    const canvas = runtimeCanvas(value.container);
+    const initial = await session.exportViewState();
+    await session.restoreViewState({ ...initial, positions: {
+      a: { x: -50, y: 0, z: 0 }, b: { x: 0, y: 0, z: 0 }, c: { x: 50, y: 0, z: 0 },
+    } });
+    await session.applyExternalInfluence({ schemaVersion: 1, type: 'replace-remembered-subjects', nodeIds: ['b', 'c'] });
+    await session.fitNodes();
+    const fit = await session.exportViewState();
+    await session.setSelection(['a']);
+    await session.restoreViewState({ ...(await session.exportViewState()), camera: {
+      ...fit.camera,
+      position: { x: fit.camera.position.x + 100, y: fit.camera.position.y + 40, z: fit.camera.position.z },
+      target: { x: fit.camera.target.x + 100, y: fit.camera.target.y + 40, z: fit.camera.target.z },
+    } });
+    click(value, canvas, { x: -100, y: -100 }, { pointerId: 930, button: 2 });
+    value.platform.flushFrame();
+    const after = await session.exportViewState();
+    equal(session.getActiveView().id, 'overview', 'reset stays in Overview');
+    deepEqual(after.selectedNodeIds, ['a'], 'Center + Fit preserves the user-selected constellation');
+    deepEqual(after.camera, fit.camera, 'reset Centers + Fits the full graph');
+    for (const ignored of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { repeat: true }, { isComposing: true }]) {
+      canvas.dispatchEvent(new value.window.KeyboardEvent('keydown', { key: ' ', bubbles: true, ...ignored }) as unknown as Event);
+      value.platform.flushFrame();
+      deepEqual((await session.exportViewState()).selectedNodeIds, ['a'], 'modified, repeated, or composing Space does not clear');
+    }
+    canvas.dispatchEvent(new value.window.KeyboardEvent('keydown', { key: ' ', bubbles: true }) as unknown as Event);
+    value.platform.flushFrame();
+    const cleared = await session.exportViewState();
+    deepEqual(cleared.selectedNodeIds, [], 'plain Space withdraws the user-selected constellation');
+    equal(session.getActiveView().id, 'overview', 'clearing stays in Overview');
+    deepEqual(cleared.camera, after.camera, 'Space preserves the camera pose and focal point');
+    canvas.dispatchEvent(new value.window.KeyboardEvent('keyup', { key: ' ', bubbles: true }) as unknown as Event);
+    value.platform.flushFrame();
+    deepEqual(await session.exportViewState(), cleared, 'Space release does not restore membership');
+    click(value, canvas, await nodePoint(session, 'b'), { pointerId: 931 });
+    value.platform.flushFrame();
+    deepEqual((await session.exportViewState()).selectedNodeIds, ['b', 'c'], 'remembered groups survive user-selection clearing');
+    await session.dispose();
+  }
 });
 
 test('stationary background right-click Centers + Fits the active Focus neighborhood without changing angle', async () => {
@@ -1475,6 +2122,86 @@ test('stationary background right-click Centers + Fits the active Focus neighbor
   await session.dispose();
 });
 
+test('single-node Constellation Center + Fit frames only its member in every modality', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    for (const modality of ['desktop', 'mobile'] as const) {
+      const value = runtimeHarness({
+        profileId,
+        document: graphDocument({
+          nodes: [
+            graphNode('subject', { positionHint: { x: 0, y: 0, z: 0 } }),
+            graphNode('right', { positionHint: { x: 400, y: 80, z: 0 } }),
+            graphNode('left', { positionHint: { x: -300, y: -120, z: 0 } }),
+            graphNode('unrelated', { positionHint: { x: 5_000, y: 0, z: 0 } }),
+          ],
+          edges: [
+            graphEdge('subject-right', 'subject', 'right'),
+            graphEdge('subject-left', 'subject', 'left'),
+          ],
+        }),
+      });
+      const session = await value.create();
+      const canvas = runtimeCanvas(value.container);
+      await session.setSelection(['subject']);
+      const selected = await session.exportViewState();
+      await session.restoreViewState({ ...selected, viewMode: 'explore' });
+
+      if (modality === 'desktop') {
+        click(value, canvas, { x: -100, y: -100 }, { pointerId: 370, button: 2 });
+      } else {
+        pointer(value, canvas, 'pointerdown', -100, -100, {
+          pointerId: 371,
+          pointerType: 'touch',
+        });
+        value.platform.flushTimer();
+      }
+      value.platform.flushFrame();
+
+      const fitted = await session.exportViewState();
+      deepEqual(fitted.camera.target, fitted.positions.subject,
+        `${profileId} ${modality} Center + Fit should recenter the selected node`);
+      const camera = new GraphCameraController(fitted.camera, fitted.dimensions);
+      camera.setViewport(640, 360);
+      for (const nodeId of ['subject']) {
+        const projected = camera.worldToScreen(fitted.positions[nodeId]);
+        assert(projected.x >= 48 - 0.000001 && projected.x <= 640 - 48 + 0.000001,
+          `${profileId} ${modality} should keep immediate node ${nodeId} inside the usable width`);
+        assert(projected.y >= 48 - 0.000001 && projected.y <= 360 - 48 + 0.000001,
+          `${profileId} ${modality} should keep immediate node ${nodeId} inside the usable height`);
+      }
+      await session.dispose();
+    }
+  }
+});
+
+test('multi-node Center + Fit continues to frame only the selection', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    const value = runtimeHarness({
+      profileId,
+      document: graphDocument({
+        nodes: [
+          graphNode('a', { positionHint: { x: -100, y: 0, z: 0 } }),
+          graphNode('b', { positionHint: { x: 100, y: 0, z: 0 } }),
+          graphNode('unselected-neighbor', { positionHint: { x: 5_000, y: 0, z: 0 } }),
+        ],
+        edges: [graphEdge('a-neighbor', 'a', 'unselected-neighbor')],
+      }),
+    });
+    const session = await value.create();
+    const canvas = runtimeCanvas(value.container);
+    await session.setSelection(['a', 'b']);
+    const selected = await session.exportViewState();
+    await session.restoreViewState({ ...selected, viewMode: 'explore' });
+    click(value, canvas, { x: -100, y: -100 }, { pointerId: 372, button: 2 });
+    value.platform.flushFrame();
+
+    const fitted = await session.exportViewState();
+    deepEqual(fitted.camera.target, averageVector([fitted.positions.a, fitted.positions.b]),
+      `${profileId} multi-node fit should remain centered on the selection only`);
+    await session.dispose();
+  }
+});
+
 test('stationary mobile background long-press Centers + Fits the visible graph without resetting angle', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
@@ -1500,6 +2227,29 @@ test('stationary mobile background long-press Centers + Fits the visible graph w
   equal(intents.filter((intent) => intent.type === 'node-context-requested').length, 0,
     'background long press should not request a node menu');
   pointer(value, canvas, 'pointerup', -100, -100, { pointerId: 36, pointerType: 'touch' });
+  await session.dispose();
+});
+
+test('mobile portrait long-press fits a 3D Explore selection inside the viewport width', async () => {
+  const value = runtimeHarness({ profileId: 'three-dimensional' });
+  value.resize(360, 640, 2);
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  await session.setSelection(['a', 'b']);
+  pointer(value, canvas, 'pointerdown', -100, -100, { pointerId: 364, pointerType: 'touch' });
+  value.platform.flushTimer();
+  value.platform.flushFrame();
+
+  const fitted = await session.exportViewState();
+  const camera = new GraphCameraController(fitted.camera, fitted.dimensions);
+  camera.setViewport(360, 640);
+  for (const nodeId of fitted.selectedNodeIds) {
+    const projected = camera.worldToScreen(fitted.positions[nodeId]);
+    assert(projected.x >= 48 - 0.000001 && projected.x <= 360 - 48 + 0.000001,
+      `portrait Center + Fit should keep selected node ${nodeId} inside the usable width`);
+    assert(projected.y >= 48 - 0.000001 && projected.y <= 640 - 48 + 0.000001,
+      `portrait Center + Fit should keep selected node ${nodeId} inside the usable height`);
+  }
   await session.dispose();
 });
 
@@ -1902,3 +2652,30 @@ function sameDirection(
     && Math.abs(a.y / aLength - b.y / bLength) < 0.000001
     && Math.abs(a.z / aLength - b.z / bLength) < 0.000001;
 }
+
+
+test('3D Focus primary background click-drag pans without rotating or changing graph state', async () => {
+  const value = runtimeHarness({ profileId: 'three-dimensional' });
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  await session.setSelection(['a', 'b']);
+  await session.focusNode('a');
+  const before = await session.exportViewState();
+  const intents: GraphIntentV1[] = [];
+  session.onIntent((intent) => intents.push(intent));
+  pointer(value, canvas, 'pointerdown', -100, -100, { pointerId: 901, pointerType: 'mouse' });
+  pointer(value, canvas, 'pointermove', -50, -65, { pointerId: 901, pointerType: 'mouse' });
+  value.platform.flushFrame();
+  pointer(value, canvas, 'pointerup', -50, -65, { pointerId: 901, pointerType: 'mouse' });
+  value.platform.flushFrame();
+  const after = await session.exportViewState();
+  assert(!sameVector(after.camera.target, before.camera.target), 'background drag translates framing');
+  assert(vectorDistance(cameraOffset(after.camera), cameraOffset(before.camera)) < 1e-9, 'pan retains orientation and distance');
+  equal(after.camera.zoom, before.camera.zoom, 'pan retains zoom');
+  deepEqual(after.positions, before.positions, 'background navigation leaves nodes in place');
+  deepEqual(after.selectedNodeIds, before.selectedNodeIds, 'pan preserves the constellation');
+  equal(after.focusedNodeId, 'a', 'pan retains the committed Focus subject');
+  assert(intents.every((intent) => !['node-activated', 'selection-changed', 'focus-changed', 'background-activated'].includes(intent.type)),
+    'drag release cannot activate an object or change View');
+  await session.dispose();
+});

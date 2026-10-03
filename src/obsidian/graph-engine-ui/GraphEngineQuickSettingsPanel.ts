@@ -1,5 +1,7 @@
 import { Notice, Setting, setIcon, type SliderComponent } from 'obsidian';
 import {
+  GRAPH_VIEW_DEFINITIONS_V1,
+  type GraphViewIdV1,
   GRAPH_QUICK_SETTINGS_CONTROL_IDS_V1 as CONTROLS,
   GRAPH_QUICK_SETTINGS_SECTION_IDS_V1 as SECTIONS,
   type Disposable,
@@ -14,7 +16,6 @@ import {
   graphUiSectionIsShownV1,
   type EffectiveGraphSessionUiPolicyV1,
 } from './GraphEngineUiPolicy.ts';
-import { GraphEngineQuickSettingsDisclosureStateV1 } from './GraphEngineQuickSettingsDisclosureState.ts';
 import { isQuickSettingsToggleKeyV1 } from './GraphEngineQuickSettingsShortcut.ts';
 import { ObsidianGraphUiLayoutV1 } from './ObsidianGraphUiLayout.ts';
 import {
@@ -37,10 +38,11 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
   private status?: HTMLDivElement;
   private layout?: ObsidianGraphUiLayoutV1;
   private intentSubscription?: Disposable;
+  private viewSubscription?: Disposable;
   private overrideSubscription?: Disposable;
   private graphSubscription?: Disposable;
   private contributionDisposables: Disposable[] = [];
-  private readonly disclosureState = new GraphEngineQuickSettingsDisclosureStateV1();
+  private activeViewId: GraphViewIdV1 = 'overview';
   private collapsed: boolean;
   private renderRevision = 0;
   private graphCounts?: { readonly nodes: number; readonly edges: number };
@@ -57,14 +59,20 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
 
   mount(): void {
     if (this.root || this.disposed || this.policy.quickSettings.visibility === 'hidden') return;
+    this.activeViewId = this.context.session.getActiveView().id;
+    this.collapsed = !(this.context.session.getViewUiState(this.activeViewId)?.quickSettingsOpen
+      ?? this.policy.quickSettings.visibility === 'shown');
     const root = this.context.container.ownerDocument.createElement('div');
     root.className = 'graph-engine-quick-settings graphplus-graph-controls graph-controls';
     root.dataset.graphEngineQuickSettings = '';
     root.addEventListener('pointerdown', stopPropagation);
+    root.addEventListener('pointerup', stopPropagation);
+    root.addEventListener('click', stopPropagation);
     root.addEventListener('wheel', stopPropagation);
     root.addEventListener('pointerenter', this.cancelAutoClose);
     root.addEventListener('pointerleave', this.scheduleAutoClose);
     this.context.container.addEventListener('keydown', this.handleKeyDown, true);
+    this.context.container.addEventListener('pointerdown', this.handleOutsidePointerDown, true);
     this.context.container.append(root);
     this.root = root;
     this.layout = new ObsidianGraphUiLayoutV1(
@@ -77,6 +85,13 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       if (intent.type === 'selection-changed' || intent.type === 'focus-changed' || intent.type === 'node-drag-ended') {
         void this.render();
       }
+    });
+    this.viewSubscription = this.context.session.onViewChanged((view) => {
+      if (this.activeViewId === view.id) return;
+      this.activeViewId = view.id;
+      this.collapsed = !(this.context.session.getViewUiState(this.activeViewId)?.quickSettingsOpen
+        ?? this.policy.quickSettings.visibility === 'shown');
+      void this.render();
     });
     this.overrideSubscription = this.context.controls.onSessionOverridesChanged(() => {
       if (!this.collapsed && this.localSettingWrites === 0) void this.render();
@@ -93,6 +108,8 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     this.disposed = true;
     this.cancelAutoClose();
     this.disposeContributions();
+    this.viewSubscription?.dispose();
+    this.viewSubscription = undefined;
     this.intentSubscription?.dispose();
     this.intentSubscription = undefined;
     this.overrideSubscription?.dispose();
@@ -104,19 +121,36 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     this.root?.removeEventListener('pointerenter', this.cancelAutoClose);
     this.root?.removeEventListener('pointerleave', this.scheduleAutoClose);
     this.context.container.removeEventListener('keydown', this.handleKeyDown, true);
+    this.context.container.removeEventListener('pointerdown', this.handleOutsidePointerDown, true);
     this.root?.remove();
     this.root = undefined;
     this.status = undefined;
     this.graphCounts = undefined;
   }
 
+  private readonly handleOutsidePointerDown = (event: PointerEvent): void => {
+    if (this.collapsed || !this.root || this.root.contains(event.target as Node)) return;
+    this.setCollapsed(true);
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    void this.render();
+  };
+
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
     if (this.disposed || !isQuickSettingsToggleKeyV1(event)) return;
     event.preventDefault();
     event.stopPropagation();
-    this.collapsed = !this.collapsed;
+    this.setCollapsed(!this.collapsed);
     void this.render();
   };
+
+  private setCollapsed(collapsed: boolean): void {
+    this.collapsed = collapsed;
+    const state = this.context.session.getViewUiState(this.activeViewId);
+    this.context.session.setViewUiState(this.activeViewId, {
+      quickSettingsOpen: !collapsed, expandedSectionIds: state?.expandedSectionIds ?? [],
+    });
+  }
 
   private async render(): Promise<void> {
     const root = this.root;
@@ -128,7 +162,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       this.disposeContributions();
       root.replaceChildren();
       const open = this.iconButton('settings-2', 'Open graph controls', () => {
-        this.collapsed = false;
+        this.setCollapsed(false);
         void this.render();
       });
       open.classList.add('graphplus-controls-open', 'graph-engine-controls-open');
@@ -147,26 +181,42 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     const header = div(root, 'graphplus-controls-header graph-engine-controls-header');
     const title = this.context.container.ownerDocument.createElement('span');
     title.className = 'graphplus-controls-title graph-engine-controls-title';
-    title.textContent = 'Graph controls';
+    title.textContent = `${GRAPH_VIEW_DEFINITIONS_V1[this.activeViewId].title} controls`;
     header.append(title);
     const actions = div(header, 'graphplus-controls-actions graph-engine-controls-actions');
+    const view = GRAPH_VIEW_DEFINITIONS_V1[this.activeViewId];
+    const availableViews = this.context.session.getAvailableViews();
+    if (view.controls.navigationActions.includes('back')
+      && view.interactions.backgroundActivation !== view.id
+      && availableViews.includes(view.interactions.backgroundActivation)) {
+      actions.append(this.iconButton('arrow-up', 'Back one View', () => {
+        void this.context.session.setView(view.interactions.backgroundActivation);
+      }));
+    }
+    if (view.controls.navigationActions.includes('overview') && view.id === 'focus' && availableViews.includes('overview')) {
+      actions.append(this.iconButton('globe', 'Return to Overview', () => { void this.context.session.setView('overview'); }));
+    }
+    if (view.controls.navigationActions.includes('clear-constellation') && viewState.selectedNodeIds.length > 0) {
+      actions.append(this.iconButton('eraser', 'Clear active constellation', () => { void this.context.session.setSelection([]); }));
+    }
     actions.append(this.iconButton('x', 'Collapse graph controls', () => {
-      this.collapsed = true;
+      this.setCollapsed(true);
       void this.render();
     }));
 
     const body = div(root, 'graphplus-controls-body graph-engine-controls-body');
+    const declared = GRAPH_VIEW_DEFINITIONS_V1[this.activeViewId].controls.quickSettingsSectionIds;
     const contributions = groupContributions(this.policy.quickSettings.contributions);
-    this.renderFilter(body, contributions.get(SECTIONS.filter) ?? []);
-    this.renderForm(
+    if (declared.includes(SECTIONS.filter)) this.renderFilter(body, contributions.get(SECTIONS.filter) ?? []);
+    if (declared.includes(SECTIONS.form)) this.renderForm(
       body,
       viewState,
       effective,
       contributions.get(SECTIONS.form) ?? [],
       contributions.get(SECTIONS.regions) ?? [],
     );
-    this.renderDisplay(body, effective, contributions.get(SECTIONS.display) ?? []);
-    this.renderForces(body, effective, contributions.get(SECTIONS.forces) ?? []);
+    if (declared.includes(SECTIONS.display)) this.renderDisplay(body, effective, contributions.get(SECTIONS.display) ?? []);
+    if (declared.includes(SECTIONS.forces)) this.renderForces(body, effective, contributions.get(SECTIONS.forces) ?? []);
     for (const [sectionId, values] of contributions) {
       if (Object.values(SECTIONS).includes(sectionId as typeof SECTIONS[keyof typeof SECTIONS])) continue;
       if (!graphUiSectionIsShownV1(this.policy, sectionId)) continue;
@@ -210,17 +260,6 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     if (!graphUiSectionIsShownV1(this.policy, SECTIONS.form)) return;
     const body = this.section(parent, SECTIONS.form, SECTION_TITLES[SECTIONS.form], false);
     this.renderFormDimensions(body, effective);
-    if (graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.formNodeZoomSize)) {
-      const anima = effective.modules.anima;
-      if (anima?.enabled) {
-        this.catalogSlider(
-          body,
-          'anima.nodeWorldScaleBlend',
-          readNumber(anima.settings.nodeWorldScaleBlend, 0),
-          'Uniform ←→ Size-driven',
-        );
-      }
-    }
     if (graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.mindMap)) {
       const form = effective.modules.form;
       const selectedId = viewState.selectedNodeIds.length === 1 ? viewState.selectedNodeIds[0] : undefined;
@@ -314,7 +353,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
         this.catalogSlider(adaptiveThresholdHost, `anima.${thresholdKey}`, readNumber(anima.settings[thresholdKey], 50));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.nodeSize)) {
-        this.catalogSlider(body, 'rendering.nodeRadiusScale', readNumber(settings.nodeRadiusScale, 2));
+        this.catalogSlider(body, 'rendering.nodeRadiusScale', readNumber(settings.nodeRadiusScale, 1));
       }
       if (graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.linkThickness)) {
         this.catalogSlider(body, 'rendering.edgeThicknessScale', readNumber(settings.edgeThicknessScale, 0.1));
@@ -575,7 +614,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     this.autoCloseTimer = this.context.container.ownerDocument.defaultView?.setTimeout(() => {
       this.autoCloseTimer = undefined;
       if (this.disposed) return;
-      this.collapsed = true;
+      this.setCollapsed(true);
       void this.render();
     }, 5_000);
   };
@@ -583,8 +622,17 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
   private section(parent: HTMLElement, sectionId: string, title: string, defaultOpen: boolean): HTMLElement {
     const details = this.context.container.ownerDocument.createElement('details');
     details.className = 'graphplus-control-section graph-engine-control-section';
-    details.open = this.disclosureState.resolve(sectionId, defaultOpen);
-    details.addEventListener('toggle', () => this.disclosureState.remember(sectionId, details.open));
+    const viewId = this.activeViewId;
+    const saved = this.context.session.getViewUiState(viewId);
+    details.open = saved ? saved.expandedSectionIds.includes(sectionId) : defaultOpen;
+    details.addEventListener('toggle', () => {
+      if (!details.isConnected) return;
+      const state = this.context.session.getViewUiState(viewId)
+        ?? { quickSettingsOpen: !this.collapsed, expandedSectionIds: [] };
+      const sections = new Set(state.expandedSectionIds);
+      if (details.open) sections.add(sectionId); else sections.delete(sectionId);
+      this.context.session.setViewUiState(viewId, { ...state, expandedSectionIds: [...sections] });
+    });
     const summary = this.context.container.ownerDocument.createElement('summary');
     const label = this.context.container.ownerDocument.createElement('span');
     label.textContent = title;

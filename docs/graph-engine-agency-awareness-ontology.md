@@ -1,8 +1,17 @@
 # Graph Engine agency and Awareness ontology
 
-Status: Approved target ontology; implementation complete through Phase 10
+Status: Approved target ontology; implementation complete through Phase 12
 
 Date: 2026-09-28
+
+View implementation note: the [View and Scene Contract](graph-engine-view-scene-contract.md)
+now implements Overview, Constellation, and Focus as Ego engagement framings. It
+supersedes Phase 12's use of all Awareness as active composition and camera pivot.
+Attention owns active membership; broader Awareness/Memory illuminate Overview and
+supply connected highlighted groups for discovery. Choosing a group object replaces
+Attention. View definitions supply bindings, interest, scene phases, and controls;
+Consciousness retains membership and Memory ownership. View changes do not mutate
+world or layout. Phase 12 notes below record the earlier migration.
 
 Implementation status: Phase 1 defines the target semantics. Phase 2 implements the
 presentation-scoped Consciousness foundation, Attention derived from compatibility
@@ -29,6 +38,23 @@ canonical active-note push before re-rooting every Local presentation.
 Phase 10 locks the completed migration with regressions for independent presentation
 Consciousness, Local Attention cardinality, empty-root projection, Awareness
 expansion, canonical multi-pane fan-out, and exactly-once outbound/inbound mutation.
+Phase 11 adds subject-local Reflexes and presentation-scoped conscious Memory,
+Association, and Reaction. Semantic observations compact into logarithmic historical
+memory; declarative associations produce Reaction intents that pass through Ego before
+an existing scoped capability executes.
+Phase 12 makes Awareness the authoritative observable constellation: deliberate
+Attention and the recent subjects retained by Memory contribute durable membership,
+while policy-expanded neighbors live in a distinct conscious field. Anima now derives
+highlighting from Awareness instead of applying Memory as a late visual override.
+Vision uses the aware constellation as the Explore pivot, and an empty Overview cannot
+enter an unanchored Constellation.
+
+Ego now also retains transient **will**: captured node/background input and its
+accepted, adjusted, or rejected interaction plan. Hover expresses the admitted
+result through Anima; activation validates freshness and commits that same result.
+Will remains distinct from realized Attention, View state, and Memory. Its scope,
+ownership, and lifecycle are defined in the
+[Ego Will and Interaction Plans contract](graph-engine-ego-interaction-plan-contract.md).
 
 For target semantic ownership, this document supersedes the Ego/Awareness ownership
 claims in `graph-engine-animus-anima-boundary.md`,
@@ -47,42 +73,40 @@ The ontology is internal to Graph Engine. Public consumers provide graph documen
 experience constraints, and neutral external events without needing to adopt Ego,
 Awareness, Vision, or Anima as public API concepts.
 
-## Awareness is an independent field
+## Awareness is an independent observable constellation
 
-Awareness is the current field of graph subjects available to conscious interaction
-and presentation. It is not owned by Ego.
+Awareness is the current set of graph subjects available for deliberate observation.
+It is the semantic constellation Anima expresses as highlighted. It is not owned by
+Ego and is not a synonym for compatibility selection.
 
 Subjects can enter or leave Awareness through more than one influence:
 
 - Ego intentionally attends to or withdraws from them;
-- Ego raises a node and its relevant neighborhood transiently in response to an
-  interpreted pointer hover;
+- Memory retains recently experienced subjects after Attention moves on;
 - experience policy constrains or requires a subject;
 - an exogenous event introduces, removes, or invalidates a subject; or
 - another future engine subsystem contributes information without an explicit Ego
   decision.
 
 Ego can direct and influence Awareness, but cannot assume exclusive authority over
-everything that enters it. Exogenous and transient influences may interrupt or expand
-the field without Ego having initiated them.
+everything that enters it. Exogenous influences and Memory may preserve or expand the
+set without Ego having just initiated that change.
 
-Nodes placed in Attention through selection enter Awareness intentionally. Nodes
-outside that field remain present when the active presentation policy permits context,
-but are unaware context and may be dimmed. Hovering a node raises that node transiently
-into Awareness. When hover policy expands to its immediate neighborhood, those
-neighbors also enter Awareness for the lifetime of that hover contribution. Removing
-the hover withdraws only the Awareness contributed by hover.
+Nodes placed in Attention through selection enter Awareness intentionally. Remembered
+session subjects also remain in Awareness after deliberate Attention moves elsewhere.
+Nodes outside Awareness may remain in the wider conscious field as visible periphery,
+or remain ordinary projected context according to the active view policy. Hover is a
+transient Anima input: it highlights its subject and may return neighboring context to
+standard presentation without durably changing Awareness.
 
 Awareness is semantic state, not visual styling. It does not choose colors, opacity,
 labels, outlines, geometry, or animation.
 
-Awareness is an undifferentiated, binary field. A subject is either within Awareness or
+Awareness is an undifferentiated, binary set. A subject is either within Awareness or
 outside it. Awareness carries no degree of salience, intensity, or priority and does not
-expose whether membership came from Ego, hover, experience requirements, or an
-exogenous event. Attention, hover, Focus, and other interaction or structural facts
-remain independent inputs that Anima may combine with Awareness when resolving visual
-expression. Rendered selection is derived from Attention rather than supplied as an
-independent semantic fact.
+expose why a subject is a member. Attention, Memory, hover, Focus, and other interaction
+facts remain independent inputs. Rendered highlight is derived from Awareness; rendered
+selection remains the compatibility expression of deliberate Attention.
 
 Systems that combine temporary and durable influences may retain private contribution
 bookkeeping so removing one influence does not incorrectly remove a subject that
@@ -118,14 +142,16 @@ example, may update canonical graph truth without changing what is presently awa
 Graph+ decides which host events have Awareness meaning when it translates them into
 neutral Graph Engine input.
 
-## Attention is the center of Awareness
+## Attention, Awareness, and the conscious field
 
-Attention is the set of nodes presently held at the center of conscious activity.
-Awareness is the larger field containing Attention plus peripheral subjects such as
-relevant neighbors and transiently hovered nodes. The core invariant is:
+Attention is the set of nodes presently held at the center of deliberate conscious
+activity. Awareness contains Attention plus subjects retained by conscious Memory.
+The conscious field contains Awareness plus policy-defined peripheral subjects. The
+core invariants are:
 
 ```text
 Attention is a subset of Awareness
+Awareness is a subset of ConsciousField
 ```
 
 Attention is semantic state rather than a synonym for raw UI selection. Selecting
@@ -147,16 +173,14 @@ compatibility, but their semantic source is Attention. An exogenous Attention ch
 therefore changes rendered selection through the same projection used for an
 endogenous Attention change.
 
-Awareness is not limited to the immediate neighborhood of Attention. Other permitted
-exogenous or transient influences may make a node aware without making it attended.
-Hover therefore expands Awareness but does not, by itself, change Attention.
+Awareness is not limited to Attention: Memory may keep a subject aware without keeping
+it selected or attended. Hover does not, by itself, change durable Attention or
+Awareness.
 
 Empty Awareness is a valid neutral state. It does not direct Anima to hide or dim every
-projected node. When neither Attention, hover, nor another influence contributes to
-Awareness, Anima presents the projected graph as neutral context. Once Awareness is
-non-empty, Anima may contrast its members against unaware peripheral context. This
-allows hover to meaningfully raise a node and its neighborhood into Awareness in an
-otherwise neutral Global Explore presentation.
+projected node. An empty Overview remains neutral and cannot enter Constellation until
+a click, Memory, or another permitted influence provides an aware subject. Once
+Awareness is non-empty, Anima may contrast its members against peripheral context.
 
 Focus Mode constrains Attention to at most one node. While a rooted Local presentation
 has a valid active subject, its policy requires exactly one. Changing that node replaces
@@ -174,22 +198,21 @@ Global presentations do not inherit Focus's cardinality constraint. Their Attent
 may contain multiple intentionally selected nodes as a constellation, or be empty when
 the experience is not directing attention to a selection.
 
-## Experience policy expands Attention into Awareness
+## Experience policy expands Awareness into the conscious field
 
-The active presentation policy defines how Attention contributes peripheral nodes to
-Awareness. Consciousness applies that rule; Ego does not hard-code a neighborhood
-radius or topology.
+The active presentation policy defines how Awareness contributes peripheral nodes to
+the conscious field. Consciousness applies that rule; Ego does not hard-code a
+neighborhood radius or topology.
 
 Examples of policy-governed expansion include:
 
-- Local Focus places its active node in Attention and includes the policy-defined local
-  neighborhood in Awareness.
-- Global Constellation places its selected constellation in Attention and may include a
-  different policy-defined periphery.
-- Global Explore with no Attention and no transient influence leaves Awareness empty,
-  producing the neutral baseline presentation.
-- Hover contributes the hovered node and its policy-defined relevant neighbors to
-  Awareness without changing Attention.
+- Local Focus places its active node in Attention and Awareness, then includes the
+  policy-defined local neighborhood in the conscious field.
+- Global Constellation combines selected Attention and recent Memory into Awareness,
+  then may include a different policy-defined periphery in the conscious field.
+- Global Overview with neither Attention nor Memory leaves Awareness empty, producing
+  the neutral baseline presentation.
+- Hover remains transient presentation influence without changing either durable set.
 
 Changing these expansion rules changes an experience policy rather than Ego,
 Awareness, or Anima.
@@ -273,6 +296,12 @@ Consciousness must remain a narrowly defined agency-and-awareness boundary. It d
 absorb camera mathematics, visual styling, graph physics, persistence, or host
 integration merely because those systems consume or influence its state.
 
+Consciousness does own associative Memory because remembered semantic observations can
+become new endogenous Reaction intents. Storage serialization remains the session
+persistence boundary's responsibility; Consciousness owns the meaning and compaction of
+the memory being serialized. See
+[Reflex, Memory, Association, and Reaction Contract](graph-engine-reflex-memory-association-reaction-contract.md).
+
 ## Ego owns intent and direction
 
 Ego represents the user's agency within Graph Engine. It receives mechanically
@@ -343,6 +372,19 @@ requirements. For example, an active-note change may require Local Graph+ to fol
 new Attention subject even though Ego did not initiate that movement. Vision must not
 misrepresent this automatic reframe as user intent, nor may Ego treat its intended
 framing as authoritative camera truth.
+
+Interaction state decides whether any conscious subject owns camera tracking. Overview
+has no tracked subjects even when Attention or remembered Awareness is non-empty and
+Anima lights those subjects. Cursor or touch anchors and the retained camera frame own
+Overview navigation; subject motion cannot pull its camera. Constellation suggests its
+centroid and Focus its subject as orbit, zoom, and motion-follow targets. Those defaults
+do not make the camera a View-owned object. Ego holds committed session `visionIntent`
+separately from transient hover will. On Focus exit it retains Vision's current focal
+point: the next Constellation orbit/zoom stays there and node motion does not pull it.
+Further View toggles and membership edits preserve that intent. A new Focus subject,
+Overview constellation choice, or explicit Center/Fit establishes a new interest.
+The actual point and pose remain geometry owned by Vision.
+See the [interaction state contract](graph-engine-interaction-state-contract.md).
 
 Vision presently owns the centroid and other spatial targets it derives from Awareness
 membership plus current graph geometry. This is an implementation boundary, not a

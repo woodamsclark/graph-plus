@@ -22,12 +22,12 @@ test('Graph+ releases dragged nodes while retaining explicit context-menu pinnin
     'Graph+ quick settings should not expose a redundant Camera section');
   deepEqual(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.profiles[0]?.interaction?.contextActionIds,
     ['open-node'], 'Graph+ should keep note preview as a transient hover interaction');
-  equal(createShippedGraphModuleRegistryV1().get('rendering')?.descriptor.defaultSettings.nodeRadiusScale, 2,
-    'the shipped Graph Engine node-size default should be 2.0');
+  equal(createShippedGraphModuleRegistryV1().get('rendering')?.descriptor.defaultSettings.nodeRadiusScale, 1,
+    'the shipped Graph Engine node-size default should be 1.00');
   equal(createShippedGraphModuleRegistryV1().get('rendering')?.descriptor.defaultSettings.edgeThicknessScale, 0.1,
     'the shipped Graph Engine link-thickness default should be 0.10');
-  equal(createShippedGraphModuleRegistryV1().get('anima')?.descriptor.defaultSettings.nodeWorldScaleBlend, 0,
-    'the shipped Graph Engine zoomed node size should default to its calmest response');
+  equal(createShippedGraphModuleRegistryV1().get('anima')?.descriptor.defaultSettings.nodeWorldScaleBlend, undefined,
+    'fixed node zoom contrast should have no configurable setting');
   equal(profile?.profileSettings?.dragRelease, 'dynamic', 'drag release should return an unpinned node to the active layout');
   equal(profile?.uiDefaults?.contextMenuEnabled, true, 'the right-click menu should remain available for explicit pinning');
   equal(profile?.uiDefaults?.coreContextActions?.['toggle-pin'], undefined, 'the core Pin node action should remain visible by default');
@@ -177,10 +177,8 @@ test('V1.7 settings catalog exposes only curated typed controls', () => {
   const quality = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'rendering.renderQuality');
   deepEqual(quality?.scopes, ['global', 'profile'], 'render quality should live in full settings without crowding quick settings');
   equal(quality?.control.type, 'select', 'render quality should use named choices rather than free-form text');
-  const nodeZoomResponse = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'anima.nodeWorldScaleBlend');
-  equal(nodeZoomResponse?.name, 'Node zoom contrast', 'the scaling control should describe its size-driven contrast');
-  equal(nodeZoomResponse?.control.type === 'slider' ? nodeZoomResponse.control.storageScale : undefined, 0.01,
-    'node zoom contrast should display as a percentage while storing a normalized response');
+  equal(GRAPH_SETTING_PRESENTATIONS_V1.some((value) => value.id === 'anima.nodeWorldScaleBlend'), false,
+    'the retired contrast slider must not appear in full or quick settings');
   const repelForce = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'force-layout.repulsionStrength');
   equal(repelForce?.control.type === 'slider' ? repelForce.control.max : undefined, 1,
     'repel force should use a normalized slider range');

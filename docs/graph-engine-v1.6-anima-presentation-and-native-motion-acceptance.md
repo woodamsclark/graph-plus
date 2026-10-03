@@ -4,6 +4,10 @@ Status: Automated gates pass; live desktop/mobile behavior accepted.
 
 Date: 2026-09-05
 
+View update: the [View and Scene Contract](graph-engine-view-scene-contract.md)
+supersedes the historical click, hover, Focus scene, and implicit framing rules below.
+Hover now previews the admitted ordinary object activation; only click commits it.
+
 Depends on: [V1.6 Anima Presentation and Native Motion Contract](graph-engine-v1.6-anima-presentation-and-native-motion-contract.md)
 
 ## 1. Acceptance principle
@@ -304,7 +308,8 @@ user camera or node-drag input cancels that automatic framing.
 - Unmodified wheel input pans in 2D.
 - Platform pinch/modified wheel input zooms.
 - Touch pinch zooms.
-- A one-finger background drag pans 3D Overview and Explore.
+- A one-finger background drag pans 3D Overview and orbits around the selected
+  constellation in 3D Explore.
 - A focused one-finger drag orbits and retains focus/selection even when it begins on
   another node; that node does not move and does not acquire neighborhood emphasis.
 - A stationary tap on that node still transfers focus.

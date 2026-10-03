@@ -24,7 +24,7 @@ export class AnimaBaselineModule implements GraphModuleInstanceV1 {
   private settings: Readonly<Record<string, JsonValue>> = {};
   private policy: GraphPresentationPolicyV2 = {};
   private labelMode: 'adaptive' | 'all' | 'off' = 'adaptive';
-  private nodeRadiusScale = 2;
+  private nodeRadiusScale = 1;
   private edgeThicknessScale = 0.1;
 
   constructor(
@@ -58,7 +58,7 @@ export class AnimaBaselineModule implements GraphModuleInstanceV1 {
       labelMode: this.labelMode,
       showArrows: settings.showArrows === true,
     };
-    this.nodeRadiusScale = positive(settings.nodeRadiusScale, 2);
+    this.nodeRadiusScale = positive(settings.nodeRadiusScale, 1);
     this.edgeThicknessScale = positive(settings.edgeThicknessScale, 0.1);
   }
 

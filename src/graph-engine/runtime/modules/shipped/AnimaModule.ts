@@ -12,14 +12,13 @@ const PRESENTATION_ROLE_OPACITY: Readonly<Record<
   AnimaPresentationRoleV1,
   Readonly<{ node: number; edge: number }>
 >> = {
-  normal: { node: 1, edge: 1 },
+  standard: { node: 1, edge: 1 },
   highlighted: { node: 1, edge: 1 },
   dimmed: { node: 0.24, edge: 0.6 },
-  hidden: { node: 0, edge: 0 },
+  void: { node: 0, edge: 0 },
 };
 
 export class AnimaModule implements GraphModuleInstanceV1 {
-  private nodeZoomContrast: number;
   private readonly labels: GraphLabelManager;
   private topologyCache?: {
     readonly document: Parameters<NonNullable<GraphModuleInstanceV1['contributeFrame']>>[0]['document'];
@@ -34,13 +33,10 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     private palette: GraphVisualThemeV2,
     settings: Readonly<Record<string, JsonValue>>,
   ) {
-    // Keep the original persisted key so existing experimental slider values survive this broader curve.
-    this.nodeZoomContrast = readUnitInterval(settings.nodeWorldScaleBlend, 0);
     this.labels = new GraphLabelManager(settings);
   }
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
-    this.nodeZoomContrast = readUnitInterval(settings.nodeWorldScaleBlend, 0);
     this.labels.updateSettings(settings);
   }
 
@@ -56,12 +52,8 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     state: Parameters<NonNullable<GraphModuleInstanceV1['contributeFrame']>>[0],
   ): GraphModulePresentationPatchV1 | void {
     const visibleNodes = state.renderSelection.nodeIds;
-    const { visibleEdges, relationships, degree } = this.presentationTopology(state);
+    const { visibleEdges, degree } = this.presentationTopology(state);
     const hoveredId = state.hoveredNodeId;
-    const transientId = state.draggedNodeId ?? state.previewedNodeId;
-    const transientNeighborhood = transientId === undefined
-      ? undefined
-      : new Set([transientId, ...(relationships.get(transientId) ?? [])]);
     const consciousness = state.consciousness;
     const interaction = createGraphInteractionContextV1({
       viewState: state.viewState,
@@ -74,26 +66,15 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const presentation = createAnimaConsciousnessPresentationV1({
       attention: consciousness.attention,
       awareness: consciousness.awareness,
+      consciousField: consciousness.consciousField,
+      remembered: consciousness.remembered,
       interaction,
+      experience: state.experience,
+      objectActivationPreview: state.objectActivationPreview,
       document: state.document,
       visibleNodeIds: state.renderSelection.nodeIds,
       visibleEdgeIds: state.renderSelection.edgeIds,
     });
-    const localFocusActive = presentation.statePolicy.renderScope === 'focused-local-view';
-    const awarenessEmphasisActive = presentation.statePolicy.renderScope === 'graph-with-awareness-emphasis';
-    const exploreActive = awarenessEmphasisActive
-      && state.selectionPresentationSuspended !== true;
-    const visibleIds = localFocusActive
-      ? presentation.highlight.highlightedNodeIds
-      : awarenessEmphasisActive
-        ? exploreActive
-          ? new Set([
-            ...presentation.consciousnessClasses.attendedNodeIds,
-            ...presentation.consciousnessClasses.peripherallyAwareNodeIds,
-          ])
-          : undefined
-        : transientNeighborhood;
-    const litNodeIds = presentation.highlight.highlightedNodeIds;
     const nodesWithRadius = state.document.nodes
       .filter((node) => visibleNodes.has(node.id))
       .map((node) => {
@@ -110,7 +91,8 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       smallestRadius = Math.min(smallestRadius, radius);
       largestRadius = Math.max(largestRadius, radius);
     }
-    const maximumScaleExponent = 0.5 + this.nodeZoomContrast * 1.5;
+    // Fixed former 100% contrast: smallest nodes respond gently, largest most strongly.
+    const maximumScaleExponent = 2;
     const labelRequests: GraphLabelRequestV1[] = Object.entries(presentation.labelRaising.byNodeId)
       .filter(([, decision]) => decision.disposition === 'force'
         || decision.disposition === 'favor'
@@ -129,13 +111,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     })), labelRequests);
     const nodeContributions = Object.fromEntries(nodesWithRadius
       .map(({ node, prior, radius }) => {
-        const isLit = litNodeIds.has(node.id);
-        const visible = visibleIds === undefined || visibleIds.has(node.id);
-        const role = isLit
-          ? presentation.highlight.policy.highlightedRole
-          : visible
-            ? 'normal'
-            : presentation.highlight.policy.contextRole;
+        const role = presentation.highlight.phaseByNodeId[node.id] ?? 'void';
         const ordinaryColor = prior?.color
           ?? (node.tokens?.includes('kind:tag') ? this.palette.colors.tagNode : undefined)
           ?? this.palette.colors.node;
@@ -144,7 +120,9 @@ export class AnimaModule implements GraphModuleInstanceV1 {
           : role === 'dimmed'
             ? desaturateGraphColorV2(ordinaryColor, 0.8)
             : ordinaryColor;
-        const selected = presentation.consciousnessClasses.byNodeId[node.id] === 'attended';
+        const selected = presentation.objectPreview
+          ? presentation.objectPreview.attentionNodeIds.includes(node.id)
+          : presentation.consciousnessClasses.byNodeId[node.id] === 'attended';
         const pinned = state.viewState.pinnedNodeIds.includes(node.id);
         const opacity = PRESENTATION_ROLE_OPACITY[role].node;
         const labelDecision = presentation.labelRaising.byNodeId[node.id];
@@ -157,31 +135,32 @@ export class AnimaModule implements GraphModuleInstanceV1 {
           finalColor: color,
           opacity,
           ...(labelDecision?.disposition === 'suppress' ? { showLabel: false, labelOpacity: 0 } : {}),
-          ...(selected || pinned ? {
+          ...(selected || pinned || presentation.sceneInteraction.focusedNodeId === node.id ? {
             strokeColor: this.palette.colors.nodeOutline,
-            strokeWidth: pinned ? 2 : 1,
+            strokeWidth: presentation.sceneInteraction.focusedNodeId === node.id ? 3 : pinned ? 2 : 1,
           } : {}),
         }];
       }));
     const edgeContributions = Object.fromEntries(visibleEdges.map((edge) => {
       const prior = state.edgeContributions[edge.id];
       const lit = presentation.highlight.highlightedEdgeIds.has(edge.id);
-      const visible = localFocusActive
-        ? lit
-        : visibleIds === undefined || lit;
-      const role = lit
-        ? presentation.highlight.policy.highlightedRole
-        : visible
-          ? 'normal'
-          : presentation.highlight.policy.contextRole;
+      const role = presentation.highlight.phaseByEdgeId[edge.id] ?? 'void';
       const opacity = PRESENTATION_ROLE_OPACITY[role].edge;
+      const ordinaryColor = prior?.color ?? this.palette.colors.edge;
+      const ordinaryArrowColor = prior?.arrowColor ?? this.palette.colors.arrow;
       return [edge.id, {
         ...prior,
         thickness: positive(prior?.baseThicknessScale, 1) * positive(prior?.thicknessScale, 1),
         opacity,
-        arrowColor: this.palette.colors.arrow,
+        color: lit
+          ? this.palette.colors.highlightedNode
+          : role === 'dimmed'
+            ? desaturateGraphColorV2(ordinaryColor, 0.8)
+            : ordinaryColor,
+        arrowColor: role === 'dimmed'
+          ? desaturateGraphColorV2(ordinaryArrowColor, 0.8)
+          : ordinaryArrowColor,
         arrowOpacity: opacity,
-        ...(lit ? { color: this.palette.colors.highlightedNode } : {}),
       }];
     }));
     return {
@@ -242,12 +221,6 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     this.topologyCache = next;
     return next;
   }
-}
-
-function readUnitInterval(value: JsonValue | undefined, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? clamp(value, 0, 1)
-    : fallback;
 }
 
 function normalize(value: number, min: number, max: number): number {

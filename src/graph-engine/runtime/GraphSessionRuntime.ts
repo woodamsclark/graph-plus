@@ -20,9 +20,13 @@ import type {
   GraphSettingsOverridesV1,
   JsonValue,
   GraphViewStateV1,
+  GraphActiveViewV1,
+  GraphViewIdV1,
+  GraphViewUiStateV1,
   TransitionOptionsV1,
   Vec3,
 } from '../contracts/v1/index.ts';
+import { GRAPH_VIEW_DEFINITIONS_V1 } from '../contracts/v1/index.ts';
 import { GraphDocumentStore } from '../core/document/index.ts';
 import { evaluateGraphFilterV1, type GraphFilterSelectionV1 } from '../core/filter/index.ts';
 import type { EffectiveConsumerProfileV1 } from '../core/profile/index.ts';
@@ -31,16 +35,25 @@ import {
   convertGraphViewStateDimensionsV1,
   reconcileGraphViewStateV1,
 } from '../core/state/index.ts';
-import { Consciousness } from './consciousness/index.ts';
+import {
+  Consciousness,
+  type ConsciousObservationV1,
+  type GraphReactionRuntimeV1,
+  type MemorySnapshotV1,
+} from './consciousness/index.ts';
 import {
   resolveGraphExperienceContractV1,
   resolveGraphExternalInfluenceV1,
 } from './experience/index.ts';
 import { Vision } from './vision/index.ts';
 import {
+  attentionFitNodeIdsV1,
   FOCUS_FIT_PADDING_PX,
+  immediateNeighborhoodFitNodeIdsV1,
+  SINGLE_NODE_FIT_MAX_PROJECTED_SCALE,
   graphInteractionPolicyV1,
   resolveGraphUxStateV1,
+  resolveGraphActiveViewV1,
   SessionInteractionRuntime,
   type GraphRuntimeViewChangeV1,
 } from './interaction/index.ts';
@@ -101,11 +114,13 @@ export interface GraphSessionRuntimeOptionsV1 {
   readonly restoreViewState?: GraphViewStateV1;
   readonly platform: SessionRuntimePlatformV1;
   readonly nodeActions?: GraphNodeActionRuntimeV1;
+  readonly reactions?: GraphReactionRuntimeV1;
   readonly rendererRegistry: GraphRendererRegistryV2;
   readonly preferredRendererBackend?: GraphRendererBackendIdV2;
 }
 
 const RETIRED_GRAPH_SYSTEM_STATE_KEY_V1 = 'graph-system-states-v1';
+const CONSCIOUS_MEMORY_STATE_KEY_V1 = 'conscious-memory-v1';
 const MAX_RESTORED_POSITION_COORDINATE = 1_000_000_000;
 const MIN_PIPELINE_INTERVAL_MS = 1_000 / 60;
 const LARGE_GRAPH_NODE_COUNT = 500;
@@ -155,12 +170,6 @@ export class GraphSessionDisposedErrorV1 extends Error {
   }
 }
 
-interface FocusSettlingFrameV1 {
-  readonly nodeId: string;
-  sampleCount: number;
-  lastSampleTimestamp?: number;
-}
-
 export class GraphSessionRuntime implements GraphSessionV1 {
   readonly sessionId: string;
   readonly engineInstanceId: string;
@@ -176,6 +185,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private themePalette: GraphVisualThemeV2;
   private readonly resolveThemePalette?: () => GraphVisualThemeV2;
   private readonly nodeActions?: GraphNodeActionRuntimeV1;
+  private readonly reactions?: GraphReactionRuntimeV1;
   private readonly modules: GraphModuleRegistry;
   private surface!: SessionSurfaceV1;
   private readonly experience: GraphExperienceContractV1;
@@ -206,7 +216,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private lastFrameTimestamp: number | null = null;
   private fatalModuleError: GraphRequiredModuleErrorV1 | null = null;
   private readonly deferredErrors: GraphSessionErrorV1[] = [];
-  private focusSettlingFrame?: FocusSettlingFrameV1;
+  private observedSelectedNodeIds = new Set<string>();
+  private observedFocusedNodeId?: string;
+  private observedView?: string;
+  private observedVisionFocusSubjectId?: string;
+  private readonly viewListeners = new Set<(view: GraphActiveViewV1) => void>();
+  private readonly viewUiState = new Map<GraphViewIdV1, GraphViewUiStateV1>();
 
   private readonly onVisibilityChange = (): void => {
     this.activity.setDocumentSuspension(this.platform.document.hidden);
@@ -230,7 +245,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const deltaSeconds = this.lastFrameTimestamp === null ? 1 / 60 : Math.max(0, (timestamp - this.lastFrameTimestamp) / 1000);
     this.lastFrameTimestamp = timestamp;
     const moduleStart = this.platform.now();
-    const previousCameraFollowPoint = cameraFollowPoint(this.viewState, this.moduleView.positions);
+    const previousCameraFollowPoint = this.vision.deriveCentroid(
+      this.interaction.getCameraTrackingNodeIds(),
+      this.moduleView.positions,
+    );
     this.diagnostics.counters.moduleTicks += 1;
     const tickResult = this.moduleHost.tick({
       ...this.moduleView,
@@ -245,7 +263,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const compositionStart = this.platform.now();
     if (positions) {
       const requiresComposition = positions !== this.moduleView.positions;
-      const nextCameraFollowPoint = cameraFollowPoint(this.viewState, positions);
+      const nextCameraFollowPoint = this.vision.deriveCentroid(
+        this.interaction.getCameraTrackingNodeIds(),
+        positions,
+      );
       this.viewState = { ...this.viewState, positions };
       if (previousCameraFollowPoint && nextCameraFollowPoint) {
         this.vision.translateBy(subtractVec(nextCameraFollowPoint, previousCameraFollowPoint));
@@ -258,7 +279,6 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         this.projection.markGeometryDirty();
         this.activeFrameInvalidations.add('geometry');
       }
-      this.updateFocusSettlingFrame(timestamp, positions, tickResult?.requestNextFrame === true);
     }
     if (tickResult?.camera) {
       this.vision.setState(tickResult.camera);
@@ -305,9 +325,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.themePalette = freezeGraphVisualThemeV2(options.themePalette);
     this.resolveThemePalette = options.resolveThemePalette;
     this.nodeActions = options.nodeActions;
+    this.reactions = options.reactions;
     this.modules = options.modules;
     this.experience = resolveGraphExperienceContractV1(options.experience);
-    this.consciousness = new Consciousness(this.experience);
     this.scheduler = new SessionFrameSchedulerV1(
       this.platform,
       () => !this.isSuspended(),
@@ -340,12 +360,17 @@ export class GraphSessionRuntime implements GraphSessionV1 {
           usesGeneratedInitialPositions(this.profile.profileSettings),
         )
       : undefined;
+    this.consciousness = new Consciousness(
+      this.experience,
+      readMemorySnapshot(restoredLayout?.moduleState[CONSCIOUS_MEMORY_STATE_KEY_V1]),
+    );
     const freshOverview = this.createInitialViewState();
     this.viewState = restoredLayout ?? freshOverview;
     this.viewState = withAttention(
       this.viewState,
       this.reconcileAttention(this.viewState.selectedNodeIds),
     );
+    this.synchronizeObservedConsciousState();
     this.projectionSelection = allOf(this.store.readDocument());
     this.renderSelection = allOf(this.store.readDocument());
 
@@ -397,10 +422,14 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         experience: this.experience,
         ego: this.consciousness.ego,
         getAttention: () => this.consciousness.attention,
+        getOverviewConstellationNodeIds: () => this.consciousness.awareness.nodeIds,
         setAttention: (nodeIds) => this.reconcileAttention(nodeIds),
-        hitTest: (point, pointerKind) => {
-          this.updateRendererScene([]);
-          return this.renderer.pick({ point, pointerKind });
+        hitTest: (point, pointerKind, retainedHoverNodeId) => {
+          // A removal preview may hide its own target. Retain only that already acquired
+          // subject for picking, using the backend's real projected hit shape.
+          this.updateRendererScene([], retainedHoverNodeId);
+          try { return this.renderer.pick({ point, pointerKind }); }
+          finally { if (retainedHoverNodeId) this.updateRendererScene([]); }
         },
         getDocument: () => this.store.readDocument(),
         getViewState: () => this.viewState,
@@ -418,8 +447,6 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         onIntent: (intent) => this.emitIntent(intent),
         onActivateNode: (nodeId) => this.invokePrimaryNodeAction(nodeId),
         onInputQueued: () => this.scheduleFrame(0, 'presentation'),
-        onFocusFramingRequested: () => this.beginFocusSettlingFrame(),
-        onUserCameraInput: () => { this.focusSettlingFrame = undefined; },
       });
       this.platform.document.addEventListener('visibilitychange', this.onVisibilityChange);
       visibilityListenerInstalled = true;
@@ -467,6 +494,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         this.viewState,
         this.reconcileAttention(this.viewState.selectedNodeIds),
       );
+      this.synchronizeObservedConsciousState();
       this.vision.setState(this.viewState.camera);
       this.moduleHost.documentChanged(next);
       this.moduleHost.viewChanged(this.viewState);
@@ -563,6 +591,40 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.recomputeView();
   }
 
+  getActiveView(): GraphActiveViewV1 {
+    this.requireActive();
+    return resolveGraphActiveViewV1(this.viewState);
+  }
+
+  getAvailableViews(): readonly GraphViewIdV1[] {
+    this.requireActive();
+    return [...this.experience.allowedStates];
+  }
+
+  async setView(viewId: GraphViewIdV1): Promise<void> {
+    this.requireActive();
+    if (!this.experience.allowedStates.includes(viewId)) throw new Error(`View ${viewId} is not permitted.`);
+    if (viewId === 'focus' && this.viewState.selectedNodeIds.length === 0) {
+      throw new Error('Focus requires an available constellation member.');
+    }
+    if (viewId === 'focus' && this.viewState.focusedNodeId === undefined) {
+      throw new Error('Focus requires an explicit subject.');
+    }
+    this.interaction.reset();
+    this.setFocusState(viewId === 'focus' ? this.viewState.focusedNodeId : undefined, viewId);
+  }
+
+  getViewUiState(viewId: GraphViewIdV1): GraphViewUiStateV1 | undefined {
+    this.requireActive();
+    const state = this.viewUiState.get(viewId);
+    return state && { ...state, expandedSectionIds: [...state.expandedSectionIds] };
+  }
+
+  setViewUiState(viewId: GraphViewIdV1, state: GraphViewUiStateV1): void {
+    this.requireActive();
+    this.viewUiState.set(viewId, { ...state, expandedSectionIds: [...new Set(state.expandedSectionIds)] });
+  }
+
   async setSelection(nodeIds: readonly string[]): Promise<void> {
     this.requireActive();
     this.setSelectionState(nodeIds);
@@ -570,28 +632,21 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   async focusNode(nodeId: string | null): Promise<void> {
     this.requireActive();
-    if (nodeId !== null && !this.store.hasNode(nodeId)) {
-      throw new Error(`Cannot focus unknown node "${nodeId}".`);
+    if (nodeId !== null && !this.renderSelection.nodeIds.has(nodeId)) {
+      throw new Error(`Cannot focus unavailable node "${nodeId}".`);
     }
     this.interaction.clearPreview();
     if (nodeId === null) {
-      const selectedNodeIds = [...this.viewState.selectedNodeIds];
-      this.setFocusState(undefined);
-      if (selectedNodeIds.length > 1) await this.fitNodes(selectedNodeIds);
-      else {
-        this.setSelectionState([]);
-        await this.fitNodes();
-      }
+      this.interaction.cancelCameraTransition();
+      this.setFocusState(undefined, this.viewState.selectedNodeIds.length > 0 ? 'explore' : 'overview');
       return;
     }
-    this.setFocusState(nodeId);
-    if (this.viewState.selectedNodeIds.length > 0) {
-      const positions = this.focusNeighborhoodNodeIds(nodeId)
-        .map((id) => this.moduleView.positions[id])
-        .filter((position): position is Vec3 => position !== undefined);
-      this.fitPositions(positions, this.moduleView.positions[nodeId], undefined, true);
-      this.beginFocusSettlingFrame(nodeId);
+    const changed = this.viewState.focusedNodeId !== nodeId;
+    if (!this.viewState.selectedNodeIds.includes(nodeId)) {
+      this.setSelectionState([...this.viewState.selectedNodeIds, nodeId]);
     }
+    this.setFocusState(nodeId);
+    if (changed) this.interaction.recenterSubject(nodeId);
   }
 
   async applyExternalInfluence(
@@ -605,6 +660,21 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       experience: this.experience,
       availableNodeIds,
     });
+    if (resolution.result.status !== 'rejected' && resolution.rememberedNodeIds !== undefined) {
+      const consciousness = this.consciousness.receiveExogenous({
+        source: 'exogenous',
+        type: 'replace-remembered-subjects',
+        nodeIds: resolution.rememberedNodeIds,
+      }, {
+        availableNodeIds,
+        relationships: documentRelationships(document),
+      });
+      this.refreshFrame();
+      return {
+        ...resolution.result,
+        rememberedNodeIds: [...consciousness.remembered.nodeIds],
+      };
+    }
     if (resolution.result.status === 'rejected' || resolution.attentionNodeIds === undefined) {
       return resolution.result;
     }
@@ -625,15 +695,33 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       || focusedNodeId !== this.viewState.focusedNodeId;
     if (stateChanged) {
       const { focusedNodeId: _focusedNodeId, ...withoutFocus } = this.viewState;
+      const currentMode = resolveGraphUxStateV1(this.viewState);
+      const viewMode = focusedNodeId !== undefined
+        ? 'focus'
+        : currentMode === 'focus' ? 'explore' : currentMode;
       this.viewState = focusedNodeId === undefined
-        ? { ...withoutFocus, selectedNodeIds: attentionNodeIds }
-        : { ...withoutFocus, selectedNodeIds: attentionNodeIds, focusedNodeId };
+        ? { ...withoutFocus, selectedNodeIds: attentionNodeIds, viewMode }
+        : { ...withoutFocus, selectedNodeIds: attentionNodeIds, focusedNodeId, viewMode };
       this.moduleHost.viewChanged(this.viewState);
       this.recomputeView();
     }
-    if (influence.framing === 'fit-state') {
-      if (focusedNodeId !== undefined) await this.focusNode(focusedNodeId);
-      else if (attentionNodeIds.length > 0) await this.fitNodes(attentionNodeIds);
+    if (influence.type === 'replace-attention' && influence.framing === 'fit-state') {
+      if (focusedNodeId !== undefined) {
+        this.fitPositions(this.focusNeighborhoodNodeIds(focusedNodeId)
+          .map((id) => this.moduleView.positions[id]).filter((p): p is Vec3 => p !== undefined),
+          this.moduleView.positions[focusedNodeId], undefined, true);
+      }
+      else if (attentionNodeIds.length > 0) {
+        const fitNodeIds = attentionFitNodeIdsV1(
+          attentionNodeIds,
+          document.edges,
+          this.renderSelection.nodeIds,
+          this.renderSelection.edgeIds,
+        );
+        await this.fitNodes(fitNodeIds, attentionNodeIds.length === 1
+          ? { centerNodeId: attentionNodeIds[0] }
+          : undefined);
+      }
       else await this.fitNodes();
     }
     return {
@@ -690,12 +778,16 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (minimumRadius !== undefined && (!Number.isFinite(minimumRadius) || minimumRadius < 0)) {
       throw new Error('Fit minimum radius must be a non-negative finite number.');
     }
+    this.interaction.cancelCameraTransition();
+    this.interaction.resetVisionInterest();
     this.fitPositions(positions, center, minimumRadius);
   }
 
   async resetCamera(options?: TransitionOptionsV1): Promise<void> {
     this.requireActive();
     assertTransition(options);
+    this.interaction.cancelCameraTransition();
+    this.interaction.resetVisionInterest();
     this.resetCameraState();
     const focusedNodeId = this.viewState.focusedNodeId;
     this.synchronizeCameraState();
@@ -736,6 +828,14 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         usesGeneratedInitialPositions(this.profile.profileSettings),
       ), this.profile.dimensions, focalLengthMm(this.profile.profileSettings));
       this.viewState = restoredViewState;
+      const restoredMemory = readMemorySnapshot(
+        restoredViewState.moduleState[CONSCIOUS_MEMORY_STATE_KEY_V1],
+      );
+      this.consciousness.restoreMemory(restoredMemory ?? {
+        schemaVersion: 1,
+        observationCount: 0,
+        buckets: [],
+      });
       this.viewState = withAttention(
         this.viewState,
         this.reconcileAttention(this.viewState.selectedNodeIds),
@@ -764,6 +864,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   createControlPort(): GraphSessionControlPortV1 {
     return {
+      toggleConstellationNode: (nodeId, modality) => {
+        this.requireActive();
+        this.interaction.queueConstellationToggle(nodeId, modality);
+      },
       getSessionOverrides: () => cloneOverrides(this.sessionOverrides),
       onSessionOverridesChanged: (listener) => {
         this.overrideListeners.add(listener);
@@ -1025,6 +1129,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     };
   }
 
+  onViewChanged(listener: (view: GraphActiveViewV1) => void): Disposable {
+    this.requireActive();
+    this.viewListeners.add(listener);
+    return { dispose: () => { this.viewListeners.delete(listener); } };
+  }
+
   onIntent(listener: (intent: GraphIntentV1) => void): Disposable {
     return this.subscribe(this.intentListeners, listener);
   }
@@ -1058,6 +1168,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.surfaceResizeSubscription = null;
     this.platform.document.removeEventListener('visibilitychange', this.onVisibilityChange);
     this.intentListeners.clear();
+    this.viewListeners.clear();
     this.graphChangedListeners.clear();
     this.errorListeners.clear();
     this.overrideListeners.clear();
@@ -1099,6 +1210,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       pinnedNodeIds: [],
       camera: defaultCamera(profile.dimensions, focalLengthMm(profile.profileSettings)),
       selectedNodeIds: [],
+      viewMode: 'overview',
       activeFilters: {},
       moduleState: {},
     };
@@ -1107,7 +1219,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private recomputeView(resetInteraction = true): void {
     if (resetInteraction) this.interaction.reset();
     const document = this.store.readDocument();
-    const previousCameraFollowPoint = cameraFollowPoint(this.viewState, this.viewState.positions);
+    const previousCameraFollowPoint = this.vision.deriveCentroid(
+      this.interaction.getCameraTrackingNodeIds(),
+      this.viewState.positions,
+    );
     this.projectionView = this.projection.project(this.moduleHost, {
       sourceDocument: document,
       document,
@@ -1122,7 +1237,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       regionLayouts: [],
     });
     if (this.projectionView.commitPositions) {
-      const nextCameraFollowPoint = cameraFollowPoint(this.viewState, this.projectionView.positions);
+      const nextCameraFollowPoint = this.vision.deriveCentroid(
+        this.interaction.getCameraTrackingNodeIds(),
+        this.projectionView.positions,
+      );
       this.viewState = cloneGraphViewStateV1({
         ...this.viewState,
         positions: this.projectionView.positions,
@@ -1141,6 +1259,20 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     }
     this.projectionSelection = this.projectionView.projectionSelection;
     this.renderSelection = this.projectionView.renderSelection;
+    const availableAttention = this.viewState.selectedNodeIds.filter((id) => this.renderSelection.nodeIds.has(id));
+    const focusAvailable = this.viewState.focusedNodeId !== undefined
+      && availableAttention.includes(this.viewState.focusedNodeId);
+    const mode = resolveGraphUxStateV1(this.viewState);
+    const nextMode = availableAttention.length === 0
+      ? mode === 'explore' && this.viewState.selectedNodeIds.length === 0 ? 'explore' : 'overview'
+      : mode === 'focus' && !focusAvailable ? 'explore' : mode;
+    const { focusedNodeId: _focus, ...withoutFocus } = this.viewState;
+    this.viewState = {
+      ...withoutFocus, selectedNodeIds: this.reconcileAttention(availableAttention), viewMode: nextMode,
+      ...(focusAvailable && nextMode === 'focus' ? { focusedNodeId: _focus } : {}),
+    };
+    this.projectionView = { ...this.projectionView, viewState: this.viewState };
+    this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame(true, 'content');
     this.updateSurface();
   }
@@ -1149,11 +1281,28 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     schedule = true,
     invalidation: SessionInvalidationClassV1 = 'presentation',
   ): void {
+    const view = resolveGraphActiveViewV1(this.viewState);
+    if (view.id === 'focus') {
+      this.consciousness.ego.intendVision({ kind: 'follow-subject', nodeId: view.subjectNodeId });
+    } else if (this.observedVisionFocusSubjectId !== undefined
+      && GRAPH_VIEW_DEFINITIONS_V1.focus.framing.exitInterest === 'retain-focal-point') {
+      this.consciousness.ego.intendVision({ kind: 'retain-focal-point' });
+    }
+    this.observedVisionFocusSubjectId = view.id === 'focus' ? view.subjectNodeId : undefined;
+    const key = JSON.stringify(view);
+    if (key !== this.observedView) {
+      this.observedView = key;
+      for (const listener of [...this.viewListeners]) {
+        try { listener({ ...view }); } catch { /* Observers cannot veto committed state. */ }
+      }
+    }
     if (invalidation === 'presentation') this.presentationRevision += 1;
     this.activeFrameInvalidations?.add(invalidation);
     this.moduleView = this.projection.compose({
       host: this.moduleHost,
       consciousness: this.consciousness,
+      experience: this.experience,
+      resolveObjectActivationPreview: () => this.interaction?.getObjectActivationPreview() ?? null,
       projectionView: this.projectionView,
       viewState: this.viewState,
       theme: this.themePalette,
@@ -1168,12 +1317,14 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (schedule) this.scheduleFrame(0, invalidation);
   }
 
-  private updateRendererScene(invalidations: readonly SessionInvalidationClassV1[]): void {
+  private updateRendererScene(invalidations: readonly SessionInvalidationClassV1[], retainedHoverNodeId?: string): void {
     const frame = this.projection.frames.get();
     if (!frame) return;
     this.renderSceneRevision += 1;
     this.renderer.updateScene({
       ...frame,
+      ...(retainedHoverNodeId ? { nodes: frame.nodes.map((node) => node.id === retainedHoverNodeId
+        ? { ...node, opacity: 1 } : node) } : {}),
       revision: this.renderSceneRevision,
       presentationRevision: this.presentationRevision,
       view: {
@@ -1181,7 +1332,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         camera: this.vision.getState(),
         viewport: this.surface.getViewport(),
       },
-      labels: frame.policy?.labelMode === 'off' ? [] : frame.nodes.map((node) => ({
+      labels: frame.nodes.filter((node) => frame.policy?.labelMode !== 'off' || node.labelForceVisible).map((node) => ({
         id: `label:${node.id}`,
         nodeId: node.id,
         text: node.label,
@@ -1255,22 +1406,25 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       .filter((position): position is Vec3 => position !== undefined);
     const center = policy.fitCenter === 'focused-node' && this.viewState.focusedNodeId
       ? this.moduleView.positions[this.viewState.focusedNodeId]
-      : undefined;
+      : policy.fitTarget === 'selection' && visibleSelectedNodeIds.length === 1
+        ? this.moduleView.positions[visibleSelectedNodeIds[0]]
+        : undefined;
     this.vision.fit(positions,
       policy.fitTarget === 'focused-neighborhood' ? FOCUS_FIT_PADDING_PX : 48,
       center, 0,
-      policy.fitTarget === 'focused-neighborhood' ? 'square' : 'viewport');
-    if (policy.fitTarget === 'focused-neighborhood') this.beginFocusSettlingFrame();
+      policy.fitTarget === 'focused-neighborhood' ? 'square' : 'viewport',
+      positions.length === 1 ? SINGLE_NODE_FIT_MAX_PROJECTED_SCALE : undefined);
   }
 
+  /** Explicit Focus fit uses the complete presentation field, including distant members. */
   private focusNeighborhoodNodeIds(focusedNodeId: string): readonly string[] {
-    const neighbors = this.store.readDocument().edges.flatMap((edge) => {
-      if (!this.renderSelection.edgeIds.has(edge.id)) return [];
-      if (edge.sourceId === focusedNodeId && this.renderSelection.nodeIds.has(edge.targetId)) return [edge.targetId];
-      if (edge.targetId === focusedNodeId && this.renderSelection.nodeIds.has(edge.sourceId)) return [edge.sourceId];
-      return [];
-    });
-    return [...new Set([focusedNodeId, ...neighbors])];
+    return [...new Set([
+      ...this.viewState.selectedNodeIds.filter((id) => this.renderSelection.nodeIds.has(id)),
+      ...immediateNeighborhoodFitNodeIdsV1(
+        focusedNodeId, this.store.readDocument().edges,
+        this.renderSelection.nodeIds, this.renderSelection.edgeIds,
+      ),
+    ])];
   }
 
   private fitPositions(
@@ -1286,6 +1440,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       center,
       minimumRadius,
       squareFrame ? 'square' : 'viewport',
+      positions.length === 1 ? SINGLE_NODE_FIT_MAX_PROJECTED_SCALE : undefined,
     );
     this.synchronizeCameraState();
     this.projectionView = { ...this.projectionView, viewState: this.viewState };
@@ -1294,70 +1449,26 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.refreshFrame(true, 'camera');
   }
 
-  private beginFocusSettlingFrame(nodeId = this.viewState.focusedNodeId): void {
-    if (!nodeId || resolveGraphUxStateV1(this.viewState) !== 'focus') {
-      this.focusSettlingFrame = undefined;
-      return;
-    }
-    this.focusSettlingFrame = {
-      nodeId,
-      sampleCount: 0,
-    };
-  }
-
-  private updateFocusSettlingFrame(
-    timestamp: number,
-    positionsById: Readonly<Record<string, Vec3>>,
-    layoutStillActive: boolean,
-  ): void {
-    const framing = this.focusSettlingFrame;
-    if (!framing) return;
-    if (this.viewState.focusedNodeId !== framing.nodeId || resolveGraphUxStateV1(this.viewState) !== 'focus') {
-      this.focusSettlingFrame = undefined;
-      return;
-    }
-    if (layoutStillActive && framing.lastSampleTimestamp !== undefined
-      && timestamp - framing.lastSampleTimestamp < 100) return;
-    const positions = this.focusNeighborhoodPositions(framing.nodeId, positionsById);
-    const center = positionsById[framing.nodeId];
-    if (!center || Object.keys(positions).length === 0) {
-      this.focusSettlingFrame = undefined;
-      return;
-    }
-    framing.lastSampleTimestamp = timestamp;
-    framing.sampleCount += 1;
-    this.vision.fit(Object.values(positions), FOCUS_FIT_PADDING_PX, center, 0, 'square');
-    this.synchronizeCameraState();
-    this.projectionView = { ...this.projectionView, viewState: this.viewState };
-    this.moduleView = { ...this.moduleView, viewState: this.viewState };
-    this.projection.markDirty();
-    this.activeFrameInvalidations?.add('camera');
-    if (!layoutStillActive || framing.sampleCount >= 50) this.focusSettlingFrame = undefined;
-  }
-
-  private focusNeighborhoodPositions(
-    nodeId: string,
-    positionsById: Readonly<Record<string, Vec3>>,
-  ): Readonly<Record<string, Vec3>> {
-    return Object.fromEntries(this.focusNeighborhoodNodeIds(nodeId).flatMap((candidateId) => {
-      const position = positionsById[candidateId];
-      return position ? [[candidateId, position]] : [];
-    }));
-  }
-
   private setSelectionState(nodeIds: readonly string[]): void {
     const selectedNodeIds = this.reconcileAttention(
-      [...new Set(nodeIds)].filter((id) => this.store.hasNode(id)),
+      [...new Set(nodeIds)].filter((id) => this.renderSelection.nodeIds.has(id)),
     );
-    const focusedNodeId = selectedNodeIds.length === 0
+    const focusedNodeId = this.viewState.focusedNodeId === undefined || !selectedNodeIds.includes(this.viewState.focusedNodeId)
       ? undefined
       : this.viewState.focusedNodeId;
+    const currentMode = resolveGraphUxStateV1(this.viewState);
+    const viewMode = selectedNodeIds.length === 0
+      ? currentMode === 'explore' && this.viewState.selectedNodeIds.length === 0 ? 'explore' : 'overview'
+      : focusedNodeId === undefined && currentMode === 'focus'
+      ? 'explore'
+      : currentMode;
     if (sameIds(selectedNodeIds, this.viewState.selectedNodeIds)
-      && focusedNodeId === this.viewState.focusedNodeId) return;
+      && focusedNodeId === this.viewState.focusedNodeId
+      && this.viewState.viewMode === viewMode) return;
     const { focusedNodeId: _focusedNodeId, ...withoutFocus } = this.viewState;
     this.viewState = focusedNodeId === undefined
-      ? { ...withoutFocus, selectedNodeIds }
-      : { ...withoutFocus, selectedNodeIds, focusedNodeId };
+      ? { ...withoutFocus, selectedNodeIds, viewMode }
+      : { ...withoutFocus, selectedNodeIds, focusedNodeId, viewMode };
     this.projectionView = { ...this.projectionView, viewState: this.viewState };
     this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
@@ -1374,12 +1485,22 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     }).attention.nodeIds];
   }
 
-  private setFocusState(nodeId: string | undefined): void {
+  private setFocusState(
+    nodeId: string | undefined,
+    requestedViewMode?: 'overview' | 'explore' | 'focus',
+  ): void {
     if (nodeId !== undefined && !this.store.hasNode(nodeId)) return;
-    if (this.viewState.focusedNodeId === nodeId) return;
-    if (nodeId === undefined) this.focusSettlingFrame = undefined;
+    const currentMode = resolveGraphUxStateV1(this.viewState);
+    const viewMode = requestedViewMode ?? (nodeId !== undefined
+      ? 'focus'
+      : currentMode === 'focus'
+        ? this.viewState.selectedNodeIds.length > 0 ? 'explore' : 'overview'
+        : currentMode);
+    if (this.viewState.focusedNodeId === nodeId && this.viewState.viewMode === viewMode) return;
     const { focusedNodeId: _focusedNodeId, ...withoutFocus } = this.viewState;
-    this.viewState = nodeId === undefined ? withoutFocus : { ...withoutFocus, focusedNodeId: nodeId };
+    this.viewState = nodeId === undefined
+      ? { ...withoutFocus, viewMode }
+      : { ...withoutFocus, focusedNodeId: nodeId, viewMode };
     this.projectionView = { ...this.projectionView, viewState: this.viewState };
     this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
@@ -1388,6 +1509,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private emitIntent(intent: GraphIntentV1): void {
+    this.reactToIntent(intent);
     for (const listener of [...this.intentListeners]) {
       try {
         listener(cloneIntent(intent));
@@ -1397,10 +1519,63 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     }
   }
 
+  private reactToIntent(intent: GraphIntentV1): void {
+    const registrations = this.reactions?.registrations() ?? [];
+    for (const observation of this.consciousObservations(intent)) {
+      for (const reaction of this.consciousness.observe(observation, registrations)) {
+        const outcome = this.consciousness.ego.consider(
+          this.consciousness.ego.intend(reaction),
+          (candidate) => ({ status: 'accepted', directive: candidate.directive }),
+        );
+        if (outcome.status === 'rejected' || !this.nodeActions || !this.hasNode(reaction.subjectId)) continue;
+        this.nodeActions.invoke(
+          reaction.actionId,
+          this.nodeActionContext(reaction.subjectId),
+          (failure) => this.handleNodeActionFailure(failure),
+        );
+      }
+    }
+  }
+
+  private consciousObservations(intent: GraphIntentV1): readonly ConsciousObservationV1[] {
+    if (intent.type === 'node-activated') {
+      return [{ type: 'node-activated', subjectId: intent.nodeId, timestamp: intent.timestamp }];
+    }
+    if (intent.type === 'node-drag-ended') {
+      return [{ type: 'node-drag-ended', subjectId: intent.nodeId, timestamp: intent.timestamp }];
+    }
+    if (intent.type === 'selection-changed') {
+      const next = new Set(intent.selectedNodeIds);
+      const added = intent.selectedNodeIds.filter((nodeId) => !this.observedSelectedNodeIds.has(nodeId));
+      this.observedSelectedNodeIds = next;
+      return added.map((subjectId) => ({ type: 'node-selected', subjectId, timestamp: intent.timestamp }));
+    }
+    if (intent.type === 'focus-changed') {
+      const changed = intent.focusedNodeId !== undefined
+        && intent.focusedNodeId !== this.observedFocusedNodeId;
+      this.observedFocusedNodeId = intent.focusedNodeId;
+      return changed
+        ? [{ type: 'node-focused', subjectId: intent.focusedNodeId!, timestamp: intent.timestamp }]
+        : [];
+    }
+    return [];
+  }
+
+  private synchronizeObservedConsciousState(): void {
+    this.observedSelectedNodeIds = new Set(this.viewState.selectedNodeIds);
+    this.observedFocusedNodeId = this.viewState.focusedNodeId;
+  }
+
   private synchronizeModuleState(): void {
+    const moduleState = this.moduleHost.exportState(this.viewState.moduleState);
     this.viewState = cloneGraphViewStateV1({
       ...this.viewState,
-      moduleState: this.moduleHost.exportState(this.viewState.moduleState),
+      moduleState: {
+        ...moduleState,
+        [CONSCIOUS_MEMORY_STATE_KEY_V1]: JSON.parse(JSON.stringify(
+          this.consciousness.reactions.memory.snapshot(),
+        )) as JsonValue,
+      },
     });
   }
 
@@ -1455,7 +1630,14 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private resolveNodeSelection(nodeId: string): readonly string[] {
-    return [nodeId];
+    const document = this.store.readDocument();
+    const edges = document.edges.filter((edge) => this.renderSelection.edgeIds.has(edge.id));
+    const group = this.consciousness.resolveOverviewConstellation(
+      nodeId, this.renderSelection.nodeIds,
+      documentRelationships({ ...document, edges }),
+      JSON.stringify([document.documentId, document.revision, edges.map((edge) => edge.id).sort()]),
+    );
+    return group?.nodeIds ?? [];
   }
 
   private handleNodeActionFailure(failure: GraphNodeActionFailureV1): void {
@@ -1630,29 +1812,6 @@ function scaleVec(value: Vec3, amount: number): Vec3 {
   return { x: value.x * amount, y: value.y * amount, z: value.z * amount };
 }
 
-function selectionCentroid(
-  selectedNodeIds: readonly string[],
-  positions: Readonly<Record<string, Vec3>>,
-): Vec3 | undefined {
-  const selectedPositions = selectedNodeIds.flatMap((nodeId) => {
-    const position = positions[nodeId];
-    return position ? [position] : [];
-  });
-  if (!selectedPositions.length) return undefined;
-  const total = selectedPositions.reduce((sum, position) => addVec(sum, position), { x: 0, y: 0, z: 0 });
-  return scaleVec(total, 1 / selectedPositions.length);
-}
-
-function cameraFollowPoint(
-  state: Pick<GraphViewStateV1, 'selectedNodeIds' | 'focusedNodeId'>,
-  positions: Readonly<Record<string, Vec3>>,
-): Vec3 | undefined {
-  if (resolveGraphUxStateV1(state) === 'focus' && state.focusedNodeId) {
-    return positions[state.focusedNodeId];
-  }
-  return selectionCentroid(state.selectedNodeIds, positions);
-}
-
 function cloneFilter(filter: GraphFilterRequestV1): GraphFilterRequestV1 {
   return JSON.parse(JSON.stringify(filter)) as GraphFilterRequestV1;
 }
@@ -1762,6 +1921,14 @@ function sameIds(a: readonly string[], b: readonly string[]): boolean {
 
 function cloneIntent(intent: GraphIntentV1): GraphIntentV1 {
   return JSON.parse(JSON.stringify(intent)) as GraphIntentV1;
+}
+
+function readMemorySnapshot(value: JsonValue | undefined): MemorySnapshotV1 | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, JsonValue>;
+  if (candidate.schemaVersion !== 1 || !Number.isSafeInteger(candidate.observationCount)
+    || !Array.isArray(candidate.buckets)) return undefined;
+  return candidate as unknown as MemorySnapshotV1;
 }
 
 function assertTransition(options?: TransitionOptionsV1): void {

@@ -1,3 +1,5 @@
+import type { GraphViewObjectPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
+import type { GraphExperienceContractV1 } from '../../contracts/v1/index.ts';
 import type { AnimusSnapshotV1 } from '../animus/index.ts';
 import type { ConsciousnessSnapshot } from '../consciousness/index.ts';
 import {
@@ -15,7 +17,7 @@ import {
   type GraphColorV2,
   type GraphVisualThemeV2,
 } from '../theme/index.ts';
-import { classifyAnimaConsciousnessV1 } from './AnimaAwareness.ts';
+import { createAnimaConsciousnessPresentationV1, type AnimaPresentationPhaseV1 } from './AnimaAwareness.ts';
 
 /**
  * The sole semantic-to-visual compilation boundary.
@@ -27,6 +29,8 @@ import { classifyAnimaConsciousnessV1 } from './AnimaAwareness.ts';
 export function compileAnimaSceneV1(options: {
   readonly snapshot: AnimusSnapshotV1;
   readonly consciousness: ConsciousnessSnapshot;
+  readonly experience?: GraphExperienceContractV1;
+  readonly objectActivationPreview?: GraphViewObjectPreviewV1 | null;
   readonly nodeContributions?: Readonly<Record<string, GraphNodeRenderContributionV1>>;
   readonly edgeContributions?: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
   readonly regionContributions?: readonly GraphRegionRenderContributionV1[];
@@ -37,10 +41,11 @@ export function compileAnimaSceneV1(options: {
   const theme = options.theme ?? DEFAULT_GRAPH_VISUAL_THEME_V2;
   const policy = options.presentationPolicy ?? DEFAULT_GRAPH_PRESENTATION_POLICY_V2;
   const interaction = options.snapshot.interaction;
-  const consciousnessClasses = classifyAnimaConsciousnessV1({
-    attention: options.consciousness.attention,
-    awareness: options.consciousness.awareness,
-    projectedNodeIds: options.snapshot.displaySelection.nodeIds,
+  const presentation = createAnimaConsciousnessPresentationV1({
+    ...options.consciousness, experience: options.experience,
+    objectActivationPreview: options.objectActivationPreview, interaction, document: options.snapshot.document,
+    visibleNodeIds: options.snapshot.displaySelection.nodeIds,
+    visibleEdgeIds: options.snapshot.displaySelection.edgeIds,
   });
   return {
     geometryRevision: options.geometryRevision,
@@ -61,10 +66,16 @@ export function compileAnimaSceneV1(options: {
       .filter((node) => options.snapshot.displaySelection.nodeIds.has(node.id))
       .map((node) => {
         const contribution = options.nodeContributions?.[node.id];
-        const attended = consciousnessClasses.byNodeId[node.id] === 'attended';
-        const focused = interaction.focusedNodeId === node.id;
+        const attended = presentation.objectPreview
+          ? presentation.objectPreview.attentionNodeIds.includes(node.id)
+          : presentation.consciousnessClasses.byNodeId[node.id] === 'attended';
+        const focused = presentation.sceneInteraction.focusedNodeId === node.id;
         const hovered = interaction.hoveredNodeId === node.id;
-        const opacity = finiteOpacity(contribution?.opacity, 1);
+        const phase = presentation.highlight.phaseByNodeId[node.id] ?? 'void';
+        const opacity = Math.min(finiteOpacity(contribution?.opacity, 1), sceneOpacity(phase, 'node'));
+        const label = presentation.labelRaising.byNodeId[node.id];
+        const suppressed = label?.disposition === 'suppress';
+        const forced = label?.disposition === 'force';
         const stroked = focused || attended || contribution?.strokeWidth !== undefined;
         return {
           id: node.id,
@@ -76,7 +87,7 @@ export function compileAnimaSceneV1(options: {
             : { nodeScaleExponent: contribution.nodeScaleExponent }),
           finalColor: constrainedColor(contribution?.finalColor ?? (focused
             ? theme.colors.focusedNode
-            : attended
+            : phase === 'highlighted'
               ? theme.colors.selectedNode
               : contribution?.color ?? theme.colors.node), theme),
           opacity,
@@ -85,26 +96,25 @@ export function compileAnimaSceneV1(options: {
             strokeWidth: contribution?.strokeWidth ?? (focused ? 2 : 1),
           } : {}),
           labelColor: constrainedColor(contribution?.labelColor ?? theme.colors.label, theme),
-          labelOpacity: finiteOpacity(contribution?.labelOpacity, opacity),
+          labelOpacity: suppressed ? 0 : forced ? finiteOpacity(contribution?.labelOpacity, 1)
+            : Math.min(finiteOpacity(contribution?.labelOpacity, opacity), opacity),
           labelFontSize: finitePositive(contribution?.labelFontSize, theme.labelFont.sizePx),
           ...(contribution?.labelOffset === undefined ? {} : { labelOffset: { ...contribution.labelOffset } }),
-          ...(contribution?.showLabel === undefined ? {} : { showLabel: contribution.showLabel }),
-          ...(contribution?.labelForceVisible === undefined
-            ? {}
-            : { labelForceVisible: contribution.labelForceVisible }),
+          ...(suppressed ? { showLabel: false } : forced ? { showLabel: true }
+            : contribution?.showLabel === undefined ? {} : { showLabel: contribution.showLabel }),
+          ...(forced ? { labelForceVisible: true } : suppressed ? { labelForceVisible: false }
+            : contribution?.labelForceVisible === undefined ? {} : { labelForceVisible: contribution.labelForceVisible }),
           ...(contribution?.labelPriority === undefined ? {} : { labelPriority: contribution.labelPriority }),
-          ...(contribution?.labelAlwaysVisible === undefined
-            ? {}
-            : { labelAlwaysVisible: contribution.labelAlwaysVisible }),
+          ...(forced ? { labelAlwaysVisible: true } : suppressed ? { labelAlwaysVisible: false }
+            : contribution?.labelAlwaysVisible === undefined ? {} : { labelAlwaysVisible: contribution.labelAlwaysVisible }),
           ...(contribution?.labelSaliencyBoost === undefined
             ? {}
             : { labelSaliencyBoost: contribution.labelSaliencyBoost }),
-          labelStatePriority: contribution?.labelStatePriority
-            ?? (focused ? 4 : attended ? 3 : hovered ? 2
-              : contribution?.labelAlwaysVisible === true ? 1 : 0),
+          labelStatePriority: label?.priority ?? contribution?.labelStatePriority
+            ?? (focused ? 4 : attended ? 3 : hovered ? 2 : 0),
         };
       }),
-    edges: compileEdges(options.snapshot, options.edgeContributions, theme, policy),
+    edges: compileEdges(options.snapshot, options.edgeContributions, theme, policy, presentation.highlight.phaseByEdgeId),
     backgroundColor: constrainedColor(theme.colors.background, theme),
     labelFont: theme.labelFont,
     policy,
@@ -116,6 +126,7 @@ function compileEdges(
   contributions: Readonly<Record<string, GraphEdgeRenderContributionV1>> | undefined,
   theme: GraphVisualThemeV2,
   policy: GraphPresentationPolicyV2,
+  phases: Readonly<Record<string, AnimaPresentationPhaseV1>>,
 ): readonly GraphRenderEdgeV1[] {
   const canonical: GraphRenderEdgeV1[] = snapshot.document.edges
     .filter((edge) => snapshot.displaySelection.edgeIds.has(edge.id))
@@ -123,7 +134,7 @@ function compileEdges(
       const contribution = contributions?.[edge.id];
       const explicitColor = contribution?.color;
       const color = constrainedColor(explicitColor ?? theme.colors.edge, theme);
-      const opacity = finiteOpacity(contribution?.opacity, 1);
+      const opacity = Math.min(finiteOpacity(contribution?.opacity, 1), sceneOpacity(phases[edge.id] ?? 'void', 'edge'));
       return {
         id: edge.id,
         sourceId: edge.sourceId,
@@ -139,7 +150,7 @@ function compileEdges(
           ? false
           : contribution?.arrowAtTarget ?? (edge.directed ?? false),
         arrowColor: constrainedColor(contribution?.arrowColor ?? explicitColor ?? theme.colors.arrow, theme),
-        arrowOpacity: finiteOpacity(contribution?.arrowOpacity, opacity),
+        arrowOpacity: Math.min(finiteOpacity(contribution?.arrowOpacity, opacity), opacity),
       };
     });
   if (policy.edgeAggregation !== 'unordered-pair') return canonical;
@@ -185,4 +196,8 @@ function finiteOpacity(value: number | undefined, fallback: number): number {
   return value !== undefined && Number.isFinite(value)
     ? Math.max(0, Math.min(1, value))
     : fallback;
+}
+
+function sceneOpacity(phase: AnimaPresentationPhaseV1, kind: 'node' | 'edge'): number {
+  return phase === 'void' ? 0 : phase === 'dimmed' ? kind === 'node' ? 0.24 : 0.6 : 1;
 }

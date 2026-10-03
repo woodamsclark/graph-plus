@@ -6,6 +6,10 @@ Baseline: V1 extraction implemented; V1.1 adds shared UI and node-click actions
 
 Date: 2026-08-22
 
+View update: the [View and Scene Contract](graph-engine-view-scene-contract.md)
+supersedes the historical click, hover, Focus scene, and implicit framing rules below.
+Hover now previews the admitted ordinary object activation; only click commits it.
+
 Migration note: the selection/Ego/Awareness ownership in this contract is superseded by
 [Graph Engine agency and Awareness ontology](graph-engine-agency-awareness-ontology.md).
 Phases 2 through 5 have migrated internal conscious-state ownership, endogenous policy
@@ -816,11 +820,10 @@ the complete visual scene, and renderer backends draw without interpreting graph
 or semantic theme roles.
 
 The internal fixed policy has three states: Overview (whole graph), Explore (selected
-constellation), and Focus (one local node). A one-node selection enters Explore. Focus
-is entered only by an explicit focus operation and does not imply selection membership,
-but it is valid only while some selection remains. Background activation exits Focus to
-Explore when two or more nodes remain selected, or clears a one-node selection and
-returns to Overview. Neither transition implicitly moves or fits the camera.
+constellation), and Focus (one local root within a constellation). A one-node selection
+enters Explore. Focus is entered only by an explicit focus operation and preserves
+selection membership. Background activation exits Focus to Explore while retaining the
+constellation. Neither transition implicitly moves or fits the camera.
 
 Center + Fit uses the arithmetic centroid for graph and selection targets and the
 focused node for a local target. It preserves camera angle and up vector. Explore
@@ -833,10 +836,11 @@ an unselected node also selects the shortest path from it to the nearest current
 constellation member; Ctrl does not change that behavior. The external highlight policy
 can reveal a highlight seed, its immediate neighbors, and its incident links. Explore's
 state contract overrides selection to selected nodes and selected-to-selected links
-only; hover remains the one-hop exception. Focus scopes highlighting to selected
-structure plus the focused neighborhood. Anima forces the hovered label, gives its immediate neighbors
-a 50% Saliency boost, and raises aware or focused labels; unrelated dim labels are
-suppressed, and remaining labels use camera-range Saliency. Dim context nodes use
+only; hover remains the one-hop exception. Focus highlights the constellation, retains
+its immediate neighbors as a dim frontier, and temporarily isolates the focused-root-to-
+hovered-neighbor connection during hover. Anima forces labels only for that highlighted
+focus path; unrelated dim labels are suppressed, and remaining labels use camera-range
+Saliency. Dim context nodes use
 24% opacity and 80% desaturation. Cmd-wheel is not a zoom mechanic. Tag nodes use the
 same selection, Focus, label, and presentation rules as ordinary nodes.
 
@@ -1305,6 +1309,7 @@ interface GraphEngineLeaseV1 {
 
   registerConsumer(registration: ConsumerRegistrationV1): Promise<void>;
   registerNodeActions(actions: readonly GraphNodeActionRegistrationV1[]): Disposable;
+  registerReactions?(reactions: readonly GraphReactionRegistrationV1[]): Disposable;
   createSession(options: GraphSessionOptionsV1): Promise<GraphSessionV1>;
   release(): Promise<void>;
 }

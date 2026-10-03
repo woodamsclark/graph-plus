@@ -332,6 +332,7 @@ export class Vision {
     center?: Vec3,
     minimumRadius = 0,
     frame: VisionFitFrame = 'viewport',
+    maximumProjectedScale?: number,
   ): void {
     if (!positions.length || this.viewport.width <= 0 || this.viewport.height <= 0) return;
     const target = center ? { ...center } : centroid(positions);
@@ -354,18 +355,29 @@ export class Vision {
       const zoom = clamp(Math.min(
         Math.max(1, fitWidth - paddingPx * 2) / width,
         Math.max(1, fitHeight - paddingPx * 2) / height,
+        finitePositive(maximumProjectedScale, Number.POSITIVE_INFINITY),
       ), MIN_ZOOM, MAX_ZOOM);
       const offset = subtract(this.state.position, this.state.target);
       this.state = { ...this.state, target, position: add(target, offset), zoom };
       return;
     }
 
-    const radius = Math.max(1, minimumRadius, ...positions.map((position) => distance(position, target)));
     const backwards = normalize(subtract(this.state.position, this.state.target));
-    const distanceForFit = frame === 'square'
-      ? Math.max(10, radius * Math.max(1, this.viewport.height) * Math.max(MIN_ZOOM, this.state.zoom)
-        / Math.max(1, fitHeight / 2 - paddingPx))
-      : Math.max(10, radius * 2.4 * Math.max(MIN_ZOOM, this.state.zoom));
+    const positionDistanceForFit = perspectiveFitDistance({
+      positions,
+      target,
+      basis: cameraBasis(this.state),
+      focalLength: Math.max(1, this.viewport.height) * Math.max(MIN_ZOOM, this.state.zoom),
+      fitWidth,
+      fitHeight,
+      paddingPx,
+      minimumRadius,
+    });
+    const scaleDistanceForFit = maximumProjectedScale === undefined
+      ? 0
+      : (Math.max(MIN_ZOOM, this.state.zoom) / DEFAULT_PERSPECTIVE_ZOOM) * DEFAULT_PERSPECTIVE_DISTANCE
+        / finitePositive(maximumProjectedScale, Number.POSITIVE_INFINITY);
+    const distanceForFit = Math.max(positionDistanceForFit, scaleDistanceForFit);
     this.state = {
       ...this.state,
       target,
@@ -379,6 +391,7 @@ export class Vision {
     paddingPx = 48,
     center?: Vec3,
     frame: VisionFitFrame = 'viewport',
+    maximumProjectedScale?: number,
   ): void {
     if (!positions.length || this.viewport.width <= 0 || this.viewport.height <= 0) return;
     const target = center ? { ...center } : centroid(positions);
@@ -393,16 +406,26 @@ export class Vision {
       const minimumZoom = clamp(Math.min(
         Math.max(1, fitWidth - paddingPx * 2) / width,
         Math.max(1, fitHeight - paddingPx * 2) / height,
+        finitePositive(maximumProjectedScale, Number.POSITIVE_INFINITY),
       ), MIN_ZOOM, MAX_ZOOM);
       if (this.state.zoom < minimumZoom) this.state = { ...this.state, zoom: minimumZoom };
       return;
     }
-    const radius = Math.max(1, ...positions.map((position) => distance(position, target)));
-    const maximumDistance = frame === 'square'
-      ? Math.max(MIN_PERSPECTIVE_DISTANCE,
-        radius * Math.max(1, this.viewport.height) * Math.max(MIN_ZOOM, this.state.zoom)
-          / Math.max(1, fitHeight / 2 - paddingPx))
-      : Math.max(MIN_PERSPECTIVE_DISTANCE, radius * 2.4 * Math.max(MIN_ZOOM, this.state.zoom));
+    const positionMaximumDistance = perspectiveFitDistance({
+      positions,
+      target,
+      basis: cameraBasis(this.state),
+      focalLength: Math.max(1, this.viewport.height) * Math.max(MIN_ZOOM, this.state.zoom),
+      fitWidth,
+      fitHeight,
+      paddingPx,
+      minimumRadius: 0,
+    });
+    const scaleMaximumDistance = maximumProjectedScale === undefined
+      ? 0
+      : (Math.max(MIN_ZOOM, this.state.zoom) / DEFAULT_PERSPECTIVE_ZOOM) * DEFAULT_PERSPECTIVE_DISTANCE
+        / finitePositive(maximumProjectedScale, Number.POSITIVE_INFINITY);
+    const maximumDistance = Math.max(positionMaximumDistance, scaleMaximumDistance);
     const offset = subtract(this.state.position, this.state.target);
     const currentDistance = Math.max(0.0001, length(offset));
     if (currentDistance <= maximumDistance) return;
@@ -411,6 +434,39 @@ export class Vision {
       position: add(this.state.target, scaleVector(offset, maximumDistance / currentDistance)),
     };
   }
+}
+
+function finitePositive(value: number | undefined, fallback: number): number {
+  return value !== undefined && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function perspectiveFitDistance(options: {
+  readonly positions: readonly Vec3[];
+  readonly target: Vec3;
+  readonly basis: CameraBasis;
+  readonly focalLength: number;
+  readonly fitWidth: number;
+  readonly fitHeight: number;
+  readonly paddingPx: number;
+  readonly minimumRadius: number;
+}): number {
+  const halfWidth = Math.max(0.5, options.fitWidth / 2 - options.paddingPx);
+  const halfHeight = Math.max(0.5, options.fitHeight / 2 - options.paddingPx);
+  let requiredDistance = Math.max(
+    MIN_PERSPECTIVE_DISTANCE,
+    options.minimumRadius * options.focalLength / Math.min(halfWidth, halfHeight),
+  );
+  for (const position of options.positions) {
+    const relative = subtract(position, options.target);
+    const depthOffset = dot(relative, options.basis.forward);
+    requiredDistance = Math.max(
+      requiredDistance,
+      Math.abs(dot(relative, options.basis.right)) * options.focalLength / halfWidth - depthOffset,
+      Math.abs(dot(relative, options.basis.up)) * options.focalLength / halfHeight - depthOffset,
+      MIN_PERSPECTIVE_DISTANCE - depthOffset,
+    );
+  }
+  return requiredDistance;
 }
 
 

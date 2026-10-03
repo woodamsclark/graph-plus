@@ -1,8 +1,10 @@
+import type { GraphViewObjectPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
 import type {
   EngineModuleDescriptorV1,
   EngineModulePolicyV1,
   GraphDimensionsV1,
   GraphDocumentV1,
+  GraphExperienceContractV1,
   GraphViewStateV1,
   JsonValue,
   Vec3,
@@ -52,6 +54,9 @@ export interface GraphModulePipelineStateV1 {
   readonly formActive: boolean;
   /** Presentation-scoped Attention and Awareness, installed for frame composition. */
   readonly consciousness?: ConsciousnessSnapshot;
+  /** Admission policy for noncommitting previews of View interactions. */
+  readonly experience?: GraphExperienceContractV1;
+  readonly objectActivationPreview?: GraphViewObjectPreviewV1 | null;
   /** Runtime-only interaction state. It is never persisted or exported as graph data. */
   readonly draggedNodeId?: string;
   /** Runtime-only hover state supplied to presentation modules. */

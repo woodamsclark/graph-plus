@@ -188,7 +188,7 @@ test('Consciousness owns Ego, Attention, and geometry-free Awareness per session
   if (/\.ego\b/.test(exogenousBody)) {
     violations.push(`${consciousnessPath}: exogenous influence is incorrectly routed through Ego`);
   }
-  if (!/this\.consciousness = new Consciousness\(this\.experience\)/.test(session)) {
+  if (!/this\.consciousness = new Consciousness\(\s*this\.experience/.test(session)) {
     violations.push('GraphSessionRuntime does not own one Consciousness aggregate');
   }
   const experienceContract = readFileSync(join(

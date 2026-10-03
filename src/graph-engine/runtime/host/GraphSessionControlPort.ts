@@ -14,4 +14,6 @@ export interface GraphSessionControlPortV1 {
   createNodeActionContext(nodeId: string): GraphNodeActionContextV1;
   resolveNodeActions(actionIds: readonly string[], nodeId: string): readonly GraphResolvedNodeActionV1[];
   invokeNodeAction(actionId: string, nodeId: string): boolean;
+  /** User-authored membership toggle, admitted through the same Ego plan as Ctrl-click. */
+  toggleConstellationNode(nodeId: string, modality?: 'mouse' | 'touch' | 'pen' | 'keyboard'): void;
 }

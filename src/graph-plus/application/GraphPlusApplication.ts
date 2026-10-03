@@ -277,6 +277,11 @@ export class GraphPlusPresentationV1<TFile> {
     await this.applyFilter();
     await this.session.setSelection([nodeId]);
     await this.session.focusNode(nodeId);
+    // Show in Graph+ is an explicit reveal operation, including a neighborhood fit.
+    const document = await this.session.exportDocument();
+    const nodeIds = [...new Set([nodeId, ...document.edges.flatMap((edge) =>
+      edge.sourceId === nodeId ? [edge.targetId] : edge.targetId === nodeId ? [edge.sourceId] : [])])];
+    await this.session.fitNodes(nodeIds, { centerNodeId: nodeId });
     return true;
   }
 

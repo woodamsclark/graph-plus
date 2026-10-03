@@ -186,9 +186,29 @@ test('focus zoom-out constraint uses the current exact neighborhood fit', () => 
   const perspectiveFit = perspective.getState();
   perspective.setState({ ...perspectiveFit, position: { x: 0, y: 0, z: 10_000 } });
   perspective.constrainZoomOutToFit(positions, 48, center, 'square');
-  equal(vectorDistance(perspective.getState().position, perspective.getState().target),
-    vectorDistance(perspectiveFit.position, perspectiveFit.target),
-    '3D Focus should not dolly farther out than its exact neighborhood fit');
+  assert(Math.abs(
+    vectorDistance(perspective.getState().position, perspective.getState().target)
+      - vectorDistance(perspectiveFit.position, perspectiveFit.target),
+  ) < 0.000001, '3D Focus should not dolly farther out than its exact neighborhood fit');
+});
+
+test('perspective viewport fitting contains horizontal nodes in portrait and landscape', () => {
+  const positions = [{ x: -100, y: 0, z: 0 }, { x: 100, y: 0, z: 0 }];
+  for (const [width, height] of [[360, 640], [640, 360]] as const) {
+    const camera = new GraphCameraController({
+      position: { x: 0, y: 0, z: 100 }, target: { x: 0, y: 0, z: 0 },
+      up: { x: 0, y: 1, z: 0 }, zoom: 50 / 24, projection: 'perspective',
+    }, '3d');
+    camera.setViewport(width, height);
+    camera.fit(positions, 48);
+    for (const position of positions) {
+      const projected = camera.worldToScreen(position);
+      assert(projected.x >= 48 - 0.000001 && projected.x <= width - 48 + 0.000001,
+        `${width}x${height} perspective fit should respect the usable horizontal frame`);
+      assert(projected.y >= 48 - 0.000001 && projected.y <= height - 48 + 0.000001,
+        `${width}x${height} perspective fit should respect the usable vertical frame`);
+    }
+  }
 });
 
 test('camera fitting can reserve a stable world-space radius before nodes expand', () => {
@@ -208,9 +228,33 @@ test('camera fitting can reserve a stable world-space radius before nodes expand
   perspective.setViewport(640, 360);
   perspective.fit([{ x: 0, y: 0, z: 0 }], 48, { x: 0, y: 0, z: 0 }, 500);
   const state = perspective.getState();
-  equal(Math.hypot(
+  const distance = Math.hypot(
     state.position.x - state.target.x,
     state.position.y - state.target.y,
     state.position.z - state.target.z,
-  ), 2500, 'a 3D predictive fit should dolly for the requested future radius');
+  );
+  assert(Math.abs(distance - (500 * 750 / 132)) < 0.000001,
+    'a 3D predictive fit should reserve the requested radius inside the padded short edge');
+});
+
+test('camera fitting caps the projected scale of a target with no spatial extent', () => {
+  const target = { x: 10, y: 20, z: 0 };
+  const orthographic = new GraphCameraController({
+    position: { x: 0, y: 0, z: 10 }, target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic',
+  }, '2d');
+  orthographic.setViewport(640, 360);
+  orthographic.fit([target], 48, target, 0, 'viewport', 5);
+  equal(orthographic.getState().zoom, 5,
+    'a lone 2D point should use the requested projected-scale ceiling');
+
+  const perspective = new GraphCameraController({
+    position: { x: 0, y: 0, z: 100 }, target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 }, zoom: 50 / 24, projection: 'perspective',
+  }, '3d');
+  perspective.setViewport(640, 360);
+  perspective.fit([target], 48, target, 0, 'viewport', 5);
+  const projected = perspective.worldToScreen(target);
+  assert(Math.abs(projected.scale - 5) < 0.000001,
+    'a lone 3D point should dolly to the same projected-scale ceiling');
 });

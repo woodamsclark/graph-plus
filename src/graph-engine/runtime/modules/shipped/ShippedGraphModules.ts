@@ -32,7 +32,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       defaultSettings: {
         renderQuality: 'automatic',
         labelMode: 'adaptive',
-        nodeRadiusScale: 2,
+        nodeRadiusScale: 1,
         edgeThicknessScale: 0.1,
         showArrows: false,
         tokenColors: {},
@@ -144,7 +144,6 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       capabilities: ['animation'],
       settingsSchemaVersion: 1,
       defaultSettings: {
-        nodeWorldScaleBlend: 0,
         labelPosition: 'above',
         adaptiveLabelThreshold2d: 65,
         adaptiveLabelThreshold3d: 50,

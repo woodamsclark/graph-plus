@@ -22,6 +22,7 @@ import {
   type GraphRendererRegistryV2,
 } from './render/index.ts';
 import type { GraphNodeActionRuntimeV1 } from './actions/index.ts';
+import type { GraphReactionRuntimeV1 } from './consciousness/index.ts';
 import type { GraphSessionControlPortV1 } from './host/index.ts';
 
 export type GraphThemePaletteResolverV1 = (container: HTMLElement) => GraphVisualThemeV2;
@@ -41,6 +42,7 @@ export interface SessionFactoryOptionsV1 {
 
 export interface GraphSessionHostServicesV1 {
   readonly nodeActions?: GraphNodeActionRuntimeV1;
+  readonly reactions?: GraphReactionRuntimeV1;
 }
 
 export interface HostedGraphSessionV1 {
@@ -139,6 +141,7 @@ export class SessionFactory {
       restoreViewState: options.restoreViewState,
       platform: this.createPlatform(options.container),
       nodeActions: hostServices.nodeActions,
+      reactions: hostServices.reactions,
       onDisposed: () => this.activeSessions.delete(runtime),
     });
     this.activeSessions.add(runtime);

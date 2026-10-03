@@ -13,6 +13,7 @@ export class GraphInput {
   private lastMousePoint: GraphScreenPointV1 = { x: 0, y: 0 };
   private lastMod = false;
   private lastCtrl = false;
+  private lastMeta = false;
   private lastShift = false;
   private lastAlt = false;
   private physicalCtrlHeld = false;
@@ -44,6 +45,7 @@ export class GraphInput {
     this.mouseInside = false;
     this.lastMod = false;
     this.lastCtrl = false;
+    this.lastMeta = false;
     this.lastShift = false;
     this.lastAlt = false;
     this.physicalCtrlHeld = false;
@@ -129,6 +131,7 @@ export class GraphInput {
       this.lastMousePoint = point;
       this.lastMod = platformMod(event, this.options.platform.window);
       this.lastCtrl = event.ctrlKey;
+      this.lastMeta = event.metaKey;
       this.lastShift = event.shiftKey;
       this.lastAlt = event.altKey;
     }
@@ -139,6 +142,7 @@ export class GraphInput {
     this.push({
       ...this.base(),
       type: 'pointer-move',
+      ctrl: event.ctrlKey, meta: event.metaKey, shift: event.shiftKey, alt: event.altKey,
       pointerId: event.pointerId,
       pointerKind,
       point,
@@ -165,17 +169,20 @@ export class GraphInput {
     if (event.key === 'Control') this.physicalCtrlHeld = event.type === 'keydown';
     const mod = platformMod(event, this.options.platform.window);
     const ctrl = event.ctrlKey;
+    const meta = event.metaKey;
     const shift = event.shiftKey;
     const alt = event.altKey;
-    if (mod === this.lastMod && ctrl === this.lastCtrl && shift === this.lastShift && alt === this.lastAlt) return;
+    if (mod === this.lastMod && meta === this.lastMeta && ctrl === this.lastCtrl && shift === this.lastShift && alt === this.lastAlt) return;
     this.lastMod = mod;
     this.lastCtrl = ctrl;
+    this.lastMeta = meta;
     this.lastShift = shift;
     this.lastAlt = alt;
     if (!this.mouseInside && (mod || ctrl || shift || alt)) return;
     this.push({
       ...this.base(),
       type: 'modifier-change',
+      meta,
       point: this.lastMousePoint,
       mod,
       ctrl,

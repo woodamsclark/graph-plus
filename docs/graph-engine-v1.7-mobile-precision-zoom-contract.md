@@ -26,7 +26,7 @@ input table is [Graph+ UI Interaction Matrix](graph-plus-ui-interaction-matrix.x
 
 ## 2. Normative gesture
 
-The gesture is:
+The original V1.7 background gesture is:
 
 1. Tap once.
 2. Tap a second time within the engine's double-tap interval.
@@ -37,9 +37,21 @@ Dragging down zooms in. Dragging up zooms out. Reversing direction during the sa
 gesture reverses the zoom continuously. Releasing the second touch ends the gesture
 without kinetic continuation.
 
+The current node-origin refinement uses the same receipt but recognizes different
+outcomes. A quick stationary second release activates the node. Any stationary 450 ms
+primary node hold enters Focus without activation or context. Crossing the movement threshold starts a
+reversible Focus transition: distance from the second-press origin maps through a smooth
+curve to the canonical viewport-aware focused-neighborhood fit, reaching it after 35%
+of the smaller viewport dimension. Moving back toward the origin reverses the camera
+transition. Background-origin movement retains the original precision-zoom behavior.
+
 The first and second taps must satisfy the existing spatial tolerance for a double
 tap. Vertical movement must cross a small drag threshold before zoom begins so hand
-jitter cannot consume an ordinary double tap.
+jitter cannot consume an ordinary double tap. The first tap commits eagerly and issues
+an interaction receipt containing the first press and release timestamps. A matching
+second press appends its own timestamp and immediately reconciles the appropriate
+post-tap selection or restores the pre-tap Focus subject. Focus is therefore restored
+before the held touch becomes precision zoom or any camera movement begins.
 
 ## 3. Camera semantics
 
@@ -50,9 +62,9 @@ jitter cannot consume an ordinary double tap.
 - The mapping is continuous and multiplicative, so equal vertical travel produces a
   comparable perceived scale change regardless of the starting zoom.
 - Existing camera minimum and maximum zoom/distance limits remain authoritative.
-- The gesture works in both 2D and 3D in Overview or Explore.
-- Focus, selection, explicit pins, canonical positions, Filter state, and Form state
-  remain unchanged.
+- Background-origin precision zoom works in both 2D and 3D in Overview or Explore.
+- Node-origin movement transfers Focus to its receipt subject while preserving explicit
+  pins, canonical positions, Filter state, and Form state.
 - Direct user zoom input cancels nonessential Anima camera choreography under the
   existing user-input precedence rule.
 
@@ -60,8 +72,9 @@ A stationary one-finger long press or secondary click on graph background perfor
 Center + Fit. Center targets the arithmetic centroid of selected nodes, or of the
 complete visible graph when nothing is selected. Fit adjusts zoom or camera distance
 to contain that same target. Angle, orientation, and up vector remain unchanged. A
-stationary long press or secondary click whose hit test resolves a node retains the
-node context-menu behavior instead. Explicit Reset Camera remains a separate operation.
+stationary primary long press whose hit test resolves a node enters Focus instead.
+Secondary click retains node context-menu behavior. Explicit Reset Camera remains a
+separate operation.
 
 ### 3.1 Canonical navigation matrix
 
@@ -70,37 +83,40 @@ node context-menu behavior instead. Explicit Reset Camera remains a separate ope
 | Desktop primary background drag | Pan | Pan | Pan |
 | Desktop secondary drag | Pan | Rotate | Rotate |
 | Unmodified trackpad translation | Pan | Pan | Orbit |
-| Trackpad pinch | Zoom around retained Vision framing point | Zoom around Awareness centroid | Zoom around Awareness centroid |
+| Trackpad pinch | Cursor-anchored in Overview; tracked subject in Explore/Focus | Zoom around cursor, including momentum | Zoom around camera locus or Awareness centroid |
 | Physical Ctrl-wheel | Zoom around cursor | Zoom around cursor | Zoom around cursor |
 | Mobile one-finger background drag | Pan | Pan | Pan |
 | Mobile two-finger translation | Pan | Rotate | Rotate |
-| Mobile pinch | Target-centered zoom concurrently with pan | Target-centered zoom concurrently with rotate | Target-centered zoom concurrently with rotate |
-| Double-tap, hold, vertical drag | Precision zoom | Precision zoom | Precision zoom |
+| Mobile pinch | Touch-midpoint zoom in Overview; tracked subject in Explore/Focus | Touch-midpoint zoom concurrently with rotate | Tracked-subject zoom concurrently with rotate |
+| Background double-tap, hold, vertical drag | Precision zoom | Precision zoom | Precision zoom |
+| Node double-tap and drag | Reversible transition to Focus fit | Reversible transition to Focus fit | Reversible transition to Focus fit |
 
 Mobile two-finger navigation begins after the movement threshold. Translation and
 pinch then compose: centroid movement pans in 2D or rotates in 3D while finger
-separation zooms around Ego's selection-derived Awareness centroid, not the touch centroid
-or serialized framing point. Two-finger rotate and pan retain selection.
+separation zooms around the touch midpoint in Overview. Constellation instead uses its
+clicked camera locus or Awareness centroid, and Focus uses the focused node. Overview
+never treats Attention or remembered Awareness as tracked. Two-finger rotate and pan
+retain selection. The [interaction state contract](graph-engine-interaction-state-contract.md)
+owns these state tracking rules.
 
 ## 4. Gesture arbitration
 
-Once the second held tap crosses the zoom threshold, precision zoom owns that pointer
-sequence. The same sequence must not:
+Once the second held background tap crosses the zoom threshold, precision zoom owns
+that pointer sequence. Once a matching node tap crosses it, the Focus transition owns
+the sequence. Neither sequence may:
 
-- focus, select, activate, or open a node;
+- activate or open a node;
 - begin or complete node dragging;
 - pan or orbit the camera;
-- open a long-press context menu;
+- open a node context menu;
 - leave a hover or pressed-node highlight latched; or
 - emit a click or double-click action on release.
 
-The gesture may begin over a node or over the background. Hit detection on either tap
-does not change the resulting zoom behavior after the threshold is crossed.
+The origin deliberately changes the result: background begins precision zoom; a node
+begins the reversible Focus transition.
 
-Before the threshold is crossed, existing tap behavior remains eligible. A completed
-stationary double tap is not assigned a new semantic action by this contract. If the
-second tap is released without qualifying as precision zoom, the interpreter resolves
-the sequence through the existing click/selection rules without synthesizing extra taps.
+Before the threshold is crossed, existing tap behavior remains eligible. A quick
+stationary double tap activates. A primary node hold enters Focus after 450 ms.
 
 A second pointer joining the sequence cancels the one-finger candidate and hands
 control to the existing two-finger pinch/pan recognizer. Suspension, view invalidation,
@@ -190,13 +206,12 @@ is evaluated independently for each mounted leaf.
 
 Automated pointer traces must prove:
 
-1. Double-tap, hold, and drag down increases zoom in 2D and 3D.
-2. Double-tap, hold, and drag up decreases zoom in 2D and 3D.
-3. Direction reversal changes zoom direction without starting a new gesture.
+1. Background double-tap, hold, and drag down increases zoom in 2D and 3D.
+2. Background double-tap, hold, and drag up decreases zoom in 2D and 3D.
+3. Node-origin drag distance moves reversibly between its starting camera and Focus fit.
 4. Zoom remains finite and inside camera limits under extreme travel.
-5. Beginning over a node never drags, focuses, activates, or opens that node once the
-   zoom threshold wins.
-6. Explore 3D precision zoom does not rotate and preserves selection.
+5. Beginning over a node never drags, activates, or opens it once the Focus transition wins.
+6. Node-origin transition enters Focus in 2D and 3D without moving the node.
 7. A second pointer cleanly transfers arbitration to pinch without a zoom jump.
 8. Cancellation and suspension leave no pointer capture, timer, pressed state, hover,
    or scheduled frame behind.
@@ -555,10 +570,11 @@ persists through session recreation without entering the canonical graph documen
 V1.7 does not require:
 
 - replacing pinch-to-zoom;
-- assigning an action to a stationary double tap;
+- adding another delayed single-tap recognizer;
 - zoom inertia;
 - platform-specific automatic sensitivity;
-- replacing Obsidian's native file-menu behavior or changing the active Markdown file;
+- replacing Obsidian's native file-menu behavior; Local Focus hops may change the active
+  Markdown file through the existing navigator capability;
 - clearing or rewriting a Filter merely to reveal a context-menu target;
 - previewing tag nodes or implementing a Graph+-specific note renderer;
 - a camera-relative flattening plane or a hard planar constraint;

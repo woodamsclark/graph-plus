@@ -484,8 +484,8 @@ test('L-LINEAR-04 initializes an editable build-out without pinning or reflowing
   await session.focusNode('join');
   deepEqual(
     (await session.exportViewState()).camera.target,
-    fitted.camera.target,
-    'focus should not recenter the camera onto the projected Linear build-out position',
+    { x: 0, y: -200, z: 0 },
+    'Focus should recenter onto the projected Linear subject without changing its layout',
   );
   await session.focusNode(null);
   await session.fitNodes();

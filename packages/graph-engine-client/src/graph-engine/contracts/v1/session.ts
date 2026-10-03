@@ -1,3 +1,4 @@
+import type { GraphActiveViewV1, GraphViewIdV1, GraphViewUiStateV1 } from './view.ts';
 import type { GraphDocumentV1 } from './document.ts';
 import type { GraphExperienceContractV1 } from './experience.ts';
 import type { GraphFilterRequestV1, GraphFilterScopeV1 } from './filter.ts';
@@ -33,6 +34,12 @@ export interface GraphSessionV1 {
   applyFilter(filter: GraphFilterRequestV1): Promise<void>;
   clearFilter(scope?: GraphFilterScopeV1): Promise<void>;
 
+  getActiveView(): GraphActiveViewV1;
+  getAvailableViews(): readonly GraphViewIdV1[];
+  setView(viewId: GraphViewIdV1): Promise<void>;
+  getViewUiState(viewId: GraphViewIdV1): GraphViewUiStateV1 | undefined;
+  setViewUiState(viewId: GraphViewIdV1, state: GraphViewUiStateV1): void;
+
   setSelection(nodeIds: readonly string[]): Promise<void>;
   focusNode(nodeId: string | null): Promise<void>;
   /** Apply host-translated truth without representing it as endogenous Ego intent. */
@@ -54,6 +61,7 @@ export interface GraphSessionV1 {
   exportPerformanceSnapshot(): Promise<GraphPerformanceSnapshotV1>;
   resetPerformanceMeasurements(): Promise<void>;
 
+  onViewChanged(listener: (view: GraphActiveViewV1) => void): Disposable;
   onIntent(listener: (intent: GraphIntentV1) => void): Disposable;
   onGraphChanged(listener: (event: GraphChangedEventV1) => void): Disposable;
   onError(listener: (error: GraphSessionErrorV1) => void): Disposable;
@@ -70,13 +78,25 @@ export interface GraphReplaceAttentionExternalInfluenceV1 {
   readonly framing?: 'preserve' | 'fit-state';
 }
 
-export type GraphExternalInfluenceV1 = GraphReplaceAttentionExternalInfluenceV1;
+export interface GraphReplaceRememberedSubjectsExternalInfluenceV1 {
+  readonly schemaVersion: 1;
+  readonly type: 'replace-remembered-subjects';
+  readonly nodeIds: readonly string[];
+}
+
+export type GraphExternalInfluenceV1 =
+  | GraphReplaceAttentionExternalInfluenceV1
+  | GraphReplaceRememberedSubjectsExternalInfluenceV1;
 
 export type GraphExternalInfluenceResultV1 =
   | {
       readonly status: 'accepted' | 'adjusted';
       readonly attentionNodeIds: readonly string[];
       readonly focusedNodeId?: string;
+    }
+  | {
+      readonly status: 'accepted' | 'adjusted';
+      readonly rememberedNodeIds: readonly string[];
     }
   | { readonly status: 'rejected'; readonly reason: string };
 

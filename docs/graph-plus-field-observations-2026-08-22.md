@@ -63,6 +63,9 @@ without treating the ownership guess as diagnosis.
   rotates. Two-finger centroid movement rotates while pinch separation zooms during
   the same gesture; pinch no longer suppresses rotation. In 2D, the combined gesture
   pans and zooms.
+- **Superseded 2026-09-30:** Physical-device feedback reversed the 3D Explore portion:
+  a one-finger background drag now orbits around the selected constellation. Overview
+  and 2D Explore continue to pan, and a direct touch on an eligible node still drags it.
 - **Likely ownership:** Shared Graph Engine touch-gesture recognition and camera intent
   mapping, with Graph+ responsible for any consumer-facing gesture guidance.
 - **Acceptance direction:** Verify both dimensions and the complete mapping with and
