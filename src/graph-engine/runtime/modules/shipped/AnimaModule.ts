@@ -1,5 +1,5 @@
 import type { JsonValue } from '../../../contracts/v1/index.ts';
-import { desaturateGraphColorV2, type GraphVisualThemeV2 } from '../../theme/index.ts';
+import { desaturateGraphColorV2, multiplyGraphColorAlphaV2, type GraphVisualThemeV2 } from '../../theme/index.ts';
 import type { GraphModuleInstanceV1, GraphModulePresentationPatchV1 } from '../GraphModuleTypes.ts';
 import { GraphLabelManager, type GraphLabelRequestV1 } from './GraphLabelManager.ts';
 import {
@@ -25,7 +25,6 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     readonly nodeIds: ReadonlySet<string>;
     readonly edgeIds: ReadonlySet<string>;
     readonly visibleEdges: Parameters<NonNullable<GraphModuleInstanceV1['contributeFrame']>>[0]['document']['edges'];
-    readonly relationships: ReadonlyMap<string, ReadonlySet<string>>;
     readonly degree: ReadonlyMap<string, number>;
   };
 
@@ -115,14 +114,17 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         const ordinaryColor = prior?.color
           ?? (node.tokens?.includes('kind:tag') ? this.palette.colors.tagNode : undefined)
           ?? this.palette.colors.node;
-        const color = role === 'highlighted'
+        const memory = presentation.constellationKindByNodeId[node.id] === 'memory';
+        const color = memory ? multiplyGraphColorAlphaV2(
+          this.palette.colors.memoryConstellation,
+          presentation.memoryStrengthByNodeId[node.id] ?? 1,
+        ) : role === 'highlighted'
           ? this.palette.colors.animaAccent
           : role === 'dimmed'
             ? desaturateGraphColorV2(ordinaryColor, 0.8)
             : ordinaryColor;
-        const selected = presentation.objectPreview
-          ? presentation.objectPreview.attentionNodeIds.includes(node.id)
-          : presentation.consciousnessClasses.byNodeId[node.id] === 'attended';
+        const selected = presentation.expressedAttentionNodeIds.has(node.id);
+        const focused = presentation.focusEmphasisNodeIds.has(node.id);
         const pinned = state.viewState.pinnedNodeIds.includes(node.id);
         const opacity = PRESENTATION_ROLE_OPACITY[role].node;
         const labelDecision = presentation.labelRaising.byNodeId[node.id];
@@ -135,15 +137,21 @@ export class AnimaModule implements GraphModuleInstanceV1 {
           finalColor: color,
           opacity,
           ...(labelDecision?.disposition === 'suppress' ? { showLabel: false, labelOpacity: 0 } : {}),
-          ...(selected || pinned || presentation.sceneInteraction.focusedNodeId === node.id ? {
+          ...(selected || pinned || focused ? {
             strokeColor: this.palette.colors.nodeOutline,
-            strokeWidth: presentation.sceneInteraction.focusedNodeId === node.id ? 3 : pinned ? 2 : 1,
+            strokeWidth: focused ? 3 : pinned ? 2 : 1,
           } : {}),
         }];
       }));
     const edgeContributions = Object.fromEntries(visibleEdges.map((edge) => {
       const prior = state.edgeContributions[edge.id];
-      const lit = presentation.highlight.highlightedEdgeIds.has(edge.id);
+      const kind = presentation.constellationKindByEdgeId[edge.id];
+      const lit = presentation.highlight.highlightedEdgeIds.has(edge.id) && kind === 'ego';
+      const memory = kind === 'memory';
+      const memoryStrength = Math.min(
+        presentation.memoryStrengthByNodeId[edge.sourceId] ?? 1,
+        presentation.memoryStrengthByNodeId[edge.targetId] ?? 1,
+      );
       const role = presentation.highlight.phaseByEdgeId[edge.id] ?? 'void';
       const opacity = PRESENTATION_ROLE_OPACITY[role].edge;
       const ordinaryColor = prior?.color ?? this.palette.colors.edge;
@@ -152,12 +160,12 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         ...prior,
         thickness: positive(prior?.baseThicknessScale, 1) * positive(prior?.thicknessScale, 1),
         opacity,
-        color: lit
+        color: memory ? multiplyGraphColorAlphaV2(this.palette.colors.memoryConstellation, memoryStrength) : lit
           ? this.palette.colors.highlightedNode
           : role === 'dimmed'
             ? desaturateGraphColorV2(ordinaryColor, 0.8)
             : ordinaryColor,
-        arrowColor: role === 'dimmed'
+        arrowColor: memory ? multiplyGraphColorAlphaV2(this.palette.colors.memoryConstellation, memoryStrength) : role === 'dimmed'
           ? desaturateGraphColorV2(ordinaryArrowColor, 0.8)
           : ordinaryArrowColor,
         arrowOpacity: opacity,
@@ -194,16 +202,12 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     const visibleNodes = state.renderSelection.nodeIds;
     const visibleEdges = state.document.edges.filter((edge) => state.renderSelection.edgeIds.has(edge.id)
       && visibleNodes.has(edge.sourceId) && visibleNodes.has(edge.targetId));
-    const relationships = new Map<string, Set<string>>();
     const degreeKeys = new Map<string, Set<string>>();
     for (const nodeId of visibleNodes) {
-      relationships.set(nodeId, new Set());
       degreeKeys.set(nodeId, new Set());
     }
     for (const edge of visibleEdges) {
       if (edge.sourceId === edge.targetId) continue;
-      relationships.get(edge.sourceId)?.add(edge.targetId);
-      relationships.get(edge.targetId)?.add(edge.sourceId);
       const ordered = edge.directed === false
         ? [edge.sourceId, edge.targetId].sort().join('\u0000')
         : `${edge.sourceId}\u0000${edge.targetId}`;
@@ -215,7 +219,6 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       nodeIds: state.renderSelection.nodeIds,
       edgeIds: state.renderSelection.edgeIds,
       visibleEdges,
-      relationships,
       degree: new Map([...degreeKeys].map(([id, keys]) => [id, keys.size])),
     };
     this.topologyCache = next;

@@ -209,6 +209,65 @@ test('R-SHELL-03 restores the compatible saved view without implicit reframing a
   await restored.dispose();
 });
 
+test('shared world updates geometry without replacing a surface viewport', async () => {
+  const value = harness();
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
+    modules: { 'force-layout': { enabled: true } },
+  });
+  const session = await value.create();
+  await session.focusNode('a');
+  await session.applyFilter({
+    schemaVersion: 1,
+    scope: 'render',
+    node: { op: 'has-token', token: 'keep' },
+  });
+  await session.fitNodes(['a']);
+  const before = await session.exportViewState();
+  const world = await session.exportWorldState();
+  let echoedWorldChanges = 0;
+  session.onWorldChanged(() => { echoedWorldChanges += 1; });
+
+  await session.applyWorldState({
+    ...world,
+    layoutModuleState: {
+      'force-layout': { schemaVersion: 1, alpha: 0, alphaTarget: 0, running: false, velocities: {} },
+    },
+  });
+  session.setLayoutAuthority(false);
+  session.setLayoutAuthority(true);
+  value.platform.flushFrame();
+  const force = value.factory.getDiagnostics().sessions[0]?.modules['force-layout'] as {
+    running?: boolean; targetStepRateHz?: number;
+  } | undefined;
+  equal(force?.running, false,
+    'shared layout-module state should settle a follower even when coordinates already match');
+  equal(force?.targetStepRateHz, 0,
+    'a follower should not restart physics when it later becomes layout authority');
+
+  await session.applyWorldState({
+    ...(await session.exportWorldState()),
+    positions: {
+      ...world.positions,
+      b: { x: 400, y: -250, z: 0 },
+    },
+    pinnedNodeIds: ['b'],
+  });
+
+  const after = await session.exportViewState();
+  deepEqual(after.positions.b, { x: 400, y: -250, z: 0 },
+    'the shared world should install canonical node coordinates');
+  deepEqual(after.pinnedNodeIds, ['b'], 'the shared world should install canonical pins');
+  deepEqual(after.camera, before.camera, 'world synchronization must not replace the surface camera');
+  deepEqual(after.selectedNodeIds, before.selectedNodeIds,
+    'world synchronization must not replace surface Attention');
+  equal(after.focusedNodeId, before.focusedNodeId,
+    'world synchronization must not replace the surface Focus subject');
+  deepEqual(after.activeFilters, before.activeFilters,
+    'world synchronization must not replace surface filters');
+  equal(echoedWorldChanges, 0, 'installing shared geometry should not create a synchronization loop');
+  await session.dispose();
+});
+
 test('neutral experience policy constrains programmatic Attention without exposing host concepts', async () => {
   const value = harness({
     experience: {

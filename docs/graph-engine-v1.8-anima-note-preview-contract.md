@@ -97,10 +97,10 @@ the focus controller.
 Ordinary hover remains useful during focus without replacing focus. When the pointer
 rests on a visible direct neighbor of the focused node, Anima temporarily presents
 the focused node, that neighbor, and their connecting link as the inspected path. The
-rest of the visible focus scope remains dim and its labels stay suppressed, so hover
-cannot reveal labels belonging to hidden second-hop nodes. Hovering
+prospective Focus scene uses the same rules as committed Focus: immediate neighbors are
+standard and inherit adaptive labeling, while unrelated context is void. Hovering
 a node outside the focused node's direct neighborhood leaves focused presentation
-unchanged. Removing the pointer restores the session constellation and dim frontier.
+unchanged. Removing the pointer restores the session constellation and standard frontier.
 
 When a node is focused, wheel or pinch zoom is anchored to that focused node rather
 than the pointer position. The camera continues to track the focused node while its

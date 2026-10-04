@@ -59,15 +59,14 @@ within the selected undirected link depth. Depth defaults to `1`, is adjustable 
 Graph+ Filter and tag/orphan preferences constrain eligible nodes, while the active
 root is always retained. Changing depth does not rewrite the Filter or canonical graph.
 
-Every active-root change creates a new local document identity. The root is ordered at
-the generated origin, pinned there for the lifetime of that local document, selected,
-and focused through ordinary Graph Engine state. The camera fits the newly derived
-document rather than inheriting full-vault coordinates. While the new neighborhood's
-physics settles, Local Graph+ periodically sizes the camera around the current node
-positions while keeping the root at viewport center. Tracking stops after movement
-stabilizes, after a bounded timeout, or immediately when the user manually changes the
-viewport. This keeps layout, force settling, focus, Anima highlighting, and camera
-framing aligned around the same root without changing shared link-force settings.
+Local Graph+ retains one stable session-map identity and canonical node order while the
+active note changes. It seeds projected nodes from the live Global Graph+ view when one
+is mounted, otherwise from the saved Global checkpoint. This reference is read-only:
+Local never overwrites Global layout or camera state. Existing Local coordinates remain
+owned by the session, while newly admitted members merge in their known full-graph
+coordinates. Force starts settled, and the camera fits once after the final coordinates
+are installed. Focus-only hops preserve camera scale, angle, and distance without
+pinning the subject or reheating layout.
 
 Global and Local Graph+ share the registered Graph+ profile and typed settings. They
 remain separate sessions, so Local Graph+ navigation cannot move or overwrite Global
@@ -103,11 +102,12 @@ views.
 4. **open local graph+** opens or reveals a `graph-plus-local` view in the right sidebar.
 5. A visible Global Graph+ follows active Markdown notes by focus without narrowing its
    saved projection or moving its camera to a single node.
-6. Local Graph+ follows the same active note with a fresh rooted local document, root
-   focus, root-centered layout, and neighbor-aware camera fit throughout initial settling.
+6. Local Graph+ follows the same active note inside one stable session map, preserving
+   existing positions and camera scale while recentering Focus on the new subject.
 7. Local depth `1` shows the root and direct eligible neighbors; larger values reveal
    successive connected layers up to `8` without changing the saved Filter.
-8. Global checkpoint state and Local layout/camera state remain isolated.
+8. Local reads Global coordinates as its placement reference but retains isolated
+   layout/camera ownership and never writes Local state into the Global checkpoint.
 9. Moving either view between a sidebar and main split does not change its identity or
    semantics.
 10. Graph surfaces remain transparent so native Obsidian main/sidebar translucency is

@@ -90,33 +90,26 @@ test('V1.9 runtime diagnostics classify work and reuse presentation-only project
   await session.dispose();
 });
 
-test('V1.9 shared graph+ lifecycle suspends hidden leaves and defers one reconciliation', () => {
+test('shared graph+ lifecycle suspends hidden leaves and releases host listeners on close', () => {
   const window = new Window();
   const content = window.document.createElement('section') as unknown as HTMLElement;
   let visible = true;
   (content as HTMLElement & { isShown: () => boolean }).isShown = () => visible;
   const suspensions: boolean[] = [];
   let previewClears = 0;
-  let reconciles = 0;
   let unregisters = 0;
   const lifecycle = new GraphPlusViewLifecycleV1(content, {
     setSuspended: (suspended) => suspensions.push(suspended),
     clearPreview: () => { previewClears += 1; },
-    reconcile: () => { reconciles += 1; },
   });
   lifecycle.register(() => { unregisters += 1; });
-  lifecycle.scheduleReconcile();
-  equal(lifecycle.rebuildScheduled, true, 'a visible leaf should debounce one reconciliation');
   visible = false;
   equal(lifecycle.synchronizeVisibility(), false, 'hidden state should be returned to follow routing');
-  equal(lifecycle.rebuildScheduled, false, 'hiding should cancel the active timer');
-  equal(lifecycle.hasReconcilePending, true, 'cancelled graph work should remain pending');
   deepEqual(suspensions, [true], 'the shared owner should suspend the consumer once');
   equal(previewClears, 1, 'hiding should clear preview ownership once');
   visible = true;
   equal(lifecycle.synchronizeVisibility(), true, 'visible state should resume follow routing');
   deepEqual(suspensions, [true, false], 'showing should resume the same consumer');
-  equal(reconciles, 1, 'showing should perform one deferred reconciliation');
   lifecycle.dispose();
   equal(unregisters, 1, 'disposal should release registered host events exactly once');
 });

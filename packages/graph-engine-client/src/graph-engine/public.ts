@@ -18,6 +18,8 @@ export {
 export { projectGraphTagsV1 } from './core/tags/index.ts';
 export {
   Ego,
+  Judgement,
+  type JudgementRuleV1,
   MemoryV1,
   faithfullyRememberExperienceV1,
   type ConsciousObservationV1,

@@ -20,11 +20,11 @@ export interface GraphViewDefinitionV1 {
   readonly title: string;
   readonly purpose: 'discover' | 'build' | 'focus';
   readonly interactions: {
-    readonly objectActivation: 'choose-constellation' | 'admit-or-present-object' | 'present-object';
+    readonly objectActivation: 'highlight-or-choose-constellation' | 'admit-or-present-object' | 'present-object';
     readonly backgroundActivation: GraphViewIdV1;
     readonly escapeActivation: GraphViewIdV1;
     readonly spaceActivation: 'clear-constellation' | 'preserve-scene';
-    readonly modifiedObjectActivation: 'toggle-membership';
+    readonly modifiedObjectActivation: 'remove-membership';
     /** Any visible, hittable node can be moved without admitting it to the constellation. */
     readonly nodeDrag: 'all-visible' | 'constellation-members';
     readonly membershipAddition: 'candidate-and-nearest-path';
@@ -39,10 +39,12 @@ export interface GraphViewDefinitionV1 {
   readonly scene: {
     readonly membership: 'attention';
     readonly context: 'standard' | 'dimmed' | 'focused-neighbors';
-    readonly hover: 'preview-object-activation';
+    readonly hover: 'preview-admission-or-view-entry';
     readonly hoverPath: 'nearest-constellation';
-    readonly modifiedHoverPath: 'addition-only';
-    readonly hoverContext: 'preserve-overview' | 'resulting-scene';
+    readonly modifiedHoverPath: 'none';
+    readonly hoverContext: 'committed-unless-view-entry';
+    /** A transient presentation lift, independent of committed Consciousness and Will. */
+    readonly hoverAwareness: { readonly phaseSteps: 1; readonly neighborhoodDepth: 0 | 1; readonly links: 'none' | 'incident' };
     readonly dragHighlights: 'preserve-scene';
     /** Reveal eligibility; adaptive layout, budgets and typography remain renderer settings. */
     readonly labels: {
@@ -77,12 +79,12 @@ function defineView(
   return Object.freeze({
     id, title, purpose,
     interactions: Object.freeze({
-      objectActivation: id === 'overview' ? 'choose-constellation'
+      objectActivation: id === 'overview' ? 'highlight-or-choose-constellation'
         : id === 'explore' ? 'admit-or-present-object' : 'present-object',
       backgroundActivation: id === 'overview' ? 'explore' : back,
       escapeActivation: back,
       spaceActivation: id === 'overview' ? 'clear-constellation' : 'preserve-scene',
-      modifiedObjectActivation: 'toggle-membership',
+      modifiedObjectActivation: 'remove-membership',
       nodeDrag: 'all-visible', membershipAddition: 'candidate-and-nearest-path',
     }),
     framing: Object.freeze({
@@ -90,8 +92,10 @@ function defineView(
       focusEntry: 'recenter-preserve-scale', back: 'preserve',
       exitInterest: id === 'focus' ? 'retain-focal-point' : 'preserve-intent',
     }),
-    scene: Object.freeze({ membership: 'attention', context, hover: 'preview-object-activation', hoverPath: 'nearest-constellation', modifiedHoverPath: 'addition-only',
-      hoverContext: id === 'overview' ? 'preserve-overview' : 'resulting-scene',
+    scene: Object.freeze({ membership: 'attention', context, hover: 'preview-admission-or-view-entry', hoverPath: 'nearest-constellation', modifiedHoverPath: 'none',
+      hoverContext: 'committed-unless-view-entry',
+      hoverAwareness: Object.freeze({ phaseSteps: 1, neighborhoodDepth: id === 'overview' ? 0 : 1,
+        links: id === 'overview' ? 'none' : 'incident' }),
       dragHighlights: 'preserve-scene',
       labels: Object.freeze({ focused: 'force', hovered: 'force', highlighted: 'force',
         dimmed: 'suppress', void: 'suppress', standard: 'fallback', removedMember: 'suppress' }) }),

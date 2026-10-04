@@ -13,7 +13,7 @@ export const GRAPH_PLUS_REQUESTED_CAPABILITIES_V1 = [
   'input',
   'filter',
   'projection',
-  'form',
+  // 'form', // Mind Map deferred; the engine module remains available to other consumers.
   'layout',
   'force-layout',
   'node-regions',
@@ -64,6 +64,9 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
         },
       },
       filtering: { policy: 'required' },
+      // Mind Map deferred. Lock it off even for saved enabled overrides.
+      form: { policy: 'forbidden' },
+      /*
       form: {
         policy: 'optional',
         defaultEnabled: false,
@@ -75,6 +78,7 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
           colorBranches: true,
         },
       },
+      */
       'force-layout': {
         policy: 'optional',
         defaultEnabled: true,

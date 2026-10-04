@@ -19,6 +19,7 @@ export interface GraphVisualThemeV2 {
     readonly selectedNode: GraphColorV2;
     readonly focusedNode: GraphColorV2;
     readonly highlightedNode: GraphColorV2;
+    readonly memoryConstellation: GraphColorV2;
     readonly nodeOutline: GraphColorV2;
     readonly edge: GraphColorV2;
     readonly arrow: GraphColorV2;
@@ -37,6 +38,7 @@ export const DEFAULT_GRAPH_VISUAL_THEME_V2: GraphVisualThemeV2 = Object.freeze({
     focusedNode: graphColorV2(0xe0 / 255, 0xaf / 255, 0x68 / 255),
     tagNode: graphColorV2(0xa7 / 255, 0x8b / 255, 0xfa / 255),
     highlightedNode: graphColorV2(0xe0 / 255, 0xaf / 255, 0x68 / 255),
+    memoryConstellation: graphColorV2(0x59 / 255, 0xad / 255, 0xd6 / 255),
     nodeOutline: graphColorV2(0xcd / 255, 0xd6 / 255, 0xf4 / 255),
     edge: graphColorV2(0x7f / 255, 0x84 / 255, 0x9c / 255),
     arrow: graphColorV2(0x7f / 255, 0x84 / 255, 0x9c / 255),

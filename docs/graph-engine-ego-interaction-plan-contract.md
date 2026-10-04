@@ -29,8 +29,9 @@ canonical graph data, conscious Memory, or a second selection store.
 The implementation follows these boundaries:
 
 - Input/Reflex recognize physical events and gestures, and acquire a target.
-- Ego captures interpreted input, proposes a View directive, and asks Experience
-  to admit, adjust, or reject it. One reducer derives the complete resulting state.
+- Ego captures interpreted input and proposes a View directive. Its owned
+  `Judgement` admits the intention after Experience validates or adjusts its meaning.
+  One reducer derives the complete resulting state.
 - Anima expresses the admitted plan as a transient preview.
 - The interaction runtime commits the admitted state to the existing owners.
   Consciousness retains authoritative Attention; View state mirrors membership
@@ -41,6 +42,32 @@ The implementation follows these boundaries:
 Exogenous events still update conscious state through their established policy
 path without seeking Ego approval. Such changes invalidate incompatible will.
 
+### Judgement and route ownership
+
+`Ego.judgement` owns the admission policy. Its initial rule allows every valid
+intention. Experience retains the existing structural constraints: available Views,
+interaction capabilities, subjects, and Attention cardinality. Permissive admission
+does not manufacture a missing subject or an unavailable View.
+
+Judgement is synchronous and has no effects, observations, or Memory writes. Its
+rule is immutable for its lifetime. A different rule has a different semantic
+revision, preventing an earlier will from being reused under a different policy.
+Hover and activation both evaluate the same owned Judgement. Generic interpreted
+commands, Reactions, and control-port node actions also pass through it.
+
+Quick Settings Back, Overview, Clear constellation, context-menu Focus, and
+membership toggles enter through the session's interaction control port. They queue
+semantic input for the ordinary document-identity/Will/commit boundary. Menu Focus
+admits the same visible connecting route as canvas Focus. Back means Escape's
+one-View retreat; Overview does not offer a forward-pointing Back button. Clearing
+a Local composition resolves to its permitted empty Constellation View.
+
+The public `setView`, `setSelection`, and `focusNode` compatibility setters install
+state for consumers and test/restoration workflows; interactive View controls must
+not use them. Host-translated arrivals use `applyExternalInfluence`, including
+application-level Show in Graph+. Received state does not emit endogenous
+selection/focus observations or request host navigation in response to itself.
+
 ## Captured input
 
 `EgoInteractionInputV1` captures:
@@ -49,16 +76,20 @@ path without seeking Ego approval. Such changes invalidate incompatible will.
 - target: a node ID or background;
 - modality: mouse, touch, pen, or keyboard;
 - independent Ctrl, Meta, Shift, and Alt facts.
+- optional explicit `membershipAction: 'toggle'` for Add/Remove menu input.
+- optional `objectAction: 'focus'` for explicit menu Focus;
+- optional `navigationAction` for Back, Overview, or Clear constellation controls.
 
 The input describes semantic activation. Coordinates, camera geometry, raw
 pointer/button history, hold timing, and drag recognition stay with Input/Reflex
 and Vision. This first implementation covers primary node activation,
-Ctrl membership toggles, the Add/Remove constellation menu actions, background activation, and Escape. Double activation,
+Ctrl membership removal, constellation and Focus menu actions, View navigation controls, background activation, and Escape. Double activation,
 node opening, holds, context menus, camera navigation, and dragging retain their
 existing interpreted-command paths through Ego's generic adjudication. They
 need plans only if a future interaction must predict their outcome.
 
-Ctrl means the membership-toggle modifier. Capturing Meta/Shift/Alt does not
+Ctrl means idempotent membership removal. The menu captures its toggle action
+explicitly rather than impersonating a physical Ctrl gesture. Capturing Meta/Shift/Alt does not
 assign them new activation behavior; platform Mod note previews retain their
 existing behavior.
 
@@ -69,7 +100,7 @@ existing behavior.
 - captured input and document identity;
 - its semantic context key and committed `before` state;
 - requested action: choose constellation, admit member, remove member,
-  focus member, enter Constellation through Overview background, or go back;
+  focus member, enter Constellation through Overview background, go back, or none;
 - admission outcome: accepted, adjusted, or rejected;
 - the admitted directive, or rejection reason;
 - resulting View, Attention membership, focused subject, and captured connecting path;
@@ -87,23 +118,59 @@ phase while retaining the same admitted resulting-state/effect objects. Click
 commits those objects rather than separately reconstructing the transition.
 Legacy Attention commands use the same state-realization reducer.
 
+### Ctrl activation outcome matrix
+
+Will resolves the complete activation outcome from committed membership. Anima
+expresses its object deltas during hover while keeping the committed View and
+Focus neighborhood. The View and subject columns below take effect only on click.
+
+| Target before input | Resulting membership | Resulting View / subject | Action |
+| --- | --- | --- | --- |
+| Unselected, in any View (including empty Constellation) | Unchanged | Unchanged | `none` |
+| Selected, in Overview | Remove target only | Overview | `remove-member` |
+| Selected, in Constellation, with members remaining | Remove target only | Constellation | `remove-member` |
+| Selected, another Focus member | Remove target only | Focus retains its subject | `remove-member` |
+| Selected Focus subject, with members remaining | Remove target only | Constellation, no subject | `remove-member` |
+| Last selected member, in any View | Empty | Overview, no subject | `remove-member` |
+
+`none` is an accepted no-change outcome: resulting state equals `before`, effects
+and connecting path are empty, and activation performs no mutation or observation.
+After Ctrl removal commits, holding Ctrl over that same target resolves to `none`;
+it cannot preview re-addition. Ctrl over a nonmember adds no outline, path, phase
+change, or hover-forced label. Independent remembered presentation remains intact.
+Releasing Ctrl resolves ordinary primary hover unless activation consumed this node visit; rearming requires pointer leave and return.
+
+The previous toggle rule was introduced in `a834813`. Both the planner and tests
+encoded nonmember Ctrl addition, while scene tests left the pointer after removal
+without checking the immediate held-Ctrl frame. This matrix supersedes that rule.
+
 ## Presentation is derived from admitted will
 
-Anima receives the plan's resulting state through `presentEgoInteractionPlanV1`.
-Ego captures the shortest visible connecting path when admitting a new member,
-and includes its nodes in the resulting Attention set. Anima uses that captured
-route for both ordinary and Ctrl-addition previews. Ctrl removal removes only the
-clicked node and has no route. Hover never realizes Attention or camera effects;
-activation commits the admitted candidate and route together. Overview whole-group
-entry retains its group-lookup contract instead of extending the previous set.
+`presentEgoInteractionPlanV1` derives `GraphInteractionPreviewV1` from Will.
+Its `objects` lane contains admitted node/link deltas and retains committed View
+context. Its `view-transition` lane additionally carries the admitted resulting
+state whenever admission enters Constellation, a group enters its View, or a member
+enters/hops Focus. That state supplies
+prospective scene context only; Consciousness and exported View remain committed.
 
-Overview keeps the discover field undimmed while showing prospective membership.
-Constellation and Focus express the admitted resulting scene. The detailed scene
-rules remain in the [View and Scene Contract](graph-engine-view-scene-contract.md).
+Overview unhighlighted nodes admit the candidate and its shortest visible route
+and enter Constellation in the same click. Committed Attention or Memory highlights enter their
+constellation. Constellation candidates admit membership only; members enter Focus.
+Preview brightness never decides which action applies. Ctrl removal always uses
+object deltas and retains committed context until activation, including subject or
+last-member removal. Will retains the full outcome for every action.
+
+Hover awareness is a separate Anima policy for object-delta previews: raise only the
+hovered node in Overview; in Constellation and Focus also raise immediate neighbors
+and incident links. Explicit View-transition previews do not receive this extra layer;
+they present the exact admitted destination scene. Hover awareness bypasses Ctrl
+removal/no-change. It never writes Consciousness or changes Will.
+
 Background input can be captured as will, but hovering background does not preview
 backing out of the current View.
 
-Picking still follows the rendered prospective scene. The existing Ctrl-removal
+Picking follows the committed View with explicit object additions and paths. A
+prospective focus cue never supplies a neighborhood for hit testing. The Ctrl-removal
 exception retains only the acquired removal target for picking if its own preview
 voids it. It does not make every void node interactive. A transient highlight is
 never evidence of committed membership.
@@ -115,7 +182,7 @@ A plan is current only while these semantic facts match:
 - document ID and revision, including topology;
 - committed View, Attention membership/order, and focused subject;
 - canonical available node IDs and projected node/edge sets;
-- Awareness membership used to resolve Overview constellations;
+- Awareness and separate remembered membership used to resolve source-typed Overview constellations;
 - the Experience contract.
 
 The constellation lookup must be derived from these facts. Changing graph
@@ -141,8 +208,13 @@ consumer routing, and Memory observation semantics.
 Pointer leave, pointer cancellation, interaction reset, dimension reset,
 suspension, and disposal clear captured hover input and will. Ongoing navigation
 or drag gestures supersede the node activation preview. Activation consumes the
-proposal; if the pointer still hovers afterward, the next presentation resolves a
-new proposal against committed state. A hover never changes state itself.
+proposal and commits its admitted node/View outcome. Activation consumes that node's
+hover visit before refreshing presentation. The next action preview waits for pointer
+leave and return; same-node movement, modifier changes and external updates do not
+rearm it. Ordinary awareness lifting continues independently. Another click resolves
+fresh committed state and may transition immediately, without requiring a preview.
+Reset, suspension and disposal clear the transient visit latch. Hover never changes
+state itself.
 
 `Ego.will` is a snapshot of the most recently resolved input. Consumers must
 validate it against current context before acting; reading this property alone
@@ -160,7 +232,8 @@ is not proof of freshness after an external update.
 - `runtime/interaction/SessionInteractionRuntime.ts`: current context, plan
   routing, freshness validation, commit, lifecycle, and effect execution.
 - `runtime/anima/AnimaInteractionPreview.ts`: plan-to-presentation adapter;
-  pure presentation callers evaluate the same Ego planner.
+  pure presentation callers evaluate the same Ego planner; presentation exposes
+  only object deltas, never a hypothetical View.
 
 Related: [Consciousness ownership](graph-engine-agency-awareness-ontology.md),
 [View and Scene Contract](graph-engine-view-scene-contract.md), and

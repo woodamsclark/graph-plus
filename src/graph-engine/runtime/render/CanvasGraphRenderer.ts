@@ -496,6 +496,9 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
         );
         if (!forced && accepted.length >= candidateBudget) continue;
         const bounds = this.labelBounds(frame, candidate);
+        if (!forced && labelIsOccludedByCloserNode(
+          candidate, bounds, this.labelOcclusionCandidates(candidate, bounds),
+        )) continue;
         if (!forced && occupied.some((other) => overlaps(bounds, other))) continue;
         occupied.push(bounds);
         accepted.push(candidate);
@@ -533,6 +536,20 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     const top = labelTop(frame, value.point.y, value.radius, this.context.font) + offset.y;
     return { left: centerX - width / 2 - 2, right: centerX + width / 2 + 2, top, bottom: top + height + 2 };
   }
+
+  private labelOcclusionCandidates(candidate: ProjectedNode, bounds: LabelBounds): readonly ProjectedNode[] {
+    const minX = Math.floor(Math.min(candidate.point.x, bounds.left) / this.hitCellSize);
+    const maxX = Math.floor(Math.max(candidate.point.x, bounds.right) / this.hitCellSize);
+    const minY = Math.floor(Math.min(candidate.point.y, bounds.top) / this.hitCellSize);
+    const maxY = Math.floor(Math.max(candidate.point.y, bounds.bottom) / this.hitCellSize);
+    const candidates = new Set<ProjectedNode>();
+    for (let x = minX; x <= maxX; x += 1) {
+      for (let y = minY; y <= maxY; y += 1) {
+        for (const value of this.hitGrid.get(`${x}:${y}`) ?? []) candidates.add(value);
+      }
+    }
+    return [...candidates];
+  }
 }
 
 function emptyRenderTiming(): GraphRenderTimingV1 {
@@ -564,9 +581,29 @@ interface LabelBounds {
 function compareLabelCandidates(a: ProjectedNode, b: ProjectedNode): number {
   return b.node.labelStatePriority - a.node.labelStatePriority
     || (b.node.labelPriority ?? 0) - (a.node.labelPriority ?? 0)
+    || a.point.depth - b.point.depth
     || b.node.radius - a.node.radius
     || b.point.scale - a.point.scale
     || a.node.id.localeCompare(b.node.id);
+}
+
+function labelIsOccludedByCloserNode(
+  candidate: ProjectedNode,
+  bounds: LabelBounds,
+  nodes: readonly ProjectedNode[],
+): boolean {
+  return nodes.some((other) => {
+    if (other.node.id === candidate.node.id || other.node.opacity <= 0
+      || other.point.depth >= candidate.point.depth) return false;
+    const dx = candidate.point.x - other.point.x;
+    const dy = candidate.point.y - other.point.y;
+    if (dx * dx + dy * dy < other.radius * other.radius) return true;
+    const nearestX = Math.max(bounds.left, Math.min(other.point.x, bounds.right));
+    const nearestY = Math.max(bounds.top, Math.min(other.point.y, bounds.bottom));
+    const labelDx = other.point.x - nearestX;
+    const labelDy = other.point.y - nearestY;
+    return labelDx * labelDx + labelDy * labelDy < other.radius * other.radius;
+  });
 }
 
 function overlaps(a: LabelBounds, b: LabelBounds): boolean {

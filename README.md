@@ -11,7 +11,7 @@ spatial, interactive workflow for creating, returning, reflecting, and discoveri
 - Focus on a note and its neighborhood.
 - Filter the graph while leaving your notes and links unchanged.
 - Preview notes while you explore.
-- Use Form, filters, regions, and layout controls to look at the same vault from
+- Use filters, regions, and layout controls to look at the same vault from
   different angles.
 
 Graph+ is for Obsidian users who think through connections—writers, researchers,
@@ -39,21 +39,24 @@ Graph+ has two related views:
 
 - **Global graph** shows the vault-wide graph. Use it to explore broad clusters,
   connections, orphan notes, and the overall shape of your knowledge base.
-- **Local graph** shows a neighborhood around one note. Run `open local graph+` from
-  the command palette, or use it from an active note, then adjust the neighborhood
-  depth to expand or narrow what is around that note.
+- **Local graph** shows the same vault graph in a compact pane, starts in Focus on the
+  active note, and follows subsequent active-note changes.
 
 The global graph is the place for broad discovery and spatial organization. The local
-graph is the place for following one idea, note, or thread without loading the entire
-vault into your immediate view. They are two presentation modes of the same Graph+
-application: Global can move among Overview, Explore, and Focus and saves its vault
-layout; Local stays in Focus around the active note and keeps its layout ephemeral.
+graph is the place for following one idea, note, or thread through that same world.
+They are two presentation modes of the same Graph+ application. Node coordinates and
+pins are shared; each pane keeps its own camera, filters, View, selection, and Focus.
+Global starts in Overview, while Local starts in Focus and follows the active note.
 
 ### Explore and navigate
 
-Select nodes to focus on them and reveal their neighborhood. Clear focus to return to
-the broader graph. Drag nodes to arrange the space; Graph+ persists node placement,
-camera framing, pins, focus, and selection as graph state for the vault.
+Choose a constellation in Overview, then click one of its members to enter Focus.
+Add visible candidates to build the constellation; click the background to move back
+one View. The three notes visited before the active note appear as blue Memory
+constellations, fading from 100% to 50% to 25% with age. Choosing a Memory constellation brings it
+into active membership. Drag nodes to arrange the shared space; Graph+ persists node
+placement and pins for the vault. Camera framing, filters, Focus, and selection belong
+to the individual pane.
 
 On desktop, use pointer, wheel, keyboard, and modifier interactions. On touch devices,
 use one- and two-finger gestures for graph movement and navigation. The exact gesture
@@ -66,8 +69,10 @@ Use the graph controls to:
 - Search for nodes with `Filter nodes…`.
 - Include or hide tag nodes and orphan notes.
 - Reset the current filters.
+<!-- Mind Map deferred; retain these instructions for its return.
 - Switch between ordinary graph exploration and Form mode.
 - Choose a relation and depth when using Form mode.
+-->
 - Change display, force-layout, region, and dimension settings.
 
 These are reversible views of your vault. They do not rewrite Markdown files, rename

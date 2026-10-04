@@ -14,6 +14,10 @@ export interface GraphSessionControlPortV1 {
   createNodeActionContext(nodeId: string): GraphNodeActionContextV1;
   resolveNodeActions(actionIds: readonly string[], nodeId: string): readonly GraphResolvedNodeActionV1[];
   invokeNodeAction(actionId: string, nodeId: string): boolean;
-  /** User-authored membership toggle, admitted through the same Ego plan as Ctrl-click. */
+  /** Explicit menu membership toggle, admitted by Ego independently of Ctrl removal. */
   toggleConstellationNode(nodeId: string, modality?: 'mouse' | 'touch' | 'pen' | 'keyboard'): void;
+  /** Deliberate View changes, resolved through the same Ego/Will as canvas input. */
+  navigateView(action: 'back' | 'overview' | 'clear-constellation'): void;
+  focusConstellationNode(nodeId: string, modality?: 'mouse' | 'touch' | 'pen' | 'keyboard'): void;
+  setNodePinned(nodeId: string, pinned: boolean): Promise<void>;
 }

@@ -17,7 +17,7 @@ import {
   resolveAnimaHighlightPolicyV1,
   type GraphRuntimeCommandV1,
 } from '../../src/graph-engine/runtime/index.ts';
-import { previewGraphViewObjectActivationV1 } from '../../src/graph-engine/runtime/anima/AnimaInteractionPreview.ts';
+import { previewGraphObjectInteractionV1, type GraphInteractionPreviewV1 } from '../../src/graph-engine/runtime/anima/AnimaInteractionPreview.ts';
 import { planGraphViewObjectActivationV1, resolveGraphHoverPathV1 } from '../../src/graph-engine/runtime/interaction/GraphViewObjectActivation.ts';
 import { DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures.ts';
@@ -51,7 +51,9 @@ function presentation(options: {
   readonly focusedNodeId?: string;
   readonly hoveredNodeId?: string;
   readonly ctrlHover?: boolean;
+  readonly visibleEdgeIds?: ReadonlySet<string>;
   readonly selectionPresentationSuspended?: boolean;
+  readonly objectActivationPreview?: GraphInteractionPreviewV1 | null;
 }) {
   const viewState = {
     ...baseViewState,
@@ -86,6 +88,8 @@ function presentation(options: {
     remembered: consciousnessState.remembered,
     interaction,
     ctrlHover: options.ctrlHover,
+    objectActivationPreview: options.objectActivationPreview,
+    visibleEdgeIds: options.visibleEdgeIds,
     document,
   });
 }
@@ -262,6 +266,42 @@ test('Ego adjudicates every interpreted command before GraphCommander reaches ef
   }], 'only an Ego-accepted directive should reach its registered effector');
 });
 
+test('Hover awareness lifts nodes and incident links exactly one degree without changing Consciousness', () => {
+  const preview: GraphInteractionPreviewV1 = { kind: 'objects', activation: 'primary',
+    addedNodeIds: [], removedNodeIds: [], hoverPathNodeIds: [] };
+  for (const viewMode of ['overview', 'explore', 'focus'] as const) {
+    const options = { viewMode, selectedNodeIds: ['a', 'd'],
+      focusedNodeId: viewMode === 'focus' ? 'a' : undefined };
+    const baseline = presentation(options);
+    const hovered = presentation({ ...options, hoveredNodeId: 'd', objectActivationPreview: preview });
+    const expected = { void: 'dimmed', dimmed: 'standard', standard: 'highlighted', highlighted: 'highlighted' } as const;
+    for (const id of viewMode === 'overview' ? ['d'] : ['c', 'd']) {
+      equal(hovered.highlight.phaseByNodeId[id], expected[baseline.highlight.phaseByNodeId[id]], 'one-hop node receives exactly one degree');
+    }
+    equal(hovered.highlight.phaseByEdgeId['c-d'], viewMode === 'overview' ? baseline.highlight.phaseByEdgeId['c-d'] : expected[baseline.highlight.phaseByEdgeId['c-d']], 'incident link lift follows the View policy');
+    equal(hovered.highlight.phaseByNodeId.b, baseline.highlight.phaseByNodeId.b, 'two-hop context is unchanged');
+    equal(hovered.highlight.phaseByEdgeId['b-c'], baseline.highlight.phaseByEdgeId['b-c'], 'nonincident link is unchanged');
+    deepEqual(hovered.consciousnessClasses, baseline.consciousnessClasses, 'awareness lift is presentation, not Consciousness mutation');
+    deepEqual([...hovered.expressedAttentionNodeIds], ['a', 'd'], 'lift does not imply membership');
+    deepEqual(presentation({ ...options, hoveredNodeId: 'd', objectActivationPreview: preview }).highlight.phaseByNodeId,
+      hovered.highlight.phaseByNodeId, 'repeated hover cannot accumulate promotion');
+    deepEqual(presentation(options).highlight.phaseByNodeId, baseline.highlight.phaseByNodeId, 'leaving restores the baseline');
+  }
+  const overview = presentation({ viewMode: 'overview', selectedNodeIds: ['a'], hoveredNodeId: 'c', objectActivationPreview: preview });
+  equal(overview.highlight.phaseByNodeId.b, 'standard', 'Overview hover cannot raise neighbors');
+  equal(overview.highlight.phaseByNodeId.d, 'standard', 'Overview hover is restricted to the hovered node');
+  equal(overview.highlight.phaseByEdgeId['b-c'], 'standard', 'Overview hover cannot raise incident links');
+  const overviewEntry = presentation({ viewMode: 'overview', selectedNodeIds: ['a'], hoveredNodeId: 'a' });
+  equal(overviewEntry.highlight.phaseByNodeId.b, 'dimmed', 'an explicit View preview cannot broaden Overview hover policy');
+  equal(overviewEntry.labelRaising.byNodeId.b.disposition, 'suppress', 'Overview preview cannot favor neighbor labels');
+  const explore = presentation({ viewMode: 'explore', selectedNodeIds: ['a'], hoveredNodeId: 'c', objectActivationPreview: preview });
+  equal(explore.highlight.phaseByNodeId.c, 'standard', 'hovered candidate rises from dimmed to standard without an admission preview');
+  deepEqual([...explore.highlight.highlightedNodeIds], ['a'], 'standard neighbors are not classified as highlights');
+  const filtered = presentation({ viewMode: 'focus', selectedNodeIds: ['a', 'd'], focusedNodeId: 'a', hoveredNodeId: 'd',
+    visibleEdgeIds: new Set(['a-b', 'b-c']), objectActivationPreview: preview });
+  equal(filtered.highlight.phaseByNodeId.c, 'void', 'filtered edge cannot supply a hover neighbor');
+});
+
 test('Anima scopes Constellation presentation to Consciousness Awareness', () => {
   const value = presentation({ selectedNodeIds: ['b'] });
 
@@ -310,43 +350,48 @@ test('Anima distinguishes the conscious field from Attention and unaware context
     'conscious context should remain dimmed and unlabeled without becoming selected');
 });
 
-test('Anima highlights hover while returning hover neighbors to standard label policy', () => {
+test('Anima View-entry preview uses destination label policy without a hover override', () => {
   const value = presentation({ hoveredNodeId: 'b' });
 
   deepEqual(value.labelRaising.byNodeId.b,
-    { disposition: 'force', reason: 'hover', priority: 6 },
-    'the hovered node should always reveal its label');
+    { disposition: 'force', reason: 'attended', priority: 5 },
+    'the prospective member should use the destination Constellation label policy');
   deepEqual(value.labelRaising.byNodeId.a,
-    { disposition: 'fallback', reason: 'slider', priority: 1 },
-    'a direct hover neighbor should use ordinary automatic label policy');
+    { disposition: 'suppress', reason: 'dimmed', priority: 2 },
+    'the prospective Constellation dims neighboring context');
   deepEqual(value.labelRaising.byNodeId.c,
-    { disposition: 'fallback', reason: 'slider', priority: 1 },
-    'every direct hover neighbor should become standard rather than highlighted');
+    { disposition: 'suppress', reason: 'dimmed', priority: 2 },
+    'Overview hover does not lift neighbors above the prospective View baseline');
   deepEqual(value.labelRaising.byNodeId.d,
-    { disposition: 'fallback', reason: 'slider', priority: 1 },
-    'unrelated normal context should fall back to the zoom-dependent slider');
+    { disposition: 'suppress', reason: 'dimmed', priority: 2 },
+    'unrelated context follows the prospective Constellation');
 });
 
 test('Constellation candidate hover previews admission and lights its route without realizing membership', () => {
   const value = presentation({ selectedNodeIds: ['a'], hoveredNodeId: 'c' });
-  deepEqual(value.highlight.phaseByNodeId, { a: 'highlighted', b: 'highlighted', c: 'highlighted', d: 'dimmed' },
+  deepEqual(value.highlight.phaseByNodeId, { a: 'highlighted', b: 'highlighted', c: 'highlighted', d: 'standard' },
     'the candidate and its connecting route are lit while other context stays dimmed');
-  equal(value.objectPreview?.focusedNodeId, undefined, 'admission does not preview a Focus subject');
-  equal(value.objectPreview?.viewId, 'explore', 'the prospective View remains Constellation');
+  equal(value.objectPreview?.focusNodeId, undefined, 'admission does not preview a Focus subject');
+  equal(value.interaction.state, 'explore', 'the committed View remains Constellation');
   deepEqual([...value.consciousnessClasses.attendedNodeIds], ['a'], 'hover is not realized Attention');
   deepEqual([...value.highlight.hoverPathNodeIds], ['c', 'b', 'a'], 'hover finds the shortest route to committed membership');
   equal(value.labelRaising.byNodeId.c.disposition, 'force', 'the prospective subject label is readable');
   equal(value.labelRaising.byNodeId.b.reason, 'attended', 'route labels express prospective membership without realizing it');
 });
 
-test('Memory does not enlarge committed Constellation or Focus scenes', () => {
+test('Memory constellations remain visible without enlarging active Constellation or Focus membership', () => {
   const build = presentation({ selectedNodeIds: ['a'], rememberedNodeIds: ['c', 'd'] });
-  equal(build.highlight.phaseByNodeId.c, 'dimmed', 'Memory does not enlarge active membership');
+  equal(build.highlight.phaseByNodeId.c, 'highlighted', 'Memory is independently visible in Constellation');
+  equal(build.constellationKindByNodeId.c, 'memory', 'its visibility retains Memory provenance');
+  deepEqual([...build.consciousnessClasses.attendedNodeIds], ['a'], 'Memory does not enlarge active membership');
   const focus = presentation({ selectedNodeIds: ['a', 'c'], rememberedNodeIds: ['d'], focusedNodeId: 'a' });
   equal(focus.highlight.phaseByNodeId.c, 'highlighted', 'distant members remain highlighted');
-  equal(focus.highlight.phaseByNodeId.b, 'dimmed', 'subject neighbors are dimmed');
-  equal(focus.highlight.phaseByNodeId.d, 'void', 'another member neighbor outside focused context is void');
-  equal(focus.highlight.phaseByEdgeId['c-d'], 'void', 'links cannot expose void endpoints');
+  equal(focus.highlight.phaseByNodeId.b, 'standard', 'subject neighbors remain standard conscious context');
+  equal(focus.labelRaising.byNodeId.b.disposition, 'fallback', 'a standard Focus neighbor inherits dynamic label policy');
+  equal(focus.highlight.phaseByNodeId.d, 'highlighted', 'distant Memory remains independently visible');
+  equal(focus.constellationKindByNodeId.d, 'memory', 'distant Memory is not an Ego member');
+  equal(focus.highlight.phaseByEdgeId['c-d'], 'highlighted', 'a link connects two visible subjects');
+  equal(focus.constellationKindByEdgeId['c-d'], undefined, 'a mixed-source link does not imply shared constellation membership');
 });
 
 test('Anima resolves remembered subjects after transient interaction and view mode', () => {
@@ -399,24 +444,89 @@ test('Focus presentation override cannot leak into Explore', () => {
     'Focus context hiding must expire with Focus');
 });
 
-test('Focus hover previews the hovered subject neighborhood and restores on leave', () => {
+test('Deliberate Focus hopping previews the admitted subject neighborhood without committing it', () => {
   const focusHover = presentation({ selectedNodeIds: ['c'], focusedNodeId: 'c', hoveredNodeId: 'b' });
-  deepEqual(focusHover.highlight.phaseByNodeId, { a: 'dimmed', b: 'highlighted', c: 'highlighted', d: 'void' },
-    'hover reveals its own neighbors while hiding the previous subject-only context');
-  deepEqual([...focusHover.highlight.highlightedEdgeIds], ['b-c'], 'prospective member-to-member links are lit');
-  equal(focusHover.labelRaising.byNodeId.a.disposition, 'suppress', 'revealed context remains dim');
+  const destination = presentation({ selectedNodeIds: ['c', 'b'], focusedNodeId: 'b' });
+  deepEqual(focusHover.highlight.phaseByNodeId, { a: 'standard', b: 'highlighted', c: 'highlighted', d: 'void' },
+    'explicit Focus hopping previews its resulting neighborhood');
+  deepEqual(focusHover.highlight.phaseByNodeId, destination.highlight.phaseByNodeId,
+    'the Focus preview phases exactly match the committed destination View');
+  deepEqual(focusHover.labelRaising.byNodeId, destination.labelRaising.byNodeId,
+    'the Focus preview labels exactly match the committed destination View');
+  deepEqual([...focusHover.highlight.highlightedEdgeIds], ['b-c'], 'only prospective member-to-member links are highlighted');
+  equal(focusHover.labelRaising.byNodeId.a.disposition, 'fallback', 'a prospective standard neighbor inherits dynamic label policy');
+  equal(focusHover.objectPreview?.kind, 'view-transition', 'Focus hopping uses the View-entry avenue');
+  equal(focusHover.interaction.focusedNodeId, 'c', 'the scene keeps its committed subject');
+  equal(focusHover.objectPreview?.focusNodeId, 'b', 'the candidate receives a local focus cue');
   deepEqual([...focusHover.consciousnessClasses.attendedNodeIds], ['c'], 'the prospective member remains uncommitted');
   const restored = presentation({ selectedNodeIds: ['c'], focusedNodeId: 'c' });
-  deepEqual(restored.highlight.phaseByNodeId, { a: 'void', b: 'dimmed', c: 'highlighted', d: 'dimmed' },
+  deepEqual(restored.highlight.phaseByNodeId, { a: 'void', b: 'standard', c: 'highlighted', d: 'standard' },
     'leaving restores the committed subject and neighborhood');
 });
 
-test('Hovering a distant constellation member reveals its own neighbors', () => {
+test('Final presentation phase determines baseline label eligibility with adaptive Focus Memory', () => {
+  const value = presentation({ selectedNodeIds: ['a'], focusedNodeId: 'a' });
+  const expected = { highlighted: 'force', standard: 'fallback', dimmed: 'suppress', void: 'suppress' } as const;
+  for (const [nodeId, phase] of Object.entries(value.highlight.phaseByNodeId)) {
+    equal(value.labelRaising.byNodeId[nodeId].disposition, expected[phase], `${phase} ${nodeId} follows the phase label policy`);
+  }
+  const rememberedRemoval = presentation({ selectedNodeIds: ['a'], rememberedNodeIds: ['a'],
+    focusedNodeId: 'a', hoveredNodeId: 'a', ctrlHover: true });
+  equal(rememberedRemoval.highlight.phaseByNodeId.a, 'highlighted', 'independent Memory survives deliberate removal preview');
+  equal(rememberedRemoval.labelRaising.byNodeId.a.disposition, 'fallback',
+    'highlighted Memory remains eligible without bypassing Focus adaptive layout');
+});
+
+test('Hovering a distant Focus member previews its View subject change', () => {
   const value = presentation({ selectedNodeIds: ['a', 'c'], focusedNodeId: 'a', hoveredNodeId: 'c' });
-  deepEqual(value.highlight.phaseByNodeId, { a: 'highlighted', b: 'dimmed', c: 'highlighted', d: 'dimmed' },
-    'a retained distant member supplies the prospective Focus neighborhood');
-  equal(value.highlight.phaseByEdgeId['c-d'], 'dimmed', 'preview exposes links to revealed context');
-  equal(value.sceneInteraction.focusedNodeId, 'c', 'only presentation gets the prospective subject');
+  deepEqual(value.highlight.phaseByNodeId, { a: 'highlighted', b: 'standard', c: 'highlighted', d: 'standard' },
+    'explicit View preview supplies the prospective neighborhood');
+  equal(value.highlight.phaseByEdgeId['c-d'], 'standard', 'a View-entry preview reveals its prospective context');
+  equal(value.interaction.focusedNodeId, 'a', 'the presentation keeps the committed subject');
+  equal(value.objectPreview?.focusNodeId, 'c', 'the candidate receives a local focus cue');
+});
+
+test('Admission/removal preview matrix preserves context while explicit View previews remain separate', () => {
+  for (const viewMode of ['overview', 'explore', 'focus'] as const) {
+    for (const hoveredNodeId of ['a', 'b', 'c']) {
+      for (const ctrlHover of [false, true]) {
+        const options = { viewMode, selectedNodeIds: ['a', 'c'],
+          focusedNodeId: viewMode === 'focus' ? 'a' : undefined };
+        const baseline = presentation(options);
+        const preview = presentation({ ...options, hoveredNodeId, ctrlHover });
+        equal(preview.interaction.state, baseline.interaction.state, 'hover cannot choose a View');
+        equal(preview.interaction.focusedNodeId, baseline.interaction.focusedNodeId, 'hover cannot choose the scene subject');
+        deepEqual([...preview.interaction.selectedNodeIds], options.selectedNodeIds, 'the interaction keeps committed membership');
+        deepEqual(preview.consciousnessClasses.byNodeId, baseline.consciousnessClasses.byNodeId, 'classification stays authoritative');
+        if (preview.objectPreview?.kind === 'view-transition') {
+          equal(ctrlHover, false, 'Ctrl removal never borrows a resulting View');
+          continue;
+        }
+        equal(preview.statePolicy, baseline.statePolicy, 'object preview retains committed scene policy');
+        const affected = new Set([...preview.objectPreview?.addedNodeIds ?? [],
+          ...preview.objectPreview?.removedNodeIds ?? [], ...preview.objectPreview?.hoverPathNodeIds ?? [],
+          hoveredNodeId, ...preview.objectPreview?.focusNodeId ? [preview.objectPreview.focusNodeId] : []]);
+        if (!ctrlHover) {
+          for (const edge of document.edges) {
+            if (edge.sourceId === hoveredNodeId) affected.add(edge.targetId);
+            if (edge.targetId === hoveredNodeId) affected.add(edge.sourceId);
+          }
+        }
+        for (const id of Object.keys(positions)) {
+          if (affected.has(id)) continue;
+          equal(preview.highlight.phaseByNodeId[id], baseline.highlight.phaseByNodeId[id], 'unaffected node phase is unchanged');
+          deepEqual(preview.labelRaising.byNodeId[id], baseline.labelRaising.byNodeId[id], 'unaffected label policy is unchanged');
+          equal(preview.constellationKindByNodeId[id], baseline.constellationKindByNodeId[id], 'unaffected node source is unchanged');
+          equal(preview.focusEmphasisNodeIds.has(id), baseline.focusEmphasisNodeIds.has(id), 'unaffected focus emphasis is unchanged');
+        }
+        for (const edge of document.edges) {
+          if (affected.has(edge.sourceId) || affected.has(edge.targetId)) continue;
+          equal(preview.highlight.phaseByEdgeId[edge.id], baseline.highlight.phaseByEdgeId[edge.id], 'unaffected edge phase is unchanged');
+          equal(preview.constellationKindByEdgeId[edge.id], baseline.constellationKindByEdgeId[edge.id], 'unaffected edge source is unchanged');
+        }
+      }
+    }
+  }
 });
 
 test('Animus carries compatibility interaction facts without assigning them to Consciousness', () => {
@@ -513,6 +623,34 @@ test('Overview constellation resolution stores connected highlighted groups with
   deepEqual([...consciousness.attention.nodeIds], [], 'resolving a group must not itself mutate composition');
 });
 
+test('Overview constellations retain Memory or Ego provenance without merging adjacent sources', () => {
+  const consciousness = new Consciousness();
+  const available = new Set(['a', 'b', 'c', 'd']);
+  const relationships = new Map([
+    ['a', new Set(['b'])], ['b', new Set(['a', 'c'])],
+    ['c', new Set(['b', 'd'])], ['d', new Set(['c'])],
+  ]);
+  consciousness.receiveExogenous({ source: 'exogenous', type: 'replace-remembered-subjects',
+    nodeIds: ['a', 'b', 'c'] }, { availableNodeIds: available });
+  consciousness.reconcile({ attentionNodeIds: ['c', 'd'], availableNodeIds: available });
+  const memory = consciousness.resolveOverviewConstellation('a', available, relationships, 'one');
+  equal(memory?.kind, 'memory', 'remembered groups have their own semantic type');
+  deepEqual(memory?.nodeIds, ['a', 'b', 'c'], 'a shared remembered subject cannot admit unrelated Ego members');
+  const ego = consciousness.resolveOverviewConstellation('c', available, relationships, 'one');
+  equal(ego?.kind, 'ego', 'deliberate membership wins on overlap, including cached lookups');
+  deepEqual(ego?.nodeIds, ['c', 'd'], 'Ego grouping cannot absorb adjacent Memory');
+  equal(ego, consciousness.resolveOverviewConstellation('d', available, relationships, 'one'), 'Ego members share one immutable group');
+  equal(memory, consciousness.resolveOverviewConstellation('b', available, relationships, 'one'), 'Memory members share their own group');
+  const filtered = new Set(['a', 'c', 'd']);
+  deepEqual(consciousness.resolveOverviewConstellation('a', filtered, relationships, 'two')?.nodeIds, ['a'],
+    'filtering a remembered bridge splits the Memory constellation');
+  consciousness.receiveExogenous({ source: 'exogenous', type: 'replace-remembered-subjects', nodeIds: ['a'] },
+    { availableNodeIds: available });
+  deepEqual(consciousness.resolveOverviewConstellation('a', available, relationships, 'two')?.nodeIds, ['a'],
+    'recency changes invalidate cached Memory membership');
+  deepEqual([...consciousness.attention.nodeIds], ['c', 'd'], 'group lookup never commits Attention');
+});
+
 
 test('Scene compilation enforces View phases even without Anima styling or with conflicting module contributions', () => {
   const viewState = {
@@ -533,7 +671,7 @@ test('Scene compilation enforces View phases even without Anima styling or with 
   const nodes = Object.fromEntries(frame.nodes.map((node) => [node.id, node]));
   equal(nodes.a.opacity, 1, 'member stays highlighted');
   equal(nodes.b.opacity, 1, 'the prospective subject is highlighted');
-  equal(nodes.c.opacity, 0.24, 'hover reveals its dimmed neighbor without Anima styling');
+  equal(nodes.c.opacity, 1, 'an admitted Focus-hop preview reveals its neighbor without Anima styling');
   equal(nodes.b.labelForceVisible, true, 'the prospective subject label is readable');
   equal(nodes.d.opacity, 0, 'unrelated context is void without requiring the styling module');
   equal(nodes.d.showLabel, false, 'a module cannot reveal a void label');
@@ -565,30 +703,33 @@ test('Object previews share group activation and Experience admission without re
     identity: { documentId: document.documentId, documentRevision: document.revision },
   };
   const plan = planGraphViewObjectActivationV1(options)!;
-  const preview = previewGraphViewObjectActivationV1(options)!;
-  deepEqual(preview.attentionNodeIds, plan.nodeIds, 'Overview previews the complete looked-up group');
-  equal(preview.viewId, 'explore', 'the eventual Constellation is explicit');
+  const preview = previewGraphObjectInteractionV1(options)!;
+  deepEqual(preview.addedNodeIds, plan.nodeIds, 'Overview previews the complete looked-up group as object additions');
+  equal(preview.kind, 'view-transition', 'Overview hover previews the exact destination View and admission');
+  equal(preview.kind === 'view-transition' && preview.resultingState.viewId, 'explore', 'click commits the previewed Constellation');
   const local = { ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1,
     allowedStates: ['focus'] as const,
     attention: { maximumNodeCount: 1, overflow: 'preserve-intent-subject' as const },
   };
-  deepEqual(previewGraphViewObjectActivationV1({ ...options, experience: local }), {
-    activation: 'primary', viewId: 'focus', attentionNodeIds: ['b'], focusedNodeId: 'b', hoverPathNodeIds: [],
+  deepEqual(previewGraphObjectInteractionV1({ ...options, experience: local }), {
+    kind: 'view-transition', resultingState: { viewId: 'focus', attentionNodeIds: ['b'], focusedNodeId: 'b' },
+    activation: 'primary', addedNodeIds: ['b'], removedNodeIds: [], focusNodeId: 'b', hoverPathNodeIds: [],
   }, 'preview honors Focus-only admission and single-subject cardinality');
   const noFocus = { ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1,
     permittedInteractions: DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1.permittedInteractions.filter((id) => id !== 'direct-focus'),
   };
-  equal(previewGraphViewObjectActivationV1({ ...options, nodeId: 'a', viewId: 'explore', attentionNodeIds: ['a'], experience: noFocus }),
+  equal(previewGraphObjectInteractionV1({ ...options, nodeId: 'a', viewId: 'explore', attentionNodeIds: ['a'], experience: noFocus }),
     undefined, 'a rejected Focus click has no hypothetical Focus preview');
-  equal(previewGraphViewObjectActivationV1({ ...options, experience: { ...local, permittedInteractions: noFocus.permittedInteractions } }),
+  equal(previewGraphObjectInteractionV1({ ...options, experience: { ...local, permittedInteractions: noFocus.permittedInteractions } }),
     undefined, 'a Focus-only adjustment cannot bypass the Focus capability');
 });
 
-test('Overview preview highlights its complete prospective group while preserving the discover field', () => {
+test('Overview hover previews its admitted constellation View without committing it', () => {
   const value = presentation({ rememberedNodeIds: ['b', 'c'], hoveredNodeId: 'a' });
-  deepEqual(value.objectPreview?.attentionNodeIds, ['a', 'b', 'c'], 'the unlit seed captures connected highlighted members');
-  deepEqual(value.highlight.phaseByNodeId, { a: 'highlighted', b: 'highlighted', c: 'highlighted', d: 'standard' },
-    'the rest of Overview remains undimmed');
+  deepEqual(value.objectPreview?.addedNodeIds, ['a'], 'the unlit seed previews its own addition without adopting Memory');
+  deepEqual(value.objectPreview?.hoverPathNodeIds, [], 'passive Memory cannot become the target of a prospective route');
+  deepEqual(value.highlight.phaseByNodeId, { a: 'highlighted', b: 'highlighted', c: 'highlighted', d: 'dimmed' },
+    'the prospective Constellation supplies its destination context');
   deepEqual([...value.consciousnessClasses.attendedNodeIds], [], 'preview highlights are not Attention');
   const restored = presentation({ rememberedNodeIds: ['b', 'c'] });
   equal(restored.highlight.phaseByNodeId.a, 'standard', 'uncommitted seed highlighting expires on leave');
@@ -596,7 +737,7 @@ test('Overview preview highlights its complete prospective group while preservin
 });
 
 
-test('Hover routes choose the nearest existing constellation with stable ties and projected topology', () => {
+test('Hover routes choose the nearest selected constellation member with stable ties and projected topology', () => {
   const edges = [graphEdge('xb', 'x', 'b'), graphEdge('xa', 'x', 'a'),
     graphEdge('ac', 'a', 'c'), graphEdge('bd', 'b', 'd'), graphEdge('de', 'd', 'e')];
   const options = { edges, visibleNodeIds: new Set(['x', 'a', 'b', 'c', 'd', 'e', 'z']),
@@ -615,12 +756,13 @@ test('Hover routes choose the nearest existing constellation with stable ties an
 
 test('Hover paths can reveal Focus context beyond the prospective neighborhood and expire on leave', () => {
   const value = presentation({ selectedNodeIds: ['a'], focusedNodeId: 'a', hoveredNodeId: 'd' });
+  deepEqual(value.objectPreview?.addedNodeIds, ['d', 'c', 'b'], 'the complete previewed route is admitted into Attention');
   deepEqual([...value.highlight.hoverPathNodeIds], ['d', 'c', 'b', 'a'], 'the route is computed against committed membership');
   deepEqual(value.highlight.phaseByNodeId, { a: 'highlighted', b: 'highlighted', c: 'highlighted', d: 'highlighted' },
     'intermediate route nodes are visible even beyond the hovered subject immediate neighborhood');
   deepEqual([...value.consciousnessClasses.attendedNodeIds], ['a'], 'the route remains presentation only');
   const restored = presentation({ selectedNodeIds: ['a'], focusedNodeId: 'a' });
-  deepEqual(restored.highlight.phaseByNodeId, { a: 'highlighted', b: 'dimmed', c: 'void', d: 'void' }, 'all provisional route emphasis expires');
+  deepEqual(restored.highlight.phaseByNodeId, { a: 'highlighted', b: 'standard', c: 'void', d: 'void' }, 'all provisional route emphasis expires');
   deepEqual([...restored.highlight.hoverPathNodeIds], [], 'the path does not latch');
 });
 
@@ -643,25 +785,56 @@ test('Overview node dragging preserves scene highlights without lighting neighbo
     'dragging cannot force neighbor labels');
 });
 
-test('Ctrl-hover previews the same membership toggle and resulting View as Ctrl-click', () => {
+test('Ctrl-hover previews removal and leaves nonmembers unchanged across Views', () => {
   const build = presentation({ selectedNodeIds: ['a', 'c'], hoveredNodeId: 'c', ctrlHover: true });
-  deepEqual(build.objectPreview?.attentionNodeIds, ['a'], 'the target is provisionally removed');
-  equal(build.objectPreview?.viewId, 'explore', 'removing a member stays in Constellation');
+  deepEqual(build.objectPreview?.removedNodeIds, ['c'], 'the target has an explicit removal cue');
+  equal(build.interaction.state, 'explore', 'the scene stays in committed Constellation');
   equal(build.highlight.phaseByNodeId.c, 'dimmed', 'the removed member shows nonmember presentation');
   deepEqual([...build.highlight.hoverPathNodeIds], [], 'removal preview cannot relight its own target through a route');
   deepEqual([...build.consciousnessClasses.attendedNodeIds], ['a', 'c'], 'actual Attention stays intact');
   const releaseFocus = presentation({ selectedNodeIds: ['a', 'c'], focusedNodeId: 'a', hoveredNodeId: 'a', ctrlHover: true });
-  equal(releaseFocus.objectPreview?.viewId, 'explore', 'removing the subject previews backing out of Focus');
-  equal(releaseFocus.sceneInteraction.focusedNodeId, undefined, 'the prospective subject is released');
-  equal(releaseFocus.highlight.phaseByNodeId.a, 'dimmed', 'removed subject loses highlighting');
+  equal(releaseFocus.interaction.state, 'focus', 'subject removal cannot preview a View exit');
+  equal(releaseFocus.interaction.focusedNodeId, 'a', 'subject removal retains committed Focus context');
+  equal(releaseFocus.highlight.phaseByNodeId.a, 'dimmed', 'removed subject receives the dimmed removal phase');
   const last = presentation({ selectedNodeIds: ['a'], focusedNodeId: 'a', hoveredNodeId: 'a', ctrlHover: true });
-  equal(last.objectPreview?.viewId, 'overview', 'removing the last member previews Overview');
-  deepEqual(last.highlight.phaseByNodeId, { a: 'standard', b: 'standard', c: 'standard', d: 'standard' }, 'Overview removal has no dimming or selected emphasis');
+  equal(last.interaction.state, 'focus', 'last-member removal cannot preview Overview');
+  deepEqual(last.highlight.phaseByNodeId, { a: 'dimmed', b: 'standard', c: 'void', d: 'void' },
+    'last-member removal changes its object without revealing the Overview field');
   const otherMember = presentation({ selectedNodeIds: ['a', 'c'], focusedNodeId: 'a', hoveredNodeId: 'c', ctrlHover: true });
-  equal(otherMember.highlight.phaseByNodeId.c, 'void', 'removing a distant member previews its disappearance');
-  equal(otherMember.sceneInteraction.focusedNodeId, 'a', 'removing another member retains Focus');
-  const add = presentation({ selectedNodeIds: ['a'], focusedNodeId: 'a', hoveredNodeId: 'b', ctrlHover: true });
-  equal(add.objectPreview?.viewId, 'focus', 'Ctrl addition does not descend or hop');
-  equal(add.sceneInteraction.focusedNodeId, 'a', 'Ctrl addition retains the current subject');
-  equal(add.highlight.phaseByNodeId.b, 'highlighted', 'Ctrl addition previews the added member');
+  equal(otherMember.highlight.phaseByNodeId.c, 'dimmed', 'removing a distant member retains a dim removal cue');
+  equal(otherMember.interaction.focusedNodeId, 'a', 'removing another member retains Focus');
+  for (const viewMode of ['overview', 'explore', 'focus'] as const) {
+    const options = { viewMode, selectedNodeIds: ['a'], focusedNodeId: viewMode === 'focus' ? 'a' : undefined };
+    const committed = presentation(options);
+    const unchanged = presentation({ ...options, hoveredNodeId: 'b', ctrlHover: true });
+    deepEqual(unchanged.objectPreview?.addedNodeIds, [], 'Ctrl cannot provisionally add a nonmember');
+    deepEqual(unchanged.objectPreview?.removedNodeIds, [], 'Ctrl on a nonmember has no object changes');
+    equal(unchanged.interaction.state, viewMode, 'Ctrl over a nonmember preserves the View');
+    equal(unchanged.interaction.focusedNodeId, options.focusedNodeId, 'Ctrl preserves the subject');
+    deepEqual(unchanged.highlight.phaseByNodeId, committed.highlight.phaseByNodeId, 'nonmember phases stay committed');
+    deepEqual(unchanged.highlight.phaseByEdgeId, committed.highlight.phaseByEdgeId, 'nonmember edges stay committed');
+    deepEqual(unchanged.labelRaising.byNodeId.b, committed.labelRaising.byNodeId.b, 'Ctrl does not force the nonmember label');
+    deepEqual([...unchanged.highlight.hoverPathNodeIds], [], 'Ctrl cannot add a prospective route');
+    const rememberedOptions = { ...options, rememberedNodeIds: ['b'] };
+    const remembered = presentation(rememberedOptions);
+    const rememberedHover = presentation({ ...rememberedOptions, hoveredNodeId: 'b', ctrlHover: true });
+    deepEqual(rememberedHover.highlight.phaseByNodeId, remembered.highlight.phaseByNodeId,
+      'no-change preserves independent Memory highlighting');
+    deepEqual(rememberedHover.labelRaising.byNodeId.b, remembered.labelRaising.byNodeId.b,
+      'no-change retains the Memory label policy without giving it a hover reason');
+  }
+});
+
+ test('Hover neighbor reveal respects projected edges and expires without admitting neighbors', () => {
+  for (const viewMode of ['explore', 'focus'] as const) {
+    const options = { viewMode, selectedNodeIds: ['a'],
+      focusedNodeId: viewMode === 'focus' ? 'a' : undefined,
+      visibleEdgeIds: new Set(['a-b', 'b-c']) };
+    const hovered = presentation({ ...options, hoveredNodeId: 'b' });
+    equal(hovered.highlight.phaseByNodeId.c, 'standard', 'hover raises its immediate neighbor one step');
+    equal(hovered.highlight.phaseByNodeId.d, viewMode === 'focus' ? 'void' : 'dimmed', 'filtered edge cannot expand hover');
+    deepEqual([...hovered.consciousnessClasses.attendedNodeIds], ['a'], 'neighbors never become members');
+    const left = presentation(options);
+    equal(left.highlight.phaseByNodeId.c, viewMode === 'focus' ? 'void' : 'dimmed', 'leaving removes transient neighbor reveal');
+  }
 });

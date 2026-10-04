@@ -13,6 +13,7 @@ import type {
   GraphSessionUiOptionsV1,
 } from '../../graph-engine/contracts/v1/index.ts';
 import type { GraphPlusLensStateV1 } from '../query/index.ts';
+import type { GraphPlusCheckpointStoreV1 } from '../persistence/index.ts';
 
 export interface LocalGraphPlusConsumerOptionsV1<TFile> {
   readonly lease: GraphEngineLeaseV1;
@@ -21,8 +22,10 @@ export interface LocalGraphPlusConsumerOptionsV1<TFile> {
   readonly source?: GraphPlusVaultSourceV1<TFile>;
   readonly navigator: GraphPlusNavigatorV1<TFile>;
   readonly countDuplicateLinks?: boolean;
+  /** Optional source of the shared full-graph checkpoint for initial placement. */
+  readonly vaultId?: string;
+  readonly checkpointStore?: GraphPlusCheckpointStoreV1;
   readonly initialRootNodeId?: string;
-  readonly initialDepth?: number;
   readonly initialLens?: GraphPlusLensStateV1;
   readonly profileId?: string;
   readonly ui?: GraphSessionUiOptionsV1;

@@ -13,6 +13,8 @@ import {
   type ConsciousReactionV1,
 } from './Reaction.ts';
 import type { ConsciousObservationV1, MemorySnapshotV1 } from './Memory.ts';
+import { Judgement, type EgoIntent, type EgoIntentOutcome, type EgoIntentPolicy } from './Judgement.ts';
+export type { EgoIntent, EgoIntentOutcome, EgoIntentPolicy } from './Judgement.ts';
 
 /** Nodes presently held at the center of conscious activity. */
 export interface Attention {
@@ -39,20 +41,6 @@ export interface EgoAttentionIntent {
   readonly nodeIds: readonly string[];
 }
 
-export interface EgoIntent<TDirective> {
-  readonly source: 'endogenous';
-  readonly directive: TDirective;
-}
-
-export type EgoIntentOutcome<TDirective> =
-  | { readonly status: 'accepted'; readonly directive: TDirective }
-  | { readonly status: 'adjusted'; readonly directive: TDirective }
-  | { readonly status: 'rejected'; readonly reason: string };
-
-export type EgoIntentPolicy<TDirective> = (
-  intent: EgoIntent<TDirective>,
-) => EgoIntentOutcome<TDirective>;
-
 export type EgoExperienceOutcomeV1 =
   | { readonly status: 'remembered'; readonly observation: ConsciousObservationV1 }
   | { readonly status: 'altered'; readonly observation: ConsciousObservationV1 }
@@ -73,6 +61,8 @@ export class Ego {
   private currentWill?: EgoInteractionPlanV1;
   private currentVisionIntent?: EgoVisionIntentV1;
 
+  constructor(readonly judgement: Judgement = new Judgement()) {}
+
   /** Session intent survives View changes and is independent of transient hover will. */
   get visionIntent(): EgoVisionIntentV1 | undefined { return this.currentVisionIntent; }
 
@@ -84,6 +74,7 @@ export class Ego {
   get will(): EgoInteractionPlanV1 | undefined { return this.currentWill; }
 
   resolveWill(input: EgoInteractionInputV1, context: EgoInteractionContextV1): EgoInteractionPlanV1 {
+    context = { ...context, judgement: this.judgement };
     const previous = this.currentWill;
     if (previous && sameEgoInteractionV1(previous.input, input) && isEgoInteractionPlanCurrentV1(previous, context)) {
       this.currentWill = previous.input.phase === input.phase ? previous : captureEgoInteractionPhaseV1(previous, input);
@@ -101,9 +92,9 @@ export class Ego {
 
   consider<TDirective>(
     intent: EgoIntent<TDirective>,
-    policy: EgoIntentPolicy<TDirective>,
+    constraints?: EgoIntentPolicy<TDirective>,
   ): EgoIntentOutcome<TDirective> {
-    return policy(intent);
+    return this.judgement.consider(intent, constraints);
   }
 
   directAttention(nodeIds: readonly string[]): EgoIntent<EgoAttentionIntent> {
@@ -163,6 +154,7 @@ const EMPTY_REMEMBERED_SUBJECTS: RememberedSubjects = Object.freeze({ nodeIds: n
 /** A resolved group of canonical subjects, independent of layout and camera. */
 export interface Constellation {
   readonly id: string;
+  readonly kind: 'ego' | 'memory';
   readonly nodeIds: readonly string[];
 }
 
@@ -274,21 +266,30 @@ export class Consciousness {
     topologyRevision: string,
   ): Constellation | undefined {
     if (!availableNodeIds.has(nodeId)) return undefined;
-    const highlighted = new Set([...this.awareness.nodeIds].filter((id) => availableNodeIds.has(id)));
-    const key = JSON.stringify([topologyRevision, [...highlighted].sort(), [...availableNodeIds].sort()]);
+    const sources = { attention: filterAvailable(this.attention.nodeIds, availableNodeIds),
+      remembered: filterAvailable(this.remembered.nodeIds, availableNodeIds) };
+    const { kind, highlighted } = overviewConstellationSource(nodeId, sources, relationships);
+    // topologyRevision is owned by the session topology cache and already covers
+    // the available-node and relationship membership of this projection.
+    const key = JSON.stringify([topologyRevision, [...sources.attention].sort(),
+      [...sources.remembered].sort()]);
     if (key !== this.constellationCacheKey) {
       this.constellationCacheKey = key;
       this.constellationsBySubject.clear();
     }
     const cached = this.constellationsBySubject.get(nodeId);
     if (cached) return cached;
-    const group = resolveOverviewConstellationV1(nodeId, availableNodeIds, highlighted, relationships)!;
+    const group = resolveOverviewConstellationV1(nodeId, availableNodeIds, highlighted, relationships, kind)!;
     const nodeIds = group.nodeIds;
     this.constellationsBySubject.set(nodeId, group);
     // An unlit seed may join multiple groups, so only an entirely highlighted
     // component can safely share the same lookup object through every member.
     if (highlighted.has(nodeId)) {
-      for (const id of nodeIds) this.constellationsBySubject.set(id, group);
+      for (const id of nodeIds) {
+        if (overviewConstellationSource(id, sources, relationships).kind === kind) {
+          this.constellationsBySubject.set(id, group);
+        }
+      }
     }
     return group;
   }
@@ -309,6 +310,7 @@ export function resolveOverviewConstellationV1(
   availableNodeIds: ReadonlySet<string>,
   highlighted: ReadonlySet<string>,
   relationships: ReadonlyMap<string, ReadonlySet<string>>,
+  kind: Constellation['kind'] = 'ego',
 ): Constellation | undefined {
   if (!availableNodeIds.has(nodeId)) return undefined;
   const members = new Set([nodeId]);
@@ -321,7 +323,36 @@ export function resolveOverviewConstellationV1(
     }
   }
   const nodeIds = Object.freeze([...members].sort());
-  return Object.freeze({ id: JSON.stringify(nodeIds), nodeIds });
+  return Object.freeze({ id: JSON.stringify([kind, nodeIds]), kind, nodeIds });
+}
+
+/** Memory and deliberate composition are distinct sources, even when their subjects touch. */
+export function resolveOverviewConstellationFromSourcesV1(
+  nodeId: string,
+  availableNodeIds: ReadonlySet<string>,
+  sources: { readonly attention: ReadonlySet<string>; readonly remembered: ReadonlySet<string> },
+  relationships: ReadonlyMap<string, ReadonlySet<string>>,
+): Constellation | undefined {
+  const { kind, highlighted } = overviewConstellationSource(nodeId, {
+    attention: filterAvailable(sources.attention, availableNodeIds),
+    remembered: filterAvailable(sources.remembered, availableNodeIds),
+  }, relationships);
+  return resolveOverviewConstellationV1(nodeId, availableNodeIds, highlighted, relationships, kind);
+}
+
+function overviewConstellationSource(
+  nodeId: string,
+  sources: { readonly attention: ReadonlySet<string>; readonly remembered: ReadonlySet<string> },
+  relationships: ReadonlyMap<string, ReadonlySet<string>>,
+): { readonly kind: Constellation['kind']; readonly highlighted: ReadonlySet<string> } {
+  // A subject in both stores is presented deliberately. An unlit entry point can join
+  // adjacent groups of one source; deliberate interest takes priority on a mixed boundary.
+  const neighbors = [...(relationships.get(nodeId) ?? [])];
+  const kind = sources.attention.has(nodeId) ? 'ego'
+    : sources.remembered.has(nodeId) ? 'memory'
+    : neighbors.some((id) => sources.attention.has(id)) ? 'ego'
+    : neighbors.some((id) => sources.remembered.has(id)) ? 'memory' : 'ego';
+  return { kind, highlighted: kind === 'ego' ? sources.attention : sources.remembered };
 }
 
 export function resolveConsciousness(options: ConsciousnessReconciliation): ConsciousnessSnapshot {

@@ -72,7 +72,7 @@ export default class GraphEnginePlugin extends Plugin {
       onError: (error) => console.error('[graph+] application error', error),
     });
     this.graphBridgeConnection = this.graphBridge.start(
-      (event) => this.sharedGraphPlusApplication?.receiveHostEvent(event),
+      (event) => this.sharedGraphPlusApplication?.receiveUnconsciousActivity(event),
     );
     const pluginDirectory = this.manifest.dir
       ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;

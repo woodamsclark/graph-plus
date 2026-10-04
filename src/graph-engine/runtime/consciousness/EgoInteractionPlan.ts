@@ -1,8 +1,10 @@
 import { GRAPH_VIEW_DEFINITIONS_V1 } from '../../contracts/v1/index.ts';
 import type { GraphEdgeV1, GraphExperienceContractV1, GraphViewIdV1 } from '../../contracts/v1/index.ts';
+import type { GraphTopologyIndex } from '../../core/document/GraphTopologyIndex.ts';
 import { adjudicateGraphExperienceCommandV1 } from '../experience/GraphExperienceAdjudicator.ts';
 import { planGraphViewObjectActivationV1, resolveGraphHoverPathV1 } from '../interaction/GraphViewObjectActivation.ts';
 import type { GraphRuntimeCommandV1, InputGraphIdentityV1 } from '../interaction/GraphInteractionTypes.ts';
+import { DEFAULT_EGO_JUDGEMENT_V1, type Judgement } from './Judgement.ts';
 
 /** Interpreted input: physical coordinates and gesture recognition stay in Input/Reflex. */
 export interface EgoInteractionInputV1 {
@@ -10,6 +12,11 @@ export interface EgoInteractionInputV1 {
   readonly target: { readonly kind: 'node'; readonly nodeId: string } | { readonly kind: 'background' };
   readonly modality: 'mouse' | 'touch' | 'pen' | 'keyboard';
   readonly modifiers: { readonly ctrl: boolean; readonly meta: boolean; readonly shift: boolean; readonly alt: boolean };
+  /** Explicit menu intent is distinct from Ctrl's idempotent removal gesture. */
+  readonly membershipAction?: 'toggle';
+  /** Explicit control actions preserve their meaning across physical modalities. */
+  readonly objectAction?: 'focus';
+  readonly navigationAction?: 'back' | 'overview' | 'clear-constellation';
 }
 
 export interface EgoInteractionStateV1 {
@@ -20,13 +27,18 @@ export interface EgoInteractionStateV1 {
 
 export interface EgoInteractionContextV1 {
   readonly identity: InputGraphIdentityV1;
+  /** Compact revision for graph-wide planning inputs supplied by their runtime owner. */
+  readonly planningRevision?: number | string;
   readonly state: EgoInteractionStateV1;
   readonly experience: GraphExperienceContractV1;
+  readonly judgement?: Judgement;
   readonly availableNodeIds: ReadonlySet<string>;
   readonly visibleNodeIds: ReadonlySet<string>;
   readonly visibleEdgeIds: ReadonlySet<string>;
   readonly edges?: readonly GraphEdgeV1[];
+  readonly topology?: GraphTopologyIndex;
   readonly awarenessNodeIds: ReadonlySet<string>;
+  readonly rememberedNodeIds?: ReadonlySet<string>;
   readonly getConstellation: (nodeId: string) => readonly string[];
 }
 
@@ -41,7 +53,7 @@ interface EgoInteractionPlanBaseV1 {
   /** Semantic basis only: camera and layout changes do not alter the intended transition. */
   readonly contextKey: string;
   readonly before: EgoInteractionStateV1;
-  readonly action: 'choose-constellation' | 'admit-member' | 'remove-member' | 'focus-member' | 'back' | 'enter-constellation';
+  readonly action: 'choose-constellation' | 'admit-member' | 'remove-member' | 'focus-member' | 'back' | 'overview' | 'clear-constellation' | 'enter-constellation' | 'none';
   readonly resultingState: EgoInteractionStateV1;
   /** Admitted connecting route, captured once for both hover and activation. */
   readonly constellationPathNodeIds: readonly string[];
@@ -68,7 +80,7 @@ export function realizeEgoViewDirectiveV1(
   const focusedNodeId = attentionNodeIds.length === 0 || directive.clearFocus
     || (directive.focusNodeId === undefined && state.focusedNodeId !== undefined && !attentionNodeIds.includes(state.focusedNodeId))
     ? undefined : directive.focusNodeId ?? state.focusedNodeId;
-  const viewId = attentionNodeIds.length === 0 ? 'overview'
+  const viewId = attentionNodeIds.length === 0 ? directive.viewMode === 'explore' ? 'explore' : 'overview'
     : directive.viewMode ?? (focusedNodeId !== undefined ? 'focus' : state.viewId === 'focus' ? 'explore' : state.viewId);
   return freezeState({ viewId, attentionNodeIds, focusedNodeId });
 }
@@ -81,17 +93,22 @@ export function resolveEgoInteractionPlanV1(
   const capturedInput = freezeInput(input);
   const before = freezeState(context.state);
   const nodeId = input.target.kind === 'node' ? input.target.nodeId : undefined;
-  const action: EgoInteractionPlanV1['action'] = nodeId === undefined
+  const isMember = nodeId !== undefined && before.attentionNodeIds.includes(nodeId);
+  const membershipAction = input.membershipAction ?? (input.modifiers.ctrl ? 'remove' : undefined);
+  const action: EgoInteractionPlanV1['action'] = input.navigationAction ?? (nodeId === undefined
     ? before.viewId === 'overview' && input.modality !== 'keyboard' ? 'enter-constellation' : 'back'
-    : input.modifiers.ctrl ? before.attentionNodeIds.includes(nodeId) ? 'remove-member' : 'admit-member'
-    : before.viewId === 'overview' ? 'choose-constellation'
-    : before.viewId === 'explore' && !before.attentionNodeIds.includes(nodeId) ? 'admit-member' : 'focus-member';
+    : input.objectAction === 'focus' ? 'focus-member'
+    : membershipAction === 'remove' ? isMember ? 'remove-member' : 'none'
+    : membershipAction === 'toggle' ? isMember ? 'remove-member' : 'admit-member'
+    : before.viewId === 'overview' ? context.awarenessNodeIds.has(nodeId) || isMember ? 'choose-constellation' : 'admit-member'
+    : before.viewId === 'explore' && !before.attentionNodeIds.includes(nodeId) ? 'admit-member' : 'focus-member');
   const addsMember = nodeId !== undefined && !before.attentionNodeIds.includes(nodeId)
-    && (input.modifiers.ctrl || before.viewId !== 'overview');
+    && membershipAction !== 'remove' && action !== 'choose-constellation';
   const constellationPathNodeIds = addsMember
     && GRAPH_VIEW_DEFINITIONS_V1[before.viewId].interactions.membershipAddition === 'candidate-and-nearest-path'
     ? resolveGraphHoverPathV1(nodeId!, { edges: context.edges ?? [],
       visibleNodeIds: context.visibleNodeIds, visibleEdgeIds: context.visibleEdgeIds,
+      topology: context.topology,
       targetNodeIds: new Set(before.attentionNodeIds) }) : [];
   const basis = { input: capturedInput, identity: Object.freeze({ ...context.identity }),
     contextKey: egoInteractionContextKeyV1(context), before, action,
@@ -100,21 +117,32 @@ export function resolveEgoInteractionPlanV1(
     ...basis, outcome: 'rejected', reason, resultingState: before, effects: Object.freeze([]),
   });
   if (nodeId !== undefined && !context.visibleNodeIds.has(nodeId)) return reject('target-not-visible');
-  const proposal = nodeId === undefined ? { type: 'activate-background' as const, back: input.modality === 'keyboard' }
-    : planGraphViewObjectActivationV1({ ...before, nodeId, ctrl: input.modifiers.ctrl,
+  // No mutation is proposed: keep even an empty Constellation intact, with no effects.
+  const proposal = action === 'none' ? { type: 'direct-attention' as const,
+      nodeIds: before.attentionNodeIds, viewMode: before.viewId }
+    : input.navigationAction === 'overview' || input.navigationAction === 'clear-constellation'
+      ? { type: 'direct-attention' as const,
+        nodeIds: input.navigationAction === 'clear-constellation' ? [] : before.attentionNodeIds,
+        clearFocus: true, viewMode: 'overview' as const }
+    : nodeId === undefined ? { type: 'activate-background' as const, back: input.navigationAction === 'back' || input.modality === 'keyboard' }
+    : planGraphViewObjectActivationV1({ ...before, nodeId, ctrl: input.modifiers.ctrl, membershipAction,
+      objectAction: input.objectAction,
+      highlightedNodeIds: new Set([...before.attentionNodeIds, ...context.awarenessNodeIds]),
       getConstellation: context.getConstellation, constellationPathNodeIds });
   if (!proposal) return reject('target-not-selectable');
-  const outcome = adjudicateGraphExperienceCommandV1({
-    command: { ...proposal, identity: context.identity, timestamp: 0 },
+  const outcome = (context.judgement ?? DEFAULT_EGO_JUDGEMENT_V1).consider<GraphRuntimeCommandV1>({
+    source: 'endogenous', directive: { ...proposal, identity: context.identity, timestamp: 0 },
+  }, (intent) => adjudicateGraphExperienceCommandV1({
+    command: intent.directive,
     experience: context.experience, currentState: before.viewId,
     attentionNodeIds: before.attentionNodeIds, focusedNodeId: before.focusedNodeId,
-  });
+  }));
   if (outcome.status === 'rejected') return reject(outcome.reason);
   const directive = freezeDirective(outcome.directive as EgoViewDirectiveV1);
-  const resultingState = realizeEgoViewDirectiveV1(directive, before, context.availableNodeIds);
+  const resultingState = action === 'none' ? before : realizeEgoViewDirectiveV1(directive, before, context.availableNodeIds);
   const effects: EgoInteractionEffectV1[] = [];
   const focusChanged = resultingState.focusedNodeId !== before.focusedNodeId;
-  if (directive.type === 'activate-background' || focusChanged) effects.push(Object.freeze({ type: 'clear-presentation' }));
+  if (directive.type === 'activate-background' || input.navigationAction !== undefined || focusChanged) effects.push(Object.freeze({ type: 'clear-presentation' }));
   if (directive.type === 'direct-attention' && focusChanged && resultingState.focusedNodeId !== undefined) {
     effects.push(Object.freeze({ type: 'recenter-focus', nodeId: resultingState.focusedNodeId }));
   }
@@ -132,6 +160,8 @@ export function sameEgoInteractionV1(a: EgoInteractionInputV1, b: EgoInteraction
   return a.target.kind === b.target.kind
     && (a.target.kind !== 'node' || (b.target.kind === 'node' && a.target.nodeId === b.target.nodeId))
     && a.modality === b.modality && a.modifiers.ctrl === b.modifiers.ctrl
+    && a.membershipAction === b.membershipAction
+    && a.objectAction === b.objectAction && a.navigationAction === b.navigationAction
     && a.modifiers.meta === b.modifiers.meta && a.modifiers.shift === b.modifiers.shift && a.modifiers.alt === b.modifiers.alt;
 }
 
@@ -141,8 +171,11 @@ export function captureEgoInteractionPhaseV1(plan: EgoInteractionPlanV1, input: 
 
 function egoInteractionContextKeyV1(context: EgoInteractionContextV1): string {
   return JSON.stringify([context.identity, context.state.viewId, context.state.attentionNodeIds,
-    context.state.focusedNodeId, [...context.availableNodeIds].sort(), [...context.visibleNodeIds].sort(),
-    [...context.visibleEdgeIds].sort(), [...context.awarenessNodeIds].sort(), context.experience]);
+    context.state.focusedNodeId, context.planningRevision ?? [
+      [...context.availableNodeIds].sort(), [...context.visibleNodeIds].sort(), [...context.visibleEdgeIds].sort(),
+    ], [...context.awarenessNodeIds].sort(),
+    [...(context.rememberedNodeIds ?? [])].sort(), context.experience,
+    (context.judgement ?? DEFAULT_EGO_JUDGEMENT_V1).revision]);
 }
 
 function freezeInput(input: EgoInteractionInputV1): EgoInteractionInputV1 {

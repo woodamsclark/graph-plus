@@ -5,10 +5,11 @@ import type {
   Awareness,
   ConsciousField,
   RememberedSubjects,
+  Constellation,
 } from '../consciousness/index.ts';
 import type { GraphInteractionContextV1, GraphUxStateV1 } from '../interaction/index.ts';
-import { resolveOverviewConstellationV1 } from '../consciousness/Consciousness.ts';
-import { previewGraphViewObjectActivationV1, type GraphViewObjectPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
+import { resolveOverviewConstellationFromSourcesV1 } from '../consciousness/Consciousness.ts';
+import { previewGraphObjectInteractionV1, type GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
 
 export type AnimaPresentationPhaseV1 = 'void' | 'dimmed' | 'standard' | 'highlighted';
 /** @deprecated Use AnimaPresentationPhaseV1. */
@@ -78,10 +79,18 @@ export interface AnimaLabelRaisingV1 {
 
 export interface AnimaConsciousnessPresentationV1 {
   /** Prospective presentation facts, never written back to View or Consciousness. */
-  readonly objectPreview?: GraphViewObjectPreviewV1;
-  readonly sceneInteraction: GraphInteractionContextV1;
+  readonly objectPreview?: GraphInteractionPreviewV1;
+  /** Committed interaction: preview cannot substitute a View or Focus subject. */
+  readonly interaction: GraphInteractionContextV1;
+  readonly expressedAttentionNodeIds: ReadonlySet<string>;
+  readonly focusEmphasisNodeIds: ReadonlySet<string>;
   readonly statePolicy: AnimaStatePresentationPolicyV1;
   readonly consciousnessClasses: AnimaConsciousnessClassesV1;
+  /** Source identity is independent of highlight phase and never inferred from color. */
+  readonly constellationKindByNodeId: Readonly<Record<string, Constellation['kind']>>;
+  readonly constellationKindByEdgeId: Readonly<Record<string, Constellation['kind']>>;
+  /** Oldest-to-newest Memory order resolves to 25%, 50%, and 100% color strength. */
+  readonly memoryStrengthByNodeId: Readonly<Record<string, number>>;
   readonly highlight: AnimaHighlightResultV1;
   readonly labelRaising: AnimaLabelRaisingV1;
 }
@@ -107,7 +116,8 @@ export const ANIMA_STATE_PRESENTATION_POLICIES_V1: Readonly<
   overview: {
     renderScope: 'graph',
     highlightOverride: {
-      sources: { focus: { enabled: false }, hover: { enabled: false } },
+      // Note-content inspection must not relight a Ctrl no-change/removal target.
+      sources: { focus: { enabled: false }, hover: { enabled: false }, activity: { enabled: false } },
       contextRole: 'standard',
     },
   },
@@ -149,7 +159,7 @@ export function createAnimaConsciousnessPresentationV1(options: {
   readonly experience?: GraphExperienceContractV1;
   readonly ctrlHover?: boolean;
   /** Session admission result; null means no admitted preview. Pure callers may omit it. */
-  readonly objectActivationPreview?: GraphViewObjectPreviewV1 | null;
+  readonly objectActivationPreview?: GraphInteractionPreviewV1 | null;
 }): AnimaConsciousnessPresentationV1 {
   const visibleNodeIds = options.visibleNodeIds ?? new Set(options.document.nodes.map((node) => node.id));
   const getConstellation = (id: string): readonly string[] => {
@@ -161,52 +171,84 @@ export function createAnimaConsciousnessPresentationV1(options: {
       relationships.get(edge.sourceId)?.add(edge.targetId);
       relationships.get(edge.targetId)?.add(edge.sourceId);
     }
-    return resolveOverviewConstellationV1(id, visibleNodeIds,
-      options.awareness.nodeIds, relationships)?.nodeIds ?? [];
+    return resolveOverviewConstellationFromSourcesV1(id, visibleNodeIds, {
+      attention: options.attention.nodeIds, remembered: options.remembered?.nodeIds ?? new Set(),
+    }, relationships)?.nodeIds ?? [];
   };
   const hovered = options.interaction.hoveredNodeId;
   const objectPreview = options.objectActivationPreview !== undefined
     ? options.objectActivationPreview ?? undefined
     : hovered !== undefined && visibleNodeIds.has(hovered)
-    ? previewGraphViewObjectActivationV1({
+    ? previewGraphObjectInteractionV1({
       viewId: options.interaction.state, nodeId: hovered, ctrl: options.ctrlHover,
       attentionNodeIds: [...options.attention.nodeIds], focusedNodeId: options.interaction.focusedNodeId,
       getConstellation,
       hoverPath: { edges: options.document.edges, visibleNodeIds,
         visibleEdgeIds: options.visibleEdgeIds ?? new Set(options.document.edges.map((edge) => edge.id)),
-        targetNodeIds: options.interaction.state === 'overview' ? options.awareness.nodeIds : options.attention.nodeIds },
+        targetNodeIds: options.attention.nodeIds },
       identity: { documentId: options.document.documentId, documentRevision: options.document.revision },
       experience: options.experience,
+      rememberedNodeIds: options.remembered?.nodeIds,
     }) : undefined;
-  const preserveOverview = GRAPH_VIEW_DEFINITIONS_V1[options.interaction.state].scene.hoverContext === 'preserve-overview';
-  const sceneInteraction: GraphInteractionContextV1 = objectPreview ? {
-    ...options.interaction, state: preserveOverview ? 'overview' : objectPreview.viewId,
-    mode: preserveOverview ? 'overview' : objectPreview.viewId,
-    selectedNodeIds: new Set(objectPreview.attentionNodeIds), focusedNodeId: objectPreview.focusedNodeId,
+  const removedNodeIds = new Set(objectPreview?.removedNodeIds ?? []);
+  const expressedAttentionNodeIds = new Set([...options.attention.nodeIds].filter((id) => !removedNodeIds.has(id)));
+  for (const id of objectPreview?.addedNodeIds ?? []) expressedAttentionNodeIds.add(id);
+  const viewTransition = objectPreview?.kind === 'view-transition' ? objectPreview.resultingState : undefined;
+  const sceneInteraction: GraphInteractionContextV1 = viewTransition ? {
+    ...options.interaction, state: viewTransition.viewId, mode: viewTransition.viewId,
+    focusedNodeId: viewTransition.focusedNodeId, selectedNodeIds: new Set(viewTransition.attentionNodeIds),
   } : options.interaction;
-  const sceneOptions = {
-    ...options, interaction: sceneInteraction,
-    attention: objectPreview ? { nodeIds: new Set(objectPreview.attentionNodeIds) } : options.attention,
-    awareness: objectPreview?.activation === 'toggle-membership'
-      ? { nodeIds: new Set([...(options.remembered?.nodeIds ?? []), ...objectPreview.attentionNodeIds]) }
-      : objectPreview && preserveOverview
-        ? { nodeIds: new Set([...options.awareness.nodeIds, ...objectPreview.attentionNodeIds]) }
-        : options.awareness,
-  };
+  const focusEmphasisNodeIds = new Set<string>();
+  if (sceneInteraction.focusedNodeId !== undefined && !removedNodeIds.has(sceneInteraction.focusedNodeId)) {
+    focusEmphasisNodeIds.add(sceneInteraction.focusedNodeId);
+  }
+  if (objectPreview?.focusNodeId !== undefined) focusEmphasisNodeIds.add(objectPreview.focusNodeId);
   const statePolicy = ANIMA_STATE_PRESENTATION_POLICIES_V1[sceneInteraction.state];
-  // Classification describes realized truth; only its visual expression is previewed.
+  // Classification always describes committed truth; only explicit View-entry preview borrows a scene.
   const consciousnessClasses = classifyAnimaConsciousnessV1({
     attention: options.attention, awareness: options.awareness,
     consciousField: options.consciousField, projectedNodeIds: visibleNodeIds,
   });
-  const highlight = resolveAnimaHighlightV1({ ...sceneOptions, statePolicy,
+  const highlight = resolveAnimaHighlightV1({ ...options, interaction: sceneInteraction,
+    hoverViewId: options.interaction.state,
+    attention: viewTransition ? { nodeIds: expressedAttentionNodeIds } : options.attention,
+    statePolicy, objectPreview,
     hoverPathNodeIds: new Set(objectPreview?.hoverPathNodeIds ?? []) });
-  const removedMemberId = objectPreview?.activation === 'toggle-membership' && hovered !== undefined
-    && options.attention.nodeIds.has(hovered) && !objectPreview.attentionNodeIds.includes(hovered) ? hovered : undefined;
+  const constellationKindByNodeId: Record<string, Constellation['kind']> = {};
+  for (const id of visibleNodeIds) {
+    if (expressedAttentionNodeIds.has(id) || highlight.hoverPathNodeIds.has(id)) {
+      constellationKindByNodeId[id] = 'ego';
+    } else if (options.remembered?.nodeIds.has(id)) {
+      constellationKindByNodeId[id] = 'memory';
+    }
+  }
+  const constellationKindByEdgeId: Record<string, Constellation['kind']> = {};
+  for (const edge of options.document.edges) {
+    if (options.visibleEdgeIds && !options.visibleEdgeIds.has(edge.id)) continue;
+    const kind = constellationKindByNodeId[edge.sourceId];
+    if (kind && kind === constellationKindByNodeId[edge.targetId]) constellationKindByEdgeId[edge.id] = kind;
+  }
+  const memoryStrengthByNodeId = resolveMemoryStrengths(options.remembered);
   return {
-    objectPreview, sceneInteraction, statePolicy, consciousnessClasses, highlight,
-    labelRaising: resolveAnimaLabelRaisingV1({ ...sceneOptions, consciousnessClasses, highlight, removedMemberId }),
+    objectPreview, interaction: options.interaction, expressedAttentionNodeIds, focusEmphasisNodeIds,
+    statePolicy, consciousnessClasses, highlight,
+    constellationKindByNodeId, constellationKindByEdgeId, memoryStrengthByNodeId,
+    labelRaising: resolveAnimaLabelRaisingV1({ ...options, interaction: sceneInteraction,
+      hoverViewId: options.interaction.state,
+      attention: { nodeIds: expressedAttentionNodeIds },
+      consciousnessClasses, highlight,
+      suppressHover: objectPreview?.activation === 'remove-membership'
+        || objectPreview?.kind === 'view-transition' }),
   };
+}
+
+function resolveMemoryStrengths(remembered: RememberedSubjects | undefined): Readonly<Record<string, number>> {
+  const newestFirst = [...(remembered?.nodeIds ?? [])].reverse();
+  const strengths = [1, 0.5, 0.25] as const;
+  return Object.fromEntries(newestFirst.map((nodeId, index) => [
+    nodeId,
+    strengths[Math.min(index, strengths.length - 1)],
+  ]));
 }
 
 /** @deprecated Use createAnimaConsciousnessPresentationV1. */
@@ -274,8 +316,10 @@ function resolveAnimaHighlightV1(options: {
   readonly consciousField?: ConsciousField;
   readonly remembered?: RememberedSubjects;
   readonly interaction: GraphInteractionContextV1;
+  readonly hoverViewId: GraphUxStateV1;
   readonly statePolicy: AnimaStatePresentationPolicyV1;
   readonly hoverPathNodeIds: ReadonlySet<string>;
+  readonly objectPreview?: GraphInteractionPreviewV1;
   readonly document: GraphDocumentV1;
   readonly visibleNodeIds?: ReadonlySet<string>;
   readonly visibleEdgeIds?: ReadonlySet<string>;
@@ -310,27 +354,73 @@ function resolveAnimaHighlightV1(options: {
     for (const seed of seeds) seedNodeIds.add(seed);
     expandNeighborhood(seeds, sourcePolicy.neighborhoodDepth, relationships, highlightedNodeIds);
   }
-  const focusScopeNodeIds = new Set(sourceSeeds.awareness);
+  // Memory remains independently visible in every View. It never becomes
+  // Attention, seeds Focus context expansion, or owns camera interest.
+  for (const id of options.remembered?.nodeIds ?? []) {
+    if (visibleNodeIds.has(id)) highlightedNodeIds.add(id);
+  }
+  const removedNodeIds = new Set(options.objectPreview?.removedNodeIds ?? []);
+  for (const id of removedNodeIds) {
+    if (!options.remembered?.nodeIds.has(id)) {
+      highlightedNodeIds.delete(id);
+      seedNodeIds.delete(id);
+    }
+  }
+  // Object deltas retain context; explicit View transitions supply their admitted subject.
+  const focusScopeNodeIds = new Set([...sourceSeeds.awareness].filter((id) => !removedNodeIds.has(id)));
   if (options.interaction.focusedNodeId !== undefined) {
+    focusScopeNodeIds.add(options.interaction.focusedNodeId);
     for (const neighbor of relationships.get(options.interaction.focusedNodeId) ?? []) {
       focusScopeNodeIds.add(neighbor);
     }
   }
   const hoverPathNodeIds = new Set([...options.hoverPathNodeIds].filter((id) => visibleNodeIds.has(id)));
+  for (const id of options.objectPreview?.addedNodeIds ?? []) {
+    if (visibleNodeIds.has(id)) highlightedNodeIds.add(id);
+  }
+  if (options.objectPreview?.focusNodeId !== undefined && visibleNodeIds.has(options.objectPreview.focusNodeId)) {
+    highlightedNodeIds.add(options.objectPreview.focusNodeId);
+  }
   for (const id of hoverPathNodeIds) highlightedNodeIds.add(id);
   const context = GRAPH_VIEW_DEFINITIONS_V1[options.interaction.state].scene.context;
   const baseNodePhase: AnimaPresentationPhaseV1 = context === 'standard'
     ? 'standard' : context === 'dimmed' ? 'dimmed' : 'void';
   const phaseByNodeId = Object.fromEntries([...visibleNodeIds].map((nodeId) => {
     let phase: AnimaPresentationPhaseV1 = baseNodePhase;
-    if (options.interaction.state === 'focus' && focusScopeNodeIds.has(nodeId)) phase = 'dimmed';
+    // Focus keeps its immediate conscious neighborhood fully present. Standard
+    // delegates label eligibility to the adaptive label policy; only unrelated
+    // context remains void.
+    if (options.interaction.state === 'focus' && focusScopeNodeIds.has(nodeId)) phase = 'standard';
     if (highlightedNodeIds.has(nodeId)) phase = 'highlighted';
+    // Removal presentation lowers the object phase instead of overriding label
+    // policy. Independent Memory stays highlighted when deliberate membership
+    // is withdrawn.
+    if (removedNodeIds.has(nodeId) && !options.remembered?.nodeIds.has(nodeId)) phase = 'dimmed';
     return [nodeId, phase];
   })) as Record<string, AnimaPresentationPhaseV1>;
   const phaseByEdgeId = Object.fromEntries(visibleEdges.map((edge) => [
     edge.id,
     weakerPhase(phaseByNodeId[edge.sourceId] ?? 'void', phaseByNodeId[edge.targetId] ?? 'void'),
   ])) as Record<string, AnimaPresentationPhaseV1>;
+  // Resolve the scene first, then lift each affected object exactly once. Deriving
+  // edges after node promotion would also lift unrelated neighbor-to-neighbor links.
+  if (options.objectPreview?.kind === 'objects' && options.objectPreview.activation === 'primary'
+    && options.interaction.hoveredNodeId !== undefined) {
+    const hovered = options.interaction.hoveredNodeId;
+    const hoverPolicy = GRAPH_VIEW_DEFINITIONS_V1[options.hoverViewId].scene.hoverAwareness;
+    const raisedNodes = new Set<string>();
+    expandNeighborhood(sourceSeeds.hover, hoverPolicy.neighborhoodDepth, relationships, raisedNodes);
+    for (const id of raisedNodes) phaseByNodeId[id] = raiseAnimaAwarenessPhaseV1(phaseByNodeId[id]);
+    for (const edge of visibleEdges) {
+      if (hoverPolicy.links === 'incident' && (edge.sourceId === hovered || edge.targetId === hovered)) {
+        phaseByEdgeId[edge.id] = raiseAnimaAwarenessPhaseV1(phaseByEdgeId[edge.id]);
+      }
+    }
+  }
+  highlightedNodeIds.clear();
+  for (const [id, phase] of Object.entries(phaseByNodeId)) {
+    if (phase === 'highlighted') highlightedNodeIds.add(id);
+  }
   const highlightedEdgeIds = new Set(visibleEdges
     .filter((edge) => phaseByEdgeId[edge.id] === 'highlighted')
     .map((edge) => edge.id));
@@ -344,49 +434,67 @@ function resolveAnimaLabelRaisingV1(options: {
   readonly attention: Attention;
   readonly awareness: Awareness;
   readonly interaction: GraphInteractionContextV1;
+  readonly hoverViewId: GraphUxStateV1;
   readonly consciousnessClasses: AnimaConsciousnessClassesV1;
   readonly remembered?: RememberedSubjects;
   readonly highlight: AnimaHighlightResultV1;
   readonly document: GraphDocumentV1;
   readonly visibleNodeIds?: ReadonlySet<string>;
   readonly visibleEdgeIds?: ReadonlySet<string>;
-  readonly removedMemberId?: string;
+  readonly suppressHover?: boolean;
 }): AnimaLabelRaisingV1 {
   const policy = GRAPH_VIEW_DEFINITIONS_V1[options.interaction.state].scene.labels;
   const visibleNodeIds = options.visibleNodeIds ?? new Set(options.document.nodes.map((node) => node.id));
+  const hoverNeighbors = new Set<string>();
+  if (!options.suppressHover && options.hoverViewId !== 'overview'
+    && options.interaction.hoveredNodeId !== undefined) {
+    for (const edge of options.document.edges) {
+      if (options.visibleEdgeIds && !options.visibleEdgeIds.has(edge.id)) continue;
+      if (edge.sourceId === options.interaction.hoveredNodeId) hoverNeighbors.add(edge.targetId);
+      if (edge.targetId === options.interaction.hoveredNodeId) hoverNeighbors.add(edge.sourceId);
+    }
+  }
   return { byNodeId: Object.fromEntries([...visibleNodeIds].map((nodeId): [string, AnimaLabelDecisionV1] => {
     const phase = options.highlight.phaseByNodeId[nodeId] ?? 'void';
-    if (nodeId === options.removedMemberId) {
-      return [nodeId, { disposition: policy.removedMember, reason: 'dimmed', priority: 2 }];
-    }
-    if (phase !== 'void' && nodeId === options.interaction.focusedNodeId) {
-      return [nodeId, { disposition: policy.focused, reason: 'attended', priority: 7 }];
-    }
-    if (phase !== 'void' && nodeId === options.interaction.hoveredNodeId) {
-      return [nodeId, { disposition: policy.hovered, reason: 'hover', priority: 6 }];
-    }
     if (phase === 'highlighted') {
-      return [nodeId, {
-        disposition: policy.highlighted,
-        reason: nodeId === options.interaction.hoveredNodeId
-          ? 'hover'
+      const reason: AnimaLabelReasonV1 = !options.suppressHover && nodeId === options.interaction.hoveredNodeId
+        ? 'hover'
+        : options.attention.nodeIds.has(nodeId)
+          ? 'attended'
           : options.remembered?.nodeIds.has(nodeId)
             ? 'remembered'
-            : options.attention.nodeIds.has(nodeId)
-              ? 'attended'
-              : options.awareness.nodeIds.has(nodeId)
-                ? 'aware'
-                : options.highlight.hoverPathNodeIds.has(nodeId)
-                  ? 'hover-path'
-                  : 'aware',
+            : options.awareness.nodeIds.has(nodeId)
+              ? 'aware'
+              : options.highlight.hoverPathNodeIds.has(nodeId)
+                ? 'hover-path'
+                : 'aware';
+      // Memory remains visible in Focus, but its label competes normally with
+      // the focused neighborhood instead of bypassing the adaptive budget.
+      if (options.interaction.state === 'focus' && reason === 'remembered') {
+        return [nodeId, { disposition: 'fallback', reason, priority: 1 }];
+      }
+      return [nodeId, {
+        disposition: policy.highlighted,
+        reason,
         priority: 5,
       }];
     }
     if (phase === 'dimmed' || phase === 'void') {
       return [nodeId, { disposition: policy[phase], reason: 'dimmed', priority: 2 }];
     }
+    if (!options.suppressHover
+      && !options.attention.nodeIds.has(nodeId)
+      && !options.remembered?.nodeIds.has(nodeId)
+      && hoverNeighbors.has(nodeId)) {
+      return [nodeId, { disposition: 'favor', reason: 'hover-neighbor', priority: 4, saliencyBoost: 0.5 }];
+    }
     return [nodeId, { disposition: policy.standard, reason: 'slider', priority: 1 }];
   })) };
+}
+
+/** Raise one presentation degree without accumulating hover state or changing membership. */
+export function raiseAnimaAwarenessPhaseV1(phase: AnimaPresentationPhaseV1): AnimaPresentationPhaseV1 {
+  return phase === 'void' ? 'dimmed' : phase === 'dimmed' ? 'standard' : 'highlighted';
 }
 
 function phaseRank(phase: AnimaPresentationPhaseV1): number {

@@ -196,6 +196,12 @@ export class GraphInteractionInterpreter {
     return (this.mode.kind !== 'idle' && this.mode.kind !== 'press') || this.touchGesture !== null;
   }
 
+  isCameraGestureActive(): boolean {
+    return this.mode.kind === 'pan' || this.mode.kind === 'elastic-pan'
+      || this.mode.kind === 'orbit' || this.mode.kind === 'radial-zoom'
+      || this.mode.kind === 'precision-zoom' || this.touchGesture?.mode === 'navigation';
+  }
+
   isSelectionPresentationSuspended(): boolean {
     return this.tagging.isPresentationSuspended();
   }
@@ -370,22 +376,10 @@ export class GraphInteractionInterpreter {
         };
         return;
       }
-      if (policy.state === 'focus' && this.mode.button === 2) {
-        const focusPoint = this.options.getFocusedNodeScreenPoint();
-        const lastRadius = focusPoint ? pointDistance(this.mode.lastPoint, focusPoint) : undefined;
-        if (focusPoint && lastRadius !== undefined) {
-          this.radialZoom(event, lastRadius, pointDistance(event.point, focusPoint));
-        }
-        this.mode = {
-          kind: 'radial-zoom', pointerId: event.pointerId, lastPoint: event.point,
-          ...(focusPoint ? { lastRadius: pointDistance(event.point, focusPoint) } : {}),
-        };
-        return;
-      }
       const navigation = this.mode.pointerKind === 'touch'
         ? policy.mobilePrimaryDrag[this.dimensions]
         : this.mode.button === 2
-          ? 'rotate'
+          ? policy.secondaryDrag
           : policy.primaryDrag[this.dimensions];
       const orbit = navigation === 'rotate' && this.dimensions === '3d';
       if (orbit) {
@@ -702,10 +696,7 @@ export class GraphInteractionInterpreter {
       const deltaX = originCentroid.x - next.centroid.x;
       const deltaY = originCentroid.y - next.centroid.y;
       if (Math.abs(deltaX) > 0 || Math.abs(deltaY) > 0) {
-        // On mobile, a two-finger drag in 3D Constellation mode must orbit, never pan.
-        const navigation = policy.state === 'explore' && this.dimensions === '3d'
-          ? 'rotate-and-zoom'
-          : policy.mobileTwoFingerDrag[this.dimensions];
+        const navigation = policy.mobileTwoFingerDrag[this.dimensions];
         this.command(event, navigation === 'rotate-and-zoom'
           ? { type: 'orbit-by', deltaX: -deltaX, deltaY }
           : { type: 'pan-by', deltaX, deltaY });

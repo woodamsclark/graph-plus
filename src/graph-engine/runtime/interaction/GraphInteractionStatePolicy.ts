@@ -75,7 +75,7 @@ export interface GraphInteractionStatePolicyV1 {
   readonly primaryDrag: Readonly<Record<GraphDimensionsV1, 'pan' | 'rotate' | 'elastic-pan'>>;
   readonly mobilePrimaryDrag: Readonly<Record<GraphDimensionsV1, 'pan' | 'rotate' | 'elastic-pan'>>;
   readonly wheel: Readonly<Record<GraphDimensionsV1, 'pan' | 'rotate' | 'elastic-pan'>>;
-  readonly secondaryDrag: 'rotate' | 'radial-zoom';
+  readonly secondaryDrag: 'rotate';
   readonly mobileTwoFingerDrag: Readonly<Record<GraphDimensionsV1, 'pan-and-zoom' | 'rotate-and-zoom'>>;
 }
 
@@ -92,15 +92,15 @@ export const GRAPH_INTERACTION_STATE_POLICIES_V1: Readonly<Record<GraphUxStateV1
     state: 'explore', cameraTracking: GRAPH_VIEW_DEFINITIONS_V1.explore.framing.interest, zoomAnchor: GRAPH_VIEW_DEFINITIONS_V1.explore.framing.zoomAnchor, fitTarget: 'selection', fitCenter: 'centroid',
     primaryDrag: { '2d': 'pan', '3d': 'pan' }, mobilePrimaryDrag: { '2d': 'pan', '3d': 'rotate' },
     wheel: { '2d': 'pan', '3d': 'rotate' }, secondaryDrag: 'rotate',
-    mobileTwoFingerDrag: { '2d': 'pan-and-zoom', '3d': 'rotate-and-zoom' },
+    mobileTwoFingerDrag: { '2d': 'pan-and-zoom', '3d': 'pan-and-zoom' },
   },
   focus: {
     nodeDrag: GRAPH_VIEW_DEFINITIONS_V1.focus.interactions.nodeDrag,
     state: 'focus', cameraTracking: GRAPH_VIEW_DEFINITIONS_V1.focus.framing.interest, zoomAnchor: GRAPH_VIEW_DEFINITIONS_V1.focus.framing.zoomAnchor, fitTarget: 'focused-neighborhood', fitCenter: 'focused-node',
     primaryDrag: { '2d': 'elastic-pan', '3d': 'pan' },
     mobilePrimaryDrag: { '2d': 'elastic-pan', '3d': 'rotate' },
-    wheel: { '2d': 'elastic-pan', '3d': 'rotate' }, secondaryDrag: 'radial-zoom',
-    mobileTwoFingerDrag: { '2d': 'pan-and-zoom', '3d': 'rotate-and-zoom' },
+    wheel: { '2d': 'elastic-pan', '3d': 'rotate' }, secondaryDrag: 'rotate',
+    mobileTwoFingerDrag: { '2d': 'pan-and-zoom', '3d': 'pan-and-zoom' },
   },
 };
 

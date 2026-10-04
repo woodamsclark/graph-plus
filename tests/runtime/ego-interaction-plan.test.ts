@@ -1,5 +1,6 @@
 import { DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1, type GraphSessionV1 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { Ego } from '../../src/graph-engine/runtime/consciousness/Consciousness.ts';
+import { Judgement } from '../../src/graph-engine/runtime/consciousness/Judgement.ts';
 import {
   isEgoInteractionPlanCurrentV1, resolveEgoInteractionPlanV1,
   type EgoInteractionContextV1, type EgoInteractionInputV1, type EgoInteractionPlanV1,
@@ -23,7 +24,28 @@ const context = (): EgoInteractionContextV1 => ({
   getConstellation: () => ['a', 'b'],
 });
 
-test('Ego additions capture the nearest visible route for primary and Ctrl activation, without expanding removals', () => {
+test('Ego owns permissive Judgement and uses one policy for preview and activation', () => {
+  const permissive = new Ego();
+  const intent = permissive.intend({ type: 'example' });
+  deepEqual(permissive.consider(intent), { status: 'accepted', directive: intent.directive }, 'valid intentions are allowed by default');
+  deepEqual(permissive.consider(intent, () => ({ status: 'rejected', reason: 'invalid-experience' })),
+    { status: 'rejected', reason: 'invalid-experience' }, 'permissive Judgement preserves structural constraints');
+
+  const judgement = new Judgement(() => ({ status: 'rejected', reason: 'rule-denied' }));
+  const ego = new Ego(judgement);
+  const hover = ego.resolveWill(node('b'), context());
+  equal(hover.outcome, 'rejected', 'preview consults owned Judgement');
+  equal(presentEgoInteractionPlanV1(hover), undefined, 'rejected intent has no prospective scene');
+  const activate = ego.resolveWill({ ...node('b'), phase: 'activate' }, context());
+  equal(activate.outcome, 'rejected', 'activation consumes the same rejection');
+  equal(activate.resultingState, hover.resultingState, 'phase capture shares the unchanged result');
+  deepEqual(activate.effects, [], 'Judgement never performs or proposes rejected effects');
+  deepEqual(ego.consider(intent), { status: 'rejected', reason: 'rule-denied' }, 'non-View intentions use the same policy');
+  assert(!isEgoInteractionPlanCurrentV1(hover, { ...context(), judgement: new Judgement() }),
+    'a different admission policy cannot reuse rejected will');
+});
+
+test('Ego additions capture the nearest visible route for primary and menu activation, without expanding removals', () => {
   const edges = [graphEdge('xy', 'x', 'y'), graphEdge('ya', 'y', 'a'),
     graphEdge('xz', 'x', 'z'), graphEdge('zb', 'z', 'b')];
   const basis: EgoInteractionContextV1 = { ...context(), edges,
@@ -32,18 +54,19 @@ test('Ego additions capture the nearest visible route for primary and Ctrl activ
     visibleEdgeIds: new Set(edges.map((edge) => edge.id)),
   };
   for (const viewId of ['overview', 'explore', 'focus'] as const) {
-    for (const ctrl of [false, true]) {
-      if (viewId === 'overview' && !ctrl) continue; // Overview primary chooses a whole group instead of extending it.
+    for (const toggle of [false, true]) {
       const current = { ...basis, state: { viewId, attentionNodeIds: ['a', 'b'],
         focusedNodeId: viewId === 'focus' ? 'a' : undefined } };
-      const plan = resolveEgoInteractionPlanV1(node('x', ctrl), current);
+      const input: EgoInteractionInputV1 = { ...node('x'), ...(toggle ? { membershipAction: 'toggle' } : {}) };
+      const plan = resolveEgoInteractionPlanV1(input, current);
       deepEqual(plan.resultingState.attentionNodeIds, ['a', 'b', 'x', 'y'], 'stable nearest route is added with the candidate');
       deepEqual(plan.constellationPathNodeIds, ['x', 'y', 'a'], 'will captures the route once');
-      deepEqual(presentEgoInteractionPlanV1(plan)?.hoverPathNodeIds, ['x', 'y', 'a'], 'Ctrl and primary hover show the committed route');
+      deepEqual(presentEgoInteractionPlanV1(plan)?.hoverPathNodeIds, ['x', 'y', 'a'], 'menu and primary plans capture the committed route');
       deepEqual(current.state.attentionNodeIds, ['a', 'b'], 'hover planning is noncommitting');
-      equal(plan.resultingState.viewId, viewId, 'adding in Constellation stays there; Ctrl preserves its View');
-      equal(plan.resultingState.focusedNodeId, viewId === 'focus' ? ctrl ? 'a' : 'x' : undefined,
-        'primary Focus hops but Ctrl additions preserve the subject');
+      equal(plan.resultingState.viewId, viewId === 'overview' && !toggle ? 'explore' : viewId,
+        'Overview primary enters Constellation; menu toggles preserve the View');
+      equal(plan.resultingState.focusedNodeId, viewId === 'focus' ? toggle ? 'a' : 'x' : undefined,
+        'primary Focus hops but menu additions preserve the subject');
     }
   }
   const rerouted = resolveEgoInteractionPlanV1(node('x'), { ...basis, visibleEdgeIds: new Set(['xz', 'zb']) });
@@ -54,6 +77,42 @@ test('Ego additions capture the nearest visible route for primary and Ctrl activ
     state: { viewId: 'explore', attentionNodeIds: ['a', 'b', 'x', 'y'] } });
   deepEqual(remove.resultingState.attentionNodeIds, ['a', 'b', 'y'], 'removing a node leaves its previously admitted route members');
   deepEqual(remove.constellationPathNodeIds, [], 'removal never adds a route');
+});
+
+test('Ego never routes a new constellation back to passive Memory', () => {
+  const edges = [graphEdge('xy', 'x', 'y'), graphEdge('ya', 'y', 'a')];
+  const plan = resolveEgoInteractionPlanV1(node('x'), {
+    ...context(),
+    state: { viewId: 'overview', attentionNodeIds: [] },
+    availableNodeIds: new Set(['a', 'x', 'y']),
+    visibleNodeIds: new Set(['a', 'x', 'y']),
+    visibleEdgeIds: new Set(edges.map((edge) => edge.id)),
+    edges,
+    awarenessNodeIds: new Set(['a']),
+    rememberedNodeIds: new Set(['a']),
+  });
+  deepEqual(plan.constellationPathNodeIds, [], 'no deliberate selection means there is no route target');
+  deepEqual(plan.resultingState.attentionNodeIds, ['x'], 'the new constellation starts only at its chosen seed');
+  deepEqual(presentEgoInteractionPlanV1(plan)?.hoverPathNodeIds, [], 'presentation cannot invent a Memory route');
+});
+
+test('Primary action matrix separates admission from deliberate View entry', () => {
+  for (const [viewId, target, action, nextView, previewKind] of [
+    ['overview', 'c', 'admit-member', 'explore', 'view-transition'],
+    ['overview', 'b', 'choose-constellation', 'explore', 'view-transition'],
+    ['explore', 'c', 'admit-member', 'explore', 'objects'],
+    ['explore', 'b', 'focus-member', 'focus', 'view-transition'],
+  ] as const) {
+    const plan = resolveEgoInteractionPlanV1(node(target), { ...context(),
+      state: { viewId, attentionNodeIds: ['a', 'b'] } });
+    equal(plan.action, action, 'committed membership/highlights select the action');
+    equal(plan.resultingState.viewId, nextView, 'the action has its own resulting View');
+    equal(presentEgoInteractionPlanV1(plan)?.kind, previewKind, 'preview uses the appropriate lane');
+  }
+  const remembered = resolveEgoInteractionPlanV1(node('c'), { ...context(),
+    state: { viewId: 'overview', attentionNodeIds: [] }, awarenessNodeIds: new Set(['c']),
+    rememberedNodeIds: new Set(['c']) });
+  equal(remembered.action, 'choose-constellation', 'committed Memory highlights also enter their constellation');
 });
 
 test('Ego retains immutable will and reuses the admitted hover result for activation', () => {
@@ -78,8 +137,9 @@ test('Ego retains immutable will and reuses the admitted hover result for activa
   equal(activated.resultingState, plan.resultingState, 'activation consumes the same prospective result');
   equal(activated.effects, plan.effects, 'activation consumes the same prospective effects');
   deepEqual(presentEgoInteractionPlanV1(activated), {
-    activation: 'primary', viewId: 'focus', attentionNodeIds: ['a', 'b'], focusedNodeId: 'b', hoverPathNodeIds: [],
-  }, 'Anima expresses the admitted state');
+    kind: 'view-transition', resultingState: plan.resultingState,
+    activation: 'primary', addedNodeIds: [], removedNodeIds: [], focusNodeId: 'b', hoverPathNodeIds: [],
+  }, 'Anima distinguishes deliberate View entry from object admission');
   ego.clearWill();
   equal(ego.will, undefined, 'canceling will does not undo committed state');
 });
@@ -104,6 +164,53 @@ test('Ego captures modifier intent and changes the preview without changing memb
   deepEqual(dim.resultingState, { viewId: 'explore', attentionNodeIds: ['a', 'b', 'c'], focusedNodeId: undefined },
     'a dim candidate proposes admission rather than Focus');
   deepEqual(dim.effects, [], 'membership admission leaves framing alone');
+});
+
+test('Will outcome matrix includes Ctrl no-change and resolves to no-change after removal', () => {
+  const cases: Array<{ before: EgoInteractionContextV1['state']; target: string;
+    action: EgoInteractionPlanV1['action']; after: EgoInteractionContextV1['state'] }> = [
+    { before: { viewId: 'overview', attentionNodeIds: ['a', 'b'] }, target: 'b', action: 'remove-member',
+      after: { viewId: 'overview', attentionNodeIds: ['a'], focusedNodeId: undefined } },
+    { before: { viewId: 'explore', attentionNodeIds: ['a', 'b'] }, target: 'b', action: 'remove-member',
+      after: { viewId: 'explore', attentionNodeIds: ['a'], focusedNodeId: undefined } },
+    { before: { viewId: 'focus', attentionNodeIds: ['a', 'b'], focusedNodeId: 'a' }, target: 'b', action: 'remove-member',
+      after: { viewId: 'focus', attentionNodeIds: ['a'], focusedNodeId: 'a' } },
+    { before: { viewId: 'focus', attentionNodeIds: ['a', 'b'], focusedNodeId: 'a' }, target: 'a', action: 'remove-member',
+      after: { viewId: 'explore', attentionNodeIds: ['b'], focusedNodeId: undefined } },
+    ...(['overview', 'explore', 'focus'] as const).map((viewId) => ({
+      before: { viewId, attentionNodeIds: ['a'], focusedNodeId: viewId === 'focus' ? 'a' : undefined },
+      target: 'a', action: 'remove-member' as const,
+      after: { viewId: 'overview' as const, attentionNodeIds: [], focusedNodeId: undefined },
+    })),
+    ...(['overview', 'explore', 'focus'] as const).map((viewId) => ({
+      before: { viewId, attentionNodeIds: ['a'], focusedNodeId: viewId === 'focus' ? 'a' : undefined },
+      target: 'c', action: 'none' as const,
+      after: { viewId, attentionNodeIds: ['a'], focusedNodeId: viewId === 'focus' ? 'a' : undefined },
+    })),
+    { before: { viewId: 'explore', attentionNodeIds: [] }, target: 'c', action: 'none',
+      after: { viewId: 'explore', attentionNodeIds: [] } },
+  ];
+  for (const row of cases) {
+    const ego = new Ego();
+    const input = node(row.target, true);
+    const basis = { ...context(), state: row.before };
+    const hover = ego.resolveWill(input, basis);
+    equal(hover.outcome, 'accepted', 'removal and no-change are valid outcomes');
+    equal(hover.action, row.action, 'the matrix names no-change explicitly');
+    deepEqual(hover.resultingState, row.after, 'Will captures the complete matrix result');
+    deepEqual(hover.constellationPathNodeIds, [], 'Ctrl never admits a route');
+    const activate = ego.resolveWill({ ...input, phase: 'activate' }, basis);
+    equal(activate.resultingState, hover.resultingState, 'activation consumes the preview outcome');
+    const held = ego.resolveWill(input, { ...basis, state: activate.resultingState });
+    equal(held.action, 'none', 'holding Ctrl after removal is idempotent');
+    deepEqual(held.resultingState, row.after, 'the resulting state cannot immediately reverse');
+    deepEqual(held.effects, [], 'already-deselected nodes have no camera or presentation effects');
+  }
+  const ego = new Ego();
+  const remove = ego.resolveWill(node('c', true), context());
+  const menu = ego.resolveWill({ ...node('c', true), membershipAction: 'toggle' }, context());
+  equal(remove.action, 'none', 'physical Ctrl does not add');
+  equal(menu.action, 'admit-member', 'explicit menu input invalidates a Ctrl no-change plan');
 });
 
 test('Ego preserves rejected will and exposes adjusted results before presentation', () => {
@@ -142,6 +249,7 @@ test('Ego plans expire with semantic context and re-evaluate the same input', ()
     { ...basis, visibleNodeIds: new Set(['a', 'b']) },
     { ...basis, visibleEdgeIds: new Set(['ab']) },
     { ...basis, awarenessNodeIds: new Set(['a']) },
+    { ...basis, rememberedNodeIds: new Set(['a']) },
     { ...basis, experience: { ...basis.experience, allowedStates: ['overview', 'explore'] } },
   ];
   for (const changed of changes) assert(!isEgoInteractionPlanCurrentV1(plan, changed), 'every semantic dependency invalidates a plan');

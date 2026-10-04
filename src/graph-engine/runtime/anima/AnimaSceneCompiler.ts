@@ -1,4 +1,4 @@
-import type { GraphViewObjectPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
+import type { GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
 import type { GraphExperienceContractV1 } from '../../contracts/v1/index.ts';
 import type { AnimusSnapshotV1 } from '../animus/index.ts';
 import type { ConsciousnessSnapshot } from '../consciousness/index.ts';
@@ -14,10 +14,12 @@ import {
 import {
   DEFAULT_GRAPH_VISUAL_THEME_V2,
   graphColorV2,
+  multiplyGraphColorAlphaV2,
   type GraphColorV2,
   type GraphVisualThemeV2,
 } from '../theme/index.ts';
-import { createAnimaConsciousnessPresentationV1, type AnimaPresentationPhaseV1 } from './AnimaAwareness.ts';
+import { createAnimaConsciousnessPresentationV1, type AnimaPresentationPhaseV1,
+  type AnimaConsciousnessPresentationV1 } from './AnimaAwareness.ts';
 
 /**
  * The sole semantic-to-visual compilation boundary.
@@ -30,7 +32,7 @@ export function compileAnimaSceneV1(options: {
   readonly snapshot: AnimusSnapshotV1;
   readonly consciousness: ConsciousnessSnapshot;
   readonly experience?: GraphExperienceContractV1;
-  readonly objectActivationPreview?: GraphViewObjectPreviewV1 | null;
+  readonly objectActivationPreview?: GraphInteractionPreviewV1 | null;
   readonly nodeContributions?: Readonly<Record<string, GraphNodeRenderContributionV1>>;
   readonly edgeContributions?: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
   readonly regionContributions?: readonly GraphRegionRenderContributionV1[];
@@ -41,6 +43,11 @@ export function compileAnimaSceneV1(options: {
   const theme = options.theme ?? DEFAULT_GRAPH_VISUAL_THEME_V2;
   const policy = options.presentationPolicy ?? DEFAULT_GRAPH_PRESENTATION_POLICY_V2;
   const interaction = options.snapshot.interaction;
+  const focusedNeighborNodeIds = interaction.state === 'focus' && interaction.focusedNodeId !== undefined
+    ? new Set(options.snapshot.document.edges.flatMap((edge) => edge.sourceId === interaction.focusedNodeId
+      ? [edge.targetId]
+      : edge.targetId === interaction.focusedNodeId ? [edge.sourceId] : []))
+    : new Set<string>();
   const presentation = createAnimaConsciousnessPresentationV1({
     ...options.consciousness, experience: options.experience,
     objectActivationPreview: options.objectActivationPreview, interaction, document: options.snapshot.document,
@@ -66,10 +73,8 @@ export function compileAnimaSceneV1(options: {
       .filter((node) => options.snapshot.displaySelection.nodeIds.has(node.id))
       .map((node) => {
         const contribution = options.nodeContributions?.[node.id];
-        const attended = presentation.objectPreview
-          ? presentation.objectPreview.attentionNodeIds.includes(node.id)
-          : presentation.consciousnessClasses.byNodeId[node.id] === 'attended';
-        const focused = presentation.sceneInteraction.focusedNodeId === node.id;
+        const attended = presentation.expressedAttentionNodeIds.has(node.id);
+        const focused = presentation.focusEmphasisNodeIds.has(node.id);
         const hovered = interaction.hoveredNodeId === node.id;
         const phase = presentation.highlight.phaseByNodeId[node.id] ?? 'void';
         const opacity = Math.min(finiteOpacity(contribution?.opacity, 1), sceneOpacity(phase, 'node'));
@@ -85,7 +90,11 @@ export function compileAnimaSceneV1(options: {
           ...(contribution?.nodeScaleExponent === undefined
             ? {}
             : { nodeScaleExponent: contribution.nodeScaleExponent }),
-          finalColor: constrainedColor(contribution?.finalColor ?? (focused
+          finalColor: constrainedColor(presentation.constellationKindByNodeId[node.id] === 'memory'
+            ? multiplyGraphColorAlphaV2(
+                theme.colors.memoryConstellation,
+                presentation.memoryStrengthByNodeId[node.id] ?? 1,
+              ) : contribution?.finalColor ?? (focused
             ? theme.colors.focusedNode
             : phase === 'highlighted'
               ? theme.colors.selectedNode
@@ -98,7 +107,8 @@ export function compileAnimaSceneV1(options: {
           labelColor: constrainedColor(contribution?.labelColor ?? theme.colors.label, theme),
           labelOpacity: suppressed ? 0 : forced ? finiteOpacity(contribution?.labelOpacity, 1)
             : Math.min(finiteOpacity(contribution?.labelOpacity, opacity), opacity),
-          labelFontSize: finitePositive(contribution?.labelFontSize, theme.labelFont.sizePx),
+          labelFontSize: finitePositive(contribution?.labelFontSize, theme.labelFont.sizePx)
+            * (focusedNeighborNodeIds.has(node.id) ? 0.5 : 1),
           ...(contribution?.labelOffset === undefined ? {} : { labelOffset: { ...contribution.labelOffset } }),
           ...(suppressed ? { showLabel: false } : forced ? { showLabel: true }
             : contribution?.showLabel === undefined ? {} : { showLabel: contribution.showLabel }),
@@ -114,7 +124,8 @@ export function compileAnimaSceneV1(options: {
             ?? (focused ? 4 : attended ? 3 : hovered ? 2 : 0),
         };
       }),
-    edges: compileEdges(options.snapshot, options.edgeContributions, theme, policy, presentation.highlight.phaseByEdgeId),
+    edges: compileEdges(options.snapshot, options.edgeContributions, theme, policy, presentation.highlight.phaseByEdgeId,
+      presentation.constellationKindByEdgeId, presentation.memoryStrengthByNodeId),
     backgroundColor: constrainedColor(theme.colors.background, theme),
     labelFont: theme.labelFont,
     policy,
@@ -127,12 +138,16 @@ function compileEdges(
   theme: GraphVisualThemeV2,
   policy: GraphPresentationPolicyV2,
   phases: Readonly<Record<string, AnimaPresentationPhaseV1>>,
+  constellationKinds: AnimaConsciousnessPresentationV1['constellationKindByEdgeId'],
+  memoryStrengths: AnimaConsciousnessPresentationV1['memoryStrengthByNodeId'],
 ): readonly GraphRenderEdgeV1[] {
   const canonical: GraphRenderEdgeV1[] = snapshot.document.edges
     .filter((edge) => snapshot.displaySelection.edgeIds.has(edge.id))
     .map((edge) => {
       const contribution = contributions?.[edge.id];
-      const explicitColor = contribution?.color;
+      const memoryStrength = Math.min(memoryStrengths[edge.sourceId] ?? 1, memoryStrengths[edge.targetId] ?? 1);
+      const memoryColor = multiplyGraphColorAlphaV2(theme.colors.memoryConstellation, memoryStrength);
+      const explicitColor = constellationKinds[edge.id] === 'memory' ? memoryColor : contribution?.color;
       const color = constrainedColor(explicitColor ?? theme.colors.edge, theme);
       const opacity = Math.min(finiteOpacity(contribution?.opacity, 1), sceneOpacity(phases[edge.id] ?? 'void', 'edge'));
       return {
@@ -149,7 +164,8 @@ function compileEdges(
         arrowAtTarget: policy.showArrows === false
           ? false
           : contribution?.arrowAtTarget ?? (edge.directed ?? false),
-        arrowColor: constrainedColor(contribution?.arrowColor ?? explicitColor ?? theme.colors.arrow, theme),
+        arrowColor: constrainedColor(constellationKinds[edge.id] === 'memory' ? memoryColor
+          : contribution?.arrowColor ?? explicitColor ?? theme.colors.arrow, theme),
         arrowOpacity: Math.min(finiteOpacity(contribution?.arrowOpacity, opacity), opacity),
       };
     });

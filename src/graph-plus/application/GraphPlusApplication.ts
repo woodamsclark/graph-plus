@@ -1,13 +1,12 @@
 import type {
   Disposable, GraphDocumentV1, GraphEffectiveSettingsV1, GraphEngineLeaseV1,
   GraphIntentV1, GraphSessionErrorV1, GraphSessionUiOptionsV1, GraphSessionV1, GraphViewStateV1,
+  GraphWorldChangedEventV1,
+  GraphWorldStateV1,
 } from '../../graph-engine/contracts/v1/index.ts';
 import { reconcileGraphViewStateV1 } from '../../graph-engine/public.ts';
 import { GraphPlusLookupV1 } from '../adapter/index.ts';
-import {
-  projectGraphPlusExperienceDocumentV1,
-  sameGraphPlusExperienceDocumentV1,
-} from './GraphPlusDocumentProjection.ts';
+import { projectGraphPlusExperienceDocumentV1 } from './GraphPlusDocumentProjection.ts';
 import {
   graphPlusEngineExperienceContractV1,
   graphPlusExperiencePolicyV1,
@@ -23,6 +22,11 @@ import {
   GraphPlusCheckpointControllerV1, migrateLegacyPositionsV1,
   type GraphPlusCheckpointClockV1, type GraphPlusCheckpointStoreV1,
 } from '../persistence/index.ts';
+import {
+  DEFAULT_GRAPH_PLUS_SESSION_NODE_LIMIT_V1,
+  GraphPlusSessionV1,
+  type GraphPlusSessionSnapshotV1,
+} from './GraphPlusSession.ts';
 import {
   adoptGraphPlusSessionOverridesV1, compileGraphPlusFilterV1, createDefaultGraphPlusLensV1,
   graphPlusSessionOverridesV1, type GraphPlusLensStateV1, type ObsidianSearchIndexV1,
@@ -48,7 +52,6 @@ export interface GraphPlusPresentationOptionsV1<TFile> {
   readonly initialLens?: GraphPlusLensStateV1;
   readonly restoreSavedLens?: boolean;
   readonly initialRootNodeId?: string;
-  readonly initialDepth?: number;
   readonly profileId?: string;
   readonly dimensions?: '2d' | '3d';
   readonly ui?: GraphSessionUiOptionsV1;
@@ -59,6 +62,16 @@ export interface GraphPlusPresentationOptionsV1<TFile> {
     readonly anchor?: { readonly x: number; readonly y: number };
     readonly active: boolean; readonly immediate?: boolean;
   }) => void;
+  readonly initialSession?: GraphPlusSessionSnapshotV1;
+  /** Managed applications initially suppress layout until they elect one presentation as authority. */
+  readonly initialLayoutAuthority?: boolean;
+  /** Shared applications use this hook to refresh canonical truth once as a view opens. */
+  readonly beforeOpen?: () => void | Promise<void>;
+  /** Current full-graph state used to place a new Local camera over the existing graph. */
+  readonly referenceViewState?: () => GraphViewStateV1 | undefined | Promise<GraphViewStateV1 | undefined>;
+  /** Application coordination hooks: graph world is shared while viewport state remains local. */
+  readonly onOpened?: () => void | Promise<void>;
+  readonly onWorldStateChanged?: (event: GraphWorldChangedEventV1) => void | Promise<void>;
 }
 
 /** One presentation session whose behavior is selected by experience policy. */
@@ -85,8 +98,10 @@ export class GraphPlusPresentationV1<TFile> {
   private resettingLayout = false;
   private visibleNodeIds = new Set<string>();
   private rootNodeId?: string;
-  private depth: number;
+  private sessionNodeIds: readonly string[];
   private enforcingPolicy = false;
+  private referenceLayout?: GraphViewStateV1;
+  private layoutAuthority: boolean;
 
   constructor(private readonly options: GraphPlusPresentationOptionsV1<TFile>) {
     this.policy = graphPlusExperiencePolicyV1(options.mode ?? 'global');
@@ -97,15 +112,16 @@ export class GraphPlusPresentationV1<TFile> {
     this.lens = clone(options.initialLens ?? createDefaultGraphPlusLensV1());
     this.profileId = options.profileId ?? 'default';
     this.dimensions = options.dimensions ?? '2d';
+    this.layoutAuthority = options.initialLayoutAuthority ?? true;
     this.rootNodeId = options.initialRootNodeId;
-    this.depth = localDepth(options.initialDepth);
+    this.sessionNodeIds = [...(options.initialSession?.nodeIds ?? (this.rootNodeId ? [this.rootNodeId] : []))];
     if (this.policy.persistence === 'checkpoint') {
       if (!options.vaultId || !options.checkpointStore) {
         throw new Error('Global Graph+ requires vault checkpoint storage.');
       }
       this.checkpoint = new GraphPlusCheckpointControllerV1(
         options.vaultId, options.checkpointStore, options.clock, 500,
-        () => clone(this.lens), stripGraphPlusProjectionFilter,
+        () => clone(this.lens), stripGraphPlusRenderFilter,
       );
     }
   }
@@ -133,6 +149,8 @@ export class GraphPlusPresentationV1<TFile> {
       }]);
       if (this.policy.persistence === 'checkpoint') await this.openGlobal();
       else await this.openLocal();
+      if (this.options.initialSession) await this.applySessionSnapshot(this.options.initialSession);
+      await this.options.onOpened?.();
     } catch (error) {
       this.opened = false;
       this.actionRegistration?.dispose();
@@ -150,9 +168,11 @@ export class GraphPlusPresentationV1<TFile> {
         profileId: this.profileId, dimensions: this.dimensions,
       });
       await this.mount(saved.document, migrated);
-      await this.applyCanonicalSnapshot(await this.model.open());
+      await this.options.beforeOpen?.();
+      if (!this.canonicalDocument) await this.applyCanonicalSnapshot(await this.model.open());
       return;
     }
+    await this.options.beforeOpen?.();
     const model = await this.model.open();
     this.adoptModel(model);
     const migrated = migrateLegacyPositionsV1(model.document, this.options.legacyPositions, {
@@ -163,10 +183,15 @@ export class GraphPlusPresentationV1<TFile> {
   }
 
   private async openLocal(): Promise<void> {
+    await this.options.beforeOpen?.();
     const model = await this.model.open();
     this.adoptModel(model);
-    await this.mount(this.projectDocument());
-    await this.enforceExperiencePolicy();
+    const document = this.projectDocument();
+    const reference = await this.resolveReferenceViewState();
+    const restored = reference ? this.localViewState(document, reference) : undefined;
+    await this.mount(document, restored);
+    await this.enforceExperiencePolicy('preserve');
+    await this.fitProjectedDocument();
   }
 
   async reconcile(): Promise<void> {
@@ -180,16 +205,12 @@ export class GraphPlusPresentationV1<TFile> {
   async applyCanonicalSnapshot(model: GraphPlusVaultModelSnapshotV1<TFile>): Promise<void> {
     if (this.resettingLayout || !this.session) return;
     this.adoptModel(model);
-    if (this.policy.documentScope === 'vault') {
-      if (model.document !== this.document) {
-        await this.session.replaceDocument(model.document);
-        this.document = model.document;
-      }
-      await this.applyFilter();
-      this.checkpoint?.schedule();
-    } else {
-      await this.replaceProjectedDocument();
+    if (model.document !== this.document) {
+      await this.session.replaceDocument(model.document);
+      this.document = model.document;
     }
+    await this.applyFilter();
+    this.checkpoint?.schedule();
   }
 
   setLens(next: GraphPlusLensStateV1): Promise<void> {
@@ -206,10 +227,8 @@ export class GraphPlusPresentationV1<TFile> {
       await this.session.setSessionOverrides(graphPlusSessionOverridesV1(this.lens));
       this.effectiveSettings = await this.session.exportEffectiveSettings();
     }
-    if (this.policy.documentScope === 'vault') {
-      await this.applyFilter();
-      this.checkpoint?.schedule();
-    } else await this.replaceProjectedDocument();
+    await this.applyFilter();
+    this.checkpoint?.schedule();
   }
 
   getLens(): GraphPlusLensStateV1 { return clone(this.lens); }
@@ -217,21 +236,11 @@ export class GraphPlusPresentationV1<TFile> {
     return this.effectiveSettings ? clone(this.effectiveSettings) : undefined;
   }
   getDocument(): GraphDocumentV1 | undefined {
-    const value = this.policy.documentScope === 'vault' ? this.document : this.canonicalDocument;
-    return value ? clone(value) : undefined;
+    return this.document ? clone(this.document) : undefined;
   }
   getProjectedDocument(): GraphDocumentV1 | undefined { return this.document ? clone(this.document) : undefined; }
   getLocalDocument(): GraphDocumentV1 | undefined { return this.getProjectedDocument(); }
   getSession(): GraphSessionV1 | undefined { return this.session; }
-  getLocalDepth(): number { return this.depth; }
-
-  async setLocalDepth(depth: number): Promise<void> {
-    if (this.policy.documentScope !== 'root-neighborhood') return;
-    const next = localDepth(depth);
-    if (next === this.depth) return;
-    this.depth = next;
-    await this.replaceProjectedDocument();
-  }
 
   async followActiveNode(nodeId?: string): Promise<boolean> {
     if (!this.policy.followActiveNote || !this.session) return false;
@@ -241,42 +250,52 @@ export class GraphPlusPresentationV1<TFile> {
         return true;
       }
       this.rootNodeId = undefined;
-      await this.replaceProjectedDocument(true);
+      await this.enforceExperiencePolicy();
       return true;
     }
-    if (!this.canonicalDocument?.nodes.some((node) => node.id === nodeId)) await this.reconcile();
     if (!this.canonicalDocument?.nodes.some((node) => node.id === nodeId)) return false;
+    this.sessionNodeIds = [
+      ...this.sessionNodeIds.filter((sessionNodeId) => sessionNodeId !== nodeId),
+      nodeId,
+    ].slice(-DEFAULT_GRAPH_PLUS_SESSION_NODE_LIMIT_V1);
     if (this.rootNodeId === nodeId) {
       await this.enforceExperiencePolicy();
       return true;
     }
     this.rootNodeId = nodeId;
-    await this.replaceProjectedDocument(true);
+    await this.enforceExperiencePolicy();
     return true;
+  }
+
+  async applySessionSnapshot(snapshot: GraphPlusSessionSnapshotV1): Promise<void> {
+    this.sessionNodeIds = snapshot.nodeIds
+      .filter((nodeId) => nodeId !== snapshot.activeNodeId)
+      .slice(-DEFAULT_GRAPH_PLUS_SESSION_NODE_LIMIT_V1);
+    if (!this.session || !this.canonicalDocument) return;
+    const result = await this.session.applyExternalInfluence({
+      schemaVersion: 1,
+      type: 'replace-remembered-subjects',
+      nodeIds: this.sessionNodeIds,
+    });
+    if (result.status === 'rejected') {
+      throw new Error(`Graph+ session Memory was rejected: ${result.reason}`);
+    }
   }
 
   async focusNode(nodeId: string): Promise<void> {
     if (!this.session) return;
     await this.session.clearPreview();
-    await this.session.setSelection([nodeId]);
-    await this.session.focusNode(nodeId);
+    await this.receiveApplicationAttention(nodeId, 'recenter-focus');
   }
 
   async revealAndFocusNode(nodeId: string): Promise<boolean> {
     const source = this.canonicalDocument ?? this.document;
     if (!this.session || !source) return false;
-    if (!source.nodes.some((node) => node.id === nodeId)) await this.reconcile();
-    if (!(this.canonicalDocument ?? this.document)?.nodes.some((node) => node.id === nodeId)) return false;
-    if (this.policy.documentScope === 'root-neighborhood') {
-      this.rootNodeId = nodeId;
-      await this.replaceProjectedDocument(true);
-      return true;
-    }
+    if (!source.nodes.some((node) => node.id === nodeId)) return false;
     this.transientRevealNodeId = nodeId;
     await this.session.clearPreview();
     await this.applyFilter();
-    await this.session.setSelection([nodeId]);
-    await this.session.focusNode(nodeId);
+    await this.receiveApplicationAttention(nodeId, 'preserve');
     // Show in Graph+ is an explicit reveal operation, including a neighborhood fit.
     const document = await this.session.exportDocument();
     const nodeIds = [...new Set([nodeId, ...document.edges.flatMap((edge) =>
@@ -285,6 +304,7 @@ export class GraphPlusPresentationV1<TFile> {
     return true;
   }
 
+  /* Mind Map deferred: retain the entry point for the later feature.
   async mindMapFromNode(nodeId: string): Promise<void> {
     if (!this.canonicalDocument?.nodes.some((node) => node.id === nodeId)
       && !this.document?.nodes.some((node) => node.id === nodeId)) return;
@@ -292,13 +312,17 @@ export class GraphPlusPresentationV1<TFile> {
     await this.session?.setSelection([nodeId]);
   }
 
+  */
+
   async openNode(nodeId: string): Promise<void> {
     const entry = this.lookup.get(nodeId);
     if (entry?.kind === 'note') await this.options.navigator.openNote(entry.file);
     if (entry?.kind === 'tag') await this.options.navigator.openTag(entry.tag);
   }
   nodeKind(nodeId: string): 'note' | 'tag' | undefined { return this.lookup.get(nodeId)?.kind; }
-  async setNodePinned(nodeId: string, pinned: boolean): Promise<void> { await this.session?.setNodePinned(nodeId, pinned); }
+  async setNodePinned(nodeId: string, pinned: boolean): Promise<void> {
+    await this.session?.setNodePinned(nodeId, pinned);
+  }
   setSuspended(suspended: boolean): void { this.session?.setSuspended(suspended); }
   async setPreviewSurfaceActive(active: boolean): Promise<void> { await this.session?.setPreviewSurfaceActive(active); }
   async clearPreview(): Promise<void> { await this.session?.clearPreview(); }
@@ -328,6 +352,7 @@ export class GraphPlusPresentationV1<TFile> {
 
   async close(): Promise<void> {
     this.opened = false;
+    await this.opening?.catch(() => undefined);
     await this.lensQueue.catch(() => undefined);
     this.disposeSessionSubscriptions();
     this.actionRegistration?.dispose();
@@ -357,6 +382,7 @@ export class GraphPlusPresentationV1<TFile> {
       consumerId: 'graph-plus', profileId: this.profileId, container: this.options.container,
       document, experience: graphPlusEngineExperienceContractV1(this.policy),
       restoreViewState: compatibleViewState,
+      layoutAuthority: this.layoutAuthority,
       sessionOverrides: graphPlusSessionOverridesV1(this.lens), ui: this.options.ui,
       onSessionOverridesChanged: (overrides) => this.adoptSessionOverrides(overrides),
     });
@@ -366,7 +392,10 @@ export class GraphPlusPresentationV1<TFile> {
     this.checkpoint?.attach(session, document);
     this.sessionSubscriptions.push(session.onError((error) => this.options.onError?.(error)));
     this.sessionSubscriptions.push(session.onIntent((intent) => this.handleIntent(intent, session)));
-    if (this.policy.documentScope === 'vault') await this.applyFilter();
+    this.sessionSubscriptions.push(session.onWorldChanged((event) => {
+      void this.options.onWorldStateChanged?.(event);
+    }));
+    await this.applyFilter();
   }
 
   private handleIntent(intent: GraphIntentV1, session: GraphSessionV1): void {
@@ -388,6 +417,25 @@ export class GraphPlusPresentationV1<TFile> {
       this.transientRevealNodeId = undefined;
       void this.applyFilter();
     }
+    if (intent.type === 'focus-changed' && this.policy.followActiveNote
+      && intent.focusedNodeId && intent.focusedNodeId !== this.rootNodeId) {
+      const entry = this.lookup.get(intent.focusedNodeId);
+      if (entry?.kind === 'note') void this.options.navigator.openNote(entry.file);
+    }
+  }
+
+  async exportWorldState(): Promise<GraphWorldStateV1 | undefined> {
+    return this.session?.exportWorldState();
+  }
+
+  async adoptSharedWorldState(state: GraphWorldStateV1): Promise<void> {
+    await this.session?.applyWorldState(state);
+    this.checkpoint?.schedule();
+  }
+
+  setLayoutAuthority(authority: boolean): void {
+    this.layoutAuthority = authority;
+    this.session?.setLayoutAuthority(authority);
   }
 
   private adoptModel(model: GraphPlusVaultModelSnapshotV1<TFile>): void {
@@ -396,37 +444,24 @@ export class GraphPlusPresentationV1<TFile> {
     this.searchIndex = model.searchIndex;
   }
 
-  private async replaceProjectedDocument(enforceCanonicalRoot = false): Promise<void> {
-    if (!this.session) return;
-    const projected = this.projectDocument();
-    if (!sameGraphPlusExperienceDocumentV1(this.document, projected)) {
-      await this.session.replaceDocument(projected);
-      this.document = projected;
-    }
-    if (enforceCanonicalRoot) {
-      await this.enforceExperiencePolicy();
-      return;
-    }
-    const state = await this.session.exportViewState();
-    const focusRemainsValid = state.focusedNodeId !== undefined
-      && state.selectedNodeIds.includes(state.focusedNodeId)
-      && projected.nodes.some((node) => node.id === state.focusedNodeId);
-    if (!focusRemainsValid) await this.enforceExperiencePolicy();
+  /** A request arriving from outside Graph+ is received truth, never an Ego action. */
+  private async receiveApplicationAttention(nodeId: string, framing: 'preserve' | 'recenter-focus'): Promise<void> {
+    const result = await this.session?.applyExternalInfluence({
+      schemaVersion: 1, type: 'replace-attention', nodeIds: [nodeId], focusNodeId: nodeId, framing,
+    });
+    if (result?.status === 'rejected') throw new Error(`Graph+ application input was rejected: ${result.reason}`);
   }
 
   private projectDocument(): GraphDocumentV1 {
     return projectGraphPlusExperienceDocumentV1({
       policy: this.policy,
       canonicalDocument: this.canonicalDocument,
-      rootNodeId: this.rootNodeId,
-      depth: this.depth,
-      lens: this.lens,
-      searchIndex: this.searchIndex,
-      onError: (error) => this.options.onError?.(error),
     });
   }
 
-  private async enforceExperiencePolicy(): Promise<void> {
+  private async enforceExperiencePolicy(
+    changedFocusFraming: 'preserve' | 'recenter-focus' = 'recenter-focus',
+  ): Promise<void> {
     if (this.enforcingPolicy || this.policy.canonicalRootState === 'none') return;
     const root = this.rootNodeId;
     if (!this.session) return;
@@ -434,25 +469,84 @@ export class GraphPlusPresentationV1<TFile> {
     this.enforcingPolicy = true;
     try {
       const state = await this.session.exportViewState();
-      const consciousStateChanged = root
-        ? state.selectedNodeIds.length !== 1
-          || state.selectedNodeIds[0] !== root
-          || state.focusedNodeId !== root
-        : state.selectedNodeIds.length > 0 || state.focusedNodeId !== undefined;
+      const available = new Set(this.document?.nodes.map((node) => node.id) ?? []);
+      const focusNodeId = root && available.has(root) ? root : undefined;
+      // The recent trail belongs to Memory. Canonical arrival establishes only
+      // the current subject in Attention; deliberate additions remain user actions.
+      const attentionNodeIds = focusNodeId ? [focusNodeId] : [];
+      const consciousStateChanged = !sameNodeIds(state.selectedNodeIds, attentionNodeIds)
+        || state.focusedNodeId !== focusNodeId;
       const result = await this.session.applyExternalInfluence({
         schemaVersion: 1,
         type: 'replace-attention',
-        nodeIds: root ? [root] : [],
-        ...(root ? { focusNodeId: root } : {}),
-        framing: consciousStateChanged ? 'fit-state' : 'preserve',
+        nodeIds: attentionNodeIds,
+        ...(focusNodeId ? { focusNodeId } : {}),
+        framing: consciousStateChanged && focusNodeId ? changedFocusFraming : 'preserve',
       });
       if (result.status === 'rejected') {
         throw new Error(`Graph+ experience rejected canonical subject: ${result.reason}`);
       }
-      if (root) {
-        if (!state.pinnedNodeIds.includes(root)) await this.session.setNodePinned(root, true);
-      }
     } finally { this.enforcingPolicy = false; }
+  }
+
+  private async resolveReferenceViewState(): Promise<GraphViewStateV1 | undefined> {
+    const live = await this.options.referenceViewState?.();
+    if (live) this.referenceLayout = clone(live);
+    if (!this.referenceLayout && this.options.vaultId && this.options.checkpointStore) {
+      const saved = (await this.options.checkpointStore.load(this.options.vaultId))?.viewState;
+      if (saved) this.referenceLayout = clone(saved);
+    }
+    return this.referenceLayout ? clone(this.referenceLayout) : undefined;
+  }
+
+  private localViewState(
+    document: GraphDocumentV1,
+    reference: GraphViewStateV1,
+    previous?: GraphViewStateV1,
+  ): GraphViewStateV1 {
+    const available = new Set(document.nodes.map((node) => node.id));
+    const base = previous ?? reference;
+    const positions = Object.fromEntries(document.nodes.flatMap((node) => {
+      const position = base.positions[node.id] ?? reference.positions[node.id];
+      return position ? [[node.id, { ...position }] as const] : [];
+    }));
+    const selectedNodeIds = (previous?.selectedNodeIds ?? []).filter((nodeId) => available.has(nodeId));
+    const focusedNodeId = previous?.focusedNodeId && selectedNodeIds.includes(previous.focusedNodeId)
+      ? previous.focusedNodeId
+      : undefined;
+    return {
+      schemaVersion: 1,
+      documentId: document.documentId,
+      documentRevision: document.revision,
+      consumerId: 'graph-plus',
+      profileId: this.profileId,
+      dimensions: base.dimensions,
+      positions,
+      pinnedNodeIds: base.pinnedNodeIds.filter((nodeId) => available.has(nodeId)),
+      camera: clone(base.camera),
+      selectedNodeIds,
+      ...(focusedNodeId ? { focusedNodeId } : {}),
+      viewMode: focusedNodeId ? 'focus' : previous?.viewMode ?? 'explore',
+      activeFilters: clone(previous?.activeFilters ?? {}),
+      moduleState: {
+        ...clone(base.moduleState),
+        'force-layout': settledForceLayoutState(),
+      },
+    };
+  }
+
+  private async fitProjectedDocument(): Promise<void> {
+    if (!this.session || !this.document?.nodes.length) return;
+    const centerNodeId = this.rootNodeId
+      && this.document.nodes.some((node) => node.id === this.rootNodeId)
+      ? this.rootNodeId
+      : undefined;
+    const nodeIds = centerNodeId
+      ? [...new Set([centerNodeId, ...this.document.edges.flatMap((edge) =>
+        edge.sourceId === centerNodeId ? [edge.targetId]
+          : edge.targetId === centerNodeId ? [edge.sourceId] : [])])]
+      : this.document.nodes.map((node) => node.id);
+    await this.session.fitNodes(nodeIds, centerNodeId ? { centerNodeId } : undefined);
   }
 
   private adoptSessionOverrides(overrides: Parameters<typeof adoptGraphPlusSessionOverridesV1>[1]): void {
@@ -473,7 +567,7 @@ export class GraphPlusPresentationV1<TFile> {
     const compiled = compileGraphPlusFilterV1(this.document, this.lens, this.searchIndex);
     if (compiled.error) this.options.onError?.(new Error(compiled.error));
     const rootId = this.lens.form.rootNodeId;
-    if (this.lens.form.enabled && rootId && !compiled.visibleNodeIds.includes(rootId)) {
+    if (this.effectiveSettings?.modules.form?.enabled && rootId && !compiled.visibleNodeIds.includes(rootId)) {
       this.lens = { ...this.lens, form: { ...this.lens.form, enabled: false } };
       await this.session.setSessionOverrides(graphPlusSessionOverridesV1(this.lens));
       this.effectiveSettings = await this.session.exportEffectiveSettings();
@@ -497,20 +591,28 @@ export interface GraphPlusApplicationOptionsV1<TFile> {
   readonly model: GraphPlusVaultModelV1<TFile>;
   readonly navigator: GraphPlusNavigatorV1<TFile>;
   readonly onError?: (error: Error) => void;
+  readonly session?: GraphPlusSessionV1;
+  readonly now?: () => number;
+  readonly reconcileDelayMs?: number;
 }
 
 export type GraphPlusPresentationAttachOptionsV1<TFile> = Omit<
   GraphPlusPresentationOptionsV1<TFile>,
-  'model' | 'navigator' | 'source' | 'countDuplicateLinks'
+  | 'model' | 'navigator' | 'source' | 'countDuplicateLinks' | 'beforeOpen' | 'referenceViewState'
+  | 'onOpened' | 'onWorldStateChanged' | 'initialLayoutAuthority'
 >;
 
-export type GraphPlusHostEventV1 =
+/** Activity outside Graph+; application policy translates it into conscious state. */
+export type GraphPlusUnconsciousActivityV1 =
   | { readonly type: 'canonical-vault-invalidated' }
-  | { readonly type: 'active-note-changed'; readonly nodeId?: string };
+  | { readonly type: 'active-note-changed'; readonly nodeId?: string; readonly timestamp?: number };
+
+/** @deprecated Host transport name; use the application boundary's unconscious activity type. */
+export type GraphPlusHostEventV1 = GraphPlusUnconsciousActivityV1;
 
 /**
  * The single Graph+ application. It owns canonical vault reconciliation and
- * distributes received truth to independent Global and Local presentations.
+ * distributes one graph world to viewport-independent Global and Local presentations.
  */
 export class GraphPlusApplicationV1<TFile> {
   private readonly presentations = new Set<GraphPlusPresentationV1<TFile>>();
@@ -518,19 +620,43 @@ export class GraphPlusApplicationV1<TFile> {
   private reconcileTimer?: ReturnType<typeof setTimeout>;
   private reconcileRunning?: Promise<void>;
   private reconcileAgain = false;
+  private canonicalDirty = true;
+  private disposed = false;
   private activeNodeQueued = false;
   private pendingActiveNodeId?: string;
   private activeNodeFollow?: Promise<void>;
+  private pendingSessionSnapshot: GraphPlusSessionSnapshotV1;
+  private readonly workspaceSession: GraphPlusSessionV1;
+  private sharedWorldState?: GraphWorldStateV1;
+  private worldStateQueue: Promise<void> = Promise.resolve();
+  private layoutAuthority?: GraphPlusPresentationV1<TFile>;
 
-  constructor(private readonly options: GraphPlusApplicationOptionsV1<TFile>) {}
+  constructor(private readonly options: GraphPlusApplicationOptionsV1<TFile>) {
+    this.workspaceSession = options.session ?? new GraphPlusSessionV1();
+    this.pendingSessionSnapshot = this.workspaceSession.snapshot();
+  }
 
   createPresentation(
     options: GraphPlusPresentationAttachOptionsV1<TFile>,
   ): GraphPlusPresentationV1<TFile> {
-    const presentation = new GraphPlusPresentationV1({
+    if (this.disposed) throw new Error('Graph+ application is disposed.');
+    if (options.initialRootNodeId && this.workspaceSession.snapshot().nodeIds.length === 0) {
+      this.pendingSessionSnapshot = this.workspaceSession.experienceFileActivation(
+        options.initialRootNodeId,
+        this.options.now?.() ?? Date.now(),
+      );
+    }
+    let presentation!: GraphPlusPresentationV1<TFile>;
+    presentation = new GraphPlusPresentationV1({
       ...options,
       model: this.options.model,
       navigator: this.options.navigator,
+      initialSession: this.workspaceSession.snapshot(),
+      beforeOpen: () => this.reconcileOnOpen(),
+      referenceViewState: () => this.exportGlobalViewState(presentation),
+      onOpened: () => this.presentationOpened(presentation),
+      onWorldStateChanged: (event) => this.queueWorldStateFrom(presentation, event),
+      initialLayoutAuthority: false,
     });
     this.presentations.add(presentation);
     return presentation;
@@ -538,36 +664,117 @@ export class GraphPlusApplicationV1<TFile> {
 
   async closePresentation(presentation: GraphPlusPresentationV1<TFile>): Promise<void> {
     if (!this.presentations.delete(presentation)) return;
+    const wasLayoutAuthority = this.layoutAuthority === presentation;
+    if (wasLayoutAuthority) {
+      presentation.setLayoutAuthority(false);
+      this.layoutAuthority = undefined;
+    }
     await presentation.close();
+    if (wasLayoutAuthority) this.electLayoutAuthority();
+    if (this.presentations.size === 0) {
+      this.canonicalDirty = true;
+      this.cancelScheduledReconcile();
+      this.activeNodeQueued = false;
+      await this.activeNodeFollow?.catch(() => undefined);
+    }
   }
 
   onHostActivity(listener: () => void): Disposable {
+    if (this.disposed) return { dispose: () => undefined };
     this.hostActivityListeners.add(listener);
     return { dispose: () => this.hostActivityListeners.delete(listener) };
   }
 
+  getSessionSnapshot(): GraphPlusSessionSnapshotV1 {
+    return this.workspaceSession.snapshot();
+  }
+
+  private async exportGlobalViewState(
+    requester: GraphPlusPresentationV1<TFile>,
+  ): Promise<GraphViewStateV1 | undefined> {
+    const reference = this.layoutAuthority?.getSession() !== undefined
+      ? this.layoutAuthority
+      : [...this.presentations].find((candidate) =>
+          candidate !== requester && candidate.getSession() !== undefined);
+    return reference?.getSession()?.exportViewState();
+  }
+
+  private presentationOpened(presentation: GraphPlusPresentationV1<TFile>): Promise<void> {
+    return this.enqueueWorldState(async () => {
+      if (this.disposed || !this.presentations.has(presentation)) return;
+      if (this.sharedWorldState) await presentation.adoptSharedWorldState(this.sharedWorldState);
+      else {
+        const state = await presentation.exportWorldState();
+        if (state) this.sharedWorldState = clone(state);
+      }
+      if (!this.layoutAuthority) {
+        this.layoutAuthority = presentation;
+        presentation.setLayoutAuthority(true);
+      }
+    });
+  }
+
+  private queueWorldStateFrom(
+    source: GraphPlusPresentationV1<TFile>,
+    event: GraphWorldChangedEventV1,
+  ): Promise<void> {
+    return this.enqueueWorldState(async () => {
+      if (this.disposed || !this.presentations.has(source)) return;
+      if ((event.cause === 'layout' || event.cause === 'document' || event.cause === 'restore')
+        && source !== this.layoutAuthority) return;
+      const state = event.state;
+      this.sharedWorldState = clone(state);
+      await Promise.all([...this.presentations]
+        .filter((presentation) => presentation !== source && presentation.getSession() !== undefined)
+        .map((presentation) => presentation.adoptSharedWorldState(state)));
+    });
+  }
+
+  private enqueueWorldState(operation: () => Promise<void>): Promise<void> {
+    const queued = this.worldStateQueue.catch(() => undefined).then(operation);
+    this.worldStateQueue = queued;
+    void queued.catch((error) => this.options.onError?.(asError(error)));
+    return queued;
+  }
+
+  private electLayoutAuthority(): void {
+    if (this.layoutAuthority?.getSession() !== undefined) return;
+    this.layoutAuthority = [...this.presentations]
+      .find((presentation) => presentation.getSession() !== undefined);
+    this.layoutAuthority?.setLayoutAuthority(true);
+  }
+
+  /** Compatibility ingress for existing hosts. */
   receiveHostEvent(event: GraphPlusHostEventV1): void {
+    this.receiveUnconsciousActivity(event);
+  }
+
+  receiveUnconsciousActivity(event: GraphPlusUnconsciousActivityV1): void {
+    if (this.disposed) return;
     if (event.type === 'canonical-vault-invalidated') {
-      this.scheduleReconcile();
+      this.canonicalDirty = true;
+      if (this.reconcileRunning) this.reconcileAgain = true;
+      else if (this.presentations.size > 0) this.scheduleReconcile();
       return;
     }
-    if (event.type === 'active-note-changed') this.queueActiveNode(event.nodeId);
+    if (event.type === 'active-note-changed') {
+      this.pendingSessionSnapshot = this.workspaceSession.experienceFileActivation(
+        event.nodeId,
+        event.timestamp ?? this.options.now?.() ?? Date.now(),
+      );
+      if (this.presentations.size > 0) this.queueActiveNode(event.nodeId, this.pendingSessionSnapshot);
+    }
     for (const listener of this.hostActivityListeners) listener();
   }
 
-  scheduleReconcile(delayMs = 180): void {
-    if (this.reconcileTimer !== undefined) clearTimeout(this.reconcileTimer);
-    this.reconcileTimer = setTimeout(() => {
-      this.reconcileTimer = undefined;
-      void this.reconcile();
-    }, delayMs);
-  }
-
   async reconcile(): Promise<void> {
-    if (this.reconcileTimer !== undefined) clearTimeout(this.reconcileTimer);
-    this.reconcileTimer = undefined;
+    if (this.disposed) return;
+    this.cancelScheduledReconcile();
+    if (this.presentations.size === 0) {
+      this.canonicalDirty = true;
+      return;
+    }
     if (this.reconcileRunning) {
-      this.reconcileAgain = true;
       return this.reconcileRunning;
     }
     const operation = this.reconcileUntilSettled();
@@ -578,18 +785,20 @@ export class GraphPlusApplicationV1<TFile> {
   }
 
   async followActiveNode(nodeId?: string): Promise<void> {
+    if (this.disposed) return;
     const locals = [...this.presentations].filter((presentation) => presentation.experiencePolicy.followActiveNote);
-    if (nodeId && !this.options.model.read()?.document.nodes.some((node) => node.id === nodeId)) {
-      await this.reconcile();
-    }
     await Promise.all(locals.map((presentation) => presentation.followActiveNode(nodeId)));
   }
 
   async dispose(): Promise<void> {
-    if (this.reconcileTimer !== undefined) clearTimeout(this.reconcileTimer);
-    this.reconcileTimer = undefined;
+    if (this.disposed) return;
+    this.disposed = true;
+    this.cancelScheduledReconcile();
+    this.reconcileAgain = false;
+    this.activeNodeQueued = false;
     await this.reconcileRunning?.catch(() => undefined);
     await this.activeNodeFollow?.catch(() => undefined);
+    await this.worldStateQueue.catch(() => undefined);
     await Promise.all([...this.presentations].map((presentation) => presentation.close()));
     this.presentations.clear();
     this.hostActivityListeners.clear();
@@ -600,33 +809,83 @@ export class GraphPlusApplicationV1<TFile> {
       this.reconcileAgain = false;
       try {
         const snapshot = await this.options.model.reconcile();
-        await Promise.all([...this.presentations].map(
-          (presentation) => presentation.applyCanonicalSnapshot(snapshot),
-        ));
+        if (this.disposed) return;
+        const presentations = [...this.presentations];
+        const globals = presentations.filter((presentation) => presentation.mode === 'global');
+        const locals = presentations.filter((presentation) => presentation.mode === 'local');
+        await Promise.all(globals.map((presentation) => presentation.applyCanonicalSnapshot(snapshot)));
+        await Promise.all(locals.map((presentation) => presentation.applyCanonicalSnapshot(snapshot)));
+        const layoutAuthority = this.layoutAuthority?.getSession() !== undefined
+          ? this.layoutAuthority
+          : globals.find((presentation) => presentation.getSession() !== undefined)
+            ?? locals.find((presentation) => presentation.getSession() !== undefined);
+        if (layoutAuthority) {
+          if (!this.layoutAuthority) {
+            this.layoutAuthority = layoutAuthority;
+            layoutAuthority.setLayoutAuthority(true);
+          }
+          await this.enqueueWorldState(() => this.refreshSharedWorldFrom(layoutAuthority));
+        }
+        if (!this.reconcileAgain) this.canonicalDirty = false;
       } catch (error) {
         this.options.onError?.(asError(error));
       }
-    } while (this.reconcileAgain);
+    } while (!this.disposed && this.presentations.size > 0 && this.reconcileAgain);
   }
 
-  private queueActiveNode(nodeId?: string): void {
+  private async reconcileOnOpen(): Promise<void> {
+    if (this.disposed || (!this.canonicalDirty && this.options.model.read())) return;
+    await this.reconcile();
+  }
+
+  private scheduleReconcile(): void {
+    this.cancelScheduledReconcile();
+    this.reconcileTimer = setTimeout(() => {
+      this.reconcileTimer = undefined;
+      void this.reconcile();
+    }, Math.max(0, this.options.reconcileDelayMs ?? 180));
+  }
+
+  private cancelScheduledReconcile(): void {
+    if (this.reconcileTimer !== undefined) clearTimeout(this.reconcileTimer);
+    this.reconcileTimer = undefined;
+  }
+
+  private queueActiveNode(nodeId?: string, snapshot = this.workspaceSession.snapshot()): void {
+    if (this.disposed || this.presentations.size === 0) return;
     this.pendingActiveNodeId = nodeId;
+    this.pendingSessionSnapshot = snapshot;
     this.activeNodeQueued = true;
     if (this.activeNodeFollow) return;
     const operation = this.drainActiveNodeQueue();
     this.activeNodeFollow = operation;
     void operation.catch((error) => this.options.onError?.(asError(error))).finally(() => {
       if (this.activeNodeFollow === operation) this.activeNodeFollow = undefined;
-      if (this.activeNodeQueued) this.queueActiveNode(this.pendingActiveNodeId);
+      if (this.activeNodeQueued && !this.disposed && this.presentations.size > 0) {
+        this.queueActiveNode(this.pendingActiveNodeId, this.pendingSessionSnapshot);
+      }
     });
   }
 
   private async drainActiveNodeQueue(): Promise<void> {
-    while (this.activeNodeQueued) {
+    while (this.activeNodeQueued && !this.disposed && this.presentations.size > 0) {
       const nodeId = this.pendingActiveNodeId;
+      const snapshot = this.pendingSessionSnapshot;
       this.activeNodeQueued = false;
       await this.followActiveNode(nodeId);
+      await Promise.all([...this.presentations].map(
+        (presentation) => presentation.applySessionSnapshot(snapshot),
+      ));
     }
+  }
+
+  private async refreshSharedWorldFrom(authority: GraphPlusPresentationV1<TFile>): Promise<void> {
+    const state = await authority.exportWorldState();
+    if (!state) return;
+    this.sharedWorldState = clone(state);
+    await Promise.all([...this.presentations]
+      .filter((presentation) => presentation !== authority && presentation.getSession() !== undefined)
+      .map((presentation) => presentation.adoptSharedWorldState(state)));
   }
 }
 
@@ -634,13 +893,15 @@ export class GraphPlusApplicationV1<TFile> {
 export const GraphPlusConsumerV1 = GraphPlusPresentationV1;
 export type GraphPlusConsumerOptionsV1<TFile> = GraphPlusPresentationOptionsV1<TFile>;
 
-function localDepth(value: number | undefined): number {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? Math.max(1, Math.min(8, Math.round(value))) : 1;
-}
-function stripGraphPlusProjectionFilter(state: GraphViewStateV1): GraphViewStateV1 {
-  const { projection: _projection, ...activeFilters } = state.activeFilters;
+function stripGraphPlusRenderFilter(state: GraphViewStateV1): GraphViewStateV1 {
+  const { render: _render, ...activeFilters } = state.activeFilters;
   return { ...state, activeFilters };
 }
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
 function asError(error: unknown): Error { return error instanceof Error ? error : new Error(String(error)); }
+function sameNodeIds(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((nodeId, index) => nodeId === right[index]);
+}
+function settledForceLayoutState() {
+  return { schemaVersion: 1, alpha: 0, alphaTarget: 0, running: false, velocities: {} };
+}

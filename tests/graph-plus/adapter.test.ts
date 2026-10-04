@@ -10,12 +10,13 @@ import {
 } from '../../src/graph-plus/adapter/index.ts';
 import {
   GraphPlusApplicationV1,
+  GraphPlusSessionV1,
   GraphPlusVaultModelV1,
   graphPlusEngineExperienceContractV1,
   graphPlusExperiencePolicyV1,
   projectGraphPlusExperienceDocumentV1,
 } from '../../src/graph-plus/application/index.ts';
-import { GraphPlusConsumerV1, LocalGraphPlusConsumerV1 } from '../../src/graph-plus/consumer/index.ts';
+import { GRAPH_PLUS_CONSUMER_REGISTRATION_V1, GraphPlusConsumerV1, LocalGraphPlusConsumerV1 } from '../../src/graph-plus/consumer/index.ts';
 import {
   GraphPlusCheckpointControllerV1,
   type GraphPlusCheckpointStoreV1,
@@ -86,6 +87,31 @@ function snapshot() {
   } as const;
 }
 
+test('workspace session Memory retains three prior notes and excludes the active note', () => {
+  const session = new GraphPlusSessionV1();
+  for (let index = 0; index < 6; index += 1) {
+    session.experienceFileActivation(`note:${index}`, index);
+  }
+  equal(session.snapshot().activeNodeId, 'note:5', 'the current note should remain the active subject');
+  deepEqual(session.snapshot().nodeIds, ['note:2', 'note:3', 'note:4'],
+    'working Memory should retain only the three prior distinct notes');
+  session.experienceFileActivation('note:3', 7);
+  equal(session.snapshot().activeNodeId, 'note:3', 'the revisited note should become active rather than remembered');
+  deepEqual(session.snapshot().nodeIds, ['note:2', 'note:4', 'note:5'],
+    'revisiting a remembered note should exclude it and retain the three prior notes in recency order');
+  equal(session.memory.count('file-activated', 'note:3', 7), 2,
+    'associative Memory should retain both activations behind the bounded working trail');
+
+  const impaired = new GraphPlusSessionV1({
+    experiencePolicy: () => ({ status: 'forgotten', reason: 'impaired-memory' }),
+  });
+  impaired.experienceFileActivation('note:forgotten', 1);
+  deepEqual(impaired.snapshot().nodeIds, [],
+    'an impaired Ego should be able to prevent perceived activity from entering session Memory');
+  equal(impaired.memory.count('file-activated', 'note:forgotten', 1), 0,
+    'forgotten activity must not leak into associative Memory');
+});
+
 test('Graph+ modes share one canonical vault read and reconciliation', async () => {
   const fixture = snapshot();
   let reads = 0;
@@ -127,7 +153,7 @@ test('Graph+ vault model coalesces initial open and saved-checkpoint reconciliat
   equal(local.document, global.document, 'both startup paths should receive the same canonical snapshot');
 });
 
-test('Graph+ application reconciles canonical truth once and fans it out to independent presentations', async () => {
+test('Graph+ application shares one graph world across viewport-independent presentations', async () => {
   const fixture = snapshot();
   let current: any = fixture.value;
   let reads = 0;
@@ -156,6 +182,7 @@ test('Graph+ application reconciles canonical truth once and fans it out to inde
   let openedNotes = 0;
   const application = new GraphPlusApplicationV1({
     model,
+    reconcileDelayMs: 0,
     navigator: {
       openNote: async () => { openedNotes += 1; },
       openTag: async () => undefined,
@@ -176,8 +203,8 @@ test('Graph+ application reconciles canonical truth once and fans it out to inde
     mode: 'local', lease: secondLocalLease.lease, container: runtime.container,
     initialRootNodeId: noteNodeId('Alpha.md'),
   });
-  await Promise.all([global.open(), local.open(), secondLocal.open()]);
-  equal(reads, 1, 'opening three presentations should read canonical vault truth once');
+  await Promise.all([global.open(), local.open()]);
+  equal(reads, 1, 'concurrent presentation opens should read canonical vault truth once');
 
   current = {
     ...fixture.value,
@@ -186,22 +213,56 @@ test('Graph+ application reconciles canonical truth once and fans it out to inde
       content: '', tags: [], properties: {},
     }],
   };
-  await application.reconcile();
-  equal(reads, 2, 'one application reconciliation should perform one additional vault read');
+  application.receiveHostEvent({ type: 'canonical-vault-invalidated' });
+  equal(reads, 1, 'vault invalidation should debounce rather than scan synchronously');
+  for (let index = 0; index < 40 && reads < 2; index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  equal(reads, 2, 'an open Graph+ application should reconcile a debounced vault invalidation');
+  await secondLocal.open();
+  equal(reads, 2, 'opening another presentation should reuse already synchronized canonical truth');
   equal(global.getDocument()?.nodes.some((node) => node.id === noteNodeId('Gamma.md')), true,
     'Global should receive the reconciled canonical revision');
   equal(local.getDocument()?.nodes.some((node) => node.id === noteNodeId('Gamma.md')), true,
-    'Local should receive the same canonical revision while retaining its own projection');
+    'Local should receive the same canonical graph revision');
   equal(secondLocal.getDocument()?.nodes.some((node) => node.id === noteNodeId('Gamma.md')), true,
     'every Local presentation should receive the same canonical revision');
+  deepEqual(
+    (await local.getSession()?.exportViewState())?.positions,
+    (await global.getSession()?.exportViewState())?.positions,
+    'Global and Local should expose the same node coordinates',
+  );
+  equal(runtime.factory.getDiagnostics().sessions.filter((session) => session.layoutAuthority).length, 1,
+    'one presentation should advance the shared layout');
+
+  await local.setLens({ ...local.getLens(), query: 'Alpha' });
+  equal(global.getLens().query, '',
+    'filter changes should stay local to the presentation viewport');
+  equal(secondLocal.getLens().query, '',
+    'a sibling presentation should retain its own filter state');
+  await local.setLens({ ...local.getLens(), query: '' });
 
   const alphaId = noteNodeId('Alpha.md');
   const betaId = noteNodeId('folder/Beta.md');
+  await local.setNodePinned(alphaId, true);
+  for (let index = 0; index < 40
+    && !(await global.getSession()?.exportViewState())?.pinnedNodeIds.includes(alphaId); index += 1) {
+    await Promise.resolve();
+  }
+  equal((await global.getSession()?.exportViewState())?.pinnedNodeIds.includes(alphaId), true,
+    'pinning in Local should update the shared graph state');
+  equal((await secondLocal.getSession()?.exportViewState())?.pinnedNodeIds.includes(alphaId), true,
+    'shared pins should reach every presentation');
+  const globalCameraBeforeLocalFocus = (await global.getSession()?.exportViewState())?.camera;
   await local.revealAndFocusNode(betaId);
-  equal(local.getLocalDocument()?.nodes[0]?.id, betaId,
+  equal((await local.getSession()?.exportViewState())?.focusedNodeId, betaId,
     'one Local presentation may consciously direct its own focal subject');
-  equal(secondLocal.getLocalDocument()?.nodes[0]?.id, alphaId,
-    'one Local presentation must not overwrite another presentation\'s Consciousness');
+  equal((await secondLocal.getSession()?.exportViewState())?.focusedNodeId, alphaId,
+    'a sibling Local presentation should retain its own Focus until canonical note activity changes');
+  equal((await global.getSession()?.exportViewState())?.focusedNodeId, undefined,
+    'Global should retain its independent Overview state');
+  deepEqual((await global.getSession()?.exportViewState())?.camera, globalCameraBeforeLocalFocus,
+    'sharing Local graph state must not move the Global camera');
   await local.followActiveNode(alphaId);
 
   const firstSession = local.getSession();
@@ -214,36 +275,36 @@ test('Graph+ application reconciles canonical truth once and fans it out to inde
   const firstApplyExternalInfluence = firstSession.applyExternalInfluence.bind(firstSession);
   const secondApplyExternalInfluence = secondSession.applyExternalInfluence.bind(secondSession);
   firstSession.applyExternalInfluence = async (influence) => {
-    firstCanonicalReplacements += 1;
+    if (influence.type === 'replace-remembered-subjects') firstCanonicalReplacements += 1;
     return firstApplyExternalInfluence(influence);
   };
   secondSession.applyExternalInfluence = async (influence) => {
-    secondCanonicalReplacements += 1;
+    if (influence.type === 'replace-remembered-subjects') secondCanonicalReplacements += 1;
     return secondApplyExternalInfluence(influence);
   };
 
   await local.openNode(betaId);
   equal(openedNotes, 1, 'one outbound reveal should invoke the bridge operation exactly once');
-  equal(local.getLocalDocument()?.nodes[0]?.id, alphaId,
+  equal((await firstSession.exportViewState()).focusedNodeId, alphaId,
     'outbound completion must not optimistically mutate the originating Local presentation');
-  equal(secondLocal.getLocalDocument()?.nodes[0]?.id, alphaId,
+  equal((await secondSession.exportViewState()).focusedNodeId, alphaId,
     'outbound completion must not masquerade as canonical truth in sibling presentations');
 
   application.receiveHostEvent({ type: 'active-note-changed', nodeId: betaId });
   for (let index = 0; index < 40 && (
-    local.getLocalDocument()?.nodes[0]?.id !== betaId
-    || secondLocal.getLocalDocument()?.nodes[0]?.id !== betaId
+    (await firstSession.exportViewState()).focusedNodeId !== betaId
+    || (await secondSession.exportViewState()).focusedNodeId !== betaId
     || firstCanonicalReplacements !== 1
     || secondCanonicalReplacements !== 1
   ); index += 1) await Promise.resolve();
-  equal(local.getLocalDocument()?.nodes[0]?.id, betaId,
+  equal((await firstSession.exportViewState()).focusedNodeId, betaId,
     'canonical active-note truth should fan out to the originating Local policy');
-  equal(secondLocal.getLocalDocument()?.nodes[0]?.id, betaId,
+  equal((await secondSession.exportViewState()).focusedNodeId, betaId,
     'canonical active-note truth should fan out to every Local presentation');
   deepEqual((await firstSession.exportViewState()).selectedNodeIds, [betaId],
-    'canonical fan-out should preserve Local single-subject Attention cardinality');
+    'canonical fan-out focuses only the active subject without copying Memory into Attention');
   deepEqual((await secondSession.exportViewState()).selectedNodeIds, [betaId],
-    'each Local Consciousness should independently realize the canonical subject');
+    'each Local Consciousness keeps Memory distinct from Attention');
   equal(firstCanonicalReplacements, 1,
     'the originating Local presentation should apply the received canonical event once');
   equal(secondCanonicalReplacements, 1,
@@ -251,71 +312,71 @@ test('Graph+ application reconciles canonical truth once and fans it out to inde
   equal(global.getProjectedDocument()?.nodes.length, global.getDocument()?.nodes.length,
     'active-note truth should not alter the Global presentation');
   deepEqual((await globalSession.exportViewState()).selectedNodeIds, [alphaId],
-    'canonical Local fan-out must not overwrite Global Consciousness');
+    'active-note following should not overwrite Global Attention');
 
   application.receiveHostEvent({ type: 'active-note-changed' });
   for (let index = 0; index < 40 && (
-    local.getLocalDocument()?.nodes.length !== 0
-    || secondLocal.getLocalDocument()?.nodes.length !== 0
+    (await firstSession.exportViewState()).focusedNodeId !== undefined
+    || (await secondSession.exportViewState()).focusedNodeId !== undefined
     || firstCanonicalReplacements !== 2
     || secondCanonicalReplacements !== 2
   ); index += 1) await Promise.resolve();
-  equal(local.getLocalDocument()?.nodes.length, 0,
-    'canonical absence should fan out as a blank originating Local presentation');
-  equal(secondLocal.getLocalDocument()?.nodes.length, 0,
-    'canonical absence should fan out as a blank sibling Local presentation');
+  assert((local.getLocalDocument()?.nodes.length ?? 0) > 0,
+    'dropping out of a note should retain the full graph in the originating Local pane');
+  assert((secondLocal.getLocalDocument()?.nodes.length ?? 0) > 0,
+    'dropping out of a note should retain the full graph in the sibling Local pane');
   deepEqual((await firstSession.exportViewState()).selectedNodeIds, [],
-    'a blank Local presentation should have empty Attention');
+    'rootless Local Attention is empty while session Memory remains visible');
   deepEqual((await secondSession.exportViewState()).selectedNodeIds, [],
-    'every blank Local presentation should have independent empty Attention');
+    'each rootless Local presentation preserves the separation from Memory');
+  deepEqual((await globalSession.exportViewState()).selectedNodeIds, [alphaId],
+    'rootless Local state should not overwrite Global Attention');
   equal(firstCanonicalReplacements, 2,
     'canonical absence should be applied once rather than duplicated with outbound state');
   equal(secondCanonicalReplacements, 2,
     'canonical absence should be applied once to each sibling presentation');
 
   await application.dispose();
+  application.receiveHostEvent({ type: 'canonical-vault-invalidated' });
+  application.receiveHostEvent({ type: 'active-note-changed', nodeId: alphaId });
+  await application.reconcile();
+  equal(reads, 2, 'disposed applications should ignore late host activity and explicit reconciliation');
   await core.dispose();
 });
 
-test('Graph+ experience policy derives Global and Local documents from one canonical model', async () => {
+test('Graph+ experience policy gives Global and Local the same canonical document', async () => {
   const fixture = snapshot();
   const model = new GraphPlusVaultModelV1({ read: () => fixture.value }, { countDuplicateLinks: true });
   const canonical = await model.open();
-  const lens = createDefaultGraphPlusLensV1();
   const globalPolicy = graphPlusExperiencePolicyV1('global');
   const localPolicy = graphPlusExperiencePolicyV1('local');
   const global = projectGraphPlusExperienceDocumentV1({
     policy: globalPolicy,
     canonicalDocument: canonical.document,
-    depth: 1,
-    lens,
-    searchIndex: canonical.searchIndex,
   });
-  const alphaId = noteNodeId('Alpha.md');
   const local = projectGraphPlusExperienceDocumentV1({
     policy: localPolicy,
     canonicalDocument: canonical.document,
-    rootNodeId: alphaId,
-    depth: 1,
-    lens,
-    searchIndex: canonical.searchIndex,
   });
 
   equal(global, canonical.document, 'Global policy should present the canonical vault document directly');
-  equal(local.nodes[0]?.id, alphaId, 'Local policy should place its active-note subject first');
-  equal(local.nodes.length, 3, 'Local policy should derive only the configured root neighborhood');
-  deepEqual(localPolicy.allowedInteractionStates, ['focus'], 'Local policy should expose Focus as its only state');
+  equal(local, canonical.document,
+    'Local should present the exact same canonical graph rather than deriving a neighborhood document');
+  deepEqual(local.nodes.map((node) => node.id), canonical.document.nodes.map((node) => node.id),
+    'Local should retain canonical node identity and order');
+  deepEqual(localPolicy.allowedInteractionStates, ['overview', 'explore', 'focus'],
+    'Local should retain the same available Views after starting in Focus');
   equal(localPolicy.persistence, 'ephemeral', 'Local policy must not inherit the Global checkpoint');
   const globalExperience = graphPlusEngineExperienceContractV1(globalPolicy);
   const localExperience = graphPlusEngineExperienceContractV1(localPolicy);
   equal(globalExperience.attention.maximumNodeCount, undefined,
     'Global should translate to unrestricted constellation Attention');
-  equal(localExperience.attention.maximumNodeCount, 1,
-    'Local should translate to single-subject Attention without naming Local in Graph Engine');
-  equal(localExperience.awareness.attentionNeighborhoodDepth, 1,
-    'Local should translate its periphery into neutral Awareness expansion');
-  deepEqual(localExperience.allowedStates, ['focus'],
-    'Local Focus policy should cross the boundary as a neutral engine state constraint');
+  equal(localExperience.attention.maximumNodeCount, undefined,
+    'Local should permit the shared constellation to remain in Attention');
+  equal(localExperience.awareness.attentionNeighborhoodDepth, 0,
+    'Local should not manufacture a second neighborhood projection around Attention');
+  deepEqual(localExperience.allowedStates, ['overview', 'explore', 'focus'],
+    'Local and Global should expose the same engine Views');
   equal(localExperience.permittedInteractions.includes('move-subject'), true,
     'Local Focus policy should retain host-neutral node dragging');
 });
@@ -422,6 +483,7 @@ test('Graph+ query translation selects IDs before invoking the generic AST filte
     showTags: false,
   }, projection.searchIndex);
   equal(compiled.error, undefined, 'consumer query should parse');
+  equal(compiled.request.scope, 'render', 'Graph+ filtering should affect only this presentation viewport');
   deepEqual((compiled.request.node as { ids: readonly string[] }).ids, [noteNodeId('folder/Beta.md')], 'consumer should translate its vocabulary to opaque node IDs');
 });
 
@@ -685,7 +747,17 @@ test('V1.7.1 explicit global reveal enters Focus without changing the full proje
   equal(runtime.container.querySelectorAll('[data-graph-engine-session]').length, 1,
     'navigation waiting on startup should share the in-flight consumer mount');
 
+  const receivedInputs: Array<Parameters<typeof session.applyExternalInfluence>[0]> = [];
+  const receive = session.applyExternalInfluence.bind(session);
+  session.applyExternalInfluence = async (input) => { receivedInputs.push(input); return receive(input); };
+  const endogenousEvents: string[] = [];
+  const arrivalSubscription = session.onIntent((intent) => endogenousEvents.push(intent.type));
+
   equal(await consumer.revealAndFocusNode(alphaId), true, 'explicit global navigation should reveal and focus the requested note');
+  deepEqual(receivedInputs, [{ schemaVersion: 1, type: 'replace-attention', nodeIds: [alphaId], focusNodeId: alphaId, framing: 'preserve' }],
+    'Show in Graph+ enters through the application external-input boundary');
+  deepEqual(endogenousEvents, [], 'external reveal never impersonates a conscious user action');
+  arrivalSubscription.dispose();
   equal((await consumer.getSession()?.exportViewState())?.focusedNodeId, alphaId,
     'explicit global navigation should use ordinary graph focus state');
   const revealed = await session.exportViewState();
@@ -751,7 +823,7 @@ function dispatchGraphClick(
   }
 }
 
-test('V1.7.1 Local Graph+ owns an ephemeral rooted document, layout, and depth', async () => {
+test('Local Graph+ reuses the full graph while active-note Focus changes', async () => {
   const fixture = snapshot();
   const runtime = runtimeHarness({ registration: graphPlusRegistration });
   const core = new GraphEngineProviderCoreV1({
@@ -776,79 +848,85 @@ test('V1.7.1 Local Graph+ owns an ephemeral rooted document, layout, and depth',
   });
   await consumer.open();
   let local = consumer.getLocalDocument();
-  assert(local, 'Local Graph+ should mount a derived local document');
-  equal(local.nodes[0]?.id, alphaId, 'the active root should seed the local origin');
-  equal(local.nodes.length, 3, 'depth one should contain the root and its direct eligible neighbors');
+  assert(local, 'Local Graph+ should mount the canonical graph document');
+  assert(local.nodes.some((node) => node.id === alphaId), 'the shared graph should contain the active subject');
+  equal(local.nodes.length, 4, 'Local should load the full canonical graph');
   let state = await consumer.getSession()?.exportViewState();
   equal(state?.focusedNodeId, alphaId, 'the local root should own ordinary focus state');
-  equal(state?.pinnedNodeIds.includes(alphaId), true, 'the local root should remain anchored while neighbors settle');
-
-  await consumer.setLocalDepth(2);
-  local = consumer.getLocalDocument();
-  equal(local?.nodes.length, 4, 'depth two should reveal the next connected layer');
+  equal(state?.pinnedNodeIds.includes(alphaId), false,
+    'following an active note should not turn Focus into a layout constraint');
 
   const session = consumer.getSession();
   assert(session, 'the local graph should retain its engine session');
+  let frameTime = 0;
+  for (let index = 0; index < 360
+    && (runtime.platform.pendingFrames > 0 || runtime.platform.pendingTimers > 0); index += 1) {
+    runtime.platform.advanceTime(1_000 / 30);
+    runtime.platform.flushTimer();
+    frameTime += 1_000 / 30;
+    runtime.platform.flushFrame(frameTime);
+  }
   const activeNoteIntents: string[] = [];
   session.onIntent((intent) => activeNoteIntents.push(intent.type));
-  const cameraBeforeFollow = (await session.exportViewState()).camera;
+  let documentReplacements = 0;
+  const replaceDocument = session.replaceDocument.bind(session);
+  session.replaceDocument = async (document) => {
+    documentReplacements += 1;
+    await replaceDocument(document);
+  };
+  const beforeFollow = await session.exportViewState();
+  const documentIdBeforeFollow = local?.documentId;
   equal(await consumer.followActiveNode(betaId), true, 'the local view should follow a newly active note');
   local = consumer.getLocalDocument();
   state = await consumer.getSession()?.exportViewState();
-  equal(local?.nodes[0]?.id, betaId, 'a new root should receive a fresh local document identity and origin');
-  equal(state?.focusedNodeId, betaId, 'focus should transfer with the active note');
-  equal(state?.pinnedNodeIds.includes(alphaId), false, 'the prior local root anchor must not leak across documents');
-  assert(JSON.stringify(state?.camera) !== JSON.stringify(cameraBeforeFollow),
-    'local active-note following should refit the new root neighborhood');
-  deepEqual(state?.camera.target, state?.positions[betaId],
-    'local active-note following should center the new root');
+  assert(state, 'Local Graph+ should export its followed Focus state');
+  equal(local?.documentId, documentIdBeforeFollow,
+    'an active-note hop should preserve the canonical graph identity');
+  equal(documentReplacements, 0,
+    'an active-note hop across existing members should not replace the document');
+  equal(state.focusedNodeId, betaId, 'focus should transfer with the active note');
+  deepEqual(state.positions, beforeFollow.positions,
+    'an active-note hop across existing local members should preserve every node position');
+  equal(state.camera.zoom, beforeFollow.camera.zoom,
+    'an active-note hop should preserve camera scale instead of fitting again');
+  equal(vectorDistance(state.camera.position, state.camera.target),
+    vectorDistance(beforeFollow.camera.position, beforeFollow.camera.target),
+    'an active-note hop should preserve perspective distance');
+  assert(vectorDistance(state.camera.target, state.positions[betaId]) < 1e-9,
+    'local active-note following should only recenter on the new subject');
   deepEqual(activeNoteIntents, [],
     'canonical active-note truth should bypass the endogenous intent stream');
 
-  assert(state, 'Local Graph+ should export its rooted Focus state');
-  const localCamera = new GraphCameraController(state.camera, state.dimensions);
-  localCamera.setViewport(640, 360);
-  const alphaPoint = localCamera.worldToScreen(state.positions[alphaId]);
-  dispatchGraphClick(runtime.window, runtimeCanvas(runtime.container), alphaPoint.x, alphaPoint.y, 941);
-  runtime.platform.flushFrame();
-  let consciouslyFocused = await session.exportViewState();
-  for (let index = 0; index < 40 && (
-    consciouslyFocused.selectedNodeIds[0] !== alphaId
-    || consciouslyFocused.focusedNodeId !== alphaId
-  ); index += 1) {
-    await Promise.resolve();
-    consciouslyFocused = await session.exportViewState();
-  }
-  equal(consumer.getLocalDocument()?.nodes[0]?.id, betaId,
-    'a Local single click should preserve the existing projected constellation root');
+  const positionsBeforeFocusHop = state.positions;
+  const zoomBeforeFocusHop = state.camera.zoom;
+  await consumer.focusNode(alphaId);
+  const consciouslyFocused = await session.exportViewState();
+  equal(consumer.getLocalDocument()?.documentId, documentIdBeforeFollow,
+    'a Local Focus hop should preserve canonical graph identity');
+  deepEqual(consciouslyFocused.positions, positionsBeforeFocusHop,
+    'a Local Focus hop should preserve existing node positions');
+  equal(consciouslyFocused.camera.zoom, zoomBeforeFocusHop,
+    'a Local Focus hop should preserve camera scale');
   deepEqual(consciouslyFocused.selectedNodeIds, [alphaId],
-    'the clicked Local subject should become Attention');
+    'application-directed Local Focus should establish only its requested subject');
   equal(consciouslyFocused.focusedNodeId, alphaId,
-    'single-subject Local Attention should remain in Focus');
-  assert(Math.hypot(
-    consciouslyFocused.camera.target.x - consciouslyFocused.positions[alphaId].x,
-    consciouslyFocused.camera.target.y - consciouslyFocused.positions[alphaId].y,
-    consciouslyFocused.camera.target.z - consciouslyFocused.positions[alphaId].z,
-  ) < 1e-9, 'Local single click should move camera Focus within the existing constellation');
-  equal(openedPath, undefined, 'a Local single click must not request an Obsidian reveal');
-
-  runtime.platform.advanceTime(400);
-  const focusedCamera = new GraphCameraController(consciouslyFocused.camera, consciouslyFocused.dimensions);
-  focusedCamera.setViewport(640, 360);
-  const focusedAlphaPoint = focusedCamera.worldToScreen(consciouslyFocused.positions[alphaId]);
-  dispatchGraphClick(runtime.window, runtimeCanvas(runtime.container), focusedAlphaPoint.x, focusedAlphaPoint.y, 942);
-  runtime.platform.flushFrame();
-  dispatchGraphClick(runtime.window, runtimeCanvas(runtime.container), focusedAlphaPoint.x, focusedAlphaPoint.y, 943);
-  runtime.platform.flushFrame();
-  await Promise.resolve();
-  equal(openedPath, 'Alpha.md', 'the second click should add the outbound note-reveal operation');
-  equal(consumer.getLocalDocument()?.nodes[0]?.id, betaId,
+    'Local Attention should move to the requested Focus subject');
+  assert(vectorDistance(consciouslyFocused.camera.target, consciouslyFocused.positions[alphaId]) < 1e-9,
+    'Local Focus should recenter without fitting');
+  await consumer.openNode(alphaId);
+  equal(openedPath, 'Alpha.md', 'the explicit outbound action should reveal the focused note');
+  equal(consumer.getLocalDocument()?.documentId, documentIdBeforeFollow,
     'outbound reveal completion must not independently mutate canonical Local truth');
 
+  const beforeReturnToAlpha = await session.exportViewState();
   equal(await consumer.followActiveNode(alphaId), true,
-    'the later canonical active-note push should replace the Local root');
-  equal(consumer.getLocalDocument()?.nodes[0]?.id, alphaId,
-    'received canonical truth should win after the outbound reveal path');
+    'the later canonical active-note push should move Focus within the shared graph');
+  equal(consumer.getLocalDocument()?.documentId, documentIdBeforeFollow,
+    'received canonical truth should not recreate the Local document');
+  equal(documentReplacements, 0,
+    'revisiting a remembered subject should not replace the Local document');
+  deepEqual((await session.exportViewState()).positions, beforeReturnToAlpha.positions,
+    'revisiting a remembered subject should preserve the settled layout');
   await session.resetCamera();
   await Promise.resolve();
   equal((await session.exportViewState()).focusedNodeId, alphaId,
@@ -856,16 +934,17 @@ test('V1.7.1 Local Graph+ owns an ephemeral rooted document, layout, and depth',
 
   equal(await consumer.followActiveNode(undefined), true,
     'absence of an active Markdown note should be accepted as canonical truth');
-  equal(consumer.getLocalDocument()?.nodes.length, 0,
-    'a rootless Local presentation should project a blank graph');
+  assert((consumer.getLocalDocument()?.nodes.length ?? 0) > 0,
+    'dropping out of a note should leave the recent Local session constellation visible');
   const blank = await session.exportViewState();
-  deepEqual(blank.selectedNodeIds, [], 'a blank Local presentation should have empty Attention');
-  equal(blank.focusedNodeId, undefined, 'a blank Local presentation should have no Focus subject');
+  deepEqual(blank.selectedNodeIds, [],
+    'a rootless Local presentation shows the recent trail through Memory rather than active membership');
+  equal(blank.focusedNodeId, undefined, 'dropping out should release Focus into constellation mode');
   await consumer.close();
   await core.dispose();
 });
 
-test('V2 Local Graph+ ignores content-only vault reconciliation but replaces changed topology', async () => {
+test('Local Graph+ ignores content-only vault reconciliation but receives changed canonical topology', async () => {
   const fixture = snapshot();
   let current: any = fixture.value;
   const runtime = runtimeHarness({ registration: graphPlusRegistration });
@@ -911,9 +990,92 @@ test('V2 Local Graph+ ignores content-only vault reconciliation but replaces cha
     resolvedLinks: { ...current.resolvedLinks, 'Alpha.md': { ...current.resolvedLinks['Alpha.md'], 'Gamma.md': 1 } },
   };
   await consumer.reconcile();
-  equal(replacements, 1, 'a new link entering the local neighborhood should replace the session document once');
+  equal(replacements, 1, 'a canonical topology change should replace the session document once');
   assert(consumer.getLocalDocument()?.nodes.some((node) => node.id === noteNodeId('Gamma.md')),
     'the changed topology should appear in the local graph');
+
+  await consumer.close();
+  await core.dispose();
+});
+
+test('Local Graph+ admits saved full-graph coordinates without force settling and fits once', async () => {
+  const fixture = snapshot();
+  const canonical = new VaultGraphAdapterV1<FakeFile>({ countDuplicateLinks: true }).build(fixture.value).document;
+  const savedPositions = Object.fromEntries(canonical.nodes.map((node, index) => [node.id, {
+    x: index * 240 - 360,
+    y: index % 2 === 0 ? -120 : 120,
+    z: 0,
+  }]));
+  const store = new MemoryStore();
+  store.value = {
+    document: canonical,
+    viewState: {
+      schemaVersion: 1,
+      documentId: canonical.documentId,
+      documentRevision: canonical.revision,
+      consumerId: 'graph-plus',
+      profileId: 'default',
+      dimensions: '2d',
+      positions: savedPositions,
+      pinnedNodeIds: [],
+      camera: {
+        position: { x: 0, y: 0, z: 10 }, target: { x: 0, y: 0, z: 0 },
+        up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic',
+      },
+      selectedNodeIds: [],
+      viewMode: 'overview',
+      activeFilters: {},
+      moduleState: {},
+    },
+    savedAt: 1,
+  };
+  const runtime = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
+  const core = new GraphEngineProviderCoreV1({
+    engineVersion: '2.0.0', engineInstanceId: 'local-reference-layout-test', capabilities: ['render'],
+    profiles: runtime.profiles, sessions: runtime.factory,
+  });
+  const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(lease.ok, 'Local Graph+ should obtain a session lease');
+  const alphaId = noteNodeId('Alpha.md');
+  const betaId = noteNodeId('folder/Beta.md');
+  const consumer = new LocalGraphPlusConsumerV1({
+    lease: lease.lease,
+    container: runtime.container,
+    vaultId: fixture.value.vaultId,
+    checkpointStore: store,
+    source: { read: () => fixture.value },
+    navigator: { openNote: async () => undefined, openTag: async () => undefined },
+    countDuplicateLinks: true,
+    initialRootNodeId: alphaId,
+  });
+  await consumer.open();
+  const session = consumer.getSession();
+  assert(session, 'Local Graph+ should expose its mounted session');
+  let state = await session.exportViewState();
+  for (const node of consumer.getLocalDocument()?.nodes ?? []) {
+    deepEqual(state.positions[node.id], savedPositions[node.id],
+      'initial Local members should use their saved full-graph coordinates');
+  }
+  equal((runtime.factory.getDiagnostics().sessions[0]?.modules['force-layout'] as { targetStepRateHz?: number })?.targetStepRateHz, 0,
+    'restoring known coordinates should start Local physics settled');
+
+  equal(await consumer.followActiveNode(betaId), true,
+    'following a new subject should reuse the loaded full graph');
+  state = await session.exportViewState();
+  for (const node of consumer.getLocalDocument()?.nodes ?? []) {
+    deepEqual(state.positions[node.id], savedPositions[node.id],
+      'every Local node should retain its saved full-graph coordinates');
+  }
+  assert(vectorDistance(state.camera.target, state.positions[betaId]) < 1e-9,
+    'the one final fit should remain centered on the followed subject');
+  const settledPositions = state.positions;
+  for (let index = 1; index <= 60; index += 1) {
+    runtime.platform.advanceTime(1_000 / 30);
+    runtime.platform.flushTimer();
+    runtime.platform.flushFrame(index * (1_000 / 30));
+  }
+  deepEqual((await session.exportViewState()).positions, settledPositions,
+    'known Local coordinates should remain static after the camera fit');
 
   await consumer.close();
   await core.dispose();
@@ -973,10 +1135,10 @@ test('G-PARITY engine host resolves Graph+ open-node once and hands transient Fo
   await core.dispose();
 });
 
-test('G-PARITY-09 Graph+ persists Form while its profile switches and restores dimensions', async () => {
+test('G-PARITY-09 Graph+ retains dormant Form data while its profile switches and restores dimensions', async () => {
   const fixture = snapshot();
   const store = new MemoryStore();
-  const first = runtimeHarness({ registration: graphPlusRegistration });
+  const first = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
   first.profiles.setUserOverrides('graph-plus', 'default', { dimensions: '2d' });
   const firstCore = new GraphEngineProviderCoreV1({
     engineVersion: '1.1.0', engineInstanceId: 'graph-plus-dim-first', capabilities: ['render'],
@@ -998,7 +1160,9 @@ test('G-PARITY-09 Graph+ persists Form while its profile switches and restores d
   assert(session, 'Graph+ should expose its leased session');
   equal((await session.exportViewState()).dimensions, '2d', 'Graph+ should honor its persistent profile dimension');
   const rootId = noteNodeId('Alpha.md');
-  await firstConsumer.mindMapFromNode(rootId);
+  // Seed an older saved Mind Map configuration; it must stay dormant.
+  await firstConsumer.setLens({ ...firstConsumer.getLens(), form: { ...firstConsumer.getLens().form, enabled: true, rootNodeId: rootId } });
+  equal((await session.exportEffectiveSettings()).modules.form.enabled, false, 'the Graph+ profile keeps legacy Mind Map disabled');
   first.profiles.setUserOverrides('graph-plus', 'default', { dimensions: '3d' });
   first.factory.refreshActiveProfiles();
   equal(firstConsumer.getSession(), session, 'live dimension switching should retain the Graph+ session handle');
@@ -1009,7 +1173,7 @@ test('G-PARITY-09 Graph+ persists Form while its profile switches and restores d
   equal(store.value?.viewState?.dimensions, '3d', 'Graph+ should checkpoint the active destination dimension');
   equal(store.value?.lens?.form.rootNodeId, rootId, 'Graph+ should checkpoint its consumer-owned Form root');
 
-  const second = runtimeHarness({ registration: graphPlusRegistration });
+  const second = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
   second.profiles.setUserOverrides('graph-plus', 'default', { dimensions: '2d' });
   const secondCore = new GraphEngineProviderCoreV1({
     engineVersion: '1.1.0', engineInstanceId: 'graph-plus-dim-second', capabilities: ['render'],
@@ -1028,12 +1192,14 @@ test('G-PARITY-09 Graph+ persists Form while its profile switches and restores d
   });
   await restored.open();
   equal((await restored.getSession()?.exportViewState())?.dimensions, '2d', 'runtime restore should convert the permitted saved dimension');
-  equal(restored.getLens().form.enabled, true, 'restored Graph+ should retain active Form');
+  equal(restored.getLens().form.enabled, true, 'restored Graph+ should preserve dormant Form configuration');
   equal(restored.getLens().form.rootNodeId, rootId, 'restored Graph+ should retain the same root');
+  equal((await restored.getSession()?.exportEffectiveSettings())?.modules.form.enabled, false, 'restoration cannot reactivate Mind Map');
   await restored.close();
   await secondCore.dispose();
 });
 
+/* Mind Map deferred: retain this acceptance test with the feature.
 test('Graph+ Mind Map snapshots selection as its root and pauses when filtering hides that root', async () => {
   const fixture = snapshot();
   const runtime = runtimeHarness({ registration: graphPlusRegistration });
@@ -1070,6 +1236,8 @@ test('Graph+ Mind Map snapshots selection as its root and pauses when filtering 
   await consumer.close();
   await core.dispose();
 });
+
+*/
 
 test('Graph+ source failure and close failure do not interrupt an external lease', async () => {
   const runtime = runtimeHarness({ registration: graphPlusRegistration });
@@ -1144,3 +1312,7 @@ test('simultaneous Graph+ and external sessions dispose independently', async ()
   await external.lease.release();
   await core.dispose();
 });
+
+function vectorDistance(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): number {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}

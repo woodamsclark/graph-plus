@@ -40,6 +40,7 @@ export class GraphModuleHost {
   private themePalette: GraphVisualThemeV2;
   private readonly getDocument: () => GraphDocumentV1;
   private readonly getViewState: () => GraphViewStateV1;
+  private readonly canRunLayout: () => boolean;
   private fatal = false;
   private disposed = false;
   private readonly tickElapsedSeconds = new Map<string, number>();
@@ -53,6 +54,7 @@ export class GraphModuleHost {
     readonly initialModuleState: Readonly<Record<string, JsonValue>>;
     readonly getDocument: () => GraphDocumentV1;
     readonly getViewState: () => GraphViewStateV1;
+    readonly canRunLayout?: () => boolean;
     readonly onFailure: (failure: GraphModuleFailureV1) => void;
   }) {
     this.registry = options.registry;
@@ -60,6 +62,7 @@ export class GraphModuleHost {
     this.themePalette = options.themePalette;
     this.getDocument = options.getDocument;
     this.getViewState = options.getViewState;
+    this.canRunLayout = options.canRunLayout ?? (() => true);
     this.failureListener = options.onFailure;
     const definitions = options.registry.resolve(options.profile);
     const enabled = Object.values(options.profile.modules).filter((module) => module.enabled);
@@ -245,6 +248,10 @@ export class GraphModuleHost {
     let nextFrameDelayMs: number | undefined;
     for (const module of [...this.active]) {
       if (!module.instance.tick) continue;
+      if (module.definition.descriptor.capabilities.includes('layout') && !this.canRunLayout()) {
+        this.tickElapsedSeconds.delete(module.id);
+        continue;
+      }
       try {
         const moduleState = { ...choreographed, positions };
         const preferredInterval = module.instance.preferredTickIntervalMs?.(moduleState);
@@ -318,6 +325,23 @@ export class GraphModuleHost {
     }
   }
 
+  restoreCapabilityState(capability: string, state: Readonly<Record<string, JsonValue>>): void {
+    if (this.fatal || this.disposed) return;
+    for (const module of [...this.active]) {
+      if (!module.definition.descriptor.capabilities.includes(capability)
+        || !module.instance.restoreState
+        || !Object.prototype.hasOwnProperty.call(state, module.id)) continue;
+      try {
+        module.instance.restoreState(cloneJson(state[module.id]));
+        this.tickElapsedSeconds.delete(module.id);
+        this.tickHasRun.delete(module.id);
+      } catch (error) {
+        this.failActiveModule(module, 'restore-state', error);
+        if (this.fatal) break;
+      }
+    }
+  }
+
   setSuspended(suspended: boolean): void {
     this.invokeLifecycle('setSuspended', 'suspend', suspended);
   }
@@ -326,6 +350,20 @@ export class GraphModuleHost {
     const result: Record<string, JsonValue> = JSON.parse(JSON.stringify(base)) as Record<string, JsonValue>;
     for (const module of [...this.active]) {
       if (!module.instance.exportState) continue;
+      try {
+        result[module.id] = cloneJson(module.instance.exportState());
+      } catch (error) {
+        this.failActiveModule(module, 'export-state', error);
+        if (this.fatal) break;
+      }
+    }
+    return result;
+  }
+
+  exportCapabilityState(capability: string): Readonly<Record<string, JsonValue>> {
+    const result: Record<string, JsonValue> = {};
+    for (const module of [...this.active]) {
+      if (!module.definition.descriptor.capabilities.includes(capability) || !module.instance.exportState) continue;
       try {
         result[module.id] = cloneJson(module.instance.exportState());
       } catch (error) {

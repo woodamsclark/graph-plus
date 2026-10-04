@@ -112,18 +112,16 @@ Automated tests must prove that:
 
 ## 7. Consistent Graph+ focus framing
 
-Graph+ derives camera framing from focus, rather than from the route used to reach a
-node. Local graph startup, direct clicks, active-note following, and **show in
-graph+** all fit the focused node and its currently visible direct neighbors while
-keeping the camera target anchored to the focused node.
+Graph+ separates Focus from fitting. Local graph startup fits its initial map once;
+direct clicks and active-note hops within the existing map then recenter on the focused
+node while preserving scale, angle, and camera distance. An active-note change that
+admits new mapped nodes fits once after their known coordinates are installed.
+**show in graph+** remains an explicit reveal-and-fit operation.
 
-The framing follows that neighborhood briefly while physics settles. Any user camera
-gesture cancels the automatic follow immediately. Clearing focus cancels framing and
-does not reset the camera. Active filters remain authoritative: hidden neighbors are
-not pulled back into view merely to satisfy camera framing.
-
-Local graph+ uses a stable predictive variant. New neighbors begin in the engine's
-compact generated placement around the pinned root, while one camera fit reserves the
-maximum configured spring radius. Nodes may then expand into place without repeated
-camera zoom corrections. Global graph+ retains settling-aware reframing because its
-focused neighborhood can begin at arbitrary saved positions across the vault layout.
+Focus follows subject translation while physics settles without recalculating zoom.
+Clearing focus does not reset the camera. Active filters remain authoritative: hidden
+neighbors are not pulled back into view merely to satisfy camera framing. Local graph+
+loads known coordinates from the live Global view or saved checkpoint, starts the force
+solver settled, and performs one fit after any newly admitted coordinates are installed.
+It retains one document identity across Focus hops, and changing only the focused
+subject does not rotate layout pins, move nodes, or reheat the solver.

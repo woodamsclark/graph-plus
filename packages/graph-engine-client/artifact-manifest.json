@@ -2,7 +2,7 @@
   "artifact": "@graph-plus/graph-engine-client",
   "artifactVersion": "1.7.1",
   "protocolVersion": 1,
-  "contentSha256": "f4af546dd55bba6a1064de86b385e84812d04db7763ffb35bb95bb8fdf5d0a68",
+  "contentSha256": "3e4c3a52276ef972bb2a62905d3e779de0ac56a82ee61959f23bae14bf6cf655",
   "generatedFrom": "src/graph-engine/public.ts",
   "publicFiles": [
     "src/graph-engine/public.ts",
@@ -33,6 +33,7 @@
     "src/graph-engine/runtime/consciousness/Association.ts",
     "src/graph-engine/runtime/consciousness/Consciousness.ts",
     "src/graph-engine/runtime/consciousness/EgoInteractionPlan.ts",
+    "src/graph-engine/runtime/consciousness/Judgement.ts",
     "src/graph-engine/runtime/consciousness/Memory.ts",
     "src/graph-engine/runtime/consciousness/Reaction.ts",
     "src/graph-engine/runtime/consciousness/index.ts",

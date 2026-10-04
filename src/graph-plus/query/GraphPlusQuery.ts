@@ -114,14 +114,14 @@ export function compileGraphPlusFilterV1(
     return {
       request: {
         schemaVersion: 1,
-        scope: 'projection',
+        scope: 'render',
         node: { op: 'id-in', ids },
       },
       visibleNodeIds: ids,
     };
   } catch (error) {
     return {
-      request: { schemaVersion: 1, scope: 'projection', node: { op: 'all' } },
+      request: { schemaVersion: 1, scope: 'render', node: { op: 'all' } },
       visibleNodeIds: document.nodes.map((node) => node.id),
       error: error instanceof Error ? error.message : 'Invalid filter.',
     };

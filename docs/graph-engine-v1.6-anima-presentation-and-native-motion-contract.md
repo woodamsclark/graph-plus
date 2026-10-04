@@ -288,24 +288,29 @@ Graph+ label sizing begins with:
 fontSize = 14 + worldRadius / 4
 ```
 
-Labels use their resolved font size in fixed CSS pixels in both 2D and 3D. They remain
+Labels use their resolved font size in fixed CSS pixels in both 2D and 3D. Focus keeps
+the root at the resolved 100% size and renders its immediate-neighbor labels at 50%.
+They remain
 readable while the graph recedes, matching the accepted 3D overview treatment rather
 than shrinking with orthographic zoom. Adaptive collision rejection and budgeting
 remain enabled as a Graph+ enhancement. Anima forces labels for highlighted nodes,
 leaves standard nodes under the adaptive label policy, and suppresses labels for dimmed
-or void nodes. Form-required labels remain structurally forced candidates.
+or void nodes. Session Memory is an adaptive rather than forced label source in Focus.
+Form-required labels remain structurally forced candidates.
 
 Adaptive label collision slots are resolved in this stable order:
 
 1. Anima highlighted subjects, including hover, Attention, and session Memory;
 2. explicit structural label priority, including Form roles;
-3. resolved Anima world radius, largest first;
-4. perspective proximity; and
+3. perspective proximity, nearest first;
+4. resolved Anima world radius, largest first; and
 5. stable node ID.
 
-World radius intentionally precedes perspective proximity so a structural hub reserves
-label space before a nearby low-degree node and does not change rank merely because
-the camera orbits. Only onscreen nodes are candidates.
+Explicit semantic and structural priority therefore remain authoritative, while two
+otherwise-equal labels resolve to the one physically nearer the camera. An ordinary
+adaptive label is also rejected when its node anchor or label bounds are occluded by a
+nearer visible node disc. Forced interaction labels bypass this occlusion rule. Only
+onscreen nodes are candidates.
 
 The base adaptive label budget is bounded from `12` through `120` before the active
 threshold adjustment and grows with viewport area and effective zoom. In 2D effective
@@ -396,7 +401,8 @@ Hover/drag presentation should adopt the useful native visual pattern:
 - no hover-only change affects physics or persistence.
 
 Explore/Constellation highlights aware nodes plus links internal to that constellation.
-Hover also highlights the shortest path from its subject to the nearest aware node;
+Hover also highlights the shortest path from its subject to the nearest selected member;
+remembered-but-unselected subjects are not route targets;
 immediate neighbors and incident links outside that path rise to standard presentation.
 None of those transient subjects become selected. Previews and Option do
 not add an Explore seed. Highlighted labels are forced, standard labels use camera-range
@@ -421,10 +427,11 @@ interaction presentation is required even when the requested focus ID already ma
 the stored focus state; an idempotent focus command may not leave stale hover behind.
 While Focus/Local is active, constellation nodes and links whose endpoints are both in
 the constellation receive the highlight treatment at full opacity. Immediate neighbors
-of any constellation node remain rendered as a dim frontier with their labels suppressed;
-they do not become selected. Any dimmed node in the Focus scope remains hoverable.
-Hover temporarily highlights that node and its shortest path to the nearest aware
-constellation subject while the rest of the visible scope remains dim. Clicking a
+of the focused node remain rendered as standard conscious context; they do not become
+selected, and their labels remain eligible for the adaptive label policy without being
+forced. Dimmed and void labels remain suppressed.
+Hover temporarily highlights that node and its shortest path to the nearest selected
+constellation subject while unrelated context remains void. Clicking a
 frontier node adds it to the constellation. Background activation exits
 Focus to Explore while retaining the constellation.
 

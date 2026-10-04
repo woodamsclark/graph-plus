@@ -88,7 +88,7 @@ test('interaction receipts are immutable evidence adjudicated by a pure matcher'
     'a Reflex should forget its autonomic evidence without changing global memory');
 });
 
-test('R-INPUT-01 pans Overview, rotates Focus trackpad scroll, and radial-zooms Focus secondary drag', async () => {
+test('R-INPUT-01 pans Overview, rotates Focus trackpad scroll, and orbits Focus secondary drag', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
@@ -132,8 +132,10 @@ test('R-INPUT-01 pans Overview, rotates Focus trackpad scroll, and radial-zooms 
   const rightDragged = await session.exportViewState();
   deepEqual(rightDragged.camera.target, focused.camera.target,
     'Focus secondary drag should keep the focused node as the camera target');
-  assert(vectorDistance(rightDragged.camera.position, rightDragged.camera.target) !== distanceBeforeSecondary,
-    'Focus secondary drag should use radial zoom instead of orbit');
+  assert(Math.abs(vectorDistance(rightDragged.camera.position, rightDragged.camera.target) - distanceBeforeSecondary) < 1e-6,
+    'Focus secondary orbit should preserve perspective distance');
+  assert(!sameDirection(cameraOffset(rightDragged.camera), cameraOffset(focused.camera)),
+    'Focus secondary drag should orbit');
   deepEqual(rightDragged.selectedNodeIds, ['a'], 'Focus secondary drag should retain selection');
   pointer(value, canvas, 'pointerup', secondaryEnd.x, secondaryEnd.y, { pointerId: 91, button: 2 });
 
@@ -518,7 +520,7 @@ test('a background tap clears stale hover even when focus is already empty', asy
   const point = await nodePoint(session, 'a');
   pointer(value, canvas, 'pointermove', point.x, point.y, { pointerId: 501 });
   value.platform.flushFrame();
-  equal(canvas.style.cursor, 'pointer', 'the fixture should begin with a hovered node');
+  equal(canvas.style.cursor.startsWith('url("data:image/svg+xml,') && canvas.style.cursor.endsWith(', pointer'), true, 'the fixture should begin with a hovered node');
   click(value, canvas, { x: -100, y: -100 }, { pointerId: 502 });
   value.platform.flushFrame();
   equal((await session.exportViewState()).focusedNodeId, undefined, 'the fixture should remain unfocused');
@@ -629,7 +631,7 @@ test('R-INPUT-03, R-INPUT-04, and R-INPUT-08 use selection-state consumer activa
     'an initial one-node selection should not enter Focus');
   deepEqual((await session.exportViewState()).selectedNodeIds, ['a'], 'single click should select its neutral node ID');
   equal((await session.exportViewState()).viewMode, 'explore',
-    'single click selection should invoke Constellation');
+    'single click highlights and enters Constellation');
   equal((await session.exportViewState()).focusedNodeId, undefined,
     'the initial selected node should not enter Focus');
 
@@ -890,8 +892,8 @@ test('tag nodes use ordinary single-node selection without selecting region memb
   const selected = await session.exportViewState();
   deepEqual(selected.selectedNodeIds, ['tag'],
     'first click should select only the clicked tag node');
-  equal(selected.focusedNodeId, undefined, 'one selected tag should enter Constellation like any ordinary node');
-  deepEqual(selected.camera, beforeTag.camera, 'an ordinary initial tag selection should preserve camera framing');
+  equal(selected.focusedNodeId, undefined, 'initial tag selection should enter Constellation');
+  deepEqual(selected.camera, beforeTag.camera, 'selecting a one-node constellation preserves camera framing');
 
   value.platform.advanceTime(400);
   click(value, canvas, await nodePoint(session, 'tag'), { pointerId: 202 });
@@ -932,7 +934,7 @@ test('Constellation admits dim candidates without focusing, then presents a memb
     click(value, canvas, await nodePoint(session, 'a'), { pointerId: 301 });
     value.platform.flushFrame();
     const before = await session.exportViewState();
-    equal(before.viewMode, 'explore', 'first click chooses a constellation');
+    equal(before.viewMode, 'explore', 'the first click highlights and enters Constellation');
     click(value, canvas, await nodePoint(session, 'c'), { pointerId: 302 });
     value.platform.flushFrame();
     const admitted = await session.exportViewState();
@@ -1312,15 +1314,17 @@ test('R-INPUT-06 updates view position and emits one revision-bearing drag inten
 
   pointer(value, canvas, 'pointermove', point.x, point.y, { pointerId: 5 });
   value.platform.flushFrame();
-  equal(canvas.style.cursor, 'pointer', 'hovered visible node should use pointer cursor');
+  assert(decodeURIComponent(canvas.style.cursor).includes('r="6"'), 'hover raises the donut above its standard radius');
+  equal(canvas.style.cursor.startsWith('url("data:image/svg+xml,') && canvas.style.cursor.endsWith(', pointer'), true, 'hovered visible node should use pointer cursor');
 
   pointer(value, canvas, 'pointerdown', point.x, point.y, { pointerId: 5 });
   pointer(value, canvas, 'pointermove', point.x + 50, point.y + 20, { pointerId: 5 });
   value.platform.flushFrame();
-  equal(canvas.style.cursor, 'grabbing', 'active node drag should use grabbing cursor');
+  assert(decodeURIComponent(canvas.style.cursor).includes('r="3"'), 'node drag presses the donut down to the camera-drag radius');
+  equal(canvas.style.cursor.startsWith('url("data:image/svg+xml,') && canvas.style.cursor.endsWith(', grabbing'), true, 'active node drag should use grabbing cursor');
   pointer(value, canvas, 'pointerup', point.x + 50, point.y + 20, { pointerId: 5 });
   value.platform.flushFrame();
-  equal(canvas.style.cursor, 'pointer', 'completed drag should return to hovered cursor');
+  equal(canvas.style.cursor.startsWith('url("data:image/svg+xml,') && canvas.style.cursor.endsWith(', pointer'), true, 'completed drag should return to hovered cursor');
 
   const after = await session.exportViewState();
   assert(!sameVector(after.positions.a, before.positions.a), 'drag should mutate only the node view position');
@@ -1396,12 +1400,17 @@ test('Overview background drags pan in 2D and secondary drag rotates in 3D', asy
   const twoDSession = await twoD.create();
   const twoDCanvas = runtimeCanvas(twoD.container);
   const twoDBefore = await twoDSession.exportViewState();
+  const restingCursor = twoDCanvas.style.cursor;
   pointer(twoD, twoDCanvas, 'pointerdown', -100, -100, { pointerId: 30 });
   pointer(twoD, twoDCanvas, 'pointermove', -50, -70, { pointerId: 30 });
   twoD.platform.flushFrame();
+  const pressedCursor = twoDCanvas.style.cursor;
+  assert(decodeURIComponent(pressedCursor).includes('r="3"'), 'camera pan uses the low donut pose');
+  assert(pressedCursor.endsWith(', grabbing'), 'camera pan owns the pressed cursor');
   assert(!sameVector((await twoDSession.exportViewState()).camera.target, twoDBefore.camera.target), 'primary background drag should pan 2d camera');
   pointer(twoD, twoDCanvas, 'pointerup', -50, -70, { pointerId: 30 });
   twoD.platform.flushFrame();
+  equal(twoDCanvas.style.cursor, restingCursor, 'camera release restores the standard donut');
   const twoDBeforeSecondary = await twoDSession.exportViewState();
   pointer(twoD, twoDCanvas, 'pointerdown', -100, -100, { pointerId: 301, button: 2 });
   pointer(twoD, twoDCanvas, 'pointermove', -60, -75, { pointerId: 301, button: 2 });
@@ -1422,6 +1431,7 @@ test('Overview background drags pan in 2D and secondary drag rotates in 3D', asy
   pointer(threeD, threeDCanvas, 'pointerdown', -100, -100, { pointerId: 31, button: 2 });
   pointer(threeD, threeDCanvas, 'pointermove', -40, -70, { pointerId: 31, button: 2 });
   threeD.platform.flushFrame();
+  equal(threeDCanvas.style.cursor, pressedCursor, 'camera orbit shares the low donut pose with pan');
   assert(!sameVector((await threeDSession.exportViewState()).camera.position, threeDBefore.camera.position), 'secondary background drag should orbit 3d camera');
   pointer(threeD, threeDCanvas, 'pointerup', -40, -70, { pointerId: 31, button: 2 });
   threeD.platform.flushFrame();
@@ -1614,7 +1624,7 @@ test('mobile one-finger drag moves a directly touched node without selecting it'
   await session.dispose();
 });
 
-test('mobile Focus drags a directly touched dim neighbor while background gestures retain navigation', async () => {
+test('mobile Focus drags a directly touched standard neighbor while background gestures retain navigation', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
@@ -1652,7 +1662,7 @@ test('mobile Focus drags a directly touched dim neighbor while background gestur
   await session.dispose();
 });
 
-test('desktop drag on a stably hovered dim neighbor moves it without changing Focus', async () => {
+test('desktop drag on a stably hovered standard neighbor moves it without changing Focus', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
@@ -1874,7 +1884,7 @@ test('V1.7 semantic hover reports Mod changes without mutating graph state', asy
     ctrlKey: !mac,
   });
   value.platform.flushFrame();
-  equal(canvas.style.cursor, 'pointer', 'Mod preview latch should survive transient pointer hit-test misses');
+  equal(canvas.style.cursor.startsWith('url("data:image/svg+xml,') && canvas.style.cursor.endsWith(', pointer'), true, 'Mod preview latch should survive transient pointer hit-test misses');
   const heldLeave = new value.window.PointerEvent('pointerleave', {
     pointerId: 104,
     pointerType: 'mouse',
@@ -1882,7 +1892,7 @@ test('V1.7 semantic hover reports Mod changes without mutating graph state', asy
   Object.defineProperty(heldLeave, 'pointerType', { value: 'mouse' });
   canvas.dispatchEvent(heldLeave as unknown as Event);
   value.platform.flushFrame();
-  equal(canvas.style.cursor, 'pointer', 'Mod hover should remain latched when the pointer leaves for a preview');
+  equal(canvas.style.cursor.startsWith('url("data:image/svg+xml,') && canvas.style.cursor.endsWith(', pointer'), true, 'Mod hover should remain latched when the pointer leaves for a preview');
   const release = new value.window.KeyboardEvent('keyup', { key: 'Meta', metaKey: false, ctrlKey: false });
   value.window.dispatchEvent(release);
   value.platform.flushFrame();
@@ -1916,7 +1926,7 @@ test('V1.8 preview surface ownership holds Anima preview through Mod release', a
   canvas.dispatchEvent(new value.window.PointerEvent('pointerleave', { pointerId: 105, pointerType: 'mouse' }) as unknown as Event);
   value.window.dispatchEvent(new value.window.KeyboardEvent('keyup', { key: 'Meta', metaKey: false, ctrlKey: false }));
   value.platform.flushFrame();
-  equal(canvas.style.cursor, 'pointer', 'card-active semantic preview should survive Mod release outside the canvas');
+  equal(canvas.style.cursor.startsWith('url("data:image/svg+xml,') && canvas.style.cursor.endsWith(', pointer'), true, 'card-active semantic preview should survive Mod release outside the canvas');
   await session.setPreviewSurfaceActive(false);
   await session.clearPreview();
   assert(canvas.style.cursor.includes('data:image/svg+xml'),
@@ -1926,7 +1936,7 @@ test('V1.8 preview surface ownership holds Anima preview through Mod release', a
   await session.dispose();
 });
 
-test('R-INPUT-18 mobile two-finger drag rotates and pinches concurrently in 3D', async () => {
+test('R-INPUT-18 mobile two-finger drag pans Constellation and Focus while pinch remains concurrent', async () => {
   const constellation = runtimeHarness({ profileId: 'three-dimensional' });
   const constellationSession = await constellation.create();
   const constellationCanvas = runtimeCanvas(constellation.container);
@@ -1941,8 +1951,10 @@ test('R-INPUT-18 mobile two-finger drag rotates and pinches concurrently in 3D',
   pointer(constellation, constellationCanvas, 'pointermove', 240, 110, { pointerId: 67, pointerType: 'touch' });
   constellation.platform.flushFrame();
   const constellationAfter = await constellationSession.exportViewState();
-  assert(!sameDirection(cameraOffset(constellationAfter.camera), cameraOffset(constellationBefore.camera)),
-    'mobile two-finger drag in Constellation mode must orbit, not pan');
+  assert(sameDirection(cameraOffset(constellationAfter.camera), cameraOffset(constellationBefore.camera)),
+    'Constellation two-finger pan should preserve orientation');
+  assert(!sameVector(constellationAfter.camera.target, constellationBefore.camera.target),
+    'Constellation two-finger translation should pan');
   await constellationSession.dispose();
 
   const unfocused = runtimeHarness({ profileId: 'three-dimensional' });
@@ -1974,10 +1986,10 @@ test('R-INPUT-18 mobile two-finger drag rotates and pinches concurrently in 3D',
   pointer(spatial, spatialCanvas, 'pointermove', 240, 110, { pointerId: 71, pointerType: 'touch' });
   spatial.platform.flushFrame();
   const spatialAfter = await spatialSession.exportViewState();
-  deepEqual(spatialAfter.camera.target, spatialBefore.camera.target,
-    'Focus two-finger orbit plus zoom should retain its locked target');
-  assert(!sameDirection(cameraOffset(spatialAfter.camera), cameraOffset(spatialBefore.camera)),
-    'Focus two-finger centroid movement should orbit around the focused target');
+  assert(!sameVector(spatialAfter.camera.target, spatialBefore.camera.target),
+    'Focus two-finger centroid movement should pan');
+  assert(sameDirection(cameraOffset(spatialAfter.camera), cameraOffset(spatialBefore.camera)),
+    'Focus two-finger pan should preserve orientation');
   assert(vectorDistance(spatialAfter.camera.position, spatialAfter.camera.target)
     !== vectorDistance(spatialBefore.camera.position, spatialBefore.camera.target),
   'Focus two-finger pinch should change perspective distance during the same gesture');
@@ -2393,7 +2405,7 @@ test('suspension and view invalidation clear transient gestures and cursors', as
   pointer(value, canvas, 'pointerdown', point.x, point.y, { pointerId: 40 });
   pointer(value, canvas, 'pointermove', point.x + 30, point.y + 10, { pointerId: 40 });
   value.platform.flushFrame();
-  equal(canvas.style.cursor, 'grabbing', 'active drag should own the grabbing cursor');
+  equal(canvas.style.cursor.startsWith('url("data:image/svg+xml,') && canvas.style.cursor.endsWith(', grabbing'), true, 'active drag should own the grabbing cursor');
 
   await session.applyFilter({
     schemaVersion: 1,

@@ -37,6 +37,7 @@ const publicFiles = [
   'src/graph-engine/runtime/consciousness/Association.ts',
   'src/graph-engine/runtime/consciousness/Consciousness.ts',
   'src/graph-engine/runtime/consciousness/EgoInteractionPlan.ts',
+  'src/graph-engine/runtime/consciousness/Judgement.ts',
   'src/graph-engine/runtime/consciousness/Memory.ts',
   'src/graph-engine/runtime/consciousness/Reaction.ts',
   'src/graph-engine/runtime/consciousness/index.ts',

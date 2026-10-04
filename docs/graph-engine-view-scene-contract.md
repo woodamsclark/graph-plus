@@ -65,7 +65,7 @@ chosen composition do not automatically become members of `C`.
 This narrows the earlier draft's use of all Awareness as the scene constellation.
 When Overview chooses group `G`, the active composition is exactly its available
 membership, not `G` union the previous composition or unrelated Memory. A subject can
-remain remembered without being highlighted as a member in Constellation or Focus.
+remain visible in a Memory constellation without being highlighted as an active member in Constellation or Focus.
 Policy-expanded peripheral neighbors also remain outside `C` unless explicitly admitted.
 
 Views do not store a second mutable copy of the composition. Consciousness owns the
@@ -81,9 +81,40 @@ Focus exit. The Focus scene still has one presented subject.
 
 The Focus subject belongs to `C`. In Constellation, clicking a dim candidate
 outside `C` admits that candidate and its shortest visible path to `C`, and stays in Constellation. A subsequent ordinary
-click on a committed member enters Focus. Within Focus, clicking a dim neighbor admits
+click on a committed member enters Focus. Within Focus, clicking a standard neighbor admits
 that candidate and its shortest connecting path and hops the subject in one operation, preserving existing members. Unrelated neighbors are never implicitly admitted.
-This permits exploration through dim neighbors while keeping "one from many" true.
+This permits exploration through conscious standard neighbors while keeping "one from many" true.
+
+### Memory and Ego constellation sources
+
+Updated 2026-10-03. `Constellation.kind` is `ego` or `memory`; source identity
+belongs to Consciousness and is independent of Anima's color or highlight phase.
+Graph+ supplies the three most recently activated distinct notes before the current
+active note as remembered subjects. Actual graph links group those subjects into Memory constellations;
+disconnected remembered notes remain valid singleton constellations. No synthetic
+links or canonical nodes are created.
+
+Memory-only nodes and internal links use the semantic `memoryConstellation` theme
+color (cool blue by default). The newest prior note uses 100% color strength, the
+second 50%, and the third 25%; an internal link uses its older endpoint's strength.
+Active membership, including admitted Will previews,
+takes visual priority on overlap. Mixed-source links retain ordinary link color.
+Remembered nodes do not receive selection outlines solely because they are remembered.
+They remain hittable and readable in all Views, but obey structural filtering.
+They never become active membership, expand ordinary Focus neighbors, or acquire
+camera-follow ownership merely by being visible. Explicit Focus scene Fit includes the
+visible Memory field; ordinary Focus entry still preserves scale and orientation.
+
+Overview resolves a hit through one source: a deliberate member selects its Ego
+component; a Memory-only member selects its remembered component. An unlit entry
+point can join directly adjacent components of one source, preferring Ego when both
+sources are adjacent. Source groups do not silently merge. A shared remembered and
+attended subject remains part of Memory's underlying component, but its own hit uses
+Ego. Lookup caches and Will freshness include the separate source memberships.
+Choosing a Memory group commits its captured members into Attention through the
+ordinary Ego/Experience plan. Hover previews that deliberate result without changing
+Memory; pointer leave restores the Memory color. Removing deliberate membership
+reveals the remembered source again while it remains in the recent trail.
 
 ## 3. Exact presentation rules
 
@@ -91,13 +122,15 @@ This permits exploration through dim neighbors while keeping "one from many" tru
 | --- | --- | --- | --- |
 | Constellation member | Highlighted emphasis is permitted | Highlighted | Highlighted, even when distant from `f` |
 | Focus subject | No special tracked role | No singular tracked role | Highlighted with a distinct focus affordance |
-| Immediate neighbor of `f` outside `C` | Standard | Dimmed | Dimmed |
-| Every other projected object outside `C` | Standard | Dimmed | Void |
+| Remembered subject outside active membership | Memory color | Memory color | Memory color, including distant subjects |
+| Ordinary immediate neighbor of `f` outside `C` | Standard | Dimmed | Standard |
+| Every other ordinary projected object outside `C` | Standard | Dimmed | Void |
 
 Overview has no View-induced dimming or voiding. Structural filters can still exclude
-objects before the scene is resolved. Constellation keeps all projected context
-visible but dims every non-member. Focus preserves the constellation and exposes
-local context around the object being presented.
+objects before the scene is resolved. Constellation keeps all projected context visible and dims ordinary non-members.
+Memory constellations remain independently highlighted in their own color in every
+View. Focus preserves active and Memory constellations and exposes local ordinary
+context around the object being presented. Memory does not expand that neighborhood.
 
 The default Focus scope interprets "neighbors" as **neighbors of the focused object**,
 not the union of every constellation member's neighbors. This scope is accepted.
@@ -106,39 +139,80 @@ distant members remain highlighted. Otherwise Focus would erase the composition 
 is meant to explore.
 
 ```text
-Overview:     member -> permitted highlight; otherwise standard
-Constellation: member -> highlighted; otherwise dimmed
+Overview:     member -> permitted highlight; remembered -> Memory highlight; otherwise standard
+Constellation: member -> highlighted; remembered -> Memory highlight; otherwise dimmed
 Focus:        member -> highlighted
-              else immediate neighbor of focused subject -> dimmed
+              else remembered -> Memory highlight
+              else immediate neighbor of focused subject -> standard
               else -> void
 ```
 
-Links inherit the weaker presentation phase of their endpoints. A link touching a
-void object is void; a highlighted-to-dimmed link is dimmed; a member-to-member link
-is highlighted. A renderer cannot expose a hidden endpoint by drawing its link.
+Before the hover-awareness lift, links inherit the weaker presentation phase of their endpoints. A link touching a
+void object is void; a highlighted-to-standard link is standard; a member-to-member link
+is highlighted. Memory-to-Memory links use the Memory color; a mixed-source link
+does not imply one shared constellation. A renderer cannot expose a hidden endpoint by drawing its link.
 
 ### Hover previews object activation
 
 Hover evaluates the same ordinary object-activation plan and Experience admission
-policy as a click, without executing it. Its resulting scene is provisional:
+policy as a click, without executing it. **View and preview are separate concepts.**
+Committed View is independent of preview. Will retains the complete click outcome.
+Anima receives a discriminated preview: `objects` retains committed context for
+admission/removal; `view-transition` borrows the admitted resulting scene for
+explicit View entry or Focus hops. Neither lane commits View or membership.
 
-- **Overview:** highlight the prospective chosen constellation, including the hovered
-  node, using the same stored-group lookup or highlighted-neighbor traversal as click.
-  Keep the full Overview field undimmed and existing remembered highlights visible.
-- **Constellation:** hovering a committed member previews Focus on it, dimming its
-  immediate nonmember neighbors and voiding the remaining nonmembers. Hovering a dim
-  candidate previews admission: highlight it and its connecting path while keeping other context dimmed and
-  retaining the Constellation View.
-- **Focus:** preview the same subject hop. Reveal the hovered object's neighbors as
-  dim context; previous-subject-only context becomes void. Existing members remain lit.
+- **Overview:** an unhighlighted node previews admission, its path and destination
+  Constellation View. A committed Attention or Memory highlight previews its group's
+  constellation entry. Neither preview commits membership or View.
+- **Constellation:** a candidate previews admission only; a member previews Focus.
+- **Focus:** a different subject previews the exact admitted Focus neighborhood.
 
-Hover also highlights the shortest graph path back to the nearest existing constellation.
+For an object-delta preview, ordinary hover raises presentation awareness by exactly
+one degree for the hovered node in Overview. In Constellation and Focus it also lifts
+immediate projected neighbors and incident links. A View-transition preview does not
+receive this additional lift; it must match its destination View exactly:
+
+| Before hover lift | During hover lift |
+| --- | --- |
+| Void | Dimmed |
+| Dimmed | Standard |
+| Standard | Highlighted |
+| Highlighted | Highlighted |
+
+Resolve the admitted scene first, then lift affected objects once. A node raised
+by hover does not lift its other links or neighbors recursively. Links start from
+the weaker endpoint phase before this lift; in Constellation and Focus only links
+incident to the hovered node receive the extra degree. Overview does not lift links. Selected members, Memory and admitted path highlights
+remain capped at highlighted. This is transient presentation, not a change to
+Consciousness Awareness, membership, Memory, or constellation provenance. Repeated
+hover does not accumulate degrees; leaving restores the scene. Revealed dim nodes
+can be picked, while unrelated void nodes remain unavailable.
+
+The lift composes with an object-delta action preview. Ctrl removal and
+no-change previews bypass it so deselection cannot immediately re-light the node.
+Filtered edges cannot reveal neighbors. Neighbors raised to standard or highlighted
+receive adaptive label saliency rather than forced visibility; dim/void neighbors
+retain their label suppression. Explicit action-preview admission/path highlights
+are independent of this one-degree rule.
+
+A hover visit captures the admitted node and View outcome. Clicking commits that
+outcome and latches the admitted presentation, so the exact scene already under the
+pointer remains visible rather than advancing to a different next action. Movement
+inside the same node, modifier changes and external state updates cannot rearm it. The
+pointer must leave the node before another preview can be computed. The latch includes
+ordinary awareness lifting, label policy, revealed hit targets, and prospective
+node/View deltas. Another click before leaving still resolves fresh committed state and
+performs its transition normally.
+
+Hover also highlights the shortest graph path back to the nearest member of the active
+deliberate constellation.
 "Nearest" means fewest undirected edge hops through projected nodes and visible edges, independent
-of spatial layout. In Overview, destinations are already highlighted Attention/Memory
-subjects; in Constellation and Focus, they are committed members of active `C`. Stable
+of spatial layout. In every View, destinations are committed Attention members of active
+`C`; passive Memory is never a route target. A user can first choose a Memory constellation
+to adopt it into Attention and then grow from it. Stable
 node-ID traversal resolves equal-length ties. A member needs no path; with no reachable
 constellation, only the ordinary object preview applies. Intermediate path nodes and
-links become highlighted and readable, even if the prospective Focus scene would
+links become highlighted and readable, even if the committed Focus scene would
 otherwise void them. Hover alone is transient. Adding the candidate commits the route
 as membership; its nodes remain highlighted after pointer leave. A disconnected candidate
 is added alone, and filtered nodes/edges cannot bridge a route. Overview whole-group
@@ -146,40 +220,46 @@ entry replaces membership using its existing group lookup, without merging a rou
 the previous constellation. A route
 revealed during Focus is interactive, just like other visible context.
 
-**Ctrl-hover previews Ctrl-click**, using the same membership-toggle plan and Experience
-admission. A member previews removal; a nonmember previews addition without descent or
-subject hopping. Removing the current subject previews Constellation; removing the last
-member previews Overview. Ctrl additions preview and commit the connecting path; Ctrl
-removals remove only the clicked member and never add a path that would falsely relight
-a removed member. Prospective membership determines outlines as well as scene phases.
-Releasing Ctrl restores the ordinary hover preview at the same pointer position; leaving
-restores the committed scene. A removal preview that voids its own hovered target retains
+**Ctrl-hover previews Ctrl-click removal**, using the same idempotent removal plan and
+Experience admission. A member previews removal; a nonmember has an explicit no-change
+outcome. Subject removal dims that object while retaining committed Focus context;
+last-member removal cannot expose Overview before click. Those actual View exits
+remain in Will and commit on activation. Ctrl removes only the clicked member and never adds a path. After
+removal commits, holding Ctrl keeps the deselected scene instead of previewing re-addition.
+Ctrl on a nonmember adds no outline, path, phase change, or hover-forced label. Independent
+Memory presentation is preserved. Prospective membership determines outlines and phases.
+Releasing Ctrl updates the ordinary action preview only before activation; after a click,
+the admitted removal preview remains latched until leave. Leaving restores the committed
+scene. A removal preview that voids its own hovered target retains
 only that already acquired target for hit testing, so it can be clicked without flicker.
 It does not expose any other void subject.
 
-Leaving the node restores the committed scene immediately. A revealed dim neighbor
+Leaving the node restores the committed scene immediately. A visible standard Focus neighbor
 can become the next hover or click target. Void objects cannot initiate hover through
 an invisible object, lingering edge, or label. Preview is derived from committed
 membership and the current candidate; preview highlights never feed constellation
-lookup or accumulate prospective members. Rejected activation has no resulting-scene
-preview; adjusted activation previews its admitted result, including cardinality limits.
+lookup or accumulate prospective members. Rejected activation has no object preview;
+adjusted activation previews its admitted object deltas, including cardinality limits.
 
 Hover changes visual phases, outlines, and labels only. It never changes the current
 View, Focus subject, Attention, Memory, camera interest or pose, layout, settings,
 history, or host actions. Click is the commit boundary. Hover lighting never counts
 as committed membership: clicking a provisionally lit candidate admits it and its
-connecting path while remaining in Constellation. A prospective Focus subject has the Focus outline and label emphasis; dim context labels remain suppressed. Ordinary
+connecting path while remaining in Constellation. A prospective Focus subject has the Focus outline and label emphasis; standard conscious neighbors inherit dynamic labeling, while dim and void labels remain suppressed. Ordinary
 hover scene preview is distinct from the modifier-held note-content preview.
 
 ### Label reveal policy
 
 Each View declares label reveal eligibility in `GRAPH_VIEW_DEFINITIONS_V1.scene.labels`.
-Anima evaluates this policy against the prospective scene for hover previews and the
-committed scene otherwise. Focused and hovered non-void subjects force their labels;
+Anima evaluates this policy against committed context for object deltas, or admitted prospective context for deliberate View transitions.
+Focused, prospective-focus, and hovered non-void subjects force their labels;
 highlighted subjects, including the transient nearest-constellation path, force theirs.
+Focus is the exception for passive session Memory: its labels remain adaptively eligible
+rather than forced. The Focus root retains its resolved label size while labels for its
+immediate graph neighbors render at 50%.
 Dimmed and void context suppress labels, except that the hovered non-void subject is
 readable. Ctrl-removal previews override hovered-label forcing and suppress the
-removed member's label, including when the resulting scene is Overview. Standard
+removed member's label without previewing the eventual View exit. Standard
 Overview subjects fall back to the normal label settings.
 
 The label manager and renderer still own adaptive saliency, collision/layout budgets,
@@ -197,13 +277,14 @@ Focus object activation changes its subject. Escape remains Back and stops at Ov
 
 | Current View | Primary activation | Result | Membership effect |
 | --- | --- | --- | --- |
-| Overview | Choose constellation `G` through its group or a member hit | Constellation | Replace active `C` with the whole available membership of `G` |
+| Overview | Unhighlighted candidate `x` | Constellation | Admit `x` and its shortest visible route |
+| Overview | Choose constellation `G` through a committed highlighted hit | Constellation | Replace active `C` with the whole available membership of `G` |
 | Overview | Background | Constellation | Preserve user membership, including an empty set |
 | Constellation | Member `x` | Focus on `x` | None |
 | Constellation | Dim candidate `x` | Constellation | Admit `x` and its shortest visible route, retaining `C`; preserve camera |
 | Constellation | Background | Overview | Preserve `C` |
 | Focus on `f` | Another member `x` | Focus on `x` | None |
-| Focus on `f` | Dim neighbor `x` | Focus on `x` | Admit `x` and its shortest visible route, retaining `C` |
+| Focus on `f` | Standard neighbor `x` | Focus on `x` | Admit `x` and its shortest visible route, retaining `C` |
 | Focus on `f` | Same object `f` | Focus on `f` | None; no repeated fit or zoom ratchet |
 | Focus on `f` | Background | Constellation | Preserve `C`; release the singular subject |
 
@@ -232,15 +313,15 @@ The accepted camera rule still preserves framing on this first descent.
 
 The membership resolver follows the agreed highlighted-connectivity rule. Start at
 the clicked canonical node, inspect its projected neighbors, and recursively traverse
-only neighbors already highlighted through Attention or retained subjects. Stop at
-every other unhighlighted node. The clicked seed is explicitly included even when it
+only neighbors already members of the resolved source: Attention for Ego, remembered subjects for
+Memory. Stop at every object outside that source. The clicked seed is explicitly included even when it
 starts unhighlighted; it can admit and join directly adjacent lit groups. This does
 not traverse an unlit bridge elsewhere in the graph.
 
 Consciousness stores each result as an immutable `Constellation` object with an ID and
 canonical member IDs. Hits within an entirely highlighted connected group look up the
 same object. The cache invalidates on document revision, projected nodes/edges, or
-highlighted membership changes. Selection captures the members into Attention, so
+separate Attention/Memory membership changes. Selection captures the members into Attention, so
 subsequent regrouping cannot change the active composition silently. Screen proximity
 and node-regions are not membership inputs.
 
@@ -254,14 +335,15 @@ Returning to Overview releases tracking; it does not mean clearing the compositi
 or Memory. The View hierarchy is fixed and bounded, not an unbounded navigation stack.
 
 Composition needs an explicit action because ordinary object clicks descend.
-Ctrl-click on desktop toggles deliberate membership without descending;
-touch exposes equivalent Add/Remove constellation actions through the object's actions.
-Those menu actions use the same Ego toggle planner, including path admission;
+Ctrl-click on desktop removes deliberate membership without descending and does
+nothing to an already-unselected node. Add/Remove constellation menu actions remain
+explicit toggles on desktop and touch. Those menu actions use Ego's explicit toggle
+input, including path admission for addition;
 programmatic `setSelection` remains an exact-set operation for host-owned truth.
 A shared control can provide Clear constellation. Clear is an explicit Consciousness
 operation with an outcome distinguishing Attention withdrawal from forgetting retained
-Memory. A retained Memory contribution cannot be described as removed while it still
-contributes to `C`.
+Memory. Removing a remembered subject from active `C` withdraws deliberate membership;
+its independent Memory appearance remains until it leaves the recent trail.
 
 Membership edits never create canonical links. Adding a candidate also admits its
 shortest visible path to existing membership; disconnected candidates add alone.
@@ -273,6 +355,12 @@ Escape performs one-level Back and remains at Overview; it does not toggle into 
 Overview action provides an immediate top-level exit without clearing membership.
 Existing explicit Focus actions and holds may remain shortcuts if Experience permits
 them; primary single-click descent does not require a hold or a double click.
+
+Secondary-click on the background invokes Center + Fit. A one-node Constellation
+uses the same neighborhood field, square frame, member center and single-point scale
+cap as Focus on that member. The equivalent touch background hold uses this same
+framing. Selection itself preserves camera framing. The View remains Constellation
+with no Focus subject. Multi-node composition retains its constellation fit.
 
 ## 5. Camera contract and the thin Constellation/Focus seam
 
@@ -434,11 +522,12 @@ only ActiveViewState changes. Anima may void an object without deleting it from 
 projection or allowing it to become a hidden hit target.
 
 Experience may restrict available Views. Global currently permits all three; Local
-currently permits Constellation and Focus over its policy-owned root neighborhood.
+starts in Focus over the same canonical graph used by Global.
 At the top permitted View, Back is a no-op; it cannot clear the Local root or change
-the canonical active note. Empty Local roots remain empty presentations under the
-existing application policy. Global does not gain active-note following from this
-contract. Each pane retains independent View, Consciousness, camera, and UI state.
+the canonical active note. An empty Local root clears Focus without removing the
+shared graph. Global does not follow active notes and retains its own View and
+Consciousness. Each pane owns its camera, filters, View, and Consciousness while the
+application shares canonical topology, coordinates, and pins.
 
 ## 9. Reconciliation, persistence, and boundary cases
 
@@ -478,7 +567,7 @@ contract. Each pane retains independent View, Consciousness, camera, and UI stat
 - `GraphViewObjectActivation` plans both ordinary click and hover. The session evaluates
   preview admission after Consciousness reconciliation, using the same constellation
   lookup as click, and supplies one result to Anima and scene compilation. Scene phases
-  and hit eligibility use the prospective subject during hover, independently of optional
+  and hit eligibility use the committed View/subject plus explicit object deltas, independently of optional
   Anima styling. Space, Option, and note-content preview cannot override these phases.
   Camera ownership continues to use committed View facts. Primary desktop background
   drag pans in Focus in both dimensions; 2D retains elastic return. Hover paths use the
@@ -497,23 +586,22 @@ contract. Each pane retains independent View, Consciousness, camera, and UI stat
 2. With `C = {a, b, c}`, focus `b`, then `c`, then return: membership stays `{a, b, c}`;
    Vision retains the current focal point, including any user framing offset.
 3. Place `a` far from focused `b`. `a` remains highlighted even without an edge to `b`;
-   a non-member neighbor of `b` is dimmed; an unrelated non-member is void.
+   a non-member neighbor of `b` is standard; an unrelated non-member is void.
 4. Move or edit the constellation while in Overview: camera pose stays unchanged and
    no projected object becomes dimmed by the View. Cursor zoom and momentum stay anchored.
 5. Click a dim candidate in Constellation: the candidate and its shortest visible route
    are admitted; View and camera stay unchanged. Click the resulting committed member:
-   enter Focus. Hover alone never realizes membership. Within Focus, clicking a dim neighbor still
+   enter Focus. Hover alone never realizes membership. Within Focus, clicking a standard neighbor still
    admits and hops directly.
 6. Back from Focus under the accepted camera rule: retain zoom, angle, distance,
    and live framing; the next orbit and unanchored zoom use the retained focal point. Re-entering or
    clicking the same focused subject cannot ratchet the zoom.
-7. Hover in Overview: highlight the prospective chosen group without dimming the field.
-   Hover in Constellation or Focus: preview the admitted Focus subject, membership,
-   neighbors, links, and voiding. Leave: restore the committed scene. Click: the same
-   membership/subject and connecting path commit, with recentering only for Focus.
-   Hover alone changes no exported state,
-   Memory, View notifications, or host actions. Newly revealed neighbors can be hovered
-   and clicked; void subjects have no invisible hit targets.
+7. Overview candidates preview admission, then highlight and enter Constellation in one click; committed highlights preview
+   and enter Constellation. Constellation candidates preview admission; members preview
+   Focus. Focus hops preview their admitted neighborhood. After a node click, the
+   committed View becomes the previewed destination, then the next node/View action
+   preview and all ordinary hover expression wait for pointer leave and return. Another click still resolves fresh state.
+   Hover changes no exported state, Memory, View notifications, camera or host actions.
 8. Drag, pinch, double activation, and holds each produce their declared effects once;
    releasing a navigation gesture never emits an additional scene descent.
 9. Close Quick Settings with an outside click: only the panel closes. Returning between
@@ -533,8 +621,9 @@ contract. Each pane retains independent View, Consciousness, camera, and UI stat
     membership follows the declared resolver and hit revision, not visual proximity,
     accidental singleton fallback, or an implicit whole-vault connectivity traversal.
 
-15. Hold Ctrl over a member: preview deselection, including Focus release or Overview
-    when appropriate. Release Ctrl without moving: return to ordinary hover preview.
+15. Hold Ctrl over a member: preview its object/link deselection while retaining
+    committed View context, including for the Focus subject or last member.
+    Only clicking commits Focus release or Overview. Release Ctrl without moving: ordinary awareness updates, but a consumed action preview still waits for leave and return.
     Move away: restore committed state. Ctrl-click a member voided by its own removal
     preview: remove it once; unrelated void nodes remain unpickable.
 16. Primary desktop background drag in 3D Focus: translate camera position and framing
@@ -552,7 +641,8 @@ constellation object for lookup. An unlit clicked seed is included, but traversa
 cannot cross other unlit nodes. Choosing a group replaces the active composition.
 
 The hover refinement uses the same admitted click plan, with transient shortest-path
-emphasis back to the nearest constellation. Ctrl-hover previews the membership toggle.
+emphasis back to the nearest active member, never passive Memory. Ctrl-hover previews removal, with an
+explicit no-change outcome for nonmembers, including immediately after removal commits.
 Constellation admits a dim candidate without entering Focus; only a committed member
 click descends. Desktop Focus primary background drag pans rather than rotating.
 

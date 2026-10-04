@@ -29,6 +29,12 @@ export function adjudicateGraphExperienceCommandV1(options: {
       options.experience.attention,
       command.subjectNodeId,
     );
+    if (nodeIds.length === 0 && command.viewMode === 'overview'
+      && !options.experience.allowedStates.includes('overview')
+      && options.experience.allowedStates.includes('explore')) {
+      return { status: 'adjusted', directive: { ...command, nodeIds,
+        clearFocus: true, focusNodeId: undefined, viewMode: 'explore' } };
+    }
     const intendedState = command.viewMode ?? (command.focusNodeId !== undefined
       ? 'focus'
       : command.clearFocus && options.currentState === 'focus'

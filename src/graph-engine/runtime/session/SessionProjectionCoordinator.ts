@@ -1,5 +1,6 @@
-import type { GraphViewObjectPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
+import type { GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
 import type { GraphViewStateV1, GraphExperienceContractV1 } from '../../contracts/v1/index.ts';
+import { GraphTopologyIndex } from '../../core/document/GraphTopologyIndex.ts';
 import { compileAnimaSceneV1 } from '../anima/index.ts';
 import { createAnimusSnapshotV1 } from '../animus/index.ts';
 import type { Consciousness } from '../consciousness/index.ts';
@@ -22,6 +23,10 @@ export class SessionProjectionCoordinatorV1 {
   readonly frames = new GraphFrameStore();
   private dirty = true;
   private geometryRevision = 0;
+  private topologyCache?: {
+    readonly document: GraphModuleProjectionStateV1['document'];
+    readonly topology: GraphTopologyIndex;
+  };
 
   constructor(
     private readonly onProjection: () => void,
@@ -37,7 +42,7 @@ export class SessionProjectionCoordinatorV1 {
     readonly host: GraphModuleHost;
     readonly consciousness: Consciousness;
     readonly experience?: GraphExperienceContractV1;
-    readonly resolveObjectActivationPreview?: () => GraphViewObjectPreviewV1 | null;
+    readonly resolveObjectActivationPreview?: () => GraphInteractionPreviewV1 | null;
     readonly projectionView: GraphModuleProjectionStateV1;
     readonly viewState: GraphViewStateV1;
     readonly theme: GraphVisualThemeV2;
@@ -51,10 +56,11 @@ export class SessionProjectionCoordinatorV1 {
   }): GraphModulePresentationStateV1 {
     this.onComposition();
     if (options.invalidation === 'geometry' || options.invalidation === 'content') this.geometryRevision += 1;
+    const topology = this.topology(options.projectionView.document);
     const consciousness = options.consciousness.reconcile({
       attentionNodeIds: options.viewState.selectedNodeIds,
-      availableNodeIds: new Set(options.projectionView.document.nodes.map((node) => node.id)),
-      relationships: documentRelationships(options.projectionView.document),
+      availableNodeIds: topology.nodeIds,
+      relationships: topology.relationships('either'),
     });
     const objectActivationPreview = options.resolveObjectActivationPreview?.();
     const moduleView = options.host.contribute({
@@ -125,17 +131,11 @@ export class SessionProjectionCoordinatorV1 {
     this.frames.set(null);
     this.dirty = false;
   }
-}
 
-function documentRelationships(
-  document: GraphModuleProjectionStateV1['document'],
-): ReadonlyMap<string, ReadonlySet<string>> {
-  const relationships = new Map<string, Set<string>>(
-    document.nodes.map((node) => [node.id, new Set<string>()]),
-  );
-  for (const edge of document.edges) {
-    relationships.get(edge.sourceId)?.add(edge.targetId);
-    relationships.get(edge.targetId)?.add(edge.sourceId);
+  private topology(document: GraphModuleProjectionStateV1['document']): GraphTopologyIndex {
+    if (this.topologyCache?.document === document) return this.topologyCache.topology;
+    const topology = new GraphTopologyIndex(document);
+    this.topologyCache = { document, topology };
+    return topology;
   }
-  return relationships;
 }

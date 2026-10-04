@@ -22,7 +22,6 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
   private fallback?: Disposable;
   private lifecycle?: GraphPlusViewLifecycleV1;
   private pendingLens: GraphPlusLensStateV1 = createDefaultGraphPlusLensV1();
-  private pendingDepth = 1;
   private stateRestored = false;
   private notePreview?: GraphPlusNotePreviewControllerV1<TFile>;
 
@@ -41,7 +40,6 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
     this.lifecycle = new GraphPlusViewLifecycleV1(this.contentEl, {
       setSuspended: (suspended) => this.application?.setSuspended(suspended),
       clearPreview: () => this.notePreview?.clear(),
-      reconcile: () => this.plugin.graphPlusApplication.reconcile(),
     });
     this.notePreview = createGraphPlusNotePreviewControllerV1({
       app: this.app,
@@ -59,23 +57,19 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
         mode: this.experienceMode,
         lease,
         container,
+        vaultId: this.app.vault.getName(),
+        checkpointStore: this.plugin.graphPlusCheckpointStore,
         ...(this.experienceMode === 'global' ? {
-          vaultId: this.app.vault.getName(),
-          checkpointStore: this.plugin.graphPlusCheckpointStore,
           legacyPositions: this.plugin.getLegacyGraphState(this.app.vault.getName()),
           restoreSavedLens: !this.stateRestored,
           clock: createWindowClock(container),
         } : {
           initialRootNodeId: this.plugin.obsidianGraphBridge.activeNoteNodeId(),
-          initialDepth: this.pendingDepth,
         }),
         initialLens: this.pendingLens,
         ui: {
           quickSettings: {
-            contributions: createGraphPlusUiContributionsV1(
-              () => application,
-              this.experienceMode === 'local' ? () => application : undefined,
-            ),
+            contributions: createGraphPlusUiContributionsV1(() => application),
           },
         },
         onError: (error) => console.error(`[${this.experienceMode} graph+] application error`, error),
@@ -118,8 +112,6 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
       trackedVisible: this.lifecycle?.isVisible ?? false,
       hasApplication: this.application !== undefined,
       listenerCount: this.lifecycle?.listenerCount ?? 0,
-      rebuildScheduled: this.lifecycle?.rebuildScheduled ?? false,
-      reconcilePending: this.lifecycle?.hasReconcilePending ?? false,
     };
   }
 
@@ -127,9 +119,6 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
     return {
       mode: this.experienceMode,
       lens: this.application?.getLens() ?? this.pendingLens,
-      ...(this.experienceMode === 'local'
-        ? { depth: this.application?.getLocalDepth() ?? this.pendingDepth }
-        : {}),
     };
   }
 
@@ -139,10 +128,6 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
     if (lens) {
       this.pendingLens = await this.plugin.migrateLegacyLensSettings(lens);
       await this.application?.setLens(this.pendingLens);
-    }
-    if (this.experienceMode === 'local') {
-      this.pendingDepth = coerceDepth(state.depth);
-      await this.application?.setLocalDepth(this.pendingDepth);
     }
     this.stateRestored = true;
   }
@@ -156,7 +141,6 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
   }
 
   async resetGraphLayoutData(): Promise<boolean> {
-    this.lifecycle?.cancelReconcile();
     this.notePreview?.clear();
     return this.application?.resetLayoutData() ?? false;
   }
@@ -173,11 +157,6 @@ function createWindowClock(container: HTMLElement) {
     setTimeout: (callback: () => void, delayMs: number) => window?.setTimeout(callback, delayMs),
     clearTimeout: (handle: unknown) => window?.clearTimeout(handle as number),
   };
-}
-
-function coerceDepth(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? Math.max(1, Math.min(8, Math.round(value))) : 1;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

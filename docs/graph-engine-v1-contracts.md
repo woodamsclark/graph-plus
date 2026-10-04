@@ -833,14 +833,17 @@ implicit fit. Only a new or incompatible view starts in Overview and fits the gr
 
 Every node click toggles constellation membership and preserves camera framing. Adding
 an unselected node also selects the shortest path from it to the nearest current
-constellation member; Ctrl does not change that behavior. The external highlight policy
+constellation member. Remembered-but-unselected nodes are not path targets; choosing a
+Memory constellation first makes it current membership. Ctrl does not change that behavior. The external highlight policy
 can reveal a highlight seed, its immediate neighbors, and its incident links. Explore's
 state contract overrides selection to selected nodes and selected-to-selected links
 only; hover remains the one-hop exception. Focus highlights the constellation, retains
-its immediate neighbors as a dim frontier, and temporarily isolates the focused-root-to-
-hovered-neighbor connection during hover. Anima forces labels only for that highlighted
-focus path; unrelated dim labels are suppressed, and remaining labels use camera-range
-Saliency. Dim context nodes use
+the focused subject's immediate neighbors as standard conscious context, and temporarily
+isolates the focused-root-to-hovered-neighbor connection during hover. Anima forces labels
+for highlighted subjects, delegates standard labels to camera-range Saliency, and
+suppresses dimmed and void labels. The Focus preview uses this same destination policy
+without an additional hover layer.
+Dim context nodes use
 24% opacity and 80% desaturation. Cmd-wheel is not a zoom mechanic. Tag nodes use the
 same selection, Focus, label, and presentation rules as ordinary nodes.
 

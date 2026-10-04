@@ -1,7 +1,7 @@
 import { MarkdownView, type App, type EventRef, type TFile } from 'obsidian';
 import { noteNodeId } from '../graph-plus/adapter/index.ts';
 import type {
-  GraphPlusHostEventV1,
+  GraphPlusUnconsciousActivityV1,
   GraphPlusNavigatorV1,
 } from '../graph-plus/application/index.ts';
 import type { Disposable } from '../graph-engine/public.ts';
@@ -9,11 +9,11 @@ import type { Disposable } from '../graph-engine/public.ts';
 /** The single inbound and outbound boundary between Obsidian and Graph+. */
 export class ObsidianGraphBridgeV1 implements GraphPlusNavigatorV1<TFile> {
   private refs: Array<{ readonly owner: { offref(ref: EventRef): void }; readonly ref: EventRef }> = [];
-  private listener?: (event: GraphPlusHostEventV1) => void;
+  private listener?: (event: GraphPlusUnconsciousActivityV1) => void;
 
   constructor(private readonly app: App) {}
 
-  start(listener: (event: GraphPlusHostEventV1) => void): Disposable {
+  start(listener: (event: GraphPlusUnconsciousActivityV1) => void): Disposable {
     if (this.listener) throw new Error('ObsidianGraphBridge is already connected.');
     this.listener = listener;
     const invalidate = (): void => listener({ type: 'canonical-vault-invalidated' });
@@ -23,14 +23,16 @@ export class ObsidianGraphBridgeV1 implements GraphPlusNavigatorV1<TFile> {
     this.track(this.app.vault, this.app.vault.on('rename', invalidate));
     this.track(this.app.metadataCache, this.app.metadataCache.on('changed', invalidate));
     this.track(this.app.workspace, this.app.workspace.on('active-leaf-change', () => {
-      listener({ type: 'active-note-changed', nodeId: this.activeNoteNodeId() });
+      listener({ type: 'active-note-changed', nodeId: this.activeNoteNodeId(), timestamp: Date.now() });
     }));
     this.track(this.app.workspace, this.app.workspace.on('file-open', (file) => {
       listener({
         type: 'active-note-changed',
         nodeId: file?.extension === 'md' ? noteNodeId(file.path) : undefined,
+        timestamp: Date.now(),
       });
     }));
+    listener({ type: 'active-note-changed', nodeId: this.activeNoteNodeId(), timestamp: Date.now() });
     return { dispose: () => this.stop() };
   }
 

@@ -3,6 +3,7 @@ import {
   DEFAULT_GRAPH_TOPOLOGY_LAYOUT_POLICY_V1,
   shortestPathToAnyV1,
 } from '../../src/graph-engine/core/topology/index.ts';
+import { GraphTopologyIndex } from '../../src/graph-engine/core/document/GraphTopologyIndex.ts';
 import {
   buildComponentPackingTargetsV1,
   coordinateWeightedSpringStrengthV1,
@@ -30,6 +31,27 @@ test('shortest paths resolve deterministically to the nearest selected group mem
     'equal-length paths should use stable lexical neighbor ordering');
   equal(shortestPathToAnyV1('isolated', new Set(['selected-a']), relationships), undefined,
     'disconnected nodes should not invent a bridge');
+});
+
+test('topology index owns deterministic paths for a filtered presentation', () => {
+  const document = graphDocument({
+    nodes: ['x', 'a', 'b', 'c', 'd'].map((id) => graphNode(id)),
+    edges: [
+      graphEdge('xa', 'x', 'a'),
+      graphEdge('ac', 'a', 'c'),
+      graphEdge('xb', 'x', 'b'),
+      graphEdge('bd', 'b', 'd'),
+    ],
+  });
+  const complete = new GraphTopologyIndex(document);
+  deepEqual(complete.shortestPathToAny('x', new Set(['c', 'd'])), ['x', 'a', 'c'],
+    'stable ordered adjacency should resolve equal routes once inside the topology authority');
+  const filtered = new GraphTopologyIndex(document, {
+    nodeIds: new Set(['x', 'b', 'd']),
+    edgeIds: new Set(['xb', 'bd']),
+  });
+  deepEqual(filtered.shortestPathToAny('x', new Set(['c', 'd'])), ['x', 'b', 'd'],
+    'filtered topology should exclude hidden nodes and edges before path search');
 });
 
 test('A-PAIR-01 aggregates physical endpoint pairs without changing canonical edges', () => {

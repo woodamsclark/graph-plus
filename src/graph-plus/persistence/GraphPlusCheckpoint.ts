@@ -69,6 +69,7 @@ export class GraphPlusCheckpointControllerV1 {
       if (intent.type === 'viewport-changed' || intent.type === 'node-drag-ended'
         || intent.type === 'selection-changed' || intent.type === 'focus-changed') this.schedule();
     }));
+    this.subscriptions.push(session.onWorldChanged(() => this.schedule()));
   }
 
   schedule(): void {

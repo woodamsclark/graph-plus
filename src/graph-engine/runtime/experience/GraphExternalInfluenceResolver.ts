@@ -45,7 +45,8 @@ export function resolveGraphExternalInfluenceV1(options: {
     return { result: { status: 'rejected', reason: 'unknown-focus-subject' } };
   }
   if (attentionNodeIds.length === 0) {
-    if (options.availableNodeIds.size > 0 && !options.experience.allowedStates.includes('overview')) {
+    if (options.availableNodeIds.size > 0 && !options.experience.allowedStates.includes('overview')
+      && !options.experience.allowedStates.includes('explore')) {
       return { result: { status: 'rejected', reason: 'state-not-permitted:overview' } };
     }
     const status = unknownRemoved || requestedFocusNodeId !== undefined ? 'adjusted' : 'accepted';

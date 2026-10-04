@@ -30,14 +30,13 @@ scene compiler's semantic dependency on compatibility selection. Phase 7 separat
 the structural projection and presentation module stages, constrains Consciousness to
 projected document membership, and enforces one-way patch capabilities at runtime.
 Phase 8 installs one bidirectional `ObsidianGraphBridge`, makes
-`GraphPlusApplicationV1` the shared canonical reconciliation and event-fan-out owner,
-and leaves each pane with an independent policy-scoped presentation session.
-Phase 9 keeps Local single-click Attention and camera Focus inside the existing
-projection, while double-click adds an outbound bridge reveal and waits for the
-canonical active-note push before re-rooting every Local presentation.
-Phase 10 locks the completed migration with regressions for independent presentation
-Consciousness, Local Attention cardinality, empty-root projection, Awareness
-expansion, canonical multi-pane fan-out, and exactly-once outbound/inbound mutation.
+`GraphPlusApplicationV1` the shared canonical reconciliation and graph-world owner,
+and leaves each pane with independent viewport Consciousness and Vision.
+Phase 9 keeps Local Attention, Focus, camera, and filters presentation-scoped.
+Double-click adds an outbound bridge reveal and waits for the canonical active-note push.
+Phase 10 locks the completed migration with regressions for shared coordinates and pins,
+pane-local viewport state, Local Attention cardinality, Awareness expansion, canonical
+multi-pane fan-out, and exactly-once outbound/inbound mutation.
 Phase 11 adds subject-local Reflexes and presentation-scoped conscious Memory,
 Association, and Reaction. Semantic observations compact into logarithmic historical
 memory; declarative associations produce Reaction intents that pass through Ego before
@@ -130,8 +129,8 @@ policy and submits the resulting conscious-state change to Graph Engine. Ego
 experiences the changed state; it does not retroactively become the author of that
 change.
 
-For Local Graph+, an Obsidian active-note change replaces the presentation's existing
-Attention with the newly active note and ensures that note is within Awareness. This is
+For Local Graph+, an Obsidian active-note change replaces each Local presentation's
+existing Attention with the newly active note and ensures that note is within Awareness. This is
 a replacement rather than an additive Attention contribution. A later endogenous node
 selection may consciously replace Attention again through Ego. Global Graph+ may use
 different Attention semantics because its policy does not root the presentation in
@@ -189,10 +188,10 @@ through Local Graph+. The presentation then derives the appropriate Awareness fi
 around the new Attention. A neighbor becoming aware does not make that neighbor
 attended.
 
-When Local Graph+ has no valid active node, the presentation is blank: its projected
-graph content, Attention, and Awareness are empty. It does not invent a placeholder
+When Local Graph+ has no valid active node, Attention and Focus are empty while the
+full shared graph and recent Memory remain available. It does not invent a placeholder
 subject merely to satisfy Focus. A later canonical active-note push establishes the new
-root and repopulates the presentation.
+subject without recreating or relaying out the graph.
 
 Global presentations do not inherit Focus's cardinality constraint. Their Attention
 may contain multiple intentionally selected nodes as a constellation, or be empty when
@@ -206,8 +205,8 @@ neighborhood radius or topology.
 
 Examples of policy-governed expansion include:
 
-- Local Focus places its active node in Attention and Awareness, then includes the
-  policy-defined local neighborhood in the conscious field.
+- Local Focus places its active node in Attention and Awareness. Anima derives the
+  Focus presentation field from the same full graph used by Global.
 - Global Constellation combines selected Attention and recent Memory into Awareness,
   then may include a different policy-defined periphery in the conscious field.
 - Global Overview with neither Attention nor Memory leaves Awareness empty, producing
@@ -219,8 +218,8 @@ Awareness, or Anima.
 
 ## Projection precedes Consciousness
 
-Awareness does not decide which nodes exist in a presentation. Graph+ projection
-policy selects the graph content supplied to each Graph Engine session. Consciousness
+Awareness does not decide which nodes exist in a presentation. Graph+ supplies the
+same canonical full graph to each Graph Engine session. Consciousness
 then classifies nodes within that projection as attended, aware, or neither, and Anima
 expresses those classifications.
 
@@ -232,26 +231,26 @@ canonical graph --> Graph+ projection --> presented graph
                                   Anima resolves expression
 ```
 
-Nodes outside Awareness may remain visible as neutral or dim context. Nodes outside
-the projection are absent from that presentation altogether. Local Graph+'s limited
-neighborhood is therefore a projection decision, while Attention and Awareness
-describe conscious state inside that neighborhood. A rootless Local pane is blank
-because its projection is empty, not because Awareness suppresses a populated graph.
+Nodes outside Awareness may remain visible as neutral or dim context. Local Graph+
+does not crop this context into a second document; Attention and Awareness describe
+conscious state inside the shared graph. A rootless Local pane retains recent subjects
+through Memory without treating any of them as current Attention.
 
 ## Local click and reveal are separate intents
 
-A single click on a node in Local Graph+ directs Attention and camera Focus to that
-node inside the existing projected constellation. This is an endogenous graph
-interaction; it neither re-roots the projection nor changes Obsidian's active note.
+A single click on a node in Local Graph+ directs that presentation's Attention and camera
+to that node inside the existing graph. This is an endogenous graph interaction; it
+does not recreate or reorder the graph. The outbound navigation
+may subsequently make the same node Obsidian's active note.
 
 A double click adds a host-facing reveal intent. Graph+ translates that intent and asks
 `ObsidianGraphBridge` to activate the corresponding note. The outbound result does not
 itself perform the canonical Local re-root. When Obsidian publishes the resulting
-active-note change, the shared canonical inbound path distributes it to Local
-presentations, whose policies replace Attention and projection root accordingly.
+active-note change, the shared canonical inbound path replaces Attention and Focus in
+each Local presentation while Global preserves its viewport state.
 
-The first click of the double-click gesture changes only the originating
-presentation's Attention and camera Focus. The later canonical active-note push
+The first click of the double-click gesture changes only the originating presentation's
+Attention and camera. The later canonical active-note push
 re-roots it and applies the same exogenous change to other Local presentations. Global
 presentations do not follow the active-note event.
 
@@ -485,12 +484,11 @@ not consulted and no endogenous `GraphIntentV1` is emitted. The compatibility
 `selectedNodeIds` mirror, Focus state, Awareness expansion, Anima, and Vision framing
 are updated from the realized result.
 
-Local Graph+ now uses this path when applying its canonical active-note subject. A new
-active Markdown note replaces Local Attention and Focus after the projected document
-is replaced. When there is no active Markdown note, Local projects an empty document
-and accepts empty exogenous Attention even though populated Local presentations are
-Focus-only. This is the explicit rootless exception; it does not authorize Overview
-inside a populated Focus-only experience.
+Local Graph+ uses this path when applying its canonical active-note subject. A new
+active Markdown note replaces that Local presentation's Attention and Focus, recenters
+its camera without fitting, and preserves canonical graph identity and existing positions. When
+there is no active Markdown note, Local accepts empty exogenous Attention while the
+full graph and recent session Memory remain available.
 
 ### Phase 6 explicit Anima consciousness classes
 
@@ -619,12 +617,13 @@ The completed runtime migration preserves behavior through these phases:
 9. Move Obsidian subscription and outbound host operations behind one
    `ObsidianGraphBridge`; reconcile canonical vault truth once in
    `GraphPlusApplication` and distribute it to presentation sessions.
-10. Keep Local single-click as endogenous Attention/camera Focus within the current
-    projection, and implement double-click as an outbound reveal whose canonical
-    active-note event re-roots Local through the shared bridge.
-11. Add regression coverage for independent Global/Local conscious state, Local
-    Attention cardinality, empty-root presentation, Attention-to-Awareness expansion,
-    canonical event fan-out, and the absence of duplicate outbound/inbound mutation.
+10. Keep Local single-click as endogenous presentation Attention plus pane-local camera Focus,
+    and implement double-click as an outbound reveal whose canonical active-note event
+    enters through the shared bridge.
+11. Add regression coverage for shared Global/Local world geometry, separate viewport
+    state, Local Attention cardinality, Attention-to-Awareness expansion, canonical
+    event fan-out, and the absence of duplicate outbound/inbound mutation.
 
-The migration must not collapse independent presentation sessions merely because they
-share one application and canonical vault model.
+Presentation rendering sessions remain separate where a surface experience must be
+separate: camera, filters, View, Attention, Focus, Memory, hover, UI, and lifecycle.
+Canonical graph data, positions, and pins belong to the one application world.

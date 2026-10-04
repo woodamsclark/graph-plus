@@ -34,7 +34,7 @@ owned by the label manager and renderer.
 
 | Current View | Input | Result |
 | --- | --- | --- |
-| Overview | Primary node activation | Resolve the whole connected highlighted group, replace membership, enter Constellation; preserve framing |
+| Overview | Primary node activation | Unhighlighted candidate: admit node/path and enter Constellation. Highlighted group: replace membership and enter Constellation. Entry preserves framing; secondary background click Centers + Fits |
 | Overview | Background | Constellation; retain membership and framing, including an empty build workspace |
 | Overview | Escape | Remain in Overview |
 | Constellation | Primary activation of committed member | Enter Focus; recenter without fitting |
@@ -91,19 +91,35 @@ respectively. Lone-point fitting retains the readable fallback scale.
 ## 4. Scene and transient affordances
 
 Overview has no View-induced dimming. Constellation highlights members and dims every
-nonmember. Focus highlights all members, dims the subject's immediate nonmember
-neighbors, and voids everything else. Links take the weaker endpoint phase. Void
+nonmember. Focus highlights all members, keeps the subject's immediate nonmember
+neighbors standard, and voids everything else. Links take the weaker endpoint phase. Void
 subjects have no labels, hit targets, preview, or context activation. Hover evaluates
 ordinary object activation through the same View planner and Experience admission as
-click. Overview highlights the prospective chosen group without dimming. Constellation
-previews admission for a dim candidate and Focus for a committed member; Focus previews
-its subject hop. Hover also lights a shortest projected-graph route back to the nearest
-committed constellation (already highlighted Attention/Memory in Overview). Route nodes
+click. Admission without View entry and removal express object deltas within committed context.
+Deliberate View entry and Focus hops use a separate prospective scene lane without
+committing the View. Overview candidate clicks highlight and enter Constellation immediately; committed highlights enter
+Constellation. Constellation candidates add only; members enter Focus. A node click
+commits the admitted node/View outcome and latches that exact preview until pointer
+leave. Same-node movement and modifier changes cannot advance it to the following
+action preview. The latched scene retains its hover lifting, label policy, and revealed
+hit targets, so the click is visually seamless with the state it commits. A second click
+still resolves fresh state and transitions without waiting for a new preview.
+Ordinary hover lifts only the node in Overview; in Constellation and Focus it also
+lifts immediate projected neighbors and incident links. The committed View chooses
+reach. Lift one presentation degree: void -> dimmed -> standard -> highlighted, capped at highlighted.
+The lift never changes Consciousness or membership, never accumulates, and excludes
+Ctrl removal/no-change. Nonincident links and two-hop neighbors retain their scene
+phase. Revealed dim nodes are interactive.
+Hover also lights a shortest projected-graph route back to the nearest
+committed Attention member; passive Memory is not a route target. Route nodes
 and links remain transient during hover; adding the candidate commits the route nodes. Hover lighting does
 not count as membership for deciding whether a click enters Focus. Revealed nodes can
-become subsequent hover/click targets. Ctrl-hover previews the Ctrl-click toggle,
-including an addition's connecting path, Focus release and empty-set Overview. Removal never highlights a route. Modifier
-release restores ordinary hover; a removal preview retains its own acquired hit target
+become subsequent hover/click targets. Ctrl-hover previews idempotent Ctrl-click removal,
+while keeping committed View context. Focus release and empty-set Overview occur
+only on click. Nonmembers have an explicit no-change
+outcome; holding Ctrl after removal cannot preview re-addition or force a hover label.
+Ctrl never highlights a route. Explicit Add/Remove menu input retains its toggle behavior. Modifier
+release restores action preview only if this node visit has not been consumed by a click; a removal preview retains its own acquired hit target
 until the pointer leaves even if that preview would void it.
 Leaving restores the committed scene. Hover never commits membership, Focus, View,
 Memory, camera movement, or host actions. Option preserves the effective scene. Space
@@ -121,8 +137,8 @@ See [View scene contract](graph-engine-view-scene-contract.md#hover-previews-obj
 | Primary background drag, 3D | Pan | Pan | Pan |
 | Primary drag on selected node | Drag node | Drag node | Drag after stable mouse hover; otherwise navigate |
 | Primary drag on unselected node | Drag node without selecting | Drag node without selecting | Drag a visible direct neighbor after stable mouse hover; otherwise navigate |
-| Secondary drag, 2D | Pan | Pan | Radial zoom around focused node |
-| Secondary drag, 3D | Rotate | Rotate | Radial zoom around focused node |
+| Secondary drag, 2D | Pan | Pan | Pan |
+| Secondary drag, 3D | Rotate | Rotate | Rotate |
 | Two-finger scroll, 2D | Pan | Pan | Elastic pan |
 | Two-finger scroll, 3D | Pan | Rotate | Rotate |
 | Physical Ctrl-wheel | Zoom around pointer | Zoom around pointer | Zoom around pointer |
@@ -136,7 +152,7 @@ Primary desktop background dragging in Focus translates the camera without rotat
 preserving zoom, orientation, distance, membership, and subject. Stable-hover node
 dragging retains its separate object-movement gesture.
 
-Focus radial zoom measures pointer distance from the focused node. Moving away zooms
+Focus double-tap drag radial zoom measures pointer distance from the focused node. Moving away zooms
 in; moving toward the focused node zooms out.
 
 Focus node dragging is deliberately narrower than ordinary navigation. A desktop
@@ -169,7 +185,7 @@ gesture and does not enter this node-drag path.
 | One-finger drag, 2D | Drag a directly touched node; pan from background | Drag a directly touched node; pan from background | Drag a directly touched node; elastic-pan from background |
 | One-finger drag, 3D | Drag a directly touched node; pan from background | Drag a directly touched node; orbit from background | Drag a directly touched node; rotate from background |
 | Two-finger translation, 2D | Pan | Pan | Pan |
-| Two-finger translation, 3D | Rotate | Rotate | Rotate around the focused node |
+| Two-finger translation, 3D | Rotate | Pan | Pan |
 | Pinch | Touch-midpoint zoom with navigation | Intended-interest zoom with navigation | Focused-subject zoom with navigation |
 | Double-tap background | Center + Fit graph | Center + Fit selection | Center + Fit Focus presentation field |
 | Double-tap drag, 2D | Vertical zoom | Vertical zoom | Radial zoom |
@@ -178,9 +194,8 @@ gesture and does not enter this node-drag path.
 | Long press node | Enter Focus | Enter Focus | Retain/hop Focus |
 | Double-tap node | Primary node action | Primary node action | Primary node action |
 
-Two-finger translation and pinch are simultaneous controls. In 3D, centroid movement
-rotates while finger separation zooms; in 2D, centroid movement pans while finger
-separation zooms. Pinch uses touch midpoint in Overview, intended interest in Constellation
+Two-finger translation and pinch are simultaneous controls. In Constellation and Focus, centroid movement pans in both dimensions while finger
+separation zooms. Overview retains 3D orbit and 2D pan. Pinch uses touch midpoint in Overview, intended interest in Constellation
 (the active composition centroid by default, retained focal point after Focus exit),
 and singular subject in Focus.
 
@@ -191,7 +206,7 @@ explicit pins, camera framing, selection, Focus, filters, Form/module state, and
 durable interaction state. Reopen does not implicitly center or fit the camera. A graph
 with no compatible saved view starts in fresh Overview and fits the whole graph.
 
-Global Graph+ and Local Graph+ have deliberately different active-note ownership:
+Global Graph+ and Local Graph+ are two surfaces over one graph world with separate viewport state:
 
 - Global Graph+ never follows the active note automatically. Opening, revealing, or
   switching to the global view preserves the complete restored graph and its saved
@@ -199,11 +214,13 @@ Global Graph+ and Local Graph+ have deliberately different active-note ownership
   focus, and frame one requested note, but ordinary `file-open` and
   `active-leaf-change` events must not do so.
 - Local Graph+ follows the active Markdown note automatically. The active note becomes
-  the root of its depth-bounded local projection, and file or leaf changes may replace
-  that local projection.
+  the focused subject in the shared full-vault graph. File or leaf changes preserve
+  document identity, existing coordinates, and camera scale.
 
-The two behaviors are separate host contracts. Shared lifecycle, reconciliation, or UI
-code must not make global Graph+ inherit Local Graph+ active-note following.
+The initial behaviors differ and the viewport states remain independent. Topology,
+coordinates, and explicit pins are shared. Camera, filters, View, Attention, and Focus
+belong to each surface. The active-note event enters through Local policy and does not
+change Global's View or camera.
 
 Explicit same-session `restoreViewState()` remains a runtime operation for controlled
 transitions and tests; it is not the reopen persistence policy.

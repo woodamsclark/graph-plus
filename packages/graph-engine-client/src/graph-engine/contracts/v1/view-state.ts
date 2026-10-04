@@ -29,3 +29,15 @@ export interface GraphViewStateV1 {
   readonly activeFilters: Partial<Readonly<Record<GraphFilterScopeV1, GraphFilterRequestV1>>>;
   readonly moduleState: Readonly<Record<string, JsonValue>>;
 }
+
+/** Application-world geometry shared by any number of independent viewport sessions. */
+export interface GraphWorldStateV1 {
+  readonly schemaVersion: 1;
+  readonly documentId: string;
+  readonly documentRevision: number;
+  readonly dimensions: GraphDimensionsV1;
+  readonly positions: Readonly<Record<string, Vec3>>;
+  readonly pinnedNodeIds: readonly string[];
+  /** State owned by modules that advance shared world layout, never viewport modules. */
+  readonly layoutModuleState: Readonly<Record<string, JsonValue>>;
+}

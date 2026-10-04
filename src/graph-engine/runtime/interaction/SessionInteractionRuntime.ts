@@ -1,4 +1,4 @@
-import { presentEgoInteractionPlanV1, type GraphViewObjectPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
+import { presentEgoInteractionPlanV1, type GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
 import { isEgoInteractionPlanCurrentV1, realizeEgoViewDirectiveV1, sameEgoInteractionV1,
   type EgoInteractionInputV1, type EgoInteractionContextV1 } from '../consciousness/EgoInteractionPlan.ts';
 import type {
@@ -11,6 +11,7 @@ import type {
   Vec3,
 } from '../../contracts/v1/index.ts';
 import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
+import type { GraphTopologyIndex } from '../../core/document/GraphTopologyIndex.ts';
 import { Vision } from '../vision/index.ts';
 import type {
   Attention,
@@ -56,6 +57,9 @@ export class SessionInteractionRuntime {
   private hoverMod = false;
   private hoverCtrl = false;
   private hoverInput: EgoInteractionInputV1 | undefined;
+  /** Activation latches the admitted preview; only a real leave/different target rearms it. */
+  private consumedHoverNodeId: string | undefined;
+  private consumedHoverPreview: GraphInteractionPreviewV1 | undefined;
   private hoverPoint: GraphScreenPointV1 | undefined;
   private elasticReturnTimer: number | undefined;
   private focusTransition: {
@@ -83,6 +87,7 @@ export class SessionInteractionRuntime {
     readonly ego: Ego;
     readonly getAttention: () => Attention;
     readonly getOverviewConstellationNodeIds: () => ReadonlySet<string>;
+    readonly getRememberedNodeIds: () => ReadonlySet<string>;
     readonly setAttention: (nodeIds: readonly string[]) => readonly string[];
     readonly hitTest: (
       point: GraphScreenPointV1,
@@ -96,6 +101,11 @@ export class SessionInteractionRuntime {
     readonly isNodeDraggable: (nodeId: string) => boolean;
     readonly setViewState: (state: GraphViewStateV1) => void;
     readonly getRenderSelection: () => GraphFilterSelectionV1;
+    readonly getPlanningTopology: () => {
+      readonly revision: number | string;
+      readonly topology: GraphTopologyIndex;
+      readonly availableNodeIds: ReadonlySet<string>;
+    };
     readonly resetCamera: () => void;
     readonly getDragReleasePolicy: () => 'pin' | 'dynamic';
     readonly getDragConstraintPolicy?: () => 'persistent-pin' | 'transient';
@@ -164,15 +174,20 @@ export class SessionInteractionRuntime {
   tick(): void {
     this.interpreter.tick();
     this.commander.tick();
+    this.updateCursor();
   }
 
   queueConstellationToggle(nodeId: string, modality: EgoInteractionInputV1['modality'] = 'keyboard'): void {
+    this.queueViewIntent({ phase: 'activate', target: { kind: 'node', nodeId }, modality,
+      modifiers: { ctrl: false, meta: false, shift: false, alt: false }, membershipAction: 'toggle' });
+  }
+
+  queueViewIntent(input: EgoInteractionInputV1): void {
     const document = this.options.getDocument();
     this.commands.push({ type: 'activate-view',
       identity: { documentId: document.documentId, documentRevision: document.revision },
       timestamp: this.options.platform.now(),
-      input: { phase: 'activate', target: { kind: 'node', nodeId }, modality,
-        modifiers: { ctrl: true, meta: false, shift: false, alt: false } },
+      input,
     });
     this.options.onInputQueued?.();
   }
@@ -394,6 +409,10 @@ export class SessionInteractionRuntime {
         });
         return;
       case 'set-hover': {
+        if (this.consumedHoverNodeId !== command.nodeId) {
+          this.consumedHoverNodeId = undefined;
+          this.consumedHoverPreview = undefined;
+        }
         const input = command.input ?? (command.nodeId === undefined ? undefined : {
           phase: 'hover' as const, target: { kind: 'node' as const, nodeId: command.nodeId }, modality: 'mouse' as const,
           modifiers: { ctrl: command.ctrl === true, meta: command.mod && !command.ctrl, shift: false, alt: false },
@@ -496,29 +515,24 @@ export class SessionInteractionRuntime {
   private routeEndogenousCommand(
     command: GraphRuntimeCommandV1,
   ): EgoIntentOutcome<GraphRuntimeCommandV1> {
-    return this.options.ego.consider(
-      this.options.ego.intend(command),
-      (intent) => {
-        if (!this.commandBelongsToActiveDocument(intent.directive)) {
-          return { status: 'rejected', reason: 'stale-document' };
-        }
-        const candidate = intent.directive;
-        if (candidate.type === 'activate-view' || candidate.type === 'activate-background') {
-          const input = candidate.type === 'activate-view' ? candidate.input : this.backgroundInput();
-          const plan = this.options.ego.resolveWill(input, this.planningContext());
-          return plan.outcome === 'rejected' ? { status: 'rejected', reason: plan.reason }
-            : { status: plan.outcome, directive: { ...candidate, type: 'activate-view', input, plan } };
-        }
-        const state = this.options.getViewState();
-        return adjudicateGraphExperienceCommandV1({
-          command: intent.directive,
-          experience: this.options.experience,
-          currentState: resolveGraphUxStateV1(state),
-          attentionNodeIds: this.attentionNodeIds(),
-          focusedNodeId: state.focusedNodeId,
-        });
-      },
-    );
+    if (!this.commandBelongsToActiveDocument(command)) {
+      return { status: 'rejected', reason: 'stale-document' };
+    }
+    const candidate = command;
+    if (candidate.type === 'activate-view' || candidate.type === 'activate-background') {
+      const input = candidate.type === 'activate-view' ? candidate.input : this.backgroundInput();
+      const plan = this.options.ego.resolveWill(input, this.planningContext());
+      return plan.outcome === 'rejected' ? { status: 'rejected', reason: plan.reason }
+        : { status: plan.outcome, directive: { ...candidate, type: 'activate-view', input, plan } };
+    }
+    const state = this.options.getViewState();
+    return this.options.ego.consider(this.options.ego.intend(command), (intent) => adjudicateGraphExperienceCommandV1({
+      command: intent.directive,
+      experience: this.options.experience,
+      currentState: resolveGraphUxStateV1(state),
+      attentionNodeIds: this.attentionNodeIds(),
+      focusedNodeId: state.focusedNodeId,
+    }));
   }
 
   private commandBelongsToActiveDocument(command: GraphRuntimeCommandV1): boolean {
@@ -536,36 +550,42 @@ export class SessionInteractionRuntime {
     const document = this.options.getDocument();
     const state = this.options.getViewState();
     const visible = this.options.getRenderSelection();
+    const planning = this.options.getPlanningTopology();
     return {
       identity: { documentId: document.documentId, documentRevision: document.revision },
+      planningRevision: planning.revision,
       state: { viewId: resolveGraphUxStateV1(state), attentionNodeIds: this.attentionNodeIds(), focusedNodeId: state.focusedNodeId },
       experience: this.options.experience,
-      availableNodeIds: new Set(document.nodes.map((node) => node.id)),
+      judgement: this.options.ego.judgement,
+      availableNodeIds: planning.availableNodeIds,
       visibleNodeIds: visible.nodeIds, visibleEdgeIds: visible.edgeIds, edges: document.edges,
+      topology: planning.topology,
       awarenessNodeIds: this.options.getOverviewConstellationNodeIds(), getConstellation: this.options.getNodeSelection,
+      rememberedNodeIds: this.options.getRememberedNodeIds(),
     };
   }
 
-  getObjectActivationPreview(): GraphViewObjectPreviewV1 | null {
+  getObjectActivationPreview(): GraphInteractionPreviewV1 | null {
     if (this.interpreter.isViewProposalSuspended() || this.dragContext !== null) {
       this.options.ego.clearWill();
       return null;
     }
     if (!this.hoverInput) return null;
+    if (this.hoverInput.target.kind === 'node' && this.hoverInput.target.nodeId === this.consumedHoverNodeId) {
+      // Keep presenting the exact state admitted by the click. Replanning here
+      // would expose the following action before the pointer begins a new visit.
+      return this.consumedHoverPreview ?? null;
+    }
     const context = this.planningContext();
     const plan = this.options.ego.resolveWill(this.hoverInput, context);
-    return presentEgoInteractionPlanV1(plan, {
-      edges: this.options.getDocument().edges,
-      visibleNodeIds: context.visibleNodeIds, visibleEdgeIds: context.visibleEdgeIds,
-      targetNodeIds: context.state.viewId === 'overview' ? context.awarenessNodeIds : new Set(context.state.attentionNodeIds),
-    }) ?? null;
+    return presentEgoInteractionPlanV1(plan) ?? null;
   }
 
   private commitWill(command: Extract<GraphRuntimeCommandV1, { type: 'activate-view' }>): void {
     const context = this.planningContext();
     const plan = command.plan && isEgoInteractionPlanCurrentV1(command.plan, context)
       && sameEgoInteractionV1(command.plan.input, command.input) ? command.plan : this.options.ego.resolveWill(command.input, context);
-    if (plan.outcome === 'rejected') return;
+    if (plan.outcome === 'rejected' || plan.action === 'none') return;
     if (plan.action === 'choose-constellation') {
       this.options.ego.intendVision({ kind: 'follow-constellation' });
     }
@@ -573,12 +593,21 @@ export class SessionInteractionRuntime {
     if (background && plan.before.viewId !== plan.resultingState.viewId) {
       this.cancelElasticReturn();
     }
+    if (plan.input.target.kind === 'node') {
+      this.consumedHoverNodeId = plan.input.target.nodeId;
+      this.consumedHoverPreview = presentEgoInteractionPlanV1(plan);
+    }
+    const preserveHover = plan.input.target.kind === 'node' && this.hoverInput?.target.kind === 'node'
+      && this.hoverInput.target.nodeId === plan.input.target.nodeId;
     this.setInteractionState(plan.resultingState.attentionNodeIds, plan.resultingState.focusedNodeId,
-      command, plan.effects.some((effect) => effect.type === 'clear-presentation'), plan.resultingState.viewId);
+      command, !preserveHover && plan.effects.some((effect) => effect.type === 'clear-presentation'), plan.resultingState.viewId);
     for (const effect of plan.effects) {
       if (effect.type === 'recenter-focus') this.recenterFocus(effect.nodeId, command);
     }
     if (background) this.options.onIntent({ ...this.intentBase(command), type: 'background-activated' });
+    if (plan.input.target.kind === 'node') {
+      this.options.onViewStateChanged('interaction');
+    }
     this.options.ego.clearWill();
   }
 
@@ -586,19 +615,24 @@ export class SessionInteractionRuntime {
     const state = this.options.getViewState();
     const viewId = resolveGraphUxStateV1(state);
     const preview = this.getObjectActivationPreview();
-    // Newly revealed neighbors are valid next hover/click targets. Camera ownership stays committed.
-    const sceneView = viewId === 'overview' ? viewId : preview?.viewId ?? viewId;
-    const subject = preview?.focusedNodeId ?? state.focusedNodeId;
-    if (sceneView !== 'focus' || !subject) return true;
+    // Only explicit View-entry previews may supply a prospective picking neighborhood.
+    const transition = preview?.kind === 'view-transition' ? preview.resultingState : undefined;
+    const subject = transition ? transition.focusedNodeId : state.focusedNodeId;
+    if ((transition?.viewId ?? viewId) !== 'focus' || !subject) return true;
     return preview?.hoverPathNodeIds.includes(nodeId) === true
-      || (preview?.attentionNodeIds ?? this.attentionNodeIds()).includes(nodeId)
-      || this.focusNeighborhoodNodeIds(subject).includes(nodeId);
+      || this.options.getRememberedNodeIds().has(nodeId)
+      || ((preview?.addedNodeIds.includes(nodeId) === true || this.attentionNodeIds().includes(nodeId))
+        && preview?.removedNodeIds.includes(nodeId) !== true)
+      || this.focusNeighborhoodNodeIds(subject).includes(nodeId)
+      || (preview?.activation === 'primary' && this.hoveredNodeId !== undefined
+        && this.focusNeighborhoodNodeIds(this.hoveredNodeId).includes(nodeId));
   }
 
   private focusVisibleNodeIds(focusedNodeId: string): readonly string[] {
     const visible = this.options.getRenderSelection().nodeIds;
     return [...new Set([
       ...this.attentionNodeIds().filter((id) => visible.has(id)),
+      ...[...this.options.getRememberedNodeIds()].filter((id) => visible.has(id)),
       ...this.focusNeighborhoodNodeIds(focusedNodeId),
     ])];
   }
@@ -618,8 +652,11 @@ export class SessionInteractionRuntime {
     const policy = this.options.experience.framing[resolveGraphUxStateV1(state)];
     const attentionNodeIds = this.attentionNodeIds();
     const targetNodeIds = attentionNodeIds;
+    const singleConstellation = resolveGraphUxStateV1(state) === 'explore' && targetNodeIds.length === 1
+      && policy.target === 'attention';
     const visible = this.options.getRenderSelection();
-    const nodeIds = policy.target === 'focused-neighborhood' && state.focusedNodeId
+    const nodeIds = singleConstellation ? this.focusVisibleNodeIds(targetNodeIds[0])
+      : policy.target === 'focused-neighborhood' && state.focusedNodeId
       ? this.focusVisibleNodeIds(state.focusedNodeId)
       : policy.target === 'attention'
         ? targetNodeIds.filter((id) => visible.nodeIds.has(id))
@@ -633,7 +670,7 @@ export class SessionInteractionRuntime {
     this.fitVisibleNodes(
       nodeIds,
       centerNodeId,
-      policy.target === 'focused-neighborhood',
+      policy.target === 'focused-neighborhood' || singleConstellation,
       modality,
     );
   }
@@ -858,6 +895,8 @@ export class SessionInteractionRuntime {
 
   private clearNodePresentation(command: GraphRuntimeCommandV1): boolean {
     this.cancelPreviewRelease();
+    this.consumedHoverNodeId = undefined;
+    this.consumedHoverPreview = undefined;
     this.hoverInput = undefined;
     this.options.ego.clearWill();
     const hoverChanged = this.hoveredNodeId !== undefined || this.previewedNodeId !== undefined;
@@ -946,7 +985,7 @@ export class SessionInteractionRuntime {
   }
 
   private updateCursor(): void {
-    this.options.surface.setCursor(this.dragContext
+    this.options.surface.setCursor(this.dragContext || this.interpreter.isCameraGestureActive()
       ? 'grabbing'
       : this.previewedNodeId ?? this.hoveredNodeId
         ? 'pointer'
@@ -954,6 +993,8 @@ export class SessionInteractionRuntime {
   }
 
   private resetTransientState(): void {
+    this.consumedHoverNodeId = undefined;
+    this.consumedHoverPreview = undefined;
     this.hoverInput = undefined;
     this.options.ego.clearWill();
     this.cancelPreviewRelease();

@@ -20,6 +20,8 @@ import type {
   GraphSettingsOverridesV1,
   JsonValue,
   GraphViewStateV1,
+  GraphWorldChangedEventV1,
+  GraphWorldStateV1,
   GraphActiveViewV1,
   GraphViewIdV1,
   GraphViewUiStateV1,
@@ -27,7 +29,7 @@ import type {
   Vec3,
 } from '../contracts/v1/index.ts';
 import { GRAPH_VIEW_DEFINITIONS_V1 } from '../contracts/v1/index.ts';
-import { GraphDocumentStore } from '../core/document/index.ts';
+import { GraphDocumentStore, GraphTopologyIndex } from '../core/document/index.ts';
 import { evaluateGraphFilterV1, type GraphFilterSelectionV1 } from '../core/filter/index.ts';
 import type { EffectiveConsumerProfileV1 } from '../core/profile/index.ts';
 import {
@@ -117,6 +119,7 @@ export interface GraphSessionRuntimeOptionsV1 {
   readonly reactions?: GraphReactionRuntimeV1;
   readonly rendererRegistry: GraphRendererRegistryV2;
   readonly preferredRendererBackend?: GraphRendererBackendIdV2;
+  readonly layoutAuthority?: boolean;
 }
 
 const RETIRED_GRAPH_SYSTEM_STATE_KEY_V1 = 'graph-system-states-v1';
@@ -133,6 +136,7 @@ export interface GraphSessionRuntimeDiagnosticsV1 {
   readonly dimensions: '2d' | '3d';
   readonly documentId: string;
   readonly documentRevision: number;
+  readonly layoutAuthority: boolean;
   readonly nodeCount: number;
   readonly edgeCount: number;
   readonly manuallySuspended: boolean;
@@ -205,8 +209,21 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private viewState: GraphViewStateV1;
   private projectionSelection: GraphFilterSelectionV1;
   private renderSelection: GraphFilterSelectionV1;
+  private documentTopologyCache?: {
+    readonly document: GraphDocumentV1;
+    readonly topology: GraphTopologyIndex;
+  };
+  private presentationTopologyCache?: {
+    readonly document: GraphDocumentV1;
+    readonly nodeIds: ReadonlySet<string>;
+    readonly edgeIds: ReadonlySet<string>;
+    readonly topology: GraphTopologyIndex;
+    readonly revision: number;
+  };
+  private topologyRevision = 0;
   private readonly intentListeners = new Set<(intent: GraphIntentV1) => void>();
   private readonly graphChangedListeners = new Set<(event: GraphChangedEventV1) => void>();
+  private readonly worldChangedListeners = new Set<(event: GraphWorldChangedEventV1) => void>();
   private readonly errorListeners = new Set<(error: GraphSessionErrorV1) => void>();
   private readonly overrideListeners = new Set<(overrides: GraphSettingsOverridesV1) => void>();
   private scheduler!: SessionFrameSchedulerV1;
@@ -222,6 +239,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private observedVisionFocusSubjectId?: string;
   private readonly viewListeners = new Set<(view: GraphActiveViewV1) => void>();
   private readonly viewUiState = new Map<GraphViewIdV1, GraphViewUiStateV1>();
+  private layoutAuthority: boolean;
 
   private readonly onVisibilityChange = (): void => {
     this.activity.setDocumentSuspension(this.platform.document.hidden);
@@ -274,6 +292,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       }
       this.projectionView = { ...this.projectionView, positions, viewState: this.viewState };
       this.moduleView = { ...this.moduleView, positions, viewState: this.viewState };
+      this.emitWorldChanged('layout');
       if (requiresComposition) this.refreshFrame(false, 'geometry');
       else {
         this.projection.markGeometryDirty();
@@ -327,6 +346,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.nodeActions = options.nodeActions;
     this.reactions = options.reactions;
     this.modules = options.modules;
+    this.layoutAuthority = options.layoutAuthority ?? true;
     this.experience = resolveGraphExperienceContractV1(options.experience);
     this.scheduler = new SessionFrameSchedulerV1(
       this.platform,
@@ -410,7 +430,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.consciousness.reconcile({
         attentionNodeIds: this.viewState.selectedNodeIds,
         availableNodeIds: new Set(Object.keys(this.viewState.positions)),
-        relationships: documentRelationships(this.store.readDocument()),
+        relationships: this.documentTopology().relationships('either'),
       });
       this.interaction = new SessionInteractionRuntime({
         sessionId: this.sessionId,
@@ -423,6 +443,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         ego: this.consciousness.ego,
         getAttention: () => this.consciousness.attention,
         getOverviewConstellationNodeIds: () => this.consciousness.awareness.nodeIds,
+        getRememberedNodeIds: () => this.consciousness.remembered.nodeIds,
         setAttention: (nodeIds) => this.reconcileAttention(nodeIds),
         hitTest: (point, pointerKind, retainedHoverNodeId) => {
           // A removal preview may hide its own target. Retain only that already acquired
@@ -438,6 +459,15 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         isNodeDraggable: () => !this.moduleView?.formActive,
         setViewState: (state) => { this.viewState = state; },
         getRenderSelection: () => this.renderSelection,
+        getPlanningTopology: () => {
+          const document = this.store.readDocument();
+          const presentation = this.presentationTopology(document);
+          return {
+            revision: presentation.revision,
+            topology: presentation.topology,
+            availableNodeIds: this.documentTopology(document).nodeIds,
+          };
+        },
         resetCamera: () => this.resetCameraState(),
         getDragReleasePolicy: () => this.profile.profileSettings.dragRelease === 'pin' ? 'pin' : 'dynamic',
         getDragConstraintPolicy: () => this.profile.profileSettings.dragConstraint === 'transient'
@@ -506,6 +536,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         revision: next.revision,
         cause: 'replace-document',
       });
+      this.emitWorldChanged('document');
     } catch (error) {
       this.emitError({
         code: 'invalid-document',
@@ -551,6 +582,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       patch: clonePatch(patch),
       cause: 'patch',
     });
+    this.emitWorldChanged('document');
     return result;
   }
 
@@ -654,7 +686,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   ): Promise<GraphExternalInfluenceResultV1> {
     this.requireActive();
     const document = this.store.readDocument();
-    const availableNodeIds = new Set(document.nodes.map((node) => node.id));
+    const topology = this.documentTopology(document);
+    const availableNodeIds = topology.nodeIds;
     const resolution = resolveGraphExternalInfluenceV1({
       influence,
       experience: this.experience,
@@ -667,7 +700,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         nodeIds: resolution.rememberedNodeIds,
       }, {
         availableNodeIds,
-        relationships: documentRelationships(document),
+        relationships: topology.relationships('either'),
       });
       this.refreshFrame();
       return {
@@ -684,26 +717,29 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       nodeIds: resolution.attentionNodeIds,
     }, {
       availableNodeIds,
-      relationships: documentRelationships(document),
+      relationships: topology.relationships('either'),
     });
     const attentionNodeIds = [...consciousness.attention.nodeIds];
     const focusedNodeId = resolution.focusedNodeId !== undefined
       && consciousness.attention.nodeIds.has(resolution.focusedNodeId)
       ? resolution.focusedNodeId
       : undefined;
+    const currentMode = resolveGraphUxStateV1(this.viewState);
+    const viewMode = focusedNodeId !== undefined ? 'focus'
+      : currentMode === 'focus' || (!this.experience.allowedStates.includes(currentMode)
+        && this.experience.allowedStates.includes('explore')) ? 'explore' : currentMode;
     const stateChanged = !sameIds(attentionNodeIds, this.viewState.selectedNodeIds)
-      || focusedNodeId !== this.viewState.focusedNodeId;
+      || focusedNodeId !== this.viewState.focusedNodeId || viewMode !== currentMode;
     if (stateChanged) {
       const { focusedNodeId: _focusedNodeId, ...withoutFocus } = this.viewState;
-      const currentMode = resolveGraphUxStateV1(this.viewState);
-      const viewMode = focusedNodeId !== undefined
-        ? 'focus'
-        : currentMode === 'focus' ? 'explore' : currentMode;
       this.viewState = focusedNodeId === undefined
         ? { ...withoutFocus, selectedNodeIds: attentionNodeIds, viewMode }
         : { ...withoutFocus, selectedNodeIds: attentionNodeIds, focusedNodeId, viewMode };
       this.moduleHost.viewChanged(this.viewState);
       this.recomputeView();
+    }
+    if (influence.type === 'replace-attention' && influence.framing === 'recenter-focus' && focusedNodeId !== undefined) {
+      this.interaction.recenterSubject(focusedNodeId);
     }
     if (influence.type === 'replace-attention' && influence.framing === 'fit-state') {
       if (focusedNodeId !== undefined) {
@@ -756,6 +792,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame(true, 'geometry');
+    this.emitWorldChanged('pin');
   }
 
   async fitNodes(nodeIds?: readonly string[], options?: FitNodesOptionsV1): Promise<void> {
@@ -844,6 +881,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.moduleHost.restoreState(this.viewState.moduleState);
       this.moduleHost.viewChanged(this.viewState);
       this.recomputeView();
+      this.emitWorldChanged('restore');
     } catch (error) {
       this.emitError({
         code: 'incompatible-view-state',
@@ -851,6 +889,65 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         recoverable: true,
       });
       throw error;
+    }
+  }
+
+  async exportWorldState(): Promise<GraphWorldStateV1> {
+    this.requireActive();
+    const document = this.store.readDocument();
+    return {
+      schemaVersion: 1,
+      documentId: document.documentId,
+      documentRevision: document.revision,
+      dimensions: this.profile.dimensions,
+      positions: clonePositions(this.viewState.positions),
+      pinnedNodeIds: [...this.viewState.pinnedNodeIds],
+      layoutModuleState: this.moduleHost.exportCapabilityState('layout'),
+    };
+  }
+
+  async applyWorldState(state: GraphWorldStateV1): Promise<void> {
+    this.requireActive();
+    const document = this.store.readDocument();
+    if (state.documentId !== document.documentId || state.documentRevision !== document.revision) return;
+    if (state.dimensions !== this.profile.dimensions) return;
+    const known = new Set(document.nodes.map((node) => node.id));
+    const positions = Object.fromEntries(document.nodes.map((node) => {
+      const position = state.positions[node.id] ?? this.viewState.positions[node.id];
+      return [node.id, position ? { ...position } : { x: 0, y: 0, z: 0 }] as const;
+    }));
+    const pinnedNodeIds = [...new Set(state.pinnedNodeIds)].filter((nodeId) => known.has(nodeId));
+    const geometryChanged = !samePositions(positions, this.viewState.positions)
+      || !sameIds(pinnedNodeIds, this.viewState.pinnedNodeIds);
+    this.moduleHost.restoreCapabilityState('layout', state.layoutModuleState);
+    if (!geometryChanged) return;
+    const previousFollowPoint = this.vision.deriveCentroid(
+      this.interaction.getCameraTrackingNodeIds(),
+      this.viewState.positions,
+    );
+    this.viewState = cloneGraphViewStateV1({ ...this.viewState, positions, pinnedNodeIds });
+    const nextFollowPoint = this.vision.deriveCentroid(
+      this.interaction.getCameraTrackingNodeIds(),
+      positions,
+    );
+    if (previousFollowPoint && nextFollowPoint) {
+      this.vision.translateBy(subtractVec(nextFollowPoint, previousFollowPoint));
+      this.synchronizeCameraState();
+    }
+    this.moduleHost.viewChanged(this.viewState);
+    this.projectionView = { ...this.projectionView, positions, viewState: this.viewState };
+    this.moduleView = { ...this.moduleView, positions, viewState: this.viewState };
+    this.refreshFrame(true, 'geometry');
+    this.updateSurface();
+  }
+
+  setLayoutAuthority(authority: boolean): void {
+    this.requireActive();
+    if (this.layoutAuthority === authority) return;
+    this.layoutAuthority = authority;
+    if (authority) {
+      this.moduleHost.viewChanged(this.viewState);
+      this.scheduleFrame(0, 'geometry');
     }
   }
 
@@ -868,13 +965,36 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         this.requireActive();
         this.interaction.queueConstellationToggle(nodeId, modality);
       },
+      navigateView: (navigationAction) => {
+        this.requireActive();
+        this.interaction.queueViewIntent({ phase: 'activate', target: { kind: 'background' },
+          modality: 'keyboard', modifiers: { ctrl: false, meta: false, shift: false, alt: false }, navigationAction });
+      },
+      focusConstellationNode: (nodeId, modality = 'keyboard') => {
+        this.requireActive();
+        this.interaction.queueViewIntent({ phase: 'activate', target: { kind: 'node', nodeId },
+          modality, modifiers: { ctrl: false, meta: false, shift: false, alt: false }, objectAction: 'focus' });
+      },
+      setNodePinned: async (nodeId, pinned) => {
+        this.requireActive();
+        const outcome = this.consciousness.ego.consider(this.consciousness.ego.intend({ type: 'pin-subject', nodeId, pinned }));
+        if (outcome.status !== 'rejected') await this.setNodePinned(outcome.directive.nodeId, outcome.directive.pinned);
+      },
       getSessionOverrides: () => cloneOverrides(this.sessionOverrides),
       onSessionOverridesChanged: (listener) => {
         this.overrideListeners.add(listener);
         return { dispose: () => this.overrideListeners.delete(listener) };
       },
-      setModuleEnabled: (moduleId, enabled) => this.patchModuleOverride(moduleId, { enabled }),
-      setModuleSetting: (moduleId, key, value) => this.patchModuleSetting(moduleId, key, value),
+      setModuleEnabled: async (moduleId, enabled) => {
+        this.requireActive();
+        const outcome = this.consciousness.ego.consider(this.consciousness.ego.intend({ type: 'configure-module', moduleId, enabled }));
+        if (outcome.status !== 'rejected') await this.patchModuleOverride(outcome.directive.moduleId, { enabled: outcome.directive.enabled });
+      },
+      setModuleSetting: async (moduleId, key, value) => {
+        this.requireActive();
+        const outcome = this.consciousness.ego.consider(this.consciousness.ego.intend({ type: 'configure-module-setting', moduleId, key, value }));
+        if (outcome.status !== 'rejected') await this.patchModuleSetting(outcome.directive.moduleId, outcome.directive.key, outcome.directive.value);
+      },
       createNodeActionContext: (nodeId) => this.nodeActionContext(nodeId),
       resolveNodeActions: (actionIds, nodeId) => {
         if (!this.nodeActions || !this.hasNode(nodeId)) return [];
@@ -885,6 +1005,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         );
       },
       invokeNodeAction: (actionId, nodeId) => {
+        this.requireActive();
+        const outcome = this.consciousness.ego.consider(this.consciousness.ego.intend({ type: 'invoke-node-action', actionId, nodeId }));
+        if (outcome.status === 'rejected') return false;
+        ({ actionId, nodeId } = outcome.directive);
         if (!this.hasNode(nodeId)) return false;
         return this.nodeActions?.invoke(
           actionId,
@@ -1009,6 +1133,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       initialModuleState,
       getDocument: () => this.store.readDocument(),
       getViewState,
+      canRunLayout: () => this.layoutAuthority,
       onFailure,
     });
   }
@@ -1100,6 +1225,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       dimensions: this.profile.dimensions,
       documentId: document.documentId,
       documentRevision: document.revision,
+      layoutAuthority: this.layoutAuthority,
       nodeCount: document.nodes.length,
       edgeCount: document.edges.length,
       manuallySuspended: activity.manuallySuspended,
@@ -1143,6 +1269,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     return this.subscribe(this.graphChangedListeners, listener);
   }
 
+  onWorldChanged(listener: (event: GraphWorldChangedEventV1) => void): Disposable {
+    return this.subscribe(this.worldChangedListeners, listener);
+  }
+
   onError(listener: (error: GraphSessionErrorV1) => void): Disposable {
     const subscription = this.subscribe(this.errorListeners, listener);
     const deferred = this.deferredErrors.splice(0);
@@ -1170,6 +1300,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.intentListeners.clear();
     this.viewListeners.clear();
     this.graphChangedListeners.clear();
+    this.worldChangedListeners.clear();
     this.errorListeners.clear();
     this.overrideListeners.clear();
     this.renderer.dispose();
@@ -1259,6 +1390,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     }
     this.projectionSelection = this.projectionView.projectionSelection;
     this.renderSelection = this.projectionView.renderSelection;
+    // Build filtered adjacency with the content transaction so pointer input never
+    // pays graph-wide topology construction on its first hover.
+    this.presentationTopology(document);
     const availableAttention = this.viewState.selectedNodeIds.filter((id) => this.renderSelection.nodeIds.has(id));
     const focusAvailable = this.viewState.focusedNodeId !== undefined
       && availableAttention.includes(this.viewState.focusedNodeId);
@@ -1382,6 +1516,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     }
     this.moduleHost.viewChanged(this.viewState);
     this.refreshFrame(true, change === 'positions' ? 'geometry' : 'presentation');
+    if (change === 'positions') this.emitWorldChanged('interaction');
     if (change === 'interaction') this.updateSurface();
   }
 
@@ -1420,6 +1555,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private focusNeighborhoodNodeIds(focusedNodeId: string): readonly string[] {
     return [...new Set([
       ...this.viewState.selectedNodeIds.filter((id) => this.renderSelection.nodeIds.has(id)),
+      ...[...this.consciousness.remembered.nodeIds].filter((id) => this.renderSelection.nodeIds.has(id)),
       ...immediateNeighborhoodFitNodeIdsV1(
         focusedNodeId, this.store.readDocument().edges,
         this.renderSelection.nodeIds, this.renderSelection.edgeIds,
@@ -1477,11 +1613,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private reconcileAttention(nodeIds: readonly string[]): string[] {
-    const availableNodeIds = new Set(this.store.readDocument().nodes.map((node) => node.id));
+    const topology = this.documentTopology();
     return [...this.consciousness.reconcile({
       attentionNodeIds: nodeIds,
-      availableNodeIds,
-      relationships: documentRelationships(this.store.readDocument()),
+      availableNodeIds: topology.nodeIds,
+      relationships: topology.relationships('either'),
     }).attention.nodeIds];
   }
 
@@ -1525,12 +1661,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       for (const reaction of this.consciousness.observe(observation, registrations)) {
         const outcome = this.consciousness.ego.consider(
           this.consciousness.ego.intend(reaction),
-          (candidate) => ({ status: 'accepted', directive: candidate.directive }),
         );
-        if (outcome.status === 'rejected' || !this.nodeActions || !this.hasNode(reaction.subjectId)) continue;
+        if (outcome.status === 'rejected' || !this.nodeActions || !this.hasNode(outcome.directive.subjectId)) continue;
         this.nodeActions.invoke(
-          reaction.actionId,
-          this.nodeActionContext(reaction.subjectId),
+          outcome.directive.actionId,
+          this.nodeActionContext(outcome.directive.subjectId),
           (failure) => this.handleNodeActionFailure(failure),
         );
       }
@@ -1631,13 +1766,35 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   private resolveNodeSelection(nodeId: string): readonly string[] {
     const document = this.store.readDocument();
-    const edges = document.edges.filter((edge) => this.renderSelection.edgeIds.has(edge.id));
+    const presentation = this.presentationTopology(document);
     const group = this.consciousness.resolveOverviewConstellation(
       nodeId, this.renderSelection.nodeIds,
-      documentRelationships({ ...document, edges }),
-      JSON.stringify([document.documentId, document.revision, edges.map((edge) => edge.id).sort()]),
+      presentation.topology.relationships('either'),
+      String(presentation.revision),
     );
     return group?.nodeIds ?? [];
+  }
+
+  private documentTopology(document = this.store.readDocument()): GraphTopologyIndex {
+    if (this.documentTopologyCache?.document === document) return this.documentTopologyCache.topology;
+    const topology = new GraphTopologyIndex(document);
+    this.documentTopologyCache = { document, topology };
+    return topology;
+  }
+
+  private presentationTopology(document = this.store.readDocument()): NonNullable<GraphSessionRuntime['presentationTopologyCache']> {
+    const cached = this.presentationTopologyCache;
+    if (cached?.document === document && cached.nodeIds === this.renderSelection.nodeIds
+      && cached.edgeIds === this.renderSelection.edgeIds) return cached;
+    const next = {
+      document,
+      nodeIds: this.renderSelection.nodeIds,
+      edgeIds: this.renderSelection.edgeIds,
+      topology: new GraphTopologyIndex(document, this.renderSelection),
+      revision: ++this.topologyRevision,
+    };
+    this.presentationTopologyCache = next;
+    return next;
   }
 
   private handleNodeActionFailure(failure: GraphNodeActionFailureV1): void {
@@ -1700,6 +1857,23 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       } catch {
         // Consumer callbacks cannot make an already-applied graph operation fail.
       }
+    }
+  }
+
+  private emitWorldChanged(cause: GraphWorldChangedEventV1['cause']): void {
+    if (!this.worldChangedListeners.size) return;
+    const document = this.store.readDocument();
+    const state: GraphWorldStateV1 = {
+      schemaVersion: 1,
+      documentId: document.documentId,
+      documentRevision: document.revision,
+      dimensions: this.profile.dimensions,
+      positions: clonePositions(this.viewState.positions),
+      pinnedNodeIds: [...this.viewState.pinnedNodeIds],
+      layoutModuleState: this.moduleHost.exportCapabilityState('layout'),
+    };
+    for (const listener of [...this.worldChangedListeners]) {
+      try { listener({ sessionId: this.sessionId, cause, state }); } catch {}
     }
   }
 
@@ -1902,21 +2076,25 @@ function withAttention(state: GraphViewStateV1, selectedNodeIds: readonly string
   return { ...withoutFocus, selectedNodeIds: [] };
 }
 
-function documentRelationships(
-  document: GraphDocumentV1,
-): ReadonlyMap<string, ReadonlySet<string>> {
-  const relationships = new Map<string, Set<string>>(
-    document.nodes.map((node) => [node.id, new Set<string>()]),
-  );
-  for (const edge of document.edges) {
-    relationships.get(edge.sourceId)?.add(edge.targetId);
-    relationships.get(edge.targetId)?.add(edge.sourceId);
-  }
-  return relationships;
-}
-
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function clonePositions(positions: Readonly<Record<string, Vec3>>): Readonly<Record<string, Vec3>> {
+  return Object.fromEntries(Object.entries(positions).map(([nodeId, position]) => [nodeId, { ...position }]));
+}
+
+function samePositions(
+  left: Readonly<Record<string, Vec3>>,
+  right: Readonly<Record<string, Vec3>>,
+): boolean {
+  const leftIds = Object.keys(left);
+  const rightIds = Object.keys(right);
+  return leftIds.length === rightIds.length && leftIds.every((nodeId) => {
+    const a = left[nodeId];
+    const b = right[nodeId];
+    return b !== undefined && a.x === b.x && a.y === b.y && a.z === b.z;
+  });
 }
 
 function cloneIntent(intent: GraphIntentV1): GraphIntentV1 {

@@ -421,7 +421,8 @@ Moving a matching second press beyond the drag threshold begins a reversible Foc
 transition and does not activate or drag the node. Movement distance is normalized to
 35% of the smaller viewport dimension; the endpoint is the ordinary viewport-aware
 focused-neighborhood fit. Given existing Focus, a stationary single node click transfers
-Attention, Focus, and camera framing to that node.
+Attention, Focus, and camera framing to that node. In Local Graph+, the resulting
+focus-change intent also requests the corresponding note as the active host note.
 
 #### R-INPUT-05 — Filtered hit testing
 

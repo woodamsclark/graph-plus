@@ -8,14 +8,14 @@ export type GraphPlusInteractionStateV1 = 'overview' | 'explore' | 'focus';
 
 export interface GraphPlusExperiencePolicyV1 {
   readonly mode: GraphPlusExperienceModeV1;
-  readonly documentScope: 'vault' | 'root-neighborhood';
+  readonly documentScope: 'vault';
   readonly subjectSources: readonly ('ego' | 'active-note')[];
   readonly allowedInteractionStates: readonly GraphPlusInteractionStateV1[];
   readonly attentionCardinality: 'constellation' | 'single-subject';
   readonly attentionAwarenessDepth: number;
   readonly persistence: 'checkpoint' | 'ephemeral';
   readonly followActiveNote: boolean;
-  readonly canonicalRootState: 'none' | 'selected-focused-pinned';
+  readonly canonicalRootState: 'none' | 'session-constellation-focused-root';
 }
 
 export const GRAPH_PLUS_EXPERIENCE_POLICIES_V1: Readonly<
@@ -34,14 +34,14 @@ export const GRAPH_PLUS_EXPERIENCE_POLICIES_V1: Readonly<
   },
   local: {
     mode: 'local',
-    documentScope: 'root-neighborhood',
+    documentScope: 'vault',
     subjectSources: ['ego', 'active-note'],
-    allowedInteractionStates: ['focus'],
-    attentionCardinality: 'single-subject',
-    attentionAwarenessDepth: 1,
+    allowedInteractionStates: ['overview', 'explore', 'focus'],
+    attentionCardinality: 'constellation',
+    attentionAwarenessDepth: 0,
     persistence: 'ephemeral',
     followActiveNote: true,
-    canonicalRootState: 'selected-focused-pinned',
+    canonicalRootState: 'session-constellation-focused-root',
   },
 };
 

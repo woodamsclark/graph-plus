@@ -8,6 +8,17 @@ import type {
 } from './SessionSurface.ts';
 
 const IDLE_DONUT_CURSOR = 'url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2216%22 height=%2216%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%228%22 cy=%228%22 r=%224.5%22 fill=%22none%22 stroke=%22%23111%22 stroke-width=%223.5%22/%3E%3Ccircle cx=%228%22 cy=%228%22 r=%224.5%22 fill=%22none%22 stroke=%22%23f7f2e8%22 stroke-width=%221.4%22/%3E%3C/svg%3E") 8 8, default';
+// Three poses share a centered hotspot: pressed low, resting, and raised on hover.
+function donutCursor(radius: number, fallback: 'pointer' | 'grabbing'): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="${radius}" fill="none" stroke="#111" stroke-width="3.5"/><circle cx="10" cy="10" r="${radius}" fill="none" stroke="#f7f2e8" stroke-width="1.4"/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 10 10, ${fallback}`;
+}
+
+const CURSOR_IMAGES = {
+  default: IDLE_DONUT_CURSOR,
+  pointer: donutCursor(6, 'pointer'),
+  grabbing: donutCursor(3, 'grabbing'),
+};
 
 export class CanvasSessionSurface implements SessionSurfaceV1 {
 
@@ -134,7 +145,7 @@ export class CanvasSessionSurface implements SessionSurfaceV1 {
   }
 
   setCursor(cursor: 'default' | 'pointer' | 'grabbing'): void {
-    if (!this.disposed) this.canvas.style.cursor = cursor === 'default' ? IDLE_DONUT_CURSOR : cursor;
+    if (!this.disposed) this.canvas.style.cursor = CURSOR_IMAGES[cursor];
   }
 
   dispose(): void {

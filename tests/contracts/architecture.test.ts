@@ -88,11 +88,17 @@ test('global and Local Graph+ are policies of one application', () => {
   if (!/projectGraphPlusExperienceDocumentV1/.test(application)) {
     violations.push('shared Graph+ application bypasses the experience projection boundary');
   }
-  if (!/allowedInteractionStates:\s*\[['"]focus['"]\]/.test(policy)
-    || !/canonicalRootState:\s*['"]selected-focused-pinned['"]/.test(policy)
+  if (!/documentScope:\s*['"]vault['"]/.test(policy)
+    || !/allowedInteractionStates:\s*\[['"]overview['"],\s*['"]explore['"],\s*['"]focus['"]\]/.test(policy)
+    || !/canonicalRootState:\s*['"]session-constellation-focused-root['"]/.test(policy)
     || !/graphPlusEngineExperienceContractV1/.test(policy)
     || !/maximumNodeCount:\s*1/.test(policy)) {
-    violations.push('Local policy does not constrain the application to rooted Focus');
+    violations.push('Local policy does not reuse the full graph while starting from rooted Focus');
+  }
+  if (!/adoptSharedWorldState/.test(application)
+    || !/applyWorldState/.test(application)
+    || !/initialLayoutAuthority:\s*false/.test(application)) {
+    violations.push('Graph+ presentations do not share one geometry world with pane-local viewport state');
   }
   if (!/experience:\s*graphPlusEngineExperienceContractV1\(this\.policy\)/.test(application)) {
     violations.push('Graph+ does not translate product policy into the neutral engine experience contract');
@@ -201,7 +207,8 @@ test('Consciousness owns Ego, Attention, and geometry-free Awareness per session
   if (!/deriveCentroid\s*\(/.test(vision)) {
     violations.push('Vision does not own derived centroid geometry');
   }
-  if (!/availableNodeIds:\s*new Set\(options\.projectionView\.document\.nodes/.test(projectionCoordinator)
+  if (!/const topology = this\.topology\(options\.projectionView\.document\)/.test(projectionCoordinator)
+    || !/availableNodeIds:\s*topology\.nodeIds/.test(projectionCoordinator)
     || /availableNodeIds:\s*new Set\(Object\.keys\(options\.projectionView\.positions\)\)/.test(projectionCoordinator)) {
     violations.push(`${projectionCoordinatorPath}: Consciousness is not bounded by projected graph membership`);
   }

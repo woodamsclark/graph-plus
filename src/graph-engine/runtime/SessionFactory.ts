@@ -138,6 +138,7 @@ export class SessionFactory {
       resolveThemePalette: () => this.resolveThemePalette(options.container),
       rendererRegistry: this.rendererRegistry,
       preferredRendererBackend: this.preferredRendererBackend,
+      layoutAuthority: options.layoutAuthority,
       restoreViewState: options.restoreViewState,
       platform: this.createPlatform(options.container),
       nodeActions: hostServices.nodeActions,

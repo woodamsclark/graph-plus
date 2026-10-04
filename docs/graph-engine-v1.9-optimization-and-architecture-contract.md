@@ -31,8 +31,8 @@ settings concept unless profiling proves that one is required for an optimizatio
    interaction state.
 2. Graph Engine remains host-neutral; Obsidian APIs stay in the Obsidian host layer.
 3. Anima remains the authority for graph presentation values and preview emphasis.
-4. Graph+ and Local Graph+ share lifecycle infrastructure while retaining separate
-   graph-document and filtering behavior.
+4. Graph+ and Local Graph+ share one graph world while retaining separate viewport
+   state and filtering behavior.
 5. Event-driven work is preferred over polling, permanent animation loops, and broad
    rebuilds.
 6. Refactors are incremental, measured, and reversible at each slice.
@@ -138,7 +138,7 @@ Acceptance:
 > Historical note: the current ownership model is defined by
 > [Graph+ application architecture](graph-plus-application-architecture.md). It
 > supersedes this section's separate-product-boundary requirement while preserving
-> separate presentation sessions and the legacy view identities.
+> separate cameras and the legacy view identities.
 
 Global Graph+ and Local Graph+ shall share small, composable host services for:
 
@@ -148,9 +148,10 @@ Global Graph+ and Local Graph+ shall share small, composable host services for:
 - active-note follow routing; and
 - theme and viewport synchronization.
 
-The two views remain separate at their product boundary. Global Graph+ owns the full
-vault graph; Local Graph+ owns its rooted, ephemeral neighborhood document. Shared
-code must not hide that distinction.
+The two views share the same full-vault graph world: canonical topology, coordinates,
+pins, and layout-module state. Their product difference is startup framing: Global
+begins in Overview; Local begins in Focus and follows the active note. Each pane retains
+its own camera, filters, View, Attention, Focus, hover, and UI state.
 
 Acceptance:
 

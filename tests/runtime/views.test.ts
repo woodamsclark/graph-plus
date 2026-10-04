@@ -1,7 +1,9 @@
-import { GRAPH_VIEW_DEFINITIONS_V1, type GraphSessionV1 } from '../../src/graph-engine/contracts/v1/index.ts';
+import { DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1, GRAPH_VIEW_DEFINITIONS_V1, type GraphSessionV1 } from '../../src/graph-engine/contracts/v1/index.ts';
+import { Judgement } from '../../src/graph-engine/runtime/consciousness/Judgement.ts';
 import { CanvasGraphRenderer, GraphRendererRegistryV2, type GraphRenderSceneV2 } from '../../src/graph-engine/runtime/render/index.ts';
 import { GraphCameraController, type GraphSessionRuntime } from '../../src/graph-engine/runtime/index.ts';
 import { DEFAULT_GRAPH_RENDER_THEME_V1 } from '../../src/graph-engine/runtime/render/index.ts';
+import { multiplyGraphColorAlphaV2 } from '../../src/graph-engine/runtime/theme/index.ts';
 import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import { runtimeCanvas, runtimeHarness, runtimeRegistration } from '../support/runtimeHarness.ts';
@@ -140,7 +142,48 @@ test('Focus entry and rapid root hops recenter in one input frame without camera
   }
 });
 
-test('Primary and Ctrl additions commit connecting paths with mouse and direct touch', async () => {
+test('One-node Constellation refit matches Focus without acquiring a Focus subject', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    for (const pointerType of ['mouse', 'touch'] as const) {
+      const value = runtimeHarness({ profileId, document: graphDocument({
+        nodes: ['a', 'b', 'c', 'd'].map((id) => graphNode(id)),
+        edges: [graphEdge('ab', 'a', 'b'), graphEdge('bc', 'b', 'c')],
+      }) });
+      const session = await value.create();
+      const initial = await session.exportViewState();
+      const basis = { ...initial, selectedNodeIds: ['a'], positions: {
+        a: { x: -60, y: 20, z: 0 }, b: { x: 90, y: -40, z: 0 },
+        c: { x: 450, y: 10, z: 0 }, d: { x: -240, y: 100, z: 0 },
+      } };
+      await session.applyExternalInfluence({ schemaVersion: 1, type: 'replace-remembered-subjects', nodeIds: ['d'] });
+      const canvas = runtimeCanvas(value.container);
+      const results = [];
+      for (const viewMode of ['explore', 'focus'] as const) {
+        await session.restoreViewState({ ...basis, viewMode,
+          focusedNodeId: viewMode === 'focus' ? 'a' : undefined });
+        value.platform.advanceTime(400);
+        for (const type of ['pointerdown', 'pointerup']) {
+          const fields = { clientX: -100, clientY: -100, pointerId: 850, pointerType,
+            button: pointerType === 'mouse' ? 2 : 0 };
+          const event = new value.window.PointerEvent(type, { ...fields, bubbles: true, cancelable: true });
+          for (const [key, field] of Object.entries(fields)) Object.defineProperty(event, key, { value: field });
+          canvas.dispatchEvent(event as unknown as Event);
+          if (type === 'pointerdown' && pointerType === 'touch') value.platform.flushTimer();
+          value.platform.flushFrame();
+        }
+        const fitted = await session.exportViewState();
+        equal(fitted.viewMode, viewMode, 'Center + Fit preserves the committed View');
+        equal(fitted.focusedNodeId, viewMode === 'focus' ? 'a' : undefined, 'Constellation fit does not acquire Focus');
+        deepEqual(fitted.camera.target, fitted.positions.a, 'refit centers the singleton, rather than its neighbors');
+        results.push(fitted.camera);
+      }
+      deepEqual(results[0], results[1], 'secondary-click Center + Fit and touch background hold share Focus framing in both Views');
+      await session.dispose();
+    }
+  }
+});
+
+test('Primary additions commit paths while Ctrl on nonmembers does nothing with mouse and direct touch', async () => {
   for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
     for (const pointerType of ['mouse', 'touch'] as const) {
       for (const ctrl of [false, true]) {
@@ -160,9 +203,11 @@ test('Primary and Ctrl additions commit connecting paths with mouse and direct t
         tap(value, runtimeCanvas(value.container), await point(session, 'c'), 900, pointerType, ctrl);
         value.platform.flushFrame();
         const after = await session.exportViewState();
-        deepEqual(after.selectedNodeIds, ['a', 'c', 'b'], 'activation admits the candidate and route even without prior hover');
+        deepEqual(after.selectedNodeIds, ctrl ? ['a'] : ['a', 'c', 'b'],
+          'primary activation admits the route while Ctrl leaves a nonmember unchanged');
         equal(after.viewMode, 'explore', 'admission does not descend into Focus');
         deepEqual(after.camera, before.camera, 'admission preserves framing');
+        if (ctrl) deepEqual(after, before, 'a Ctrl no-change outcome does not create observations or effects');
         await session.dispose();
       }
     }
@@ -186,6 +231,75 @@ test('The constellation menu control uses Ego admission instead of exact-set rep
   value.platform.flushFrame();
   deepEqual((await session.exportViewState()).selectedNodeIds, ['a', 'b'], 'menu removal leaves the admitted path member');
   await session.dispose();
+});
+
+test('View controls use Ego while external application truth bypasses Judgement and user observations', async () => {
+  const original = Judgement.prototype.consider;
+  const decisions: string[] = [];
+  let deny = false;
+  Judgement.prototype.consider = function (intent, constraints) {
+    decisions.push((intent.directive as { type: string }).type);
+    const consider = original.bind(this) as typeof this.consider;
+    return deny ? { status: 'rejected', reason: 'test-rule-denied' }
+      : consider(intent, constraints);
+  };
+  let session: GraphSessionV1 | undefined;
+  try {
+    for (const local of [false, true]) {
+      const value = runtimeHarness({ document: graphDocument({
+        nodes: ['a', 'b', 'c'].map((id) => graphNode(id)),
+        edges: [graphEdge('ab', 'a', 'b'), graphEdge('bc', 'b', 'c')],
+      }), experience: { ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1,
+        allowedStates: local ? ['explore', 'focus'] : ['overview', 'explore', 'focus'] } });
+      session = await value.create();
+      const controls = (session as GraphSessionRuntime).createControlPort();
+      const intents: string[] = [];
+      session.onIntent((intent) => intents.push(intent.type));
+      decisions.length = 0;
+      deny = true;
+      await session.applyExternalInfluence({ schemaVersion: 1, type: 'replace-remembered-subjects', nodeIds: ['c'] });
+      await session.applyExternalInfluence({ schemaVersion: 1, type: 'replace-attention', nodeIds: ['a'],
+        focusNodeId: 'a', framing: 'recenter-focus' });
+      deepEqual(decisions, [], 'outside truth does not ask Ego permission');
+      deepEqual(intents, [], 'outside arrival creates no endogenous observations');
+      const received = await session.exportViewState();
+      deepEqual(received.selectedNodeIds, ['a'], 'external Attention is still received under a denying Judgement');
+      equal(received.focusedNodeId, 'a', 'external Focus is installed directly');
+
+      controls.focusConstellationNode('c');
+      value.platform.flushFrame();
+      deepEqual((await session.exportViewState()).selectedNodeIds, ['a'], 'denied menu Focus cannot admit a member');
+      equal((await session.exportViewState()).focusedNodeId, 'a', 'denied menu Focus cannot replace the subject');
+      deepEqual(intents, [], 'denied controls create no observations');
+      deny = false;
+      await session.applyExternalInfluence({ schemaVersion: 1, type: 'replace-attention', nodeIds: ['a'] });
+      controls.focusConstellationNode('c');
+      value.platform.flushFrame();
+      const focused = await session.exportViewState();
+      deepEqual(focused.selectedNodeIds, ['a', 'c', 'b'], 'menu Focus admits the same connecting route as canvas Focus');
+      equal(focused.focusedNodeId, 'c', 'menu Focus commits its requested subject');
+      assert(intents.includes('selection-changed') && intents.includes('focus-changed'), 'deliberate controls emit normal observations');
+      assert(decisions.includes('direct-attention'), 'semantic View directives reach Judgement');
+      controls.navigateView('back'); value.platform.flushFrame();
+      equal(session.getActiveView().id, 'explore', 'toolbar Back follows Escape one View');
+      deepEqual((await session.exportViewState()).camera, focused.camera, 'Back retains framing');
+      if (!local) {
+        controls.navigateView('overview'); value.platform.flushFrame();
+        deepEqual((await session.exportViewState()).selectedNodeIds, focused.selectedNodeIds, 'Overview retains the composition');
+        controls.navigateView('back'); value.platform.flushFrame();
+        equal(session.getActiveView().id, 'overview', 'Back at Overview never goes forward');
+      }
+      controls.navigateView('clear-constellation'); value.platform.flushFrame();
+      const cleared = await session.exportViewState();
+      deepEqual(cleared.selectedNodeIds, [], 'clear withdraws only active composition');
+      equal(cleared.focusedNodeId, undefined, 'clear releases Focus');
+      equal(cleared.viewMode, local ? 'explore' : 'overview', 'empty composition respects consumer View permissions');
+      await session.dispose(); session = undefined;
+    }
+  } finally {
+    await session?.dispose();
+    Judgement.prototype.consider = original;
+  }
 });
 
 test('An empty Constellation remains a build View through unrelated filter reconciliation', async () => {
@@ -251,7 +365,149 @@ function tap(value: ReturnType<typeof runtimeHarness>, canvas: HTMLCanvasElement
 }
 
 
-test('Hover previews View activation in 2D and 3D, independently of optional Anima styling', async () => {
+test('Memory constellation colors, visibility, and adoption agree across Views, dimensions, and Anima styling', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    for (const animaEnabled of [false, true]) {
+      let scene: GraphRenderSceneV2 | undefined;
+      const registry = new GraphRendererRegistryV2();
+      registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true,
+        create: ({ createCanvas, now }) => {
+          const renderer = new CanvasGraphRenderer(createCanvas(), now);
+          const update = renderer.updateScene.bind(renderer);
+          renderer.updateScene = (next) => { scene = next; update(next); };
+          return renderer;
+        },
+      });
+      const base = runtimeRegistration();
+      const value = runtimeHarness({ profileId, rendererRegistry: registry, registration: {
+        ...base, profiles: base.profiles.map((profile) => ({ ...profile, modules: {
+          ...profile.modules, anima: { ...profile.modules.anima, defaultEnabled: animaEnabled },
+        } })),
+      }, document: graphDocument({ nodes: ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => graphNode(id)),
+        edges: [graphEdge('ab', 'a', 'b'), graphEdge('bc', 'b', 'c'), graphEdge('cd', 'c', 'd')],
+      }) });
+      const session = await value.create();
+      const initial = await session.exportViewState();
+      await session.restoreViewState({ ...initial,
+        camera: { ...initial.camera, zoom: 1, target: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 0, z: 600 } },
+        positions: Object.fromEntries(['a', 'b', 'c', 'd', 'e', 'f'].map((id, i) => [id, { x: i * 70 - 175, y: 0, z: 0 }])),
+      });
+      await session.applyExternalInfluence({ schemaVersion: 1, type: 'replace-remembered-subjects', nodeIds: ['b', 'c', 'd', 'e'] });
+      await session.setSelection(['a', 'b']);
+      const memoryColor = DEFAULT_GRAPH_RENDER_THEME_V1.colors.memoryConstellation;
+      const memoryColorFor = (strength: number) => multiplyGraphColorAlphaV2(memoryColor, strength);
+      const node = (id: string) => scene!.nodes.find((node) => node.id === id)!;
+      for (const view of ['overview', 'explore', 'focus'] as const) {
+        if (view === 'focus') await session.focusNode('a');
+        else await session.setView(view);
+        value.platform.flushFrame();
+        for (const [id, strength] of [['c', 0.25], ['d', 0.5], ['e', 1]] as const) {
+          deepEqual(node(id).finalColor, memoryColorFor(strength),
+            'Memory uses its own color faded from oldest to newest');
+          equal(node(id).opacity, 1, 'Memory remains visible in every View');
+          equal(node(id).labelForceVisible === true, view !== 'focus',
+            'Memory labels remain prominent outside Focus and adaptive within Focus');
+          equal(node(id).strokeWidth, undefined, 'Memory visibility does not imply deliberate membership');
+        }
+        assert(JSON.stringify(node('b').finalColor) !== JSON.stringify(memoryColor), 'deliberate membership wins when a subject is also remembered');
+        deepEqual(scene!.edges.find((edge) => edge.sourceId === 'c' && edge.targetId === 'd')?.color,
+          memoryColorFor(0.25), 'links internal to Memory use the older endpoint strength');
+        deepEqual((await session.exportViewState()).selectedNodeIds, ['a', 'b'], 'Memory presentation never changes Attention');
+        if (view === 'focus') equal(node('f').opacity, 0, 'ordinary distant context remains void');
+        if (view === 'focus') {
+          equal(node('b').labelFontSize, node('a').labelFontSize * 0.5,
+            'Focus neighbors use half-size labels while the root retains its full label size');
+        }
+      }
+      // A distant remembered object is actually hittable in Focus. Admitting it
+      // follows the same path rule as other candidates, without selecting all Memory.
+      const canvas = runtimeCanvas(value.container);
+      tap(value, canvas, await point(session, 'd'), 901, 'touch');
+      value.platform.flushFrame();
+      const adopted = await session.exportViewState();
+      equal(adopted.focusedNodeId, 'd', 'Focus can explore a visible memory subject');
+      deepEqual(adopted.selectedNodeIds, ['a', 'b', 'd', 'c'], 'adoption admits only the target and connecting route');
+      deepEqual(node('e').finalColor, memoryColorFor(1), 'unrelated recent Memory remains fully colored');
+      await session.setSelection([]);
+      await session.setView('overview');
+      value.platform.flushFrame();
+      deepEqual(node('d').finalColor, memoryColorFor(0.5),
+        'clearing deliberate membership restores its recency-weighted Memory color');
+      // Choosing a Memory component in Overview adopts its complete remembered group.
+      value.platform.advanceTime(400);
+      tap(value, canvas, await point(session, 'c'), 902, 'touch');
+      value.platform.flushFrame();
+      deepEqual((await session.exportViewState()).selectedNodeIds, ['b', 'c', 'd'], 'Overview adopts the connected Memory group');
+      equal(session.getActiveView().id, 'explore', 'Memory choice becomes deliberate Constellation');
+      await session.applyFilter({ schemaVersion: 1, scope: 'render', node: { op: 'id-in', ids: ['a', 'b', 'c', 'd', 'f'] } });
+      value.platform.flushFrame();
+      equal(scene!.nodes.some((node) => node.id === 'e'), false, 'Memory cannot bypass structural filtering');
+      await session.clearFilter();
+      await session.applyExternalInfluence({ schemaVersion: 1, type: 'replace-remembered-subjects', nodeIds: ['c'] });
+      value.platform.flushFrame();
+      equal(node('e').labelForceVisible, false, 'a subject that leaves recent Memory loses its memory emphasis');
+      await session.dispose();
+    }
+  }
+});
+
+test('Committed activation holds its admitted preview until pointer leave', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    let scene: GraphRenderSceneV2 | undefined;
+    const registry = new GraphRendererRegistryV2();
+    registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true,
+      create: ({ createCanvas, now }) => {
+        const renderer = new CanvasGraphRenderer(createCanvas(), now);
+        const update = renderer.updateScene.bind(renderer);
+        renderer.updateScene = (next) => { scene = next; update(next); };
+        return renderer;
+      },
+    });
+    const value = runtimeHarness({ profileId, rendererRegistry: registry, document: graphDocument({
+      nodes: ['a', 'b', 'c', 'd'].map((id) => graphNode(id)),
+      edges: [graphEdge('ab', 'a', 'b'), graphEdge('cd', 'c', 'd')],
+    }) });
+    const session = await value.create();
+    const initial = await session.exportViewState();
+    await session.restoreViewState({ ...initial, selectedNodeIds: ['a', 'd'], viewMode: 'focus', focusedNodeId: 'a',
+      positions: { a: { x: -90, y: 0, z: 0 }, b: { x: -30, y: 0, z: 0 },
+        c: { x: 30, y: 0, z: 0 }, d: { x: 90, y: 0, z: 0 } },
+      camera: { ...initial.camera, zoom: 1, target: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 0, z: 600 } },
+    });
+    const canvas = runtimeCanvas(value.container);
+    const hover = async (id?: string) => {
+      const location = id ? await point(session, id) : { x: -100, y: -100 };
+      const fields = { clientX: location.x, clientY: location.y, pointerId: 950, pointerType: 'mouse' };
+      const event = new value.window.PointerEvent(id ? 'pointermove' : 'pointerleave', { ...fields, bubbles: true });
+      for (const [key, field] of Object.entries(fields)) Object.defineProperty(event, key, { value: field });
+      canvas.dispatchEvent(event as unknown as Event);
+      value.platform.flushFrame();
+    };
+    await hover('d');
+    const preview = scene!.nodes.map((node) => ({ id: node.id, opacity: node.opacity,
+      labelOpacity: node.labelOpacity, labelForceVisible: node.labelForceVisible, strokeWidth: node.strokeWidth }));
+    tap(value, canvas, await point(session, 'd'), 951, 'mouse');
+    value.platform.flushFrame();
+    equal((await session.exportViewState()).focusedNodeId, 'd', 'click commits the previewed Focus subject');
+    deepEqual(scene!.nodes.map((node) => ({ id: node.id, opacity: node.opacity,
+      labelOpacity: node.labelOpacity, labelForceVisible: node.labelForceVisible, strokeWidth: node.strokeWidth })), preview,
+    'the admitted preview remains visually exact through its commit');
+    await hover('d');
+    deepEqual(scene!.nodes.map((node) => ({ id: node.id, opacity: node.opacity,
+      labelOpacity: node.labelOpacity, labelForceVisible: node.labelForceVisible, strokeWidth: node.strokeWidth })), preview,
+    'movement within the node retains the latched preview');
+    await hover();
+    equal(scene!.nodes.find((node) => node.id === 'c')!.opacity, 1, 'leaving reveals the committed Focus neighborhood');
+    let hoveredNodeId: string | undefined;
+    session.onIntent((intent) => { if (intent.type === 'node-hover-changed') hoveredNodeId = intent.nodeId; });
+    await hover('c');
+    equal(hoveredNodeId, 'c', 'the standard neighbor is pickable on its new visit');
+    equal((await session.exportViewState()).focusedNodeId, 'd', 'the new hover leaves the committed Focus subject intact');
+    await session.dispose();
+  }
+});
+
+test('Selective hover previews preserve committed state in 2D and 3D with and without Anima styling', async () => {
   for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
     for (const animaEnabled of [false, true]) {
       let scene: GraphRenderSceneV2 | undefined;
@@ -296,11 +552,50 @@ test('Hover previews View activation in 2D and 3D, independently of optional Ani
       session.onViewChanged((view) => viewChanges.push(view.id));
       const overview = await session.exportViewState();
       await hover('b');
-      deepEqual(opacities(), { a: 1, b: 1, c: 1, d: 1 }, 'Overview retains its full undimmed field');
+      deepEqual(opacities(), { a: 0.24, b: 1, c: 0.24, d: 0.24 }, 'Overview previews the admitted Constellation destination');
       deepEqual(scene!.nodes.find((node) => node.id === 'b')!.finalColor,
         animaEnabled ? DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent : DEFAULT_GRAPH_RENDER_THEME_V1.colors.selectedNode,
         'Overview shows the prospective selection');
       deepEqual(await session.exportViewState(), overview, 'Overview hover cannot alter world-facing state or Memory');
+      tap(value, canvas, await point(session, 'b'), 690, 'mouse');
+      value.platform.flushFrame();
+      equal((await session.exportViewState()).viewMode, 'explore', 'first click highlights and enters Constellation');
+      const entered = await session.exportViewState();
+      deepEqual(entered.camera, overview.camera, 'selection preserves framing until an explicit Center + Fit');
+      deepEqual(opacities(), { a: 0.24, b: 1, c: 0.24, d: 0.24 },
+        'click commits Constellation without any partial Focus hover presentation');
+      equal(scene!.nodes.find((node) => node.id === 'a')!.labelForceVisible, false,
+        'the consumed visit cannot reveal a neighbor label');
+      equal(scene!.nodes.find((node) => node.id === 'c')!.labelForceVisible, false,
+        'the consumed visit keeps every nonmember neighbor label suppressed');
+      await hover('b');
+      deepEqual(opacities(), { a: 0.24, b: 1, c: 0.24, d: 0.24 }, 'same-node movement cannot rearm any hover presentation');
+      await hover('b', true);
+      assert(scene!.nodes.find((node) => node.id === 'b')!.strokeWidth !== undefined, 'modifier changes cannot preview another action in the consumed visit');
+      await hover('b');
+      equal(opacities().d, 0.24, 'modifier release cannot rearm Focus preview');
+      await hover();
+      await hover('b');
+      equal(opacities().d, 0, 'leaving and returning rearms Focus preview');
+      value.platform.advanceTime(400);
+      const focusPreview = { ...opacities() };
+      tap(value, canvas, await point(session, 'b'), 693, 'mouse');
+      value.platform.flushFrame();
+      equal((await session.exportViewState()).focusedNodeId, 'b', 'click commits the previewed Focus subject');
+      deepEqual(opacities(), focusPreview, 'the Focus preview exactly matches the committed default Focus scene');
+      deepEqual(opacities(), { a: 1, b: 1, c: 1, d: 0 },
+        'committed Focus keeps immediate neighbors standard and unrelated context void');
+      await hover();
+      await session.restoreViewState(overview);
+      await hover('b');
+      value.platform.advanceTime(400);
+      tap(value, canvas, await point(session, 'b'), 691, 'mouse');
+      value.platform.flushFrame();
+      value.platform.advanceTime(400);
+      tap(value, canvas, await point(session, 'b'), 692, 'mouse');
+      value.platform.flushFrame();
+      equal((await session.exportViewState()).viewMode, 'focus', 'second click without leaving still enters Focus');
+      await session.restoreViewState(overview);
       await hover();
       await session.setSelection(['a', 'd']);
       await session.setView('explore');
@@ -315,8 +610,17 @@ test('Hover previews View activation in 2D and 3D, independently of optional Ani
       equal(admitted.focusedNodeId, undefined, 'the admission click cannot enter Focus');
       deepEqual(admitted.selectedNodeIds, ['a', 'd', 'c', 'b'], 'adding a candidate also commits the intermediate path');
       deepEqual(admitted.camera, build.camera, 'admission preserves framing');
+      equal(scene!.nodes.find((node) => node.id === 'c')!.strokeWidth, 1,
+        'admission commits its preview and cannot immediately show the next Focus outline');
+      await hover('c');
+      equal(scene!.nodes.find((node) => node.id === 'c')!.strokeWidth, 1,
+        'movement inside the newly admitted node cannot rearm its Focus preview');
       await hover();
       deepEqual(opacities(), { a: 1, b: 1, c: 1, d: 1 }, 'the admitted route remains highlighted after leave');
+      await hover('c');
+      equal(scene!.nodes.find((node) => node.id === 'c')!.strokeWidth, animaEnabled ? 3 : 2,
+        'a new hover visit previews Focus for the admitted member');
+      await hover();
       await session.setSelection(['a', 'd']);
       build = await session.exportViewState();
       await hover('a', true);
@@ -327,24 +631,43 @@ test('Hover previews View activation in 2D and 3D, independently of optional Ani
         'the removal policy overrides hover forcing with and without optional Anima');
       equal(scene!.nodes.find((node) => node.id === 'a')!.strokeWidth, undefined, 'removed members lose their selection outline');
       deepEqual((await session.exportViewState()).selectedNodeIds, ['a', 'd'], 'Ctrl-hover does not commit deselection');
+      tap(value, canvas, await point(session, 'a'), 704, 'mouse', true);
+      value.platform.flushFrame();
+      deepEqual((await session.exportViewState()).selectedNodeIds, ['d'], 'Ctrl-click commits the removal');
+      deepEqual(opacities(), { a: 0.24, b: 0.24, c: 0.24, d: 1 },
+        'holding Ctrl after removal cannot immediately preview re-adding the node and route');
+      await hover('a', true);
+      deepEqual(opacities(), { a: 0.24, b: 0.24, c: 0.24, d: 1 },
+        'Ctrl-hover keeps the deselected target in its committed scene phase');
+      equal(scene!.nodes.find((node) => node.id === 'a')!.labelForceVisible, false,
+        'the deselected target cannot regain hover-forced labels while Ctrl remains held');
+      equal(scene!.nodes.find((node) => node.id === 'a')!.strokeWidth, undefined,
+        'the deselected target cannot regain a prospective selection outline');
+      const removed = await session.exportViewState();
+      tap(value, canvas, await point(session, 'a'), 705, 'mouse', true);
+      value.platform.flushFrame();
+      deepEqual(await session.exportViewState(), removed, 'repeating Ctrl-click on the deselected node has no effects');
+      await session.setSelection(['a', 'd']);
+      await hover('a', true);
       canvas.dispatchEvent(new value.window.KeyboardEvent('keyup', { key: 'Control', ctrlKey: false, bubbles: true }) as unknown as Event);
       value.platform.flushFrame();
-      deepEqual(opacities(), { a: 1, b: 0.24, c: 0, d: 1 }, 'releasing Ctrl previews the ordinary member click at the same pointer');
+      deepEqual(opacities(), { a: 0.24, b: 0.24, c: 0.24, d: 1 },
+        'modifier release retains the admitted removal preview until leave');
       await hover('a');
-      deepEqual(opacities(), { a: 1, b: 0.24, c: 0, d: 1 }, 'Constellation previews Focus around the hovered member');
+      deepEqual(opacities(), { a: 0.24, b: 0.24, c: 0.24, d: 1 }, 'same-node movement retains the admitted removal preview');
       deepEqual(await session.exportViewState(), build, 'Constellation preview preserves all exported state');
       await hover();
       deepEqual(opacities(), { a: 1, b: 0.24, c: 0.24, d: 1 }, 'leaving restores Constellation');
       await session.focusNode('a');
       const committed = await session.exportViewState();
       await hover('d', true);
-      deepEqual(opacities(), { a: 1, b: 0.24, c: 0, d: 0 }, 'Ctrl-hover on a distant Focus member previews voiding');
+      deepEqual(opacities(), { a: 1, b: 1, c: 0, d: 0.24 }, 'Ctrl-hover dims the removed member within standard Focus context');
       await hover('d', true);
-      deepEqual(opacities(), { a: 1, b: 0.24, c: 0, d: 0 }, 'a removal preview retains its own target without flicker');
+      deepEqual(opacities(), { a: 1, b: 1, c: 0, d: 0.24 }, 'a removal preview retains its own target without flicker');
       deepEqual(await session.exportViewState(), committed, 'a retained removal target does not change actual state');
       canvas.dispatchEvent(new value.window.KeyboardEvent('keyup', { key: 'Control', ctrlKey: false, bubbles: true }) as unknown as Event);
       value.platform.flushFrame();
-      deepEqual(opacities(), { a: 1, b: 0, c: 0, d: 1 }, 'Ctrl release returns to the ordinary Focus preview of the same member');
+      deepEqual(opacities(), { a: 1, b: 0, c: 0, d: 1 }, 'Ctrl release previews the exact destination Focus scene');
       await hover('d', true);
       tap(value, canvas, await point(session, 'd'), 703, 'mouse', true);
       value.platform.flushFrame();
@@ -353,17 +676,18 @@ test('Hover previews View activation in 2D and 3D, independently of optional Ani
       await session.setSelection(['a', 'd']);
       build = await session.exportViewState();
       await hover('a', true);
-      deepEqual(opacities(), { a: 0.24, b: 0.24, c: 0.24, d: 1 }, 'Ctrl-hover of the subject previews releasing Focus');
+      deepEqual(opacities(), { a: 0.24, b: 1, c: 0, d: 1 }, 'subject removal cue dims only the removed subject within standard Focus context');
       await hover();
       intents.length = 0;
       viewChanges.length = 0;
+      const unchangedFocus = await session.exportViewState();
       await hover('b');
-      deepEqual(opacities(), { a: 1, b: 1, c: 0.24, d: 1 }, 'Focus reveals the hovered neighbor neighborhood');
-      deepEqual(await session.exportViewState(), committed, 'hover changes neither camera, settings, membership, subject, layout, nor Memory');
+      deepEqual(opacities(), { a: 1, b: 1, c: 1, d: 1 }, 'Focus hopping has an explicit prospective View scene');
+      deepEqual(await session.exportViewState(), unchangedFocus, 'hover changes neither camera, settings, membership, subject, layout, nor Memory');
       deepEqual(viewChanges, [], 'visual previews do not publish View transitions');
       assert(intents.every((type) => type === 'node-hover-changed'), 'hover emits inspection only');
       await hover();
-      deepEqual(opacities(), { a: 1, b: 0.24, c: 0, d: 1 }, 'leaving restores committed Focus');
+      deepEqual(opacities(), { a: 1, b: 1, c: 0, d: 1 }, 'leaving restores committed Focus');
       await hover('b');
       await hover('c');
       deepEqual(opacities(), { a: 1, b: 1, c: 1, d: 1 }, 'the next preview subject also reveals its shortest route');
@@ -375,6 +699,29 @@ test('Hover previews View activation in 2D and 3D, independently of optional Ani
       deepEqual(chosen.selectedNodeIds, ['a', 'd', 'c', 'b'], 'a Focus addition also admits its connecting path');
       await hover();
       deepEqual(opacities(), prospective, 'click commits the previewed subject and its connecting path');
+      await session.setSelection(['a']);
+      await session.focusNode('a');
+      const singleFocus = await session.exportViewState();
+      await hover('a', true);
+      deepEqual(opacities(), { a: 0.24, b: 1, c: 0, d: 0 },
+        'last-member removal preview retains Focus rather than exposing Overview');
+      equal(scene!.nodes.find((node) => node.id === 'a')!.strokeWidth, undefined,
+        'removing the subject drops only its local focus and membership outlines');
+      deepEqual(await session.exportViewState(), singleFocus, 'last-member preview has no committed effects');
+      await hover();
+      deepEqual(opacities(), { a: 1, b: 1, c: 0, d: 0 }, 'canceling removal restores its object emphasis');
+      await hover('a', true);
+      tap(value, canvas, await point(session, 'a'), 707, 'mouse', true);
+      value.platform.flushFrame();
+      equal(session.getActiveView().id, 'overview', 'only activation commits the last-member View exit');
+      deepEqual(opacities(), { a: 0.24, b: 1, c: 1, d: 1 },
+        'the committed Overview retains the admitted removal preview until leave');
+      const empty = await session.exportViewState();
+      const emptyLabelForce = scene!.nodes.find((node) => node.id === 'a')!.labelForceVisible;
+      await hover('a', true);
+      equal(scene!.nodes.find((node) => node.id === 'a')!.labelForceVisible, emptyLabelForce,
+        'continued Ctrl-hover preserves the committed label policy, including independent Memory');
+      deepEqual(await session.exportViewState(), empty, 'continued Ctrl-hover does not reverse the committed exit');
       await session.dispose();
     }
   }

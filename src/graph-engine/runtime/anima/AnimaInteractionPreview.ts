@@ -1,32 +1,46 @@
 import { DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1 } from '../../contracts/v1/index.ts';
 import type { GraphExperienceContractV1, GraphViewIdV1 } from '../../contracts/v1/index.ts';
-import { resolveEgoInteractionPlanV1, type EgoInteractionPlanV1 } from '../consciousness/EgoInteractionPlan.ts';
-import { resolveGraphHoverPathV1, type GraphHoverPathOptionsV1 } from '../interaction/GraphViewObjectActivation.ts';
+import { resolveEgoInteractionPlanV1, type EgoInteractionPlanV1, type EgoInteractionStateV1 } from '../consciousness/EgoInteractionPlan.ts';
+import type { GraphHoverPathOptionsV1 } from '../interaction/GraphViewObjectActivation.ts';
 import type { InputGraphIdentityV1 } from '../interaction/GraphInteractionTypes.ts';
 
-export interface GraphViewObjectPreviewV1 {
-  readonly activation: 'primary' | 'toggle-membership';
-  readonly viewId: GraphViewIdV1;
-  readonly attentionNodeIds: readonly string[];
-  readonly focusedNodeId?: string;
+interface GraphInteractionPreviewBaseV1 {
+  readonly activation: 'primary' | 'remove-membership' | 'toggle-membership';
+  readonly addedNodeIds: readonly string[];
+  readonly removedNodeIds: readonly string[];
+  /** Local emphasis; only the separate View-transition state chooses scene context. */
+  readonly focusNodeId?: string;
   readonly hoverPathNodeIds: readonly string[];
 }
 
-/** Anima expresses an admitted will; it never reconstructs the transition. */
-export function presentEgoInteractionPlanV1(
-  plan: EgoInteractionPlanV1, hoverPath?: GraphHoverPathOptionsV1,
-): GraphViewObjectPreviewV1 | undefined {
+/** Object admission and deliberate View entry are separate presentation avenues. */
+export type GraphInteractionPreviewV1 = GraphInteractionPreviewBaseV1 & (
+  | { readonly kind: 'objects' }
+  | { readonly kind: 'view-transition'; readonly resultingState: EgoInteractionStateV1 }
+);
+
+/** Derive an object preview or an explicit View-entry preview from admitted Will. */
+export function presentEgoInteractionPlanV1(plan: EgoInteractionPlanV1): GraphInteractionPreviewV1 | undefined {
   if (plan.outcome === 'rejected' || plan.input.target.kind !== 'node') return undefined;
   return {
-    activation: plan.input.modifiers.ctrl ? 'toggle-membership' : 'primary',
-    ...plan.resultingState,
-    hoverPathNodeIds: plan.constellationPathNodeIds.length > 0 ? plan.constellationPathNodeIds
-      : plan.input.modifiers.ctrl || !hoverPath ? [] : resolveGraphHoverPathV1(plan.input.target.nodeId, hoverPath),
+    ...((plan.action === 'choose-constellation' || plan.action === 'focus-member' || plan.action === 'admit-member')
+      && (plan.resultingState.viewId !== plan.before.viewId || plan.resultingState.focusedNodeId !== plan.before.focusedNodeId)
+      ? { kind: 'view-transition' as const, resultingState: plan.resultingState } : { kind: 'objects' as const }),
+    activation: plan.input.membershipAction === 'toggle' ? 'toggle-membership'
+      : plan.input.modifiers.ctrl ? 'remove-membership' : 'primary',
+    addedNodeIds: plan.resultingState.attentionNodeIds.filter((id) => !plan.before.attentionNodeIds.includes(id)),
+    removedNodeIds: plan.before.attentionNodeIds.filter((id) => !plan.resultingState.attentionNodeIds.includes(id)),
+    focusNodeId: plan.resultingState.focusedNodeId !== plan.before.focusedNodeId
+      ? plan.resultingState.focusedNodeId : undefined,
+    // The preview must express the route Ego actually admitted. Recomputing a
+    // presentation-only route can target passive Memory and promise nodes that
+    // activation will not select.
+    hoverPathNodeIds: plan.constellationPathNodeIds,
   };
 }
 
 /** Pure presentation callers use the same Ego planner as a live session. */
-export function previewGraphViewObjectActivationV1(options: {
+export function previewGraphObjectInteractionV1(options: {
   readonly viewId: GraphViewIdV1;
   readonly nodeId: string;
   readonly attentionNodeIds: readonly string[];
@@ -35,8 +49,9 @@ export function previewGraphViewObjectActivationV1(options: {
   readonly getConstellation: (nodeId: string) => readonly string[];
   readonly identity: InputGraphIdentityV1;
   readonly experience?: GraphExperienceContractV1;
+  readonly rememberedNodeIds?: ReadonlySet<string>;
   readonly hoverPath?: GraphHoverPathOptionsV1;
-}): GraphViewObjectPreviewV1 | undefined {
+}): GraphInteractionPreviewV1 | undefined {
   // Without a projection, collect all possible results rather than truncating the looked-up group.
   const available = options.hoverPath?.visibleNodeIds ?? new Set([
     ...options.attentionNodeIds, options.nodeId, ...options.getConstellation(options.nodeId),
@@ -49,7 +64,8 @@ export function previewGraphViewObjectActivationV1(options: {
     visibleEdgeIds: options.hoverPath?.visibleEdgeIds ?? new Set(),
     edges: options.hoverPath?.edges,
     awarenessNodeIds: options.hoverPath?.targetNodeIds ?? new Set(options.attentionNodeIds),
+    rememberedNodeIds: options.rememberedNodeIds,
     getConstellation: options.getConstellation,
   });
-  return presentEgoInteractionPlanV1(plan, options.hoverPath);
+  return presentEgoInteractionPlanV1(plan);
 }

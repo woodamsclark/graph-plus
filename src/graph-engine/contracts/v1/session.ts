@@ -4,7 +4,7 @@ import type { GraphExperienceContractV1 } from './experience.ts';
 import type { GraphFilterRequestV1, GraphFilterScopeV1 } from './filter.ts';
 import type { ApplyGraphPatchResultV1, GraphPatchV1 } from './patch.ts';
 import type { GraphEffectiveSettingsV1, GraphSettingsOverridesV1 } from './profile.ts';
-import type { GraphCameraStateV1, GraphViewStateV1 } from './view-state.ts';
+import type { GraphCameraStateV1, GraphViewStateV1, GraphWorldStateV1 } from './view-state.ts';
 import type { Disposable, Vec3 } from './values.ts';
 import type { GraphSessionUiOptionsV1 } from './ui.ts';
 
@@ -18,6 +18,8 @@ export interface GraphSessionOptionsV1 {
   readonly restoreViewState?: GraphViewStateV1;
   readonly sessionOverrides?: GraphSettingsOverridesV1;
   readonly ui?: GraphSessionUiOptionsV1;
+  /** Only one surface attached to a shared application world should advance layout. */
+  readonly layoutAuthority?: boolean;
   readonly onSessionOverridesChanged?: (
     overrides: GraphSettingsOverridesV1,
   ) => void | Promise<void>;
@@ -36,10 +38,12 @@ export interface GraphSessionV1 {
 
   getActiveView(): GraphActiveViewV1;
   getAvailableViews(): readonly GraphViewIdV1[];
+  /** State installation for consumers; interactive controls use the Ego control port. */
   setView(viewId: GraphViewIdV1): Promise<void>;
   getViewUiState(viewId: GraphViewIdV1): GraphViewUiStateV1 | undefined;
   setViewUiState(viewId: GraphViewIdV1, state: GraphViewUiStateV1): void;
 
+  /** Compatibility state setters; do not represent user intentions or emit their observations. */
   setSelection(nodeIds: readonly string[]): Promise<void>;
   focusNode(nodeId: string | null): Promise<void>;
   /** Apply host-translated truth without representing it as endogenous Ego intent. */
@@ -55,6 +59,10 @@ export interface GraphSessionV1 {
   resetCamera(options?: TransitionOptionsV1): Promise<void>;
   exportViewState(): Promise<GraphViewStateV1>;
   restoreViewState(state: GraphViewStateV1): Promise<void>;
+  /** World layout is independent from this surface's camera, filters, and conscious View state. */
+  exportWorldState(): Promise<GraphWorldStateV1>;
+  applyWorldState(state: GraphWorldStateV1): Promise<void>;
+  setLayoutAuthority(authority: boolean): void;
 
   setSessionOverrides(overrides: GraphSettingsOverridesV1): Promise<void>;
   exportEffectiveSettings(): Promise<GraphEffectiveSettingsV1>;
@@ -64,10 +72,17 @@ export interface GraphSessionV1 {
   onViewChanged(listener: (view: GraphActiveViewV1) => void): Disposable;
   onIntent(listener: (intent: GraphIntentV1) => void): Disposable;
   onGraphChanged(listener: (event: GraphChangedEventV1) => void): Disposable;
+  onWorldChanged(listener: (event: GraphWorldChangedEventV1) => void): Disposable;
   onError(listener: (error: GraphSessionErrorV1) => void): Disposable;
 
   setSuspended(suspended: boolean): void;
   dispose(): Promise<void>;
+}
+
+export interface GraphWorldChangedEventV1 {
+  readonly sessionId: string;
+  readonly cause: 'layout' | 'interaction' | 'pin' | 'document' | 'restore';
+  readonly state: GraphWorldStateV1;
 }
 
 export interface GraphReplaceAttentionExternalInfluenceV1 {
@@ -75,7 +90,7 @@ export interface GraphReplaceAttentionExternalInfluenceV1 {
   readonly type: 'replace-attention';
   readonly nodeIds: readonly string[];
   readonly focusNodeId?: string;
-  readonly framing?: 'preserve' | 'fit-state';
+  readonly framing?: 'preserve' | 'fit-state' | 'recenter-focus';
 }
 
 export interface GraphReplaceRememberedSubjectsExternalInfluenceV1 {

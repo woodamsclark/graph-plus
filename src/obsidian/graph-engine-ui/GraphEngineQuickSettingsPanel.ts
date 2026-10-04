@@ -1,4 +1,4 @@
-import { Notice, Setting, setIcon, type SliderComponent } from 'obsidian';
+import { Setting, setIcon, type SliderComponent } from 'obsidian';
 import {
   GRAPH_VIEW_DEFINITIONS_V1,
   type GraphViewIdV1,
@@ -187,17 +187,17 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     const view = GRAPH_VIEW_DEFINITIONS_V1[this.activeViewId];
     const availableViews = this.context.session.getAvailableViews();
     if (view.controls.navigationActions.includes('back')
-      && view.interactions.backgroundActivation !== view.id
-      && availableViews.includes(view.interactions.backgroundActivation)) {
+      && view.interactions.escapeActivation !== view.id
+      && availableViews.includes(view.interactions.escapeActivation)) {
       actions.append(this.iconButton('arrow-up', 'Back one View', () => {
-        void this.context.session.setView(view.interactions.backgroundActivation);
+        this.context.controls.navigateView('back');
       }));
     }
     if (view.controls.navigationActions.includes('overview') && view.id === 'focus' && availableViews.includes('overview')) {
-      actions.append(this.iconButton('globe', 'Return to Overview', () => { void this.context.session.setView('overview'); }));
+      actions.append(this.iconButton('globe', 'Return to Overview', () => { this.context.controls.navigateView('overview'); }));
     }
     if (view.controls.navigationActions.includes('clear-constellation') && viewState.selectedNodeIds.length > 0) {
-      actions.append(this.iconButton('eraser', 'Clear active constellation', () => { void this.context.session.setSelection([]); }));
+      actions.append(this.iconButton('eraser', 'Clear active constellation', () => { this.context.controls.navigateView('clear-constellation'); }));
     }
     actions.append(this.iconButton('x', 'Collapse graph controls', () => {
       this.setCollapsed(true);
@@ -260,6 +260,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     if (!graphUiSectionIsShownV1(this.policy, SECTIONS.form)) return;
     const body = this.section(parent, SECTIONS.form, SECTION_TITLES[SECTIONS.form], false);
     this.renderFormDimensions(body, effective);
+    /* Mind Map deferred: keep this implementation for a later release.
     if (graphUiControlIsShownV1(this.policy, SECTIONS.form, CONTROLS.mindMap)) {
       const form = effective.modules.form;
       const selectedId = viewState.selectedNodeIds.length === 1 ? viewState.selectedNodeIds[0] : undefined;
@@ -301,6 +302,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
         }
       }
     }
+    */
     this.renderRegionControls(body, effective);
     this.mountContributions(body, contributions);
     this.mountContributions(body, regionContributions);
