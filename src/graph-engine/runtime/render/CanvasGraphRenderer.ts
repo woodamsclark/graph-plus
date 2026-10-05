@@ -464,54 +464,62 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     this.context.textAlign = 'center';
     this.context.textBaseline = 'top';
     this.context.font = graphFontToCss(frame.labelFont);
-    const candidates = nodes
-      .filter((candidate) => (candidate.node.showLabel !== false || this.cursorLabelReveal(frame, candidate) > 0)
-        && (mode !== 'off' || candidate.node.labelForceVisible === true))
-      .sort((a, b) => this.cursorLabelReveal(frame, b) - this.cursorLabelReveal(frame, a) || compareLabelCandidates(a, b));
     const layoutStart = this.now();
-    let acceptedCandidates: readonly ProjectedNode[];
-    if (mode === 'all' || mode === 'off') {
-      acceptedCandidates = candidates;
-    } else {
-      const cameraState = this.vision.getState();
-      const zoom = cameraState.projection === 'perspective'
-        ? this.vision.worldToScreen(cameraState.target).scale
-        : Math.max(0.1, cameraState.zoom);
-      const saliency = Math.max(0, Math.min(100,
-        renderPolicy(frame).adaptiveLabelSaliency
-          ?? renderPolicy(frame).adaptiveLabelThreshold
-          ?? 50));
-      const occupied: LabelBounds[] = [];
-      const accepted: ProjectedNode[] = [];
-      for (const candidate of candidates) {
-        const forced = candidate.node.labelForceVisible === true
-          || candidate.node.labelAlwaysVisible === true;
+    const occupied: LabelBounds[] = [];
+    const accepted: ProjectedNode[] = [];
+    const automaticIds = new Set<string>();
+    const cameraState = this.vision.getState();
+    const zoom = cameraState.projection === 'perspective'
+      ? this.vision.worldToScreen(cameraState.target).scale
+      : Math.max(0.1, cameraState.zoom);
+    const saliency = Math.max(0, Math.min(100,
+      renderPolicy(frame).adaptiveLabelSaliency ?? renderPolicy(frame).adaptiveLabelThreshold ?? 50));
+    // Resolve automatic eligibility independently of proximity. A cursor-only
+    // label must not inherit a full-opacity baseline merely because it is standard.
+    const automaticCandidates = nodes.filter(candidate => candidate.node.showLabel !== false
+      && (mode !== 'off' || candidate.node.labelForceVisible === true)).sort(compareLabelCandidates);
+    for (const candidate of automaticCandidates) {
+      const forced = candidate.node.labelForceVisible === true || candidate.node.labelAlwaysVisible === true;
+      if (mode === 'adaptive') {
         const boost = Math.max(0, Math.min(1, candidate.node.labelSaliencyBoost ?? 0));
         const effectiveSaliency = saliency * (1 - boost);
-        const saliencyFactor = 2 ** ((50 - effectiveSaliency) / 50);
-        const minimumBudget = clampInteger(Math.round(12 * saliencyFactor), 4, 24);
+        // Shift the whole 0–100 range one octave stricter: half the old budget.
+        const saliencyFactor = 2 ** (-effectiveSaliency / 50);
+        const minimumBudget = clampInteger(Math.round(12 * saliencyFactor), 1, 12);
         const candidateBudget = clampInteger(
           Math.round(this.width * this.height / 12000 * Math.sqrt(zoom) * saliencyFactor),
-          minimumBudget,
-          120,
+          minimumBudget, 60,
         );
-        if (!forced && this.cursorLabelReveal(frame, candidate) <= 0 && accepted.length >= candidateBudget) continue;
-        const bounds = this.labelBounds(frame, candidate);
-        if (!forced && labelIsOccludedByCloserNode(
-          candidate, bounds, this.labelOcclusionCandidates(candidate, bounds),
-        )) continue;
-        if (!forced && occupied.some((other) => overlaps(bounds, other))) continue;
-        occupied.push(bounds);
-        accepted.push(candidate);
+        if (!forced && accepted.length >= candidateBudget) continue;
       }
-      acceptedCandidates = accepted;
+      const bounds = this.labelBounds(frame, candidate);
+      if (mode === 'adaptive' && !forced && (labelIsOccludedByCloserNode(
+        candidate, bounds, this.labelOcclusionCandidates(candidate, bounds),
+      ) || occupied.some(other => overlaps(bounds, other)))) continue;
+      occupied.push(bounds);
+      accepted.push(candidate);
+      automaticIds.add(candidate.node.id);
     }
+    // Proximity is a separate label channel, including when automatic labels are
+    // Off. Void objects, closer-node occlusion and label collisions still apply.
+    const proximityCandidates = nodes.filter(candidate => !automaticIds.has(candidate.node.id)
+      && this.cursorLabelReveal(frame, candidate) > 0)
+      .sort((a, b) => this.cursorLabelReveal(frame, b) - this.cursorLabelReveal(frame, a) || compareLabelCandidates(a, b));
+    for (const candidate of proximityCandidates) {
+      const bounds = this.labelBounds(frame, candidate);
+      if (labelIsOccludedByCloserNode(candidate, bounds, this.labelOcclusionCandidates(candidate, bounds))
+        || occupied.some(other => overlaps(bounds, other))) continue;
+      occupied.push(bounds);
+      accepted.push(candidate);
+    }
+    const acceptedCandidates = accepted;
     const labelLayoutMs = elapsed(layoutStart, this.now());
     const drawStart = this.now();
     for (const candidate of acceptedCandidates) {
       const { node, point, radius } = candidate;
       const offset = node.labelOffset ?? { x: 0, y: 0 };
-      this.context.globalAlpha = Math.max(clampOpacity(node.labelOpacity), this.cursorLabelReveal(frame, candidate));
+      const automaticOpacity = automaticIds.has(node.id) ? clampOpacity(node.labelOpacity) : 0;
+      this.context.globalAlpha = Math.max(automaticOpacity, this.cursorLabelReveal(frame, candidate));
       this.context.fillStyle = this.colorCss(node.labelColor);
       const font = nodeFont(frame, node, this.vision.getState().zoom, this.vision.getState().projection, this.cursorLabelReveal(frame, candidate) > 0 ? 12 : 1);
       this.context.font = font;

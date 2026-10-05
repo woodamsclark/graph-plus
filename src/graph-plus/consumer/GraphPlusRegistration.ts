@@ -101,6 +101,7 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
         policy: 'required',
         constraints: {
           labelPosition: { type: 'enum', allowed: ['above', 'below'] },
+          cursorLabelProximityEnabled: { type: 'enum', allowed: [true, false] },
           adaptiveLabelThreshold2d: { type: 'number', min: 0, max: 100 },
           adaptiveLabelThreshold3d: { type: 'number', min: 0, max: 100 },
         },

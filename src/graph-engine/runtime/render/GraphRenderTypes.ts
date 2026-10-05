@@ -131,6 +131,7 @@ export interface GraphEdgeRenderContributionV1 {
 
 export interface GraphPresentationPolicyV2 {
   readonly cursorAttractionRadiusPx?: number;
+  /** Independent of labelMode; zero disables cursor-only label reveal. */
   readonly cursorLabelRevealRadiusPx?: number;
   readonly labelMode?: 'adaptive' | 'all' | 'off';
   readonly labelPosition?: 'above' | 'below';

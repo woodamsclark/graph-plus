@@ -356,6 +356,15 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
           await this.context.profileSettings.setModuleSetting('anima', 'labelPosition', value);
         }));
     }
+    if (anima?.enabled
+      && graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labelProximity)) {
+      const presentation = graphSettingPresentationV1('anima.cursorLabelProximityEnabled');
+      new Setting(body).setName(presentation.name).addToggle(toggle => toggle
+        .setValue(anima.settings.cursorLabelProximityEnabled !== false)
+        .onChange(async enabled => {
+          await this.context.profileSettings.setModuleSetting('anima', 'cursorLabelProximityEnabled', enabled);
+        }));
+    }
     if (rendering) {
       const settings = rendering.settings;
       if (anima?.enabled

@@ -312,9 +312,10 @@ adaptive label is also rejected when its node anchor or label bounds are occlude
 nearer visible node disc. Forced interaction labels bypass this occlusion rule. Only
 onscreen nodes are candidates.
 
-The base adaptive label budget is bounded from `12` through `120` before the active
-threshold adjustment and grows with viewport area and effective zoom. In 2D effective
-zoom is the orthographic camera zoom with the existing lower bound. In 3D it is the
+The base adaptive label budget grows with viewport area and effective zoom. The RC
+saliency mapping caps the adjusted budget at `60` and uses the slider-dependent
+minimum below. In 2D effective zoom is the orthographic camera zoom with the existing
+lower bound. In 3D it is the
 perspective scale at the camera target, so dollying closer reveals progressively more
 ordinary labels and dollying away returns to the hub-first overview. Collision
 rejection remains active at every budget.
@@ -327,15 +328,16 @@ is unaffected. Graph+ defaults to `65` in 2D and `50` in 3D. For Saliency `s`, t
 renderer applies:
 
 ```text
-saliencyFactor = 2 ^ ((50 - s) / 50)
-minimumBudget = clamp(round(12 * saliencyFactor), 4, 24)
-budget = clamp(round(baseAdaptiveBudget * saliencyFactor), minimumBudget, 120)
+saliencyFactor = 2 ^ (-s / 50)
+minimumBudget = clamp(round(12 * saliencyFactor), 1, 12)
+budget = clamp(round(baseAdaptiveBudget * saliencyFactor), minimumBudget, 60)
 ```
 
-Thus `50` preserves the accepted curve, `100` halves its ordinary-label budget at a
-given zoom, and `0` doubles it subject to the bounds. Changing the slider updates the
-mounted session without changing label rank, graph state, or the other dimension's
-value.
+The RC shifts the entire mapping to roughly half the prior automatic-label budget.
+The distant-zoom minimum is `12` at `0`, `6` at `50`, and `3` at `100`. Cursor proximity
+is controlled independently and can reveal labels even with Labels Off. Changing the
+slider updates the mounted session without changing label rank, graph state, or the
+other dimension's value.
 
 Anima owns a two-value `labelPosition` presentation setting:
 

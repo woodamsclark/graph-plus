@@ -243,7 +243,7 @@ test('Overview previews fully only on node hover, independently of cursor gravit
   }
 });
 
-test('cursor proximity reveals nearby dim labels but respects range, void nodes and Labels Off', () => {
+test('cursor proximity reveals nearby labels independently of Labels mode while respecting range and void', () => {
   const value = runtimeHarness();
   const canvas = value.document.createElement('canvas');
   const renderer = new CanvasGraphRenderer(canvas, () => 0);
@@ -271,8 +271,83 @@ test('cursor proximity reveals nearby dim labels but respects range, void nodes 
   deepEqual(labels(), [], 'leaving restores dim label suppression');
   renderer.updateScene({ ...scene, cursorScreenPoint: { x: 320, y: 160 }, policy: { ...scene.policy, labelMode: 'off' } });
   renderer.render();
-  deepEqual(labels(), [], 'proximity cannot override Labels Off');
+  deepEqual(labels(), ['near'], 'Labels Off leaves the proximity channel enabled');
+  value.drawArguments.length = 0;
+  renderer.updateScene({ ...scene, cursorScreenPoint: { x: 320, y: 160 },
+    policy: { ...scene.policy, labelMode: 'off', cursorLabelRevealRadiusPx: 0 } });
+  renderer.render();
+  deepEqual(labels(), [], 'disabling proximity and ordinary labels hides unforced labels');
   renderer.dispose();
+});
+
+test('proximity-only labels fade identically for Overview standard and Constellation dim nodes', () => {
+  for (const dimensions of ['2d', '3d'] as const) {
+    const value = runtimeHarness();
+    const canvas = value.document.createElement('canvas');
+    const context = recordingContext([]);
+    const alphas = new Map<string, number>();
+    context.fillText = text => { alphas.set(text, context.globalAlpha); };
+    canvas.getContext = (() => context) as unknown as typeof canvas.getContext;
+    const renderer = new CanvasGraphRenderer(canvas, () => 0);
+    renderer.initialize(); renderer.resize(640, 360, 1);
+    const cameraState = { position: { x: 0, y: 0, z: 1000 }, target: { x: 0, y: 0, z: 0 },
+      up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: dimensions === '2d' ? 'orthographic' as const : 'perspective' as const };
+    const camera = new GraphCameraController(cameraState, dimensions); camera.setViewport(640, 360);
+    const automatic = Array.from({ length: 12 }, (_, i) => ({ id: `auto-${i}`, label: `A${i}`,
+      position: camera.screenToWorld(40 + (i % 6) * 95, i < 6 ? 40 : 320, 1000), radius: 4,
+      ...RESOLVED_NODE_STYLE, labelStatePriority: 5, labelFontSize: 12 }));
+    for (const dimmed of [false, true]) {
+      const scene = { regions: [], edges: [], ...RESOLVED_FRAME_STYLE, revision: 1, presentationRevision: 1,
+        view: { dimensions, camera: cameraState, viewport: { width: 640, height: 360, devicePixelRatio: 1 } }, labels: [],
+        nodes: [...automatic, { id: 'target', label: 'target', position: camera.screenToWorld(320, 180, 1000), radius: 4,
+          ...RESOLVED_NODE_STYLE, opacity: dimmed ? 0.24 : 1, showLabel: !dimmed, labelOpacity: dimmed ? 0 : 1,
+          labelStatePriority: 0 }],
+        policy: { labelMode: 'adaptive' as const, adaptiveLabelSaliency: 100, cursorLabelRevealRadiusPx: 96 },
+      };
+      for (const distance of [72, 48, 24]) {
+        alphas.clear();
+        renderer.updateScene({ ...scene, cursorScreenPoint: { x: 320 + distance, y: 180 } }); renderer.render();
+        equal(alphas.get('target'), 1 - distance / 96, 'cursor-only opacity depends on distance, not its scene label opacity');
+        assert([...alphas].filter(([label]) => label !== 'target').every(([, alpha]) => alpha === 1),
+          'already eligible automatic labels retain their normal opacity');
+      }
+      alphas.clear(); renderer.updateScene(scene); renderer.render();
+      equal(alphas.has('target'), false, 'leaving restores the automatic budget or dim suppression');
+    }
+    renderer.dispose();
+  }
+});
+
+test('live cursor label toggle updates independently of Labels Off and cursor gravity', async () => {
+  let scene: GraphRenderSceneV2 | undefined;
+  const registry = new GraphRendererRegistryV2();
+  registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true, create: ({ createCanvas, now }) => {
+    const renderer = new CanvasGraphRenderer(createCanvas(), now); const update = renderer.updateScene.bind(renderer);
+    renderer.updateScene = next => { scene = next; update(next); }; return renderer;
+  } });
+  const value = runtimeHarness({ consumerId: 'graph-plus', profileId: 'default',
+    registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1, rendererRegistry: registry,
+    document: graphDocument({ nodes: [graphNode('near'), graphNode('far')], edges: [] }) });
+  value.profiles.setUserOverrides('graph-plus', 'default', { dimensions: '2d', modules: {
+    'force-layout': { enabled: false }, rendering: { settings: { labelMode: 'off' } },
+  } });
+  const session = await value.create(); const initial = await session.exportViewState();
+  const camera = new GraphCameraController(initial.camera, '2d'); camera.setViewport(640, 360);
+  await session.restoreViewState({ ...initial, positions: { near: camera.screenToWorld(320, 180, 1000),
+    far: camera.screenToWorld(500, 180, 1000) } });
+  const canvas = runtimeCanvas(value.container);
+  pointer(value, canvas, 'pointermove', 350, 180, 26); value.platform.flushFrame();
+  const drawn = () => value.drawArguments.filter(call => call.method === 'fillText').map(call => call.args[0]);
+  for (const enabled of [false, true, false]) {
+    value.drawArguments.length = 0;
+    await session.setSessionOverrides({ modules: { anima: { settings: { cursorLabelProximityEnabled: enabled } } } });
+    value.platform.flushFrame();
+    deepEqual(drawn(), enabled ? ['near'] : [], 'proximity can switch while ordinary labels remain Off');
+    equal(scene!.policy?.labelMode, 'off', 'the proximity toggle cannot alter Labels mode');
+    equal(scene!.policy?.cursorAttractionRadiusPx, 64, 'the label toggle cannot alter gravity');
+    equal(scene!.policy?.cursorLabelRevealRadiusPx, enabled ? 96 : 0, 'the live setting controls only the label field');
+  }
+  await session.dispose();
 });
 
 test('V1.6 Anima owns the exact visible-degree radius and composable structural scale', () => {
@@ -1216,7 +1291,9 @@ test('V1.6 adaptive label budget follows camera range and per-node Saliency', ()
   const near = renderAtDistance(100);
   const stricter = renderAtDistance(100, 100);
   const favored = renderAtDistance(100, 100, 0.5);
-  equal(far, 12, 'a distant perspective overview should begin at the minimum label budget');
+  equal(far, 6, 'the stricter midpoint halves the distant automatic label floor');
+  equal(renderAtDistance(5_000, 0), 12, 'the low slider end starts at the former midpoint budget');
+  equal(renderAtDistance(5_000, 100), 3, 'the strict slider end can show fewer than the former minimum');
   assert(near > far, 'dollying closer should reveal additional adaptive labels');
   assert(stricter < near, 'raising Saliency should reduce peripheral labels at the same camera range');
   assert(favored > stricter,

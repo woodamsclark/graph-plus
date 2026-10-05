@@ -21,9 +21,19 @@ camera, saved settings or simulation.
   Normal graph forces can still act while their alpha remains above zero.
 - Label reveal reaches 96 CSS pixels and fades with cursor distance. It can reveal
   visible dim context without promoting the node or changing membership. Void nodes
-  remain hidden, Labels Off is respected, and ordinary label collision and nearer-disc
-  occlusion checks remain active. Proximity labels have a 12-pixel readable font floor,
-  shared by text measurement and drawing.
+  remain hidden. Cursor-only labels use the same distance fade for standard Overview
+  nodes and dim Constellation context; automatically visible labels retain their normal
+  opacity. Ordinary label collision and nearer-disc occlusion checks remain active.
+  Proximity labels have a 12-pixel readable font floor, shared by text measurement
+  and drawing.
+- Cursor label proximity is a default-on Anima setting, independent of Labels mode
+  and cursor attraction. Its Display toggle follows Label position. With Labels Off,
+  proximity can still reveal nearby labels; disabling proximity leaves automatic and
+  interaction-forced labels unchanged.
+- Adaptive saliency retains the existing 0–100 saved values but halves the automatic
+  label budget across the range. At distant zoom the minimum budgets are 12, 6, and 3
+  for saliency 0, 50, and 100 respectively, with a maximum budget of 60. Higher values
+  remain more selective; the existing hover-neighbor priority boost is retained.
 - Mouse down suspends the field during navigation and dragging. Ctrl-removal also
   suspends it so proximity cannot relight a removed label or move its target. Leave, cancellation,
   disabled input and touch clear it. Touch does not create a hover field.
@@ -74,5 +84,6 @@ Regression coverage includes input lifecycle, cold-layout attraction, pin and Fo
 exclusion, actual session movement/range in 2D and 3D, unchanged camera framing,
 pointer-leave settling, repeated natural settling and waking with shared position buffers,
 host failure isolation, nearest-only attraction and destination-plus-hover preview, Display control order, and
-label range/void/Off behavior. Obsidian desktop visual
-acceptance remains a separate smoke check.
+label range/void behavior, equal Overview/Constellation fade opacity in both dimensions,
+independent live proximity toggling with Labels Off, and the shifted saliency budgets.
+Obsidian desktop visual acceptance remains a separate smoke check.
