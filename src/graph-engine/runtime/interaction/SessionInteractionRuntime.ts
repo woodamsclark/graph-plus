@@ -581,6 +581,11 @@ export class SessionInteractionRuntime {
     };
   }
 
+  isHoverPreviewCommitted(): boolean {
+    return this.hoverInput?.target.kind === 'node'
+      && this.hoverInput.target.nodeId === this.consumedHoverNodeId;
+  }
+
   getObjectActivationPreview(): GraphInteractionPreviewV1 | null {
     // A drag owns an already-admitted snapshot, so gesture suspension must not
     // discard it or ask Ego to plan a replacement.

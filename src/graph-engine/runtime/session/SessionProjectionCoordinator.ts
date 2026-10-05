@@ -1,3 +1,4 @@
+import { AnimaHoverPreviewAnimationV1, blendAnimaPreviewFrameV1 } from '../anima/AnimaHoverPreviewAnimation.ts';
 import type { GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
 import type { GraphViewStateV1, GraphExperienceContractV1 } from '../../contracts/v1/index.ts';
 import { GraphTopologyIndex } from '../../core/document/GraphTopologyIndex.ts';
@@ -22,6 +23,7 @@ import type { SessionInvalidationClassV1 } from './SessionFrameScheduler.ts';
 export class SessionProjectionCoordinatorV1 {
   readonly frames = new GraphFrameStore();
   private dirty = true;
+  private readonly hoverAnimation = new AnimaHoverPreviewAnimationV1();
   private geometryRevision = 0;
   private topologyCache?: {
     readonly document: GraphModuleProjectionStateV1['document'];
@@ -53,6 +55,8 @@ export class SessionProjectionCoordinatorV1 {
     readonly selectionNeighborRevealActive?: boolean;
     readonly previewedNodeId?: string;
     readonly invalidation: SessionInvalidationClassV1;
+    readonly now: number;
+    readonly previewCommitted?: boolean;
   }): GraphModulePresentationStateV1 {
     this.onComposition();
     if (options.invalidation === 'geometry' || options.invalidation === 'content') this.geometryRevision += 1;
@@ -63,7 +67,7 @@ export class SessionProjectionCoordinatorV1 {
       relationships: topology.relationships('either'),
     });
     const objectActivationPreview = options.resolveObjectActivationPreview?.();
-    const moduleView = options.host.contribute({
+    const input = {
       ...options.projectionView,
       viewState: options.viewState,
       consciousness,
@@ -80,35 +84,67 @@ export class SessionProjectionCoordinatorV1 {
       theme: options.theme,
       presentationPolicy: options.presentationPolicy,
       motionTargets: {},
+    };
+    const compile = (preview: GraphInteractionPreviewV1 | null | undefined, hoveredNodeId = options.hoveredNodeId) => {
+      const moduleView = options.host.contribute({ ...input, objectActivationPreview: preview, hoveredNodeId });
+      const snapshot = createAnimusSnapshotV1({
+        document: moduleView.document,
+        viewState: options.viewState,
+        displaySelection: moduleView.renderSelection,
+        positions: moduleView.positions,
+        nodeRoles: moduleView.nodeRoles,
+        edgeRoles: moduleView.edgeRoles,
+        regions: moduleView.regions,
+        draggedNodeId: options.draggedNodeId,
+        hoveredNodeId,
+        previewedNodeId: options.previewedNodeId,
+        selectionPresentationSuspended: options.selectionPresentationSuspended,
+        selectionNeighborRevealActive: options.selectionNeighborRevealActive,
+      });
+      const frame = compileAnimaSceneV1({
+        snapshot,
+        consciousness,
+        experience: options.experience,
+        objectActivationPreview: preview,
+        nodeContributions: moduleView.nodeContributions,
+        edgeContributions: moduleView.edgeContributions,
+        regionContributions: moduleView.regionContributions,
+        theme: moduleView.theme,
+        presentationPolicy: moduleView.presentationPolicy,
+        geometryRevision: this.geometryRevision,
+      });
+      return { moduleView, frame };
+    };
+    const animated = options.host.has('anima') && objectActivationPreview?.activation !== 'remove-membership'
+      && objectActivationPreview?.activation !== 'toggle-membership';
+    if (!animated) {
+      this.hoverAnimation.clear();
+      const result = compile(objectActivationPreview);
+      this.frames.set(result.frame);
+      this.dirty = true;
+      return result.moduleView;
+    }
+    const layers = this.hoverAnimation.update({
+      context: JSON.stringify([input.document.documentId, input.document.revision, options.viewState.dimensions, options.viewState.viewMode,
+        options.viewState.focusedNodeId, options.viewState.selectedNodeIds,
+        [...input.renderSelection.nodeIds], [...input.renderSelection.edgeIds]]),
+      preview: objectActivationPreview, hoveredNodeId: options.hoveredNodeId,
+      committed: options.previewCommitted === true, now: options.now,
     });
-    const snapshot = createAnimusSnapshotV1({
-      document: moduleView.document,
-      viewState: options.viewState,
-      displaySelection: moduleView.renderSelection,
-      positions: moduleView.positions,
-      nodeRoles: moduleView.nodeRoles,
-      edgeRoles: moduleView.edgeRoles,
-      regions: moduleView.regions,
-      draggedNodeId: options.draggedNodeId,
-      hoveredNodeId: options.hoveredNodeId,
-      previewedNodeId: options.previewedNodeId,
-      selectionPresentationSuspended: options.selectionPresentationSuspended,
-      selectionNeighborRevealActive: options.selectionNeighborRevealActive,
-    });
-    this.frames.set(compileAnimaSceneV1({
-      snapshot,
-      consciousness,
-      experience: options.experience,
-      objectActivationPreview,
-      nodeContributions: moduleView.nodeContributions,
-      edgeContributions: moduleView.edgeContributions,
-      regionContributions: moduleView.regionContributions,
-      theme: moduleView.theme,
-      presentationPolicy: moduleView.presentationPolicy,
-      geometryRevision: this.geometryRevision,
-    }));
+    const baseline = compile(null);
+    let frame = baseline.frame;
+    for (const layer of layers) {
+      frame = blendAnimaPreviewFrameV1(frame, compile(layer.preview, layer.hoveredNodeId).frame, layer.strength);
+    }
+    this.frames.set(frame);
     this.dirty = true;
-    return moduleView;
+    return baseline.moduleView;
+  }
+
+  resetPreviewAnimation(): void { this.hoverAnimation.clear(); }
+
+  nextPreviewFrameDelayMs(now: number): number | undefined {
+    return this.hoverAnimation.nextFrameDelayMs(now);
   }
 
   markDirty(): void { this.dirty = true; }
@@ -128,6 +164,7 @@ export class SessionProjectionCoordinatorV1 {
   }
 
   clear(): void {
+    this.hoverAnimation.clear();
     this.frames.set(null);
     this.dirty = false;
   }

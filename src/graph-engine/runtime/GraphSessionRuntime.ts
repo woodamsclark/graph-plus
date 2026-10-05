@@ -308,6 +308,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.projection.markDirty();
       this.activeFrameInvalidations.add('camera');
     }
+    if (this.projection.nextPreviewFrameDelayMs(this.platform.now()) !== undefined) {
+      this.refreshFrame(false, 'presentation');
+    }
     const compositionMs = duration(compositionStart, this.platform.now());
     if (this.isSuspended()) {
       this.activeFrameInvalidations = null;
@@ -329,6 +332,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     }
     this.activeFrameInvalidations = null;
     if (tickResult?.requestNextFrame) this.scheduleFrame(tickResult.nextFrameDelayMs, 'geometry');
+    const previewDelay = this.projection.nextPreviewFrameDelayMs(this.platform.now());
+    if (previewDelay !== undefined) this.scheduleFrame(previewDelay, 'presentation');
   };
 
   constructor(options: GraphSessionRuntimeOptionsV1) {
@@ -1448,6 +1453,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       selectionNeighborRevealActive: this.interaction?.isSelectionNeighborRevealActive(),
       previewedNodeId: this.interaction?.getPreviewedNodeId(),
       invalidation,
+      now: this.platform.now(),
+      previewCommitted: this.interaction?.isHoverPreviewCommitted(),
     });
     if (schedule) this.scheduleFrame(0, invalidation);
   }
@@ -1851,6 +1858,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.interaction.setEnabled(!suspended);
     this.moduleHost.setSuspended(suspended);
     if (suspended) {
+      this.projection.resetPreviewAnimation();
+      this.refreshFrame(false, 'presentation');
       this.lastFrameTimestamp = null;
       this.clearScheduledFrame();
       return;

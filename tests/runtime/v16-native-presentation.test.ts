@@ -200,7 +200,7 @@ test('cursor gravity pulls only the nearest eligible node and never a runner-up 
   }
 });
 
-test('Overview previews fully only on node hover, independently of cursor gravity range', async () => {
+test('Overview completes timed previews only on node hover, independently of cursor gravity range', async () => {
   for (const dimensions of ['2d', '3d'] as const) {
     let scene: GraphRenderSceneV2 | undefined;
     const registry = new GraphRendererRegistryV2();
@@ -226,8 +226,10 @@ test('Overview previews fully only on node hover, independently of cursor gravit
     for (const [distance, expected] of [[64, 1], [32, 1], [0, 0.24], [1, 0.24], [0, 0.24], [32, 1], [64, 1]]) {
       pointer(value, canvas, 'pointermove', 320 + distance, 180, 14);
       value.platform.flushFrame();
+      value.platform.advanceTime(distance <= 1 ? 4_000 : 2_000);
+      value.platform.flushTimer(); value.platform.flushFrame();
       equal(scene!.nodes.find(node => node.id === 'far')!.opacity, expected,
-        'only an actual node hover previews the complete destination, without a distance fade');
+        'only an actual node hover completes the timed preview, independently of cursor distance');
       deepEqual(await session.exportViewState(), unchanged, 'hover never commits View, Attention, Memory or camera');
     }
     canvas.dispatchEvent(new value.window.PointerEvent('pointerleave', { pointerType: 'mouse', pointerId: 14 }) as unknown as Event);

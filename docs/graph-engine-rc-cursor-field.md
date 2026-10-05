@@ -59,9 +59,22 @@ while its unrelated context retains the destination baseline. Neighbor labels re
 adaptive priority rather than forced visibility.
 
 Preview begins only from an actual node hover. The gravity radius alone cannot
-activate it, and preview strength does not fade with distance. The 96-pixel proximity
-label reveal remains independent. There is one admitted transition and one hover
-presentation pass; the destination hover never plans another transition recursively.
+activate it. While Anima is enabled, a primary hover visit waits two seconds, then
+linearly blends from the committed scene to the admitted preview over two seconds.
+Leaving cancels the visit and fades its current strength back to the normal scene
+over two seconds, including when canceled midway through fade-in. Changing targets
+starts a fresh delay while the old preview fades out. Strength depends on elapsed
+time, not cursor distance. The 96-pixel proximity label reveal remains immediate
+and independent. Ctrl membership-removal cues remain immediate.
+
+Anima owns the transient timer and the blend of resolved node, label, outline and
+link visuals. The session supplies its clock and scheduler; a cold graph wakes for
+the delay/fade, then sleeps after it finishes. No simulation alpha or graph position
+is changed to animate the preview. Actual activation bypasses the timer and retains
+its admitted hovered scene immediately. A changed committed View, membership or
+projection discards stale prospective state. Suspension cancels the preview rather
+than replaying it on resume; suspension and session shutdown clear all wakeups.
+There is one admitted transition and one hover presentation pass; the destination hover never plans another transition recursively.
 Actual activation commits normally and preserves the admitted hover visit until leave.
 Hover alone never commits Attention, Memory, View, or camera interest.
 
@@ -85,5 +98,7 @@ exclusion, actual session movement/range in 2D and 3D, unchanged camera framing,
 pointer-leave settling, repeated natural settling and waking with shared position buffers,
 host failure isolation, nearest-only attraction and destination-plus-hover preview, Display control order, and
 label range/void behavior, equal Overview/Constellation fade opacity in both dimensions,
-independent live proximity toggling with Labels Off, and the shifted saliency budgets.
+independent live proximity toggling with Labels Off, the shifted saliency budgets,
+timed preview delay/fade/cancellation in every View and dimension, fresh target delays,
+partial-fade reversal, immediate activation during waiting, and idle scheduling.
 Obsidian desktop visual acceptance remains a separate smoke check.
