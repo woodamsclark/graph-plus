@@ -1,6 +1,6 @@
 import { presentEgoInteractionPlanV1, type GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
 import { isEgoInteractionPlanCurrentV1, realizeEgoViewDirectiveV1, sameEgoInteractionV1,
-  type EgoInteractionInputV1, type EgoInteractionContextV1 } from '../consciousness/EgoInteractionPlan.ts';
+  type EgoInteractionInputV1, type EgoInteractionContextV1, type EgoInteractionStateV1 } from '../consciousness/EgoInteractionPlan.ts';
 import type {
   GraphCameraStateV1,
   GraphDimensionsV1,
@@ -65,6 +65,15 @@ export class SessionInteractionRuntime {
   /** The admitted hover scene captured at drag start, held without replanning. */
   private dragHoverPreview: GraphInteractionPreviewV1 | undefined;
   private hoverPoint: GraphScreenPointV1 | undefined;
+  /** Borrowed controls and spatial interest; never realized as Attention or a saved View. */
+  private navigationPeek?: {
+    readonly preview: GraphInteractionPreviewV1;
+    readonly state: EgoInteractionStateV1;
+    readonly returnTarget: Vec3;
+    readonly source: string;
+    navigated: boolean;
+  };
+
   private elasticReturnTimer: number | undefined;
   private focusTransition: {
     readonly nodeId: string;
@@ -148,12 +157,12 @@ export class SessionInteractionRuntime {
         this.hitTestMs += Math.max(0, this.options.platform.now() - start);
         return hit && (hit.nodeId === retainedHoverNodeId || this.isNodeInteractiveInCurrentState(hit.nodeId)) ? hit : null;
       },
-      getSelectedNodeIds: () => this.attentionNodeIds(),
-      getFocusedNodeId: () => this.options.getViewState().focusedNodeId,
-      getViewMode: () => resolveGraphUxStateV1(this.options.getViewState()),
+      getSelectedNodeIds: () => this.getNavigationState().attentionNodeIds,
+      getFocusedNodeId: () => this.getNavigationState().focusedNodeId,
+      getViewMode: () => this.getNavigationState().viewId,
       getHoveredNodeId: () => this.hoveredNodeId,
       getFocusedNodeScreenPoint: () => {
-        const focusedNodeId = this.options.getViewState().focusedNodeId;
+        const focusedNodeId = this.getNavigationState().focusedNodeId;
         const position = focusedNodeId === undefined
           ? undefined
           : this.options.getInteractivePositions()[focusedNodeId];
@@ -308,6 +317,8 @@ export class SessionInteractionRuntime {
   private applyCommand(command: GraphRuntimeCommandV1): void {
     switch (command.type) {
       case 'pan-by':
+        this.getNavigationState();
+        if (this.navigationPeek) this.navigationPeek.navigated = true;
         this.options.ego.clearWill();
         this.options.vision.panByPixels(command.deltaX, command.deltaY);
         this.cameraChanged(command);
@@ -442,6 +453,7 @@ export class SessionInteractionRuntime {
         this.hoverMod = command.mod;
         this.hoverCtrl = command.ctrl === true;
         this.hoverPoint = command.point ? { ...command.point } : undefined;
+        this.getNavigationState();
         this.updateCursor();
         this.options.onViewStateChanged('interaction');
         this.options.onIntent({
@@ -497,7 +509,37 @@ export class SessionInteractionRuntime {
     }
   }
 
-  /** Navigation ownership is state policy, independent of Anima's highlights. */
+  private getNavigationState(): EgoInteractionStateV1 {
+    const state = this.options.getViewState();
+    const committed: EgoInteractionStateV1 = { viewId: resolveGraphUxStateV1(state),
+      attentionNodeIds: this.attentionNodeIds(), focusedNodeId: state.focusedNodeId };
+    const document = this.options.getDocument();
+    const source = JSON.stringify([document.documentId, document.revision, committed]);
+    if (this.navigationPeek && this.navigationPeek.source !== source) this.endNavigationPeek(false);
+    const preview = this.isHoverPreviewCommitted() ? null : this.resolveCurrentHoverPreview();
+    if (preview?.activation !== 'primary' || preview.kind !== 'view-transition') {
+      this.endNavigationPeek();
+      return committed;
+    }
+    const returnTarget = this.navigationPeek?.returnTarget ?? this.options.vision.getState().target;
+    this.navigationPeek = { preview, state: preview.resultingState, returnTarget: { ...returnTarget }, source,
+      navigated: this.navigationPeek?.navigated ?? false };
+    return this.navigationPeek.state;
+  }
+
+  private endNavigationPeek(restoreTarget = true): void {
+    const peek = this.navigationPeek;
+    this.navigationPeek = undefined;
+    if (!peek) return;
+    this.cancelElasticReturn();
+    if (restoreTarget && peek.navigated) {
+      // Keep user navigation, restoring just the old target coordinate and controls.
+      this.options.vision.setTarget(peek.returnTarget, true);
+      this.commitCamera();
+    }
+  }
+
+  /** Node motion follows committed camera interest, independently of the peek pivot. */
   getCameraTrackingNodeIds(): readonly string[] {
     const state = this.options.getViewState();
     const tracking = graphInteractionPolicyV1(state).cameraTracking;
@@ -510,6 +552,14 @@ export class SessionInteractionRuntime {
   }
 
   private navigationPivot(): Vec3 | undefined {
+    const navigation = this.getNavigationState();
+    if (this.navigationPeek) {
+      this.navigationPeek.navigated = true;
+      return this.options.vision.deriveCentroid(
+        navigation.viewId === 'focus' && navigation.focusedNodeId ? [navigation.focusedNodeId] : navigation.attentionNodeIds,
+        this.options.getInteractivePositions(),
+      );
+    }
     if (this.options.ego.visionIntent?.kind === 'retain-focal-point') {
       return this.options.vision.getState().target;
     }
@@ -521,6 +571,8 @@ export class SessionInteractionRuntime {
 
   /** Explicit framing actions accept the active View's suggested interest. */
   resetVisionInterest(): void {
+    this.getNavigationState();
+    if (this.navigationPeek) { this.navigationPeek.navigated = true; return; }
     const state = this.options.getViewState();
     const view = resolveGraphUxStateV1(state);
     this.options.ego.intendVision(view === 'focus' && state.focusedNodeId !== undefined
@@ -592,7 +644,7 @@ export class SessionInteractionRuntime {
     if (this.dragContext !== null) return this.dragHoverPreview ?? null;
     if (this.interpreter.isViewProposalSuspended()) {
       this.options.ego.clearWill();
-      return null;
+      return this.interpreter.isCameraGestureActive() ? this.navigationPeek?.preview ?? null : null;
     }
     return this.resolveCurrentHoverPreview();
   }
@@ -620,6 +672,11 @@ export class SessionInteractionRuntime {
     const plan = command.plan && isEgoInteractionPlanCurrentV1(command.plan, context)
       && sameEgoInteractionV1(command.plan.input, command.input) ? command.plan : this.options.ego.resolveWill(command.input, context);
     if (plan.outcome === 'rejected' || plan.action === 'none') return;
+    // A matching click promotes the peek; other actions cancel its borrowed pivot.
+    const commitsPeek = plan.input.target.kind === 'node' && this.hoverInput?.target.kind === 'node'
+      && this.hoverInput.target.nodeId === plan.input.target.nodeId;
+    const preservePeekCamera = commitsPeek && this.navigationPeek?.navigated === true;
+    this.endNavigationPeek(!commitsPeek);
     if (plan.action === 'choose-constellation') {
       this.options.ego.intendVision({ kind: 'follow-constellation' });
     }
@@ -636,7 +693,7 @@ export class SessionInteractionRuntime {
     this.setInteractionState(plan.resultingState.attentionNodeIds, plan.resultingState.focusedNodeId,
       command, !preserveHover && plan.effects.some((effect) => effect.type === 'clear-presentation'), plan.resultingState.viewId);
     for (const effect of plan.effects) {
-      if (effect.type === 'recenter-focus') this.recenterFocus(effect.nodeId, command);
+      if (effect.type === 'recenter-focus' && !preservePeekCamera) this.recenterFocus(effect.nodeId, command);
     }
     if (background) this.options.onIntent({ ...this.intentBase(command), type: 'background-activated' });
     if (plan.input.target.kind === 'node') {
@@ -662,10 +719,10 @@ export class SessionInteractionRuntime {
         && this.focusNeighborhoodNodeIds(this.hoveredNodeId).includes(nodeId));
   }
 
-  private focusVisibleNodeIds(focusedNodeId: string): readonly string[] {
+  private focusVisibleNodeIds(focusedNodeId: string, attentionNodeIds: readonly string[] = this.attentionNodeIds()): readonly string[] {
     const visible = this.options.getRenderSelection().nodeIds;
     return [...new Set([
-      ...this.attentionNodeIds().filter((id) => visible.has(id)),
+      ...attentionNodeIds.filter((id) => visible.has(id)),
       ...[...this.options.getRememberedNodeIds()].filter((id) => visible.has(id)),
       ...this.focusNeighborhoodNodeIds(focusedNodeId),
     ])];
@@ -682,16 +739,18 @@ export class SessionInteractionRuntime {
   }
 
   private fitStateTarget(modality?: 'mouse' | 'touch' | 'pen'): void {
-    const state = this.options.getViewState();
-    const policy = this.options.experience.framing[resolveGraphUxStateV1(state)];
-    const attentionNodeIds = this.attentionNodeIds();
+    const navigation = this.getNavigationState();
+    if (this.navigationPeek) this.navigationPeek.navigated = true;
+    const state = { ...this.options.getViewState(), viewMode: navigation.viewId, focusedNodeId: navigation.focusedNodeId };
+    const policy = this.options.experience.framing[navigation.viewId];
+    const attentionNodeIds = navigation.attentionNodeIds;
     const targetNodeIds = attentionNodeIds;
     const singleConstellation = resolveGraphUxStateV1(state) === 'explore' && targetNodeIds.length === 1
       && policy.target === 'attention';
     const visible = this.options.getRenderSelection();
-    const nodeIds = singleConstellation ? this.focusVisibleNodeIds(targetNodeIds[0])
+    const nodeIds = singleConstellation ? this.focusVisibleNodeIds(targetNodeIds[0], attentionNodeIds)
       : policy.target === 'focused-neighborhood' && state.focusedNodeId
-      ? this.focusVisibleNodeIds(state.focusedNodeId)
+      ? this.focusVisibleNodeIds(state.focusedNodeId, attentionNodeIds)
       : policy.target === 'attention'
         ? targetNodeIds.filter((id) => visible.nodeIds.has(id))
         : [...visible.nodeIds];
@@ -710,8 +769,10 @@ export class SessionInteractionRuntime {
   }
 
   private elasticPan(deltaX: number, deltaY: number): void {
+    this.getNavigationState();
+    if (this.navigationPeek) this.navigationPeek.navigated = true;
     this.options.vision.panByPixels(deltaX * 0.55, deltaY * 0.55);
-    const focusedNodeId = this.options.getViewState().focusedNodeId;
+    const focusedNodeId = this.getNavigationState().focusedNodeId;
     const focusedPosition = focusedNodeId
       ? this.options.getInteractivePositions()[focusedNodeId]
       : undefined;
@@ -726,7 +787,7 @@ export class SessionInteractionRuntime {
     if (this.elasticReturnTimer !== undefined) return;
     this.elasticReturnTimer = this.options.platform.setTimeout(() => {
       this.elasticReturnTimer = undefined;
-      const focusedNodeId = this.options.getViewState().focusedNodeId;
+      const focusedNodeId = this.getNavigationState().focusedNodeId;
       const focusedPosition = focusedNodeId
         ? this.options.getInteractivePositions()[focusedNodeId]
         : undefined;
@@ -854,6 +915,14 @@ export class SessionInteractionRuntime {
   }
 
   private centerCamera(): void {
+    const navigation = this.getNavigationState();
+    if (this.navigationPeek) {
+      this.navigationPeek.navigated = true;
+      const center = this.options.vision.deriveCentroid(navigation.viewId === 'focus' && navigation.focusedNodeId
+        ? [navigation.focusedNodeId] : navigation.attentionNodeIds, this.options.getInteractivePositions());
+      if (center) this.options.vision.setTarget(center, true);
+      return;
+    }
     const positionsById = this.options.getInteractivePositions();
     const candidates = graphInteractionPolicyV1(this.options.getViewState()).cameraTracking === 'none'
       ? [...this.options.getRenderSelection().nodeIds]
@@ -909,7 +978,7 @@ export class SessionInteractionRuntime {
     const presentationChanged = clearPresentation ? this.clearNodePresentation(command) : false;
     if (!attentionChanged && !focusChanged && !modeChanged && !presentationChanged) return;
     if (attentionChanged || focusChanged || modeChanged) {
-      const { focusedNodeId: _focusedNodeId, ...withoutFocus } = state;
+      const { focusedNodeId: _focusedNodeId, ...withoutFocus } = this.options.getViewState();
       this.commit(focusedNodeId === undefined
         ? { ...withoutFocus, selectedNodeIds: realizedAttentionNodeIds, viewMode }
         : { ...withoutFocus, selectedNodeIds: realizedAttentionNodeIds, focusedNodeId, viewMode });
@@ -928,6 +997,7 @@ export class SessionInteractionRuntime {
   }
 
   private clearNodePresentation(command: GraphRuntimeCommandV1): boolean {
+    this.endNavigationPeek();
     this.cancelPreviewRelease();
     this.consumedHoverNodeId = undefined;
     this.consumedHoverPreview = undefined;
@@ -1036,6 +1106,7 @@ export class SessionInteractionRuntime {
   }
 
   private resetTransientState(): void {
+    this.endNavigationPeek();
     this.consumedHoverNodeId = undefined;
     this.consumedHoverPreview = undefined;
     this.presentedHoverNodeId = undefined;

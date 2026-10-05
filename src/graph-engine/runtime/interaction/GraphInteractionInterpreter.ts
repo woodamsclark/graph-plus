@@ -249,6 +249,12 @@ export class GraphInteractionInterpreter {
       return;
     }
     const hit = this.options.hitTest(event.point, event.pointerKind);
+    // A press elsewhere ends the old visit even if no pointer-move arrived first.
+    if (event.pointerKind !== 'touch' && this.options.getHoveredNodeId() !== undefined
+      && hit?.nodeId !== this.options.getHoveredNodeId()) {
+      this.command(event, { type: 'set-hover', mod: false });
+      this.command(event, { type: 'set-preview-hover' });
+    }
     const matchingReceipt = event.button === 0 && !event.ctrl && !event.meta && !event.shift && !event.alt
       ? this.matchingPrimaryTapReceipt(event, hit)
       : undefined;

@@ -783,3 +783,103 @@ test('Selective hover previews preserve committed state in 2D and 3D with and wi
     }
   }
 });
+
+
+test('Hover peeking borrows destination swipe controls and pivot, then restores prior navigation without committing', async () => {
+  for (const viewMode of ['overview', 'explore', 'focus'] as const) {
+    const value = runtimeHarness({ profileId: 'three-dimensional', document: graphDocument({ nodes: ['a', 'b', 'c'].map(id => graphNode(id)),
+      edges: [graphEdge('ab', 'a', 'b'), graphEdge('bc', 'b', 'c')] }) });
+    const session = await value.create();
+    await session.setSessionOverrides({ modules: { 'force-layout': { enabled: false } } });
+    const initial = await session.exportViewState();
+    const camera = new GraphCameraController(initial.camera, '3d'); camera.setViewport(640, 360);
+    const positions = { a: camera.screenToWorld(220, 180, 1000), b: camera.screenToWorld(400, 180, 1000),
+      c: camera.screenToWorld(520, 220, 1000) };
+    await session.restoreViewState({ ...initial, positions, viewMode,
+      selectedNodeIds: viewMode === 'overview' ? [] : viewMode === 'focus' ? ['a'] : ['b'],
+      ...(viewMode === 'focus' ? { focusedNodeId: 'a' } : {}) });
+    const canvas = runtimeCanvas(value.container);
+    const before = await session.exportViewState();
+    const hit = await point(session, 'b');
+    const hover = (type: 'pointermove' | 'pointerleave') => {
+      const fields = { clientX: hit.x, clientY: hit.y, pointerId: 912, pointerType: 'mouse', button: 0 };
+      const event = new value.window.PointerEvent(type, { ...fields, bubbles: true });
+      for (const [key, field] of Object.entries(fields)) Object.defineProperty(event, key, { value: field });
+      canvas.dispatchEvent(event as unknown as Event); value.platform.advanceTime(20); value.platform.flushFrame();
+    };
+    const swipe = () => {
+      canvas.dispatchEvent(new value.window.WheelEvent('wheel', {
+        deltaX: 24, deltaY: 12, deltaMode: 0, bubbles: true, cancelable: true }) as unknown as Event);
+      value.platform.advanceTime(20); value.platform.flushFrame();
+    };
+    hover('pointermove'); value.platform.advanceTime(800); value.platform.flushTimer(); value.platform.flushFrame();
+    deepEqual(await session.exportViewState(), before, 'peeking itself does not commit View, membership, subject or camera framing');
+    const expected = new GraphCameraController(before.camera, '3d'); expected.setViewport(640, 360);
+    expected.orbitByPixels(-24, 12, positions.b);
+    swipe();
+    const rotated = await session.exportViewState();
+    deepEqual(rotated.camera, expected.getState(), 'swipe rotates around the peeked subject even from Overview');
+    equal(rotated.viewMode, viewMode, 'navigation does not commit the destination View');
+    deepEqual(rotated.selectedNodeIds, before.selectedNodeIds, 'peeking does not admit members');
+    equal(rotated.focusedNodeId, before.focusedNodeId, 'peeking does not change the committed subject');
+    hover('pointerleave');
+    expected.setTarget(before.camera.target, true);
+    deepEqual((await session.exportViewState()).camera, expected.getState(), 'leaving restores the old target while retaining the chosen rotation and zoom');
+    const returned = await session.exportViewState();
+    if (viewMode === 'overview') {
+      expected.panByPixels(24, 12); swipe();
+      deepEqual((await session.exportViewState()).camera, expected.getState(), 'Overview swipe resumes panning after leaving');
+    }
+    deepEqual(returned.positions, before.positions, 'navigation never changes the graph layout');
+    await session.restoreViewState(before);
+    hover('pointermove'); value.platform.advanceTime(800); value.platform.flushTimer(); value.platform.flushFrame();
+    swipe();
+    const peekCamera = (await session.exportViewState()).camera;
+    tap(value, canvas, await point(session, 'b'), 913, 'mouse'); value.platform.advanceTime(20); value.platform.flushFrame();
+    const committed = await session.exportViewState();
+    equal(committed.viewMode, viewMode === 'overview' ? 'explore' : 'focus', 'click commits the exact borrowed destination');
+    if (committed.viewMode === 'focus') equal(committed.focusedNodeId, 'b', 'click commits the peeked subject');
+    deepEqual(committed.camera, peekCamera, 'committing a navigated peek keeps the camera framing');
+    hover('pointerleave');
+    deepEqual((await session.exportViewState()).camera, peekCamera, 'leaving a committed peek never restores the old target');
+    await session.dispose();
+  }
+});
+
+
+test('Constellation peek uses Focus elastic pan in 2D and cancels its return motion on leave', async () => {
+  const value = runtimeHarness({ document: graphDocument({ nodes: ['a', 'b'].map(id => graphNode(id)),
+    edges: [graphEdge('ab', 'a', 'b')] }) });
+  const session = await value.create();
+  await session.setSessionOverrides({ modules: { 'force-layout': { enabled: false } } });
+  const initial = await session.exportViewState();
+  const camera = new GraphCameraController(initial.camera, '2d'); camera.setViewport(640, 360);
+  const positions = { a: camera.screenToWorld(220, 180, 1000), b: camera.screenToWorld(420, 180, 1000) };
+  await session.restoreViewState({ ...initial, positions, viewMode: 'explore', selectedNodeIds: ['b'] });
+  const before = await session.exportViewState();
+  const canvas = runtimeCanvas(value.container); const hit = await point(session, 'b');
+  const pointer = (type: 'pointermove' | 'pointerleave') => {
+    const fields = { clientX: hit.x, clientY: hit.y, pointerId: 914, pointerType: 'mouse', button: 0 };
+    const event = new value.window.PointerEvent(type, { ...fields, bubbles: true });
+    for (const [key, field] of Object.entries(fields)) Object.defineProperty(event, key, { value: field });
+    canvas.dispatchEvent(event as unknown as Event); value.platform.advanceTime(20); value.platform.flushFrame();
+  };
+  pointer('pointermove');
+  const expected = new GraphCameraController(before.camera, '2d'); expected.setViewport(640, 360);
+  expected.panByPixels(12 * 0.55, 8 * 0.55);
+  const panned = expected.getState().target;
+  expected.translateBy({ x: (positions.b.x - panned.x) * 0.22, y: (positions.b.y - panned.y) * 0.22,
+    z: (positions.b.z - panned.z) * 0.22 });
+  canvas.dispatchEvent(new value.window.WheelEvent('wheel', { deltaX: 12, deltaY: 8, deltaMode: 0,
+    bubbles: true, cancelable: true }) as unknown as Event);
+  value.platform.advanceTime(20); value.platform.flushFrame();
+  deepEqual((await session.exportViewState()).camera, expected.getState(), 'peeked Focus elastic pan pulls toward the prospective root');
+  equal(session.getActiveView().id, 'explore', 'borrowed Focus controls do not commit Focus');
+  pointer('pointerleave');
+  expected.setTarget(before.camera.target, true);
+  deepEqual((await session.exportViewState()).camera, expected.getState(), 'leave restores the previous target');
+  const returned = (await session.exportViewState()).camera;
+  value.platform.advanceTime(1000); value.platform.flushTimer(); value.platform.flushFrame();
+  deepEqual((await session.exportViewState()).camera, returned, 'no abandoned elastic-return timer moves the camera afterward');
+  await session.dispose();
+});

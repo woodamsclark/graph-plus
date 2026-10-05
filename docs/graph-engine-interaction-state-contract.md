@@ -276,3 +276,15 @@ View policy suppresses labels on Ctrl-removal previews before the hovered-label
 forcing rule. Dragging does not expand neighbor highlights in any View. Overview
 Space clears user Attention and preserves camera framing and Memory. Center + Fit
 preserves membership; node right-click still opens the existing context menu.
+
+## Hover peek navigation
+
+A primary View-transition hover borrows the admitted destination's gesture policy
+and spatial pivot without changing committed View, Focus, Attention or Memory. The
+pivot is its focused subject or prospective constellation centroid. Overview swipe
+can therefore rotate as Constellation; Constellation member hover can navigate as
+Focus. A camera gesture holds the admitted hover scene. Leaving restores the prior
+target coordinate and controls while retaining user rotation/zoom; matching click
+commits the destination and keeps camera framing already explored in the peek.
+The existing Anima delay/fades remain responsible for visual presentation. Node
+motion and drag continue to follow the committed camera-interest policy.

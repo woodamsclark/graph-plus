@@ -59,3 +59,26 @@ starts building the group again.
 Regression coverage lives in `views.test.ts`, `ego.test.ts`,
 `ego-interaction-plan.test.ts`, `v16-native-presentation.test.ts`, and Graph+ adapter and
 settings-controller tests. Automated checks do not replace Obsidian visual acceptance.
+
+## Hover peeking and camera navigation
+
+Primary node hover borrows the admitted destination View's input policy and spatial
+pivot: Overview to Constellation, Constellation member to Focus, and Focus neighbor
+to its prospective root. Constellation candidate admission keeps Constellation's
+controls. This navigation lane does not realize Attention, Awareness, Memory,
+View changes, note activation, or the working constellation's clear-on-Overview rule.
+
+The borrowed pivot is the destination constellation centroid or focused subject's
+coordinate. It does not recenter or refit on hover. Trackpad swipes in 3D Overview
+therefore orbit while peeking rather than panning; unanchored zoom, drag navigation
+and Focus elastic pan also use the borrowed View. Camera gestures retain the peek
+scene rather than replacing it with the underlying View mid-gesture. Center and Fit
+use the borrowed scene when invoked during a peek.
+
+Leaving restores the previous camera target coordinate and input policy, retaining
+rotation and zoom performed during the peek. The visual scene uses the existing
+0.2-second delay and 0.5-second fades. Hover-only node motion and node dragging do
+not transfer camera-follow ownership to the peeked subject. A matching click commits
+the admitted destination; after navigating a peek, commitment preserves that camera
+framing, and subsequent leave cannot restore the old target. Modifiers, different
+press targets, reset/suspension and external state changes release the temporary lane.
