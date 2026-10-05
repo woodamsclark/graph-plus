@@ -145,7 +145,6 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       settingsSchemaVersion: 1,
       defaultSettings: {
         labelPosition: 'above',
-        cursorLabelProximityEnabled: true,
         adaptiveLabelThreshold2d: 65,
         adaptiveLabelThreshold3d: 50,
       },

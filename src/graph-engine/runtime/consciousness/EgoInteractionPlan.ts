@@ -70,11 +70,14 @@ export function realizeEgoViewDirectiveV1(
   directive: EgoViewDirectiveV1,
   state: EgoInteractionStateV1,
   availableNodeIds: ReadonlySet<string>,
+  experience?: GraphExperienceContractV1,
 ): EgoInteractionStateV1 {
   if (directive.type === 'activate-background') {
     const bindings = GRAPH_VIEW_DEFINITIONS_V1[state.viewId].interactions;
     const viewId = directive.back ? bindings.escapeActivation : bindings.backgroundActivation;
-    return freezeState(viewId === state.viewId ? state : { ...state, viewId, focusedNodeId: undefined });
+    return freezeState(viewId === state.viewId ? state : { ...state, viewId, focusedNodeId: undefined,
+      ...(viewId === 'overview' && experience?.attention.clearOnOverviewEntry ? { attentionNodeIds: [] } : {}),
+    });
   }
   const attentionNodeIds = [...new Set(directive.nodeIds)].filter((id) => availableNodeIds.has(id));
   const focusedNodeId = attentionNodeIds.length === 0 || directive.clearFocus
@@ -82,7 +85,8 @@ export function realizeEgoViewDirectiveV1(
     ? undefined : directive.focusNodeId ?? state.focusedNodeId;
   const viewId = attentionNodeIds.length === 0 ? directive.viewMode === 'explore' ? 'explore' : 'overview'
     : directive.viewMode ?? (focusedNodeId !== undefined ? 'focus' : state.viewId === 'focus' ? 'explore' : state.viewId);
-  return freezeState({ viewId, attentionNodeIds, focusedNodeId });
+  return freezeState({ viewId, attentionNodeIds: viewId === 'overview' && state.viewId !== 'overview'
+    && experience?.attention.clearOnOverviewEntry ? [] : attentionNodeIds, focusedNodeId });
 }
 
 /** Evaluates a proposal without observing it in Memory or performing any effect. */
@@ -100,6 +104,7 @@ export function resolveEgoInteractionPlanV1(
     : input.objectAction === 'focus' ? 'focus-member'
     : membershipAction === 'remove' ? isMember ? 'remove-member' : 'none'
     : membershipAction === 'toggle' ? isMember ? 'remove-member' : 'admit-member'
+    : before.viewId === 'focus' && nodeId === before.focusedNodeId ? 'none'
     : before.viewId === 'overview' ? context.awarenessNodeIds.has(nodeId) || isMember ? 'choose-constellation' : 'admit-member'
     : before.viewId === 'explore' && !before.attentionNodeIds.includes(nodeId) ? 'admit-member' : 'focus-member');
   const addsMember = nodeId !== undefined && !before.attentionNodeIds.includes(nodeId)
@@ -139,7 +144,7 @@ export function resolveEgoInteractionPlanV1(
   }));
   if (outcome.status === 'rejected') return reject(outcome.reason);
   const directive = freezeDirective(outcome.directive as EgoViewDirectiveV1);
-  const resultingState = action === 'none' ? before : realizeEgoViewDirectiveV1(directive, before, context.availableNodeIds);
+  const resultingState = action === 'none' ? before : realizeEgoViewDirectiveV1(directive, before, context.availableNodeIds, context.experience);
   const effects: EgoInteractionEffectV1[] = [];
   const focusChanged = resultingState.focusedNodeId !== before.focusedNodeId;
   if (directive.type === 'activate-background' || input.navigationAction !== undefined || focusChanged) effects.push(Object.freeze({ type: 'clear-presentation' }));

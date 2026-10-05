@@ -97,6 +97,7 @@ export class GraphPlusPresentationV1<TFile> {
   private transientRevealNodeId?: string;
   private resettingLayout = false;
   private visibleNodeIds = new Set<string>();
+  private readonly pendingActiveConstellationNodes = new Set<string>();
   private rootNodeId?: string;
   private sessionNodeIds: readonly string[];
   private enforcingPolicy = false;
@@ -149,7 +150,12 @@ export class GraphPlusPresentationV1<TFile> {
       }]);
       if (this.policy.persistence === 'checkpoint') await this.openGlobal();
       else await this.openLocal();
-      if (this.options.initialSession) await this.applySessionSnapshot(this.options.initialSession);
+      if (this.options.initialSession) {
+        await this.applySessionSnapshot(this.options.initialSession);
+        if (this.options.initialSession.activeNodeId) {
+          await this.addActiveNodesToConstellation([this.options.initialSession.activeNodeId]);
+        }
+      }
       await this.options.onOpened?.();
     } catch (error) {
       this.opened = false;
@@ -210,6 +216,7 @@ export class GraphPlusPresentationV1<TFile> {
       this.document = model.document;
     }
     await this.applyFilter();
+    await this.addActiveNodesToConstellation([]);
     this.checkpoint?.schedule();
   }
 
@@ -265,6 +272,25 @@ export class GraphPlusPresentationV1<TFile> {
     this.rootNodeId = nodeId;
     await this.enforceExperiencePolicy();
     return true;
+  }
+
+  async addActiveNodesToConstellation(nodeIds: readonly string[]): Promise<void> {
+    if (!this.session || !this.document || this.resettingLayout) return;
+    for (const id of nodeIds) this.pendingActiveConstellationNodes.add(id);
+    const available = new Set(this.document.nodes.map(node => node.id));
+    const admitted = [...this.pendingActiveConstellationNodes].filter(id => available.has(id));
+    const state = await this.session.exportViewState();
+    const members = [...new Set([...state.selectedNodeIds, ...admitted])];
+    if (sameNodeIds(members, state.selectedNodeIds)) {
+      for (const id of admitted) this.pendingActiveConstellationNodes.delete(id);
+      return;
+    }
+    const result = await this.session.applyExternalInfluence({
+      schemaVersion: 1, type: 'replace-attention', nodeIds: members,
+      ...(state.focusedNodeId ? { focusNodeId: state.focusedNodeId } : {}), framing: 'preserve',
+    });
+    if (result.status === 'rejected') throw new Error(`Active-note constellation was rejected: ${result.reason}`);
+    for (const id of admitted) this.pendingActiveConstellationNodes.delete(id);
   }
 
   async applySessionSnapshot(snapshot: GraphPlusSessionSnapshotV1): Promise<void> {
@@ -369,6 +395,7 @@ export class GraphPlusPresentationV1<TFile> {
       this.searchIndex = new Map();
       this.transientRevealNodeId = undefined;
       this.visibleNodeIds.clear();
+      this.pendingActiveConstellationNodes.clear();
       if (!this.leaseReleased) {
         this.leaseReleased = true;
         await this.options.lease.release();
@@ -392,6 +419,9 @@ export class GraphPlusPresentationV1<TFile> {
     this.checkpoint?.attach(session, document);
     this.sessionSubscriptions.push(session.onError((error) => this.options.onError?.(error)));
     this.sessionSubscriptions.push(session.onIntent((intent) => this.handleIntent(intent, session)));
+    this.sessionSubscriptions.push(session.onViewChanged(view => {
+      if (view.id === 'overview') this.pendingActiveConstellationNodes.clear();
+    }));
     this.sessionSubscriptions.push(session.onWorldChanged((event) => {
       void this.options.onWorldStateChanged?.(event);
     }));
@@ -446,8 +476,11 @@ export class GraphPlusPresentationV1<TFile> {
 
   /** A request arriving from outside Graph+ is received truth, never an Ego action. */
   private async receiveApplicationAttention(nodeId: string, framing: 'preserve' | 'recenter-focus'): Promise<void> {
+    const previous = await this.session?.exportViewState();
+    const nodeIds = previous?.viewMode === 'focus'
+      ? [...new Set([...previous.selectedNodeIds, ...(previous.focusedNodeId ? [previous.focusedNodeId] : []), nodeId])] : [nodeId];
     const result = await this.session?.applyExternalInfluence({
-      schemaVersion: 1, type: 'replace-attention', nodeIds: [nodeId], focusNodeId: nodeId, framing,
+      schemaVersion: 1, type: 'replace-attention', nodeIds, focusNodeId: nodeId, framing,
     });
     if (result?.status === 'rejected') throw new Error(`Graph+ application input was rejected: ${result.reason}`);
   }
@@ -471,9 +504,10 @@ export class GraphPlusPresentationV1<TFile> {
       const state = await this.session.exportViewState();
       const available = new Set(this.document?.nodes.map((node) => node.id) ?? []);
       const focusNodeId = root && available.has(root) ? root : undefined;
-      // The recent trail belongs to Memory. Canonical arrival establishes only
-      // the current subject in Attention; deliberate additions remain user actions.
-      const attentionNodeIds = focusNodeId ? [focusNodeId] : [];
+      // Canonical note arrival extends the current working constellation. Focus
+      // moves locally, while the prior subject and deliberate members stay admitted.
+      const attentionNodeIds = [...new Set([...state.selectedNodeIds,
+        ...(state.focusedNodeId ? [state.focusedNodeId] : []), ...(focusNodeId ? [focusNodeId] : [])])];
       const consciousStateChanged = !sameNodeIds(state.selectedNodeIds, attentionNodeIds)
         || state.focusedNodeId !== focusNodeId;
       const result = await this.session.applyExternalInfluence({
@@ -624,6 +658,7 @@ export class GraphPlusApplicationV1<TFile> {
   private disposed = false;
   private activeNodeQueued = false;
   private pendingActiveNodeId?: string;
+  private readonly pendingConstellationNodeIds = new Set<string>();
   private activeNodeFollow?: Promise<void>;
   private pendingSessionSnapshot: GraphPlusSessionSnapshotV1;
   private readonly workspaceSession: GraphPlusSessionV1;
@@ -758,11 +793,15 @@ export class GraphPlusApplicationV1<TFile> {
       return;
     }
     if (event.type === 'active-note-changed') {
+      const previousActiveNodeId = this.workspaceSession.snapshot().activeNodeId;
       this.pendingSessionSnapshot = this.workspaceSession.experienceFileActivation(
         event.nodeId,
         event.timestamp ?? this.options.now?.() ?? Date.now(),
       );
-      if (this.presentations.size > 0) this.queueActiveNode(event.nodeId, this.pendingSessionSnapshot);
+      if (event.nodeId !== previousActiveNodeId) {
+        if (event.nodeId) this.pendingConstellationNodeIds.add(event.nodeId);
+        if (this.presentations.size > 0) this.queueActiveNode(event.nodeId, this.pendingSessionSnapshot);
+      }
     }
     for (const listener of this.hostActivityListeners) listener();
   }
@@ -801,6 +840,7 @@ export class GraphPlusApplicationV1<TFile> {
     await this.worldStateQueue.catch(() => undefined);
     await Promise.all([...this.presentations].map((presentation) => presentation.close()));
     this.presentations.clear();
+    this.pendingConstellationNodeIds.clear();
     this.hostActivityListeners.clear();
   }
 
@@ -871,8 +911,13 @@ export class GraphPlusApplicationV1<TFile> {
     while (this.activeNodeQueued && !this.disposed && this.presentations.size > 0) {
       const nodeId = this.pendingActiveNodeId;
       const snapshot = this.pendingSessionSnapshot;
+      const admittedNodeIds = [...this.pendingConstellationNodeIds];
+      this.pendingConstellationNodeIds.clear();
       this.activeNodeQueued = false;
       await this.followActiveNode(nodeId);
+      await Promise.all([...this.presentations].map(
+        presentation => presentation.addActiveNodesToConstellation(admittedNodeIds),
+      ));
       await Promise.all([...this.presentations].map(
         (presentation) => presentation.applySessionSnapshot(snapshot),
       ));

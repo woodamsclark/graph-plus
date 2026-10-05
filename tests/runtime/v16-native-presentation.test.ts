@@ -245,7 +245,7 @@ test('Overview completes timed previews only on node hover, independently of cur
   }
 });
 
-test('cursor proximity reveals nearby labels independently of Labels mode while respecting range and void', () => {
+test('cursor proximity mode reveals nearby labels while Off suppresses every label', () => {
   const value = runtimeHarness();
   const canvas = value.document.createElement('canvas');
   const renderer = new CanvasGraphRenderer(canvas, () => 0);
@@ -262,7 +262,7 @@ test('cursor proximity reveals nearby labels independently of Labels mode while 
         showLabel: false, labelOpacity: 0 },
       { id: 'void', label: 'void', position: { x: 20, y: 0, z: 0 }, radius: 8, ...RESOLVED_NODE_STYLE,
         opacity: 0, showLabel: false, labelOpacity: 0 },
-    ], policy: { labelMode: 'adaptive' as const, cursorLabelRevealRadiusPx: 96 } };
+    ], policy: { labelMode: 'proximity' as const, cursorLabelRevealRadiusPx: 96 } };
   const labels = () => value.drawArguments.filter(c => c.method === 'fillText').map(c => c.args[0]);
   renderer.updateScene({ ...scene, cursorScreenPoint: { x: 320, y: 160 } });
   renderer.render();
@@ -273,7 +273,7 @@ test('cursor proximity reveals nearby labels independently of Labels mode while 
   deepEqual(labels(), [], 'leaving restores dim label suppression');
   renderer.updateScene({ ...scene, cursorScreenPoint: { x: 320, y: 160 }, policy: { ...scene.policy, labelMode: 'off' } });
   renderer.render();
-  deepEqual(labels(), ['near'], 'Labels Off leaves the proximity channel enabled');
+  deepEqual(labels(), [], 'Labels Off suppresses the proximity channel absolutely');
   value.drawArguments.length = 0;
   renderer.updateScene({ ...scene, cursorScreenPoint: { x: 320, y: 160 },
     policy: { ...scene.policy, labelMode: 'off', cursorLabelRevealRadiusPx: 0 } });
@@ -282,7 +282,7 @@ test('cursor proximity reveals nearby labels independently of Labels mode while 
   renderer.dispose();
 });
 
-test('proximity-only labels fade identically for Overview standard and Constellation dim nodes', () => {
+test('proximity mode labels fade identically for Overview standard and Constellation dim nodes', () => {
   for (const dimensions of ['2d', '3d'] as const) {
     const value = runtimeHarness();
     const canvas = value.document.createElement('canvas');
@@ -304,14 +304,13 @@ test('proximity-only labels fade identically for Overview standard and Constella
         nodes: [...automatic, { id: 'target', label: 'target', position: camera.screenToWorld(320, 180, 1000), radius: 4,
           ...RESOLVED_NODE_STYLE, opacity: dimmed ? 0.24 : 1, showLabel: !dimmed, labelOpacity: dimmed ? 0 : 1,
           labelStatePriority: 0 }],
-        policy: { labelMode: 'adaptive' as const, adaptiveLabelSaliency: 100, cursorLabelRevealRadiusPx: 96 },
+        policy: { labelMode: 'proximity' as const, adaptiveLabelSaliency: 100, cursorLabelRevealRadiusPx: 96 },
       };
       for (const distance of [72, 48, 24]) {
         alphas.clear();
         renderer.updateScene({ ...scene, cursorScreenPoint: { x: 320 + distance, y: 180 } }); renderer.render();
         equal(alphas.get('target'), 1 - distance / 96, 'cursor-only opacity depends on distance, not its scene label opacity');
-        assert([...alphas].filter(([label]) => label !== 'target').every(([, alpha]) => alpha === 1),
-          'already eligible automatic labels retain their normal opacity');
+        equal(alphas.size, 1, 'proximity mode does not admit automatic background labels');
       }
       alphas.clear(); renderer.updateScene(scene); renderer.render();
       equal(alphas.has('target'), false, 'leaving restores the automatic budget or dim suppression');
@@ -320,7 +319,7 @@ test('proximity-only labels fade identically for Overview standard and Constella
   }
 });
 
-test('live cursor label toggle updates independently of Labels Off and cursor gravity', async () => {
+test('live label modes separate absolute Off, cursor proximity, and adaptive labels', async () => {
   let scene: GraphRenderSceneV2 | undefined;
   const registry = new GraphRendererRegistryV2();
   registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true, create: ({ createCanvas, now }) => {
@@ -340,14 +339,14 @@ test('live cursor label toggle updates independently of Labels Off and cursor gr
   const canvas = runtimeCanvas(value.container);
   pointer(value, canvas, 'pointermove', 350, 180, 26); value.platform.flushFrame();
   const drawn = () => value.drawArguments.filter(call => call.method === 'fillText').map(call => call.args[0]);
-  for (const enabled of [false, true, false]) {
+  for (const mode of ['off', 'proximity', 'adaptive', 'off'] as const) {
     value.drawArguments.length = 0;
-    await session.setSessionOverrides({ modules: { anima: { settings: { cursorLabelProximityEnabled: enabled } } } });
+    await session.setSessionOverrides({ modules: { rendering: { settings: { labelMode: mode } } } });
     value.platform.flushFrame();
-    deepEqual(drawn(), enabled ? ['near'] : [], 'proximity can switch while ordinary labels remain Off');
-    equal(scene!.policy?.labelMode, 'off', 'the proximity toggle cannot alter Labels mode');
+    deepEqual(drawn(), mode === 'proximity' ? ['near'] : mode === 'adaptive' ? ['far', 'near'] : [], 'each label mode controls its own admission channel');
+    equal(scene!.policy?.labelMode, mode, 'the dropdown updates the live label mode');
     equal(scene!.policy?.cursorAttractionRadiusPx, 64, 'the label toggle cannot alter gravity');
-    equal(scene!.policy?.cursorLabelRevealRadiusPx, enabled ? 96 : 0, 'the live setting controls only the label field');
+    equal(scene!.policy?.cursorLabelRevealRadiusPx, 96, 'proximity mode uses the fixed screen-space field');
   }
   await session.dispose();
 });
@@ -585,22 +584,22 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   assert(hoveredTag?.nodeContributions && hoveredTag.edgeContributions,
     'hovering a tagged node should retain its one-hop neighborhood');
   deepEqual(hoveredTag.nodeContributions.b.finalColor,
-    DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
-    'Focus preview includes the destination hover neighbor style');
+    desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
+    'Focus preview keeps the destination root neighbor style dim');
   deepEqual(hoveredTag.nodeContributions.d.finalColor,
-    DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
-    'Focus destination hover makes immediate neighbors standard');
+    desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
+    'Focus destination root keeps immediate neighbors dim');
   equal(hoveredTag.nodeContributions.c.opacity, 0, 'committed member hover previews deliberate Focus entry');
-  equal(hoveredTag.edgeContributions['a-b'].opacity, 1, 'Focus destination hover raises incident links');
-  equal(hoveredTag.edgeContributions['a-d'].opacity, 1, 'each incident frontier link uses destination hover');
+  equal(hoveredTag.edgeContributions['a-b'].opacity, 0.6, 'Focus destination root keeps context incident links dim');
+  equal(hoveredTag.edgeContributions['a-d'].opacity, 0.6, 'each incident frontier link stays dim for root hover');
   equal(hoveredTag.nodeContributions.a.labelForceVisible, true,
     'hovering a tagged node should force only its own label');
   equal(hoveredTag.nodeContributions.b.labelForceVisible, false,
     'a lit direct neighbor should not receive the hover label override');
   equal(hoveredTag.nodeContributions.b.labelAlwaysVisible, false,
     'a direct hover neighbor should not bypass adaptive collision policy');
-  equal(hoveredTag.nodeContributions.b.showLabel, true,
-    'a destination hover neighbor remains label eligible');
+  equal(hoveredTag.nodeContributions.b.showLabel, false,
+    'a destination root keeps its dim neighbor automatically suppressed');
 
   const suspended = anima.contributeFrame({
     ...state,
@@ -704,10 +703,10 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     'a dimmed non-hovered focus neighbor should not retain its Awareness-raised label');
   equal(hoveredFocusedNeighbor.nodeContributions.d.labelOpacity, 0,
     'a dimmed non-hovered focus neighbor label should be fully transparent');
-  equal(hoveredFocusedNeighbor.nodeContributions.c.opacity, 1,
-    'Focus preview includes the prospective subject hover neighbors');
-  equal(hoveredFocusedNeighbor.nodeContributions.c.showLabel, true,
-    'a standard destination hover neighbor remains label eligible');
+  equal(hoveredFocusedNeighbor.nodeContributions.c.opacity, 0.24,
+    'Focus preview keeps the prospective root neighbors dim');
+  equal(hoveredFocusedNeighbor.nodeContributions.c.showLabel, false,
+    'a dim destination root neighbor remains automatically suppressed');
   equal(hoveredFocusedNeighbor.nodeContributions.c.labelForceVisible, false,
     'hover neighbors remain under adaptive label policy');
   equal(hoveredFocusedNeighbor.nodeContributions.c.labelAlwaysVisible, false,
@@ -719,8 +718,8 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     'the prospective member connection is highlighted');
   equal(hoveredFocusedNeighbor.edgeContributions['a-d'].opacity, 0,
     'explicit View preview voids old subject-only context links');
-  equal(hoveredFocusedNeighbor.edgeContributions['b-c'].opacity, 1,
-    'Focus destination hover raises the prospective subject incident link');
+  equal(hoveredFocusedNeighbor.edgeContributions['b-c'].opacity, 0.6,
+    'Focus destination root keeps its context incident link dim');
 
   const cleared = anima.contributeFrame(state);
   assert(cleared?.edgeContributions, 'cleared focus should still resolve baseline edge presentation');
@@ -851,7 +850,7 @@ test('Canvas skips zero-width node outlines while preserving intentional outline
   renderer.dispose();
 });
 
-test('hover-forced labels are the only labels rendered while label mode is off', () => {
+test('label mode Off suppresses even hover-forced labels', () => {
   const fillTextY: number[] = [];
   const context = recordingContext(fillTextY);
   const canvas = { getContext: () => context } as unknown as HTMLCanvasElement;
@@ -878,7 +877,7 @@ test('hover-forced labels are the only labels rendered while label mode is off',
   const renderer = new CanvasGraphRenderer(canvas, camera, frames, () => 0);
   renderer.resize(640, 360, 1);
   renderer.render();
-  equal(fillTextY.length, 1, 'label mode off should retain only the explicit hover label override');
+  equal(fillTextY.length, 0, 'label mode off must suppress even the explicit hover label override');
 });
 
 test('node scaling supports calm, world, and exaggerated responses in 2D and 3D', () => {
@@ -1728,14 +1727,18 @@ test('V1.6 retirement migration promotes the accepted settings and removes compa
     profileSettings: { graphSystem: 'legacy', graphSystemMigrationVersion: 1 },
     modules: {
       rendering: { settings: {
-        nodeRadiusScale: 4,
+        nodeRadiusScale: 4, labelMode: 'all',
         newSettings: { nodeRadiusScale: 1.5, edgeThicknessScale: 0.75 },
         legacySettings: { nodeRadiusScale: 8 },
       } },
+      anima: { settings: { labelPosition: 'above', cursorLabelProximityEnabled: false } },
     },
   });
   equal(migrated.profileSettings?.graphSystem, undefined, 'the retired selector should be removed');
   const rendering = migrated.modules?.rendering?.settings as Record<string, unknown>;
+  equal(rendering.labelMode, 'adaptive', 'retired All maps to Adaptive');
+  equal(migrated.modules?.anima?.settings?.cursorLabelProximityEnabled, undefined, 'the dropdown retires the separate proximity toggle');
+  equal(migrated.modules?.anima?.settings?.labelPosition, 'above', 'migration retains label placement');
   equal(rendering.nodeRadiusScale, 1.5, 'the accepted bank should override obsolete direct tuning');
   equal(rendering.edgeThicknessScale, 0.75, 'the accepted bank should become directly editable');
   equal(rendering.newSettings, undefined, 'the accepted bank wrapper should be removed');

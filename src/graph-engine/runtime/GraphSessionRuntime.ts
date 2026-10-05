@@ -1513,7 +1513,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         camera: this.vision.getState(),
         viewport: this.surface.getViewport(),
       },
-      labels: frame.nodes.filter((node) => frame.policy?.labelMode !== 'off' || node.labelForceVisible).map((node) => ({
+      labels: frame.nodes.filter(() => frame.policy?.labelMode !== 'off').map((node) => ({
         id: `label:${node.id}`,
         nodeId: node.id,
         text: node.label,
@@ -1681,9 +1681,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         : currentMode);
     if (this.viewState.focusedNodeId === nodeId && this.viewState.viewMode === viewMode) return;
     const { focusedNodeId: _focusedNodeId, ...withoutFocus } = this.viewState;
+    const selectedNodeIds = viewMode === 'overview' && currentMode !== 'overview'
+      && this.experience.attention.clearOnOverviewEntry
+      ? this.reconcileAttention([]) : this.viewState.selectedNodeIds;
     this.viewState = nodeId === undefined
-      ? { ...withoutFocus, viewMode }
-      : { ...withoutFocus, focusedNodeId: nodeId, viewMode };
+      ? { ...withoutFocus, selectedNodeIds, viewMode }
+      : { ...withoutFocus, selectedNodeIds, focusedNodeId: nodeId, viewMode };
     this.projectionView = { ...this.projectionView, viewState: this.viewState };
     this.moduleView = { ...this.moduleView, viewState: this.viewState };
     this.moduleHost.viewChanged(this.viewState);

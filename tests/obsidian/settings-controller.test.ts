@@ -180,8 +180,11 @@ test('V1.7 settings catalog exposes only curated typed controls', () => {
   equal(quality?.control.type, 'select', 'render quality should use named choices rather than free-form text');
   equal(GRAPH_SETTING_PRESENTATIONS_V1.some((value) => value.id === 'anima.nodeWorldScaleBlend'), false,
     'the retired contrast slider must not appear in full or quick settings');
-  const proximity = GRAPH_SETTING_PRESENTATIONS_V1.find(value => value.id === 'anima.cursorLabelProximityEnabled');
-  equal(proximity?.control.type, 'toggle', 'cursor label proximity has an independent boolean control');
+  const labels = GRAPH_SETTING_PRESENTATIONS_V1.find(value => value.id === 'rendering.labelMode');
+  deepEqual(labels?.control.type === 'select' ? labels.control.options : undefined,
+    { off: 'Off', proximity: 'Cursor proximity', adaptive: 'Adaptive' }, 'Labels exposes exactly the three requested modes');
+  equal(GRAPH_SETTING_PRESENTATIONS_V1.some(value => value.id === 'anima.cursorLabelProximityEnabled'), false,
+    'the mode dropdown replaces the separate proximity toggle');
   const repelForce = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'force-layout.repulsionStrength');
   equal(repelForce?.control.type === 'slider' ? repelForce.control.max : undefined, 1,
     'repel force should use a normalized slider range');

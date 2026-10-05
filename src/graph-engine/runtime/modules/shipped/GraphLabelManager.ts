@@ -3,7 +3,7 @@ import type { GraphNodeRenderContributionV1, GraphPresentationPolicyV2 } from '.
 
 export interface GraphLabelRequestV1 {
   readonly nodeId: string;
-  /** Interaction requests may override the global off mode. */
+  /** Interaction requests bypass adaptive ranking, never absolute Off. */
   readonly forceVisible?: boolean;
   /** Persistent structure requests bypass the adaptive collision budget. */
   readonly alwaysVisible?: boolean;
@@ -26,7 +26,6 @@ export interface GraphManagedLabelNodeV1 {
  */
 export class GraphLabelManager {
   private labelPosition: 'above' | 'below' = 'below';
-  private cursorLabelProximityEnabled = true;
   private adaptiveLabelThreshold2d = 50;
   private adaptiveLabelThreshold3d = 50;
 
@@ -36,7 +35,6 @@ export class GraphLabelManager {
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
     this.labelPosition = settings.labelPosition === 'above' ? 'above' : 'below';
-    this.cursorLabelProximityEnabled = settings.cursorLabelProximityEnabled !== false;
     this.adaptiveLabelThreshold2d = readThreshold(settings.adaptiveLabelThreshold2d, 50);
     this.adaptiveLabelThreshold3d = readThreshold(settings.adaptiveLabelThreshold3d, 50);
   }
@@ -76,7 +74,7 @@ export class GraphLabelManager {
     return {
       labelScaleMode: 'fixed',
       labelPosition: this.labelPosition,
-      cursorLabelRevealRadiusPx: this.cursorLabelProximityEnabled ? 96 : 0,
+      cursorLabelRevealRadiusPx: 96,
       adaptiveLabelSaliency: dimensions === '3d'
         ? this.adaptiveLabelThreshold3d
         : this.adaptiveLabelThreshold2d,

@@ -14,6 +14,8 @@ export interface GraphExperienceAttentionPolicyV1 {
   readonly maximumNodeCount?: number;
   /** When a cap is exceeded, preserve the subject that originated the intent. */
   readonly overflow: 'preserve-intent-subject';
+  /** Clear deliberate membership when returning from another View to Overview. */
+  readonly clearOnOverviewEntry?: boolean;
 }
 
 export interface GraphExperienceAwarenessPolicyV1 {

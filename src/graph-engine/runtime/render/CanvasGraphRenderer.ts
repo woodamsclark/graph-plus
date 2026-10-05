@@ -460,6 +460,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
 
   private drawLabels(frame: GraphRenderFrameV1, nodes: readonly ProjectedNode[]): Pick<GraphRenderTimingV1, 'labelLayoutMs' | 'labelDrawMs'> {
     const mode = renderPolicy(frame).labelMode ?? 'adaptive';
+    if (mode === 'off') return { labelLayoutMs: 0, labelDrawMs: 0 };
     this.context.save();
     this.context.textAlign = 'center';
     this.context.textBaseline = 'top';
@@ -476,8 +477,8 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       renderPolicy(frame).adaptiveLabelSaliency ?? renderPolicy(frame).adaptiveLabelThreshold ?? 50));
     // Resolve automatic eligibility independently of proximity. A cursor-only
     // label must not inherit a full-opacity baseline merely because it is standard.
-    const automaticCandidates = nodes.filter(candidate => candidate.node.showLabel !== false
-      && (mode !== 'off' || candidate.node.labelForceVisible === true)).sort(compareLabelCandidates);
+    const automaticCandidates = mode === 'proximity' ? []
+      : nodes.filter(candidate => candidate.node.showLabel !== false).sort(compareLabelCandidates);
     for (const candidate of automaticCandidates) {
       const forced = candidate.node.labelForceVisible === true || candidate.node.labelAlwaysVisible === true;
       if (mode === 'adaptive') {
@@ -500,8 +501,8 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       accepted.push(candidate);
       automaticIds.add(candidate.node.id);
     }
-    // Proximity is a separate label channel, including when automatic labels are
-    // Off. Void objects, closer-node occlusion and label collisions still apply.
+    // Proximity mode uses only the cursor field. Void objects, closer-node
+    // occlusion and label collisions still apply.
     const proximityCandidates = nodes.filter(candidate => !automaticIds.has(candidate.node.id)
       && this.cursorLabelReveal(frame, candidate) > 0)
       .sort((a, b) => this.cursorLabelReveal(frame, b) - this.cursorLabelReveal(frame, a) || compareLabelCandidates(a, b));
@@ -531,6 +532,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   }
 
   private cursorLabelReveal(frame: GraphRenderFrameV1, candidate: ProjectedNode): number {
+    if (renderPolicy(frame).labelMode !== 'proximity') return 0;
     const cursor = this.scene?.cursorScreenPoint;
     const radius = renderPolicy(frame).cursorLabelRevealRadiusPx ?? 0;
     if (!cursor || radius <= 0 || candidate.node.opacity <= 0) return 0;

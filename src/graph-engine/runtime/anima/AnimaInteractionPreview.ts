@@ -21,7 +21,8 @@ export type GraphInteractionPreviewV1 = GraphInteractionPreviewBaseV1 & (
 
 /** Derive an object preview or an explicit View-entry preview from admitted Will. */
 export function presentEgoInteractionPlanV1(plan: EgoInteractionPlanV1): GraphInteractionPreviewV1 | undefined {
-  if (plan.outcome === 'rejected' || plan.input.target.kind !== 'node') return undefined;
+  if (plan.outcome === 'rejected' || plan.input.target.kind !== 'node'
+    || (plan.action === 'none' && plan.input.membershipAction !== 'toggle' && !plan.input.modifiers.ctrl)) return undefined;
   return {
     ...((plan.action === 'choose-constellation' || plan.action === 'focus-member' || plan.action === 'admit-member')
       && (plan.resultingState.viewId !== plan.before.viewId || plan.resultingState.focusedNodeId !== plan.before.focusedNodeId)

@@ -28,7 +28,7 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
   profiles: [{
     profileId: GRAPH_PLUS_PROFILE_ID_V1,
     displayName: 'Default',
-    descriptorVersion: 9,
+    descriptorVersion: 10,
     dimensions: '2d',
     allowedDimensions: ['2d', '3d'],
     requestedCapabilities: GRAPH_PLUS_REQUESTED_CAPABILITIES_V1,
@@ -58,9 +58,10 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
     modules: {
       rendering: {
         policy: 'required',
+        defaults: { labelMode: 'proximity' },
         constraints: {
           renderQuality: { type: 'enum', allowed: ['automatic', 'high-fidelity', 'energy-saver'] },
-          labelMode: { type: 'enum', allowed: ['adaptive', 'all', 'off'] },
+          labelMode: { type: 'enum', allowed: ['off', 'proximity', 'adaptive'] },
         },
       },
       filtering: { policy: 'required' },
@@ -101,7 +102,6 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
         policy: 'required',
         constraints: {
           labelPosition: { type: 'enum', allowed: ['above', 'below'] },
-          cursorLabelProximityEnabled: { type: 'enum', allowed: [true, false] },
           adaptiveLabelThreshold2d: { type: 'number', min: 0, max: 100 },
           adaptiveLabelThreshold3d: { type: 'number', min: 0, max: 100 },
         },
@@ -132,6 +132,14 @@ export function migrateGraphPlusProfileOverridesV17(
     const settings = { ...modules['force-layout'].settings };
     delete settings.weightingMode;
     modules['force-layout'] = { ...modules['force-layout'], settings: Object.keys(settings).length ? settings : undefined };
+  }
+  if (modules.rendering?.settings?.labelMode === 'all') {
+    modules.rendering = { ...modules.rendering, settings: { ...modules.rendering.settings, labelMode: 'adaptive' } };
+  }
+  if (modules.anima?.settings) {
+    const settings = { ...modules.anima.settings };
+    delete settings.cursorLabelProximityEnabled;
+    modules.anima = { ...modules.anima, settings };
   }
   const anima = modules.anima;
   if (anima?.enabled === false) {

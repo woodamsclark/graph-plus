@@ -26,7 +26,7 @@ export const GRAPH_PLUS_EXPERIENCE_POLICIES_V1: Readonly<
   global: {
     mode: 'global',
     documentScope: 'vault',
-    subjectSources: ['ego'],
+    subjectSources: ['ego', 'active-note'],
     allowedInteractionStates: ['overview', 'explore', 'focus'],
     attentionCardinality: 'constellation',
     attentionAwarenessDepth: 0,
@@ -65,6 +65,7 @@ export function graphPlusEngineExperienceContractV1(
     attention: {
       ...(policy.attentionCardinality === 'single-subject' ? { maximumNodeCount: 1 } : {}),
       overflow: 'preserve-intent-subject',
+      clearOnOverviewEntry: true,
     },
     awareness: { attentionNeighborhoodDepth: policy.attentionAwarenessDepth },
     permittedInteractions: [...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1.permittedInteractions],

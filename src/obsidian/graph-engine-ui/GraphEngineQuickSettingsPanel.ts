@@ -356,15 +356,6 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
           await this.context.profileSettings.setModuleSetting('anima', 'labelPosition', value);
         }));
     }
-    if (anima?.enabled
-      && graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labelProximity)) {
-      const presentation = graphSettingPresentationV1('anima.cursorLabelProximityEnabled');
-      new Setting(body).setName(presentation.name).addToggle(toggle => toggle
-        .setValue(anima.settings.cursorLabelProximityEnabled !== false)
-        .onChange(async enabled => {
-          await this.context.profileSettings.setModuleSetting('anima', 'cursorLabelProximityEnabled', enabled);
-        }));
-    }
     if (rendering) {
       const settings = rendering.settings;
       if (anima?.enabled
@@ -721,8 +712,8 @@ function readNumber(value: JsonValue | undefined, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
-function readLabelMode(value: JsonValue | undefined): 'adaptive' | 'all' | 'off' {
-  return value === 'all' || value === 'off' ? value : 'adaptive';
+function readLabelMode(value: JsonValue | undefined): 'adaptive' | 'proximity' | 'off' {
+  return value === 'adaptive' || value === 'off' ? value : value === 'all' ? 'adaptive' : 'proximity';
 }
 
 function readLabelPosition(value: JsonValue | undefined): 'above' | 'below' {

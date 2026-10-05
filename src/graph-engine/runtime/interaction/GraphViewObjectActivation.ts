@@ -18,7 +18,8 @@ export function planGraphViewObjectActivationV1(options: {
   readonly getConstellation: (nodeId: string) => readonly string[];
   readonly constellationPathNodeIds?: readonly string[];
 }): ObjectActivation | undefined {
-  const addedNodeIds = [...new Set([...options.attentionNodeIds, options.nodeId,
+  const addedNodeIds = [...new Set([...options.attentionNodeIds,
+    ...(options.viewId === 'focus' && options.focusedNodeId ? [options.focusedNodeId] : []), options.nodeId,
     ...(options.constellationPathNodeIds ?? [])])];
   const membershipAction = options.membershipAction ?? (options.ctrl ? 'remove' : undefined);
   if (options.objectAction === 'focus') return {

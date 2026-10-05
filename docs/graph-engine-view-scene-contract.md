@@ -19,7 +19,9 @@ Related contracts:
 A View defines how Ego engages with the world and how that engagement is presented.
 A scene contract makes the View's permitted interest and presentation explicit.
 Changing a View does not itself change canonical nodes, relationships, structural
-projection, layout, conscious history, or the constellation's membership.
+projection, layout or conscious history. Graph+ enables the optional
+`attention.clearOnOverviewEntry` policy: returning to Overview clears membership,
+while entering Focus or returning from Focus to Constellation retains it.
 
 | View | Purpose | Scope of interest | Tracked interest |
 | --- | --- | --- | --- |
@@ -89,8 +91,11 @@ This permits exploration through visible dimmed neighbors while keeping "one fro
 
 Updated 2026-10-03. `Constellation.kind` is `ego` or `memory`; source identity
 belongs to Consciousness and is independent of Anima's color or highlight phase.
-Graph+ supplies the three most recently activated distinct notes before the current
-active note as remembered subjects. Actual graph links group those subjects into Memory constellations;
+Graph+ currently disables visible Memory constellations. Its RC working-constellation
+experiment instead adds active notes to Attention without changing Global View or
+camera, retains previous Focus roots, and clears the group on return to Overview.
+The following Memory source rules remain available to other consumers. Actual graph
+links group remembered subjects into Memory constellations;
 disconnected remembered notes remain valid singleton constellations. No synthetic
 links or canonical nodes are created.
 
@@ -169,10 +174,14 @@ explicit View entry or Focus hops. Neither lane commits View or membership.
   new subject hovered. The focused subject retains ordinary Focus hover.
 
 Resolve the admitted destination once, then apply its hover policy once. A hover in
-Constellation or Focus raises the hovered node, immediate projected neighbors and
+Constellation admission raises the hovered node, immediate projected neighbors and
 incident links by one degree. View transitions use the destination's hover policy,
-not the source View's. Destination hover does not recursively plan another View
-transition. All preview expression is immediate; cursor distance does not blend scenes.
+not the source View's. A Focus root has no next transition, so hovering it leaves
+its dim neighbors and context links unchanged. A neighbor preview presents the new
+root with the normal dim neighborhood and a full root-size hover label. Destination
+hover does not recursively plan another View transition. With Anima enabled, primary
+previews wait 0.2 seconds and fade in over 0.5 seconds; cancellation fades back over
+0.5 seconds. Cursor distance does not blend scenes.
 
 | Before hover lift | During hover lift |
 | --- | --- |
@@ -611,7 +620,7 @@ application shares canonical topology, coordinates, and pins.
    in that View. Gravity proximity alone never starts a preview, and there is no
    distance fade. Only the nearest eligible node receives physical attraction.
    One actual node click commits the admitted destination; proximity labels continue
-   to reveal independently.
+   to reveal in Cursor proximity mode; Off suppresses every label.
    Constellation candidates preview admission; members preview Focus. Focus hops preview
    their admitted neighborhood. After a node click, another next-action preview waits
    for pointer leave and return. Another click still resolves fresh state.

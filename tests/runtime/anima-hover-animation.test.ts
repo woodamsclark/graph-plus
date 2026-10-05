@@ -58,7 +58,7 @@ test('Anima delays and fades each View preview in and out in 2D and 3D without m
       const probe = viewMode === 'focus' ? 'c' : 'd';
       const opacity = () => scene!.nodes.find(node => node.id === probe)!.opacity;
       const baseline = opacity();
-      const target = viewMode === 'overview' ? 0.24 : viewMode === 'explore' ? 0 : 1;
+      const target = viewMode === 'overview' ? 0.24 : viewMode === 'explore' ? 0 : 0.24;
       const canvas = runtimeCanvas(value.container);
       const hover = (type: 'pointermove' | 'pointerleave' | 'pointerdown' | 'pointerup') => {
         const fields = { clientX: 240, clientY: 180, pointerId: 981, pointerType: 'mouse', button: 0 };

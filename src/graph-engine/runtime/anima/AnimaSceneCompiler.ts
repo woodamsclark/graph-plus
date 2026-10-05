@@ -82,8 +82,8 @@ export function compileAnimaSceneV1(options: {
         const phase = presentation.highlight.phaseByNodeId[node.id] ?? 'void';
         const opacity = Math.min(finiteOpacity(contribution?.opacity, 1), sceneOpacity(phase, 'node'));
         const label = presentation.labelRaising.byNodeId[node.id];
-        const suppressed = label?.disposition === 'suppress';
-        const forced = label?.disposition === 'force';
+        const suppressed = policy.labelMode === 'off' || label?.disposition === 'suppress';
+        const forced = !suppressed && label?.disposition === 'force';
         const stroked = focused || attended || contribution?.strokeWidth !== undefined;
         return {
           id: node.id,
@@ -111,7 +111,7 @@ export function compileAnimaSceneV1(options: {
           labelOpacity: suppressed ? 0 : forced ? finiteOpacity(contribution?.labelOpacity, 1)
             : Math.min(finiteOpacity(contribution?.labelOpacity, opacity), opacity),
           labelFontSize: finitePositive(contribution?.labelFontSize, theme.labelFont.sizePx)
-            * (focusedNeighborNodeIds.has(node.id) ? 0.5 : 1),
+            * (focusedNeighborNodeIds.has(node.id) && node.id !== sceneFocus && !hovered ? 0.5 : 1),
           ...(contribution?.labelOffset === undefined ? {} : { labelOffset: { ...contribution.labelOffset } }),
           ...(suppressed ? { showLabel: false } : forced ? { showLabel: true }
             : contribution?.showLabel === undefined ? {} : { showLabel: contribution.showLabel }),

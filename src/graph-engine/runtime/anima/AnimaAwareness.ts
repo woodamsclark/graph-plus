@@ -405,7 +405,9 @@ function resolveAnimaHighlightV1(options: {
   // Resolve the scene first, then lift each affected object exactly once. Deriving
   // edges after node promotion would also lift unrelated neighbor-to-neighbor links.
   if (options.objectPreview?.activation === 'primary'
-    && options.interaction.hoveredNodeId !== undefined) {
+    && options.interaction.hoveredNodeId !== undefined
+    && !(options.interaction.state === 'focus'
+      && options.interaction.hoveredNodeId === options.interaction.focusedNodeId)) {
     const hovered = options.interaction.hoveredNodeId;
     const hoverPolicy = GRAPH_VIEW_DEFINITIONS_V1[options.hoverViewId].scene.hoverAwareness;
     const raisedNodes = new Set<string>();
@@ -445,9 +447,13 @@ function resolveAnimaLabelRaisingV1(options: {
 }): AnimaLabelRaisingV1 {
   const policy = GRAPH_VIEW_DEFINITIONS_V1[options.interaction.state].scene.labels;
   const visibleNodeIds = options.visibleNodeIds ?? new Set(options.document.nodes.map((node) => node.id));
+  const suppressHover = options.suppressHover || (options.interaction.state === 'focus'
+    && options.interaction.hoveredNodeId === options.interaction.focusedNodeId);
   const hoverNeighbors = new Set<string>();
-  if (!options.suppressHover && options.hoverViewId !== 'overview'
-    && options.interaction.hoveredNodeId !== undefined) {
+  if (!suppressHover && options.hoverViewId !== 'overview'
+    && options.interaction.hoveredNodeId !== undefined
+    && !(options.interaction.state === 'focus'
+      && options.interaction.hoveredNodeId === options.interaction.focusedNodeId)) {
     for (const edge of options.document.edges) {
       if (options.visibleEdgeIds && !options.visibleEdgeIds.has(edge.id)) continue;
       if (edge.sourceId === options.interaction.hoveredNodeId) hoverNeighbors.add(edge.targetId);
@@ -457,7 +463,7 @@ function resolveAnimaLabelRaisingV1(options: {
   return { byNodeId: Object.fromEntries([...visibleNodeIds].map((nodeId): [string, AnimaLabelDecisionV1] => {
     const phase = options.highlight.phaseByNodeId[nodeId] ?? 'void';
     if (phase === 'highlighted') {
-      const reason: AnimaLabelReasonV1 = !options.suppressHover && nodeId === options.interaction.hoveredNodeId
+      const reason: AnimaLabelReasonV1 = !suppressHover && nodeId === options.interaction.hoveredNodeId
         ? 'hover'
         : options.attention.nodeIds.has(nodeId)
           ? 'attended'
@@ -482,7 +488,7 @@ function resolveAnimaLabelRaisingV1(options: {
     if (phase === 'dimmed' || phase === 'void') {
       return [nodeId, { disposition: policy[phase], reason: 'dimmed', priority: 2 }];
     }
-    if (!options.suppressHover
+    if (!suppressHover
       && !options.attention.nodeIds.has(nodeId)
       && !options.remembered?.nodeIds.has(nodeId)
       && hoverNeighbors.has(nodeId)) {

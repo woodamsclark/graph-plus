@@ -638,8 +638,8 @@ test('Selective hover previews preserve committed state in 2D and 3D with and wi
       value.platform.flushFrame();
       equal((await session.exportViewState()).focusedNodeId, 'b', 'click commits the previewed Focus subject');
       deepEqual(opacities(), focusPreview, 'the Focus preview exactly matches the committed default Focus scene');
-      deepEqual(opacities(), { a: 1, b: 1, c: 1, d: 0 },
-        'committed hovered Focus keeps immediate neighbors standard and unrelated context void');
+      deepEqual(opacities(), { a: 0.24, b: 1, c: 0.24, d: 0 },
+        'committed root hover keeps immediate neighbors dim and unrelated context void');
       await hover();
       await session.restoreViewState(overview);
       await hover('b');
@@ -739,7 +739,7 @@ test('Selective hover previews preserve committed state in 2D and 3D with and wi
       viewChanges.length = 0;
       const unchangedFocus = await session.exportViewState();
       await hover('b');
-      deepEqual(opacities(), { a: 1, b: 1, c: 1, d: 1 }, 'Focus hopping previews the destination plus hovering its subject');
+      deepEqual(opacities(), { a: 1, b: 1, c: 0.24, d: 1 }, 'Focus hopping previews the destination root with dim neighbors');
       deepEqual(await session.exportViewState(), unchangedFocus, 'hover changes neither camera, settings, membership, subject, layout, nor Memory');
       deepEqual(viewChanges, [], 'visual previews do not publish View transitions');
       assert(intents.every((type) => type === 'node-hover-changed'), 'hover emits inspection only');

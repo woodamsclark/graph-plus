@@ -872,7 +872,7 @@ export class SessionInteractionRuntime {
     const context = this.planningContext();
     const directive = { ...command, type: 'direct-attention' as const, nodeIds, clearFocus, focusNodeId,
       viewMode: command.type === 'direct-attention' ? command.viewMode : undefined };
-    const next = realizeEgoViewDirectiveV1(directive, context.state, context.availableNodeIds);
+    const next = realizeEgoViewDirectiveV1(directive, context.state, context.availableNodeIds, context.experience);
     const focusChanged = next.focusedNodeId !== context.state.focusedNodeId;
     this.setInteractionState(next.attentionNodeIds, next.focusedNodeId, command, focusChanged, next.viewId);
     if (focusChanged && next.focusedNodeId !== undefined) this.recenterFocus(next.focusedNodeId, command);

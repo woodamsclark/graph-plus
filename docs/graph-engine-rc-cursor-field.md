@@ -22,14 +22,15 @@ camera, saved settings or simulation.
 - Label reveal reaches 96 CSS pixels and fades with cursor distance. It can reveal
   visible dim context without promoting the node or changing membership. Void nodes
   remain hidden. Cursor-only labels use the same distance fade for standard Overview
-  nodes and dim Constellation context; automatically visible labels retain their normal
-  opacity. Ordinary label collision and nearer-disc occlusion checks remain active.
+  nodes and dim Constellation context. Adaptive mode separately preserves the opacity
+  of its automatically admitted labels. Ordinary label collision and nearer-disc occlusion checks remain active.
   Proximity labels have a 12-pixel readable font floor, shared by text measurement
   and drawing.
-- Cursor label proximity is a default-on Anima setting, independent of Labels mode
-  and cursor attraction. Its Display toggle follows Label position. With Labels Off,
-  proximity can still reveal nearby labels; disabling proximity leaves automatic and
-  interaction-forced labels unchanged.
+- Labels offers Off, Cursor proximity (the Graph+ default), and Adaptive. Off suppresses
+  every label, including hover, root, selected and structural labels. Cursor proximity
+  uses only the 96-pixel distance fade; Adaptive uses the saliency budget and interaction
+  priorities without the cursor field. The dropdown replaces the independent proximity
+  toggle. Label position remains directly beneath Labels. Legacy All maps to Adaptive.
 - Adaptive saliency retains the existing 0–100 saved values but halves the automatic
   label budget across the range. At distant zoom the minimum budgets are 12, 6, and 3
   for saliency 0, 50, and 100 respectively, with a maximum budget of 60. Higher values
@@ -53,10 +54,11 @@ reheating the whole graph, or reanalyzing unchanged topology.
 
 Hover previews show the next admitted View with the same node hovered there.
 Overview previews Constellation plus hover; Constellation member hover previews
-Focus plus hover; Focus hops preview the new Focus subject plus hover. The destination
-hover policy raises its immediate projected neighbors and incident links one degree,
-while its unrelated context retains the destination baseline. Neighbor labels receive
-adaptive priority rather than forced visibility.
+Focus plus hover; Focus hops preview the new Focus subject plus hover. A Focus root
+has no next transition, so root hover preserves its dim neighbors and dim context
+links. A hovered neighbor uses its full future-root label size, including during the
+preview delay. Constellation admission previews can still raise immediate neighbors
+and incident links one degree, with adaptive label priority rather than forced labels.
 
 Preview begins only from an actual node hover. The gravity radius alone cannot
 activate it. While Anima is enabled, a primary hover visit waits 0.2 seconds, then
@@ -100,7 +102,8 @@ exclusion, actual session movement/range in 2D and 3D, unchanged camera framing,
 pointer-leave settling, repeated natural settling and waking with shared position buffers,
 host failure isolation, nearest-only attraction and destination-plus-hover preview, Display control order, and
 label range/void behavior, equal Overview/Constellation fade opacity in both dimensions,
-independent live proximity toggling with Labels Off, the shifted saliency budgets,
+absolute Labels Off, the three live label modes, the shifted saliency budgets,
+inert Focus-root hover, future-root hover label size and active-note membership,
 timed preview delay/fade/cancellation in every View and dimension, fresh target delays,
 partial-fade reversal, immediate activation during waiting, and idle scheduling.
 Obsidian desktop visual acceptance remains a separate smoke check.

@@ -79,6 +79,25 @@ test('Ego additions capture the nearest visible route for primary and menu activ
   deepEqual(remove.constellationPathNodeIds, [], 'removal never adds a route');
 });
 
+test('Focus root hover is inert and Overview entry clears membership only when the experience requests it', () => {
+  const rootContext = { ...context(), state: { viewId: 'focus' as const, attentionNodeIds: ['a', 'b'], focusedNodeId: 'a' } };
+  const rootHover = resolveEgoInteractionPlanV1(node('a'), rootContext);
+  equal(rootHover.action, 'none', 'the current root has no next View to preview');
+  equal(presentEgoInteractionPlanV1(rootHover), undefined, 'root hover has no prospective scene');
+  deepEqual(rootHover.resultingState, rootContext.state, 'root hover preserves the complete scene state');
+  deepEqual(rootHover.effects, [], 'root hover cannot recenter or clear presentation');
+  const input: EgoInteractionInputV1 = { ...node('a'), target: { kind: 'background' }, modality: 'keyboard', phase: 'activate', navigationAction: 'back' };
+  const clearingExperience = { ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1,
+    attention: { ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1.attention, clearOnOverviewEntry: true } };
+  const focusBack = resolveEgoInteractionPlanV1(input, { ...rootContext, experience: clearingExperience });
+  deepEqual(focusBack.resultingState.attentionNodeIds, ['a', 'b'], 'Focus back retains the constellation');
+  const overviewBack = resolveEgoInteractionPlanV1(input, { ...context(), experience: clearingExperience });
+  equal(overviewBack.resultingState.viewId, 'overview', 'Constellation back returns to Overview');
+  deepEqual(overviewBack.resultingState.attentionNodeIds, [], 'returning to Overview clears working membership');
+  deepEqual(resolveEgoInteractionPlanV1(input, context()).resultingState.attentionNodeIds, ['a', 'b'],
+    'other consumers retain their existing default membership policy');
+});
+
 test('Ego never routes a new constellation back to passive Memory', () => {
   const edges = [graphEdge('xy', 'x', 'y'), graphEdge('ya', 'y', 'a')];
   const plan = resolveEgoInteractionPlanV1(node('x'), {

@@ -29,7 +29,6 @@ export const GRAPH_QUICK_SETTINGS_CONTROL_IDS_V1 = Object.freeze({
   /** @deprecated Compatibility spelling for labelSaliency. */
   labelThreshold: 'display.label-threshold',
   labelPosition: 'display.label-position',
-  labelProximity: 'display.label-proximity',
   nodeSize: 'display.node-size',
   linkThickness: 'display.link-thickness',
   showArrows: 'display.show-arrows',

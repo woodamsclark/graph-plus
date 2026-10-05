@@ -45,6 +45,7 @@ export function resolveGraphExperienceContractV1(
     attention: {
       ...(maximumNodeCount === undefined ? {} : { maximumNodeCount }),
       overflow: 'preserve-intent-subject',
+      ...(source.attention.clearOnOverviewEntry === true ? { clearOnOverviewEntry: true } : {}),
     },
     awareness: { attentionNeighborhoodDepth: depth },
     permittedInteractions,

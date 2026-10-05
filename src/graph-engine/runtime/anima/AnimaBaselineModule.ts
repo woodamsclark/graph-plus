@@ -23,7 +23,7 @@ export class AnimaBaselineModule implements GraphModuleInstanceV1 {
   private theme: GraphVisualThemeV2;
   private settings: Readonly<Record<string, JsonValue>> = {};
   private policy: GraphPresentationPolicyV2 = {};
-  private labelMode: 'adaptive' | 'all' | 'off' = 'adaptive';
+  private labelMode: 'adaptive' | 'all' | 'off' | 'proximity' = 'adaptive';
   private nodeRadiusScale = 1;
   private edgeThicknessScale = 0.1;
 
@@ -143,6 +143,6 @@ function positive(value: JsonValue | undefined, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-function labelMode(value: JsonValue | undefined): 'adaptive' | 'all' | 'off' {
-  return value === 'all' || value === 'off' ? value : 'adaptive';
+function labelMode(value: JsonValue | undefined): 'adaptive' | 'all' | 'off' | 'proximity' {
+  return value === 'all' || value === 'off' || value === 'proximity' ? value : 'adaptive';
 }

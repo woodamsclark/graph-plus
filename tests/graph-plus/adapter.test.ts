@@ -316,10 +316,10 @@ test('Graph+ application shares one graph world across viewport-independent pres
     'canonical active-note truth should fan out to the originating Local policy');
   equal((await secondSession.exportViewState()).focusedNodeId, betaId,
     'canonical active-note truth should fan out to every Local presentation');
-  deepEqual((await firstSession.exportViewState()).selectedNodeIds, [betaId],
-    'canonical fan-out focuses only the active subject without copying Memory into Attention');
-  deepEqual((await secondSession.exportViewState()).selectedNodeIds, [betaId],
-    'each Local Consciousness keeps Memory distinct from Attention');
+  deepEqual((await firstSession.exportViewState()).selectedNodeIds, [alphaId, betaId],
+    'canonical fan-out retains the previous root as a constellation member');
+  deepEqual((await secondSession.exportViewState()).selectedNodeIds, [alphaId, betaId],
+    'each Local constellation retains active-note arrivals independently of Memory');
   equal(firstCanonicalReplacements, 1,
     'the originating Local presentation should apply the received canonical event once');
   equal(secondCanonicalReplacements, 1,
@@ -330,8 +330,8 @@ test('Graph+ application shares one graph world across viewport-independent pres
     'the release profile should suppress Memory constellations in every Local pane');
   equal(global.getProjectedDocument()?.nodes.length, global.getDocument()?.nodes.length,
     'active-note truth should not alter the Global presentation');
-  deepEqual((await globalSession.exportViewState()).selectedNodeIds, [alphaId],
-    'active-note following should not overwrite Global Attention');
+  deepEqual((await globalSession.exportViewState()).selectedNodeIds, [alphaId, betaId],
+    'active-note arrival extends Global Attention without replacing it');
 
   application.receiveHostEvent({ type: 'active-note-changed' });
   for (let index = 0; index < 40 && (
@@ -344,11 +344,11 @@ test('Graph+ application shares one graph world across viewport-independent pres
     'dropping out of a note should retain the full graph in the originating Local pane');
   assert((secondLocal.getLocalDocument()?.nodes.length ?? 0) > 0,
     'dropping out of a note should retain the full graph in the sibling Local pane');
-  deepEqual((await firstSession.exportViewState()).selectedNodeIds, [],
-    'rootless Local Attention is empty without projecting session Memory');
-  deepEqual((await secondSession.exportViewState()).selectedNodeIds, [],
-    'each rootless Local presentation stays empty without a Memory constellation');
-  deepEqual((await globalSession.exportViewState()).selectedNodeIds, [alphaId],
+  deepEqual((await firstSession.exportViewState()).selectedNodeIds, [alphaId, betaId],
+    'absence of an active note retains the working constellation');
+  deepEqual((await secondSession.exportViewState()).selectedNodeIds, [alphaId, betaId],
+    'each rootless Local presentation retains its working constellation');
+  deepEqual((await globalSession.exportViewState()).selectedNodeIds, [alphaId, betaId],
     'rootless Local state should not overwrite Global Attention');
   equal(firstCanonicalReplacements, 2,
     'canonical absence should be applied once rather than duplicated with outbound state');
@@ -599,6 +599,52 @@ class MemoryStore implements GraphPlusCheckpointStoreV1 {
   async load(): Promise<GraphPlusCheckpointV1 | undefined> { return this.value; }
   async save(_vaultId: string, checkpoint: GraphPlusCheckpointV1): Promise<void> { this.value = checkpoint; this.saves += 1; }
 }
+
+test('Active notes build a clearable constellation without moving Global framing or changing Views', async () => {
+  const fixture = snapshot(); let current: any = fixture.value;
+  const runtime = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
+  runtime.profiles.setUserOverrides('graph-plus', 'default', { modules: { 'force-layout': { enabled: false } } });
+  const core = new GraphEngineProviderCoreV1({ engineVersion: '2.0.0', engineInstanceId: 'active-constellation-test',
+    capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory });
+  const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(lease.ok, 'Graph+ obtains an independent presentation lease');
+  const application = new GraphPlusApplicationV1({ model: new GraphPlusVaultModelV1({ read: () => current }, { countDuplicateLinks: true }),
+    navigator: { openNote: async () => undefined, openTag: async () => undefined } });
+  const alpha = noteNodeId('Alpha.md'); const beta = noteNodeId('folder/Beta.md'); const gamma = noteNodeId('Gamma.md');
+  application.receiveHostEvent({ type: 'active-note-changed', nodeId: alpha });
+  const graph = application.createPresentation({ mode: 'global', lease: lease.lease, container: runtime.container,
+    vaultId: fixture.value.vaultId, checkpointStore: new MemoryStore() });
+  await graph.open(); const session = graph.getSession()!;
+  const settle = async () => { for (let i = 0; i < 100; i += 1) await Promise.resolve(); };
+  const initial = await session.exportViewState();
+  equal(initial.viewMode, 'overview', 'startup stays in Overview');
+  deepEqual(initial.selectedNodeIds, [alpha], 'the active startup note seeds the constellation');
+  equal((await session.exportEffectiveSettings()).modules.rendering.settings.labelMode, 'proximity', 'Cursor proximity is the default label mode');
+  application.receiveHostEvent({ type: 'active-note-changed', nodeId: beta }); await settle();
+  deepEqual((await session.exportViewState()).selectedNodeIds, [alpha, beta], 'note arrival adds without replacing prior members');
+  deepEqual((await session.exportViewState()).camera, initial.camera, 'Global note arrival preserves the camera');
+  equal((await session.exportViewState()).viewMode, 'overview', 'Global note arrival preserves the View');
+  await session.setView('explore'); await session.focusNode(beta);
+  const focused = await session.exportViewState();
+  application.receiveHostEvent({ type: 'active-note-changed', nodeId: gamma }); await settle();
+  current = { ...current, notes: [...current.notes, { file: { path: 'Gamma.md' }, path: 'Gamma.md', basename: 'Gamma',
+    extension: 'md', content: '', tags: [], properties: {} }] };
+  application.receiveHostEvent({ type: 'canonical-vault-invalidated' }); await application.reconcile(); await settle();
+  deepEqual((await session.exportViewState()).selectedNodeIds, [alpha, beta, gamma], 'new-note arrival is admitted after canonical topology catches up');
+  equal((await session.exportViewState()).focusedNodeId, beta, 'Global note activity cannot change the Focus subject');
+  deepEqual((await session.exportViewState()).camera, focused.camera, 'Global note activity cannot move Focus framing');
+  await session.setView('explore');
+  deepEqual((await session.exportViewState()).selectedNodeIds, [alpha, beta, gamma], 'Focus back retains the working constellation');
+  await session.setView('overview');
+  deepEqual((await session.exportViewState()).selectedNodeIds, [], 'Constellation exit clears the working group');
+  application.receiveHostEvent({ type: 'active-note-changed', nodeId: gamma }); await settle();
+  deepEqual((await session.exportViewState()).selectedNodeIds, [], 'duplicate host activity cannot resurrect a cleared constellation');
+  application.receiveHostEvent({ type: 'active-note-changed', nodeId: alpha });
+  application.receiveHostEvent({ type: 'active-note-changed', nodeId: beta }); await settle();
+  deepEqual((await session.exportViewState()).selectedNodeIds, [alpha, beta], 'rapid note switches retain every activation even when the queue coalesces');
+  equal((await session.exportViewState()).viewMode, 'overview', 'rebuilding after a clear keeps Overview');
+  await application.dispose(); await core.dispose();
+});
 
 test('V1.2 Graph+ checkpoints export graph data only after graph changes', async () => {
   const runtime = runtimeHarness();
@@ -926,8 +972,8 @@ test('Local Graph+ reuses the full graph while active-note Focus changes', async
     'a Local Focus hop should preserve existing node positions');
   equal(consciouslyFocused.camera.zoom, zoomBeforeFocusHop,
     'a Local Focus hop should preserve camera scale');
-  deepEqual(consciouslyFocused.selectedNodeIds, [alphaId],
-    'application-directed Local Focus should establish only its requested subject');
+  deepEqual(consciouslyFocused.selectedNodeIds, [alphaId, betaId],
+    'application-directed Local Focus retains the prior root in its constellation');
   equal(consciouslyFocused.focusedNodeId, alphaId,
     'Local Attention should move to the requested Focus subject');
   assert(vectorDistance(consciouslyFocused.camera.target, consciouslyFocused.positions[alphaId]) < 1e-9,
@@ -956,8 +1002,8 @@ test('Local Graph+ reuses the full graph while active-note Focus changes', async
   assert((consumer.getLocalDocument()?.nodes.length ?? 0) > 0,
     'dropping out of a note should retain the full Local graph document');
   const blank = await session.exportViewState();
-  deepEqual(blank.selectedNodeIds, [],
-    'a rootless Local presentation should not turn recent history into visible membership');
+  deepEqual(blank.selectedNodeIds, [alphaId, betaId],
+    'a rootless Local presentation retains its working constellation');
   equal(blank.focusedNodeId, undefined, 'dropping out should release Focus into constellation mode');
   await consumer.close();
   await core.dispose();

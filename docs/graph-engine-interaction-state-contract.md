@@ -30,6 +30,11 @@ consume the shared eligibility policy; Form retains its independent position-own
 gate. Anima consumes label reveal policy, while label layout and adaptive budgets remain
 owned by the label manager and renderer.
 
+Graph+ enables `attention.clearOnOverviewEntry`: returning from Constellation or
+Focus to Overview clears deliberate membership without moving the camera. The engine
+default preserves membership for consumers that do not enable this policy. Active
+notes add to Graph+ membership; Global arrival preserves View, Focus subject and camera.
+
 ## 2. View transitions
 
 | Current View | Input | Result |
@@ -41,7 +46,7 @@ owned by the label manager and renderer.
 | Constellation | Primary activation of dim candidate | Admit the candidate and its nearest visible path; remain in Constellation and preserve framing |
 | Focus | Primary node activation | Retain membership, admit the candidate and connecting path if needed, hop Focus; recenter without fitting |
 | Focus | Background or Escape | Constellation; retain membership and camera frame |
-| Constellation | Background or Escape | Overview; retain membership and camera frame |
+| Constellation | Background or Escape | Overview; Graph+ clears membership and retains camera frame |
 | Any View | Ctrl-click object | Add candidate and path, or remove only the member, without descent; removing the subject releases Focus, removing the last member resolves Overview |
 
 Primary release commits only for a stationary gesture. A second matching release
@@ -105,9 +110,11 @@ leave. Same-node movement and modifier changes cannot advance it to the followin
 action preview. The latched scene retains its hover lifting, label policy, and revealed
 hit targets, so the click is visually seamless with the state it commits. A second click
 still resolves fresh state and transitions without waiting for a new preview.
-Ordinary hover lifts only the node in Overview; in Constellation and Focus it also
-lifts immediate projected neighbors and incident links. The committed View chooses
-reach. Lift one presentation degree: void -> dimmed -> standard -> highlighted, capped at highlighted.
+Hover previews the admitted destination View with the same node hovered there.
+A Focus root has no next transition: hovering it leaves its neighbors and incident
+context links dim. A hovered Focus neighbor previews admission and becoming the new
+root, with its full root label size. Constellation admission can lift immediate
+projected neighbors and incident links. Lift one presentation degree: void -> dimmed -> standard -> highlighted, capped at highlighted.
 The lift never changes Consciousness or membership, never accumulates, and excludes
 Ctrl removal/no-change. Nonincident links and two-hop neighbors retain their scene
 phase. Revealed dim nodes are interactive.
