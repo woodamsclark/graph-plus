@@ -16,21 +16,21 @@ test('Anima cancels waiting previews and reverses partial fades without jumping'
     context, preview: id ? preview : null, hoveredNodeId: id, committed, now,
   });
   deepEqual(update(0, 'a'), [], 'the first hover waits');
-  equal(animation.nextFrameDelayMs(0), 2_000, 'a waiting preview needs one delayed wake');
-  deepEqual(update(1_000), [], 'leaving during the delay never exposes the preview');
-  equal(animation.nextFrameDelayMs(1_000), undefined, 'canceled waiting work becomes idle');
-  update(2_000, 'a');
-  equal(update(5_000, 'a')[0].strength, 0.5, 'three seconds into a new visit is halfway in');
-  equal(update(5_000, 'b')[0].strength, 0.5, 'handoff preserves the outgoing visual strength');
-  equal(update(6_000, 'b')[0].strength, 0.25, 'the old preview fades back while the new visit waits');
-  deepEqual(update(7_000, 'b'), [], 'the old preview is gone as the new delay ends');
-  equal(update(8_000, 'b')[0].strength, 0.5, 'each target owns its own delay');
-  equal(update(8_000)[0].strength, 0.5, 'canceling a partial fade preserves its current strength');
-  equal(update(9_000)[0].strength, 0.25, 'partial cancellation returns over two seconds');
-  deepEqual(update(10_000), [], 'the canceled preview reaches the normal scene');
-  equal(animation.nextFrameDelayMs(10_000), undefined, 'completed fade-out has no background work');
-  equal(update(10_100, 'a', true)[0].strength, 1, 'activation bypasses all preview timing');
-  deepEqual(update(10_200, 'a', false, 'focus'), [], 'a changed committed scene discards stale previews');
+  equal(animation.nextFrameDelayMs(0), 200, 'a waiting preview needs one delayed wake');
+  deepEqual(update(100), [], 'leaving during the delay never exposes the preview');
+  equal(animation.nextFrameDelayMs(100), undefined, 'canceled waiting work becomes idle');
+  update(300, 'a');
+  equal(update(750, 'a')[0].strength, 0.5, '450ms into a new visit is halfway in');
+  equal(update(750, 'b')[0].strength, 0.5, 'handoff preserves the outgoing visual strength');
+  equal(update(850, 'b')[0].strength, 0.4, 'the old preview fades back while the new visit waits');
+  equal(update(950, 'b').length, 1, 'only the outgoing preview is visible as the new delay ends');
+  equal(update(1_200, 'b').find(layer => layer.hoveredNodeId === 'b')!.strength, 0.5, 'each target owns its own delay');
+  equal(update(1_200)[0].strength, 0.5, 'canceling a partial fade preserves its current strength');
+  equal(update(1_450)[0].strength, 0.25, 'partial cancellation returns over half a second');
+  deepEqual(update(1_700), [], 'the canceled preview reaches the normal scene');
+  equal(animation.nextFrameDelayMs(1_700), undefined, 'completed fade-out has no background work');
+  equal(update(1_800, 'a', true)[0].strength, 1, 'activation bypasses all preview timing');
+  deepEqual(update(1_900, 'a', false, 'focus'), [], 'a changed committed scene discards stale previews');
 });
 
 test('Anima delays and fades each View preview in and out in 2D and 3D without moving the graph', async () => {
@@ -73,14 +73,14 @@ test('Anima delays and fades each View preview in and out in 2D and 3D without m
       const close = (actual: number, expected: number, message: string) => assert(Math.abs(actual - expected) < 1e-8, `${dimensions}/${viewMode}: ${message}; expected ${expected}, got ${actual}`);
       hover('pointermove');
       equal(opacity(), baseline, 'entry retains the committed View');
-      advance(1_999); equal(opacity(), baseline, 'preview stays absent for the full delay');
-      advance(1); equal(opacity(), baseline, 'fade starts at zero after two seconds');
-      advance(1_000); close(opacity(), (baseline + target) / 2, 'halfway fade blends the committed and admitted scenes');
+      advance(199); equal(opacity(), baseline, 'preview stays absent for the full delay');
+      advance(1); equal(opacity(), baseline, 'fade starts at zero after 200ms');
+      advance(250); close(opacity(), (baseline + target) / 2, 'halfway fade blends the committed and admitted scenes');
       equal(scene!.policy?.cursorLabelRevealRadiusPx, 96, 'label proximity remains independent of preview timing');
-      advance(1_000); close(opacity(), target, 'the preview reaches its exact admitted scene');
+      advance(250); close(opacity(), target, 'the preview reaches its exact admitted scene');
       hover('pointerleave'); close(opacity(), target, 'leaving does not snap the scene back');
-      advance(1_000); close(opacity(), (baseline + target) / 2, 'leave fades halfway toward the normal View');
-      advance(1_000); close(opacity(), baseline, 'the normal View is restored after two seconds');
+      advance(250); close(opacity(), (baseline + target) / 2, 'leave fades halfway toward the normal View');
+      advance(250); close(opacity(), baseline, 'the normal View is restored after 500ms');
       deepEqual(await session.exportViewState(), unchanged, 'timed presentation never changes camera, positions, membership or Memory');
       equal(value.platform.pendingFrames + value.platform.pendingTimers, 0, 'a completed fade sleeps on a cold graph');
       hover('pointermove');

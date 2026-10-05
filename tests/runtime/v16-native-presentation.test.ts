@@ -226,7 +226,7 @@ test('Overview completes timed previews only on node hover, independently of cur
     for (const [distance, expected] of [[64, 1], [32, 1], [0, 0.24], [1, 0.24], [0, 0.24], [32, 1], [64, 1]]) {
       pointer(value, canvas, 'pointermove', 320 + distance, 180, 14);
       value.platform.flushFrame();
-      value.platform.advanceTime(distance <= 1 ? 4_000 : 2_000);
+      value.platform.advanceTime(distance <= 1 ? 700 : 500);
       value.platform.flushTimer(); value.platform.flushFrame();
       equal(scene!.nodes.find(node => node.id === 'far')!.opacity, expected,
         'only an actual node hover completes the timed preview, independently of cursor distance');

@@ -2,8 +2,8 @@ import type { GraphInteractionPreviewV1 } from './AnimaInteractionPreview.ts';
 import type { GraphRenderFrameV1 } from '../render/GraphRenderTypes.ts';
 import type { GraphColorV2 } from '../theme/index.ts';
 
-const DELAY_MS = 2_000;
-const FADE_MS = 2_000;
+const DELAY_MS = 200;
+const FADE_MS = 500;
 
 interface PreviewVisit {
   readonly key: string;

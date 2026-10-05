@@ -597,7 +597,7 @@ test('Selective hover previews preserve committed state in 2D and 3D with and wi
         canvas.dispatchEvent(event as unknown as Event);
         value.platform.flushFrame();
         if (animaEnabled) {
-          value.platform.advanceTime(id ? 4_000 : 2_000);
+          value.platform.advanceTime(id ? 700 : 500);
           value.platform.flushTimer(); value.platform.flushFrame();
         }
       };
@@ -706,7 +706,7 @@ test('Selective hover previews preserve committed state in 2D and 3D with and wi
       await hover('a', true);
       canvas.dispatchEvent(new value.window.KeyboardEvent('keyup', { key: 'Control', ctrlKey: false, bubbles: true }) as unknown as Event);
       value.platform.flushFrame();
-      if (animaEnabled) { value.platform.advanceTime(4_000); value.platform.flushTimer(); value.platform.flushFrame(); }
+      if (animaEnabled) { value.platform.advanceTime(700); value.platform.flushTimer(); value.platform.flushFrame(); }
       deepEqual(opacities(), { a: 0.24, b: 0.24, c: 0.24, d: 1 },
         'modifier release retains the admitted removal preview until leave');
       await hover('a');
@@ -723,7 +723,7 @@ test('Selective hover previews preserve committed state in 2D and 3D with and wi
       deepEqual(await session.exportViewState(), committed, 'a retained removal target does not change actual state');
       canvas.dispatchEvent(new value.window.KeyboardEvent('keyup', { key: 'Control', ctrlKey: false, bubbles: true }) as unknown as Event);
       value.platform.flushFrame();
-      if (animaEnabled) { value.platform.advanceTime(4_000); value.platform.flushTimer(); value.platform.flushFrame(); }
+      if (animaEnabled) { value.platform.advanceTime(700); value.platform.flushTimer(); value.platform.flushFrame(); }
       deepEqual(opacities(), { a: 1, b: 0, c: 0, d: 1 }, 'Ctrl release previews the exact destination Focus scene');
       await hover('d', true);
       tap(value, canvas, await point(session, 'd'), 703, 'mouse', true);

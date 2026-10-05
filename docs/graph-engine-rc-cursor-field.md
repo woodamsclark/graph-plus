@@ -59,10 +59,10 @@ while its unrelated context retains the destination baseline. Neighbor labels re
 adaptive priority rather than forced visibility.
 
 Preview begins only from an actual node hover. The gravity radius alone cannot
-activate it. While Anima is enabled, a primary hover visit waits two seconds, then
-linearly blends from the committed scene to the admitted preview over two seconds.
+activate it. While Anima is enabled, a primary hover visit waits 0.2 seconds, then
+linearly blends from the committed scene to the admitted preview over 0.5 seconds.
 Leaving cancels the visit and fades its current strength back to the normal scene
-over two seconds, including when canceled midway through fade-in. Changing targets
+over 0.5 seconds, including when canceled midway through fade-in. Changing targets
 starts a fresh delay while the old preview fades out. Strength depends on elapsed
 time, not cursor distance. The 96-pixel proximity label reveal remains immediate
 and independent. Ctrl membership-removal cues remain immediate.
