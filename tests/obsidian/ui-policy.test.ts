@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { Window } from 'happy-dom';
 import {
   GRAPH_QUICK_SETTINGS_CONTROL_IDS_V1 as CONTROLS,
@@ -67,6 +68,13 @@ test('R-UI-02 hiding UI controls is independent of engine module policy', () => 
   });
   equal(graphUiSectionIsShownV1(policy, SECTIONS.form), false, 'the Form UI section should be hidden');
   equal(value.modules.form, undefined, 'resolving visibility must not synthesize or mutate module policy');
+});
+
+test('Display Quick Settings keeps Label position immediately after Labels', () => {
+  const source = readFileSync('src/obsidian/graph-engine-ui/GraphEngineQuickSettingsPanel.ts', 'utf8');
+  const display = source.slice(source.indexOf('  private renderDisplay('), source.indexOf('  private async setTransientFormSetting('));
+  const controls = [...display.matchAll(/SECTIONS\.display, CONTROLS\.(\w+)/g)].map(match => match[1]);
+  equal(controls[controls.indexOf('labels') + 1], 'labelPosition', 'no other Display control may separate Labels and Label position');
 });
 
 test('R-UI-04 quick-setting disclosures retain their user state across panel renders', () => {

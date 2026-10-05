@@ -161,16 +161,18 @@ Anima receives a discriminated preview: `objects` retains committed context for
 admission/removal; `view-transition` borrows the admitted resulting scene for
 explicit View entry or Focus hops. Neither lane commits View or membership.
 
-- **Overview:** an unhighlighted node previews admission, its path and destination
-  Constellation View. A committed Attention or Memory highlight previews its group's
-  constellation entry. Neither preview commits membership or View.
+- **Overview:** hover reveals the immediate projected neighborhood without presenting
+  its admitted click destination. The hovered node is highlighted, its immediate
+  neighbors are standard, and unrelated context is dimmed. Independent Attention and
+  Memory highlights remain visible. It expresses no prospective membership or route.
+  Clicking still chooses the admitted constellation and enters Constellation.
 - **Constellation:** a candidate previews admission only; a member previews Focus.
 - **Focus:** a different subject previews the exact admitted Focus neighborhood.
 
-For an object-delta preview, ordinary hover raises presentation awareness by exactly
-one degree for the hovered node in Overview. In Constellation and Focus it also lifts
-immediate projected neighbors and incident links. A View-transition preview does not
-receive this additional lift; it must match its destination View exactly:
+In Constellation and Focus, an object-delta preview raises presentation awareness by
+exactly one degree for the hovered node, immediate projected neighbors and incident
+links. Their View-transition previews do not receive this additional lift; they match
+the destination View exactly. Overview uses the separate neighborhood reveal above:
 
 | Before hover lift | During hover lift |
 | --- | --- |
@@ -201,14 +203,16 @@ pointer remains visible rather than advancing to a different next action. Moveme
 inside the same node, modifier changes and external state updates cannot rearm it. The
 pointer must leave the node before another preview can be computed. The latch includes
 ordinary awareness lifting, label policy, revealed hit targets, and prospective
-node/View deltas. Another click before leaving still resolves fresh committed state and
+node/View deltas in Constellation and Focus. Overview drag retains neighborhood
+emphasis; Overview click displays the committed Constellation instead of latching a
+prospective next-View scene. Another click before leaving still resolves fresh committed state and
 performs its transition normally.
 
 Hover also highlights the shortest graph path back to the nearest member of the active
 deliberate constellation.
 "Nearest" means fewest undirected edge hops through projected nodes and visible edges, independent
-of spatial layout. In every View, destinations are committed Attention members of active
-`C`; passive Memory is never a route target. A user can first choose a Memory constellation
+of spatial layout. In Constellation and Focus, destinations are committed Attention members of active
+`C`; passive Memory is never a route target. Overview does not present a hover route. A user can first choose a Memory constellation
 to adopt it into Attention and then grow from it. Stable
 node-ID traversal resolves equal-length ties. A member needs no path; with no reachable
 constellation, only the ordinary object preview applies. Intermediate path nodes and
@@ -603,12 +607,15 @@ application shares canonical topology, coordinates, and pins.
 6. Back from Focus under the accepted camera rule: retain zoom, angle, distance,
    and live framing; the next orbit and unanchored zoom use the retained focal point. Re-entering or
    clicking the same focused subject cannot ratchet the zoom.
-7. Overview candidates preview admission, then highlight and enter Constellation in one click; committed highlights preview
-   and enter Constellation. Constellation candidates preview admission; members preview
-   Focus. Focus hops preview their admitted neighborhood. After a node click, the
-   committed View becomes the previewed destination, then the next node/View action
-   preview and all ordinary hover expression wait for pointer leave and return. Another click still resolves fresh state.
-   Hover changes no exported state, Memory, View notifications, camera or host actions.
+7. Overview hover emphasizes immediate neighbors without showing the next View or
+   prospective membership; one click chooses the admitted group and enters Constellation.
+   Neighbor labels remain adaptive and can be revealed by cursor proximity.
+   Constellation candidates preview admission; members preview Focus. Focus hops preview
+   their admitted neighborhood. After a node click, another next-action preview waits
+   for pointer leave and return. Another click still resolves fresh state.
+   Hover presentation changes no membership, Memory, View notifications, camera or host
+   actions. The separate RC cursor field can move eligible nodes; see
+   `graph-engine-rc-cursor-field.md` for its physics and position persistence contract.
 8. Drag, pinch, double activation, and holds each produce their declared effects once;
    releasing a navigation gesture never emits an additional scene descent.
 9. Close Quick Settings with an outside click: only the panel closes. Returning between

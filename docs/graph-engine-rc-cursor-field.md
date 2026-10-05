@@ -28,6 +28,27 @@ camera, saved settings or simulation.
 - Cursor position and attraction steps are transient. They are not exported as graph
   data or settings. Actual node movement follows the existing position persistence rules.
 
+## Settling and restart contract
+
+The first RC port exposed an existing buffer lifecycle mismatch: `stop()` clears
+velocities, but `synchronizeBuffers()` used only document/position identity to skip
+initialization. After a cursor visit had returned the internal position object,
+a later settle-and-wake reached an undefined velocity. `GraphModuleHost` isolated
+that tick failure by removing Force Layout from the active module list, so it stayed
+off for the session. The fast path now also requires complete velocity buffers.
+This retains empty exported cold-state velocities and restarts without stale momentum,
+reheating the whole graph, or reanalyzing unchanged topology.
+
+Overview hover now highlights the hovered node, retains standard immediate projected
+neighbors, and dims other context. Existing Attention and Memory highlights remain
+independent. It does not borrow the prospective Constellation View, membership, or
+route; clicking still enters the admitted Constellation. The hovered label is forced;
+neighbor labels receive adaptive priority and the same cursor proximity reveal.
+
+Label position sits immediately after Labels in Display Quick Settings. The cursor
+trial was branched from the original RC, while the prior reorder lived on the separate
+three-size trial branch; this was a missing carried change, not a settings reset.
+
 ## Ownership and validation
 
 `GraphInput` owns canvas-local mouse position; `SessionInteractionRuntime` exposes it.
@@ -38,5 +59,7 @@ Anima declares the two screen-space radii in presentation policy.
 
 Regression coverage includes input lifecycle, cold-layout attraction, pin and Form
 exclusion, actual session movement/range in 2D and 3D, unchanged camera framing,
-pointer-leave settling, and label range/void/Off behavior. Obsidian desktop visual
+pointer-leave settling, repeated natural settling and waking with shared position buffers,
+host failure isolation, Overview neighborhood presentation, Display control order, and
+label range/void/Off behavior. Obsidian desktop visual
 acceptance remains a separate smoke check.

@@ -88,6 +88,28 @@ test('cursor attraction moves a cooled graph without reheating and excludes pins
   equal(force.tick(state, 1 / 60)?.requestNextFrame, false, 'leaving allows a cold layout to stop');
 });
 
+test('settled physics can repeatedly wake on cursor entry with unchanged position buffers', () => {
+  const document = graphDocument({ nodes: [graphNode('a'), graphNode('b')], edges: [] });
+  let state = pipeline(document, { nodeIds: new Set(['a', 'b']), edgeIds: new Set() });
+  const force = new ForceLayoutModule('2d', readForceSettings({ repulsionStrength: 0, springStrength: 0,
+    centeringStrength: 0, collisionRadius: 0, alphaDecay: 1 }));
+  for (let visit = 0; visit < 3; visit++) {
+    for (let step = 0; step < 90; step++) {
+      const result = force.tick(state, 1 / 60);
+      if (result?.positions) state = { ...state, positions: result.positions };
+    }
+    equal(force.getDiagnostics().running, false, 'ordinary settling puts physics to sleep');
+    const before = state.positions.a.x;
+    const result = force.tick({ ...state, cursorAttractionSteps: { a: { x: 1, y: 0, z: 0 } } }, 1 / 60);
+    assert(result?.positions, 'a cursor visit must restart a naturally settled layout');
+    equal(result.positions.a.x, before + 1, 'each new visit moves the nearby node');
+    state = { ...state, positions: result.positions };
+    equal(force.tick(state, 1 / 60)?.requestNextFrame, false, 'leave returns a cold layout to sleep');
+  }
+  force.updateSettings({ repulsionStrength: 0, springStrength: 0, centeringStrength: 0.1, collisionRadius: 0 });
+  assert(force.tick(state, 1 / 60)?.positions, 'ordinary forces can restart after cursor wake cycles');
+});
+
 test('live cursor field has the same short screen range in 2D and 3D and stops on leave', async () => {
   for (const dimensions of ['2d', '3d'] as const) {
     const document = graphDocument({ nodes: ['near', 'pinned', 'far'].map(id => graphNode(id)), edges: [] });
@@ -106,6 +128,8 @@ test('live cursor field has the same short screen range in 2D and 3D and stops o
       pinned: camera.screenToWorld(320, 210, 1000), far: camera.screenToWorld(500, 180, 1000) };
     await session.restoreViewState({ ...initial, camera: cameraState, positions, pinnedNodeIds: ['pinned'] });
     const restoredCamera = (await session.exportViewState()).camera;
+    const errors: string[] = [];
+    session.onError(error => errors.push(error.code));
     const canvas = runtimeCanvas(value.container);
     pointer(value, canvas, 'pointermove', 350, 180, 11, 'mouse');
     value.platform.flushFrame(17);
@@ -117,6 +141,23 @@ test('live cursor field has the same short screen range in 2D and 3D and stops o
     canvas.dispatchEvent(new value.window.PointerEvent('pointerleave', { pointerType: 'mouse', pointerId: 11 }) as unknown as Event);
     value.platform.flushFrame(34);
     deepEqual((await session.exportViewState()).positions, after.positions, 'leaving stops attraction without replaying momentum');
+    let timestamp = 34;
+    for (let visit = 0; visit < 3; visit++) {
+      for (let step = 0; step < 90; step++) {
+        value.platform.advanceTime(34);
+        value.platform.flushTimer();
+        value.platform.flushFrame(timestamp += 34);
+      }
+      const beforeVisit = await session.exportViewState();
+      pointer(value, canvas, 'pointermove', 350, 180, 11, 'mouse');
+      value.platform.flushFrame(timestamp += 34);
+      const nextVisit = await session.exportViewState();
+      assert(nextVisit.positions.near.x > beforeVisit.positions.near.x, 'each cursor return wakes settled session physics');
+      deepEqual(nextVisit.camera, restoredCamera, 'repeated waking retains camera framing');
+      canvas.dispatchEvent(new value.window.PointerEvent('pointerleave', { pointerType: 'mouse', pointerId: 11 }) as unknown as Event);
+      value.platform.flushFrame(timestamp += 34);
+    }
+    deepEqual(errors, [], 'settle and wake must never cause the host to disable force layout');
     await session.dispose();
   }
 });
@@ -306,21 +347,21 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   });
   assert(overviewHover?.nodeContributions && overviewHover.edgeContributions,
     'overview hover should produce node and edge presentation');
-  equal(overviewHover.nodeContributions.a.opacity, 0.24, 'neighbor context follows the prospective Constellation');
-  equal(overviewHover.nodeContributions.d.opacity, 0.24, 'the destination View dims unrelated context');
-  deepEqual(overviewHover.nodeContributions.a.finalColor, desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
-    'Overview hover leaves neighboring nodes unchanged');
+  equal(overviewHover.nodeContributions.a.opacity, 1, 'immediate neighbors stay standard');
+  equal(overviewHover.nodeContributions.d.opacity, 0.24, 'Overview dims unrelated context without borrowing a View');
+  deepEqual(overviewHover.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
+    'Overview neighbors keep their standard color');
   deepEqual(overviewHover.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'overview hover should light the hovered node');
   equal(overviewHover.nodeContributions.b.labelForceVisible, true,
     'overview hover should force the hovered node label');
   equal(overviewHover.nodeContributions.c.labelAlwaysVisible, false,
     'overview hover should leave a neighboring node under adaptive saliency');
-  equal(overviewHover.nodeContributions.c.labelSaliencyBoost, undefined,
-    'overview hover should leave neighboring labels under ordinary automatic policy');
+  equal(overviewHover.nodeContributions.c.labelSaliencyBoost, 0.5,
+    'neighbor labels get adaptive priority alongside proximity reveal');
   equal(overviewHover.edgeContributions['a-d'].opacity, 0.6, 'unrelated links follow prospective Constellation context');
-  equal(overviewHover.edgeContributions['a-b'].opacity, 0.6,
-    'Overview hover leaves links at their prospective View baseline');
+  equal(overviewHover.edgeContributions['a-b'].opacity, 1,
+    'Overview incident links follow the standard neighbor phase');
 
   const taggedA = anima.contributeFrame({
     ...state,

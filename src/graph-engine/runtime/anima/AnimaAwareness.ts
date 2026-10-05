@@ -190,10 +190,15 @@ export function createAnimaConsciousnessPresentationV1(options: {
       experience: options.experience,
       rememberedNodeIds: options.remembered?.nodeIds,
     }) : undefined;
-  const removedNodeIds = new Set(objectPreview?.removedNodeIds ?? []);
+  // Overview expresses a local neighborhood, independently of the admitted
+  // click destination. Will still owns Constellation entry on activation.
+  const overviewNeighborReveal = options.interaction.state === 'overview'
+    && hovered !== undefined && !options.ctrlHover && objectPreview?.activation === 'primary';
+  const presentationPreview = overviewNeighborReveal ? undefined : objectPreview;
+  const removedNodeIds = new Set(presentationPreview?.removedNodeIds ?? []);
   const expressedAttentionNodeIds = new Set([...options.attention.nodeIds].filter((id) => !removedNodeIds.has(id)));
-  for (const id of objectPreview?.addedNodeIds ?? []) expressedAttentionNodeIds.add(id);
-  const viewTransition = objectPreview?.kind === 'view-transition' ? objectPreview.resultingState : undefined;
+  for (const id of presentationPreview?.addedNodeIds ?? []) expressedAttentionNodeIds.add(id);
+  const viewTransition = presentationPreview?.kind === 'view-transition' ? presentationPreview.resultingState : undefined;
   const sceneInteraction: GraphInteractionContextV1 = viewTransition ? {
     ...options.interaction, state: viewTransition.viewId, mode: viewTransition.viewId,
     focusedNodeId: viewTransition.focusedNodeId, selectedNodeIds: new Set(viewTransition.attentionNodeIds),
@@ -202,7 +207,7 @@ export function createAnimaConsciousnessPresentationV1(options: {
   if (sceneInteraction.focusedNodeId !== undefined && !removedNodeIds.has(sceneInteraction.focusedNodeId)) {
     focusEmphasisNodeIds.add(sceneInteraction.focusedNodeId);
   }
-  if (objectPreview?.focusNodeId !== undefined) focusEmphasisNodeIds.add(objectPreview.focusNodeId);
+  if (presentationPreview?.focusNodeId !== undefined) focusEmphasisNodeIds.add(presentationPreview.focusNodeId);
   const statePolicy = ANIMA_STATE_PRESENTATION_POLICIES_V1[sceneInteraction.state];
   // Classification always describes committed truth; only explicit View-entry preview borrows a scene.
   const consciousnessClasses = classifyAnimaConsciousnessV1({
@@ -212,8 +217,8 @@ export function createAnimaConsciousnessPresentationV1(options: {
   const highlight = resolveAnimaHighlightV1({ ...options, interaction: sceneInteraction,
     hoverViewId: options.interaction.state,
     attention: viewTransition ? { nodeIds: expressedAttentionNodeIds } : options.attention,
-    statePolicy, objectPreview,
-    hoverPathNodeIds: new Set(objectPreview?.hoverPathNodeIds ?? []) });
+    statePolicy, objectPreview: presentationPreview, overviewNeighborReveal,
+    hoverPathNodeIds: new Set(presentationPreview?.hoverPathNodeIds ?? []) });
   const constellationKindByNodeId: Record<string, Constellation['kind']> = {};
   for (const id of visibleNodeIds) {
     if (expressedAttentionNodeIds.has(id) || highlight.hoverPathNodeIds.has(id)) {
@@ -237,8 +242,8 @@ export function createAnimaConsciousnessPresentationV1(options: {
       hoverViewId: options.interaction.state,
       attention: { nodeIds: expressedAttentionNodeIds },
       consciousnessClasses, highlight,
-      suppressHover: objectPreview?.activation === 'remove-membership'
-        || objectPreview?.kind === 'view-transition' }),
+      suppressHover: presentationPreview?.activation === 'remove-membership'
+        || presentationPreview?.kind === 'view-transition' }),
   };
 }
 
@@ -317,6 +322,7 @@ function resolveAnimaHighlightV1(options: {
   readonly remembered?: RememberedSubjects;
   readonly interaction: GraphInteractionContextV1;
   readonly hoverViewId: GraphUxStateV1;
+  readonly overviewNeighborReveal?: boolean;
   readonly statePolicy: AnimaStatePresentationPolicyV1;
   readonly hoverPathNodeIds: ReadonlySet<string>;
   readonly objectPreview?: GraphInteractionPreviewV1;
@@ -397,6 +403,14 @@ function resolveAnimaHighlightV1(options: {
     if (removedNodeIds.has(nodeId) && !options.remembered?.nodeIds.has(nodeId)) phase = 'dimmed';
     return [nodeId, phase];
   })) as Record<string, AnimaPresentationPhaseV1>;
+  if (options.overviewNeighborReveal && options.interaction.hoveredNodeId !== undefined) {
+    const hovered = options.interaction.hoveredNodeId;
+    const neighbors = relationships.get(hovered) ?? new Set<string>();
+    for (const id of visibleNodeIds) {
+      if (id === hovered) phaseByNodeId[id] = 'highlighted';
+      else if (phaseByNodeId[id] !== 'highlighted') phaseByNodeId[id] = neighbors.has(id) ? 'standard' : 'dimmed';
+    }
+  }
   const phaseByEdgeId = Object.fromEntries(visibleEdges.map((edge) => [
     edge.id,
     weakerPhase(phaseByNodeId[edge.sourceId] ?? 'void', phaseByNodeId[edge.targetId] ?? 'void'),
@@ -445,7 +459,7 @@ function resolveAnimaLabelRaisingV1(options: {
   const policy = GRAPH_VIEW_DEFINITIONS_V1[options.interaction.state].scene.labels;
   const visibleNodeIds = options.visibleNodeIds ?? new Set(options.document.nodes.map((node) => node.id));
   const hoverNeighbors = new Set<string>();
-  if (!options.suppressHover && options.hoverViewId !== 'overview'
+  if (!options.suppressHover
     && options.interaction.hoveredNodeId !== undefined) {
     for (const edge of options.document.edges) {
       if (options.visibleEdgeIds && !options.visibleEdgeIds.has(edge.id)) continue;

@@ -345,6 +345,19 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
             if (adaptiveThresholdHost) adaptiveThresholdHost.hidden = value !== 'adaptive';
           }));
       }
+    }
+    if (anima?.enabled
+      && graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labelPosition)) {
+      const presentation = graphSettingPresentationV1('anima.labelPosition');
+      new Setting(body).setName(presentation.name).addDropdown((dropdown) => dropdown
+        .addOptions(selectOptions(presentation))
+        .setValue(readLabelPosition(anima.settings.labelPosition))
+        .onChange(async (value) => {
+          await this.context.profileSettings.setModuleSetting('anima', 'labelPosition', value);
+        }));
+    }
+    if (rendering) {
+      const settings = rendering.settings;
       if (anima?.enabled
         && graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labelSaliency)) {
         const thresholdKey = effective.dimensions === '3d'
@@ -368,16 +381,6 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
             await this.context.profileSettings.setModuleSetting('rendering', 'showArrows', visible);
           }));
       }
-    }
-    if (anima?.enabled
-      && graphUiControlIsShownV1(this.policy, SECTIONS.display, CONTROLS.labelPosition)) {
-      const presentation = graphSettingPresentationV1('anima.labelPosition');
-      new Setting(body).setName(presentation.name).addDropdown((dropdown) => dropdown
-        .addOptions(selectOptions(presentation))
-        .setValue(readLabelPosition(anima.settings.labelPosition))
-        .onChange(async (value) => {
-          await this.context.profileSettings.setModuleSetting('anima', 'labelPosition', value);
-        }));
     }
     this.mountContributions(body, contributions);
   }

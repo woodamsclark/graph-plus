@@ -697,7 +697,9 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     const key = `${state.document.documentId}\u0000${state.document.revision}`;
     const topologyChanged = key !== this.documentKey || state.document !== this.bufferDocumentSource;
     const sourceChanged = state.positions !== this.positionSource && state.positions !== this.positions;
-    if (!topologyChanged && !sourceChanged) return;
+    // stop() clears motion, while the document and internal positions stay the
+    // same. Cursor entry (or reheat) must rebuild those buffers on the fast path.
+    if (!topologyChanged && !sourceChanged && this.velocities.size === state.document.nodes.length) return;
     const known = new Set(state.document.nodes.map((node) => node.id));
     if (topologyChanged) {
       for (const id of Object.keys(this.positions)) if (!known.has(id)) delete this.positions[id];
