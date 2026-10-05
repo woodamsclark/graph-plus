@@ -246,8 +246,6 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.synchronizeRuntimeActivity();
   };
 
-  private cursorPreviewKey = '';
-
   private readonly onAnimationFrame: FrameRequestCallback = (timestamp) => {
     if (this.isSuspended()) return;
     if (this.lastFrameTimestamp !== null
@@ -314,13 +312,6 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (this.isSuspended()) {
       this.activeFrameInvalidations = null;
       return;
-    }
-    // Physics can move the nearest node beneath a stationary cursor. Recompose
-    // presentation when its distance changes, without reprojecting the graph.
-    if (resolveGraphUxStateV1(this.viewState) === 'overview' && this.interaction.getCursorPoint()) {
-      const target = this.resolveCursorFieldTarget(true);
-      const key = target ? `${target.nodeId}:${target.distance}` : '';
-      if (key !== this.cursorPreviewKey) this.refreshFrame(false, 'presentation');
     }
     this.updateRendererScene([...this.activeFrameInvalidations]);
     const render = this.projection.render(this.renderer);
@@ -1442,25 +1433,17 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     }
     if (invalidation === 'presentation') this.presentationRevision += 1;
     this.activeFrameInvalidations?.add(invalidation);
-    const cursor = this.interaction?.getCursorPoint();
-    const radius = this.projection.frames.get()?.policy?.cursorAttractionRadiusPx ?? 0;
-    const proximityOverview = view.id === 'overview' && cursor !== undefined && radius > 0;
-    const cursorTarget = proximityOverview ? this.resolveCursorFieldTarget(true) : undefined;
-    this.cursorPreviewKey = cursorTarget ? `${cursorTarget.nodeId}:${cursorTarget.distance}` : '';
     this.moduleView = this.projection.compose({
       host: this.moduleHost,
       consciousness: this.consciousness,
       experience: this.experience,
-      resolveObjectActivationPreview: () => proximityOverview
-        ? cursorTarget ? this.interaction.getProximityActivationPreview(cursorTarget.nodeId) : null
-        : this.interaction?.getObjectActivationPreview() ?? null,
-      overviewPreviewStrength: proximityOverview ? cursorTarget ? 1 - cursorTarget.distance / radius : 0 : undefined,
+      resolveObjectActivationPreview: () => this.interaction?.getObjectActivationPreview() ?? null,
       projectionView: this.projectionView,
       viewState: this.viewState,
       theme: this.themePalette,
       presentationPolicy: DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
       draggedNodeId: this.interaction?.getDraggedNodeId(),
-      hoveredNodeId: proximityOverview ? cursorTarget?.nodeId : this.interaction?.getHoveredNodeId(),
+      hoveredNodeId: this.interaction?.getHoveredNodeId(),
       selectionPresentationSuspended: this.interaction?.isSelectionPresentationSuspended(),
       selectionNeighborRevealActive: this.interaction?.isSelectionNeighborRevealActive(),
       previewedNodeId: this.interaction?.getPreviewedNodeId(),
@@ -1469,17 +1452,17 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (schedule) this.scheduleFrame(0, invalidation);
   }
 
-  private resolveCursorFieldTarget(includeFixed = false): {
+  private resolveCursorFieldTarget(): {
     nodeId: string; point: { x: number; y: number; depth: number }; distance: number; radius: number;
   } | undefined {
     const cursor = this.interaction?.getCursorPoint();
     const frame = this.projection.frames.get();
     const radius = frame?.policy?.cursorAttractionRadiusPx ?? 0;
-    if (!cursor || !frame || radius <= 0 || (!includeFixed && this.moduleView.formActive)) return undefined;
+    if (!cursor || !frame || radius <= 0 || this.moduleView.formActive) return undefined;
     const fixed = new Set([...this.viewState.pinnedNodeIds, ...this.interaction.getCameraTrackingNodeIds()]);
     let nearest: { nodeId: string; point: { x: number; y: number; depth: number }; distance: number; radius: number } | undefined;
     for (const node of frame.nodes) {
-      if (node.opacity <= 0 || (!includeFixed && (fixed.has(node.id) || node.id === this.viewState.focusedNodeId))) continue;
+      if (node.opacity <= 0 || (fixed.has(node.id) || node.id === this.viewState.focusedNodeId)) continue;
       const position = this.moduleView.positions[node.id];
       if (!position) continue;
       const point = this.vision.worldToScreen(position);

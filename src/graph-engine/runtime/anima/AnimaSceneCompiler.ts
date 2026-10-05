@@ -43,17 +43,20 @@ export function compileAnimaSceneV1(options: {
   const theme = options.theme ?? DEFAULT_GRAPH_VISUAL_THEME_V2;
   const policy = options.presentationPolicy ?? DEFAULT_GRAPH_PRESENTATION_POLICY_V2;
   const interaction = options.snapshot.interaction;
-  const focusedNeighborNodeIds = interaction.state === 'focus' && interaction.focusedNodeId !== undefined
-    ? new Set(options.snapshot.document.edges.flatMap((edge) => edge.sourceId === interaction.focusedNodeId
-      ? [edge.targetId]
-      : edge.targetId === interaction.focusedNodeId ? [edge.sourceId] : []))
-    : new Set<string>();
   const presentation = createAnimaConsciousnessPresentationV1({
     ...options.consciousness, experience: options.experience,
     objectActivationPreview: options.objectActivationPreview, interaction, document: options.snapshot.document,
     visibleNodeIds: options.snapshot.displaySelection.nodeIds,
     visibleEdgeIds: options.snapshot.displaySelection.edgeIds,
   });
+  const destination = presentation.objectPreview?.kind === 'view-transition'
+    ? presentation.objectPreview.resultingState : undefined;
+  const sceneView = destination?.viewId ?? interaction.state;
+  const sceneFocus = destination ? destination.focusedNodeId : interaction.focusedNodeId;
+  const focusedNeighborNodeIds = sceneView === 'focus' && sceneFocus !== undefined
+    ? new Set(options.snapshot.document.edges.flatMap((edge) => edge.sourceId === sceneFocus
+      ? [edge.targetId] : edge.targetId === sceneFocus ? [edge.sourceId] : []))
+    : new Set<string>();
   return {
     geometryRevision: options.geometryRevision,
     regions: (options.regionContributions ?? []).map((region) => ({

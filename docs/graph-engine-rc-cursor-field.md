@@ -41,20 +41,19 @@ off for the session. The fast path now also requires complete velocity buffers.
 This retains empty exported cold-state velocities and restarts without stale momentum,
 reheating the whole graph, or reanalyzing unchanged topology.
 
-Overview again previews the admitted Constellation destination, fading linearly from
-its ordinary scene as the nearest visible node enters the 64-pixel cursor well.
-Strength is `clamp(1 - screenDistance / gravityRadius, 0, 1)`: zero at the edge,
-50% halfway inward, and 100% at the center. Fixed nodes can receive presentation
-preview but remain ineligible for physical attraction. The scene blend includes node
-and link opacity, colors, outlines and label expression. Newly forced destination
-labels fade in; the existing 96-pixel proximity label reveal remains independent.
+Hover previews show the next admitted View with the same node hovered there.
+Overview previews Constellation plus hover; Constellation member hover previews
+Focus plus hover; Focus hops preview the new Focus subject plus hover. The destination
+hover policy raises its immediate projected neighbors and incident links one degree,
+while its unrelated context retains the destination baseline. Neighbor labels receive
+adaptive priority rather than forced visibility.
 
-The session supplies a pure proximity admission plan; input picking and click targets
-remain based on actual node hits. Partial preview never commits Attention, Memory,
-View or camera interest. Actual node activation commits normally and retains the
-existing consumed-hover latch. Ctrl, touch and navigation do not create a proximity
-preview. When gravity moves a node under a stationary cursor, distance is recomputed
-and the scene is refreshed. Leaving restores ordinary Overview.
+Preview begins only from an actual node hover. The gravity radius alone cannot
+activate it, and preview strength does not fade with distance. The 96-pixel proximity
+label reveal remains independent. There is one admitted transition and one hover
+presentation pass; the destination hover never plans another transition recursively.
+Actual activation commits normally and preserves the admitted hover visit until leave.
+Hover alone never commits Attention, Memory, View, or camera interest.
 
 Label position sits immediately after Labels in Display Quick Settings. The cursor
 trial was branched from the original RC, while the prior reorder lived on the separate
@@ -66,14 +65,14 @@ three-size trial branch; this was a missing carried change, not a settings reset
 The session owns screen-to-world conversion. `ForceLayoutModule` integrates the local
 step independently of alpha. `CanvasGraphRenderer` resolves nearby label eligibility
 and opacity from the same pointer without changing graph interaction or scene roles.
-Anima declares the two screen-space radii in presentation policy. The projection
-coordinator evaluates baseline and admitted preview through the same presentation
-pipeline; `AnimaSceneBlend` interpolates their resolved expression. It never runs
-physics or graph projection, and neither scene evaluation commits a View.
+Anima declares the two screen-space radii in presentation policy. Input and Ego
+admit the actual node-hover action. Anima resolves the destination scene and applies
+that View's hover policy once. Presentation never runs another admission planner
+against its hypothetical destination, nor commits the destination View.
 
 Regression coverage includes input lifecycle, cold-layout attraction, pin and Form
 exclusion, actual session movement/range in 2D and 3D, unchanged camera framing,
 pointer-leave settling, repeated natural settling and waking with shared position buffers,
-host failure isolation, nearest-only attraction and continuous Constellation preview, Display control order, and
+host failure isolation, nearest-only attraction and destination-plus-hover preview, Display control order, and
 label range/void/Off behavior. Obsidian desktop visual
 acceptance remains a separate smoke check.

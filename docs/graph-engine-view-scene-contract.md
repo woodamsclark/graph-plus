@@ -161,19 +161,18 @@ Anima receives a discriminated preview: `objects` retains committed context for
 admission/removal; `view-transition` borrows the admitted resulting scene for
 explicit View entry or Focus hops. Neither lane commits View or membership.
 
-- **Overview:** the nearest visible node within the mouse gravity radius previews
-  its admitted Constellation destination. The scene fades linearly with screen
-  distance: `1 - distance / radius`, clamped to 0–1. The edge is ordinary Overview;
-  the center is the complete admitted Constellation scene. Input and click targets
-  remain actual node hits. The preview never commits membership, Memory, or View;
-  clicking still chooses the admitted constellation and enters Constellation.
-- **Constellation:** a candidate previews admission only; a member previews Focus.
-- **Focus:** a different subject previews the exact admitted Focus neighborhood.
+- **Overview:** an actual node hover previews its admitted Constellation destination
+  with that same node hovered there. The gravity field alone cannot start a preview.
+- **Constellation:** a candidate previews admission with ordinary hover; a member
+  previews Focus with the same node hovered in Focus.
+- **Focus:** a different subject previews the admitted Focus neighborhood with that
+  new subject hovered. The focused subject retains ordinary Focus hover.
 
-In Constellation and Focus, an object-delta preview raises presentation awareness by
-exactly one degree for the hovered node, immediate projected neighbors and incident
-links. Their View-transition previews do not receive this additional lift; they match
-the destination View exactly. Overview uses the distance blend above instead:
+Resolve the admitted destination once, then apply its hover policy once. A hover in
+Constellation or Focus raises the hovered node, immediate projected neighbors and
+incident links by one degree. View transitions use the destination's hover policy,
+not the source View's. Destination hover does not recursively plan another View
+transition. All preview expression is immediate; cursor distance does not blend scenes.
 
 | Before hover lift | During hover lift |
 | --- | --- |
@@ -204,9 +203,9 @@ pointer remains visible rather than advancing to a different next action. Moveme
 inside the same node, modifier changes and external state updates cannot rearm it. The
 pointer must leave the node before another preview can be computed. The latch includes
 ordinary awareness lifting, label policy, revealed hit targets, and prospective
-node/View deltas in Constellation and Focus. Overview proximity preview blends
-expression until activation. A node click commits the complete Constellation scene
-and retains its admitted destination until the pointer leaves. Another click before leaving still resolves fresh committed state and
+node/View deltas and the admitted destination's hover expression. A node click
+commits the destination View and retains that same hovered scene until the pointer
+leaves, instead of immediately previewing a further View. Another click before leaving still resolves fresh committed state and
 performs its transition normally.
 
 Hover also highlights the shortest graph path back to the nearest member of the active
@@ -608,11 +607,11 @@ application shares canonical topology, coordinates, and pins.
 6. Back from Focus under the accepted camera rule: retain zoom, angle, distance,
    and live framing; the next orbit and unanchored zoom use the retained focal point. Re-entering or
    clicking the same focused subject cannot ratchet the zoom.
-7. Overview proximity previews Constellation with 0% expression at the gravity
-   radius, 50% halfway inward and 100% at the node center. Movement outward reverses
-   the fade; leaving restores Overview. Only the nearest eligible node receives
-   physical attraction. One actual node click chooses the admitted group and enters
-   Constellation; proximity labels continue to reveal independently.
+7. Actual node hover previews the next admitted View plus hovering the same node
+   in that View. Gravity proximity alone never starts a preview, and there is no
+   distance fade. Only the nearest eligible node receives physical attraction.
+   One actual node click commits the admitted destination; proximity labels continue
+   to reveal independently.
    Constellation candidates preview admission; members preview Focus. Focus hops preview
    their admitted neighborhood. After a node click, another next-action preview waits
    for pointer leave and return. Another click still resolves fresh state.

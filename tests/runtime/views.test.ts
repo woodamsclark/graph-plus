@@ -485,16 +485,16 @@ test('Committed activation holds its admitted preview until pointer leave', asyn
     };
     await hover('d');
     const preview = scene!.nodes.map((node) => ({ id: node.id, opacity: node.opacity,
-      labelOpacity: node.labelOpacity, labelForceVisible: node.labelForceVisible, strokeWidth: node.strokeWidth }));
+      labelOpacity: node.labelOpacity, labelFontSize: node.labelFontSize, labelForceVisible: node.labelForceVisible, strokeWidth: node.strokeWidth }));
     tap(value, canvas, await point(session, 'd'), 951, 'mouse');
     value.platform.flushFrame();
     equal((await session.exportViewState()).focusedNodeId, 'd', 'click commits the previewed Focus subject');
     deepEqual(scene!.nodes.map((node) => ({ id: node.id, opacity: node.opacity,
-      labelOpacity: node.labelOpacity, labelForceVisible: node.labelForceVisible, strokeWidth: node.strokeWidth })), preview,
+      labelOpacity: node.labelOpacity, labelFontSize: node.labelFontSize, labelForceVisible: node.labelForceVisible, strokeWidth: node.strokeWidth })), preview,
     'the admitted preview remains visually exact through its commit');
     await hover('d');
     deepEqual(scene!.nodes.map((node) => ({ id: node.id, opacity: node.opacity,
-      labelOpacity: node.labelOpacity, labelForceVisible: node.labelForceVisible, strokeWidth: node.strokeWidth })), preview,
+      labelOpacity: node.labelOpacity, labelFontSize: node.labelFontSize, labelForceVisible: node.labelForceVisible, strokeWidth: node.strokeWidth })), preview,
     'movement within the node retains the latched preview');
     await hover();
     equal(scene!.nodes.find((node) => node.id === 'c')!.opacity, 0.24, 'leaving retains the committed dimmed Focus neighborhood');
@@ -543,7 +543,7 @@ test('Overview node drag holds the admitted Constellation preview without replan
     emit('pointermove', start.x, start.y);
     value.platform.flushFrame();
     const preview = nodeScene();
-    deepEqual(Object.fromEntries(preview.map((node) => [node.id, node.opacity])), { a: 0.24, b: 1, c: 0.24 },
+    deepEqual(Object.fromEntries(preview.map((node) => [node.id, node.opacity])), { a: 1, b: 1, c: 1 },
       'Overview hover first admits the Constellation preview');
     emit('pointerdown', start.x, start.y);
     emit('pointermove', start.x + 35, start.y + 15);
@@ -603,7 +603,7 @@ test('Selective hover previews preserve committed state in 2D and 3D with and wi
       session.onViewChanged((view) => viewChanges.push(view.id));
       const overview = await session.exportViewState();
       await hover('b');
-      deepEqual(opacities(), { a: 0.24, b: 1, c: 0.24, d: 0.24 }, 'Overview previews the admitted Constellation destination');
+      deepEqual(opacities(), { a: 1, b: 1, c: 1, d: 0.24 }, 'Overview previews the admitted Constellation destination');
       deepEqual(scene!.nodes.find((node) => node.id === 'b')!.finalColor,
         animaEnabled ? DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent : DEFAULT_GRAPH_RENDER_THEME_V1.colors.selectedNode,
         'Overview shows the prospective selection');
@@ -613,14 +613,14 @@ test('Selective hover previews preserve committed state in 2D and 3D with and wi
       equal((await session.exportViewState()).viewMode, 'explore', 'first click highlights and enters Constellation');
       const entered = await session.exportViewState();
       deepEqual(entered.camera, overview.camera, 'selection preserves framing until an explicit Center + Fit');
-      deepEqual(opacities(), { a: 0.24, b: 1, c: 0.24, d: 0.24 },
+      deepEqual(opacities(), { a: 1, b: 1, c: 1, d: 0.24 },
         'click commits Constellation without any partial Focus hover presentation');
-      equal(scene!.nodes.find((node) => node.id === 'a')!.labelForceVisible, false,
-        'the consumed visit cannot reveal a neighbor label');
-      equal(scene!.nodes.find((node) => node.id === 'c')!.labelForceVisible, false,
-        'the consumed visit keeps every nonmember neighbor label suppressed');
+      equal(scene!.nodes.find((node) => node.id === 'a')!.labelForceVisible === true, false,
+        'the consumed visit keeps neighbor labels adaptive');
+      equal(scene!.nodes.find((node) => node.id === 'c')!.labelForceVisible === true, false,
+        'the consumed visit does not force nonmember neighbor labels');
       await hover('b');
-      deepEqual(opacities(), { a: 0.24, b: 1, c: 0.24, d: 0.24 }, 'same-node movement cannot rearm any hover presentation');
+      deepEqual(opacities(), { a: 1, b: 1, c: 1, d: 0.24 }, 'same-node movement cannot rearm any hover presentation');
       await hover('b', true);
       assert(scene!.nodes.find((node) => node.id === 'b')!.strokeWidth !== undefined, 'modifier changes cannot preview another action in the consumed visit');
       await hover('b');
@@ -634,8 +634,8 @@ test('Selective hover previews preserve committed state in 2D and 3D with and wi
       value.platform.flushFrame();
       equal((await session.exportViewState()).focusedNodeId, 'b', 'click commits the previewed Focus subject');
       deepEqual(opacities(), focusPreview, 'the Focus preview exactly matches the committed default Focus scene');
-      deepEqual(opacities(), { a: 0.24, b: 1, c: 0.24, d: 0 },
-        'committed Focus keeps immediate neighbors dimmed and unrelated context void');
+      deepEqual(opacities(), { a: 1, b: 1, c: 1, d: 0 },
+        'committed hovered Focus keeps immediate neighbors standard and unrelated context void');
       await hover();
       await session.restoreViewState(overview);
       await hover('b');
@@ -733,7 +733,7 @@ test('Selective hover previews preserve committed state in 2D and 3D with and wi
       viewChanges.length = 0;
       const unchangedFocus = await session.exportViewState();
       await hover('b');
-      deepEqual(opacities(), { a: 1, b: 1, c: 0.24, d: 1 }, 'Focus hopping has an explicit prospective View scene');
+      deepEqual(opacities(), { a: 1, b: 1, c: 1, d: 1 }, 'Focus hopping previews the destination plus hovering its subject');
       deepEqual(await session.exportViewState(), unchangedFocus, 'hover changes neither camera, settings, membership, subject, layout, nor Memory');
       deepEqual(viewChanges, [], 'visual previews do not publish View transitions');
       assert(intents.every((type) => type === 'node-hover-changed'), 'hover emits inspection only');

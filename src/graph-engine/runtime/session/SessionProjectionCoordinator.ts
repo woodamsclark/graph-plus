@@ -1,4 +1,3 @@
-import { blendAnimaScenesV1 } from '../anima/AnimaSceneBlend.ts';
 import type { GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
 import type { GraphViewStateV1, GraphExperienceContractV1 } from '../../contracts/v1/index.ts';
 import { GraphTopologyIndex } from '../../core/document/GraphTopologyIndex.ts';
@@ -50,8 +49,6 @@ export class SessionProjectionCoordinatorV1 {
     readonly presentationPolicy: GraphPresentationPolicyV2;
     readonly draggedNodeId?: string;
     readonly hoveredNodeId?: string;
-    /** Continuous Overview expression, resolved in cursor screen space by the session. */
-    readonly overviewPreviewStrength?: number;
     readonly selectionPresentationSuspended?: boolean;
     readonly selectionNeighborRevealActive?: boolean;
     readonly previewedNodeId?: string;
@@ -98,7 +95,7 @@ export class SessionProjectionCoordinatorV1 {
       selectionPresentationSuspended: options.selectionPresentationSuspended,
       selectionNeighborRevealActive: options.selectionNeighborRevealActive,
     });
-    const previewFrame = compileAnimaSceneV1({
+    this.frames.set(compileAnimaSceneV1({
       snapshot,
       consciousness,
       experience: options.experience,
@@ -109,30 +106,7 @@ export class SessionProjectionCoordinatorV1 {
       theme: moduleView.theme,
       presentationPolicy: moduleView.presentationPolicy,
       geometryRevision: this.geometryRevision,
-    });
-    if (options.overviewPreviewStrength !== undefined && options.overviewPreviewStrength < 1
-      && objectActivationPreview !== null && objectActivationPreview !== undefined) {
-      // Evaluate baseline and preview through the same presentation pipeline.
-      // Neither evaluation runs layout, projection, or commits Consciousness.
-      const baselineView = options.host.contribute({
-        ...options.projectionView, viewState: options.viewState, consciousness, experience: options.experience,
-        objectActivationPreview: null, hoveredNodeId: undefined, draggedNodeId: options.draggedNodeId,
-        nodeContributions: {}, edgeContributions: {}, regionContributions: [],
-        theme: options.theme, presentationPolicy: options.presentationPolicy, motionTargets: {},
-      });
-      const baselineSnapshot = createAnimusSnapshotV1({
-        document: baselineView.document, viewState: options.viewState, displaySelection: baselineView.renderSelection,
-        positions: baselineView.positions, nodeRoles: baselineView.nodeRoles, edgeRoles: baselineView.edgeRoles,
-        regions: baselineView.regions,
-      });
-      const baselineFrame = compileAnimaSceneV1({
-        snapshot: baselineSnapshot, consciousness, experience: options.experience, objectActivationPreview: null,
-        nodeContributions: baselineView.nodeContributions, edgeContributions: baselineView.edgeContributions,
-        regionContributions: baselineView.regionContributions, theme: baselineView.theme,
-        presentationPolicy: baselineView.presentationPolicy, geometryRevision: this.geometryRevision,
-      });
-      this.frames.set(blendAnimaScenesV1(baselineFrame, previewFrame, options.overviewPreviewStrength));
-    } else this.frames.set(previewFrame);
+    }));
     this.dirty = true;
     return moduleView;
   }

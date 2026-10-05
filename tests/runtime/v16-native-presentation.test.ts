@@ -200,7 +200,7 @@ test('cursor gravity pulls only the nearest eligible node and never a runner-up 
   }
 });
 
-test('Overview Constellation preview fades linearly over the gravity radius without committing state', async () => {
+test('Overview previews fully only on node hover, independently of cursor gravity range', async () => {
   for (const dimensions of ['2d', '3d'] as const) {
     let scene: GraphRenderSceneV2 | undefined;
     const registry = new GraphRendererRegistryV2();
@@ -223,29 +223,16 @@ test('Overview Constellation preview fades linearly over the gravity radius with
     await session.restoreViewState({ ...initial, positions });
     const unchanged = await session.exportViewState();
     const canvas = runtimeCanvas(value.container);
-    for (const distance of [64, 32, 16, 0, 16, 32, 64]) {
+    for (const [distance, expected] of [[64, 1], [32, 1], [0, 0.24], [1, 0.24], [0, 0.24], [32, 1], [64, 1]]) {
       pointer(value, canvas, 'pointermove', 320 + distance, 180, 14);
       value.platform.flushFrame();
-      const expected = 1 + (0.24 - 1) * (1 - distance / 64);
-      assert(Math.abs(scene!.nodes.find(node => node.id === 'far')!.opacity - expected) < 1e-6,
-        'preview fades in and out continuously from baseline to admitted Constellation');
-      deepEqual(await session.exportViewState(), unchanged, 'proximity admission never commits View, Attention, Memory or camera');
+      equal(scene!.nodes.find(node => node.id === 'far')!.opacity, expected,
+        'only an actual node hover previews the complete destination, without a distance fade');
+      deepEqual(await session.exportViewState(), unchanged, 'hover never commits View, Attention, Memory or camera');
     }
     canvas.dispatchEvent(new value.window.PointerEvent('pointerleave', { pointerType: 'mouse', pointerId: 14 }) as unknown as Event);
     value.platform.flushFrame();
     equal(scene!.nodes.find(node => node.id === 'far')!.opacity, 1, 'leaving restores Overview');
-    await session.setSessionOverrides({ modules: { 'force-layout': { enabled: true, settings: {
-      repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionRadius: 0,
-    } } } });
-    pointer(value, canvas, 'pointermove', 350, 180, 14);
-    value.platform.flushFrame();
-    const beforePull = scene!.nodes.find(node => node.id === 'far')!.opacity;
-    const beforePositions = (await session.exportViewState()).positions;
-    value.platform.advanceTime(34);
-    value.platform.flushTimer();
-    value.platform.flushFrame(1000);
-    assert((await session.exportViewState()).positions.a.x > beforePositions.a.x, 'gravity continues with a stationary cursor');
-    assert(scene!.nodes.find(node => node.id === 'far')!.opacity < beforePull, 'preview strengthens as gravity moves the node inward');
     pointer(value, canvas, 'pointermove', 320, 180, 14);
     value.platform.flushFrame(1100);
     pointer(value, canvas, 'pointerdown', 320, 180, 14);
@@ -441,21 +428,21 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   });
   assert(overviewHover?.nodeContributions && overviewHover.edgeContributions,
     'overview hover should produce node and edge presentation');
-  equal(overviewHover.nodeContributions.a.opacity, 0.24, 'neighbor context follows the prospective Constellation');
+  equal(overviewHover.nodeContributions.a.opacity, 1, 'preview includes destination hover neighbors');
   equal(overviewHover.nodeContributions.d.opacity, 0.24, 'the destination View dims unrelated context');
-  deepEqual(overviewHover.nodeContributions.a.finalColor, desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
-    'Overview hover leaves neighboring nodes unchanged');
+  deepEqual(overviewHover.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
+    'destination hover neighbors retain standard color');
   deepEqual(overviewHover.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'overview hover should light the hovered node');
   equal(overviewHover.nodeContributions.b.labelForceVisible, true,
     'overview hover should force the hovered node label');
   equal(overviewHover.nodeContributions.c.labelAlwaysVisible, false,
     'overview hover should leave a neighboring node under adaptive saliency');
-  equal(overviewHover.nodeContributions.c.labelSaliencyBoost, undefined,
-    'overview hover should leave neighboring labels under ordinary automatic policy');
+  equal(overviewHover.nodeContributions.c.labelSaliencyBoost, 0.5,
+    'destination hover favors adaptive neighbor labels');
   equal(overviewHover.edgeContributions['a-d'].opacity, 0.6, 'unrelated links follow prospective Constellation context');
-  equal(overviewHover.edgeContributions['a-b'].opacity, 0.6,
-    'Overview hover leaves links at their prospective View baseline');
+  equal(overviewHover.edgeContributions['a-b'].opacity, 1,
+    'destination hover raises incident links');
 
   const taggedA = anima.contributeFrame({
     ...state,
@@ -521,22 +508,22 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   assert(hoveredTag?.nodeContributions && hoveredTag.edgeContributions,
     'hovering a tagged node should retain its one-hop neighborhood');
   deepEqual(hoveredTag.nodeContributions.b.finalColor,
-    desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
-    'Focus entry keeps the member neighbor dimmed');
+    DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
+    'Focus preview includes the destination hover neighbor style');
   deepEqual(hoveredTag.nodeContributions.d.finalColor,
-    desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
-    'Focus entry keeps every immediate neighbor dimmed');
+    DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
+    'Focus destination hover makes immediate neighbors standard');
   equal(hoveredTag.nodeContributions.c.opacity, 0, 'committed member hover previews deliberate Focus entry');
-  equal(hoveredTag.edgeContributions['a-b'].opacity, 0.6, 'Focus entry keeps incident frontier links dimmed');
-  equal(hoveredTag.edgeContributions['a-d'].opacity, 0.6, 'every Focus frontier link remains dimmed');
+  equal(hoveredTag.edgeContributions['a-b'].opacity, 1, 'Focus destination hover raises incident links');
+  equal(hoveredTag.edgeContributions['a-d'].opacity, 1, 'each incident frontier link uses destination hover');
   equal(hoveredTag.nodeContributions.a.labelForceVisible, true,
     'hovering a tagged node should force only its own label');
   equal(hoveredTag.nodeContributions.b.labelForceVisible, false,
     'a lit direct neighbor should not receive the hover label override');
   equal(hoveredTag.nodeContributions.b.labelAlwaysVisible, false,
     'a direct hover neighbor should not bypass adaptive collision policy');
-  equal(hoveredTag.nodeContributions.b.showLabel, false,
-    'a dimmed Focus neighbor should suppress its label');
+  equal(hoveredTag.nodeContributions.b.showLabel, true,
+    'a destination hover neighbor remains label eligible');
 
   const suspended = anima.contributeFrame({
     ...state,
@@ -640,10 +627,10 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     'a dimmed non-hovered focus neighbor should not retain its Awareness-raised label');
   equal(hoveredFocusedNeighbor.nodeContributions.d.labelOpacity, 0,
     'a dimmed non-hovered focus neighbor label should be fully transparent');
-  equal(hoveredFocusedNeighbor.nodeContributions.c.opacity, 0.24,
-    'Focus preview keeps the prospective subject immediate neighbor dimmed');
-  equal(hoveredFocusedNeighbor.nodeContributions.c.showLabel, false,
-    'a dimmed prospective Focus neighbor suppresses its label');
+  equal(hoveredFocusedNeighbor.nodeContributions.c.opacity, 1,
+    'Focus preview includes the prospective subject hover neighbors');
+  equal(hoveredFocusedNeighbor.nodeContributions.c.showLabel, true,
+    'a standard destination hover neighbor remains label eligible');
   equal(hoveredFocusedNeighbor.nodeContributions.c.labelForceVisible, false,
     'hover neighbors remain under adaptive label policy');
   equal(hoveredFocusedNeighbor.nodeContributions.c.labelAlwaysVisible, false,
@@ -655,8 +642,8 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     'the prospective member connection is highlighted');
   equal(hoveredFocusedNeighbor.edgeContributions['a-d'].opacity, 0,
     'explicit View preview voids old subject-only context links');
-  equal(hoveredFocusedNeighbor.edgeContributions['b-c'].opacity, 0.6,
-    'Focus preview keeps the prospective subject frontier link dimmed');
+  equal(hoveredFocusedNeighbor.edgeContributions['b-c'].opacity, 1,
+    'Focus destination hover raises the prospective subject incident link');
 
   const cleared = anima.contributeFrame(state);
   assert(cleared?.edgeContributions, 'cleared focus should still resolve baseline edge presentation');

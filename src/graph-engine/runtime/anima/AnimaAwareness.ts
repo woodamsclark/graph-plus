@@ -210,7 +210,7 @@ export function createAnimaConsciousnessPresentationV1(options: {
     consciousField: options.consciousField, projectedNodeIds: visibleNodeIds,
   });
   const highlight = resolveAnimaHighlightV1({ ...options, interaction: sceneInteraction,
-    hoverViewId: options.interaction.state,
+    hoverViewId: sceneInteraction.state,
     attention: viewTransition ? { nodeIds: expressedAttentionNodeIds } : options.attention,
     statePolicy, objectPreview,
     hoverPathNodeIds: new Set(objectPreview?.hoverPathNodeIds ?? []) });
@@ -234,11 +234,10 @@ export function createAnimaConsciousnessPresentationV1(options: {
     statePolicy, consciousnessClasses, highlight,
     constellationKindByNodeId, constellationKindByEdgeId, memoryStrengthByNodeId,
     labelRaising: resolveAnimaLabelRaisingV1({ ...options, interaction: sceneInteraction,
-      hoverViewId: options.interaction.state,
+      hoverViewId: sceneInteraction.state,
       attention: { nodeIds: expressedAttentionNodeIds },
       consciousnessClasses, highlight,
-      suppressHover: objectPreview?.activation === 'remove-membership'
-        || objectPreview?.kind === 'view-transition' }),
+      suppressHover: objectPreview?.activation === 'remove-membership' }),
   };
 }
 
@@ -401,9 +400,11 @@ function resolveAnimaHighlightV1(options: {
     edge.id,
     weakerPhase(phaseByNodeId[edge.sourceId] ?? 'void', phaseByNodeId[edge.targetId] ?? 'void'),
   ])) as Record<string, AnimaPresentationPhaseV1>;
+  // The destination scene still has this node under the pointer. Apply its hover
+  // policy once, without planning another transition from the previewed state.
   // Resolve the scene first, then lift each affected object exactly once. Deriving
   // edges after node promotion would also lift unrelated neighbor-to-neighbor links.
-  if (options.objectPreview?.kind === 'objects' && options.objectPreview.activation === 'primary'
+  if (options.objectPreview?.activation === 'primary'
     && options.interaction.hoveredNodeId !== undefined) {
     const hovered = options.interaction.hoveredNodeId;
     const hoverPolicy = GRAPH_VIEW_DEFINITIONS_V1[options.hoverViewId].scene.hoverAwareness;
