@@ -68,6 +68,7 @@ export class SessionInteractionRuntime {
   /** Borrowed controls and spatial interest; never realized as Attention or a saved View. */
   private navigationPeek?: {
     readonly preview: GraphInteractionPreviewV1;
+    readonly nodeId: string;
     readonly state: EgoInteractionStateV1;
     readonly returnPivot: Vec3;
     readonly source: string;
@@ -519,12 +520,14 @@ export class SessionInteractionRuntime {
     if (this.restoredNavigationPivot?.source !== source) this.restoredNavigationPivot = undefined;
     if (this.navigationPeek && this.navigationPeek.source !== source) this.endNavigationPeek(false);
     const preview = this.isHoverPreviewCommitted() ? null : this.resolveCurrentHoverPreview();
-    if (preview?.activation !== 'primary' || preview.kind !== 'view-transition') {
+    if (preview?.activation !== 'primary' || this.hoverInput?.target.kind !== 'node') {
       this.endNavigationPeek();
       return committed;
     }
     const returnPivot = this.navigationPeek?.returnPivot ?? this.committedNavigationPivot() ?? this.options.vision.getState().target;
-    this.navigationPeek = { preview, state: preview.resultingState, returnPivot: { ...returnPivot }, source,
+    const resultingState = preview.kind === 'view-transition' ? preview.resultingState
+      : this.options.ego.resolveWill(this.hoverInput, this.planningContext()).resultingState;
+    this.navigationPeek = { preview, nodeId: this.hoverInput.target.nodeId, state: resultingState, returnPivot: { ...returnPivot }, source,
       navigated: this.navigationPeek?.navigated ?? false };
     return this.navigationPeek.state;
   }
@@ -555,7 +558,7 @@ export class SessionInteractionRuntime {
     if (this.navigationPeek) {
       this.navigationPeek.navigated = true;
       return this.options.vision.deriveCentroid(
-        navigation.viewId === 'focus' && navigation.focusedNodeId ? [navigation.focusedNodeId] : navigation.attentionNodeIds,
+        [this.navigationPeek.nodeId],
         this.options.getInteractivePositions(),
       );
     }
@@ -683,7 +686,10 @@ export class SessionInteractionRuntime {
     const preservePeekCamera = commitsPeek && this.navigationPeek?.navigated === true
       && this.options.experience.framing.focus.entry !== 'recenter';
     this.endNavigationPeek(!commitsPeek);
-    if (plan.action === 'choose-constellation') {
+    if (plan.input.target.kind === 'node' && !plan.input.modifiers.ctrl
+      && plan.input.membershipAction === undefined && this.options.experience.framing.focus.entry === 'recenter') {
+      this.options.ego.intendVision({ kind: 'follow-subject', nodeId: plan.input.target.nodeId });
+    } else if (plan.action === 'choose-constellation') {
       this.options.ego.intendVision({ kind: 'follow-constellation' });
     }
     const background = plan.input.target.kind === 'background';
@@ -711,6 +717,7 @@ export class SessionInteractionRuntime {
   private isNodeInteractiveInCurrentState(nodeId: string): boolean {
     const state = this.options.getViewState();
     const viewId = resolveGraphUxStateV1(state);
+    if (viewId !== 'focus') return true;
     const preview = this.getObjectActivationPreview();
     // Only explicit View-entry previews may supply a prospective picking neighborhood.
     const transition = preview?.kind === 'view-transition' ? preview.resultingState : undefined;

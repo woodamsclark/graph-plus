@@ -68,8 +68,8 @@ to its prospective root. Constellation candidate admission keeps Constellation's
 controls. This navigation lane does not realize Attention, Awareness, Memory,
 View changes, note activation, or the working constellation's clear-on-Overview rule.
 
-The borrowed pivot is the destination constellation centroid or focused subject's
-coordinate. It does not recenter or refit on hover. Trackpad swipes in 3D Overview
+The borrowed pivot is the hovered node's coordinate, including dim Constellation
+candidates whose next action is admission rather than Focus entry. It does not recenter or refit on hover. Trackpad swipes in 3D Overview
 therefore orbit while peeking rather than panning; unanchored zoom, drag navigation
 and Focus elastic pan also use the borrowed View. Camera gestures retain the peek
 scene rather than replacing it with the underlying View mid-gesture. Center and Fit
@@ -92,3 +92,11 @@ available. Other engine consumers retain their configured framing policy. Peek e
 
 Cursor gravity reaches 32 CSS pixels; label proximity remains independently fixed
 at 96 CSS pixels. Changing label mode does not change the gravity radius.
+
+All non-void source-View nodes are hover targets, including disconnected dim
+Constellation candidates. A temporary Focus peek cannot revoke targets visible in
+its underlying Constellation: picking falls back to the committed scene without
+changing its rendered appearance. Committed Focus void nodes remain unavailable.
+Clicking a primary node in Graph+ retains that node as camera interest, including
+Overview-to-Constellation admission after a previously retained focal point. Hover
+admission keeps the correct View step and does not recursively enter Focus.

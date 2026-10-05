@@ -22,6 +22,7 @@ import type { SessionInvalidationClassV1 } from './SessionFrameScheduler.ts';
 /** Owns the projection-to-frame boundary and its render dirty state for one session. */
 export class SessionProjectionCoordinatorV1 {
   readonly frames = new GraphFrameStore();
+  readonly committedFrames = new GraphFrameStore();
   private dirty = true;
   private readonly hoverAnimation = new AnimaHoverPreviewAnimationV1();
   private geometryRevision = 0;
@@ -120,6 +121,7 @@ export class SessionProjectionCoordinatorV1 {
     if (!animated) {
       this.hoverAnimation.clear();
       const result = compile(objectActivationPreview);
+      this.committedFrames.set(objectActivationPreview ? compile(null).frame : result.frame);
       this.frames.set(result.frame);
       this.dirty = true;
       return result.moduleView;
@@ -132,6 +134,7 @@ export class SessionProjectionCoordinatorV1 {
       committed: options.previewCommitted === true, now: options.now,
     });
     const baseline = compile(null);
+    this.committedFrames.set(baseline.frame);
     let frame = baseline.frame;
     for (const layer of layers) {
       frame = blendAnimaPreviewFrameV1(frame, compile(layer.preview, layer.hoveredNodeId).frame, layer.strength);
@@ -166,6 +169,7 @@ export class SessionProjectionCoordinatorV1 {
   clear(): void {
     this.hoverAnimation.clear();
     this.frames.set(null);
+    this.committedFrames.set(null);
     this.dirty = false;
   }
 

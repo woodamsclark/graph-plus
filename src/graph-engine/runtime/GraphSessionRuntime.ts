@@ -455,8 +455,15 @@ export class GraphSessionRuntime implements GraphSessionV1 {
           // A removal preview may hide its own target. Retain only that already acquired
           // subject for picking, using the backend's real projected hit shape.
           this.updateRendererScene([], retainedHoverNodeId);
-          try { return this.renderer.pick({ point, pointerKind }); }
-          finally { if (retainedHoverNodeId) this.updateRendererScene([]); }
+          try {
+            const hit = this.renderer.pick({ point, pointerKind });
+            if (hit || resolveGraphActiveViewV1(this.viewState).id === 'focus') return hit;
+            // A temporary Focus scene cannot revoke non-void source-View hover targets.
+            const committed = this.projection.committedFrames.get();
+            if (!committed) return null;
+            this.updateRendererScene([], undefined, committed);
+            return this.renderer.pick({ point, pointerKind });
+          } finally { this.updateRendererScene([]); }
         },
         getDocument: () => this.store.readDocument(),
         getViewState: () => this.viewState,
@@ -673,7 +680,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (nodeId !== null && !this.renderSelection.nodeIds.has(nodeId)) {
       throw new Error(`Cannot focus unavailable node "${nodeId}".`);
     }
-    this.interaction.clearPreview();
+    // External Focus changes end the old hover visit before evaluating the new scene.
+    this.interaction.reset();
     if (nodeId === null) {
       this.interaction.cancelCameraTransition();
       this.setFocusState(undefined, this.viewState.selectedNodeIds.length > 0 ? 'explore' : 'overview');
@@ -1497,8 +1505,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     return { [nodeId]: { x: target.x - position.x, y: target.y - position.y, z: target.z - position.z } };
   }
 
-  private updateRendererScene(invalidations: readonly SessionInvalidationClassV1[], retainedHoverNodeId?: string): void {
-    const frame = this.projection.frames.get();
+  private updateRendererScene(invalidations: readonly SessionInvalidationClassV1[], retainedHoverNodeId?: string, committedFrame?: NonNullable<ReturnType<SessionProjectionCoordinatorV1['frames']['get']>>): void {
+    const frame = committedFrame ?? this.projection.frames.get();
     if (!frame) return;
     this.renderSceneRevision += 1;
     this.renderer.updateScene({

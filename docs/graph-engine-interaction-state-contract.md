@@ -281,7 +281,7 @@ preserves membership; node right-click still opens the existing context menu.
 
 A primary View-transition hover borrows the admitted destination's gesture policy
 and spatial pivot without changing committed View, Focus, Attention or Memory. The
-pivot is its focused subject or prospective constellation centroid. Overview swipe
+pivot is the hovered node, including a dim candidate whose next step is admission. Overview swipe
 can therefore rotate as Constellation; Constellation member hover can navigate as
 Focus. A camera gesture holds the admitted hover scene. Leaving restores the prior
 navigation pivot and controls without changing camera position, orientation or zoom; matching click

@@ -928,3 +928,56 @@ test('Graph+ Focus entry and hops recenter without resizing; right-click explici
     }
   }
 });
+
+test('Overview commitment retains its node pivot and Constellation can peek any source-visible node', async () => {
+  const value = runtimeHarness({ profileId: 'three-dimensional',
+    experience: graphPlusEngineExperienceContractV1(graphPlusExperiencePolicyV1('global')),
+    document: graphDocument({ nodes: ['a', 'b', 'c', 'isolated'].map(id => graphNode(id)),
+      edges: [graphEdge('ab', 'a', 'b'), graphEdge('bc', 'b', 'c')] }) });
+  const session = await value.create();
+  await session.setSessionOverrides({ modules: { 'force-layout': { enabled: false } } });
+  const initial = await session.exportViewState();
+  const camera = new GraphCameraController(initial.camera, '3d'); camera.setViewport(640, 360);
+  const depth = camera.worldToScreen(initial.camera.target).depth;
+  const positions = { a: camera.screenToWorld(280, 180, depth), b: camera.screenToWorld(340, 180, depth),
+    c: camera.screenToWorld(400, 160, depth), isolated: camera.screenToWorld(320, 260, depth) };
+  await session.restoreViewState({ ...initial, positions });
+  await session.focusNode('a'); await session.setView('explore'); await session.setView('overview');
+  const canvas = runtimeCanvas(value.container);
+  let hovered: string | undefined;
+  session.onIntent(intent => { if (intent.type === 'node-hover-changed') hovered = intent.nodeId; });
+  const hover = async (nodeId: string) => {
+    const p = await point(session, nodeId);
+    const fields = { clientX: p.x, clientY: p.y, pointerId: 945, pointerType: 'mouse', button: 0 };
+    const event = new value.window.PointerEvent('pointermove', { ...fields, bubbles: true });
+    for (const [key, field] of Object.entries(fields)) Object.defineProperty(event, key, { value: field });
+    canvas.dispatchEvent(event as unknown as Event); value.platform.advanceTime(20); value.platform.flushFrame();
+    value.platform.advanceTime(800); value.platform.flushTimer(); value.platform.flushFrame();
+  };
+  const swipe = async (pivot: typeof positions.a) => {
+    const before = await session.exportViewState();
+    const expected = new GraphCameraController(before.camera, '3d'); expected.setViewport(640, 360);
+    expected.orbitByPixels(-12, 6, pivot);
+    canvas.dispatchEvent(new value.window.WheelEvent('wheel', { deltaX: 12, deltaY: 6, deltaMode: 0, bubbles: true }) as unknown as Event);
+    value.platform.advanceTime(20); value.platform.flushFrame();
+    deepEqual((await session.exportViewState()).camera, expected.getState(), 'rotation uses the chosen node coordinate');
+  };
+  await hover('b'); await swipe(positions.b);
+  tap(value, canvas, await point(session, 'b'), 946, 'mouse'); value.platform.advanceTime(20); value.platform.flushFrame();
+  equal(session.getActiveView().id, 'explore', 'Overview click commits Constellation');
+  await swipe(positions.b);
+  await hover('c');
+  equal(hovered, 'c', 'dim candidates are hoverable');
+  await swipe(positions.c);
+  await hover('b');
+  equal(hovered, 'b', 'highlighted member peeks into Focus');
+  await hover('isolated');
+  equal(hovered, 'isolated', 'a distant source-visible node remains pickable through the temporary Focus scene');
+  await swipe(positions.isolated);
+  deepEqual((await session.exportViewState()).selectedNodeIds, ['b'], 'candidate peeking never commits membership');
+  equal(session.getActiveView().id, 'explore', 'candidate peeking respects its admission step in the flow');
+  await session.focusNode('b'); value.platform.advanceTime(20); value.platform.flushFrame();
+  await hover('isolated');
+  equal(hovered, undefined, 'a node void in committed Focus remains unavailable');
+  await session.dispose();
+});
