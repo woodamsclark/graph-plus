@@ -56,7 +56,7 @@ reheating the whole graph, or reanalyzing unchanged topology.
 Hover previews show the next admitted View with the same node hovered there.
 Overview previews Constellation plus hover; Constellation member hover previews
 Focus plus hover; Focus hops preview the new Focus subject plus hover. A Focus root
-has no next transition, so root hover preserves its dim neighbors and dim context
+has no next transition, so root hover preserves its standard neighbors and standard context
 links. A hovered neighbor uses its full future-root label size, including during the
 preview delay. Constellation admission previews can still raise immediate neighbors
 and incident links one degree, with adaptive label priority rather than forced labels.

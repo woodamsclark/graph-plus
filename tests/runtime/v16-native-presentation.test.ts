@@ -586,8 +586,8 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   });
   assert(taggedStructure?.edgeContributions, 'multi-tag presentation should include structural links');
   equal(taggedStructure.edgeContributions['a-b'].opacity, 1, 'a link between tagged nodes should remain bright');
-  equal(taggedStructure.edgeContributions['b-c'].opacity, 0.6,
-    'Focus should keep a connection to its non-constellation frontier dimmed');
+  equal(taggedStructure.edgeContributions['b-c'].opacity, 1,
+    'Focus should keep a connection to its non-constellation frontier standard');
 
   const exploredHover = anima.contributeFrame({
     ...state,
@@ -614,22 +614,22 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   assert(hoveredTag?.nodeContributions && hoveredTag.edgeContributions,
     'hovering a tagged node should retain its one-hop neighborhood');
   deepEqual(hoveredTag.nodeContributions.b.finalColor,
-    desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
-    'Focus preview keeps the destination root neighbor style dim');
+    DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
+    'Focus preview keeps the destination root neighbor style standard');
   deepEqual(hoveredTag.nodeContributions.d.finalColor,
-    desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
-    'Focus destination root keeps immediate neighbors dim');
+    DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
+    'Focus destination root keeps immediate neighbors standard');
   equal(hoveredTag.nodeContributions.c.opacity, 0, 'committed member hover previews deliberate Focus entry');
-  equal(hoveredTag.edgeContributions['a-b'].opacity, 0.6, 'Focus destination root keeps context incident links dim');
-  equal(hoveredTag.edgeContributions['a-d'].opacity, 0.6, 'each incident frontier link stays dim for root hover');
+  equal(hoveredTag.edgeContributions['a-b'].opacity, 1, 'Focus destination root keeps context incident links standard');
+  equal(hoveredTag.edgeContributions['a-d'].opacity, 1, 'each incident frontier link stays standard for root hover');
   equal(hoveredTag.nodeContributions.a.labelForceVisible, true,
     'hovering a tagged node should force only its own label');
   equal(hoveredTag.nodeContributions.b.labelForceVisible, false,
     'a lit direct neighbor should not receive the hover label override');
   equal(hoveredTag.nodeContributions.b.labelAlwaysVisible, false,
     'a direct hover neighbor should not bypass adaptive collision policy');
-  equal(hoveredTag.nodeContributions.b.showLabel, false,
-    'a destination root keeps its dim neighbor automatically suppressed');
+  equal(hoveredTag.nodeContributions.b.showLabel, true,
+    'a destination root keeps its standard neighbor automatically eligible');
 
   const suspended = anima.contributeFrame({
     ...state,
@@ -701,13 +701,13 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   assert(previewedA?.edgeContributions, 'semantic preview should produce Anima presentation');
   equal(previewedA.edgeContributions['a-b'].opacity, 0,
     'Focus should hide links outside the focused neighborhood');
-  equal(previewedA.nodeContributions?.b.opacity, 0.24,
-    'a focused frontier neighbor should remain dimmed');
+  equal(previewedA.nodeContributions?.b.opacity, 1,
+    'a focused frontier neighbor should remain standard');
   deepEqual(previewedA.nodeContributions?.b.finalColor,
-    desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
-    'a focused frontier neighbor should use dimmed theme presentation');
-  equal(previewedA.edgeContributions['b-c'].opacity, 0.6,
-    'a focused-to-frontier link should remain dimmed');
+    DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
+    'a focused frontier neighbor should use standard theme presentation');
+  equal(previewedA.edgeContributions['b-c'].opacity, 1,
+    'a focused-to-frontier link should remain standard');
   equal(previewedA.edgeContributions['a-d'].opacity, 0,
     'Focus should ignore unrelated preview links outside its local rendering scope');
 
@@ -733,10 +733,10 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     'a dimmed non-hovered focus neighbor should not retain its Awareness-raised label');
   equal(hoveredFocusedNeighbor.nodeContributions.d.labelOpacity, 0,
     'a dimmed non-hovered focus neighbor label should be fully transparent');
-  equal(hoveredFocusedNeighbor.nodeContributions.c.opacity, 0.24,
-    'Focus preview keeps the prospective root neighbors dim');
-  equal(hoveredFocusedNeighbor.nodeContributions.c.showLabel, false,
-    'a dim destination root neighbor remains automatically suppressed');
+  equal(hoveredFocusedNeighbor.nodeContributions.c.opacity, 1,
+    'Focus preview keeps the prospective root neighbors standard');
+  equal(hoveredFocusedNeighbor.nodeContributions.c.showLabel, true,
+    'a standard destination root neighbor remains automatically eligible');
   equal(hoveredFocusedNeighbor.nodeContributions.c.labelForceVisible, false,
     'hover neighbors remain under adaptive label policy');
   equal(hoveredFocusedNeighbor.nodeContributions.c.labelAlwaysVisible, false,
@@ -748,8 +748,8 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
     'the prospective member connection is highlighted');
   equal(hoveredFocusedNeighbor.edgeContributions['a-d'].opacity, 0,
     'explicit View preview voids old subject-only context links');
-  equal(hoveredFocusedNeighbor.edgeContributions['b-c'].opacity, 0.6,
-    'Focus destination root keeps its context incident link dim');
+  equal(hoveredFocusedNeighbor.edgeContributions['b-c'].opacity, 1,
+    'Focus destination root keeps its context incident link standard');
 
   const cleared = anima.contributeFrame(state);
   assert(cleared?.edgeContributions, 'cleared focus should still resolve baseline edge presentation');
@@ -775,12 +775,12 @@ test('V2 adaptive labels remain continuously eligible and accept interaction req
   equal(adaptive.nodeContributions.a.showLabel, true, 'the tagged node label should remain eligible');
   equal(adaptive.nodeContributions.a.labelForceVisible, true,
     'highlighted Focus membership should always show its label');
-  equal(adaptive.nodeContributions.b.showLabel, false,
-    'a dimmed Focus neighbor should suppress its label');
+  equal(adaptive.nodeContributions.b.showLabel, true,
+    'a standard Focus neighbor should delegate label reveal');
   equal(adaptive.nodeContributions.b.labelForceVisible, false,
     'a standard Focus neighbor should not bypass the adaptive label policy');
-  equal(adaptive.nodeContributions.b.labelOpacity, 0,
-    'a dimmed Focus neighbor label should be fully transparent');
+  equal(adaptive.nodeContributions.b.labelOpacity, 1,
+    'a standard Focus neighbor label should be eligible for algorithmic reveal');
   equal(adaptive.nodeContributions.c.showLabel, false,
     'Focus should suppress labels outside the local node, its neighbors, and the constellation');
   equal(adaptive.nodeContributions.c.labelOpacity, 0,

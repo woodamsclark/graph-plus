@@ -98,7 +98,7 @@ respectively. Lone-point fitting retains the readable fallback scale.
 
 Overview has no View-induced dimming. Constellation highlights members and dims every
 nonmember. Focus highlights all members, keeps the subject's immediate nonmember
-neighbors dimmed, and voids everything else. Links take the weaker endpoint phase. Void
+neighbors standard, and voids everything else. Links take the weaker endpoint phase. Void
 subjects have no labels, hit targets, preview, or context activation. Hover evaluates
 ordinary object activation through the same View planner and Experience admission as
 click. Admission without View entry and removal express object deltas within committed context.
@@ -112,7 +112,7 @@ hit targets, so the click is visually seamless with the state it commits. A seco
 still resolves fresh state and transitions without waiting for a new preview.
 Hover previews the admitted destination View with the same node hovered there.
 A Focus root has no next transition: hovering it leaves its neighbors and incident
-context links dim. A hovered Focus neighbor previews admission and becoming the new
+context links standard. A hovered Focus neighbor previews admission and becoming the new
 root, with its full root label size. Constellation admission can lift immediate
 projected neighbors and incident links. Lift one presentation degree: void -> dimmed -> standard -> highlighted, capped at highlighted.
 The lift never changes Consciousness or membership, never accumulates, and excludes

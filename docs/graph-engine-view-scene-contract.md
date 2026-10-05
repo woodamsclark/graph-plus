@@ -83,9 +83,9 @@ Focus exit. The Focus scene still has one presented subject.
 
 The Focus subject belongs to `C`. In Constellation, clicking a dim candidate
 outside `C` admits that candidate and its shortest visible path to `C`, and stays in Constellation. A subsequent ordinary
-click on a committed member enters Focus. Within Focus, clicking a dimmed neighbor admits
+click on a committed member enters Focus. Within Focus, clicking a standard neighbor admits
 that candidate and its shortest connecting path and hops the subject in one operation, preserving existing members. Unrelated neighbors are never implicitly admitted.
-This permits exploration through visible dimmed neighbors while keeping "one from many" true.
+This permits exploration through visible standard neighbors while keeping "one from many" true.
 
 ### Memory and Ego constellation sources
 
@@ -148,7 +148,7 @@ Overview:     member -> permitted highlight; remembered -> Memory highlight; oth
 Constellation: member -> highlighted; remembered -> Memory highlight; otherwise dimmed
 Focus:        member -> highlighted
               else remembered -> Memory highlight
-              else immediate neighbor of focused subject -> dimmed
+              else immediate neighbor of focused subject -> standard
               else -> void
 ```
 
@@ -177,8 +177,8 @@ Resolve the admitted destination once, then apply its hover policy once. A hover
 Constellation admission raises the hovered node, immediate projected neighbors and
 incident links by one degree. View transitions use the destination's hover policy,
 not the source View's. A Focus root has no next transition, so hovering it leaves
-its dim neighbors and context links unchanged. A neighbor preview presents the new
-root with the normal dim neighborhood and a full root-size hover label. Destination
+its standard neighbors and context links unchanged. A neighbor preview presents the new
+root with the normal standard neighborhood and a full root-size hover label. Destination
 hover does not recursively plan another View transition. With Anima enabled, primary
 previews wait 0.2 seconds and fade in over 0.5 seconds; cancellation fades back over
 0.5 seconds. Cursor distance does not blend scenes.
@@ -606,12 +606,12 @@ application shares canonical topology, coordinates, and pins.
 2. With `C = {a, b, c}`, focus `b`, then `c`, then return: membership stays `{a, b, c}`;
    Vision retains the current focal point, including any user framing offset.
 3. Place `a` far from focused `b`. `a` remains highlighted even without an edge to `b`;
-   a non-member neighbor of `b` is dimmed; an unrelated non-member is void.
+   a non-member neighbor of `b` is standard; an unrelated non-member is void.
 4. Move or edit the constellation while in Overview: camera pose stays unchanged and
    no projected object becomes dimmed by the View. Cursor zoom and momentum stay anchored.
 5. Click a dim candidate in Constellation: the candidate and its shortest visible route
    are admitted; View and camera stay unchanged. Click the resulting committed member:
-   enter Focus. Hover alone never realizes membership. Within Focus, clicking a dimmed neighbor still
+   enter Focus. Hover alone never realizes membership. Within Focus, clicking a standard neighbor still
    admits and hops directly.
 6. Back from Focus under the accepted camera rule: retain zoom, angle, distance,
    and live framing; the next orbit and unanchored zoom use the retained focal point. Re-entering or

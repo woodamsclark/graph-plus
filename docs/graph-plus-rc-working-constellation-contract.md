@@ -23,12 +23,12 @@ choices. Mouse gravity is unaffected by label mode.
 ## Focus
 
 Hovering the current root has no prospective action and leaves node/link/label styling
-unchanged. Its nonmember neighbors remain dim, and unrelated context remains void.
+unchanged. Its nonmember neighbors remain standard, and unrelated context remains void.
 Hovering a neighbor previews admission and making that node the new root. Its label
 uses its full resolved root-size treatment instead of the half-size neighbor treatment,
 including during the preview delay. Every other non-root Focus label stays reduced, including nodes beyond the
 original root neighborhood, so preview cannot accidentally restore their full size.
-The admitted destination root has dim nonmember neighbors; it does not promise a
+The admitted destination root has standard nonmember neighbors; it does not promise a
 further View transition on hover.
 
 A Focus hop retains the prior root, all admitted members and the new subject in the
