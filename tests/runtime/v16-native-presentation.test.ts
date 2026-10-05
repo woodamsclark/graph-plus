@@ -828,6 +828,29 @@ test('V1.6 Anima labels retain their CSS size across orthographic zoom', () => {
     'zoomed-in 2D should keep the same resolved label font size');
 });
 
+test('Canvas skips zero-width node outlines while preserving intentional outlines', () => {
+  const context = recordingContext([]);
+  let strokes = 0;
+  context.stroke = () => { strokes += 1; };
+  const canvas = { getContext: () => context, remove: () => {} } as unknown as HTMLCanvasElement;
+  const camera = new GraphCameraController({
+    position: { x: 0, y: 0, z: 1000 }, target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic',
+  }, '2d');
+  camera.setViewport(640, 360);
+  const frames = new GraphFrameStore();
+  frames.set({ regions: [], edges: [], ...RESOLVED_FRAME_STYLE,
+    nodes: [0, 1, 2].map((width, index) => ({
+      id: `node-${index}`, label: `node-${index}`, position: { x: index * 40 - 40, y: 0, z: 0 }, radius: 8,
+      ...RESOLVED_NODE_STYLE, strokeColor: DEFAULT_GRAPH_RENDER_THEME_V1.colors.label, strokeWidth: width,
+    })), policy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'off' },
+  });
+  const renderer = new CanvasGraphRenderer(canvas, camera, frames, () => 0);
+  renderer.resize(640, 360, 1); renderer.render();
+  equal(strokes, 2, 'zero width never issues a Canvas stroke; positive selection/focus widths still draw');
+  renderer.dispose();
+});
+
 test('hover-forced labels are the only labels rendered while label mode is off', () => {
   const fillTextY: number[] = [];
   const context = recordingContext(fillTextY);

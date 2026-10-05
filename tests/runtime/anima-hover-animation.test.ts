@@ -76,10 +76,12 @@ test('Anima delays and fades each View preview in and out in 2D and 3D without m
       advance(199); equal(opacity(), baseline, 'preview stays absent for the full delay');
       advance(1); equal(opacity(), baseline, 'fade starts at zero after 200ms');
       advance(250); close(opacity(), (baseline + target) / 2, 'halfway fade blends the committed and admitted scenes');
+      equal(scene!.nodes.find(node => node.id === 'd')!.strokeWidth, undefined, 'fade-in cannot invent an outline on an ordinary node');
       equal(scene!.policy?.cursorLabelRevealRadiusPx, 96, 'label proximity remains independent of preview timing');
       advance(250); close(opacity(), target, 'the preview reaches its exact admitted scene');
       hover('pointerleave'); close(opacity(), target, 'leaving does not snap the scene back');
       advance(250); close(opacity(), (baseline + target) / 2, 'leave fades halfway toward the normal View');
+      equal(scene!.nodes.find(node => node.id === 'd')!.strokeWidth, undefined, 'fade-out cannot invent an outline on an ordinary node');
       advance(250); close(opacity(), baseline, 'the normal View is restored after 500ms');
       deepEqual(await session.exportViewState(), unchanged, 'timed presentation never changes camera, positions, membership or Memory');
       equal(value.platform.pendingFrames + value.platform.pendingTimers, 0, 'a completed fade sleeps on a cold graph');

@@ -68,7 +68,9 @@ time, not cursor distance. The 96-pixel proximity label reveal remains immediate
 and independent. Ctrl membership-removal cues remain immediate.
 
 Anima owns the transient timer and the blend of resolved node, label, outline and
-link visuals. The session supplies its clock and scheduler; a cold graph wakes for
+link visuals. The blend preserves absent node outlines; it never adds zero-width
+strokes to ordinary nodes. Canvas rejects nonpositive outline widths because assigning
+zero to its line width is ignored and would otherwise draw an inherited-width halo. The session supplies its clock and scheduler; a cold graph wakes for
 the delay/fade, then sleeps after it finishes. No simulation alpha or graph position
 is changed to animate the preview. Actual activation bypasses the timer and retains
 its admitted hovered scene immediately. A changed committed View, membership or

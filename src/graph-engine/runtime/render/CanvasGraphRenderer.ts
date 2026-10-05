@@ -449,7 +449,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       this.context.beginPath();
       this.context.arc(point.x, point.y, radius, 0, Math.PI * 2);
       this.context.fill();
-      if (node.strokeWidth !== undefined && node.strokeColor !== undefined) {
+      if (node.strokeWidth !== undefined && node.strokeWidth > 0 && node.strokeColor !== undefined) {
         this.context.strokeStyle = this.colorCss(node.strokeColor);
         this.context.lineWidth = node.strokeWidth;
         this.context.stroke();

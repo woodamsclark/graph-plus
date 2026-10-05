@@ -95,12 +95,14 @@ export function blendAnimaPreviewFrameV1(
     nodes: baseline.nodes.map(node => {
       const target = nodes.get(node.id);
       if (!target) return node;
+      const strokeWidth = lerp(node.strokeWidth ?? 0, target.strokeWidth ?? 0);
       return {
         ...node,
         finalColor: color(node.finalColor, target.finalColor),
         opacity: lerp(node.opacity, target.opacity),
-        strokeColor: color(node.strokeColor ?? node.finalColor, target.strokeColor ?? target.finalColor),
-        strokeWidth: lerp(node.strokeWidth ?? 0, target.strokeWidth ?? 0),
+        strokeColor: strokeWidth > 0
+          ? color(node.strokeColor ?? node.finalColor, target.strokeColor ?? target.finalColor) : undefined,
+        strokeWidth: strokeWidth > 0 ? strokeWidth : undefined,
         labelColor: color(node.labelColor, target.labelColor),
         labelOpacity: lerp(node.labelOpacity, target.labelOpacity),
         labelFontSize: lerp(node.labelFontSize, target.labelFontSize),
