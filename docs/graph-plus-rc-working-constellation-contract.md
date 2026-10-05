@@ -10,8 +10,8 @@ Display Quick Settings offers exactly three choices:
 
 - **Off:** no node labels, including root, selection, hover, structural and cursor labels.
 - **Cursor proximity (default):** labels reveal within 96 CSS pixels with the existing
-  distance fade, collision/occlusion checks and 12-pixel readability floor. No automatic
-  labels are admitted away from the cursor.
+  distance fade, collision/occlusion checks and 12-pixel readability floor. View-required root, constellation and preview labels remain visible independently
+  of the cursor. Only extra labels use proximity instead of the adaptive algorithm.
 - **Adaptive:** the existing saliency budget, semantic ordering and interaction label
   priorities. No cursor-only reveal runs in this mode.
 
@@ -26,7 +26,8 @@ Hovering the current root has no prospective action and leaves node/link/label s
 unchanged. Its nonmember neighbors remain dim, and unrelated context remains void.
 Hovering a neighbor previews admission and making that node the new root. Its label
 uses its full resolved root-size treatment instead of the half-size neighbor treatment,
-including during the preview delay. Other neighbors retain their normal label sizing.
+including during the preview delay. Every other non-root Focus label stays reduced, including nodes beyond the
+original root neighborhood, so preview cannot accidentally restore their full size.
 The admitted destination root has dim nonmember neighbors; it does not promise a
 further View transition on hover.
 

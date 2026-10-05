@@ -289,7 +289,7 @@ fontSize = 14 + worldRadius / 4
 ```
 
 Labels use their resolved font size in fixed CSS pixels in both 2D and 3D. Focus keeps
-the root at the resolved 100% size and renders its immediate-neighbor labels at 50%.
+the root at the resolved 100% size and renders every other node label at 50%.
 A hovered neighbor uses 100%, matching its future root label size throughout the preview.
 They remain
 readable while the graph recedes, matching the accepted 3D overview treatment rather
@@ -336,7 +336,8 @@ budget = clamp(round(baseAdaptiveBudget * saliencyFactor), minimumBudget, 60)
 
 The RC shifts the entire mapping to roughly half the prior automatic-label budget.
 The distant-zoom minimum is `12` at `0`, `6` at `50`, and `3` at `100`. Cursor proximity
-is the default Graph+ label mode, separate from Adaptive. Off suppresses all labels,
+is the default Graph+ label mode. Both modes retain View-required labels; proximity
+replaces only Adaptive's extra-label admission algorithm. Off suppresses all labels,
 including hover and proximity. Changing the
 slider updates the mounted session without changing label rank, graph state, or the
 other dimension's value.

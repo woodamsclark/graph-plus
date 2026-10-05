@@ -282,6 +282,36 @@ test('cursor proximity mode reveals nearby labels while Off suppresses every lab
   renderer.dispose();
 });
 
+test('View-required labels retain their transition opacity in both reveal modes without cursor proximity', () => {
+  const value = runtimeHarness();
+  const canvas = value.document.createElement('canvas');
+  const context = recordingContext([]);
+  const alphas = new Map<string, number>();
+  context.fillText = text => { alphas.set(text, context.globalAlpha); };
+  canvas.getContext = (() => context) as unknown as typeof canvas.getContext;
+  const renderer = new CanvasGraphRenderer(canvas, () => 0);
+  renderer.initialize(); renderer.resize(640, 360, 1);
+  for (const mode of ['adaptive', 'proximity', 'off'] as const) {
+    for (const opacity of [0.25, 0.75, 1, 0.75, 0.25]) {
+      alphas.clear();
+      renderer.updateScene({ regions: [], edges: [], ...RESOLVED_FRAME_STYLE, revision: 1, presentationRevision: 1,
+        view: { dimensions: '2d', camera: { position: { x: 0, y: 0, z: 100 }, target: { x: 0, y: 0, z: 0 },
+          up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic' },
+          viewport: { width: 640, height: 360, devicePixelRatio: 1 } }, labels: [],
+        nodes: [
+          { id: 'root', label: 'root', position: { x: 150, y: 0, z: 0 }, radius: 8, ...RESOLVED_NODE_STYLE,
+            showLabel: true, labelForceVisible: true, labelAlwaysVisible: true, labelOpacity: opacity },
+          { id: 'background', label: 'background', position: { x: -150, y: 0, z: 0 }, radius: 8,
+            ...RESOLVED_NODE_STYLE, showLabel: true },
+        ], policy: { labelMode: mode, cursorLabelRevealRadiusPx: 96 },
+      }); renderer.render();
+      equal(alphas.get('root'), mode === 'off' ? undefined : opacity, 'View-required root/preview labels preserve fade in and out independently of the extra reveal algorithm');
+      equal(alphas.has('background'), mode === 'adaptive', 'only Adaptive admits background labels without a cursor');
+    }
+  }
+  renderer.dispose();
+});
+
 test('proximity mode labels fade identically for Overview standard and Constellation dim nodes', () => {
   for (const dimensions of ['2d', '3d'] as const) {
     const value = runtimeHarness();

@@ -28,8 +28,9 @@ camera, saved settings or simulation.
   and drawing.
 - Labels offers Off, Cursor proximity (the Graph+ default), and Adaptive. Off suppresses
   every label, including hover, root, selected and structural labels. Cursor proximity
-  uses only the 96-pixel distance fade; Adaptive uses the saliency budget and interaction
-  priorities without the cursor field. The dropdown replaces the independent proximity
+  and Adaptive both retain View-required root, constellation and preview labels.
+  Extra labels use the 96-pixel distance fade in Cursor proximity or the saliency
+  budget in Adaptive. The dropdown replaces the independent proximity
   toggle. Label position remains directly beneath Labels. Legacy All maps to Adaptive.
 - Adaptive saliency retains the existing 0–100 saved values but halves the automatic
   label budget across the range. At distant zoom the minimum budgets are 12, 6, and 3

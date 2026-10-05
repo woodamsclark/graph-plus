@@ -709,7 +709,7 @@ test('Focus root hover leaves styling unchanged and hovered neighbors use their 
   const consciousness = resolveConsciousness({ attentionNodeIds: ['a'], availableNodeIds: displaySelection.nodeIds });
   const compile = (hoveredNodeId?: string, preview: GraphInteractionPreviewV1 | null = null) => compileAnimaSceneV1({
     snapshot: createAnimusSnapshotV1({ document, viewState, displaySelection, positions, hoveredNodeId }), consciousness,
-    objectActivationPreview: preview, nodeContributions: { a: { labelFontSize: 20 }, b: { labelFontSize: 20 } },
+    objectActivationPreview: preview, nodeContributions: Object.fromEntries(document.nodes.map(node => [node.id, { labelFontSize: 20, radius: 7 }])),
   });
   const baseline = compile();
   deepEqual(compile('a').nodes, baseline.nodes, 'root hover cannot change node or label styling');
@@ -718,6 +718,11 @@ test('Focus root hover leaves styling unchanged and hovered neighbors use their 
   equal(compile('b').nodes.find(node => node.id === 'b')!.labelFontSize, 20, 'hovered neighbors gain root-size labels even during the preview delay');
   const destination = presentation({ selectedNodeIds: ['a'], focusedNodeId: 'a', hoveredNodeId: 'b' }).objectPreview;
   equal(compile('b', destination!).nodes.find(node => node.id === 'b')!.labelFontSize, 20, 'hover label size matches becoming the new root');
+  for (const frame of [baseline, compile('b'), compile('b', destination!)]) {
+    equal(frame.nodes.find(node => node.id === 'c')!.labelFontSize, 10, 'nodes beyond the old root neighborhood stay reduced through preview');
+    equal(frame.nodes.find(node => node.id === 'd')!.labelFontSize, 10, 'all other Focus labels retain reduced size');
+    assert(frame.nodes.every(node => node.radius === 7), 'hover and label policy do not enlarge node bodies');
+  }
   const off = compileAnimaSceneV1({ snapshot: createAnimusSnapshotV1({ document, viewState, displaySelection, positions, hoveredNodeId: 'b' }),
     consciousness, presentationPolicy: { labelMode: 'off' } });
   assert(off.nodes.every(node => node.showLabel === false && node.labelOpacity === 0 && node.labelForceVisible !== true),

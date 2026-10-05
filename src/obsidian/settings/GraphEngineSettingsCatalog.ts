@@ -35,7 +35,7 @@ export const GRAPH_SETTING_PRESENTATIONS_V1: readonly GraphSettingPresentationV1
   entry('rendering.renderQuality', 'appearance', 'rendering', 'renderQuality', 'Render quality', 'Balance sharpness and energy use.',
     { type: 'select', options: { automatic: 'Automatic', 'high-fidelity': 'High fidelity', 'energy-saver': 'Energy saver' } },
     ['global', 'profile']),
-  entry('rendering.labelMode', 'appearance', 'rendering', 'labelMode', 'Labels', 'Off hides every label. Cursor proximity reveals nearby labels. Adaptive uses label saliency.',
+  entry('rendering.labelMode', 'appearance', 'rendering', 'labelMode', 'Labels', 'Off hides every label. Both other modes retain View labels; extra labels use cursor proximity or adaptive saliency.',
     { type: 'select', options: { off: 'Off', proximity: 'Cursor proximity', adaptive: 'Adaptive' } }),
   entry('anima.labelPosition', 'appearance', 'anima', 'labelPosition', 'Label position', 'Place labels above or below nodes.',
     { type: 'select', options: { above: 'Above', below: 'Below' } }),

@@ -269,7 +269,7 @@ Focused, prospective-focus, and hovered non-void subjects force their labels;
 highlighted subjects, including the transient nearest-constellation path, force theirs.
 Focus is the exception for passive session Memory: its labels remain adaptively eligible
 rather than forced. The Focus root retains its resolved label size while labels for its
-immediate graph neighbors render at 50%.
+all other Focus node labels render at 50%, except the hovered next-root label.
 Dimmed and void context suppress labels, except that the hovered non-void subject is
 readable. Ctrl-removal previews override hovered-label forcing and suppress the
 removed member's label without previewing the eventual View exit. Standard

@@ -477,8 +477,9 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       renderPolicy(frame).adaptiveLabelSaliency ?? renderPolicy(frame).adaptiveLabelThreshold ?? 50));
     // Resolve automatic eligibility independently of proximity. A cursor-only
     // label must not inherit a full-opacity baseline merely because it is standard.
-    const automaticCandidates = mode === 'proximity' ? []
-      : nodes.filter(candidate => candidate.node.showLabel !== false).sort(compareLabelCandidates);
+    const automaticCandidates = nodes.filter(candidate => candidate.node.showLabel !== false
+      && (mode !== 'proximity' || candidate.node.labelForceVisible === true
+        || candidate.node.labelAlwaysVisible === true)).sort(compareLabelCandidates);
     for (const candidate of automaticCandidates) {
       const forced = candidate.node.labelForceVisible === true || candidate.node.labelAlwaysVisible === true;
       if (mode === 'adaptive') {
@@ -501,8 +502,8 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       accepted.push(candidate);
       automaticIds.add(candidate.node.id);
     }
-    // Proximity mode uses only the cursor field. Void objects, closer-node
-    // occlusion and label collisions still apply.
+    // View-required labels are shared by both modes. Proximity replaces only
+    // adaptive admission; void objects, occlusion and collisions still apply.
     const proximityCandidates = nodes.filter(candidate => !automaticIds.has(candidate.node.id)
       && this.cursorLabelReveal(frame, candidate) > 0)
       .sort((a, b) => this.cursorLabelReveal(frame, b) - this.cursorLabelReveal(frame, a) || compareLabelCandidates(a, b));

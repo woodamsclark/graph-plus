@@ -53,10 +53,6 @@ export function compileAnimaSceneV1(options: {
     ? presentation.objectPreview.resultingState : undefined;
   const sceneView = destination?.viewId ?? interaction.state;
   const sceneFocus = destination ? destination.focusedNodeId : interaction.focusedNodeId;
-  const focusedNeighborNodeIds = sceneView === 'focus' && sceneFocus !== undefined
-    ? new Set(options.snapshot.document.edges.flatMap((edge) => edge.sourceId === sceneFocus
-      ? [edge.targetId] : edge.targetId === sceneFocus ? [edge.sourceId] : []))
-    : new Set<string>();
   return {
     geometryRevision: options.geometryRevision,
     regions: (options.regionContributions ?? []).map((region) => ({
@@ -111,7 +107,7 @@ export function compileAnimaSceneV1(options: {
           labelOpacity: suppressed ? 0 : forced ? finiteOpacity(contribution?.labelOpacity, 1)
             : Math.min(finiteOpacity(contribution?.labelOpacity, opacity), opacity),
           labelFontSize: finitePositive(contribution?.labelFontSize, theme.labelFont.sizePx)
-            * (focusedNeighborNodeIds.has(node.id) && node.id !== sceneFocus && !hovered ? 0.5 : 1),
+            * (sceneView === 'focus' && node.id !== sceneFocus && !hovered ? 0.5 : 1),
           ...(contribution?.labelOffset === undefined ? {} : { labelOffset: { ...contribution.labelOffset } }),
           ...(suppressed ? { showLabel: false } : forced ? { showLabel: true }
             : contribution?.showLabel === undefined ? {} : { showLabel: contribution.showLabel }),
