@@ -375,7 +375,7 @@ test('live label modes separate absolute Off, cursor proximity, and adaptive lab
     value.platform.flushFrame();
     deepEqual(drawn(), mode === 'proximity' ? ['near'] : mode === 'adaptive' ? ['far', 'near'] : [], 'each label mode controls its own admission channel');
     equal(scene!.policy?.labelMode, mode, 'the dropdown updates the live label mode');
-    equal(scene!.policy?.cursorAttractionRadiusPx, 64, 'the label toggle cannot alter gravity');
+    equal(scene!.policy?.cursorAttractionRadiusPx, 32, 'the smaller gravity well remains independent of label mode');
     equal(scene!.policy?.cursorLabelRevealRadiusPx, 96, 'proximity mode uses the fixed screen-space field');
   }
   await session.dispose();

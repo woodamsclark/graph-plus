@@ -79,13 +79,16 @@ Leaving restores only the previous navigation pivot and input policy. The comple
 camera pose, including position, orientation, target and zoom, stays untouched. The visual scene uses the existing
 0.2-second delay and 0.5-second fades. Hover-only node motion and node dragging do
 not transfer camera-follow ownership to the peeked subject. A matching click commits
-the admitted destination; after navigating a peek, commitment preserves that camera
-framing, and subsequent leave cannot restore the old target. Modifiers, different
+the admitted destination; Overview commitment preserves camera framing; Focus entry or a root switch recenters
+without changing angle or scale, and subsequent leave cannot restore the old target. Modifiers, different
 press targets, reset/suspension and external state changes release the temporary lane.
 
-Graph+ enables `framing.focus.entry: preserve`. Ordinary Focus entry, root hopping,
-programmatic Focus and active-note following preserve the entire camera framing.
+Graph+ enables `framing.focus.entry: recenter`. Ordinary Focus entry, root hopping,
+programmatic Focus and Local active-note following recenter on the new root while
+preserving orientation, distance and zoom. Hover entry/exit still does not move the camera.
 Right-click Center + Fit remains the explicit graph gesture for reframing/resizing.
 Initial surface framing and the explicit Show in Graph+ reveal/fit operation remain
-available. Other engine consumers retain legacy automatic recentering unless they
-opt into this experience policy. Peek exit never calls a camera transform or fit.
+available. Other engine consumers retain their configured framing policy. Peek exit never calls a camera transform or fit.
+
+Cursor gravity reaches 32 CSS pixels; label proximity remains independently fixed
+at 96 CSS pixels. Changing label mode does not change the gravity radius.

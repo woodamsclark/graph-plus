@@ -177,7 +177,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       presentationPolicy: {
         ...(state.presentationPolicy ?? {}),
         ...this.labels.policy(state.viewState.dimensions),
-        cursorAttractionRadiusPx: 64,
+        cursorAttractionRadiusPx: 32,
         nodeScaleMode: 'sqrt-orthographic',
         nodeScaleExponent: 0.5,
         minimumPerspectiveNodeRadius: 4,

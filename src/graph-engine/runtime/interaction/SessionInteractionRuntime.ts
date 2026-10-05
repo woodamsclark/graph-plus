@@ -680,7 +680,8 @@ export class SessionInteractionRuntime {
     // A matching click promotes the peek; other actions cancel its borrowed pivot.
     const commitsPeek = plan.input.target.kind === 'node' && this.hoverInput?.target.kind === 'node'
       && this.hoverInput.target.nodeId === plan.input.target.nodeId;
-    const preservePeekCamera = commitsPeek && this.navigationPeek?.navigated === true;
+    const preservePeekCamera = commitsPeek && this.navigationPeek?.navigated === true
+      && this.options.experience.framing.focus.entry !== 'recenter';
     this.endNavigationPeek(!commitsPeek);
     if (plan.action === 'choose-constellation') {
       this.options.ego.intendVision({ kind: 'follow-constellation' });

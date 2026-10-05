@@ -957,7 +957,7 @@ test('Local Graph+ reuses the full graph while active-note Focus changes', async
   equal(vectorDistance(state.camera.position, state.camera.target),
     vectorDistance(beforeFollow.camera.position, beforeFollow.camera.target),
     'an active-note hop should preserve perspective distance');
-  deepEqual(state.camera, beforeFollow.camera, 'local active-note following preserves the complete camera pose');
+  assert(vectorDistance(state.camera.target, state.positions[betaId]) < 1e-9, 'local active-note following recenters on the new root');
   deepEqual(activeNoteIntents, [],
     'canonical active-note truth should bypass the endogenous intent stream');
 
@@ -975,7 +975,7 @@ test('Local Graph+ reuses the full graph while active-note Focus changes', async
     'application-directed Local Focus retains the prior root in its constellation');
   equal(consciouslyFocused.focusedNodeId, alphaId,
     'Local Attention should move to the requested Focus subject');
-  deepEqual(consciouslyFocused.camera, state.camera, 'Local Focus hopping preserves camera position and orientation');
+  assert(vectorDistance(consciouslyFocused.camera.target, consciouslyFocused.positions[alphaId]) < 1e-9, 'Local Focus hopping recenters on the requested root');
   await consumer.openNode(alphaId);
   equal(openedPath, 'Alpha.md', 'the explicit outbound action should reveal the focused note');
   equal(consumer.getLocalDocument()?.documentId, documentIdBeforeFollow,
@@ -1130,7 +1130,8 @@ test('Local Graph+ admits saved full-graph coordinates without force settling an
     deepEqual(state.positions[node.id], savedPositions[node.id],
       'every Local node should retain its saved full-graph coordinates');
   }
-  deepEqual(state.camera, cameraBeforeFollow, 'a later active note does not refit or recenter the initialized camera');
+  assert(vectorDistance(state.camera.target, state.positions[betaId]) < 1e-9, 'a later active note recenters without refitting');
+  equal(state.camera.zoom, cameraBeforeFollow.zoom, 'active note changes preserve the initialized scale');
   const settledPositions = state.positions;
   for (let index = 1; index <= 60; index += 1) {
     runtime.platform.advanceTime(1_000 / 30);

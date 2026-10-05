@@ -9,7 +9,7 @@ camera, saved settings or simulation.
 
 ## Behavior
 
-- Attraction reaches 64 CSS pixels from the mouse, with quadratic distance falloff.
+- Attraction reaches 32 CSS pixels from the mouse, with quadratic distance falloff.
   Only the nearest eligible node receives a pull, capped at 1.5 screen pixels per step.
   Equal screen distances use stable node-ID ordering. A node already at the cursor
   retains ownership of the well; it cannot pass its pull to a runner-up.

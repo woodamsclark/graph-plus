@@ -696,9 +696,9 @@ color, origin category, or forget-on-deselect behavior is introduced by these fi
 
 ### Graph+ RC framing override (2026-10-05)
 
-Graph+ opts into `framing.focus.entry: preserve`. Ordinary Focus entry, subject hops
-and active-note following change the logical subject and navigation pivot without
-recentring or refitting the camera. Right-click Center + Fit explicitly reframes the
+Graph+ opts into `framing.focus.entry: recenter`. Ordinary Focus entry, subject hops
+and Local active-note following recenter on the new root without refitting or changing
+zoom, angle or distance. Right-click Center + Fit explicitly reframes the
 current scene. Hover peek exit restores only the prior navigation pivot; position,
 orientation, render target and zoom remain exactly as left by the user. Generic engine
 consumers can retain their default entry recentering. Initial framing and explicit

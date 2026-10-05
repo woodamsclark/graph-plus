@@ -887,7 +887,7 @@ test('Constellation peek uses Focus elastic pan in 2D and cancels its return mot
 });
 
 
-test('Graph+ Focus entry and hops preserve the camera; right-click explicitly centers and fits', async () => {
+test('Graph+ Focus entry and hops recenter without resizing; right-click explicitly fits', async () => {
   for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
     for (const mode of ['global', 'local'] as const) {
       const value = runtimeHarness({ profileId, experience: graphPlusEngineExperienceContractV1(graphPlusExperiencePolicyV1(mode)),
@@ -896,17 +896,24 @@ test('Graph+ Focus entry and hops preserve the camera; right-click explicitly ce
       await session.setSessionOverrides({ modules: { 'force-layout': { enabled: false } } });
       const initial = await session.exportViewState();
       const camera = new GraphCameraController(initial.camera, initial.dimensions); camera.setViewport(640, 360);
-      const positions = { a: camera.screenToWorld(200, 180, 1000), b: camera.screenToWorld(440, 220, 1000) };
+      const depth = camera.worldToScreen(initial.camera.target).depth;
+      const positions = { a: camera.screenToWorld(260, 180, depth), b: camera.screenToWorld(380, 220, depth) };
       await session.restoreViewState({ ...initial, positions, selectedNodeIds: ['a', 'b'], viewMode: 'explore' });
       const before = await session.exportViewState(); const canvas = runtimeCanvas(value.container);
-      for (const [index, nodeId] of ['a', 'b'].entries()) {
+      for (const [index, nodeId] of (['a', 'b'] as const).entries()) {
         tap(value, canvas, await point(session, nodeId), 920 + index, 'mouse');
         value.platform.advanceTime(20); value.platform.flushFrame();
         equal((await session.exportViewState()).focusedNodeId, nodeId, 'ordinary click changes the focused subject');
-        deepEqual((await session.exportViewState()).camera, before.camera, 'Focus entry and hops change no camera coordinates or scale');
+        const focusedCamera = (await session.exportViewState()).camera;
+        assert(Math.hypot(focusedCamera.target.x - positions[nodeId].x, focusedCamera.target.y - positions[nodeId].y, focusedCamera.target.z - positions[nodeId].z) < 1e-9, 'Focus entry and hops recenter on the chosen root');
+        equal(focusedCamera.zoom, before.camera.zoom, 'Focus changes do not refit or resize');
+        deepEqual(focusedCamera.up, before.camera.up, 'Focus changes preserve camera orientation');
+        assert(Math.hypot(focusedCamera.position.x - focusedCamera.target.x - (before.camera.position.x - before.camera.target.x),
+          focusedCamera.position.y - focusedCamera.target.y - (before.camera.position.y - before.camera.target.y),
+          focusedCamera.position.z - focusedCamera.target.z - (before.camera.position.z - before.camera.target.z)) < 1e-9, 'recenter preserves distance and angle');
       }
       await session.focusNode('a');
-      deepEqual((await session.exportViewState()).camera, before.camera, 'programmatic Focus also preserves framing');
+      assert(Math.hypot((await session.exportViewState()).camera.target.x - positions.a.x, (await session.exportViewState()).camera.target.y - positions.a.y, (await session.exportViewState()).camera.target.z - positions.a.z) < 1e-9, 'programmatic Focus also recenters');
       for (const type of ['pointerdown', 'pointerup']) {
         const fields = { clientX: 10, clientY: 10, pointerId: 924, pointerType: 'mouse', button: 2 };
         const event = new value.window.PointerEvent(type, { ...fields, bubbles: true });

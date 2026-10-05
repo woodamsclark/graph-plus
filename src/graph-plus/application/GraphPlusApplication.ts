@@ -311,7 +311,7 @@ export class GraphPlusPresentationV1<TFile> {
   async focusNode(nodeId: string): Promise<void> {
     if (!this.session) return;
     await this.session.clearPreview();
-    await this.receiveApplicationAttention(nodeId, 'preserve');
+    await this.receiveApplicationAttention(nodeId, 'recenter-focus');
   }
 
   async revealAndFocusNode(nodeId: string): Promise<boolean> {
@@ -493,7 +493,7 @@ export class GraphPlusPresentationV1<TFile> {
   }
 
   private async enforceExperiencePolicy(
-    changedFocusFraming: 'preserve' | 'recenter-focus' = 'preserve',
+    changedFocusFraming: 'preserve' | 'recenter-focus' = 'recenter-focus',
   ): Promise<void> {
     if (this.enforcingPolicy || this.policy.canonicalRootState === 'none') return;
     const root = this.rootNodeId;
