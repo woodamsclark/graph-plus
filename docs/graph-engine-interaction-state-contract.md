@@ -284,7 +284,7 @@ and spatial pivot without changing committed View, Focus, Attention or Memory. T
 pivot is its focused subject or prospective constellation centroid. Overview swipe
 can therefore rotate as Constellation; Constellation member hover can navigate as
 Focus. A camera gesture holds the admitted hover scene. Leaving restores the prior
-target coordinate and controls while retaining user rotation/zoom; matching click
+navigation pivot and controls without changing camera position, orientation or zoom; matching click
 commits the destination and keeps camera framing already explored in the peek.
 The existing Anima delay/fades remain responsible for visual presentation. Node
 motion and drag continue to follow the committed camera-interest policy.

@@ -72,7 +72,7 @@ export function graphPlusEngineExperienceContractV1(
     framing: {
       overview: { ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1.framing.overview },
       explore: { ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1.framing.explore },
-      focus: { ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1.framing.focus },
+      focus: { ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1.framing.focus, entry: 'preserve' },
     },
   };
 }

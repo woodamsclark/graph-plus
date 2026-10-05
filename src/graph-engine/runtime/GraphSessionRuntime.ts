@@ -684,7 +684,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.setSelectionState([...this.viewState.selectedNodeIds, nodeId]);
     }
     this.setFocusState(nodeId);
-    if (changed) this.interaction.recenterSubject(nodeId);
+    if (changed && this.experience.framing.focus.entry !== 'preserve') this.interaction.recenterSubject(nodeId);
   }
 
   async applyExternalInfluence(

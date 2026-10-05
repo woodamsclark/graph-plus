@@ -75,10 +75,17 @@ and Focus elastic pan also use the borrowed View. Camera gestures retain the pee
 scene rather than replacing it with the underlying View mid-gesture. Center and Fit
 use the borrowed scene when invoked during a peek.
 
-Leaving restores the previous camera target coordinate and input policy, retaining
-rotation and zoom performed during the peek. The visual scene uses the existing
+Leaving restores only the previous navigation pivot and input policy. The complete
+camera pose, including position, orientation, target and zoom, stays untouched. The visual scene uses the existing
 0.2-second delay and 0.5-second fades. Hover-only node motion and node dragging do
 not transfer camera-follow ownership to the peeked subject. A matching click commits
 the admitted destination; after navigating a peek, commitment preserves that camera
 framing, and subsequent leave cannot restore the old target. Modifiers, different
 press targets, reset/suspension and external state changes release the temporary lane.
+
+Graph+ enables `framing.focus.entry: preserve`. Ordinary Focus entry, root hopping,
+programmatic Focus and active-note following preserve the entire camera framing.
+Right-click Center + Fit remains the explicit graph gesture for reframing/resizing.
+Initial surface framing and the explicit Show in Graph+ reveal/fit operation remain
+available. Other engine consumers retain legacy automatic recentering unless they
+opt into this experience policy. Peek exit never calls a camera transform or fit.

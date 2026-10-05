@@ -693,3 +693,13 @@ likewise distinct from forgetting.
 The product decision remains open: remembered constellations may be treated as the
 same selectable objects, or expressed as distinct ready-to-use interests. No new
 color, origin category, or forget-on-deselect behavior is introduced by these fixes.
+
+### Graph+ RC framing override (2026-10-05)
+
+Graph+ opts into `framing.focus.entry: preserve`. Ordinary Focus entry, subject hops
+and active-note following change the logical subject and navigation pivot without
+recentring or refitting the camera. Right-click Center + Fit explicitly reframes the
+current scene. Hover peek exit restores only the prior navigation pivot; position,
+orientation, render target and zoom remain exactly as left by the user. Generic engine
+consumers can retain their default entry recentering. Initial framing and explicit
+Show in Graph+ neighborhood fit remain separate host operations.

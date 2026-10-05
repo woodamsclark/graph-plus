@@ -69,11 +69,12 @@ export class SessionInteractionRuntime {
   private navigationPeek?: {
     readonly preview: GraphInteractionPreviewV1;
     readonly state: EgoInteractionStateV1;
-    readonly returnTarget: Vec3;
+    readonly returnPivot: Vec3;
     readonly source: string;
     navigated: boolean;
   };
 
+  private restoredNavigationPivot?: { readonly source: string; readonly point: Vec3 };
   private elasticReturnTimer: number | undefined;
   private focusTransition: {
     readonly nodeId: string;
@@ -515,28 +516,26 @@ export class SessionInteractionRuntime {
       attentionNodeIds: this.attentionNodeIds(), focusedNodeId: state.focusedNodeId };
     const document = this.options.getDocument();
     const source = JSON.stringify([document.documentId, document.revision, committed]);
+    if (this.restoredNavigationPivot?.source !== source) this.restoredNavigationPivot = undefined;
     if (this.navigationPeek && this.navigationPeek.source !== source) this.endNavigationPeek(false);
     const preview = this.isHoverPreviewCommitted() ? null : this.resolveCurrentHoverPreview();
     if (preview?.activation !== 'primary' || preview.kind !== 'view-transition') {
       this.endNavigationPeek();
       return committed;
     }
-    const returnTarget = this.navigationPeek?.returnTarget ?? this.options.vision.getState().target;
-    this.navigationPeek = { preview, state: preview.resultingState, returnTarget: { ...returnTarget }, source,
+    const returnPivot = this.navigationPeek?.returnPivot ?? this.committedNavigationPivot() ?? this.options.vision.getState().target;
+    this.navigationPeek = { preview, state: preview.resultingState, returnPivot: { ...returnPivot }, source,
       navigated: this.navigationPeek?.navigated ?? false };
     return this.navigationPeek.state;
   }
 
-  private endNavigationPeek(restoreTarget = true): void {
+  private endNavigationPeek(restorePivot = true): void {
     const peek = this.navigationPeek;
     this.navigationPeek = undefined;
     if (!peek) return;
     this.cancelElasticReturn();
-    if (restoreTarget && peek.navigated) {
-      // Keep user navigation, restoring just the old target coordinate and controls.
-      this.options.vision.setTarget(peek.returnTarget, true);
-      this.commitCamera();
-    }
+    if (restorePivot) this.restoredNavigationPivot = { source: peek.source, point: { ...peek.returnPivot } };
+    else this.restoredNavigationPivot = undefined;
   }
 
   /** Node motion follows committed camera interest, independently of the peek pivot. */
@@ -560,6 +559,11 @@ export class SessionInteractionRuntime {
         this.options.getInteractivePositions(),
       );
     }
+    return this.committedNavigationPivot();
+  }
+
+  private committedNavigationPivot(): Vec3 | undefined {
+    if (this.restoredNavigationPivot) return this.restoredNavigationPivot.point;
     if (this.options.ego.visionIntent?.kind === 'retain-focal-point') {
       return this.options.vision.getState().target;
     }
@@ -573,6 +577,7 @@ export class SessionInteractionRuntime {
   resetVisionInterest(): void {
     this.getNavigationState();
     if (this.navigationPeek) { this.navigationPeek.navigated = true; return; }
+    this.restoredNavigationPivot = undefined;
     const state = this.options.getViewState();
     const view = resolveGraphUxStateV1(state);
     this.options.ego.intendVision(view === 'focus' && state.focusedNodeId !== undefined
@@ -824,7 +829,9 @@ export class SessionInteractionRuntime {
       const center = positionsById[command.nodeId];
       if (!center) return;
       const targetVision = new Vision(this.options.vision.getState(), this.options.dimensions);
-      targetVision.translateBy(subtract(center, targetVision.getState().target));
+      if (this.options.experience.framing.focus.entry !== 'preserve') {
+        targetVision.translateBy(subtract(center, targetVision.getState().target));
+      }
       this.focusTransition = {
         nodeId: command.nodeId,
         start: this.options.vision.getState(),
@@ -851,6 +858,7 @@ export class SessionInteractionRuntime {
 
   /** Programmatic navigation is realized before its public promise completes. */
   recenterSubject(nodeId: string): void {
+    this.restoredNavigationPivot = undefined;
     this.cancelElasticReturn();
     const point = this.options.getInteractivePositions()[nodeId];
     if (!point) return;
@@ -865,6 +873,8 @@ export class SessionInteractionRuntime {
   }
 
   private recenterFocus(nodeId: string, command: GraphRuntimeCommandV1): void {
+    if (this.options.experience.framing.focus.entry === 'preserve') return;
+    this.restoredNavigationPivot = undefined;
     this.cancelCameraTransition();
     const point = this.options.getInteractivePositions()[nodeId];
     if (!point) return;

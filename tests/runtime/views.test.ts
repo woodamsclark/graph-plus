@@ -1,3 +1,4 @@
+import { graphPlusEngineExperienceContractV1, graphPlusExperiencePolicyV1 } from '../../src/graph-plus/application/GraphPlusExperiencePolicy.ts';
 import { DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1, GRAPH_VIEW_DEFINITIONS_V1, type GraphSessionV1 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { Judgement } from '../../src/graph-engine/runtime/consciousness/Judgement.ts';
 import { CanvasGraphRenderer, GraphRendererRegistryV2, type GraphRenderSceneV2 } from '../../src/graph-engine/runtime/render/index.ts';
@@ -823,12 +824,14 @@ test('Hover peeking borrows destination swipe controls and pivot, then restores 
     deepEqual(rotated.selectedNodeIds, before.selectedNodeIds, 'peeking does not admit members');
     equal(rotated.focusedNodeId, before.focusedNodeId, 'peeking does not change the committed subject');
     hover('pointerleave');
-    expected.setTarget(before.camera.target, true);
-    deepEqual((await session.exportViewState()).camera, expected.getState(), 'leaving restores the old target while retaining the chosen rotation and zoom');
+    deepEqual((await session.exportViewState()).camera, expected.getState(), 'leaving preserves the entire camera pose while restoring only navigation interest');
     const returned = await session.exportViewState();
     if (viewMode === 'overview') {
       expected.panByPixels(24, 12); swipe();
       deepEqual((await session.exportViewState()).camera, expected.getState(), 'Overview swipe resumes panning after leaving');
+    } else {
+      expected.orbitByPixels(-24, 12, viewMode === 'focus' ? positions.a : positions.b); swipe();
+      deepEqual((await session.exportViewState()).camera, expected.getState(), 'subsequent rotation uses the previous pivot without a pose reset');
     }
     deepEqual(returned.positions, before.positions, 'navigation never changes the graph layout');
     await session.restoreViewState(before);
@@ -876,10 +879,45 @@ test('Constellation peek uses Focus elastic pan in 2D and cancels its return mot
   deepEqual((await session.exportViewState()).camera, expected.getState(), 'peeked Focus elastic pan pulls toward the prospective root');
   equal(session.getActiveView().id, 'explore', 'borrowed Focus controls do not commit Focus');
   pointer('pointerleave');
-  expected.setTarget(before.camera.target, true);
-  deepEqual((await session.exportViewState()).camera, expected.getState(), 'leave restores the previous target');
+  deepEqual((await session.exportViewState()).camera, expected.getState(), 'leave preserves the current camera pose');
   const returned = (await session.exportViewState()).camera;
   value.platform.advanceTime(1000); value.platform.flushTimer(); value.platform.flushFrame();
   deepEqual((await session.exportViewState()).camera, returned, 'no abandoned elastic-return timer moves the camera afterward');
   await session.dispose();
+});
+
+
+test('Graph+ Focus entry and hops preserve the camera; right-click explicitly centers and fits', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    for (const mode of ['global', 'local'] as const) {
+      const value = runtimeHarness({ profileId, experience: graphPlusEngineExperienceContractV1(graphPlusExperiencePolicyV1(mode)),
+        document: graphDocument({ nodes: ['a', 'b'].map(id => graphNode(id)), edges: [graphEdge('ab', 'a', 'b')] }) });
+      const session = await value.create();
+      await session.setSessionOverrides({ modules: { 'force-layout': { enabled: false } } });
+      const initial = await session.exportViewState();
+      const camera = new GraphCameraController(initial.camera, initial.dimensions); camera.setViewport(640, 360);
+      const positions = { a: camera.screenToWorld(200, 180, 1000), b: camera.screenToWorld(440, 220, 1000) };
+      await session.restoreViewState({ ...initial, positions, selectedNodeIds: ['a', 'b'], viewMode: 'explore' });
+      const before = await session.exportViewState(); const canvas = runtimeCanvas(value.container);
+      for (const [index, nodeId] of ['a', 'b'].entries()) {
+        tap(value, canvas, await point(session, nodeId), 920 + index, 'mouse');
+        value.platform.advanceTime(20); value.platform.flushFrame();
+        equal((await session.exportViewState()).focusedNodeId, nodeId, 'ordinary click changes the focused subject');
+        deepEqual((await session.exportViewState()).camera, before.camera, 'Focus entry and hops change no camera coordinates or scale');
+      }
+      await session.focusNode('a');
+      deepEqual((await session.exportViewState()).camera, before.camera, 'programmatic Focus also preserves framing');
+      for (const type of ['pointerdown', 'pointerup']) {
+        const fields = { clientX: 10, clientY: 10, pointerId: 924, pointerType: 'mouse', button: 2 };
+        const event = new value.window.PointerEvent(type, { ...fields, bubbles: true });
+        for (const [key, field] of Object.entries(fields)) Object.defineProperty(event, key, { value: field });
+        canvas.dispatchEvent(event as unknown as Event);
+      }
+      value.platform.advanceTime(20); value.platform.flushFrame();
+      const fitted = await session.exportViewState();
+      deepEqual(fitted.camera.target, positions.a, 'right-click explicitly centers on the current Focus root');
+      assert(JSON.stringify(fitted.camera) !== JSON.stringify(before.camera), 'right-click explicitly changes camera framing');
+      await session.dispose();
+    }
+  }
 });

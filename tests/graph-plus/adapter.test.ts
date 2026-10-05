@@ -957,8 +957,7 @@ test('Local Graph+ reuses the full graph while active-note Focus changes', async
   equal(vectorDistance(state.camera.position, state.camera.target),
     vectorDistance(beforeFollow.camera.position, beforeFollow.camera.target),
     'an active-note hop should preserve perspective distance');
-  assert(vectorDistance(state.camera.target, state.positions[betaId]) < 1e-9,
-    'local active-note following should only recenter on the new subject');
+  deepEqual(state.camera, beforeFollow.camera, 'local active-note following preserves the complete camera pose');
   deepEqual(activeNoteIntents, [],
     'canonical active-note truth should bypass the endogenous intent stream');
 
@@ -976,8 +975,7 @@ test('Local Graph+ reuses the full graph while active-note Focus changes', async
     'application-directed Local Focus retains the prior root in its constellation');
   equal(consciouslyFocused.focusedNodeId, alphaId,
     'Local Attention should move to the requested Focus subject');
-  assert(vectorDistance(consciouslyFocused.camera.target, consciouslyFocused.positions[alphaId]) < 1e-9,
-    'Local Focus should recenter without fitting');
+  deepEqual(consciouslyFocused.camera, state.camera, 'Local Focus hopping preserves camera position and orientation');
   await consumer.openNode(alphaId);
   equal(openedPath, 'Alpha.md', 'the explicit outbound action should reveal the focused note');
   equal(consumer.getLocalDocument()?.documentId, documentIdBeforeFollow,
@@ -1124,6 +1122,7 @@ test('Local Graph+ admits saved full-graph coordinates without force settling an
   equal((runtime.factory.getDiagnostics().sessions[0]?.modules['force-layout'] as { targetStepRateHz?: number })?.targetStepRateHz, 0,
     'restoring known coordinates should start Local physics settled');
 
+  const cameraBeforeFollow = state.camera;
   equal(await consumer.followActiveNode(betaId), true,
     'following a new subject should reuse the loaded full graph');
   state = await session.exportViewState();
@@ -1131,8 +1130,7 @@ test('Local Graph+ admits saved full-graph coordinates without force settling an
     deepEqual(state.positions[node.id], savedPositions[node.id],
       'every Local node should retain its saved full-graph coordinates');
   }
-  assert(vectorDistance(state.camera.target, state.positions[betaId]) < 1e-9,
-    'the one final fit should remain centered on the followed subject');
+  deepEqual(state.camera, cameraBeforeFollow, 'a later active note does not refit or recenter the initialized camera');
   const settledPositions = state.positions;
   for (let index = 1; index <= 60; index += 1) {
     runtime.platform.advanceTime(1_000 / 30);

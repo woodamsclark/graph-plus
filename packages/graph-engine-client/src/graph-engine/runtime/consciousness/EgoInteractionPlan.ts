@@ -148,7 +148,8 @@ export function resolveEgoInteractionPlanV1(
   const effects: EgoInteractionEffectV1[] = [];
   const focusChanged = resultingState.focusedNodeId !== before.focusedNodeId;
   if (directive.type === 'activate-background' || input.navigationAction !== undefined || focusChanged) effects.push(Object.freeze({ type: 'clear-presentation' }));
-  if (directive.type === 'direct-attention' && focusChanged && resultingState.focusedNodeId !== undefined) {
+  if (directive.type === 'direct-attention' && focusChanged && resultingState.focusedNodeId !== undefined
+    && context.experience.framing.focus.entry !== 'preserve') {
     effects.push(Object.freeze({ type: 'recenter-focus', nodeId: resultingState.focusedNodeId }));
   }
   return Object.freeze({ ...basis, outcome: outcome.status, directive, resultingState,

@@ -26,6 +26,8 @@ export interface GraphExperienceAwarenessPolicyV1 {
 export interface GraphExperienceFramingPolicyV1 {
   readonly target: 'graph' | 'attention' | 'focused-neighborhood';
   readonly center: 'centroid' | 'focused-node';
+  /** Automatic Focus entry/hop framing; omitted retains legacy recentering. */
+  readonly entry?: 'preserve' | 'recenter';
 }
 
 /** Host-neutral constraints for one Graph Engine presentation session. */
