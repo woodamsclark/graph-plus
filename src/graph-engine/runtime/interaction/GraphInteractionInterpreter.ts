@@ -84,10 +84,6 @@ type SinglePointerMode =
       lastRadius?: number;
     }
   | {
-      readonly kind: 'focus-hold';
-      readonly pointerId: number;
-    }
-  | {
       readonly kind: 'focus-transition';
       readonly pointerId: number;
       readonly pointerKind: 'mouse' | 'touch' | 'pen';
@@ -123,7 +119,6 @@ const TRACKPAD_PINCH_MOMENTUM_INITIAL_SCALE = 0.35;
 const TRACKPAD_PINCH_MOMENTUM_DECAY = 0.78;
 const TRACKPAD_PINCH_MOMENTUM_MIN_DELTA = 0.1;
 const DEFAULT_PRIMARY_TAP_RECEIPT_WINDOW_MS = 240;
-const DEFAULT_PRIMARY_TAP_FOCUS_HOLD_MS = 450;
 const DEFAULT_FOCUS_TRANSITION_DISTANCE_RATIO = 0.35;
 
 export class GraphInteractionInterpreter {
@@ -134,7 +129,6 @@ export class GraphInteractionInterpreter {
   private lastPointerPoint: GraphScreenPointV1 | undefined;
   private pendingHover: Extract<GraphInputEventV1, { type: 'pointer-move' }> | null = null;
   private readonly primaryTapReflex = new ReflexV1<PrimaryTapReceipt>();
-  private primaryTapFocusHoldTimer: number | null = null;
   private trackpadPinchMomentum: TrackpadPinchMomentum | null = null;
   private trackpadPinchMomentumTimer: number | null = null;
   private readonly tagging = new GraphTaggingController();
@@ -154,7 +148,6 @@ export class GraphInteractionInterpreter {
     readonly dragThresholdPx?: number;
     readonly primaryTapReceiptWindowMs?: number;
     readonly primaryTapReceiptDistancePx?: number;
-    readonly primaryTapFocusHoldMs?: number;
     readonly focusTransitionDistanceRatio?: number;
     readonly setTimeout: (callback: () => void, delayMs: number) => number;
     readonly clearTimeout: (handle: number) => void;
@@ -211,7 +204,6 @@ export class GraphInteractionInterpreter {
   }
 
   reset(): void {
-    this.cancelPrimaryTapFocusHold();
     this.clearPrimaryTapReceipt();
     this.cancelTrackpadPinchMomentum();
     this.pointers.clear();
@@ -251,7 +243,6 @@ export class GraphInteractionInterpreter {
     }
     this.pointers.set(event.pointerId, { id: event.pointerId, kind: event.pointerKind, point: event.point });
     if (this.pointers.size === 2) {
-      this.cancelPrimaryTapFocusHold();
       this.clearPrimaryTapReceipt();
       this.mode = { kind: 'idle' };
       this.touchGesture = this.readTouchGesture();
@@ -284,9 +275,6 @@ export class GraphInteractionInterpreter {
       precisionZoomCandidate,
       ...(receiptSource ? { receiptSource } : {}),
     };
-    if (event.button === 0 && effectiveHit) {
-      this.armNodeFocusHold(event, effectiveHit.nodeId);
-    }
   }
 
   private pointerMove(event: Extract<GraphInputEventV1, { type: 'pointer-move' }>): void {
@@ -300,7 +288,6 @@ export class GraphInteractionInterpreter {
     if (this.mode.kind === 'press' && this.mode.pointerId === event.pointerId) {
       const threshold = this.options.dragThresholdPx ?? 6;
       if (distanceSquared(this.mode.downPoint, event.point) <= threshold ** 2) return;
-      this.cancelPrimaryTapFocusHold();
       const receiptNodeId = this.mode.receiptSource?.payload.hit?.nodeId;
       if (receiptNodeId && this.mode.hit?.nodeId === receiptNodeId) {
         const progress = this.focusTransitionProgress(this.mode.downPoint, event.point);
@@ -467,7 +454,6 @@ export class GraphInteractionInterpreter {
   }
 
   private pointerUp(event: Extract<GraphInputEventV1, { type: 'pointer-up' }>): void {
-    this.cancelPrimaryTapFocusHold();
     this.pointers.delete(event.pointerId);
     if (this.touchGesture) {
       if (this.pointers.size < 2) this.touchGesture = null;
@@ -489,10 +475,6 @@ export class GraphInteractionInterpreter {
       return;
     }
     if (this.mode.kind === 'precision-zoom' && this.mode.pointerId === event.pointerId) {
-      this.mode = { kind: 'idle' };
-      return;
-    }
-    if (this.mode.kind === 'focus-hold' && this.mode.pointerId === event.pointerId) {
       this.mode = { kind: 'idle' };
       return;
     }
@@ -540,7 +522,6 @@ export class GraphInteractionInterpreter {
 
   private pointerCancel(event: Extract<GraphInputEventV1, { type: 'pointer-cancel' }>): void {
     this.pendingHover = null;
-    this.cancelPrimaryTapFocusHold();
     this.pointers.delete(event.pointerId);
     if (this.mode.kind === 'drag' && this.mode.pointerId === event.pointerId) {
       this.command(event, {
@@ -616,12 +597,12 @@ export class GraphInteractionInterpreter {
   }
 
   private longPress(event: Extract<GraphInputEventV1, { type: 'long-press' }>): void {
-    this.cancelPrimaryTapFocusHold();
     const hit = this.options.hitTest(event.point, event.pointerKind);
+    // A node hold remains an ordinary press, so it may continue into a drag or
+    // resolve as a normal click on release. Only background hold owns an action.
+    if (hit) return;
     if (this.mode.kind === 'press' && this.mode.pointerId === event.pointerId) this.mode = { kind: 'idle' };
-    if (hit) {
-      this.focusNode(event, hit.nodeId);
-    } else this.command(event, { type: 'center-and-fit-camera', modality: event.pointerKind });
+    this.command(event, { type: 'center-and-fit-camera', modality: event.pointerKind });
   }
 
   private keyDown(event: Extract<GraphInputEventV1, { type: 'key-down' }>): void {
@@ -719,28 +700,6 @@ export class GraphInteractionInterpreter {
     };
   }
 
-  private armNodeFocusHold(
-    event: Extract<GraphInputEventV1, { type: 'pointer-down' }>,
-    nodeId: string,
-  ): void {
-    this.cancelPrimaryTapFocusHold();
-    this.primaryTapFocusHoldTimer = this.options.setTimeout(() => {
-      this.primaryTapFocusHoldTimer = null;
-      if (this.mode.kind !== 'press' || this.mode.pointerId !== event.pointerId
-        || this.mode.hit?.nodeId !== nodeId) return;
-      this.focusNode(event, nodeId);
-      this.mode = { kind: 'focus-hold', pointerId: event.pointerId };
-      this.options.onDeferredCommand();
-    }, this.options.primaryTapFocusHoldMs ?? DEFAULT_PRIMARY_TAP_FOCUS_HOLD_MS);
-  }
-
-  private cancelPrimaryTapFocusHold(): void {
-    if (this.primaryTapFocusHoldTimer !== null) {
-      this.options.clearTimeout(this.primaryTapFocusHoldTimer);
-    }
-    this.primaryTapFocusHoldTimer = null;
-  }
-
   private focusTransitionProgress(
     origin: GraphScreenPointV1,
     point: GraphScreenPointV1,
@@ -750,18 +709,6 @@ export class GraphInteractionInterpreter {
       ?? DEFAULT_FOCUS_TRANSITION_DISTANCE_RATIO;
     const distance = Math.max(48, Math.min(viewport.width, viewport.height) * ratio);
     return Math.max(0, Math.min(1, pointDistance(origin, point) / distance));
-  }
-
-  private focusNode(
-    event: { readonly identity: InputGraphIdentityV1; readonly timestamp: number },
-    nodeId: string,
-  ): void {
-    this.command(event, {
-      type: 'direct-attention',
-      nodeIds: [...new Set([...this.options.getSelectedNodeIds(), nodeId])],
-      subjectNodeId: nodeId,
-      focusNodeId: nodeId,
-    });
   }
 
   private matchingPrimaryTapReceipt(

@@ -173,8 +173,8 @@ export default class GraphEnginePlugin extends Plugin {
       callback: () => this.activateLocalView(),
     });
     this.addCommand({
-      id: 'copy-graph-engine-diagnostics',
-      name: 'copy graph-engine diagnostics',
+      id: 'copy-graph-plus-diagnostics',
+      name: 'copy graph+ diagnostics',
       callback: () => { void this.copyDiagnostics(); },
     });
 
@@ -280,7 +280,7 @@ export default class GraphEnginePlugin extends Plugin {
       requestedCapabilities: GRAPH_PLUS_REQUESTED_CAPABILITIES_V1,
     }) ?? {
       ok: false as const,
-      error: { code: 'engine-unavailable' as const, message: 'graph-engine is unavailable.' },
+      error: { code: 'engine-unavailable' as const, message: 'graph+ is unavailable.' },
     };
     if (!result.ok) throw new GraphEngineServiceErrorV1(result.error);
     return result.lease;
@@ -307,14 +307,14 @@ export default class GraphEnginePlugin extends Plugin {
       provider: this.graphEngineCore?.getDiagnostics(),
     };
     const text = JSON.stringify(snapshot, null, 2);
-    console.info('[graph-engine diagnostics]', snapshot);
+    console.info('[graph+ diagnostics]', snapshot);
     try {
       const clipboard = document.defaultView?.navigator.clipboard;
       if (!clipboard) throw new Error('Clipboard API is unavailable.');
       await clipboard.writeText(text);
-      new Notice('graph-engine diagnostics copied.');
+      new Notice('graph+ diagnostics copied.');
     } catch (error) {
-      console.error('[graph-engine] could not copy diagnostics', error);
+      console.error('[graph+] could not copy diagnostics', error);
       new Notice('Could not copy diagnostics. Details were written to the developer console.');
     }
   }

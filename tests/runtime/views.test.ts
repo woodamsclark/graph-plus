@@ -497,12 +497,63 @@ test('Committed activation holds its admitted preview until pointer leave', asyn
       labelOpacity: node.labelOpacity, labelForceVisible: node.labelForceVisible, strokeWidth: node.strokeWidth })), preview,
     'movement within the node retains the latched preview');
     await hover();
-    equal(scene!.nodes.find((node) => node.id === 'c')!.opacity, 1, 'leaving reveals the committed Focus neighborhood');
+    equal(scene!.nodes.find((node) => node.id === 'c')!.opacity, 0.24, 'leaving retains the committed dimmed Focus neighborhood');
     let hoveredNodeId: string | undefined;
     session.onIntent((intent) => { if (intent.type === 'node-hover-changed') hoveredNodeId = intent.nodeId; });
     await hover('c');
-    equal(hoveredNodeId, 'c', 'the standard neighbor is pickable on its new visit');
+    equal(hoveredNodeId, 'c', 'the dimmed neighbor is pickable on its new visit');
     equal((await session.exportViewState()).focusedNodeId, 'd', 'the new hover leaves the committed Focus subject intact');
+    await session.dispose();
+  }
+});
+
+test('Overview node drag holds the admitted Constellation preview without replanning it', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
+    let scene: GraphRenderSceneV2 | undefined;
+    const registry = new GraphRendererRegistryV2();
+    registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true,
+      create: ({ createCanvas, now }) => {
+        const renderer = new CanvasGraphRenderer(createCanvas(), now);
+        const update = renderer.updateScene.bind(renderer);
+        renderer.updateScene = (next) => { scene = next; update(next); };
+        return renderer;
+      },
+    });
+    const value = runtimeHarness({ profileId, rendererRegistry: registry, document: graphDocument({
+      nodes: ['a', 'b', 'c'].map((id) => graphNode(id)),
+      edges: [graphEdge('ab', 'a', 'b'), graphEdge('bc', 'b', 'c')],
+    }) });
+    const session = await value.create();
+    const initial = await session.exportViewState();
+    await session.restoreViewState({ ...initial, viewMode: 'overview', selectedNodeIds: [], focusedNodeId: undefined,
+      positions: { a: { x: -80, y: 0, z: 0 }, b: { x: 0, y: 0, z: 0 }, c: { x: 80, y: 0, z: 0 } },
+      camera: { ...initial.camera, zoom: 1, target: { x: 0, y: 0, z: 0 }, position: { x: 0, y: 0, z: 600 } },
+    });
+    const canvas = runtimeCanvas(value.container);
+    const nodeScene = () => scene!.nodes.map((node) => ({ id: node.id, opacity: node.opacity,
+      finalColor: node.finalColor, labelOpacity: node.labelOpacity,
+      labelForceVisible: node.labelForceVisible, strokeWidth: node.strokeWidth }));
+    const emit = (type: 'pointermove' | 'pointerdown' | 'pointerup', x: number, y: number) => {
+      const fields = { clientX: x, clientY: y, pointerId: 960, pointerType: 'mouse', button: 0 };
+      const event = new value.window.PointerEvent(type, { ...fields, bubbles: true });
+      for (const [key, field] of Object.entries(fields)) Object.defineProperty(event, key, { value: field });
+      canvas.dispatchEvent(event as unknown as Event);
+    };
+    const start = await point(session, 'b');
+    emit('pointermove', start.x, start.y);
+    value.platform.flushFrame();
+    const preview = nodeScene();
+    deepEqual(Object.fromEntries(preview.map((node) => [node.id, node.opacity])), { a: 0.24, b: 1, c: 0.24 },
+      'Overview hover first admits the Constellation preview');
+    emit('pointerdown', start.x, start.y);
+    emit('pointermove', start.x + 35, start.y + 15);
+    value.platform.flushFrame();
+    deepEqual(nodeScene(), preview, 'dragging holds the exact preview captured before drag start');
+    deepEqual((await session.exportViewState()).selectedNodeIds, [], 'the held preview remains uncommitted during drag');
+    emit('pointerup', start.x + 35, start.y + 15);
+    value.platform.flushFrame();
+    deepEqual(nodeScene(), preview, 'drag release under the moved node continues the same hover visit');
+    deepEqual((await session.exportViewState()).selectedNodeIds, [], 'drag release cannot commit the held preview');
     await session.dispose();
   }
 });
@@ -583,8 +634,8 @@ test('Selective hover previews preserve committed state in 2D and 3D with and wi
       value.platform.flushFrame();
       equal((await session.exportViewState()).focusedNodeId, 'b', 'click commits the previewed Focus subject');
       deepEqual(opacities(), focusPreview, 'the Focus preview exactly matches the committed default Focus scene');
-      deepEqual(opacities(), { a: 1, b: 1, c: 1, d: 0 },
-        'committed Focus keeps immediate neighbors standard and unrelated context void');
+      deepEqual(opacities(), { a: 0.24, b: 1, c: 0.24, d: 0 },
+        'committed Focus keeps immediate neighbors dimmed and unrelated context void');
       await hover();
       await session.restoreViewState(overview);
       await hover('b');
@@ -661,9 +712,9 @@ test('Selective hover previews preserve committed state in 2D and 3D with and wi
       await session.focusNode('a');
       const committed = await session.exportViewState();
       await hover('d', true);
-      deepEqual(opacities(), { a: 1, b: 1, c: 0, d: 0.24 }, 'Ctrl-hover dims the removed member within standard Focus context');
+      deepEqual(opacities(), { a: 1, b: 0.24, c: 0, d: 0.24 }, 'Ctrl-hover dims the removed member within dimmed Focus context');
       await hover('d', true);
-      deepEqual(opacities(), { a: 1, b: 1, c: 0, d: 0.24 }, 'a removal preview retains its own target without flicker');
+      deepEqual(opacities(), { a: 1, b: 0.24, c: 0, d: 0.24 }, 'a removal preview retains its own target without flicker');
       deepEqual(await session.exportViewState(), committed, 'a retained removal target does not change actual state');
       canvas.dispatchEvent(new value.window.KeyboardEvent('keyup', { key: 'Control', ctrlKey: false, bubbles: true }) as unknown as Event);
       value.platform.flushFrame();
@@ -676,18 +727,18 @@ test('Selective hover previews preserve committed state in 2D and 3D with and wi
       await session.setSelection(['a', 'd']);
       build = await session.exportViewState();
       await hover('a', true);
-      deepEqual(opacities(), { a: 0.24, b: 1, c: 0, d: 1 }, 'subject removal cue dims only the removed subject within standard Focus context');
+      deepEqual(opacities(), { a: 0.24, b: 0.24, c: 0, d: 1 }, 'subject removal cue retains the dimmed Focus neighborhood');
       await hover();
       intents.length = 0;
       viewChanges.length = 0;
       const unchangedFocus = await session.exportViewState();
       await hover('b');
-      deepEqual(opacities(), { a: 1, b: 1, c: 1, d: 1 }, 'Focus hopping has an explicit prospective View scene');
+      deepEqual(opacities(), { a: 1, b: 1, c: 0.24, d: 1 }, 'Focus hopping has an explicit prospective View scene');
       deepEqual(await session.exportViewState(), unchangedFocus, 'hover changes neither camera, settings, membership, subject, layout, nor Memory');
       deepEqual(viewChanges, [], 'visual previews do not publish View transitions');
       assert(intents.every((type) => type === 'node-hover-changed'), 'hover emits inspection only');
       await hover();
-      deepEqual(opacities(), { a: 1, b: 1, c: 0, d: 1 }, 'leaving restores committed Focus');
+      deepEqual(opacities(), { a: 1, b: 0.24, c: 0, d: 1 }, 'leaving restores committed Focus');
       await hover('b');
       await hover('c');
       deepEqual(opacities(), { a: 1, b: 1, c: 1, d: 1 }, 'the next preview subject also reveals its shortest route');
@@ -703,13 +754,13 @@ test('Selective hover previews preserve committed state in 2D and 3D with and wi
       await session.focusNode('a');
       const singleFocus = await session.exportViewState();
       await hover('a', true);
-      deepEqual(opacities(), { a: 0.24, b: 1, c: 0, d: 0 },
+      deepEqual(opacities(), { a: 0.24, b: 0.24, c: 0, d: 0 },
         'last-member removal preview retains Focus rather than exposing Overview');
       equal(scene!.nodes.find((node) => node.id === 'a')!.strokeWidth, undefined,
         'removing the subject drops only its local focus and membership outlines');
       deepEqual(await session.exportViewState(), singleFocus, 'last-member preview has no committed effects');
       await hover();
-      deepEqual(opacities(), { a: 1, b: 1, c: 0, d: 0 }, 'canceling removal restores its object emphasis');
+      deepEqual(opacities(), { a: 1, b: 0.24, c: 0, d: 0 }, 'canceling removal restores its object emphasis');
       await hover('a', true);
       tap(value, canvas, await point(session, 'a'), 707, 'mouse', true);
       value.platform.flushFrame();

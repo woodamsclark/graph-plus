@@ -81,9 +81,9 @@ Focus exit. The Focus scene still has one presented subject.
 
 The Focus subject belongs to `C`. In Constellation, clicking a dim candidate
 outside `C` admits that candidate and its shortest visible path to `C`, and stays in Constellation. A subsequent ordinary
-click on a committed member enters Focus. Within Focus, clicking a standard neighbor admits
+click on a committed member enters Focus. Within Focus, clicking a dimmed neighbor admits
 that candidate and its shortest connecting path and hops the subject in one operation, preserving existing members. Unrelated neighbors are never implicitly admitted.
-This permits exploration through conscious standard neighbors while keeping "one from many" true.
+This permits exploration through visible dimmed neighbors while keeping "one from many" true.
 
 ### Memory and Ego constellation sources
 
@@ -123,7 +123,7 @@ reveals the remembered source again while it remains in the recent trail.
 | Constellation member | Highlighted emphasis is permitted | Highlighted | Highlighted, even when distant from `f` |
 | Focus subject | No special tracked role | No singular tracked role | Highlighted with a distinct focus affordance |
 | Remembered subject outside active membership | Memory color | Memory color | Memory color, including distant subjects |
-| Ordinary immediate neighbor of `f` outside `C` | Standard | Dimmed | Standard |
+| Ordinary immediate neighbor of `f` outside `C` | Standard | Dimmed | Dimmed |
 | Every other ordinary projected object outside `C` | Standard | Dimmed | Void |
 
 Overview has no View-induced dimming or voiding. Structural filters can still exclude
@@ -143,12 +143,12 @@ Overview:     member -> permitted highlight; remembered -> Memory highlight; oth
 Constellation: member -> highlighted; remembered -> Memory highlight; otherwise dimmed
 Focus:        member -> highlighted
               else remembered -> Memory highlight
-              else immediate neighbor of focused subject -> standard
+              else immediate neighbor of focused subject -> dimmed
               else -> void
 ```
 
 Before the hover-awareness lift, links inherit the weaker presentation phase of their endpoints. A link touching a
-void object is void; a highlighted-to-standard link is standard; a member-to-member link
+void object is void; a highlighted-to-dimmed link is dimmed; a member-to-member link
 is highlighted. Memory-to-Memory links use the Memory color; a mixed-source link
 does not imply one shared constellation. A renderer cannot expose a hidden endpoint by drawing its link.
 
@@ -245,7 +245,7 @@ Hover changes visual phases, outlines, and labels only. It never changes the cur
 View, Focus subject, Attention, Memory, camera interest or pose, layout, settings,
 history, or host actions. Click is the commit boundary. Hover lighting never counts
 as committed membership: clicking a provisionally lit candidate admits it and its
-connecting path while remaining in Constellation. A prospective Focus subject has the Focus outline and label emphasis; standard conscious neighbors inherit dynamic labeling, while dim and void labels remain suppressed. Ordinary
+connecting path while remaining in Constellation. A prospective Focus subject has the Focus outline and label emphasis; dimmed neighbors and void context suppress labels. Ordinary
 hover scene preview is distinct from the modifier-held note-content preview.
 
 ### Label reveal policy
@@ -353,8 +353,9 @@ otherwise Overview; it does not silently choose another focused object.
 
 Escape performs one-level Back and remains at Overview; it does not toggle into Constellation. A separate Return to
 Overview action provides an immediate top-level exit without clearing membership.
-Existing explicit Focus actions and holds may remain shortcuts if Experience permits
-them; primary single-click descent does not require a hold or a double click.
+Existing explicit Focus actions may remain shortcuts if Experience permits them;
+node hold is not a Focus action, and primary single-click descent does not require a
+hold or a double click.
 
 Secondary-click on the background invokes Center + Fit. A one-node Constellation
 uses the same neighborhood field, square frame, member center and single-point scale
@@ -432,6 +433,11 @@ The interpreter consults the View policy before choosing dragging versus navigat
 the runtime checks it again before beginning a drag. Membership and highlight state
 do not restrict movement.
 
+An admitted hover preview is latched at node-drag start and held as an immutable
+presentation snapshot while the node moves. Drag state does not rebuild an equivalent
+preview or realize its proposed membership/View. Release under the moved node retains
+the same hover visit; pointer leave ends it through the ordinary hover lifecycle.
+
 The older selection-or-empty-selection gate lived in `GraphInteractionInterpreter`
 and originated in commit `4c781ef` (2026-09-19). It assumed that a non-empty selection
 implied Constellation. Once Views became explicit and Overview retained membership,
@@ -446,8 +452,9 @@ a double activation performs the consumer's primary object action
 and applies the first single-click descent only once. Its second press must not add
 another independent descent or duplicate admission. Receipt reconciliation records
 explicit View, Consciousness, and camera effects. A canceled gesture cannot roll back
-unrelated later state. Existing node-hold Focus and background-hold Fit shortcuts are
-explicit operations, with no competing click emitted on release.
+unrelated later state. A node hold remains an ordinary press that can become a drag or
+click on release. Background-hold Fit remains an explicit operation, with no competing
+click emitted on release.
 
 Desktop secondary object activation opens object actions without descending. Background
 secondary activation retains explicit Center + Fit without clearing membership.
@@ -586,12 +593,12 @@ application shares canonical topology, coordinates, and pins.
 2. With `C = {a, b, c}`, focus `b`, then `c`, then return: membership stays `{a, b, c}`;
    Vision retains the current focal point, including any user framing offset.
 3. Place `a` far from focused `b`. `a` remains highlighted even without an edge to `b`;
-   a non-member neighbor of `b` is standard; an unrelated non-member is void.
+   a non-member neighbor of `b` is dimmed; an unrelated non-member is void.
 4. Move or edit the constellation while in Overview: camera pose stays unchanged and
    no projected object becomes dimmed by the View. Cursor zoom and momentum stay anchored.
 5. Click a dim candidate in Constellation: the candidate and its shortest visible route
    are admitted; View and camera stay unchanged. Click the resulting committed member:
-   enter Focus. Hover alone never realizes membership. Within Focus, clicking a standard neighbor still
+   enter Focus. Hover alone never realizes membership. Within Focus, clicking a dimmed neighbor still
    admits and hops directly.
 6. Back from Focus under the accepted camera rule: retain zoom, angle, distance,
    and live framing; the next orbit and unanchored zoom use the retained focal point. Re-entering or

@@ -427,9 +427,8 @@ interaction presentation is required even when the requested focus ID already ma
 the stored focus state; an idempotent focus command may not leave stale hover behind.
 While Focus/Local is active, constellation nodes and links whose endpoints are both in
 the constellation receive the highlight treatment at full opacity. Immediate neighbors
-of the focused node remain rendered as standard conscious context; they do not become
-selected, and their labels remain eligible for the adaptive label policy without being
-forced. Dimmed and void labels remain suppressed.
+of the focused node remain rendered as dimmed visible context; they do not become
+selected, and their labels remain suppressed. Unrelated context is void.
 Hover temporarily highlights that node and its shortest path to the nearest selected
 constellation subject while unrelated context remains void. Clicking a
 frontier node adds it to the constellation. Background activation exits

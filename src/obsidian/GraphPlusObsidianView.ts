@@ -34,8 +34,8 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
   async onOpen(): Promise<void> {
     this.contentEl.empty();
     const classes = this.experienceMode === 'local'
-      ? 'greater-graph-view graphplus-view graphplus-local-view'
-      : 'greater-graph-view graphplus-view';
+      ? 'graphplus-view graphplus-local-view'
+      : 'graphplus-view';
     const container = this.contentEl.createDiv({ cls: classes });
     this.lifecycle = new GraphPlusViewLifecycleV1(this.contentEl, {
       setSuspended: (suspended) => this.application?.setSuspended(suspended),

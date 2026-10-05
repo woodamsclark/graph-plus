@@ -769,7 +769,7 @@ test('selected Focus double click preserves its eager hop state before activatio
   actions.dispose();
 });
 
-test('primary long click and press enter Focus without activating the node', async () => {
+test('node hold can continue into dragging without entering Focus or activating the node', async () => {
   for (const pointerType of ['mouse', 'touch'] as const) {
     let actionRuns = 0;
     const actions = new ConsumerNodeActionRegistryV1();
@@ -798,12 +798,17 @@ test('primary long click and press enter Focus without activating the node', asy
     value.platform.flushTimer();
     value.platform.flushFrame();
     const held = await session.exportViewState();
-    equal(held.focusedNodeId, 'a', `${pointerType} hold should enter Focus`);
-    deepEqual(held.selectedNodeIds, ['a'], `${pointerType} hold should retain Attention`);
+    equal(held.focusedNodeId, undefined, `${pointerType} hold must not enter Focus`);
+    deepEqual(held.selectedNodeIds, [], `${pointerType} hold must not change Attention`);
     equal(actionRuns, 0, `${pointerType} hold must not activate the node`);
-    pointer(value, canvas, 'pointerup', point.x, point.y, { pointerId: 130, pointerType });
+    pointer(value, canvas, 'pointermove', point.x + 20, point.y, { pointerId: 130, pointerType });
     value.platform.flushFrame();
-    equal(actionRuns, 0, `${pointerType} release after the hold must remain non-activating`);
+    pointer(value, canvas, 'pointerup', point.x + 20, point.y, { pointerId: 130, pointerType });
+    value.platform.flushFrame();
+    const dragged = await session.exportViewState();
+    equal(dragged.focusedNodeId, undefined, `${pointerType} hold-drag must not enter Focus`);
+    deepEqual(dragged.selectedNodeIds, [], `${pointerType} hold-drag must not change Attention`);
+    equal(actionRuns, 0, `${pointerType} hold-drag release must remain non-activating`);
     await session.dispose();
     actions.dispose();
   }
@@ -1624,7 +1629,7 @@ test('mobile one-finger drag moves a directly touched node without selecting it'
   await session.dispose();
 });
 
-test('mobile Focus drags a directly touched standard neighbor while background gestures retain navigation', async () => {
+test('mobile Focus drags a directly touched dimmed neighbor while background gestures retain navigation', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
@@ -1662,7 +1667,7 @@ test('mobile Focus drags a directly touched standard neighbor while background g
   await session.dispose();
 });
 
-test('desktop drag on a stably hovered standard neighbor moves it without changing Focus', async () => {
+test('desktop drag on a stably hovered dimmed neighbor moves it without changing Focus', async () => {
   const value = runtimeHarness({ profileId: 'three-dimensional' });
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
@@ -2022,7 +2027,7 @@ test('R-INPUT-18 mobile two-finger drag pans Constellation and Focus while pinch
   await flatSession.dispose();
 });
 
-test('stationary mobile long-press enters Focus without opening node context', async () => {
+test('stationary mobile node hold remains an ordinary click resolved on release', async () => {
   const value = runtimeHarness();
   const session = await value.create();
   const canvas = runtimeCanvas(value.container);
@@ -2034,9 +2039,14 @@ test('stationary mobile long-press enters Focus without opening node context', a
   value.platform.flushFrame();
   equal(intents.filter((intent) => intent.type === 'node-context-requested').length, 0,
     'primary long press should not emit a context request');
-  equal((await session.exportViewState()).focusedNodeId, 'a', 'primary long press should focus its node');
+  equal((await session.exportViewState()).focusedNodeId, undefined, 'primary long press must not focus its node');
+  deepEqual((await session.exportViewState()).selectedNodeIds, [],
+    'primary long press must not change Attention before release');
+  pointer(value, canvas, 'pointerup', point.x, point.y, { pointerId: 35, pointerType: 'touch' });
+  value.platform.flushFrame();
+  equal((await session.exportViewState()).focusedNodeId, undefined, 'release remains an ordinary first click');
   deepEqual((await session.exportViewState()).selectedNodeIds, ['a'],
-    'primary long press should make its node the sole Attention subject');
+    'stationary release commits the ordinary first-click constellation');
   await session.dispose();
 });
 

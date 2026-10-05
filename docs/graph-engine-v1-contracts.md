@@ -838,7 +838,7 @@ Memory constellation first makes it current membership. Ctrl does not change tha
 can reveal a highlight seed, its immediate neighbors, and its incident links. Explore's
 state contract overrides selection to selected nodes and selected-to-selected links
 only; hover remains the one-hop exception. Focus highlights the constellation, retains
-the focused subject's immediate neighbors as standard conscious context, and temporarily
+the focused subject's immediate neighbors as dimmed visible context, and temporarily
 isolates the focused-root-to-hovered-neighbor connection during hover. Anima forces labels
 for highlighted subjects, delegates standard labels to camera-range Saliency, and
 suppresses dimmed and void labels. The Focus preview uses this same destination policy
@@ -1279,8 +1279,8 @@ state.
 
 Obsidian has no documented plugin-dependency field or public plugin-manager lookup.
 The primary connection mechanism therefore uses the public Workspace Events API.
-The V1 provider is the installed plugin whose manifest ID is `graph-engine`; consumers
-discover the `graph-engine` capability rather than looking up that plugin through an
+The V1 provider is bundled inside the installed `graph-plus` plugin; consumers discover
+the `graph-engine` capability rather than looking up the host plugin through an
 undocumented plugin manager.
 
 Suggested event names:

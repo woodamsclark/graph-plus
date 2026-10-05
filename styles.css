@@ -1,5 +1,4 @@
-.graphplus-view,
-.greater-graph-view {
+.graphplus-view {
   --graph-plus-surface-background: #0f0f0f;
   position: absolute;
   inset: 0;

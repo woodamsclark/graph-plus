@@ -60,6 +60,10 @@ export class SessionInteractionRuntime {
   /** Activation latches the admitted preview; only a real leave/different target rearms it. */
   private consumedHoverNodeId: string | undefined;
   private consumedHoverPreview: GraphInteractionPreviewV1 | undefined;
+  private presentedHoverNodeId: string | undefined;
+  private presentedHoverPreview: GraphInteractionPreviewV1 | undefined;
+  /** The admitted hover scene captured at drag start, held without replanning. */
+  private dragHoverPreview: GraphInteractionPreviewV1 | undefined;
   private hoverPoint: GraphScreenPointV1 | undefined;
   private elasticReturnTimer: number | undefined;
   private focusTransition: {
@@ -409,6 +413,10 @@ export class SessionInteractionRuntime {
         });
         return;
       case 'set-hover': {
+        if (this.presentedHoverNodeId !== command.nodeId) {
+          this.presentedHoverNodeId = undefined;
+          this.presentedHoverPreview = undefined;
+        }
         if (this.consumedHoverNodeId !== command.nodeId) {
           this.consumedHoverNodeId = undefined;
           this.consumedHoverPreview = undefined;
@@ -467,10 +475,14 @@ export class SessionInteractionRuntime {
           ...(command.point ? { anchor: { ...command.point } } : {}),
         });
         return;
-      case 'drag-start':
+      case 'drag-start': {
+        const preview = this.presentedHoverNodeId === command.nodeId
+          ? this.presentedHoverPreview
+          : undefined;
         this.options.ego.clearWill();
-            this.beginNodeDrag(command.nodeId, command.point);
+        this.beginNodeDrag(command.nodeId, command.point, preview);
         return;
+      }
       case 'drag-update':
         this.updateNodeDrag(command.nodeId, command.point);
         return;
@@ -566,19 +578,32 @@ export class SessionInteractionRuntime {
   }
 
   getObjectActivationPreview(): GraphInteractionPreviewV1 | null {
-    if (this.interpreter.isViewProposalSuspended() || this.dragContext !== null) {
+    // A drag owns an already-admitted snapshot, so gesture suspension must not
+    // discard it or ask Ego to plan a replacement.
+    if (this.dragContext !== null) return this.dragHoverPreview ?? null;
+    if (this.interpreter.isViewProposalSuspended()) {
       this.options.ego.clearWill();
       return null;
     }
+    return this.resolveCurrentHoverPreview();
+  }
+
+  private resolveCurrentHoverPreview(): GraphInteractionPreviewV1 | null {
     if (!this.hoverInput) return null;
     if (this.hoverInput.target.kind === 'node' && this.hoverInput.target.nodeId === this.consumedHoverNodeId) {
       // Keep presenting the exact state admitted by the click. Replanning here
       // would expose the following action before the pointer begins a new visit.
-      return this.consumedHoverPreview ?? null;
+      const preview = this.consumedHoverPreview ?? null;
+      this.presentedHoverNodeId = this.hoverInput.target.nodeId;
+      this.presentedHoverPreview = preview ?? undefined;
+      return preview;
     }
     const context = this.planningContext();
     const plan = this.options.ego.resolveWill(this.hoverInput, context);
-    return presentEgoInteractionPlanV1(plan) ?? null;
+    const preview = presentEgoInteractionPlanV1(plan) ?? null;
+    this.presentedHoverNodeId = this.hoverInput.target.kind === 'node' ? this.hoverInput.target.nodeId : undefined;
+    this.presentedHoverPreview = preview ?? undefined;
+    return preview;
   }
 
   private commitWill(command: Extract<GraphRuntimeCommandV1, { type: 'activate-view' }>): void {
@@ -897,6 +922,9 @@ export class SessionInteractionRuntime {
     this.cancelPreviewRelease();
     this.consumedHoverNodeId = undefined;
     this.consumedHoverPreview = undefined;
+    this.presentedHoverNodeId = undefined;
+    this.presentedHoverPreview = undefined;
+    this.dragHoverPreview = undefined;
     this.hoverInput = undefined;
     this.options.ego.clearWill();
     const hoverChanged = this.hoveredNodeId !== undefined || this.previewedNodeId !== undefined;
@@ -922,7 +950,11 @@ export class SessionInteractionRuntime {
     return true;
   }
 
-  private beginNodeDrag(nodeId: string, point: GraphScreenPointV1): void {
+  private beginNodeDrag(
+    nodeId: string,
+    point: GraphScreenPointV1,
+    hoverPreview: GraphInteractionPreviewV1 | undefined,
+  ): void {
     if (!this.options.getRenderSelection().nodeIds.has(nodeId)) return;
     if (!canDragGraphNodeV1(nodeId, this.options.getViewState())) return;
     if (!this.options.isNodeDraggable(nodeId)) return;
@@ -938,6 +970,7 @@ export class SessionInteractionRuntime {
       offset: subtract(position, underPointer),
       wasPinned,
     };
+    this.dragHoverPreview = hoverPreview;
     if (!wasPinned && this.options.getDragConstraintPolicy?.() !== 'transient') {
       this.commit({ ...state, pinnedNodeIds: [...state.pinnedNodeIds, nodeId] });
       this.options.onViewStateChanged('layout');
@@ -967,6 +1000,7 @@ export class SessionInteractionRuntime {
     const position = this.options.getViewState().positions[command.nodeId];
     const wasPinned = this.dragContext.wasPinned;
     this.dragContext = null;
+    this.dragHoverPreview = undefined;
     this.hoveredNodeId = command.pointerKind === 'touch' ? undefined : command.nodeId;
     this.updateCursor();
     if (!position) return;
@@ -995,6 +1029,9 @@ export class SessionInteractionRuntime {
   private resetTransientState(): void {
     this.consumedHoverNodeId = undefined;
     this.consumedHoverPreview = undefined;
+    this.presentedHoverNodeId = undefined;
+    this.presentedHoverPreview = undefined;
+    this.dragHoverPreview = undefined;
     this.hoverInput = undefined;
     this.options.ego.clearWill();
     this.cancelPreviewRelease();

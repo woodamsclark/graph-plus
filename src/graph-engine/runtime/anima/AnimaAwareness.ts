@@ -387,10 +387,9 @@ function resolveAnimaHighlightV1(options: {
     ? 'standard' : context === 'dimmed' ? 'dimmed' : 'void';
   const phaseByNodeId = Object.fromEntries([...visibleNodeIds].map((nodeId) => {
     let phase: AnimaPresentationPhaseV1 = baseNodePhase;
-    // Focus keeps its immediate conscious neighborhood fully present. Standard
-    // delegates label eligibility to the adaptive label policy; only unrelated
-    // context remains void.
-    if (options.interaction.state === 'focus' && focusScopeNodeIds.has(nodeId)) phase = 'standard';
+    // Focus keeps its immediate neighborhood visible but subdued. Dimmed labels
+    // remain suppressed; only unrelated context becomes void.
+    if (options.interaction.state === 'focus' && focusScopeNodeIds.has(nodeId)) phase = 'dimmed';
     if (highlightedNodeIds.has(nodeId)) phase = 'highlighted';
     // Removal presentation lowers the object phase instead of overriding label
     // policy. Independent Memory stays highlighted when deliberate membership

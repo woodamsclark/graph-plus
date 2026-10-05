@@ -89,7 +89,7 @@ export class GraphEngineWorkspaceClientV1 {
         ok: false,
         error: {
           code: 'engine-unavailable',
-          message: 'graph-engine is unavailable or not installed. This feature requires graph-engine.',
+          message: 'Graph+ is unavailable or not installed. This feature requires Graph+.',
         },
       }), timeoutMs);
       request();

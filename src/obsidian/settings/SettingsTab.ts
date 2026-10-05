@@ -14,7 +14,7 @@ export class GraphEngineSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     preserveSettingsScrollV1(containerEl, () => {
       containerEl.empty();
-      containerEl.createEl('h2', { text: 'graph-engine' });
+      containerEl.createEl('h2', { text: 'graph+' });
       const enginePanel = new GraphEngineSettingsPanelV1(this.graphPlus.engineSettings);
       enginePanel.renderProfiles(containerEl, this.app, () => this.display());
       this.renderGeneral(containerEl);

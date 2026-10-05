@@ -121,14 +121,14 @@ for the Graph+ profile where supported.
 
 ## For plugin developers
 
-Graph+ is the first priority consumer of `graph-engine`, a host-neutral graph platform.
+Graph+ contains `graph-engine`, its host-neutral internal graph platform.
 
 The core engine is designed for plugins that already own meaningful data. A consumer
-plugin passes graph nodes, edges, profiles, and view state to graph-engine; the engine
+plugin passes graph nodes, edges, profiles, and view state to the internal engine; the engine
 returns a presentable interactive graph surface inside an HTML element owned by that
 plugin. The consumer keeps ownership of its data, domain meaning, and persistence.
 
-Graph-engine owns generic graph layout, rendering, camera movement, hit testing,
+The internal Graph Engine owns generic graph layout, rendering, camera movement, hit testing,
 gestures, filters, modules, and presentation state. This lets another plugin add a
 graph without importing Graph+’s Obsidian-vault interpretation.
 
@@ -145,7 +145,7 @@ validated against your own vault and device before relying on it for daily work.
 Graph+ is available through the Obsidian community plugins browser. For manual
 installation, place `main.js`, `manifest.json`, and `styles.css` in:
 
-`.obsidian/plugins/graph-engine/`
+`.obsidian/plugins/graph-plus/`
 
 ## Development
 

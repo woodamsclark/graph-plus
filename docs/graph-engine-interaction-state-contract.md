@@ -45,9 +45,10 @@ owned by the label manager and renderer.
 | Any View | Ctrl-click object | Add candidate and path, or remove only the member, without descent; removing the subject releases Focus, removing the last member resolves Overview |
 
 Primary release commits only for a stationary gesture. A second matching release
-adds the primary host action once and preserves the first descent. Node hold (450 ms)
-remains a Focus shortcut. Moving a matching second press interpolates translation
-into Focus over 35% of the smaller viewport dimension while preserving scale. Holds
+adds the primary host action once and preserves the first descent. A node hold has no
+separate action: movement may continue into dragging, while stationary release remains
+an ordinary click. Moving a matching second press interpolates translation into Focus
+over 35% of the smaller viewport dimension while preserving scale. Background holds
 and navigation never emit a competing click. Touch Add/Remove constellation is
 available through object actions.
 
@@ -92,7 +93,7 @@ respectively. Lone-point fitting retains the readable fallback scale.
 
 Overview has no View-induced dimming. Constellation highlights members and dims every
 nonmember. Focus highlights all members, keeps the subject's immediate nonmember
-neighbors standard, and voids everything else. Links take the weaker endpoint phase. Void
+neighbors dimmed, and voids everything else. Links take the weaker endpoint phase. Void
 subjects have no labels, hit targets, preview, or context activation. Hover evaluates
 ordinary object activation through the same View planner and Experience admission as
 click. Admission without View entry and removal express object deltas within committed context.
@@ -152,6 +153,11 @@ Primary desktop background dragging in Focus translates the camera without rotat
 preserving zoom, orientation, distance, membership, and subject. Stable-hover node
 dragging retains its separate object-movement gesture.
 
+When an eligible node drag begins from an active hover preview, the runtime snapshots
+that admitted preview and presents the same snapshot for the whole drag. Dragging does
+not cancel, recompute, or commit the preview. Releasing beneath the moved node resumes
+the same hover visit; actual pointer leave clears it normally.
+
 Focus double-tap drag radial zoom measures pointer distance from the focused node. Moving away zooms
 in; moving toward the focused node zooms out.
 
@@ -191,7 +197,7 @@ gesture and does not enter this node-drag path.
 | Double-tap drag, 2D | Vertical zoom | Vertical zoom | Radial zoom |
 | Double-tap drag, 3D | Horizontal rotate + vertical zoom | Horizontal rotate + vertical zoom | Radial zoom |
 | Long press background | Center + Fit graph | Center + Fit selection | Center + Fit Focus presentation field |
-| Long press node | Enter Focus | Enter Focus | Retain/hop Focus |
+| Long press node | No separate action; release clicks or movement drags | Same | Same |
 | Double-tap node | Primary node action | Primary node action | Primary node action |
 
 Two-finger translation and pinch are simultaneous controls. In Constellation and Focus, centroid movement pans in both dimensions while finger

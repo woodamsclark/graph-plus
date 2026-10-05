@@ -1,24 +1,26 @@
-# graph-engine V1.7.1 identity, global graph+, and local graph+ contract
+# Graph+ V1.7.1 identity, global graph+, and local graph+ contract
 
 Status: Implemented; automated suite passes, live Obsidian acceptance pending.
 
 Date: 2026-09-06
 
-> Historical note: the current ownership and active-note policy is defined by
+> Historical note: the current ownership, identity, and active-note policy is defined by
 > [Graph+ application architecture](graph-plus-application-architecture.md). It
-> supersedes this document's two-consumer boundary and Global active-note following.
+> supersedes this document's two-consumer boundary, Global active-note following,
+> and former `graph-engine` plugin identity.
 
 ## Purpose
 
-V1.7.1 establishes the installed Obsidian plugin as **graph-engine** while retaining
-**graph+** as its bundled first-party graph application. It separates full-vault and
+The installed Obsidian plugin is **Graph+**. Graph Engine is its bundled internal
+platform rather than a second user-facing plugin identity. Graph+ separates full-vault and
 active-note behavior into two explicit Obsidian views so moving a leaf never silently
 changes the graph's data, physics, or camera semantics.
 
 ## Product identity and versions
 
-- The Obsidian manifest ID is `graph-engine` and its display name is **graph-engine**.
-- The root package is `graph-engine`.
+- The Obsidian manifest ID and installation folder are `graph-plus`; its display name
+  is **Graph+**.
+- The root package is `graph-plus`.
 - The installed plugin, root package, bundled graph+ consumer, and public client
   artifact use release version `1.7.1`.
 - The public wire protocol remains version `1`.
@@ -27,13 +29,15 @@ changes the graph's data, physics, or camera semantics.
   consumer namespace.
 - User-facing commands are **open graph+**, **open local graph+**, and
   **show in graph+**.
-- User-facing product names and command titles use lowercase **graph-engine** and
-  **graph+** branding throughout Obsidian.
+- User-facing product names and command titles use **Graph+** / **graph+** branding
+  throughout Obsidian. Graph Engine terminology is reserved for internal architecture
+  and the downstream consumer protocol.
 - Graph+ checkpoints, lens state, profile ownership, and stable node IDs remain in the
   `graph-plus` consumer namespace.
 
-Changing the manifest ID makes Obsidian register the installation as graph-engine. It
-does not rename graph+ data merely to make internal strings resemble the host ID.
+Changing the manifest ID to `graph-plus` makes Obsidian register the installation under
+the same stable identity as its folder and persisted settings. It does not rename
+Graph+ data or the internal Graph Engine contracts.
 
 ## Global Graph+
 
@@ -95,7 +99,7 @@ views.
 
 ## Acceptance
 
-1. Obsidian lists the plugin as **graph-engine** under manifest ID `graph-engine`.
+1. Obsidian lists the plugin as **Graph+** under manifest ID `graph-plus`.
 2. Manifest, root package, graph+ consumer, and client artifact report `1.7.1` while
    protocol version remains `1`.
 3. **open graph+** opens or reveals a `graph-plus` full-vault view.

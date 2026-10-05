@@ -22,7 +22,7 @@ equations, topology weighting, input semantics, checkpoint policy, or final layo
 
 ## 2. Diagnostic snapshot
 
-Graph-engine registers a **copy graph-engine diagnostics** command. It copies one
+Graph+ registers a **copy graph+ diagnostics** command. It copies one
 bounded JSON snapshot to the clipboard and also writes the same structured value to
 the developer console.
 
@@ -55,7 +55,7 @@ Automated tests must prove that:
 6. diagnostics contain no graph content or per-node motion data.
 
 Manual mobile diagnosis captures snapshots with graph+ visible, covered by another
-leaf, closed, and with graph-engine disabled. A fully closed graph+ with no downstream
+leaf, closed, and with Graph+ disabled. A fully closed graph+ with no downstream
 consumer should report zero active sessions and zero mounted session elements.
 
 ## 4. Adaptive physics cadence
