@@ -9,6 +9,8 @@ import {
   DEFAULT_GRAPH_RENDER_THEME_V1,
   DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
   GraphFrameStore,
+  GraphRendererRegistryV2,
+  type GraphRenderSceneV2,
 } from '../../src/graph-engine/runtime/render/index.ts';
 import { desaturateGraphColorV2, parseGraphColorV2 } from '../../src/graph-engine/runtime/theme/index.ts';
 import { GraphCameraController } from '../../src/graph-engine/runtime/camera/index.ts';
@@ -158,6 +160,98 @@ test('live cursor field has the same short screen range in 2D and 3D and stops o
       value.platform.flushFrame(timestamp += 34);
     }
     deepEqual(errors, [], 'settle and wake must never cause the host to disable force layout');
+    await session.dispose();
+  }
+});
+
+test('cursor gravity pulls only the nearest eligible node and never a runner-up at the center', async () => {
+  for (const dimensions of ['2d', '3d'] as const) {
+    const value = runtimeHarness({ consumerId: 'graph-plus', profileId: 'default',
+      registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1,
+      document: graphDocument({ nodes: ['a', 'b', 'far'].map(id => graphNode(id)), edges: [] }) });
+    value.profiles.setUserOverrides('graph-plus', 'default', { dimensions, modules: { 'force-layout': { settings: {
+      repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionRadius: 0,
+    } } } });
+    const session = await value.create();
+    const initial = await session.exportViewState();
+    const camera = new GraphCameraController(initial.camera, dimensions);
+    camera.setViewport(640, 360);
+    const depth = camera.worldToScreen(initial.camera.target).depth;
+    const positions = { a: camera.screenToWorld(320, 180, depth),
+      b: camera.screenToWorld(360, 180, depth), far: camera.screenToWorld(500, 180, depth) };
+    await session.restoreViewState({ ...initial, positions });
+    const canvas = runtimeCanvas(value.container);
+    pointer(value, canvas, 'pointermove', 340, 180, 13);
+    value.platform.flushFrame(100);
+    const pulled = await session.exportViewState();
+    assert(pulled.positions.a.x > positions.a.x, 'a stable node-ID tie selects a single nearest node');
+    deepEqual(pulled.positions.b, positions.b, 'another node inside the well stays still');
+    deepEqual(pulled.positions.far, positions.far, 'outside nodes stay still');
+    const centered = camera.worldToScreen(pulled.positions.a);
+    pointer(value, canvas, 'pointermove', centered.x, centered.y, 13);
+    value.platform.flushFrame(200);
+    deepEqual((await session.exportViewState()).positions, pulled.positions, 'a centered nearest node cannot pass attraction to the runner-up');
+    pointer(value, canvas, 'pointermove', 370, 180, 13);
+    value.platform.flushFrame(300);
+    const switched = await session.exportViewState();
+    assert(switched.positions.b.x > pulled.positions.b.x, 'moving the cursor hands the well to the new nearest node');
+    deepEqual(switched.positions.a, pulled.positions.a, 'the previous nearest stops moving');
+    await session.dispose();
+  }
+});
+
+test('Overview Constellation preview fades linearly over the gravity radius without committing state', async () => {
+  for (const dimensions of ['2d', '3d'] as const) {
+    let scene: GraphRenderSceneV2 | undefined;
+    const registry = new GraphRendererRegistryV2();
+    registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true, create: ({ createCanvas, now }) => {
+      const renderer = new CanvasGraphRenderer(createCanvas(), now);
+      const update = renderer.updateScene.bind(renderer);
+      renderer.updateScene = next => { scene = next; update(next); };
+      return renderer;
+    } });
+    const value = runtimeHarness({ consumerId: 'graph-plus', profileId: 'default',
+      registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1, rendererRegistry: registry,
+      document: graphDocument({ nodes: ['a', 'b', 'far'].map(id => graphNode(id)), edges: [graphEdge('ab', 'a', 'b')] }) });
+    value.profiles.setUserOverrides('graph-plus', 'default', { dimensions, modules: { 'force-layout': { enabled: false } } });
+    const session = await value.create();
+    const initial = await session.exportViewState();
+    const camera = new GraphCameraController(initial.camera, dimensions);
+    camera.setViewport(640, 360);
+    const positions = { a: camera.screenToWorld(320, 180, 1000),
+      b: camera.screenToWorld(500, 180, 1000), far: camera.screenToWorld(80, 180, 1000) };
+    await session.restoreViewState({ ...initial, positions });
+    const unchanged = await session.exportViewState();
+    const canvas = runtimeCanvas(value.container);
+    for (const distance of [64, 32, 16, 0, 16, 32, 64]) {
+      pointer(value, canvas, 'pointermove', 320 + distance, 180, 14);
+      value.platform.flushFrame();
+      const expected = 1 + (0.24 - 1) * (1 - distance / 64);
+      assert(Math.abs(scene!.nodes.find(node => node.id === 'far')!.opacity - expected) < 1e-6,
+        'preview fades in and out continuously from baseline to admitted Constellation');
+      deepEqual(await session.exportViewState(), unchanged, 'proximity admission never commits View, Attention, Memory or camera');
+    }
+    canvas.dispatchEvent(new value.window.PointerEvent('pointerleave', { pointerType: 'mouse', pointerId: 14 }) as unknown as Event);
+    value.platform.flushFrame();
+    equal(scene!.nodes.find(node => node.id === 'far')!.opacity, 1, 'leaving restores Overview');
+    await session.setSessionOverrides({ modules: { 'force-layout': { enabled: true, settings: {
+      repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionRadius: 0,
+    } } } });
+    pointer(value, canvas, 'pointermove', 350, 180, 14);
+    value.platform.flushFrame();
+    const beforePull = scene!.nodes.find(node => node.id === 'far')!.opacity;
+    const beforePositions = (await session.exportViewState()).positions;
+    value.platform.advanceTime(34);
+    value.platform.flushTimer();
+    value.platform.flushFrame(1000);
+    assert((await session.exportViewState()).positions.a.x > beforePositions.a.x, 'gravity continues with a stationary cursor');
+    assert(scene!.nodes.find(node => node.id === 'far')!.opacity < beforePull, 'preview strengthens as gravity moves the node inward');
+    pointer(value, canvas, 'pointermove', 320, 180, 14);
+    value.platform.flushFrame(1100);
+    pointer(value, canvas, 'pointerdown', 320, 180, 14);
+    pointer(value, canvas, 'pointerup', 320, 180, 14);
+    value.platform.flushFrame(1200);
+    equal((await session.exportViewState()).viewMode, 'explore', 'actual node activation still commits Constellation normally');
     await session.dispose();
   }
 });
@@ -347,21 +441,21 @@ test('Anima separates undimmed overview hover from tagged Explore presentation',
   });
   assert(overviewHover?.nodeContributions && overviewHover.edgeContributions,
     'overview hover should produce node and edge presentation');
-  equal(overviewHover.nodeContributions.a.opacity, 1, 'immediate neighbors stay standard');
-  equal(overviewHover.nodeContributions.d.opacity, 0.24, 'Overview dims unrelated context without borrowing a View');
-  deepEqual(overviewHover.nodeContributions.a.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
-    'Overview neighbors keep their standard color');
+  equal(overviewHover.nodeContributions.a.opacity, 0.24, 'neighbor context follows the prospective Constellation');
+  equal(overviewHover.nodeContributions.d.opacity, 0.24, 'the destination View dims unrelated context');
+  deepEqual(overviewHover.nodeContributions.a.finalColor, desaturateGraphColorV2(DEFAULT_GRAPH_RENDER_THEME_V1.colors.node, 0.8),
+    'Overview hover leaves neighboring nodes unchanged');
   deepEqual(overviewHover.nodeContributions.b.finalColor, DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent,
     'overview hover should light the hovered node');
   equal(overviewHover.nodeContributions.b.labelForceVisible, true,
     'overview hover should force the hovered node label');
   equal(overviewHover.nodeContributions.c.labelAlwaysVisible, false,
     'overview hover should leave a neighboring node under adaptive saliency');
-  equal(overviewHover.nodeContributions.c.labelSaliencyBoost, 0.5,
-    'neighbor labels get adaptive priority alongside proximity reveal');
+  equal(overviewHover.nodeContributions.c.labelSaliencyBoost, undefined,
+    'overview hover should leave neighboring labels under ordinary automatic policy');
   equal(overviewHover.edgeContributions['a-d'].opacity, 0.6, 'unrelated links follow prospective Constellation context');
-  equal(overviewHover.edgeContributions['a-b'].opacity, 1,
-    'Overview incident links follow the standard neighbor phase');
+  equal(overviewHover.edgeContributions['a-b'].opacity, 0.6,
+    'Overview hover leaves links at their prospective View baseline');
 
   const taggedA = anima.contributeFrame({
     ...state,

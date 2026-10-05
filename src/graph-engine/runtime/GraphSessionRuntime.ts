@@ -246,6 +246,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.synchronizeRuntimeActivity();
   };
 
+  private cursorPreviewKey = '';
+
   private readonly onAnimationFrame: FrameRequestCallback = (timestamp) => {
     if (this.isSuspended()) return;
     if (this.lastFrameTimestamp !== null
@@ -312,6 +314,13 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (this.isSuspended()) {
       this.activeFrameInvalidations = null;
       return;
+    }
+    // Physics can move the nearest node beneath a stationary cursor. Recompose
+    // presentation when its distance changes, without reprojecting the graph.
+    if (resolveGraphUxStateV1(this.viewState) === 'overview' && this.interaction.getCursorPoint()) {
+      const target = this.resolveCursorFieldTarget(true);
+      const key = target ? `${target.nodeId}:${target.distance}` : '';
+      if (key !== this.cursorPreviewKey) this.refreshFrame(false, 'presentation');
     }
     this.updateRendererScene([...this.activeFrameInvalidations]);
     const render = this.projection.render(this.renderer);
@@ -1433,17 +1442,25 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     }
     if (invalidation === 'presentation') this.presentationRevision += 1;
     this.activeFrameInvalidations?.add(invalidation);
+    const cursor = this.interaction?.getCursorPoint();
+    const radius = this.projection.frames.get()?.policy?.cursorAttractionRadiusPx ?? 0;
+    const proximityOverview = view.id === 'overview' && cursor !== undefined && radius > 0;
+    const cursorTarget = proximityOverview ? this.resolveCursorFieldTarget(true) : undefined;
+    this.cursorPreviewKey = cursorTarget ? `${cursorTarget.nodeId}:${cursorTarget.distance}` : '';
     this.moduleView = this.projection.compose({
       host: this.moduleHost,
       consciousness: this.consciousness,
       experience: this.experience,
-      resolveObjectActivationPreview: () => this.interaction?.getObjectActivationPreview() ?? null,
+      resolveObjectActivationPreview: () => proximityOverview
+        ? cursorTarget ? this.interaction.getProximityActivationPreview(cursorTarget.nodeId) : null
+        : this.interaction?.getObjectActivationPreview() ?? null,
+      overviewPreviewStrength: proximityOverview ? cursorTarget ? 1 - cursorTarget.distance / radius : 0 : undefined,
       projectionView: this.projectionView,
       viewState: this.viewState,
       theme: this.themePalette,
       presentationPolicy: DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
       draggedNodeId: this.interaction?.getDraggedNodeId(),
-      hoveredNodeId: this.interaction?.getHoveredNodeId(),
+      hoveredNodeId: proximityOverview ? cursorTarget?.nodeId : this.interaction?.getHoveredNodeId(),
       selectionPresentationSuspended: this.interaction?.isSelectionPresentationSuspended(),
       selectionNeighborRevealActive: this.interaction?.isSelectionNeighborRevealActive(),
       previewedNodeId: this.interaction?.getPreviewedNodeId(),
@@ -1452,27 +1469,42 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (schedule) this.scheduleFrame(0, invalidation);
   }
 
-  private resolveCursorAttractionSteps(): Readonly<Record<string, Vec3>> | undefined {
-    const cursor = this.interaction.getCursorPoint();
+  private resolveCursorFieldTarget(includeFixed = false): {
+    nodeId: string; point: { x: number; y: number; depth: number }; distance: number; radius: number;
+  } | undefined {
+    const cursor = this.interaction?.getCursorPoint();
     const frame = this.projection.frames.get();
     const radius = frame?.policy?.cursorAttractionRadiusPx ?? 0;
-    if (!cursor || !frame || radius <= 0 || this.moduleView.formActive) return undefined;
-    const pinned = new Set([...this.viewState.pinnedNodeIds, ...this.interaction.getCameraTrackingNodeIds()]);
-    const steps: Record<string, Vec3> = {};
+    if (!cursor || !frame || radius <= 0 || (!includeFixed && this.moduleView.formActive)) return undefined;
+    const fixed = new Set([...this.viewState.pinnedNodeIds, ...this.interaction.getCameraTrackingNodeIds()]);
+    let nearest: { nodeId: string; point: { x: number; y: number; depth: number }; distance: number; radius: number } | undefined;
     for (const node of frame.nodes) {
-      if (node.opacity <= 0 || pinned.has(node.id) || node.id === this.viewState.focusedNodeId) continue;
+      if (node.opacity <= 0 || (!includeFixed && (fixed.has(node.id) || node.id === this.viewState.focusedNodeId))) continue;
       const position = this.moduleView.positions[node.id];
       if (!position) continue;
       const point = this.vision.worldToScreen(position);
       if (point.depth <= 0) continue;
       const distance = Math.hypot(cursor.x - point.x, cursor.y - point.y);
-      if (distance < 0.5 || distance >= radius) continue;
-      const amount = Math.min(0.035 * (1 - distance / radius) ** 2, 1.5 / distance);
-      const target = this.vision.screenToWorld(point.x + (cursor.x - point.x) * amount,
-        point.y + (cursor.y - point.y) * amount, point.depth);
-      steps[node.id] = { x: target.x - position.x, y: target.y - position.y, z: target.z - position.z };
+      if (distance >= radius) continue;
+      if (!nearest || distance < nearest.distance
+        || (distance === nearest.distance && node.id.localeCompare(nearest.nodeId) < 0)) {
+        nearest = { nodeId: node.id, point, distance, radius };
+      }
     }
-    return Object.keys(steps).length ? steps : undefined;
+    return nearest;
+  }
+
+  private resolveCursorAttractionSteps(): Readonly<Record<string, Vec3>> | undefined {
+    const nearest = this.resolveCursorFieldTarget();
+    // A centered nearest node still owns the well; never pull a runner-up instead.
+    if (!nearest || nearest.distance < 0.5) return undefined;
+    const cursor = this.interaction.getCursorPoint()!;
+    const { nodeId, point, distance, radius } = nearest;
+    const amount = Math.min(0.035 * (1 - distance / radius) ** 2, 1.5 / distance);
+    const target = this.vision.screenToWorld(point.x + (cursor.x - point.x) * amount,
+      point.y + (cursor.y - point.y) * amount, point.depth);
+    const position = this.moduleView.positions[nodeId];
+    return { [nodeId]: { x: target.x - position.x, y: target.y - position.y, z: target.z - position.z } };
   }
 
   private updateRendererScene(invalidations: readonly SessionInvalidationClassV1[], retainedHoverNodeId?: string): void {

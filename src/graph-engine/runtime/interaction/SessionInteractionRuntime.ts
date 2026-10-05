@@ -1,5 +1,5 @@
 import { presentEgoInteractionPlanV1, type GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
-import { isEgoInteractionPlanCurrentV1, realizeEgoViewDirectiveV1, sameEgoInteractionV1,
+import { isEgoInteractionPlanCurrentV1, realizeEgoViewDirectiveV1, resolveEgoInteractionPlanV1, sameEgoInteractionV1,
   type EgoInteractionInputV1, type EgoInteractionContextV1 } from '../consciousness/EgoInteractionPlan.ts';
 import type {
   GraphCameraStateV1,
@@ -579,6 +579,15 @@ export class SessionInteractionRuntime {
       awarenessNodeIds: this.options.getOverviewConstellationNodeIds(), getConstellation: this.options.getNodeSelection,
       rememberedNodeIds: this.options.getRememberedNodeIds(),
     };
+  }
+
+  /** Pure proximity admission: it cannot change pointer hit targets or committed Will. */
+  getProximityActivationPreview(nodeId: string): GraphInteractionPreviewV1 | null {
+    if (this.dragContext !== null || this.interpreter.isViewProposalSuspended()) return null;
+    const plan = resolveEgoInteractionPlanV1({ phase: 'hover', target: { kind: 'node', nodeId },
+      modality: 'mouse', modifiers: { ctrl: false, meta: false, shift: false, alt: false },
+    }, this.planningContext());
+    return presentEgoInteractionPlanV1(plan) ?? null;
   }
 
   getObjectActivationPreview(): GraphInteractionPreviewV1 | null {

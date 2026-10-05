@@ -507,7 +507,7 @@ test('Committed activation holds its admitted preview until pointer leave', asyn
   }
 });
 
-test('Overview node drag holds neighborhood emphasis without previewing Constellation', async () => {
+test('Overview node drag holds the admitted Constellation preview without replanning it', async () => {
   for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
     let scene: GraphRenderSceneV2 | undefined;
     const registry = new GraphRendererRegistryV2();
@@ -543,8 +543,8 @@ test('Overview node drag holds neighborhood emphasis without previewing Constell
     emit('pointermove', start.x, start.y);
     value.platform.flushFrame();
     const preview = nodeScene();
-    deepEqual(Object.fromEntries(preview.map((node) => [node.id, node.opacity])), { a: 1, b: 1, c: 1 },
-      'Overview hover reveals immediate neighbors');
+    deepEqual(Object.fromEntries(preview.map((node) => [node.id, node.opacity])), { a: 0.24, b: 1, c: 0.24 },
+      'Overview hover first admits the Constellation preview');
     emit('pointerdown', start.x, start.y);
     emit('pointermove', start.x + 35, start.y + 15);
     value.platform.flushFrame();
@@ -603,10 +603,10 @@ test('Selective hover previews preserve committed state in 2D and 3D with and wi
       session.onViewChanged((view) => viewChanges.push(view.id));
       const overview = await session.exportViewState();
       await hover('b');
-      deepEqual(opacities(), { a: 1, b: 1, c: 1, d: 0.24 }, 'Overview emphasizes only the immediate neighborhood');
+      deepEqual(opacities(), { a: 0.24, b: 1, c: 0.24, d: 0.24 }, 'Overview previews the admitted Constellation destination');
       deepEqual(scene!.nodes.find((node) => node.id === 'b')!.finalColor,
         animaEnabled ? DEFAULT_GRAPH_RENDER_THEME_V1.colors.animaAccent : DEFAULT_GRAPH_RENDER_THEME_V1.colors.selectedNode,
-        'Overview highlights the hovered node without prospective membership');
+        'Overview shows the prospective selection');
       deepEqual(await session.exportViewState(), overview, 'Overview hover cannot alter world-facing state or Memory');
       tap(value, canvas, await point(session, 'b'), 690, 'mouse');
       value.platform.flushFrame();

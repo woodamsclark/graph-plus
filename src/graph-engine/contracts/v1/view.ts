@@ -39,10 +39,10 @@ export interface GraphViewDefinitionV1 {
   readonly scene: {
     readonly membership: 'attention';
     readonly context: 'standard' | 'dimmed' | 'focused-neighbors';
-    readonly hover: 'neighbor-reveal' | 'preview-admission-or-view-entry';
-    readonly hoverPath: 'none' | 'nearest-constellation';
+    readonly hover: 'proximity-preview-view-entry' | 'preview-admission-or-view-entry';
+    readonly hoverPath: 'nearest-constellation';
     readonly modifiedHoverPath: 'none';
-    readonly hoverContext: 'committed' | 'committed-unless-view-entry';
+    readonly hoverContext: 'committed-unless-view-entry';
     /** A transient presentation lift, independent of committed Consciousness and Will. */
     readonly hoverAwareness: { readonly phaseSteps: 1; readonly neighborhoodDepth: 0 | 1; readonly links: 'none' | 'incident' };
     readonly dragHighlights: 'preserve-scene';
@@ -92,10 +92,9 @@ function defineView(
       focusEntry: 'recenter-preserve-scale', back: 'preserve',
       exitInterest: id === 'focus' ? 'retain-focal-point' : 'preserve-intent',
     }),
-    scene: Object.freeze({ membership: 'attention', context, hover: id === 'overview' ? 'neighbor-reveal' : 'preview-admission-or-view-entry',
-      hoverPath: id === 'overview' ? 'none' : 'nearest-constellation', modifiedHoverPath: 'none',
-      hoverContext: id === 'overview' ? 'committed' : 'committed-unless-view-entry',
-      hoverAwareness: Object.freeze({ phaseSteps: 1, neighborhoodDepth: 1,
+    scene: Object.freeze({ membership: 'attention', context, hover: id === 'overview' ? 'proximity-preview-view-entry' : 'preview-admission-or-view-entry', hoverPath: 'nearest-constellation', modifiedHoverPath: 'none',
+      hoverContext: 'committed-unless-view-entry',
+      hoverAwareness: Object.freeze({ phaseSteps: 1, neighborhoodDepth: id === 'overview' ? 0 : 1,
         links: id === 'overview' ? 'none' : 'incident' }),
       dragHighlights: 'preserve-scene',
       labels: Object.freeze({ focused: 'force', hovered: 'force', highlighted: 'force',

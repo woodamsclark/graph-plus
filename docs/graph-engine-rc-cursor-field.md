@@ -10,7 +10,9 @@ camera, saved settings or simulation.
 ## Behavior
 
 - Attraction reaches 64 CSS pixels from the mouse, with quadratic distance falloff.
-  Each 60 Hz step moves a nearby node toward the cursor by at most 1.5 screen pixels.
+  Only the nearest eligible node receives a pull, capped at 1.5 screen pixels per step.
+  Equal screen distances use stable node-ID ordering. A node already at the cursor
+  retains ownership of the well; it cannot pass its pull to a runner-up.
 - The session projects eligible nodes and converts the screen displacement back to
   their existing camera-depth plane. This gives the same short reach in 2D and 3D.
 - Force Layout owns position changes. Attraction works at zero alpha, wakes a cold
@@ -39,11 +41,20 @@ off for the session. The fast path now also requires complete velocity buffers.
 This retains empty exported cold-state velocities and restarts without stale momentum,
 reheating the whole graph, or reanalyzing unchanged topology.
 
-Overview hover now highlights the hovered node, retains standard immediate projected
-neighbors, and dims other context. Existing Attention and Memory highlights remain
-independent. It does not borrow the prospective Constellation View, membership, or
-route; clicking still enters the admitted Constellation. The hovered label is forced;
-neighbor labels receive adaptive priority and the same cursor proximity reveal.
+Overview again previews the admitted Constellation destination, fading linearly from
+its ordinary scene as the nearest visible node enters the 64-pixel cursor well.
+Strength is `clamp(1 - screenDistance / gravityRadius, 0, 1)`: zero at the edge,
+50% halfway inward, and 100% at the center. Fixed nodes can receive presentation
+preview but remain ineligible for physical attraction. The scene blend includes node
+and link opacity, colors, outlines and label expression. Newly forced destination
+labels fade in; the existing 96-pixel proximity label reveal remains independent.
+
+The session supplies a pure proximity admission plan; input picking and click targets
+remain based on actual node hits. Partial preview never commits Attention, Memory,
+View or camera interest. Actual node activation commits normally and retains the
+existing consumed-hover latch. Ctrl, touch and navigation do not create a proximity
+preview. When gravity moves a node under a stationary cursor, distance is recomputed
+and the scene is refreshed. Leaving restores ordinary Overview.
 
 Label position sits immediately after Labels in Display Quick Settings. The cursor
 trial was branched from the original RC, while the prior reorder lived on the separate
@@ -55,11 +66,14 @@ three-size trial branch; this was a missing carried change, not a settings reset
 The session owns screen-to-world conversion. `ForceLayoutModule` integrates the local
 step independently of alpha. `CanvasGraphRenderer` resolves nearby label eligibility
 and opacity from the same pointer without changing graph interaction or scene roles.
-Anima declares the two screen-space radii in presentation policy.
+Anima declares the two screen-space radii in presentation policy. The projection
+coordinator evaluates baseline and admitted preview through the same presentation
+pipeline; `AnimaSceneBlend` interpolates their resolved expression. It never runs
+physics or graph projection, and neither scene evaluation commits a View.
 
 Regression coverage includes input lifecycle, cold-layout attraction, pin and Form
 exclusion, actual session movement/range in 2D and 3D, unchanged camera framing,
 pointer-leave settling, repeated natural settling and waking with shared position buffers,
-host failure isolation, Overview neighborhood presentation, Display control order, and
+host failure isolation, nearest-only attraction and continuous Constellation preview, Display control order, and
 label range/void/Off behavior. Obsidian desktop visual
 acceptance remains a separate smoke check.
