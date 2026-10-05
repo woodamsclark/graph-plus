@@ -15,6 +15,8 @@ export interface GraphPlusExperiencePolicyV1 {
   readonly attentionAwarenessDepth: number;
   readonly persistence: 'checkpoint' | 'ephemeral';
   readonly followActiveNote: boolean;
+  /** Whether recent workspace subjects are projected as visible Memory constellations. */
+  readonly memoryConstellations: 'enabled' | 'disabled';
   readonly canonicalRootState: 'none' | 'session-constellation-focused-root';
 }
 
@@ -30,6 +32,7 @@ export const GRAPH_PLUS_EXPERIENCE_POLICIES_V1: Readonly<
     attentionAwarenessDepth: 0,
     persistence: 'checkpoint',
     followActiveNote: false,
+    memoryConstellations: 'disabled',
     canonicalRootState: 'none',
   },
   local: {
@@ -41,6 +44,7 @@ export const GRAPH_PLUS_EXPERIENCE_POLICIES_V1: Readonly<
     attentionAwarenessDepth: 0,
     persistence: 'ephemeral',
     followActiveNote: true,
+    memoryConstellations: 'disabled',
     canonicalRootState: 'session-constellation-focused-root',
   },
 };

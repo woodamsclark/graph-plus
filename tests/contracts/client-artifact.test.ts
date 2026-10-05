@@ -55,7 +55,7 @@ test('Graph+ registers its graph-engine provider and exposes independent provide
   equal(pluginManifest.id, 'graph-engine', 'Obsidian plugin ID');
   equal(pluginManifest.name, 'Graph+', 'Obsidian plugin name');
   equal(rootPackage.name, 'graph-plus', 'root package name');
-  equal(pluginManifest.version, '2.0.0', 'Obsidian release version');
+  equal(pluginManifest.version, '2.0.0-rc.1', 'Obsidian release-candidate version');
   equal((pluginManifest as { minAppVersion?: string }).minAppVersion, '1.13.7', 'minimum compatible Obsidian version');
   equal(rootPackage.version, pluginManifest.version, 'root package release version');
   equal(clientPackage.version, '1.7.1', 'public client release version is independently declared');

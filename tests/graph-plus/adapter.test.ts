@@ -132,6 +132,13 @@ test('Graph+ modes share one canonical vault read and reconciliation', async () 
   equal(globalNext.document, localNext.document, 'both modes should receive the same reconciled revision');
 });
 
+test('Graph+ release policy keeps Memory constellations out of every presentation mode', () => {
+  equal(graphPlusExperiencePolicyV1('global').memoryConstellations, 'disabled',
+    'Global should not present workspace history as Memory constellations');
+  equal(graphPlusExperiencePolicyV1('local').memoryConstellations, 'disabled',
+    'Local should not present workspace history as Memory constellations');
+});
+
 test('Graph+ vault model coalesces initial open and saved-checkpoint reconciliation', async () => {
   const fixture = snapshot();
   let reads = 0;
@@ -272,14 +279,22 @@ test('Graph+ application shares one graph world across viewport-independent pres
   await globalSession.setSelection([alphaId]);
   let firstCanonicalReplacements = 0;
   let secondCanonicalReplacements = 0;
+  let firstRememberedNodeIds: readonly string[] | undefined;
+  let secondRememberedNodeIds: readonly string[] | undefined;
   const firstApplyExternalInfluence = firstSession.applyExternalInfluence.bind(firstSession);
   const secondApplyExternalInfluence = secondSession.applyExternalInfluence.bind(secondSession);
   firstSession.applyExternalInfluence = async (influence) => {
-    if (influence.type === 'replace-remembered-subjects') firstCanonicalReplacements += 1;
+    if (influence.type === 'replace-remembered-subjects') {
+      firstCanonicalReplacements += 1;
+      firstRememberedNodeIds = influence.nodeIds;
+    }
     return firstApplyExternalInfluence(influence);
   };
   secondSession.applyExternalInfluence = async (influence) => {
-    if (influence.type === 'replace-remembered-subjects') secondCanonicalReplacements += 1;
+    if (influence.type === 'replace-remembered-subjects') {
+      secondCanonicalReplacements += 1;
+      secondRememberedNodeIds = influence.nodeIds;
+    }
     return secondApplyExternalInfluence(influence);
   };
 
@@ -309,6 +324,10 @@ test('Graph+ application shares one graph world across viewport-independent pres
     'the originating Local presentation should apply the received canonical event once');
   equal(secondCanonicalReplacements, 1,
     'a sibling Local presentation should apply the received canonical event once');
+  deepEqual(firstRememberedNodeIds, [],
+    'the release profile should not project recent notes as Memory constellations');
+  deepEqual(secondRememberedNodeIds, [],
+    'the release profile should suppress Memory constellations in every Local pane');
   equal(global.getProjectedDocument()?.nodes.length, global.getDocument()?.nodes.length,
     'active-note truth should not alter the Global presentation');
   deepEqual((await globalSession.exportViewState()).selectedNodeIds, [alphaId],
@@ -326,9 +345,9 @@ test('Graph+ application shares one graph world across viewport-independent pres
   assert((secondLocal.getLocalDocument()?.nodes.length ?? 0) > 0,
     'dropping out of a note should retain the full graph in the sibling Local pane');
   deepEqual((await firstSession.exportViewState()).selectedNodeIds, [],
-    'rootless Local Attention is empty while session Memory remains visible');
+    'rootless Local Attention is empty without projecting session Memory');
   deepEqual((await secondSession.exportViewState()).selectedNodeIds, [],
-    'each rootless Local presentation preserves the separation from Memory');
+    'each rootless Local presentation stays empty without a Memory constellation');
   deepEqual((await globalSession.exportViewState()).selectedNodeIds, [alphaId],
     'rootless Local state should not overwrite Global Attention');
   equal(firstCanonicalReplacements, 2,
@@ -935,10 +954,10 @@ test('Local Graph+ reuses the full graph while active-note Focus changes', async
   equal(await consumer.followActiveNode(undefined), true,
     'absence of an active Markdown note should be accepted as canonical truth');
   assert((consumer.getLocalDocument()?.nodes.length ?? 0) > 0,
-    'dropping out of a note should leave the recent Local session constellation visible');
+    'dropping out of a note should retain the full Local graph document');
   const blank = await session.exportViewState();
   deepEqual(blank.selectedNodeIds, [],
-    'a rootless Local presentation shows the recent trail through Memory rather than active membership');
+    'a rootless Local presentation should not turn recent history into visible membership');
   equal(blank.focusedNodeId, undefined, 'dropping out should release Focus into constellation mode');
   await consumer.close();
   await core.dispose();

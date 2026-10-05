@@ -52,11 +52,9 @@ Global starts in Overview, while Local starts in Focus and follows the active no
 
 Choose a constellation in Overview, then click one of its members to enter Focus.
 Add visible candidates to build the constellation; click the background to move back
-one View. The three notes visited before the active note appear as blue Memory
-constellations, fading from 100% to 50% to 25% with age. Choosing a Memory constellation brings it
-into active membership. Drag nodes to arrange the shared space; Graph+ persists node
-placement and pins for the vault. Camera framing, filters, Focus, and selection belong
-to the individual pane.
+one View. Drag nodes to arrange the shared space; Graph+ persists node placement and
+pins for the vault. Camera framing, filters, Focus, and selection belong to the
+individual pane.
 
 On desktop, use pointer, wheel, keyboard, and modifier interactions. On touch devices,
 use one- and two-finger gestures for graph movement and navigation. The exact gesture
@@ -139,7 +137,7 @@ See [the graph-engine consumer guide](docs/graph-engine-consumer-guide.md) and t
 
 ## Compatibility
 
-Graph+ 2.0.0 has been tested on Obsidian 1.13.7. Desktop and mobile behavior should be
+Graph+ 2.0.0-rc.1 has been tested on Obsidian 1.13.7. Desktop and mobile behavior should be
 validated against your own vault and device before relying on it for daily work.
 
 ## Installation

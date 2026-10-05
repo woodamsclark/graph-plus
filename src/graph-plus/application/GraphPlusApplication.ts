@@ -275,7 +275,7 @@ export class GraphPlusPresentationV1<TFile> {
     const result = await this.session.applyExternalInfluence({
       schemaVersion: 1,
       type: 'replace-remembered-subjects',
-      nodeIds: this.sessionNodeIds,
+      nodeIds: this.policy.memoryConstellations === 'enabled' ? this.sessionNodeIds : [],
     });
     if (result.status === 'rejected') {
       throw new Error(`Graph+ session Memory was rejected: ${result.reason}`);
