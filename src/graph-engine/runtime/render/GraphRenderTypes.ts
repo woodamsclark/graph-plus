@@ -131,6 +131,7 @@ export interface GraphEdgeRenderContributionV1 {
 
 export interface GraphPresentationPolicyV2 {
   readonly cursorAttractionRadiusPx?: number;
+  readonly cursorAttractionMode?: 'soft' | 'clingy' | 'off';
   /** Screen-space reach used by proximity label mode; zero disables reveal. */
   readonly cursorLabelRevealRadiusPx?: number;
   readonly labelMode?: 'adaptive' | 'all' | 'off' | 'proximity';

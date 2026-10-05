@@ -28,15 +28,19 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     readonly degree: ReadonlyMap<string, number>;
   };
 
+  private cursorGravity: 'soft' | 'clingy' | 'off' = 'soft';
+
   constructor(
     private palette: GraphVisualThemeV2,
     settings: Readonly<Record<string, JsonValue>>,
   ) {
     this.labels = new GraphLabelManager(settings);
+    this.updateSettings(settings);
   }
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
     this.labels.updateSettings(settings);
+    this.cursorGravity = settings.cursorGravity === 'clingy' || settings.cursorGravity === 'off' ? settings.cursorGravity : 'soft';
   }
 
   restoreState(state: JsonValue): void {
@@ -177,7 +181,8 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       presentationPolicy: {
         ...(state.presentationPolicy ?? {}),
         ...this.labels.policy(state.viewState.dimensions),
-        cursorAttractionRadiusPx: 32,
+        cursorAttractionRadiusPx: this.cursorGravity === 'off' ? 0 : 32,
+        cursorAttractionMode: this.cursorGravity,
         nodeScaleMode: 'sqrt-orthographic',
         nodeScaleExponent: 0.5,
         minimumPerspectiveNodeRadius: 4,

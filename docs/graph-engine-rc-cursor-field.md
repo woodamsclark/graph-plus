@@ -9,8 +9,11 @@ camera, saved settings or simulation.
 
 ## Behavior
 
-- Attraction reaches 32 CSS pixels from the mouse, with quadratic distance falloff.
-  Only the nearest eligible node receives a pull, capped at 1.5 screen pixels per step.
+- Attraction reaches 32 CSS pixels from the mouse, with a softened hyperbolic falloff. Soft is shallow and broad; Clingy is deeper
+  and narrower inside the same radius. Off disables attraction only, leaving the
+  independent 96-pixel cursor label reveal active. Soft is the default.
+  Only the nearest eligible node receives a pull, capped at 1.5 screen pixels per step
+  in Soft and 6 in Clingy.
   Equal screen distances use stable node-ID ordering. A node already at the cursor
   retains ownership of the well; it cannot pass its pull to a runner-up.
 - The session projects eligible nodes and converts the screen displacement back to

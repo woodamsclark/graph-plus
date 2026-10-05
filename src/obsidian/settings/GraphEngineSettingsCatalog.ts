@@ -37,6 +37,8 @@ export const GRAPH_SETTING_PRESENTATIONS_V1: readonly GraphSettingPresentationV1
     ['global', 'profile']),
   entry('rendering.labelMode', 'appearance', 'rendering', 'labelMode', 'Labels', 'Off hides every label. Both other modes retain View labels; extra labels use cursor proximity or adaptive saliency.',
     { type: 'select', options: { off: 'Off', proximity: 'Cursor proximity', adaptive: 'Adaptive' } }),
+  entry('anima.cursorGravity', 'layout-motion', 'anima', 'cursorGravity', 'Cursor gravity', 'Soft loosely attracts the nearest node; Clingy grabs more strongly. Off leaves proximity labels active.',
+    { type: 'select', options: { soft: 'Soft', clingy: 'Clingy', off: 'Off' } }),
   entry('anima.labelPosition', 'appearance', 'anima', 'labelPosition', 'Label position', 'Place labels above or below nodes.',
     { type: 'select', options: { above: 'Above', below: 'Below' } }),
   entry('anima.adaptiveLabelThreshold2d', 'appearance', 'anima', 'adaptiveLabelThreshold2d', '2D label saliency', 'Higher values show fewer automatic labels in 2D. Choose Cursor proximity in Labels for proximity reveal.',

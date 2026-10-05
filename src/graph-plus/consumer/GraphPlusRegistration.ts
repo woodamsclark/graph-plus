@@ -101,6 +101,7 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
       anima: {
         policy: 'required',
         constraints: {
+          cursorGravity: { type: 'enum', allowed: ['soft', 'clingy', 'off'] },
           labelPosition: { type: 'enum', allowed: ['above', 'below'] },
           adaptiveLabelThreshold2d: { type: 'number', min: 0, max: 100 },
           adaptiveLabelThreshold3d: { type: 'number', min: 0, max: 100 },

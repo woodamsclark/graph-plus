@@ -2020,3 +2020,40 @@ function recordingContext(fillTextY: number[], arcRadii: number[] = []): CanvasR
     measureText: (text: string) => ({ width: text.length * 7 }) as TextMetrics,
   } as unknown as CanvasRenderingContext2D;
 }
+
+test('Cursor gravity Soft, Clingy and Off change nearest-node attraction independently of proximity labels', async () => {
+  for (const dimensions of ['2d', '3d'] as const) {
+    const shifts = new Map<string, number>();
+    for (const mode of ['soft', 'clingy', 'off'] as const) {
+      const value = runtimeHarness({ consumerId: 'graph-plus', profileId: 'default',
+        registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1,
+        document: graphDocument({ nodes: ['near', 'runner'].map(id => graphNode(id)), edges: [] }) });
+      value.profiles.setUserOverrides('graph-plus', 'default', { dimensions, modules: {
+        'force-layout': { settings: { repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionRadius: 0 } },
+        anima: { settings: { cursorGravity: mode } }, rendering: { settings: { labelMode: 'proximity' } },
+      } });
+      const session = await value.create(); const initial = await session.exportViewState();
+      const camera = new GraphCameraController(initial.camera, dimensions); camera.setViewport(640, 360);
+      const depth = camera.worldToScreen(initial.camera.target).depth;
+      const positions = { near: camera.screenToWorld(320, 180, depth), runner: camera.screenToWorld(344, 180, depth) };
+      await session.restoreViewState({ ...initial, positions });
+      const canvas = runtimeCanvas(value.container);
+      value.drawArguments.length = 0;
+      pointer(value, canvas, 'pointermove', 330, 180, 952); value.platform.flushFrame(100);
+      const after = await session.exportViewState();
+      shifts.set(mode, camera.worldToScreen(after.positions.near).x - 320);
+      deepEqual(after.positions.runner, positions.runner, 'the runner-up remains still inside the well');
+      assert(value.drawArguments.some(call => call.method === 'fillText' && call.args[0] === 'near'),
+        'nearby labels remain visible in every gravity mode, including Off');
+      if (mode === 'off') deepEqual(after.positions, positions, 'Off disables attraction without disabling labels');
+      await session.setSessionOverrides({ modules: { anima: { settings: { cursorGravity: 'off' } } } });
+      const stopped = await session.exportViewState();
+      value.platform.flushFrame(200);
+      deepEqual((await session.exportViewState()).positions, stopped.positions, 'switching Off stops cursor attraction immediately');
+      await session.dispose();
+    }
+    assert(shifts.get('soft')! > 0, 'Soft gently pulls the nearest node');
+    assert(shifts.get('clingy')! > shifts.get('soft')! * 2, 'Clingy provides a clearly stronger capture');
+    assert(shifts.get('clingy')! < 10, 'the pull cannot overshoot the cursor');
+  }
+});

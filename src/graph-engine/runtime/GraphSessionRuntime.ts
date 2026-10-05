@@ -1498,7 +1498,13 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (!nearest || nearest.distance < 0.5) return undefined;
     const cursor = this.interaction.getCursorPoint()!;
     const { nodeId, point, distance, radius } = nearest;
-    const amount = Math.min(0.035 * (1 - distance / radius) ** 2, 1.5 / distance);
+    const clingy = this.projection.frames.get()?.policy?.cursorAttractionMode === 'clingy';
+    // A softened hyperbolic well, normalized to zero at the edge. Clingy is
+    // narrower and deeper; both remain bounded and cannot overshoot the cursor.
+    const core = radius * (clingy ? 0.3 : 0.7);
+    const edge = 1 / Math.sqrt(1 + (radius / core) ** 2);
+    const well = (1 / Math.sqrt(1 + (distance / core) ** 2) - edge) / (1 - edge);
+    const amount = Math.min((clingy ? 0.28 : 0.035) * well, (clingy ? 6 : 1.5) / distance);
     const target = this.vision.screenToWorld(point.x + (cursor.x - point.x) * amount,
       point.y + (cursor.y - point.y) * amount, point.depth);
     const position = this.moduleView.positions[nodeId];

@@ -180,6 +180,9 @@ test('V1.7 settings catalog exposes only curated typed controls', () => {
   equal(quality?.control.type, 'select', 'render quality should use named choices rather than free-form text');
   equal(GRAPH_SETTING_PRESENTATIONS_V1.some((value) => value.id === 'anima.nodeWorldScaleBlend'), false,
     'the retired contrast slider must not appear in full or quick settings');
+  const gravity = GRAPH_SETTING_PRESENTATIONS_V1.find(value => value.id === 'anima.cursorGravity');
+  deepEqual(gravity?.control.type === 'select' ? gravity.control.options : undefined,
+    { soft: 'Soft', clingy: 'Clingy', off: 'Off' }, 'Cursor gravity exposes the three requested modes');
   const labels = GRAPH_SETTING_PRESENTATIONS_V1.find(value => value.id === 'rendering.labelMode');
   deepEqual(labels?.control.type === 'select' ? labels.control.options : undefined,
     { off: 'Off', proximity: 'Cursor proximity', adaptive: 'Adaptive' }, 'Labels exposes exactly the three requested modes');

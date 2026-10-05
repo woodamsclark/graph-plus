@@ -33,6 +33,7 @@ export const GRAPH_QUICK_SETTINGS_CONTROL_IDS_V1 = Object.freeze({
   linkThickness: 'display.link-thickness',
   showArrows: 'display.show-arrows',
   resetCamera: 'camera.reset',
+  cursorGravity: 'forces.cursor-gravity',
   centerForce: 'forces.center',
   radialForce: 'forces.radial',
   axialSpringAxis: 'force-layout.axial-spring-axis',
