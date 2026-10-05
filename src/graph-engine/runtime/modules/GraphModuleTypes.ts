@@ -59,6 +59,8 @@ export interface GraphModulePipelineStateV1 {
   readonly objectActivationPreview?: GraphInteractionPreviewV1 | null;
   /** Runtime-only interaction state. It is never persisted or exported as graph data. */
   readonly draggedNodeId?: string;
+  /** Transient per-step cursor displacement, resolved in screen space by the session. */
+  readonly cursorAttractionSteps?: Readonly<Record<string, Vec3>>;
   /** Runtime-only hover state supplied to presentation modules. */
   readonly hoveredNodeId?: string;
   /** Runtime-only held-key dimming suspension; durable selection remains unchanged. */

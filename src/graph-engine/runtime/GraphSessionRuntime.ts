@@ -270,6 +270,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.diagnostics.counters.moduleTicks += 1;
     const tickResult = this.moduleHost.tick({
       ...this.moduleView,
+      cursorAttractionSteps: this.resolveCursorAttractionSteps(),
       draggedNodeId: this.interaction.getDraggedNodeId(),
       hoveredNodeId: this.interaction.getHoveredNodeId(),
       selectionPresentationSuspended: this.interaction.isSelectionPresentationSuspended(),
@@ -1451,6 +1452,29 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (schedule) this.scheduleFrame(0, invalidation);
   }
 
+  private resolveCursorAttractionSteps(): Readonly<Record<string, Vec3>> | undefined {
+    const cursor = this.interaction.getCursorPoint();
+    const frame = this.projection.frames.get();
+    const radius = frame?.policy?.cursorAttractionRadiusPx ?? 0;
+    if (!cursor || !frame || radius <= 0 || this.moduleView.formActive) return undefined;
+    const pinned = new Set([...this.viewState.pinnedNodeIds, ...this.interaction.getCameraTrackingNodeIds()]);
+    const steps: Record<string, Vec3> = {};
+    for (const node of frame.nodes) {
+      if (node.opacity <= 0 || pinned.has(node.id) || node.id === this.viewState.focusedNodeId) continue;
+      const position = this.moduleView.positions[node.id];
+      if (!position) continue;
+      const point = this.vision.worldToScreen(position);
+      if (point.depth <= 0) continue;
+      const distance = Math.hypot(cursor.x - point.x, cursor.y - point.y);
+      if (distance < 0.5 || distance >= radius) continue;
+      const amount = Math.min(0.035 * (1 - distance / radius) ** 2, 1.5 / distance);
+      const target = this.vision.screenToWorld(point.x + (cursor.x - point.x) * amount,
+        point.y + (cursor.y - point.y) * amount, point.depth);
+      steps[node.id] = { x: target.x - position.x, y: target.y - position.y, z: target.z - position.z };
+    }
+    return Object.keys(steps).length ? steps : undefined;
+  }
+
   private updateRendererScene(invalidations: readonly SessionInvalidationClassV1[], retainedHoverNodeId?: string): void {
     const frame = this.projection.frames.get();
     if (!frame) return;
@@ -1459,6 +1483,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       ...frame,
       ...(retainedHoverNodeId ? { nodes: frame.nodes.map((node) => node.id === retainedHoverNodeId
         ? { ...node, opacity: 1 } : node) } : {}),
+      cursorScreenPoint: this.interaction.getCursorPoint(),
       revision: this.renderSceneRevision,
       presentationRevision: this.presentationRevision,
       view: {

@@ -206,8 +206,9 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     if (this.suspended || state.formActive || state.document.nodes.length < 2) return null;
     const dragActive = state.draggedNodeId !== undefined
       && state.document.nodes.some((node) => node.id === state.draggedNodeId);
-    if (!this.running && !dragActive) return null;
-    return this.targetFrameIntervalMs(dragActive);
+    const cursorActive = Object.keys(state.cursorAttractionSteps ?? {}).length > 0;
+    if (!this.running && !dragActive && !cursorActive) return null;
+    return this.targetFrameIntervalMs(dragActive || cursorActive);
   }
 
   tick(state: GraphModulePipelineStateV1, deltaSeconds: number) {
@@ -222,7 +223,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     if (this.suspended || state.formActive || state.document.nodes.length < 2) return;
     const dragActive = state.draggedNodeId !== undefined
       && state.document.nodes.some((node) => node.id === state.draggedNodeId);
-    if (dragActive) this.running = true;
+    if (dragActive || Object.keys(state.cursorAttractionSteps ?? {}).length) this.running = true;
     this.synchronizeBuffers(state);
     this.synchronizeTopology(state);
     if (!this.running) return;
@@ -367,6 +368,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     deltaSeconds: number,
     dragActive: boolean,
   ): GraphModuleTickResultV1 | undefined {
+    const cursorActive = Object.keys(state.cursorAttractionSteps ?? {}).length > 0;
     this.alphaTarget = dragActive ? ACTIVE_DRAG_ACTIVITY : 0;
     // Alpha is a bounded simulation-time scale. Forces always calculate one
     // ordinary step, then the whole state transition is blended by alpha so
@@ -375,16 +377,16 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.dragWasActive = dragActive;
     if (dragActive) this.settledStepCount = 0;
     const elapsedSeconds = Math.max(0, Math.min(0.25, deltaSeconds || FIXED_STEP_SECONDS));
-    if (!dragActive && this.alpha < this.settings.alphaMin) {
+    if (!dragActive && !cursorActive && this.alpha < this.settings.alphaMin) {
       this.stop();
       return { requestNextFrame: false };
     }
     this.accumulatorSeconds += elapsedSeconds;
     if (this.accumulatorSeconds + 1e-12 < FIXED_STEP_SECONDS) {
-      this.coolBy(elapsedSeconds, dragActive);
+      this.coolBy(elapsedSeconds, dragActive, cursorActive);
       return {
         requestNextFrame: this.running,
-        ...(this.running ? { nextFrameDelayMs: this.targetFrameIntervalMs(dragActive) } : {}),
+        ...(this.running ? { nextFrameDelayMs: this.targetFrameIntervalMs(dragActive || cursorActive) } : {}),
       };
     }
     this.accumulatorSeconds = Math.min(
@@ -428,9 +430,10 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
           ? 0
           : previous.z + (fullStepVelocity.z - previous.z) * integrationScale;
         const position = this.positions[node.id];
-        const movementX = fullStepVelocity.x * integrationScale;
-        const movementY = fullStepVelocity.y * integrationScale;
-        const movementZ = this.dimensions === '2d' ? 0 : fullStepVelocity.z * integrationScale;
+        const cursorStep = state.cursorAttractionSteps?.[node.id];
+        const movementX = fullStepVelocity.x * integrationScale + (cursorStep?.x ?? 0);
+        const movementY = fullStepVelocity.y * integrationScale + (cursorStep?.y ?? 0);
+        const movementZ = this.dimensions === '2d' ? 0 : fullStepVelocity.z * integrationScale + (cursorStep?.z ?? 0);
         const movement = Math.hypot(movementX, movementY, movementZ);
         maximumMovement = Math.max(maximumMovement, movement);
         if (movement > 0.00001) changed = true;
@@ -444,12 +447,12 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
         ? this.settledStepCount + 1
         : 0;
     }
-    this.coolBy(elapsedSeconds, dragActive);
-    if (!dragActive && this.settledStepCount >= SETTLED_STEP_COUNT) this.stop();
+    this.coolBy(elapsedSeconds, dragActive, cursorActive);
+    if (!dragActive && !cursorActive && this.settledStepCount >= SETTLED_STEP_COUNT) this.stop();
     return {
       ...(changed ? { positions: this.positions } : {}),
       requestNextFrame: this.running,
-      ...(this.running ? { nextFrameDelayMs: this.targetFrameIntervalMs(dragActive) } : {}),
+      ...(this.running ? { nextFrameDelayMs: this.targetFrameIntervalMs(dragActive || cursorActive) } : {}),
     };
   }
 
@@ -723,10 +726,10 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.settledStepCount = 0;
   }
 
-  private coolBy(elapsedSeconds: number, dragActive: boolean): void {
+  private coolBy(elapsedSeconds: number, dragActive: boolean, cursorActive = false): void {
     if (dragActive) return;
     this.alpha = Math.max(0, this.alpha - this.settings.alphaDecay * elapsedSeconds);
-    if (this.alpha < this.settings.alphaMin) this.stop();
+    if (!cursorActive && this.alpha < this.settings.alphaMin) this.stop();
   }
 
   private stop(): void {

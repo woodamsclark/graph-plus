@@ -19,6 +19,7 @@ export interface GraphViewTransformV2 {
 }
 
 export interface GraphRenderSceneV2 extends GraphRenderFrameV1 {
+  readonly cursorScreenPoint?: { readonly x: number; readonly y: number };
   readonly revision: number;
   readonly presentationRevision: number;
   readonly view: GraphViewTransformV2;

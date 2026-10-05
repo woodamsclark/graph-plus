@@ -39,6 +39,11 @@ export class GraphInput {
     if (!enabled) this.reset();
   }
 
+  getCursorPoint(): GraphScreenPointV1 | undefined {
+    return this.enabled && !this.disposed && this.mouseInside && !this.lastCtrl && !this.physicalCtrlHeld && this.activePointers.size === 0
+      ? { ...this.lastMousePoint } : undefined;
+  }
+
   reset(): void {
     this.clearLongPress();
     this.activePointers.clear();
@@ -101,6 +106,7 @@ export class GraphInput {
     try { this.options.element.setPointerCapture(event.pointerId); } catch {}
     this.activePointers.add(event.pointerId);
     const pointerKind = pointerKindOf(event.pointerType);
+    if (pointerKind !== 'mouse') this.mouseInside = false;
     const point = this.toScreen(event.clientX, event.clientY);
     this.push({
       ...this.base(),
@@ -126,6 +132,7 @@ export class GraphInput {
     event.preventDefault();
     const point = this.toScreen(event.clientX, event.clientY);
     const pointerKind = pointerKindOf(event.pointerType);
+    if (pointerKind !== 'mouse') this.mouseInside = false;
     if (pointerKind === 'mouse') {
       this.mouseInside = true;
       this.lastMousePoint = point;
@@ -214,6 +221,7 @@ export class GraphInput {
 
   private readonly onPointerCancel = (event: PointerEvent): void => {
     if (!this.enabled || this.disposed) return;
+    this.mouseInside = false;
     event.preventDefault();
     this.activePointers.delete(event.pointerId);
     if (this.longPressPointer?.pointerId === event.pointerId) this.clearLongPress();

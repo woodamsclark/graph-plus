@@ -465,8 +465,9 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     this.context.textBaseline = 'top';
     this.context.font = graphFontToCss(frame.labelFont);
     const candidates = nodes
-      .filter(({ node }) => node.showLabel !== false && (mode !== 'off' || node.labelForceVisible === true))
-      .sort(compareLabelCandidates);
+      .filter((candidate) => (candidate.node.showLabel !== false || this.cursorLabelReveal(frame, candidate) > 0)
+        && (mode !== 'off' || candidate.node.labelForceVisible === true))
+      .sort((a, b) => this.cursorLabelReveal(frame, b) - this.cursorLabelReveal(frame, a) || compareLabelCandidates(a, b));
     const layoutStart = this.now();
     let acceptedCandidates: readonly ProjectedNode[];
     if (mode === 'all' || mode === 'off') {
@@ -494,7 +495,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
           minimumBudget,
           120,
         );
-        if (!forced && accepted.length >= candidateBudget) continue;
+        if (!forced && this.cursorLabelReveal(frame, candidate) <= 0 && accepted.length >= candidateBudget) continue;
         const bounds = this.labelBounds(frame, candidate);
         if (!forced && labelIsOccludedByCloserNode(
           candidate, bounds, this.labelOcclusionCandidates(candidate, bounds),
@@ -507,11 +508,12 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     }
     const labelLayoutMs = elapsed(layoutStart, this.now());
     const drawStart = this.now();
-    for (const { node, point, radius } of acceptedCandidates) {
+    for (const candidate of acceptedCandidates) {
+      const { node, point, radius } = candidate;
       const offset = node.labelOffset ?? { x: 0, y: 0 };
-      this.context.globalAlpha = clampOpacity(node.labelOpacity);
+      this.context.globalAlpha = Math.max(clampOpacity(node.labelOpacity), this.cursorLabelReveal(frame, candidate));
       this.context.fillStyle = this.colorCss(node.labelColor);
-      const font = nodeFont(frame, node, this.vision.getState().zoom, this.vision.getState().projection);
+      const font = nodeFont(frame, node, this.vision.getState().zoom, this.vision.getState().projection, this.cursorLabelReveal(frame, candidate) > 0 ? 12 : 1);
       this.context.font = font;
       this.context.fillText(node.label, point.x + offset.x, labelTop(frame, point.y, radius, font) + offset.y);
     }
@@ -520,8 +522,15 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     return { labelLayoutMs, labelDrawMs };
   }
 
+  private cursorLabelReveal(frame: GraphRenderFrameV1, candidate: ProjectedNode): number {
+    const cursor = this.scene?.cursorScreenPoint;
+    const radius = renderPolicy(frame).cursorLabelRevealRadiusPx ?? 0;
+    if (!cursor || radius <= 0 || candidate.node.opacity <= 0) return 0;
+    return Math.max(0, 1 - Math.hypot(cursor.x - candidate.point.x, cursor.y - candidate.point.y) / radius);
+  }
+
   private labelBounds(frame: GraphRenderFrameV1, value: ProjectedNode): LabelBounds {
-    this.context.font = nodeFont(frame, value.node, this.vision.getState().zoom, this.vision.getState().projection);
+    this.context.font = nodeFont(frame, value.node, this.vision.getState().zoom, this.vision.getState().projection, this.cursorLabelReveal(frame, value) > 0 ? 12 : 1);
     const cacheKey = `${this.context.font}\u0000${value.node.label}`;
     let width = this.textWidthCache.get(cacheKey);
     if (width === undefined) {
@@ -665,11 +674,12 @@ function nodeFont(
   node: GraphRenderNodeV1,
   zoom: number,
   projection: 'orthographic' | 'perspective',
+  minimumSize = 1,
 ): string {
   const scale = renderPolicy(frame).labelScaleMode === 'sqrt-orthographic' && projection === 'orthographic'
     ? Math.sqrt(Math.max(0, zoom))
     : 1;
-  const size = Math.max(1, node.labelFontSize * scale);
+  const size = Math.max(minimumSize, node.labelFontSize * scale);
   const family = frame.labelFont.family;
   return `${size}px ${family || 'sans-serif'}`;
 }

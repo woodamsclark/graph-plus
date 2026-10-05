@@ -130,6 +130,8 @@ export interface GraphEdgeRenderContributionV1 {
 }
 
 export interface GraphPresentationPolicyV2 {
+  readonly cursorAttractionRadiusPx?: number;
+  readonly cursorLabelRevealRadiusPx?: number;
   readonly labelMode?: 'adaptive' | 'all' | 'off';
   readonly labelPosition?: 'above' | 'below';
   /** Higher values delay ordinary adaptive labels; interaction-required labels remain visible. */

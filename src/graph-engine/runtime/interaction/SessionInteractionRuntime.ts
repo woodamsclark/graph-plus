@@ -223,6 +223,10 @@ export class SessionInteractionRuntime {
     this.resetTransientState();
   }
 
+  getCursorPoint(): GraphScreenPointV1 | undefined {
+    return this.input.getCursorPoint();
+  }
+
   getHoveredNodeId(): string | undefined {
     return this.hoveredNodeId;
   }

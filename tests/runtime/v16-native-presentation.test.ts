@@ -1,3 +1,5 @@
+import { GraphInput } from '../../src/graph-engine/runtime/interaction/GraphInput.ts';
+import { BufferedQueue } from '../../src/graph-engine/runtime/interaction/BufferedQueue.ts';
 import type {
   GraphModulePresentationStateV1,
 } from '../../src/graph-engine/runtime/modules/index.ts';
@@ -41,6 +43,115 @@ const RESOLVED_FRAME_STYLE = {
   backgroundColor: DEFAULT_GRAPH_RENDER_THEME_V1.colors.background,
   labelFont: DEFAULT_GRAPH_RENDER_THEME_V1.labelFont,
 } as const;
+
+test('cursor input clears on leave, gestures and touch without creating a stale field', () => {
+  const value = runtimeHarness();
+  const canvas = value.document.createElement('canvas');
+  const input = new GraphInput({ element: canvas, platform: value.platform, events: new BufferedQueue(),
+    getIdentity: () => ({ documentId: 'cursor-test', documentRevision: 0 }) });
+  pointer(value, canvas, 'pointermove', 50, 60, 1, 'mouse');
+  deepEqual(input.getCursorPoint(), { x: 50, y: 60 }, 'mouse supplies canvas-local coordinates');
+  canvas.dispatchEvent(new value.window.PointerEvent('pointermove', { pointerType: 'mouse', pointerId: 1,
+    clientX: 50, clientY: 60, ctrlKey: true }) as unknown as Event);
+  equal(input.getCursorPoint(), undefined, 'Ctrl-removal cannot regain a label or moving target through proximity');
+  pointer(value, canvas, 'pointermove', 50, 60, 1, 'mouse');
+  pointer(value, canvas, 'pointerdown', 50, 60, 1, 'mouse');
+  equal(input.getCursorPoint(), undefined, 'mouse gestures suspend attraction and proximity');
+  pointer(value, canvas, 'pointerup', 50, 60, 1, 'mouse');
+  pointer(value, canvas, 'pointerdown', 50, 60, 2, 'touch');
+  pointer(value, canvas, 'pointerup', 50, 60, 2, 'touch');
+  equal(input.getCursorPoint(), undefined, 'touch cannot resume a stale mouse field');
+  pointer(value, canvas, 'pointermove', 50, 60, 1, 'mouse');
+  canvas.dispatchEvent(new value.window.PointerEvent('pointerleave', { pointerType: 'mouse', pointerId: 1 }) as unknown as Event);
+  equal(input.getCursorPoint(), undefined, 'pointer leave clears proximity');
+  input.dispose();
+});
+
+test('cursor attraction moves a cooled graph without reheating and excludes pins and Form', () => {
+  const document = graphDocument({ nodes: [graphNode('a'), graphNode('b')], edges: [] });
+  const initial = pipeline(document, { nodeIds: new Set(['a', 'b']), edgeIds: new Set() });
+  const state = { ...initial, viewState: { ...initial.viewState, pinnedNodeIds: ['b'] } };
+  const force = new ForceLayoutModule('2d', readForceSettings({ repulsionStrength: 0, springStrength: 0,
+    centeringStrength: 0, collisionRadius: 0 }));
+  force.tick(state, 1 / 60);
+  force.restoreState({ schemaVersion: 1, alpha: 0, running: false, velocities: {} });
+  const result = force.tick({ ...state, cursorAttractionSteps: { a: { x: 1, y: 2, z: 7 }, b: { x: -10, y: 0, z: 0 } } }, 1 / 60);
+  assert(result?.positions, 'cursor must wake a cold layout');
+  equal(result.positions.a.x, state.positions.a.x + 1, 'cursor moves eligible nodes independently of alpha');
+  equal(result.positions.a.y, state.positions.a.y + 2, 'cursor follows both screen axes');
+  equal(result.positions.a.z, 0, '2D remains planar');
+  deepEqual(result.positions.b, state.positions.b, 'pinned nodes ignore cursor steps');
+  equal(force.getDiagnostics().alpha, 0, 'cursor must not reheat the whole graph');
+  equal(result.requestNextFrame, true, 'cursor continues while it has nearby nodes');
+  equal(force.tick({ ...state, formActive: true, cursorAttractionSteps: { a: { x: 1, y: 0, z: 0 } } }, 1 / 60), undefined,
+    'cursor cannot distort a Form layout');
+  equal(force.tick(state, 1 / 60)?.requestNextFrame, false, 'leaving allows a cold layout to stop');
+});
+
+test('live cursor field has the same short screen range in 2D and 3D and stops on leave', async () => {
+  for (const dimensions of ['2d', '3d'] as const) {
+    const document = graphDocument({ nodes: ['near', 'pinned', 'far'].map(id => graphNode(id)), edges: [] });
+    const value = runtimeHarness({ consumerId: 'graph-plus', profileId: 'default',
+      registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1, document });
+    value.profiles.setUserOverrides('graph-plus', 'default', { dimensions, modules: { 'force-layout': { settings: {
+      repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionRadius: 0, alphaDecay: 1000,
+    } } } });
+    const session = await value.create();
+    const initial = await session.exportViewState();
+    const cameraState = { ...initial.camera, position: { x: 0, y: 0, z: 1000 }, target: { x: 0, y: 0, z: 0 },
+      zoom: 1, projection: dimensions === '2d' ? 'orthographic' as const : 'perspective' as const };
+    const camera = new GraphCameraController(cameraState, dimensions);
+    camera.setViewport(640, 360);
+    const positions = { near: camera.screenToWorld(320, 180, 1000),
+      pinned: camera.screenToWorld(320, 210, 1000), far: camera.screenToWorld(500, 180, 1000) };
+    await session.restoreViewState({ ...initial, camera: cameraState, positions, pinnedNodeIds: ['pinned'] });
+    const restoredCamera = (await session.exportViewState()).camera;
+    const canvas = runtimeCanvas(value.container);
+    pointer(value, canvas, 'pointermove', 350, 180, 11, 'mouse');
+    value.platform.flushFrame(17);
+    const after = await session.exportViewState();
+    assert(after.positions.near.x > positions.near.x, 'nearby node should move toward the cursor');
+    deepEqual(after.positions.pinned, positions.pinned, 'pinned nodes stay fixed');
+    deepEqual(after.positions.far, positions.far, 'distant nodes are outside the field');
+    deepEqual(after.camera, restoredCamera, 'attraction never moves the camera');
+    canvas.dispatchEvent(new value.window.PointerEvent('pointerleave', { pointerType: 'mouse', pointerId: 11 }) as unknown as Event);
+    value.platform.flushFrame(34);
+    deepEqual((await session.exportViewState()).positions, after.positions, 'leaving stops attraction without replaying momentum');
+    await session.dispose();
+  }
+});
+
+test('cursor proximity reveals nearby dim labels but respects range, void nodes and Labels Off', () => {
+  const value = runtimeHarness();
+  const canvas = value.document.createElement('canvas');
+  const renderer = new CanvasGraphRenderer(canvas, () => 0);
+  renderer.initialize();
+  renderer.resize(640, 360, 1);
+  const scene = { regions: [], edges: [], ...RESOLVED_FRAME_STYLE, revision: 1, presentationRevision: 1,
+    view: { dimensions: '2d' as const, camera: { position: { x: 0, y: 0, z: 100 }, target: { x: 0, y: 0, z: 0 },
+      up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic' as const },
+      viewport: { width: 640, height: 360, devicePixelRatio: 1 } }, labels: [],
+    nodes: [
+      { id: 'near', label: 'near', position: { x: 0, y: 0, z: 0 }, radius: 8, ...RESOLVED_NODE_STYLE,
+        opacity: 0.24, showLabel: false, labelOpacity: 0 },
+      { id: 'far', label: 'far', position: { x: 150, y: 0, z: 0 }, radius: 8, ...RESOLVED_NODE_STYLE,
+        showLabel: false, labelOpacity: 0 },
+      { id: 'void', label: 'void', position: { x: 20, y: 0, z: 0 }, radius: 8, ...RESOLVED_NODE_STYLE,
+        opacity: 0, showLabel: false, labelOpacity: 0 },
+    ], policy: { labelMode: 'adaptive' as const, cursorLabelRevealRadiusPx: 96 } };
+  const labels = () => value.drawArguments.filter(c => c.method === 'fillText').map(c => c.args[0]);
+  renderer.updateScene({ ...scene, cursorScreenPoint: { x: 320, y: 160 } });
+  renderer.render();
+  deepEqual(labels(), ['near'], 'only nearby visible nodes reveal labels');
+  value.drawArguments.length = 0;
+  renderer.updateScene(scene);
+  renderer.render();
+  deepEqual(labels(), [], 'leaving restores dim label suppression');
+  renderer.updateScene({ ...scene, cursorScreenPoint: { x: 320, y: 160 }, policy: { ...scene.policy, labelMode: 'off' } });
+  renderer.render();
+  deepEqual(labels(), [], 'proximity cannot override Labels Off');
+  renderer.dispose();
+});
 
 test('V1.6 Anima owns the exact visible-degree radius and composable structural scale', () => {
   const nodes = [graphNode('hub'), ...Array.from({ length: 9 }, (_, index) => graphNode(`leaf-${index}`))];
