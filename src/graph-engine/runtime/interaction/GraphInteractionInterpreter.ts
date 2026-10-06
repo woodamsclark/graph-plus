@@ -143,6 +143,7 @@ export class GraphInteractionInterpreter {
     readonly getFocusedNodeId: () => string | undefined;
     readonly getViewMode: () => GraphUxStateV1;
     readonly getHoveredNodeId: () => string | undefined;
+    readonly getPreviewedNodeId?: () => string | undefined;
     readonly getFocusedNodeScreenPoint: () => GraphScreenPointV1 | undefined;
     readonly getNodeScreenPoint: (nodeId: string) => GraphScreenPointV1 | undefined;
     readonly getViewport: () => { readonly width: number; readonly height: number };
@@ -839,6 +840,11 @@ export class GraphInteractionInterpreter {
     event: Extract<GraphInputEventV1, { type: 'pointer-up' }>,
     hit: GraphHitV1 | null,
   ): void {
+    if (hit && event.meta && !event.ctrl && !event.shift && !event.alt
+      && this.options.getPreviewedNodeId?.() === hit.nodeId) {
+      this.command(event, { type: 'activate-node', nodeId: hit.nodeId, activation: 'primary' });
+      return;
+    }
     if (!hit) this.tagging.reset();
     this.command(event, { type: 'activate-view', input: {
       phase: 'activate', target: hit ? { kind: 'node', nodeId: hit.nodeId } : { kind: 'background' },

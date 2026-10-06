@@ -165,6 +165,7 @@ export class SessionInteractionRuntime {
       getFocusedNodeId: () => this.getNavigationState().focusedNodeId,
       getViewMode: () => this.getNavigationState().viewId,
       getHoveredNodeId: () => this.hoveredNodeId,
+      getPreviewedNodeId: () => this.previewedNodeId,
       getFocusedNodeScreenPoint: () => {
         const focusedNodeId = this.getNavigationState().focusedNodeId;
         const position = focusedNodeId === undefined

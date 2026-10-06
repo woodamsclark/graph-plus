@@ -2701,3 +2701,33 @@ test('3D Focus primary background click-drag pans without rotating or changing g
     'drag release cannot activate an object or change View');
   await session.dispose();
 });
+
+
+test('Cmd single-click opens the previewed node without committing a View transition', async () => {
+  let actionRuns = 0;
+  const actions = new ConsumerNodeActionRegistryV1();
+  actions.register('synthetic-consumer', {}, [{ id: 'open-node', label: 'Open node', run: () => { actionRuns++; } }]);
+  const base = runtimeRegistration();
+  const value = runtimeHarness({ registration: { ...base, profiles: base.profiles.map(profile => ({
+    ...profile, interaction: { activationActionIds: ['open-node'] },
+  })) }, nodeActions: actions.runtimeFor('synthetic-consumer') });
+  Object.defineProperty(value.window.navigator, 'platform', { value: 'MacIntel', configurable: true });
+  const session = await value.create(); const canvas = runtimeCanvas(value.container);
+  const point = await nodePoint(session, 'a');
+  const intents: GraphIntentV1[] = [];
+  session.onIntent(intent => intents.push(intent));
+  pointer(value, canvas, 'pointermove', point.x, point.y, { pointerId: 957, metaKey: true });
+  value.platform.flushFrame();
+  assert(intents.some(intent => intent.type === 'preview-changed' && intent.nodeId === 'a'), 'Cmd hover opens the note preview');
+  const before = await session.exportViewState();
+  click(value, canvas, point, { pointerId: 957, metaKey: true }); value.platform.flushFrame();
+  equal(actionRuns, 1, 'one Cmd click runs the note open action once');
+  const after = await session.exportViewState();
+  deepEqual(after.selectedNodeIds, before.selectedNodeIds, 'opening the note preserves constellation membership');
+  equal(after.focusedNodeId, before.focusedNodeId, 'opening the note preserves the root');
+  equal(after.viewMode, before.viewMode, 'opening the note does not commit the peek View');
+  await session.clearPreview();
+  click(value, canvas, await nodePoint(session, 'a'), { pointerId: 958, metaKey: true }); value.platform.flushFrame();
+  equal(actionRuns, 1, 'Cmd click without an open preview retains ordinary interaction behavior');
+  await session.dispose();
+});
