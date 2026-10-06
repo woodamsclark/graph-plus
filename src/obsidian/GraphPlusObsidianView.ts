@@ -40,6 +40,9 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
     this.lifecycle = new GraphPlusViewLifecycleV1(this.contentEl, {
       setSuspended: (suspended) => this.application?.setSuspended(suspended),
       clearPreview: () => this.notePreview?.clear(),
+      onRevealed: () => {
+        if (this.experienceMode === 'local') void this.application?.recenterFocusedNode();
+      },
     });
     this.notePreview = createGraphPlusNotePreviewControllerV1({
       app: this.app,
@@ -144,6 +147,8 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
     this.notePreview?.clear();
     return this.application?.resetLayoutData() ?? false;
   }
+
+  onResize(): void { this.synchronizeLeafVisibility(); }
 
   private synchronizeLeafVisibility(): void {
     this.lifecycle?.synchronizeVisibility();

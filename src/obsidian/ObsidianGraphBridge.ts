@@ -25,6 +25,9 @@ export class ObsidianGraphBridgeV1 implements GraphPlusNavigatorV1<TFile> {
     this.track(this.app.vault, this.app.vault.on('delete', invalidate));
     this.track(this.app.vault, this.app.vault.on('rename', invalidate));
     this.track(this.app.metadataCache, this.app.metadataCache.on('changed', invalidate));
+    this.track(this.app.workspace, this.app.workspace.on('layout-change', () => {
+      listener({ type: 'workspace-layout-changed' });
+    }));
     this.track(this.app.workspace, this.app.workspace.on('active-leaf-change', () => {
       listener({ type: 'active-note-changed', nodeId: this.activeNoteNodeId(), timestamp: Date.now() });
     }));

@@ -8,6 +8,7 @@ export class GraphPlusViewLifecycleV1 {
     private readonly callbacks: {
       readonly setSuspended: (suspended: boolean) => void;
       readonly clearPreview: () => void;
+      readonly onRevealed?: () => void;
     },
   ) {}
 
@@ -19,7 +20,8 @@ export class GraphPlusViewLifecycleV1 {
   }
 
   synchronizeVisibility(): boolean {
-    const visible = this.content.isShown();
+    const visible = this.content.isShown()
+      && this.content.closest('.workspace-split.is-collapsed') === null;
     if (this.visible === visible) return visible;
     this.visible = visible;
     this.callbacks.setSuspended(!visible);
@@ -27,6 +29,7 @@ export class GraphPlusViewLifecycleV1 {
       this.callbacks.clearPreview();
       return false;
     }
+    this.callbacks.onRevealed?.();
     return true;
   }
 

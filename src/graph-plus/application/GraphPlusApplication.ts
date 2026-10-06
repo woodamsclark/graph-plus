@@ -308,6 +308,11 @@ export class GraphPlusPresentationV1<TFile> {
     }
   }
 
+  async recenterFocusedNode(): Promise<void> {
+    const state = await this.session?.exportViewState();
+    if (state?.focusedNodeId) await this.receiveApplicationAttention(state.focusedNodeId, 'recenter-focus');
+  }
+
   async focusNode(nodeId: string): Promise<void> {
     if (!this.session) return;
     await this.session.clearPreview();
@@ -644,7 +649,8 @@ export type GraphPlusPresentationAttachOptionsV1<TFile> = Omit<
 export type GraphPlusUnconsciousActivityV1 =
   | { readonly type: 'canonical-vault-invalidated' }
   | { readonly type: 'active-note-changed'; readonly nodeId?: string; readonly timestamp?: number }
-  | { readonly type: 'document-link-hovered'; readonly nodeId?: string };
+  | { readonly type: 'document-link-hovered'; readonly nodeId?: string }
+  | { readonly type: 'workspace-layout-changed' };
 
 /** @deprecated Host transport name; use the application boundary's unconscious activity type. */
 export type GraphPlusHostEventV1 = GraphPlusUnconsciousActivityV1;

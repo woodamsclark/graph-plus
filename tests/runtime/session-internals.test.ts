@@ -113,3 +113,22 @@ test('shared graph+ lifecycle suspends hidden leaves and releases host listeners
   lifecycle.dispose();
   equal(unregisters, 1, 'disposal should release registered host events exactly once');
 });
+
+
+test('opening a collapsed graph side pane emits one reveal callback without repeating on resize', () => {
+  const window = new Window();
+  const split = window.document.createElement('div'); split.className = 'workspace-split is-collapsed';
+  const content = window.document.createElement('section') as unknown as HTMLElement;
+  split.append(content as unknown as typeof split);
+  (content as HTMLElement & { isShown: () => boolean }).isShown = () => true;
+  let reveals = 0;
+  const lifecycle = new GraphPlusViewLifecycleV1(content, {
+    setSuspended: () => undefined, clearPreview: () => undefined, onRevealed: () => { reveals++; },
+  });
+  equal(lifecycle.synchronizeVisibility(), false, 'a collapsed sidebar is hidden even when its content reports shown');
+  split.classList.remove('is-collapsed'); lifecycle.synchronizeVisibility(); lifecycle.synchronizeVisibility();
+  equal(reveals, 1, 'reopening recenters once, ordinary resize does not repeat it');
+  split.classList.add('is-collapsed'); lifecycle.synchronizeVisibility();
+  split.classList.remove('is-collapsed'); lifecycle.synchronizeVisibility();
+  equal(reveals, 2, 'each reopening emits another recenter request');
+});

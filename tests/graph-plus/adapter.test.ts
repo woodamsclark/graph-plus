@@ -994,6 +994,19 @@ test('Local Graph+ reuses the full graph while active-note Focus changes', async
   await Promise.resolve();
   equal((await session.exportViewState()).focusedNodeId, alphaId,
     'resetting the camera should preserve local graph focus');
+  const beforeReopen = await session.exportViewState();
+  await session.restoreViewState({ ...beforeReopen, camera: { ...beforeReopen.camera,
+    position: { ...beforeReopen.camera.position, x: beforeReopen.camera.position.x + 75 },
+    target: { ...beforeReopen.camera.target, x: beforeReopen.camera.target.x + 75 },
+  } });
+  await consumer.recenterFocusedNode();
+  const recentered = await session.exportViewState();
+  assert(vectorDistance(recentered.camera.target, recentered.positions[alphaId]) < 1e-9,
+    'reopening a Local pane recenters its focused root');
+  equal(recentered.camera.zoom, beforeReopen.camera.zoom, 'pane reveal preserves camera zoom');
+  deepEqual(recentered.positions, beforeReopen.positions, 'pane reveal does not change node positions');
+  deepEqual(recentered.selectedNodeIds, beforeReopen.selectedNodeIds, 'pane reveal preserves constellation');
+
 
   equal(await consumer.followActiveNode(undefined), true,
     'absence of an active Markdown note should be accepted as canonical truth');
