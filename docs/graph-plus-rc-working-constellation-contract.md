@@ -101,9 +101,13 @@ Clicking a primary node in Graph+ retains that node as camera interest, includin
 Overview-to-Constellation admission after a previously retained focal point. Hover
 admission keeps the correct View step and does not recursively enter Focus.
 
-Forces Quick Settings offers Cursor gravity: Soft (default), Clingy, Off. Soft uses
+Forces Quick Settings offers Cursor gravity: Soft, Clingy, Off. Soft uses
 a broad shallow hyperbolic well; Clingy uses a narrower deeper well and a stronger
 bounded step. Both reach 16 CSS pixels, capture only the nearest eligible node and
 cannot overshoot the cursor. Off removes attraction, never label proximity or
 hover peeking. The label reveal radius stays 96 CSS pixels in every mode. The choice
 is stored as `anima.cursorGravity` through the normal profile settings path.
+
+Clingy is enabled by default. Gravity pauses for the duration of a node drag.
+RC excludes region capabilities, forces and controls, including saved enabled overrides.
+Drag input bursts compose and publish their final position once per frame.

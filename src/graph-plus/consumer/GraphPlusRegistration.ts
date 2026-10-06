@@ -16,7 +16,6 @@ export const GRAPH_PLUS_REQUESTED_CAPABILITIES_V1 = [
   // 'form', // Mind Map deferred; the engine module remains available to other consumers.
   'layout',
   'force-layout',
-  'node-regions',
   'animation',
 ] as const;
 
@@ -28,7 +27,7 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
   profiles: [{
     profileId: GRAPH_PLUS_PROFILE_ID_V1,
     displayName: 'Default',
-    descriptorVersion: 10,
+    descriptorVersion: 11,
     dimensions: '2d',
     allowedDimensions: ['2d', '3d'],
     requestedCapabilities: GRAPH_PLUS_REQUESTED_CAPABILITIES_V1,
@@ -41,7 +40,7 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
         display: { visibility: 'shown' },
         camera: { visibility: 'hidden' },
         forces: { visibility: 'shown' },
-        regions: { visibility: 'shown' },
+        regions: { visibility: 'hidden' },
       },
       contextMenuEnabled: true,
     },
@@ -88,18 +87,10 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
           axialSpringStiffness: { type: 'number', min: 0, max: 0.9 },
         },
       },
-      'node-regions': {
-        policy: 'optional',
-        defaultEnabled: true,
-        constraints: {
-          boundariesVisible: { type: 'enum', allowed: [true, false] },
-          membershipStrength: { type: 'number', min: 0, max: 2 },
-          membershipDistance: { type: 'number', min: 10, max: 500 },
-          boundaryPadding: { type: 'number', min: 8, max: 120 },
-        },
-      },
+      'node-regions': { policy: 'forbidden' },
       anima: {
         policy: 'required',
+        defaults: { cursorGravity: 'clingy' },
         constraints: {
           cursorGravity: { type: 'enum', allowed: ['soft', 'clingy', 'off'] },
           labelPosition: { type: 'enum', allowed: ['above', 'below'] },

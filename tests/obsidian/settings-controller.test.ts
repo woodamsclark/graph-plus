@@ -231,3 +231,17 @@ test('V1.7 global catalog values flow into Graph+ until its profile overrides th
   equal(controller.getEffectiveProfile('graph-plus', 'default').modules.rendering?.settings.nodeRadiusScale, 2,
     'resetting one profile value should reveal Global again');
 });
+
+
+test('RC disables regions even with saved enabled overrides and defaults cursor gravity to Clingy', () => {
+  const profiles = new ConsumerProfileRegistry();
+  for (const descriptor of createShippedGraphModuleRegistryV1().descriptors()) profiles.registerModule(descriptor);
+  profiles.registerConsumer(GRAPH_PLUS_CONSUMER_REGISTRATION_V1);
+  profiles.setUserOverrides('graph-plus', 'default', { modules: { 'node-regions': { enabled: true } } });
+  const controller = new GraphEngineSettingsControllerV1(profiles, {}, () => undefined, true);
+  const effective = controller.getEffectiveProfile('graph-plus', 'default');
+  equal(effective.modules.anima.settings.cursorGravity, 'clingy', 'gravity is enabled and Clingy by default');
+  equal(effective.modules['node-regions'].enabled, false, 'regions are disabled in the RC');
+  equal(controller.getProfileDescriptor('graph-plus', 'default').modules['node-regions'].policy, 'forbidden',
+    'saved enabled overrides cannot reactivate regions');
+});

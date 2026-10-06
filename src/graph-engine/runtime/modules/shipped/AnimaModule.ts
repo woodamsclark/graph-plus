@@ -28,7 +28,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
     readonly degree: ReadonlyMap<string, number>;
   };
 
-  private cursorGravity: 'soft' | 'clingy' | 'off' = 'soft';
+  private cursorGravity: 'soft' | 'clingy' | 'off' = 'clingy';
 
   constructor(
     private palette: GraphVisualThemeV2,
@@ -40,7 +40,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
     this.labels.updateSettings(settings);
-    this.cursorGravity = settings.cursorGravity === 'clingy' || settings.cursorGravity === 'off' ? settings.cursorGravity : 'soft';
+    this.cursorGravity = settings.cursorGravity === 'soft' || settings.cursorGravity === 'off' ? settings.cursorGravity : 'clingy';
   }
 
   restoreState(state: JsonValue): void {

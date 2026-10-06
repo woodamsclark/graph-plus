@@ -439,7 +439,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       const presentation = graphSettingPresentationV1('anima.cursorGravity');
       new Setting(body).setName(presentation.name).addDropdown(dropdown => dropdown
         .addOptions(selectOptions(presentation))
-        .setValue(anima.settings.cursorGravity === 'clingy' || anima.settings.cursorGravity === 'off' ? anima.settings.cursorGravity : 'soft')
+        .setValue(anima.settings.cursorGravity === 'soft' || anima.settings.cursorGravity === 'off' ? anima.settings.cursorGravity : 'clingy')
         .onChange(async value => { await this.context.profileSettings.setModuleSetting('anima', 'cursorGravity', value); }));
     }
     const forces = effective.modules['force-layout'];

@@ -199,6 +199,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private renderer!: GraphRendererV2;
   private rendererSelection!: GraphRendererSelectionV2;
   private renderSceneRevision = 0;
+  private pendingDragGeometry = false;
   private presentationRevision = 0;
   private interaction!: SessionInteractionRuntime;
   private moduleHost!: GraphModuleHost;
@@ -257,6 +258,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const frameStart = this.platform.now();
     const interactionStart = this.platform.now();
     this.interaction.tick();
+    if (this.pendingDragGeometry) {
+      this.pendingDragGeometry = false;
+      this.moduleHost.viewChanged(this.viewState);
+      this.refreshFrame(false, 'geometry');
+      this.emitWorldChanged('interaction');
+    }
     const interactionMs = duration(interactionStart, this.platform.now());
     const hitTestMs = this.interaction.consumeHitTestDuration();
     this.diagnostics.counters.hitTests += this.interaction.consumeHitTestCount();
@@ -1475,7 +1482,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const cursor = this.interaction?.getCursorPoint();
     const frame = this.projection.frames.get();
     const radius = frame?.policy?.cursorAttractionRadiusPx ?? 0;
-    if (!cursor || !frame || radius <= 0 || this.moduleView.formActive) return undefined;
+    if (!cursor || !frame || radius <= 0 || this.moduleView.formActive
+      || this.interaction.getDraggedNodeId() !== undefined) return undefined;
     const fixed = new Set([...this.viewState.pinnedNodeIds, ...this.interaction.getCameraTrackingNodeIds()]);
     let nearest: { nodeId: string; point: { x: number; y: number; depth: number }; distance: number; radius: number } | undefined;
     for (const node of frame.nodes) {
@@ -1571,6 +1579,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       } : {}),
     };
     this.moduleView = { ...this.moduleView, viewState: this.viewState, positions: this.projectionView.positions };
+    // Drag packets can arrive several times in one frame. Compose and publish only the final position.
+    if (change === 'positions' && draggedNodeId) {
+      this.pendingDragGeometry = true;
+      this.scheduleFrame(0, 'geometry');
+      return;
+    }
     if (change === 'camera') {
       this.moduleHost.viewChanged(this.viewState);
       this.projection.markDirty();

@@ -11,7 +11,7 @@ camera, saved settings or simulation.
 
 - Attraction reaches 16 CSS pixels from the mouse, with a softened hyperbolic falloff. Soft is shallow and broad; Clingy is deeper
   and narrower inside the same radius. Off disables attraction only, leaving the
-  independent 96-pixel cursor label reveal active. Soft is the default.
+  independent 96-pixel cursor label reveal active. Clingy is the default.
   Only the nearest eligible node receives a pull, capped at 1.5 screen pixels per step
   in Soft and 6 in Clingy.
   Equal screen distances use stable node-ID ordering. A node already at the cursor
@@ -114,3 +114,5 @@ Obsidian desktop visual acceptance remains a separate smoke check.
 
 Cursor-only presentation invalidations repaint even when hover and physics are idle.
 This ensures the last proximity label clears when the cursor leaves a cluster for empty space.
+
+Gravity is suspended during node dragging. Drag position updates compose and publish once per frame, rather than per input packet. Regions are forbidden in the RC Graph+ profile and their controls are hidden.

@@ -144,7 +144,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       capabilities: ['animation'],
       settingsSchemaVersion: 1,
       defaultSettings: {
-        cursorGravity: 'soft',
+        cursorGravity: 'clingy',
         labelPosition: 'above',
         adaptiveLabelThreshold2d: 65,
         adaptiveLabelThreshold3d: 50,

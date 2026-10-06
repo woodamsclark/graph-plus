@@ -2080,3 +2080,29 @@ test('idle proximity labels repaint as the cursor leaves a cluster for empty spa
   }
   await session.dispose();
 });
+
+
+test('node dragging batches world updates and suspends cursor gravity for nearby nodes', async () => {
+  const value = runtimeHarness({ consumerId: 'graph-plus', profileId: 'default',
+    registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1,
+    document: graphDocument({ nodes: [graphNode('drag'), graphNode('near')], edges: [] }) });
+  value.profiles.setUserOverrides('graph-plus', 'default', { dimensions: '2d', modules: {
+    'force-layout': { settings: { repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionRadius: 0 } },
+  } });
+  const session = await value.create(); const initial = await session.exportViewState();
+  const camera = new GraphCameraController(initial.camera, '2d'); camera.setViewport(640, 360);
+  const positions = { drag: camera.screenToWorld(320, 180, 1000), near: camera.screenToWorld(370, 180, 1000) };
+  await session.restoreViewState({ ...initial, positions });
+  let updates = 0;
+  session.onWorldChanged(event => { if (event.cause === 'interaction') updates++; });
+  const canvas = runtimeCanvas(value.container);
+  pointer(value, canvas, 'pointerdown', 320, 180, 954);
+  for (const x of [340, 345, 350, 355, 360]) pointer(value, canvas, 'pointermove', x, 180, 954);
+  value.platform.flushFrame(100);
+  const dragged = await session.exportViewState();
+  equal(updates, 1, 'a burst of drag packets publishes one world snapshot per frame');
+  deepEqual(dragged.positions.near, positions.near, 'gravity does not tug other nodes during dragging');
+  assert(dragged.positions.drag.x > positions.drag.x, 'the dragged node still follows the cursor');
+  pointer(value, canvas, 'pointerup', 360, 180, 954); value.platform.flushFrame(200);
+  await session.dispose();
+});
