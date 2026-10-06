@@ -111,3 +111,5 @@ is stored as `anima.cursorGravity` through the normal profile settings path.
 Clingy is enabled by default. Gravity pauses for the duration of a node drag.
 RC excludes region capabilities, forces and controls, including saved enabled overrides.
 Drag input bursts compose and publish their final position once per frame.
+
+Graph+ RC reserves plain Space for a temporary physics override: while held, force layout ticks at alpha 1 even if disabled in settings. Release or window blur restores the configured behavior. Holding Space never clears the constellation or changes saved settings.

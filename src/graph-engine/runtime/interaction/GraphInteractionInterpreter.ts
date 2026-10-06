@@ -134,6 +134,7 @@ export class GraphInteractionInterpreter {
   private readonly tagging = new GraphTaggingController();
 
   constructor(private readonly options: {
+    readonly spacePhysicsOverride?: boolean;
     readonly dimensions: GraphDimensionsV1;
     readonly events: BufferedQueue<GraphInputEventV1>;
     readonly commands: BufferedQueue<GraphRuntimeCommandV1>;
@@ -635,6 +636,7 @@ export class GraphInteractionInterpreter {
       return;
     }
     if (event.key === ' ' || event.key === 'Spacebar') {
+      if (this.options.spacePhysicsOverride) return;
       if (event.repeat || event.composing || event.ctrl || event.meta || event.shift || event.alt) return;
       if (GRAPH_VIEW_DEFINITIONS_V1[this.viewMode()].interactions.spaceActivation === 'clear-constellation') {
         this.command(event, { type: 'direct-attention', nodeIds: [], clearFocus: true, viewMode: 'overview' });
@@ -653,6 +655,7 @@ export class GraphInteractionInterpreter {
 
   private keyUp(event: Extract<GraphInputEventV1, { type: 'key-up' }>): void {
     if (event.key !== ' ' && event.key !== 'Spacebar') return;
+    if (this.options.spacePhysicsOverride) return;
     if (this.tagging.updateSpace(false)) this.command(event, { type: 'selection-presentation-changed' });
   }
 

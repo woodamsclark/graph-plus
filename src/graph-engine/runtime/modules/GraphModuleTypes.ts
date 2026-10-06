@@ -60,6 +60,8 @@ export interface GraphModulePipelineStateV1 {
   /** Runtime-only interaction state. It is never persisted or exported as graph data. */
   readonly draggedNodeId?: string;
   /** Transient per-step cursor displacement, resolved in screen space by the session. */
+  /** Temporary keyboard hold runs physics at maximum alpha without changing settings. */
+  readonly physicsOverrideHeld?: boolean;
   readonly cursorAttractionSteps?: Readonly<Record<string, Vec3>>;
   /** Runtime-only hover state supplied to presentation modules. */
   readonly hoveredNodeId?: string;

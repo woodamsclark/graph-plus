@@ -39,6 +39,8 @@ export class GraphInput {
     if (!enabled) this.reset();
   }
 
+  isSpaceHeld(): boolean { return this.enabled && !this.disposed && this.spaceHeld; }
+
   getCursorPoint(): GraphScreenPointV1 | undefined {
     return this.enabled && !this.disposed && this.mouseInside && !this.lastCtrl && !this.physicalCtrlHeld && this.activePointers.size === 0
       ? { ...this.lastMousePoint } : undefined;
@@ -75,6 +77,7 @@ export class GraphInput {
     canvas.addEventListener('wheel', this.onWheel, { passive: false });
     canvas.addEventListener('contextmenu', this.onContextMenu, { passive: false });
     canvas.addEventListener('keydown', this.onKeyDown);
+    this.options.platform.window.addEventListener('blur', this.onWindowBlur);
     this.options.platform.window.addEventListener('keyup', this.onKeyUp);
     this.options.platform.window.addEventListener('keydown', this.onModifierChange);
     this.options.platform.window.addEventListener('keyup', this.onModifierChange);
@@ -90,6 +93,7 @@ export class GraphInput {
     canvas.removeEventListener('wheel', this.onWheel);
     canvas.removeEventListener('contextmenu', this.onContextMenu);
     canvas.removeEventListener('keydown', this.onKeyDown);
+    this.options.platform.window.removeEventListener('blur', this.onWindowBlur);
     this.options.platform.window.removeEventListener('keyup', this.onKeyUp);
     this.options.platform.window.removeEventListener('keydown', this.onModifierChange);
     this.options.platform.window.removeEventListener('keyup', this.onModifierChange);
@@ -252,11 +256,17 @@ export class GraphInput {
     });
   };
 
+  private readonly onWindowBlur = (): void => {
+    this.spaceHeld = false;
+    this.options.onInputQueued?.();
+  };
+
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     if (!this.enabled || this.disposed) return;
     if (event.defaultPrevented) return;
     if (isGraphKeyboardCommand(event.key)) event.preventDefault();
-    if (event.key === ' ' || event.key === 'Spacebar') this.spaceHeld = true;
+    if ((event.key === ' ' || event.key === 'Spacebar') && !event.isComposing
+      && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) this.spaceHeld = true;
     this.push({
       ...this.base(),
       type: 'key-down',

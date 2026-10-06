@@ -93,6 +93,7 @@ export class SessionInteractionRuntime {
 
   constructor(private readonly options: {
     readonly sessionId: string;
+    readonly spacePhysicsOverride?: boolean;
     readonly dimensions: GraphDimensionsV1;
     readonly platform: SessionRuntimePlatformV1;
     readonly surface: SessionSurfaceV1;
@@ -146,6 +147,7 @@ export class SessionInteractionRuntime {
       onInputQueued: this.options.onInputQueued,
     });
     this.interpreter = new GraphInteractionInterpreter({
+      spacePhysicsOverride: this.options.spacePhysicsOverride,
       dimensions: this.options.dimensions,
       events: this.inputEvents,
       commands: this.commands,
@@ -233,6 +235,8 @@ export class SessionInteractionRuntime {
     this.input.reset();
     this.resetTransientState();
   }
+
+  isPhysicsOverrideHeld(): boolean { return this.options.spacePhysicsOverride === true && this.input.isSpaceHeld(); }
 
   getCursorPoint(): GraphScreenPointV1 | undefined {
     return this.input.getCursorPoint();

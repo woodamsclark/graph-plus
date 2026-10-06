@@ -2106,3 +2106,52 @@ test('node dragging batches world updates and suspends cursor gravity for nearby
   pointer(value, canvas, 'pointerup', 360, 180, 954); value.platform.flushFrame(200);
   await session.dispose();
 });
+
+
+test('Graph+ Space holds maximum-alpha physics over a disabled setting and releases on keyup or blur', async () => {
+  const value = runtimeHarness({ consumerId: 'graph-plus', profileId: 'default',
+    registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1,
+    document: graphDocument({ nodes: [graphNode('a'), graphNode('b')], edges: [] }) });
+  value.profiles.setUserOverrides('graph-plus', 'default', { dimensions: '2d', modules: {
+    'force-layout': { enabled: false, settings: { centeringStrength: 0, collisionRadius: 0 } },
+    anima: { settings: { cursorGravity: 'off' } },
+  } });
+  const session = await value.create(); const initial = await session.exportViewState();
+  await session.restoreViewState({ ...initial, selectedNodeIds: ['a'], positions: {
+    a: { x: -100, y: 0, z: 0 }, b: { x: 100, y: 0, z: 0 },
+  } });
+  const canvas = runtimeCanvas(value.container);
+  const press = () => canvas.dispatchEvent(new value.window.KeyboardEvent('keydown', { key: ' ', bubbles: true }) as unknown as Event);
+  press(); value.platform.flushFrame(100);
+  const running = await session.exportViewState();
+  equal((running.moduleState['force-layout'] as { alpha: number }).alpha, 1, 'held Space runs at maximum alpha');
+  deepEqual(running.selectedNodeIds, ['a'], 'Space never clears the constellation');
+  assert(JSON.stringify(running.positions) !== JSON.stringify(initial.positions), 'Space runs disabled physics temporarily');
+  value.platform.flushFrame(200);
+  equal(((await session.exportViewState()).moduleState['force-layout'] as { alpha: number }).alpha, 1, 'held Space does not cool');
+  value.window.dispatchEvent(new value.window.KeyboardEvent('keyup', { key: ' ' }));
+  value.platform.flushFrame(300);
+  const released = await session.exportViewState(); value.platform.flushFrame(400);
+  deepEqual((await session.exportViewState()).positions, released.positions, 'release restores disabled physics');
+  press(); value.platform.flushFrame(500);
+  value.window.dispatchEvent(new value.window.Event('blur')); value.platform.flushFrame(600);
+  const blurred = await session.exportViewState(); value.platform.flushFrame(700);
+  deepEqual((await session.exportViewState()).positions, blurred.positions, 'losing window focus cancels the hold');
+  await session.dispose();
+});
+
+
+test('Space physics override restores an enabled solver to its settled activity on release', () => {
+  const document = graphDocument({ nodes: [graphNode('a'), graphNode('b')], edges: [] });
+  const state = pipeline(document, { nodeIds: new Set(['a', 'b']), edgeIds: new Set() });
+  const force = new ForceLayoutModule('2d', readForceSettings({ repulsionStrength: 0,
+    centeringStrength: 0, collisionRadius: 0 }));
+  force.tick(state, 1 / 30);
+  force.restoreState({ schemaVersion: 1, alpha: 0, alphaTarget: 0, running: false, velocities: {} });
+  const held = { ...state, physicsOverrideHeld: true };
+  force.preferredTickIntervalMs(held); force.tick(held, 1 / 30);
+  equal((force.exportState() as { alpha: number }).alpha, 1, 'a settled solver wakes at maximum alpha');
+  force.preferredTickIntervalMs(state);
+  equal((force.exportState() as { alpha: number }).alpha, 0, 'release restores the prior alpha');
+  equal((force.exportState() as { running: boolean }).running, false, 'release restores settled ticking');
+});

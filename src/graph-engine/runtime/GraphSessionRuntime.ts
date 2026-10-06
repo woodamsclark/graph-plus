@@ -200,6 +200,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private rendererSelection!: GraphRendererSelectionV2;
   private renderSceneRevision = 0;
   private pendingDragGeometry = false;
+  private physicsOverrideHeld = false;
   private presentationRevision = 0;
   private interaction!: SessionInteractionRuntime;
   private moduleHost!: GraphModuleHost;
@@ -258,6 +259,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const frameStart = this.platform.now();
     const interactionStart = this.platform.now();
     this.interaction.tick();
+    const held = this.interaction.isPhysicsOverrideHeld();
+    if (held !== this.physicsOverrideHeld) {
+      this.physicsOverrideHeld = held;
+      this.moduleHost.updateProfile(this.physicsOverrideProfile(this.profile));
+    }
     if (this.pendingDragGeometry) {
       this.pendingDragGeometry = false;
       this.moduleHost.viewChanged(this.viewState);
@@ -277,6 +283,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.diagnostics.counters.moduleTicks += 1;
     const tickResult = this.moduleHost.tick({
       ...this.moduleView,
+      physicsOverrideHeld: held,
       cursorAttractionSteps: this.resolveCursorAttractionSteps(),
       draggedNodeId: this.interaction.getDraggedNodeId(),
       hoveredNodeId: this.interaction.getHoveredNodeId(),
@@ -448,6 +455,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         relationships: this.documentTopology().relationships('either'),
       });
       this.interaction = new SessionInteractionRuntime({
+        spacePhysicsOverride: this.consumerId === 'graph-plus',
         sessionId: this.sessionId,
         dimensions: this.profile.dimensions,
         platform: this.platform,
@@ -1058,6 +1066,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.refreshFrame(true, 'presentation');
   }
 
+  private physicsOverrideProfile(profile: EffectiveConsumerProfileV1): EffectiveConsumerProfileV1 {
+    const force = profile.modules['force-layout'];
+    if (!this.physicsOverrideHeld || !force || force.policy === 'forbidden' || force.enabled) return profile;
+    return { ...profile, modules: { ...profile.modules, 'force-layout': { ...force, enabled: true } } };
+  }
+
   private applyResolvedProfile(next: EffectiveConsumerProfileV1): void {
     const fatalIssues = next.issues.filter((issue) => issue.fatal);
     if (fatalIssues.length) throw new Error(fatalIssues.map((issue) => `${issue.path}: ${issue.message}`).join('; '));
@@ -1075,7 +1089,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.reconfigureDimensions(next);
       return;
     }
-    this.moduleHost.updateProfile(next);
+    this.moduleHost.updateProfile(this.physicsOverrideProfile(next));
     this.vision.setPerspectiveZoom(focalLengthMm(next.profileSettings) / 24);
     this.synchronizeCameraState();
     this.profile = next;

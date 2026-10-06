@@ -106,6 +106,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private suspended = false;
   private alpha = 1;
   private running = true;
+  private physicsOverrideReturn?: { alpha: number; alphaTarget: number; running: boolean };
   private pinnedKey = '';
   private projectionFilterKey: string | undefined;
   private regionLayoutKey = '';
@@ -203,6 +204,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   preferredTickIntervalMs(state: GraphModulePipelineStateV1): number | null {
+    this.synchronizePhysicsOverride(state.physicsOverrideHeld === true);
     if (this.suspended || state.formActive || state.document.nodes.length < 2) return null;
     const dragActive = state.draggedNodeId !== undefined
       && state.document.nodes.some((node) => node.id === state.draggedNodeId);
@@ -212,6 +214,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   tick(state: GraphModulePipelineStateV1, deltaSeconds: number) {
+    this.synchronizePhysicsOverride(state.physicsOverrideHeld === true);
     // A restored view can reach the first tick before a view lifecycle event. Keep
     // pin state correct without requiring the session kernel to special-case force.
     this.synchronizePinnedNodes(state.viewState);
@@ -374,16 +377,17 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     // ordinary step, then the whole state transition is blended by alpha so
     // reheating changes only speed, never the force field or its equilibrium.
     if (dragActive) this.alpha = ACTIVE_DRAG_ACTIVITY;
+    if (state.physicsOverrideHeld) { this.alpha = 1; this.alphaTarget = 1; }
     this.dragWasActive = dragActive;
     if (dragActive) this.settledStepCount = 0;
     const elapsedSeconds = Math.max(0, Math.min(0.25, deltaSeconds || FIXED_STEP_SECONDS));
-    if (!dragActive && !cursorActive && this.alpha < this.settings.alphaMin) {
+    if (!state.physicsOverrideHeld && !dragActive && !cursorActive && this.alpha < this.settings.alphaMin) {
       this.stop();
       return { requestNextFrame: false };
     }
     this.accumulatorSeconds += elapsedSeconds;
     if (this.accumulatorSeconds + 1e-12 < FIXED_STEP_SECONDS) {
-      this.coolBy(elapsedSeconds, dragActive, cursorActive);
+      if (!state.physicsOverrideHeld) this.coolBy(elapsedSeconds, dragActive, cursorActive);
       return {
         requestNextFrame: this.running,
         ...(this.running ? { nextFrameDelayMs: this.targetFrameIntervalMs(dragActive || cursorActive) } : {}),
@@ -447,8 +451,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
         ? this.settledStepCount + 1
         : 0;
     }
-    this.coolBy(elapsedSeconds, dragActive, cursorActive);
-    if (!dragActive && !cursorActive && this.settledStepCount >= SETTLED_STEP_COUNT) this.stop();
+    if (!state.physicsOverrideHeld) this.coolBy(elapsedSeconds, dragActive, cursorActive);
+    if (!state.physicsOverrideHeld && !dragActive && !cursorActive && this.settledStepCount >= SETTLED_STEP_COUNT) this.stop();
     return {
       ...(changed ? { positions: this.positions } : {}),
       requestNextFrame: this.running,
@@ -720,6 +724,17 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.documentKey = key;
     this.bufferDocumentSource = state.document;
     this.positionSource = this.positions;
+  }
+
+  private synchronizePhysicsOverride(held: boolean): void {
+    if (held) {
+      this.physicsOverrideReturn ??= { alpha: this.alpha, alphaTarget: this.alphaTarget, running: this.running };
+      this.alpha = 1; this.alphaTarget = 1; this.running = true;
+    } else if (this.physicsOverrideReturn) {
+      const previous = this.physicsOverrideReturn;
+      this.physicsOverrideReturn = undefined;
+      this.alpha = previous.alpha; this.alphaTarget = previous.alphaTarget; this.running = previous.running;
+    }
   }
 
   private reheatForChange(): void {
