@@ -316,6 +316,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.activeFrameInvalidations = null;
       return;
     }
+    // Cursor-only input can change proximity labels without changing hover or geometry.
+    if (this.activeFrameInvalidations.has('presentation')) this.projection.markDirty();
     this.updateRendererScene([...this.activeFrameInvalidations]);
     const render = this.projection.render(this.renderer);
     if (render) {

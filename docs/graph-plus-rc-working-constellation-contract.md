@@ -90,7 +90,7 @@ Right-click Center + Fit remains the explicit graph gesture for reframing/resizi
 Initial surface framing and the explicit Show in Graph+ reveal/fit operation remain
 available. Other engine consumers retain their configured framing policy. Peek exit never calls a camera transform or fit.
 
-Cursor gravity reaches 32 CSS pixels; label proximity remains independently fixed
+Cursor gravity reaches 16 CSS pixels; label proximity remains independently fixed
 at 96 CSS pixels. Changing label mode does not change the gravity radius.
 
 All non-void source-View nodes are hover targets, including disconnected dim
@@ -103,7 +103,7 @@ admission keeps the correct View step and does not recursively enter Focus.
 
 Forces Quick Settings offers Cursor gravity: Soft (default), Clingy, Off. Soft uses
 a broad shallow hyperbolic well; Clingy uses a narrower deeper well and a stronger
-bounded step. Both reach 32 CSS pixels, capture only the nearest eligible node and
+bounded step. Both reach 16 CSS pixels, capture only the nearest eligible node and
 cannot overshoot the cursor. Off removes attraction, never label proximity or
 hover peeking. The label reveal radius stays 96 CSS pixels in every mode. The choice
 is stored as `anima.cursorGravity` through the normal profile settings path.

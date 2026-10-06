@@ -133,7 +133,7 @@ test('live cursor field has the same short screen range in 2D and 3D and stops o
     const errors: string[] = [];
     session.onError(error => errors.push(error.code));
     const canvas = runtimeCanvas(value.container);
-    pointer(value, canvas, 'pointermove', 350, 180, 11, 'mouse');
+    pointer(value, canvas, 'pointermove', 330, 180, 11, 'mouse');
     value.platform.flushFrame(17);
     const after = await session.exportViewState();
     assert(after.positions.near.x > positions.near.x, 'nearby node should move toward the cursor');
@@ -151,7 +151,7 @@ test('live cursor field has the same short screen range in 2D and 3D and stops o
         value.platform.flushFrame(timestamp += 34);
       }
       const beforeVisit = await session.exportViewState();
-      pointer(value, canvas, 'pointermove', 350, 180, 11, 'mouse');
+      pointer(value, canvas, 'pointermove', 330, 180, 11, 'mouse');
       value.platform.flushFrame(timestamp += 34);
       const nextVisit = await session.exportViewState();
       assert(nextVisit.positions.near.x > beforeVisit.positions.near.x, 'each cursor return wakes settled session physics');
@@ -178,10 +178,10 @@ test('cursor gravity pulls only the nearest eligible node and never a runner-up 
     camera.setViewport(640, 360);
     const depth = camera.worldToScreen(initial.camera.target).depth;
     const positions = { a: camera.screenToWorld(320, 180, depth),
-      b: camera.screenToWorld(360, 180, depth), far: camera.screenToWorld(500, 180, depth) };
+      b: camera.screenToWorld(344, 180, depth), far: camera.screenToWorld(500, 180, depth) };
     await session.restoreViewState({ ...initial, positions });
     const canvas = runtimeCanvas(value.container);
-    pointer(value, canvas, 'pointermove', 340, 180, 13);
+    pointer(value, canvas, 'pointermove', 332, 180, 13);
     value.platform.flushFrame(100);
     const pulled = await session.exportViewState();
     assert(pulled.positions.a.x > positions.a.x, 'a stable node-ID tie selects a single nearest node');
@@ -191,7 +191,7 @@ test('cursor gravity pulls only the nearest eligible node and never a runner-up 
     pointer(value, canvas, 'pointermove', centered.x, centered.y, 13);
     value.platform.flushFrame(200);
     deepEqual((await session.exportViewState()).positions, pulled.positions, 'a centered nearest node cannot pass attraction to the runner-up');
-    pointer(value, canvas, 'pointermove', 370, 180, 13);
+    pointer(value, canvas, 'pointermove', 354, 180, 13);
     value.platform.flushFrame(300);
     const switched = await session.exportViewState();
     assert(switched.positions.b.x > pulled.positions.b.x, 'moving the cursor hands the well to the new nearest node');
@@ -375,7 +375,7 @@ test('live label modes separate absolute Off, cursor proximity, and adaptive lab
     value.platform.flushFrame();
     deepEqual(drawn(), mode === 'proximity' ? ['near'] : mode === 'adaptive' ? ['far', 'near'] : [], 'each label mode controls its own admission channel');
     equal(scene!.policy?.labelMode, mode, 'the dropdown updates the live label mode');
-    equal(scene!.policy?.cursorAttractionRadiusPx, 32, 'the smaller gravity well remains independent of label mode');
+    equal(scene!.policy?.cursorAttractionRadiusPx, 16, 'the smaller gravity well remains independent of label mode');
     equal(scene!.policy?.cursorLabelRevealRadiusPx, 96, 'proximity mode uses the fixed screen-space field');
   }
   await session.dispose();
@@ -2056,4 +2056,27 @@ test('Cursor gravity Soft, Clingy and Off change nearest-node attraction indepen
     assert(shifts.get('clingy')! > shifts.get('soft')! * 2, 'Clingy provides a clearly stronger capture');
     assert(shifts.get('clingy')! < 10, 'the pull cannot overshoot the cursor');
   }
+});
+
+
+test('idle proximity labels repaint as the cursor leaves a cluster for empty space', async () => {
+  const value = runtimeHarness({ consumerId: 'graph-plus', profileId: 'default',
+    registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1,
+    document: graphDocument({ nodes: [graphNode('near')], edges: [] }) });
+  value.profiles.setUserOverrides('graph-plus', 'default', { dimensions: '2d', modules: {
+    'force-layout': { enabled: false }, anima: { settings: { cursorGravity: 'off' } },
+    rendering: { settings: { labelMode: 'proximity' } },
+  } });
+  const session = await value.create(); const initial = await session.exportViewState();
+  const camera = new GraphCameraController(initial.camera, '2d'); camera.setViewport(640, 360);
+  await session.restoreViewState({ ...initial, positions: { near: camera.screenToWorld(320, 180, 1000) } });
+  const canvas = runtimeCanvas(value.container);
+  for (const [x, visible] of [[350, true], [380, true], [500, false]] as const) {
+    value.drawArguments.length = 0;
+    pointer(value, canvas, 'pointermove', x, 180, 953); value.platform.flushFrame();
+    assert(value.drawArguments.length > 0, 'cursor-only movement repaints the idle scene');
+    equal(value.drawArguments.some(call => call.method === 'fillText' && call.args[0] === 'near'), visible,
+      'the last proximity label disappears beyond its radius without another node hover');
+  }
+  await session.dispose();
 });

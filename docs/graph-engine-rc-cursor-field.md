@@ -9,7 +9,7 @@ camera, saved settings or simulation.
 
 ## Behavior
 
-- Attraction reaches 32 CSS pixels from the mouse, with a softened hyperbolic falloff. Soft is shallow and broad; Clingy is deeper
+- Attraction reaches 16 CSS pixels from the mouse, with a softened hyperbolic falloff. Soft is shallow and broad; Clingy is deeper
   and narrower inside the same radius. Off disables attraction only, leaving the
   independent 96-pixel cursor label reveal active. Soft is the default.
   Only the nearest eligible node receives a pull, capped at 1.5 screen pixels per step
@@ -111,3 +111,6 @@ inert Focus-root hover, future-root hover label size and active-note membership,
 timed preview delay/fade/cancellation in every View and dimension, fresh target delays,
 partial-fade reversal, immediate activation during waiting, and idle scheduling.
 Obsidian desktop visual acceptance remains a separate smoke check.
+
+Cursor-only presentation invalidations repaint even when hover and physics are idle.
+This ensures the last proximity label clears when the cursor leaves a cluster for empty space.
