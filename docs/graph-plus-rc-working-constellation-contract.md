@@ -48,13 +48,12 @@ duplicate host events do not resurrect a cleared group. Rapid activations retain
 note even when the follow queue coalesces its latest subject. A newly activated note
 not yet in canonical graph data waits for canonical reconciliation before admission.
 
-Graph+ enables the host-neutral `attention.clearOnOverviewEntry` experience policy:
-returning from Constellation or Focus to Overview clears membership, while entering
-Focus or returning from Focus to Constellation preserves it. Pending unavailable-note
-admissions are also canceled on Overview entry. The engine's default preserves
-membership for consumers that do not enable this policy. Users can also clear through
-the existing explicit Clear constellation action. A later distinct note activation
-starts building the group again.
+Returning from Constellation or Focus to Overview preserves constellation membership,
+including pending unavailable-note admissions. A constellation member's secondary-click
+context menu includes Clear constellation; non-members do not offer it. Explicit clear
+removes the working group and cancels pending admissions. Local remains Focus-only and
+retains its required root while removing the other members. A later distinct note
+activation starts building the group again.
 
 Regression coverage lives in `views.test.ts`, `ego.test.ts`,
 `ego-interaction-plan.test.ts`, `v16-native-presentation.test.ts`, and Graph+ adapter and

@@ -147,6 +147,10 @@ export class GraphPlusPresentationV1<TFile> {
         icon: 'file-text',
         isAvailable: (context) => this.nodeKind(context.nodeId) !== undefined,
         run: (context) => this.openNode(context.nodeId),
+      }, {
+        id: 'clear-constellation', label: 'Clear constellation', icon: 'eraser',
+        isAvailable: context => context.selectedNodeIds.includes(context.nodeId),
+        run: () => this.clearConstellation(),
       }]);
       if (this.policy.persistence === 'checkpoint') await this.openGlobal();
       else await this.openLocal();
@@ -308,6 +312,14 @@ export class GraphPlusPresentationV1<TFile> {
     }
   }
 
+  async clearConstellation(): Promise<void> {
+    this.pendingActiveConstellationNodes.clear();
+    const state = await this.session?.exportViewState();
+    if (!state) return;
+    // Local remains Focus-only; its root is the minimum required Attention subject.
+    await this.session?.setSelection(this.policy.mode === 'local' && state.focusedNodeId ? [state.focusedNodeId] : []);
+  }
+
   async recenterFocusedNode(): Promise<void> {
     const state = await this.session?.exportViewState();
     if (state?.focusedNodeId) await this.receiveApplicationAttention(state.focusedNodeId, 'recenter-focus');
@@ -427,9 +439,6 @@ export class GraphPlusPresentationV1<TFile> {
     this.checkpoint?.attach(session, document);
     this.sessionSubscriptions.push(session.onError((error) => this.options.onError?.(error)));
     this.sessionSubscriptions.push(session.onIntent((intent) => this.handleIntent(intent, session)));
-    this.sessionSubscriptions.push(session.onViewChanged(view => {
-      if (view.id === 'overview') this.pendingActiveConstellationNodes.clear();
-    }));
     this.sessionSubscriptions.push(session.onWorldChanged((event) => {
       void this.options.onWorldStateChanged?.(event);
     }));

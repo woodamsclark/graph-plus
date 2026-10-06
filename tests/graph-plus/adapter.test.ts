@@ -1,3 +1,4 @@
+import type { GraphSessionControlPortV1 } from '../../src/graph-engine/runtime/host/GraphSessionControlPort.ts';
 import type { ConsumerRegistrationV1 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { ConsumerProfileRegistry } from '../../src/graph-engine/core/profile/index.ts';
 import { GraphCameraController, SessionFactory } from '../../src/graph-engine/runtime/index.ts';
@@ -604,8 +605,11 @@ test('Active notes build a clearable constellation without moving Global framing
   const fixture = snapshot(); let current: any = fixture.value;
   const runtime = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
   runtime.profiles.setUserOverrides('graph-plus', 'default', { modules: { 'force-layout': { enabled: false } } });
+  let controls: GraphSessionControlPortV1 | undefined;
   const core = new GraphEngineProviderCoreV1({ engineVersion: '2.0.0', engineInstanceId: 'active-constellation-test',
-    capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory });
+    capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory, sessionUiHost: { mount: async context => {
+      controls = context.controls; return { dispose: () => undefined };
+    } } });
   const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
   assert(lease.ok, 'Graph+ obtains an independent presentation lease');
   const application = new GraphPlusApplicationV1({ model: new GraphPlusVaultModelV1({ read: () => current }, { countDuplicateLinks: true }),
@@ -618,6 +622,9 @@ test('Active notes build a clearable constellation without moving Global framing
   const settle = async () => { for (let i = 0; i < 100; i += 1) await Promise.resolve(); };
   const initial = await session.exportViewState();
   equal(initial.viewMode, 'overview', 'startup stays in Overview');
+  assert(controls, 'context-menu action controls are mounted');
+  equal(controls.resolveNodeActions(['clear-constellation'], alpha).length, 1, 'a member offers Clear constellation');
+  equal(controls.resolveNodeActions(['clear-constellation'], beta).length, 0, 'a non-member does not offer Clear constellation');
   deepEqual(initial.selectedNodeIds, [alpha], 'the active startup note seeds the constellation');
   equal((await session.exportEffectiveSettings()).modules.rendering.settings.labelMode, 'proximity', 'Cursor proximity is the default label mode');
   application.receiveHostEvent({ type: 'active-note-changed', nodeId: beta }); await settle();
@@ -636,7 +643,11 @@ test('Active notes build a clearable constellation without moving Global framing
   await session.setView('explore');
   deepEqual((await session.exportViewState()).selectedNodeIds, [alpha, beta, gamma], 'Focus back retains the working constellation');
   await session.setView('overview');
-  deepEqual((await session.exportViewState()).selectedNodeIds, [], 'Constellation exit clears the working group');
+  deepEqual((await session.exportViewState()).selectedNodeIds, [alpha, beta, gamma], 'Constellation exit preserves the working group');
+  equal(controls.invokeNodeAction('clear-constellation', alpha), true, 'member menu can invoke clear');
+  await settle();
+  equal(controls.resolveNodeActions(['clear-constellation'], alpha).length, 0, 'cleared nodes no longer offer the menu item');
+  deepEqual((await session.exportViewState()).selectedNodeIds, [], 'explicit clearing removes the working group');
   application.receiveHostEvent({ type: 'active-note-changed', nodeId: gamma }); await settle();
   deepEqual((await session.exportViewState()).selectedNodeIds, [], 'duplicate host activity cannot resurrect a cleared constellation');
   application.receiveHostEvent({ type: 'active-note-changed', nodeId: alpha });

@@ -65,7 +65,7 @@ export function graphPlusEngineExperienceContractV1(
     attention: {
       ...(policy.attentionCardinality === 'single-subject' ? { maximumNodeCount: 1 } : {}),
       overflow: 'preserve-intent-subject',
-      clearOnOverviewEntry: true,
+      clearOnOverviewEntry: false,
     },
     awareness: { attentionNeighborhoodDepth: policy.attentionAwarenessDepth },
     permittedInteractions: [...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1.permittedInteractions],

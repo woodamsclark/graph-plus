@@ -974,7 +974,7 @@ test('Overview commitment retains its node pivot and Constellation can peek any 
   await hover('isolated');
   equal(hovered, 'isolated', 'a distant source-visible node remains pickable through the temporary Focus scene');
   await swipe(positions.isolated);
-  deepEqual((await session.exportViewState()).selectedNodeIds, ['b'], 'candidate peeking never commits membership');
+  deepEqual((await session.exportViewState()).selectedNodeIds, ['a', 'b'], 'candidate peeking preserves membership retained across Overview entry');
   equal(session.getActiveView().id, 'explore', 'candidate peeking respects its admission step in the flow');
   await session.focusNode('b'); value.platform.advanceTime(20); value.platform.flushFrame();
   await hover('isolated');
