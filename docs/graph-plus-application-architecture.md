@@ -81,7 +81,7 @@ not write opaque identity metadata into notes or maintain a fallible rename ledg
 | Document scope | Full vault | The same full vault |
 | Subject inputs | Ego | Ego and active note |
 | Initial View | Overview | Focus on the active note |
-| Interaction states | Overview, Constellation, Focus | Overview, Constellation, Focus |
+| Interaction states | Overview, Constellation, Focus | Focus only |
 | Camera | Pane-local | Pane-local |
 | Persistence | Owns the vault checkpoint | Reuses the shared graph world; its viewport state is ephemeral |
 | Active-note following | No | Yes |

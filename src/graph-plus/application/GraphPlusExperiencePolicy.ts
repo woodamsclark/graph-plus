@@ -39,7 +39,7 @@ export const GRAPH_PLUS_EXPERIENCE_POLICIES_V1: Readonly<
     mode: 'local',
     documentScope: 'vault',
     subjectSources: ['ego', 'active-note'],
-    allowedInteractionStates: ['overview', 'explore', 'focus'],
+    allowedInteractionStates: ['focus'],
     attentionCardinality: 'constellation',
     attentionAwarenessDepth: 0,
     persistence: 'ephemeral',

@@ -115,3 +115,5 @@ Drag input bursts compose and publish their final position once per frame.
 Graph+ RC reserves plain Space for a temporary physics override: while held, force layout ticks at alpha 1 even if disabled in settings. Release or window blur restores the configured behavior. Holding Space never clears the constellation or changes saved settings.
 
 Cursor proximity label reveal pauses immediately while hovering any node, and resumes in empty space. View and peek label policies continue to apply; cursor gravity is unaffected.
+
+Local Graph+ is Focus-only. Background clicks and Escape cannot exit Focus; absence of an active Markdown note retains the last root. Document internal-link hover is resolved by the Obsidian bridge and forwarded only to Local presentations through the engine node-hover input. It shares graph hover highlighting, root-sized label styling, timed peek/pivot and fade-out without committing Attention or Focus. Link leave clears the host hover. Global remains independent.

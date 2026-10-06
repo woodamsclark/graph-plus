@@ -1,3 +1,4 @@
+import { graphPlusEngineExperienceContractV1, graphPlusExperiencePolicyV1 } from '../../src/graph-plus/application/GraphPlusExperiencePolicy.ts';
 import { GraphInput } from '../../src/graph-engine/runtime/interaction/GraphInput.ts';
 import { BufferedQueue } from '../../src/graph-engine/runtime/interaction/BufferedQueue.ts';
 import type {
@@ -2188,4 +2189,50 @@ test('hover suspends cursor label proximity while retaining View labels and resu
   pointer(value, canvas, 'pointermove', 350, 180, 955); value.platform.flushFrame(1100);
   equal(scene!.policy?.cursorLabelRevealRadiusPx, 96, 'leaving hover restores proximity reveal');
   await session.dispose();
+});
+
+
+test('Local Focus ignores background exits and document link hover uses the node peek lifecycle', async () => {
+  for (const dimensions of ['2d', '3d'] as const) {
+    let scene: GraphRenderSceneV2 | undefined;
+    const registry = new GraphRendererRegistryV2();
+    registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true, create: ({ createCanvas, now }) => {
+      const renderer = new CanvasGraphRenderer(createCanvas(), now);
+      const update = renderer.updateScene.bind(renderer);
+      renderer.updateScene = next => { scene = next; update(next); };
+      return renderer;
+    } });
+    const value = runtimeHarness({ consumerId: 'graph-plus', profileId: 'default',
+      registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1, rendererRegistry: registry,
+      experience: graphPlusEngineExperienceContractV1(graphPlusExperiencePolicyV1('local')),
+      document: graphDocument({ nodes: [graphNode('root'), graphNode('neighbor')], edges: [graphEdge('rn', 'root', 'neighbor')] }) });
+    value.profiles.setUserOverrides('graph-plus', 'default', { dimensions, modules: {
+      'force-layout': { enabled: false }, anima: { settings: { cursorGravity: 'off' } },
+    } });
+    const session = await value.create();
+    await session.focusNode('root'); value.platform.flushFrame(100);
+    const initial = await session.exportViewState();
+    const rootLabelSize = scene!.nodes.find(node => node.id === 'root')!.labelFontSize;
+    const neighborLabelSize = scene!.nodes.find(node => node.id === 'neighbor')!.labelFontSize;
+    const canvas = runtimeCanvas(value.container);
+    pointer(value, canvas, 'pointerdown', -100, -100, 956);
+    pointer(value, canvas, 'pointerup', -100, -100, 956); value.platform.flushFrame(200);
+    const afterBackground = await session.exportViewState();
+    equal(afterBackground.viewMode, 'focus', 'background click cannot exit Local Focus');
+    equal(afterBackground.focusedNodeId, 'root', 'background click preserves the root');
+    deepEqual(afterBackground.selectedNodeIds, initial.selectedNodeIds, 'background click preserves constellation');
+    assert(session.setNodeHover, 'engine exposes host hover input');
+    await session.setNodeHover('neighbor'); value.platform.flushFrame(300);
+    equal(scene!.policy?.cursorLabelRevealRadiusPx, 0, 'host hover enters the same node-hover state');
+    value.platform.advanceTime(800); value.platform.flushTimer(); value.platform.flushFrame(1100);
+    const hovered = scene!.nodes.find(node => node.id === 'neighbor')!;
+    assert(hovered.labelFontSize > neighborLabelSize, 'link hover grows the next-root label');
+    equal(hovered.labelFontSize, rootLabelSize, 'link hover receives root-sized label styling');
+    equal((await session.exportViewState()).focusedNodeId, 'root', 'peeking never commits the new root');
+    await session.setNodeHover(null); value.platform.flushFrame(1200);
+    value.platform.advanceTime(800); value.platform.flushTimer(); value.platform.flushFrame(2000);
+    equal(scene!.nodes.find(node => node.id === 'neighbor')!.labelFontSize, neighborLabelSize, 'link leave fades back to the committed Focus scene');
+    equal((await session.exportViewState()).focusedNodeId, 'root', 'link leave retains Local root');
+    await session.dispose();
+  }
 });

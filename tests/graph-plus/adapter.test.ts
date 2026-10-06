@@ -383,8 +383,8 @@ test('Graph+ experience policy gives Global and Local the same canonical documen
     'Local should present the exact same canonical graph rather than deriving a neighborhood document');
   deepEqual(local.nodes.map((node) => node.id), canonical.document.nodes.map((node) => node.id),
     'Local should retain canonical node identity and order');
-  deepEqual(localPolicy.allowedInteractionStates, ['overview', 'explore', 'focus'],
-    'Local should retain the same available Views after starting in Focus');
+  deepEqual(localPolicy.allowedInteractionStates, ['focus'],
+    'Local remains locked in Focus');
   equal(localPolicy.persistence, 'ephemeral', 'Local policy must not inherit the Global checkpoint');
   const globalExperience = graphPlusEngineExperienceContractV1(globalPolicy);
   const localExperience = graphPlusEngineExperienceContractV1(localPolicy);
@@ -394,8 +394,8 @@ test('Graph+ experience policy gives Global and Local the same canonical documen
     'Local should permit the shared constellation to remain in Attention');
   equal(localExperience.awareness.attentionNeighborhoodDepth, 0,
     'Local should not manufacture a second neighborhood projection around Attention');
-  deepEqual(localExperience.allowedStates, ['overview', 'explore', 'focus'],
-    'Local and Global should expose the same engine Views');
+  deepEqual(localExperience.allowedStates, ['focus'],
+    'Local allows only the Focus engine View');
   equal(localExperience.permittedInteractions.includes('move-subject'), true,
     'Local Focus policy should retain host-neutral node dragging');
 });
@@ -1002,7 +1002,7 @@ test('Local Graph+ reuses the full graph while active-note Focus changes', async
   const blank = await session.exportViewState();
   deepEqual(blank.selectedNodeIds, [alphaId, betaId],
     'a rootless Local presentation retains its working constellation');
-  equal(blank.focusedNodeId, undefined, 'dropping out should release Focus into constellation mode');
+  equal(blank.focusedNodeId, alphaId, 'absence of an active note retains the last Local Focus root');
   await consumer.close();
   await core.dispose();
 });

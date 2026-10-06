@@ -712,6 +712,13 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (changed && this.experience.framing.focus.entry !== 'preserve') this.interaction.recenterSubject(nodeId);
   }
 
+  async setNodeHover(nodeId: string | null): Promise<void> {
+    this.requireActive();
+    if (nodeId !== null && (!this.renderSelection.nodeIds.has(nodeId)
+      || !this.store.readDocument().nodes.some(node => node.id === nodeId))) return;
+    this.interaction.queueNodeHover(nodeId ?? undefined);
+  }
+
   async applyExternalInfluence(
     influence: GraphExternalInfluenceV1,
   ): Promise<GraphExternalInfluenceResultV1> {

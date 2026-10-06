@@ -52,6 +52,8 @@ export interface GraphSessionV1 {
   ): Promise<GraphExternalInfluenceResultV1>;
   /** Retain semantic preview while the pointer is inside a consumer preview surface. */
   setPreviewSurfaceActive(active: boolean): Promise<void>;
+  /** Host-translated link hover uses the same temporary node peek as graph hover. */
+  setNodeHover?(nodeId: string | null): Promise<void>;
   /** Dismiss transient semantic preview without changing hover, focus, or selection. */
   clearPreview(): Promise<void>;
   setNodePinned(nodeId: string, pinned: boolean): Promise<void>;

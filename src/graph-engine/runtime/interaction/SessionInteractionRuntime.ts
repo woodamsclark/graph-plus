@@ -194,6 +194,18 @@ export class SessionInteractionRuntime {
     this.updateCursor();
   }
 
+  queueNodeHover(nodeId: string | undefined): void {
+    if (nodeId !== undefined && !this.isNodeInteractiveInCurrentState(nodeId)) return;
+    const document = this.options.getDocument();
+    const position = nodeId === undefined ? undefined : this.options.getInteractivePositions()[nodeId];
+    const point = position ? this.options.vision.worldToScreen(position) : undefined;
+    this.commands.push({ type: 'set-hover', identity: { documentId: document.documentId, documentRevision: document.revision },
+      timestamp: this.options.platform.now(), nodeId, mod: false, ctrl: false,
+      ...(point ? { point: { x: point.x, y: point.y } } : {}),
+    });
+    this.options.onInputQueued?.();
+  }
+
   queueConstellationToggle(nodeId: string, modality: EgoInteractionInputV1['modality'] = 'keyboard'): void {
     this.queueViewIntent({ phase: 'activate', target: { kind: 'node', nodeId }, modality,
       modifiers: { ctrl: false, meta: false, shift: false, alt: false }, membershipAction: 'toggle' });

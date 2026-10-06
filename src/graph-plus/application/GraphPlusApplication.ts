@@ -352,6 +352,9 @@ export class GraphPlusPresentationV1<TFile> {
   setSuspended(suspended: boolean): void { this.session?.setSuspended(suspended); }
   async setPreviewSurfaceActive(active: boolean): Promise<void> { await this.session?.setPreviewSurfaceActive(active); }
   async clearPreview(): Promise<void> { await this.session?.clearPreview(); }
+  async hoverDocumentLink(nodeId?: string): Promise<void> {
+    if (this.policy.mode === 'local') await this.session?.setNodeHover?.(nodeId ?? null);
+  }
 
   async resetLayoutData(): Promise<boolean> {
     if (this.policy.persistence !== 'checkpoint' || this.resettingLayout || !this.session || !this.document) return false;
@@ -503,7 +506,8 @@ export class GraphPlusPresentationV1<TFile> {
     try {
       const state = await this.session.exportViewState();
       const available = new Set(this.document?.nodes.map((node) => node.id) ?? []);
-      const focusNodeId = root && available.has(root) ? root : undefined;
+      const candidateRoot = root ?? state.focusedNodeId;
+      const focusNodeId = candidateRoot && available.has(candidateRoot) ? candidateRoot : undefined;
       // Canonical note arrival extends the current working constellation. Focus
       // moves locally, while the prior subject and deliberate members stay admitted.
       const attentionNodeIds = [...new Set([...state.selectedNodeIds,
@@ -639,7 +643,8 @@ export type GraphPlusPresentationAttachOptionsV1<TFile> = Omit<
 /** Activity outside Graph+; application policy translates it into conscious state. */
 export type GraphPlusUnconsciousActivityV1 =
   | { readonly type: 'canonical-vault-invalidated' }
-  | { readonly type: 'active-note-changed'; readonly nodeId?: string; readonly timestamp?: number };
+  | { readonly type: 'active-note-changed'; readonly nodeId?: string; readonly timestamp?: number }
+  | { readonly type: 'document-link-hovered'; readonly nodeId?: string };
 
 /** @deprecated Host transport name; use the application boundary's unconscious activity type. */
 export type GraphPlusHostEventV1 = GraphPlusUnconsciousActivityV1;
@@ -786,6 +791,10 @@ export class GraphPlusApplicationV1<TFile> {
 
   receiveUnconsciousActivity(event: GraphPlusUnconsciousActivityV1): void {
     if (this.disposed) return;
+    if (event.type === 'document-link-hovered') {
+      for (const presentation of this.presentations) void presentation.hoverDocumentLink(event.nodeId);
+      return;
+    }
     if (event.type === 'canonical-vault-invalidated') {
       this.canonicalDirty = true;
       if (this.reconcileRunning) this.reconcileAgain = true;
