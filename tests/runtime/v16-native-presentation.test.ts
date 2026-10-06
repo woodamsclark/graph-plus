@@ -2043,8 +2043,10 @@ test('Cursor gravity Soft, Clingy and Off change nearest-node attraction indepen
       const after = await session.exportViewState();
       shifts.set(mode, camera.worldToScreen(after.positions.near).x - 320);
       deepEqual(after.positions.runner, positions.runner, 'the runner-up remains still inside the well');
+      value.drawArguments.length = 0;
+      pointer(value, canvas, 'pointermove', 260, 180, 952); value.platform.flushFrame(150);
       assert(value.drawArguments.some(call => call.method === 'fillText' && call.args[0] === 'near'),
-        'nearby labels remain visible in every gravity mode, including Off');
+        'nearby labels remain visible outside node hover in every gravity mode, including Off');
       if (mode === 'off') deepEqual(after.positions, positions, 'Off disables attraction without disabling labels');
       await session.setSessionOverrides({ modules: { anima: { settings: { cursorGravity: 'off' } } } });
       const stopped = await session.exportViewState();
@@ -2154,4 +2156,36 @@ test('Space physics override restores an enabled solver to its settled activity 
   force.preferredTickIntervalMs(state);
   equal((force.exportState() as { alpha: number }).alpha, 0, 'release restores the prior alpha');
   equal((force.exportState() as { running: boolean }).running, false, 'release restores settled ticking');
+});
+
+
+test('hover suspends cursor label proximity while retaining View labels and resumes on empty space', async () => {
+  let scene: GraphRenderSceneV2 | undefined;
+  const registry = new GraphRendererRegistryV2();
+  registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true, create: ({ createCanvas, now }) => {
+    const renderer = new CanvasGraphRenderer(createCanvas(), now);
+    const update = renderer.updateScene.bind(renderer);
+    renderer.updateScene = next => { scene = next; update(next); };
+    return renderer;
+  } });
+  const value = runtimeHarness({ consumerId: 'graph-plus', profileId: 'default',
+    registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1, rendererRegistry: registry,
+    document: graphDocument({ nodes: [graphNode('a'), graphNode('b')], edges: [graphEdge('ab', 'a', 'b')] }) });
+  value.profiles.setUserOverrides('graph-plus', 'default', { dimensions: '2d', modules: {
+    'force-layout': { enabled: false }, anima: { settings: { cursorGravity: 'off' } },
+  } });
+  const session = await value.create(); const initial = await session.exportViewState();
+  const camera = new GraphCameraController(initial.camera, '2d'); camera.setViewport(640, 360);
+  await session.restoreViewState({ ...initial, positions: { a: camera.screenToWorld(320, 180, 1000),
+    b: camera.screenToWorld(400, 180, 1000) } });
+  const canvas = runtimeCanvas(value.container);
+  pointer(value, canvas, 'pointermove', 350, 180, 955); value.platform.flushFrame(100);
+  equal(scene!.policy?.cursorLabelRevealRadiusPx, 96, 'empty space retains proximity reveal');
+  pointer(value, canvas, 'pointermove', 320, 180, 955); value.platform.flushFrame(200);
+  equal(scene!.policy?.cursorLabelRevealRadiusPx, 0, 'hover disables the proximity channel immediately');
+  value.platform.advanceTime(800); value.platform.flushTimer(); value.platform.flushFrame(1000);
+  assert(scene!.nodes.some(node => node.labelForceVisible || node.labelAlwaysVisible), 'peek still admits View-required labels');
+  pointer(value, canvas, 'pointermove', 350, 180, 955); value.platform.flushFrame(1100);
+  equal(scene!.policy?.cursorLabelRevealRadiusPx, 96, 'leaving hover restores proximity reveal');
+  await session.dispose();
 });

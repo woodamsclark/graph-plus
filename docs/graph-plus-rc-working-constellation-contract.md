@@ -113,3 +113,5 @@ RC excludes region capabilities, forces and controls, including saved enabled ov
 Drag input bursts compose and publish their final position once per frame.
 
 Graph+ RC reserves plain Space for a temporary physics override: while held, force layout ticks at alpha 1 even if disabled in settings. Release or window blur restores the configured behavior. Holding Space never clears the constellation or changes saved settings.
+
+Cursor proximity label reveal pauses immediately while hovering any node, and resumes in empty space. View and peek label policies continue to apply; cursor gravity is unaffected.

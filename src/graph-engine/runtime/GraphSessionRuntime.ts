@@ -1543,6 +1543,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       ...frame,
       ...(retainedHoverNodeId ? { nodes: frame.nodes.map((node) => node.id === retainedHoverNodeId
         ? { ...node, opacity: 1 } : node) } : {}),
+      // Hover/peek policy owns labels while a node is under the cursor.
+      policy: this.interaction.getHoveredNodeId() !== undefined
+        ? { ...frame.policy, cursorLabelRevealRadiusPx: 0 } : frame.policy,
       cursorScreenPoint: this.interaction.getCursorPoint(),
       revision: this.renderSceneRevision,
       presentationRevision: this.presentationRevision,

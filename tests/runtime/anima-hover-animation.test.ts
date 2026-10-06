@@ -77,7 +77,7 @@ test('Anima delays and fades each View preview in and out in 2D and 3D without m
       advance(1); equal(opacity(), baseline, 'fade starts at zero after 200ms');
       advance(250); close(opacity(), (baseline + target) / 2, 'halfway fade blends the committed and admitted scenes');
       equal(scene!.nodes.find(node => node.id === 'd')!.strokeWidth, undefined, 'fade-in cannot invent an outline on an ordinary node');
-      equal(scene!.policy?.cursorLabelRevealRadiusPx, 96, 'label proximity remains independent of preview timing');
+      equal(scene!.policy?.cursorLabelRevealRadiusPx, 0, 'hover suspends proximity labels throughout preview timing');
       advance(250); close(opacity(), target, 'the preview reaches its exact admitted scene');
       hover('pointerleave'); close(opacity(), target, 'leaving does not snap the scene back');
       advance(250); close(opacity(), (baseline + target) / 2, 'leave fades halfway toward the normal View');
