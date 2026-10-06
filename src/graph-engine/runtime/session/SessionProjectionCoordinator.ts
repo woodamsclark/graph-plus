@@ -86,7 +86,8 @@ export class SessionProjectionCoordinatorV1 {
       presentationPolicy: options.presentationPolicy,
       motionTargets: {},
     };
-    const compile = (preview: GraphInteractionPreviewV1 | null | undefined, hoveredNodeId = options.hoveredNodeId) => {
+    const compile = (preview: GraphInteractionPreviewV1 | null | undefined, hoveredInput: string | null | undefined = options.hoveredNodeId) => {
+      const hoveredNodeId = hoveredInput ?? undefined;
       const moduleView = options.host.contribute({ ...input, objectActivationPreview: preview, hoveredNodeId });
       const snapshot = createAnimusSnapshotV1({
         document: moduleView.document,
@@ -133,9 +134,16 @@ export class SessionProjectionCoordinatorV1 {
       preview: objectActivationPreview, hoveredNodeId: options.hoveredNodeId,
       committed: options.previewCommitted === true, now: options.now,
     });
-    const baseline = compile(null);
+    const focusLabelEntry = options.viewState.viewMode === 'focus'
+      && options.hoveredNodeId !== undefined && options.hoveredNodeId !== options.viewState.focusedNodeId
+      && objectActivationPreview?.activation === 'primary';
+    // Keep the committed small label as the animation's starting point. Hover
+    // reveal is immediate; the new root size still waits for the timed peek.
+    const baseline = compile(null, focusLabelEntry ? null : options.hoveredNodeId);
     this.committedFrames.set(baseline.frame);
-    let frame = baseline.frame;
+    let frame = focusLabelEntry ? { ...baseline.frame, nodes: baseline.frame.nodes.map(node =>
+      node.id === options.hoveredNodeId ? { ...node, showLabel: true, labelForceVisible: true,
+        labelAlwaysVisible: true, labelOpacity: 1, labelFontSize: Math.max(12, node.labelFontSize) } : node) } : baseline.frame;
     for (const layer of layers) {
       frame = blendAnimaPreviewFrameV1(frame, compile(layer.preview, layer.hoveredNodeId).frame, layer.strength);
     }

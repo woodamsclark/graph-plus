@@ -102,3 +102,42 @@ test('Anima delays and fades each View preview in and out in 2D and 3D without m
     }
   }
 });
+
+
+test('Focus hover keeps its label visible through the delay and grows it continuously to root size', async () => {
+  for (const dimensions of ['2d', '3d'] as const) {
+    let scene: GraphRenderSceneV2 | undefined;
+    const registry = new GraphRendererRegistryV2();
+    registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true, create: ({ createCanvas, now }) => {
+      const renderer = new CanvasGraphRenderer(createCanvas(), now);
+      const update = renderer.updateScene.bind(renderer);
+      renderer.updateScene = next => { scene = next; update(next); };
+      return renderer;
+    } });
+    const value = runtimeHarness({ consumerId: 'graph-plus', profileId: 'default',
+      registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1, rendererRegistry: registry,
+      document: graphDocument({ nodes: [graphNode('root'), graphNode('neighbor')], edges: [graphEdge('rn', 'root', 'neighbor')] }) });
+    value.profiles.setUserOverrides('graph-plus', 'default', { dimensions, modules: {
+      'force-layout': { enabled: false }, anima: { settings: { cursorGravity: 'off' } },
+    } });
+    const session = await value.create(); await session.focusNode('root');
+    value.platform.flushFrame(value.platform.now());
+    const label = () => scene!.nodes.find(node => node.id === 'neighbor')!;
+    const baselineSize = label().labelFontSize;
+    const small = Math.max(12, baselineSize);
+    const large = scene!.nodes.find(node => node.id === 'root')!.labelFontSize;
+    assert(session.setNodeHover, 'host hover shares the graph hover transition');
+    await session.setNodeHover('neighbor'); value.platform.advanceTime(20); value.platform.flushFrame(value.platform.now());
+    const advance = (ms: number) => { value.platform.advanceTime(ms); value.platform.flushTimer(); value.platform.flushFrame(value.platform.now()); };
+    const visible = () => { assert(label().showLabel !== false && label().labelForceVisible === true,
+      'hovered label remains admitted even with proximity paused'); equal(label().labelOpacity, 1, 'entry label never fades out'); };
+    visible(); equal(label().labelFontSize, small, 'hover begins at the small label size');
+    advance(200); visible(); equal(label().labelFontSize, small, 'delay preserves the visible small label');
+    advance(250); visible(); assert(Math.abs(label().labelFontSize - (small + large) / 2) < 1e-8,
+      'halfway entry smoothly interpolates label size');
+    advance(250); visible(); equal(label().labelFontSize, large, 'entry ends at root label size');
+    await session.setNodeHover(null); value.platform.advanceTime(20); value.platform.flushFrame(value.platform.now());
+    advance(500); equal(label().labelFontSize, baselineSize, 'leave restores the smaller label size');
+    await session.dispose();
+  }
+});

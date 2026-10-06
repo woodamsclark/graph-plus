@@ -121,3 +121,5 @@ Local Graph+ is Focus-only. Background clicks and Escape cannot exit Focus; abse
 Cmd + single click on a node with its note preview already open invokes its registered open-note action immediately. It does not commit a View transition or change constellation membership. Cmd click without an open preview retains ordinary behavior.
 
 Reopening a side pane containing Local Graph+ recenters its camera on the committed Focus root. Visibility is synchronized on workspace layout changes and view resize; repeated visible resize does not recenter. Reveal preserves zoom, orientation and graph positions. Global reveal preserves its framing.
+
+In Focus, a hovered non-root node retains a visible small label through the 200 ms peek delay, then grows continuously to the next-root size over 500 ms. Turning off proximity on hover must not create a label visibility gap. Leave retains the existing fade-out lifecycle; absolute Labels Off still suppresses every label.
