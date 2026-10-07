@@ -11,6 +11,7 @@ import './core/view-state.test.ts';
 import './runtime/interaction.test.ts';
 import './runtime/views.test.ts';
 import './runtime/anima-hover-animation.test.ts';
+import './runtime/anima-preview-cache.test.ts';
 import './runtime/ego.test.ts';
 import './runtime/ego-interaction-plan.test.ts';
 import './runtime/camera.test.ts';

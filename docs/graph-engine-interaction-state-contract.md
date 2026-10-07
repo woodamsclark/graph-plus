@@ -137,6 +137,12 @@ Leaving otherwise restores the committed scene. Hover never commits membership, 
 Memory, camera movement, or host actions. Option preserves the effective scene. Space
 preserves the scene in Constellation/Focus and explicitly clears user membership in Overview.
 The prospective subject receives the Focus outline and highest-priority label.
+Only visual properties may be blended from cached hover targets: positions, membership,
+node/edge geometry and world state always come from the live committed baseline,
+including at full fade strength. Theme, module settings, structural roles, pins,
+Memory and presentation-policy changes invalidate target visuals without restarting
+the current visit's delay or fade. Position-only and camera-only changes retain
+the cached targets. Content transactions invalidate settings and structural targets.
 See [View scene contract](graph-engine-view-scene-contract.md#hover-previews-object-activation).
 
 ## 5. Desktop input matrix

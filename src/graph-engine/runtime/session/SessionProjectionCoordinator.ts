@@ -27,6 +27,7 @@ export class SessionProjectionCoordinatorV1 {
   private dirty = true;
   private readonly hoverAnimation = new AnimaHoverPreviewAnimationV1();
   private previewTargetContext?: string;
+  private previewPresentationContext?: string;
   private readonly previewTargetFrames = new Map<string, GraphRenderFrameV1>();
   private geometryRevision = 0;
   private topologyCache?: {
@@ -126,6 +127,7 @@ export class SessionProjectionCoordinatorV1 {
       this.hoverAnimation.clear();
       this.previewTargetFrames.clear();
       this.previewTargetContext = undefined;
+      this.previewPresentationContext = undefined;
       const result = compile(objectActivationPreview);
       this.committedFrames.set(objectActivationPreview ? compile(null).frame : result.frame);
       this.frames.set(result.frame);
@@ -146,6 +148,26 @@ export class SessionProjectionCoordinatorV1 {
 
     if (this.previewTargetContext !== previewContext) {
       this.previewTargetContext = previewContext;
+      this.previewTargetFrames.clear();
+    }
+
+    // Target validity and visit timing have different owners. Theme, settings,
+    // pins and semantic changes redress the existing visit without replaying its
+    // delay/fade. Content transactions include module settings and structural
+    // roles; position and camera updates deliberately do not expire targets.
+    const presentationContext = JSON.stringify([
+      options.theme.revision,
+      options.presentationPolicy,
+      options.experience,
+      options.viewState.pinnedNodeIds,
+      [...consciousness.remembered.nodeIds],
+      options.draggedNodeId,
+      options.previewedNodeId,
+      options.selectionPresentationSuspended,
+      options.selectionNeighborRevealActive,
+    ]);
+    if (options.invalidation === 'content' || this.previewPresentationContext !== presentationContext) {
+      this.previewPresentationContext = presentationContext;
       this.previewTargetFrames.clear();
     }
 
@@ -204,6 +226,7 @@ export class SessionProjectionCoordinatorV1 {
     this.hoverAnimation.clear();
     this.previewTargetFrames.clear();
     this.previewTargetContext = undefined;
+    this.previewPresentationContext = undefined;
   }
 
   nextPreviewFrameDelayMs(now: number): number | undefined {
@@ -230,6 +253,7 @@ export class SessionProjectionCoordinatorV1 {
     this.hoverAnimation.clear();
     this.previewTargetFrames.clear();
     this.previewTargetContext = undefined;
+    this.previewPresentationContext = undefined;
 
     this.frames.set(null);
     this.committedFrames.set(null);
