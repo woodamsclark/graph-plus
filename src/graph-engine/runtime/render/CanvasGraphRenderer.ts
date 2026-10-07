@@ -45,6 +45,7 @@ export interface GraphRenderTimingV1 {
 
 export class CanvasGraphRenderer implements GraphRendererV2 {
   readonly backendId = 'canvas2d' as const;
+  readonly labelRepresentation = 'node-fields' as const;
   readonly interactionElement: HTMLElement;
   private context!: CanvasRenderingContext2D;
   private vision!: Vision;

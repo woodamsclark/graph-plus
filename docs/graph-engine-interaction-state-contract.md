@@ -161,6 +161,14 @@ Canvas reuses the drawn hit grid for ordinary hits and retains at most two alter
 indexes. Source presentation is immutable; position-map replacement or an advancing
 geometry revision invalidates live geometry, and camera/viewport changes invalidate
 projection. Picking does not allocate renderer label records.
+Node label fields are the canonical renderer presentation. Canvas declares
+`labelRepresentation: 'node-fields'` and receives a shared empty `labels` array;
+its adaptive/proximity admission, styling and drawing continue to read node fields.
+Backends that omit this capability retain derived label records for compatibility.
+Those records are cached by label values and node membership/order, so geometry-only
+callbacks reuse their array and records. Label mode off supplies the shared empty
+array; changes to text, color, opacity, font size, offset, visibility, priority or
+always-visible state refresh only affected records.
 See [View scene contract](graph-engine-view-scene-contract.md#hover-previews-object-activation).
 
 ## 5. Desktop input matrix

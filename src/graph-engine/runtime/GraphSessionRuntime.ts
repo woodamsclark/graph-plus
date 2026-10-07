@@ -69,6 +69,7 @@ import {
   type GraphModuleRegistry,
 } from './modules/index.ts';
 import type { SessionRuntimePlatformV1 } from './platform/index.ts';
+import { GraphLabelRecordCache, EMPTY_GRAPH_LABEL_RECORDS } from './render/GraphLabelRecordCache.ts';
 import {
   DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
   detectGraphRendererCapabilitiesV2,
@@ -202,6 +203,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private renderer!: GraphRendererV2;
   private rendererSelection!: GraphRendererSelectionV2;
   private renderSceneRevision = 0;
+  private readonly labelRecordCache = new GraphLabelRecordCache();
   private pendingDragGeometry = false;
   private physicsOverrideHeld = false;
   private presentationRevision = 0;
@@ -1606,18 +1608,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         camera: this.vision.getState(),
         viewport: this.surface.getViewport(),
       },
-      labels: frame.nodes.filter(() => frame.policy?.labelMode !== 'off').map((node) => ({
-        id: `label:${node.id}`,
-        nodeId: node.id,
-        text: node.label,
-        color: node.labelColor,
-        opacity: node.labelOpacity,
-        fontSizePx: node.labelFontSize,
-        offset: node.labelOffset ?? { x: 0, y: 0 },
-        visible: node.showLabel !== false,
-        priority: node.labelPriority ?? 0,
-        alwaysVisible: node.labelAlwaysVisible === true,
-      })),
+      labels: this.renderer.labelRepresentation === 'node-fields'
+        ? EMPTY_GRAPH_LABEL_RECORDS : this.labelRecordCache.resolve(frame),
     }, invalidations);
   }
 

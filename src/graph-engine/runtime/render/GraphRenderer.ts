@@ -23,6 +23,7 @@ export interface GraphRenderSceneV2 extends GraphRenderFrameV1 {
   readonly revision: number;
   readonly presentationRevision: number;
   readonly view: GraphViewTransformV2;
+  /** Derived compatibility records. Node fields are canonical; node-field backends receive an empty array. */
   readonly labels: readonly GraphRenderLabelV2[];
 }
 
@@ -71,6 +72,8 @@ export interface GraphRendererDiagnosticsV2 {
 export interface GraphRendererV2 {
   readonly backendId: GraphRendererBackendIdV2;
   readonly interactionElement: HTMLElement;
+  /** Omission preserves record-based renderer compatibility. */
+  readonly labelRepresentation?: 'node-fields' | 'records';
   initialize(): void | Promise<void>;
   resize(viewport: GraphRenderViewportV2): void;
   updateTheme(theme: GraphVisualThemeV2): void;
