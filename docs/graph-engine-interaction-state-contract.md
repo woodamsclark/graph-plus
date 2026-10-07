@@ -152,6 +152,15 @@ in-place solver geometry retains its existing composition-free path. Startup may
 compose outside a display callback to install the initial scene. Runtime diagnostics
 expose `compositionsThisFrame` (the latest callback) and `maxCompositionsPerFrame`;
 a second composition in one callback warns so this invariant is visible.
+Picking accepts an explicit `GraphPickSourceV2` with its frame and current view
+transform; it never calls `updateScene()` or replaces the active renderer scene.
+Retained removal targets and committed-View fallback use the same circular,
+depth-aware picking rules, including perspective touch assistance. Pending world
+positions and render membership can override the pick source before drawing.
+Canvas reuses the drawn hit grid for ordinary hits and retains at most two alternate
+indexes. Source presentation is immutable; position-map replacement or an advancing
+geometry revision invalidates live geometry, and camera/viewport changes invalidate
+projection. Picking does not allocate renderer label records.
 See [View scene contract](graph-engine-view-scene-contract.md#hover-previews-object-activation).
 
 ## 5. Desktop input matrix

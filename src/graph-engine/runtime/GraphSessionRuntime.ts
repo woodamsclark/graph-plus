@@ -78,6 +78,7 @@ import {
   type GraphRendererRegistryV2,
   type GraphRendererSelectionV2,
   type GraphRendererV2,
+  type GraphPickSourceV2,
 } from './render/index.ts';
 import {
   graphVisualThemesEqualV2,
@@ -479,16 +480,14 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         hitTest: (point, pointerKind, retainedHoverNodeId) => {
           // A removal preview may hide its own target. Retain only that already acquired
           // subject for picking, using the backend's real projected hit shape.
-          this.updateRendererScene([], retainedHoverNodeId, undefined, true);
-          try {
-            const hit = this.renderer.pick({ point, pointerKind });
-            if (hit || resolveGraphActiveViewV1(this.viewState).id === 'focus') return hit;
-            // A temporary Focus scene cannot revoke non-void source-View hover targets.
-            const committed = this.projection.committedFrames.get();
-            if (!committed) return null;
-            this.updateRendererScene([], undefined, committed, true);
-            return this.renderer.pick({ point, pointerKind });
-          } finally { this.updateRendererScene([]); }
+          const frame = this.projection.frames.get();
+          if (!frame) return null;
+          const request = { point, pointerKind };
+          const hit = this.renderer.pick(request, this.pickSource(frame, retainedHoverNodeId));
+          if (hit || resolveGraphActiveViewV1(this.viewState).id === 'focus') return hit;
+          // A temporary Focus scene cannot revoke non-void source-View hover targets.
+          const committed = this.projection.committedFrames.get();
+          return committed ? this.renderer.pick(request, this.pickSource(committed)) : null;
         },
         getDocument: () => this.store.readDocument(),
         getViewState: () => this.viewState,
@@ -1575,23 +1574,27 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     return { [nodeId]: { x: target.x - position.x, y: target.y - position.y, z: target.z - position.z } };
   }
 
-  private updateRendererScene(invalidations: readonly SessionInvalidationClassV1[], retainedHoverNodeId?: string, committedFrame?: NonNullable<ReturnType<SessionProjectionCoordinatorV1['frames']['get']>>, livePicking = false): void {
-    const frame = committedFrame ?? this.projection.frames.get();
+  private pickSource(frame: GraphPickSourceV2['frame'], retainedNodeId?: string): GraphPickSourceV2 {
+    return {
+      frame,
+      retainedNodeId,
+      ...(this.pendingDragGeometry || this.pendingCompositionInvalidations.has('geometry')
+        || this.pendingCompositionInvalidations.has('content') ? { positions: this.moduleView.positions } : {}),
+      ...(this.pendingCompositionInvalidations.has('content') ? { nodeIds: this.renderSelection.nodeIds } : {}),
+      view: {
+        dimensions: this.profile.dimensions,
+        camera: this.vision.getState(),
+        viewport: this.surface.getViewport(),
+      },
+    };
+  }
+
+  private updateRendererScene(invalidations: readonly SessionInvalidationClassV1[]): void {
+    const frame = this.projection.frames.get();
     if (!frame) return;
-    const useLiveGeometry = livePicking && (this.pendingCompositionInvalidations.size > 0 || this.pendingDragGeometry);
-    // Input may arrive after world mutations and before the display callback.
-    // Project current geometry for picking without compiling another graph scene.
-    let nodes = useLiveGeometry
-      ? frame.nodes.filter(node => this.renderSelection.nodeIds.has(node.id)).map(node => ({
-        ...node, position: this.moduleView.positions[node.id] ?? node.position,
-      }))
-      : frame.nodes;
-    if (retainedHoverNodeId) nodes = nodes.map(node => node.id === retainedHoverNodeId ? { ...node, opacity: 1 } : node);
     this.renderSceneRevision += 1;
     this.renderer.updateScene({
       ...frame,
-      nodes,
-      ...(useLiveGeometry ? { geometryRevision: undefined } : {}),
       // Hover/peek policy owns labels while a node or its note preview is active.
       policy: this.interaction.getPresentationHoveredNodeId() !== undefined
         ? { ...frame.policy, cursorLabelRevealRadiusPx: 0 } : frame.policy,

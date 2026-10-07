@@ -2,6 +2,7 @@ import { Vision, type ProjectedGraphPointV1 } from '../vision/index.ts';
 import type { GraphFrameStore } from './GraphFrameStore.ts';
 import type {
   GraphPickRequestV2,
+  GraphPickSourceV2,
   GraphRendererDiagnosticsV2,
   GraphRendererV2,
   GraphRenderSceneV2,
@@ -26,6 +27,13 @@ interface ProjectedGeometry {
   readonly point: ProjectedGraphPointV1;
 }
 
+interface PickIndex {
+  readonly source: GraphPickSourceV2;
+  readonly geometryRevision: number | undefined;
+  readonly visionKey: string;
+  readonly grid: Map<string, ProjectedNode[]>;
+}
+
 export interface GraphRenderTimingV1 {
   readonly projectionMs: number;
   readonly regionRenderMs: number;
@@ -48,6 +56,11 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   private colorCssCache = new WeakMap<GraphColorV2, string>();
   private readonly hitGrid = new Map<string, ProjectedNode[]>();
   private readonly hitCellSize = 32;
+  private pickVision?: Vision;
+  // Normal preview and committed fallback are the only alternate pick sources.
+  private readonly pickIndexes: PickIndex[] = [];
+  private pickIndexBuilds = 0;
+  private pickIndexCacheHits = 0;
   private indexedFrame: GraphRenderFrameV1 | null = null;
   private indexedVisionKey = '';
   private projectedGeometryRevision = -1;
@@ -145,12 +158,22 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       this.indexedFrame = frame;
       this.indexedVisionKey = visionKey;
     }
+    return this.pickFromGrid(point, pointerKind, frame, this.vision, this.hitGrid);
+  }
+
+  private pickFromGrid(
+    point: { readonly x: number; readonly y: number },
+    pointerKind: 'mouse' | 'touch' | 'pen',
+    frame: GraphRenderFrameV1 | null,
+    vision: Vision,
+    grid: Map<string, ProjectedNode[]>,
+  ) {
     const minimumTouchRadius = pointerKind === 'touch' && frame !== null
       && renderPolicy(frame).minimumPerspectiveTouchHitRadius !== undefined
-      && this.vision.getState().projection === 'perspective'
+      && vision.getState().projection === 'perspective'
       ? renderPolicy(frame).minimumPerspectiveTouchHitRadius!
       : 0;
-    const candidates = this.hitCandidates(point.x, point.y, minimumTouchRadius);
+    const candidates = this.hitCandidates(point.x, point.y, minimumTouchRadius, grid);
     let bestVisible: ProjectedNode | undefined;
     let bestVisibleDistance = Number.POSITIVE_INFINITY;
     let bestTouch: ProjectedNode | undefined;
@@ -182,6 +205,9 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
 
   getDiagnostics(): Readonly<Record<string, number>> {
     return {
+      pickIndexBuilds: this.pickIndexBuilds,
+      pickIndexCacheHits: this.pickIndexCacheHits,
+      pickIndexEntries: this.pickIndexes.length,
       projectedGeometryEntries: this.projectedGeometry.length,
       projectionCacheHits: this.projectionCacheHits,
       hitGridCells: this.hitGrid.size,
@@ -199,8 +225,50 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     this.vision.setViewport(scene.view.viewport.width, scene.view.viewport.height);
   }
 
-  pick(request: GraphPickRequestV2) {
-    return this.hitTest(request.point, request.pointerKind);
+  pick(request: GraphPickRequestV2, source?: GraphPickSourceV2) {
+    if (!source) return this.hitTest(request.point, request.pointerKind);
+    if (!this.pickVision) this.pickVision = new Vision(source.view.camera, source.view.dimensions);
+    else this.pickVision.reconfigure(source.view.camera, source.view.dimensions);
+    this.pickVision.setViewport(source.view.viewport.width, source.view.viewport.height);
+    const visionKey = `${source.view.dimensions}:${this.visionKey(this.pickVision)}`;
+    // Ordinary picking can use the spatial index installed by the last draw.
+    // Alternate sources keep their own indexes and never disturb that index.
+    if (!source.positions && !source.nodeIds && !source.retainedNodeId
+      && source.frame.nodes === this.indexedFrame?.nodes
+      && source.frame.geometryRevision === this.indexedFrame?.geometryRevision
+      && hitShapePolicyKey(source.frame) === hitShapePolicyKey(this.indexedFrame)
+      && this.visionKey(this.pickVision) === this.indexedVisionKey) {
+      this.pickIndexCacheHits += 1;
+      return this.pickFromGrid(request.point, request.pointerKind ?? 'mouse', source.frame, this.pickVision, this.hitGrid);
+    }
+    const cached = this.pickIndexes.find(index => index.source.frame === source.frame
+      && index.geometryRevision === source.frame.geometryRevision
+      && index.source.positions === source.positions
+      && index.source.nodeIds === source.nodeIds
+      && index.source.retainedNodeId === source.retainedNodeId
+      && index.visionKey === visionKey);
+    let grid = cached?.grid;
+    if (grid) this.pickIndexCacheHits += 1;
+    else {
+      grid = new Map();
+      const projected: ProjectedNode[] = [];
+      const projection = this.pickVision.getState().projection;
+      for (const node of source.frame.nodes) {
+        if (source.nodeIds && !source.nodeIds.has(node.id)) continue;
+        if (node.opacity <= 0 && node.id !== source.retainedNodeId) continue;
+        const position = source.positions?.[node.id] ?? node.position;
+        const point = this.pickVision.worldToScreen(position);
+        if (point.depth <= 0) continue;
+        const radius = projectedRadius(source.frame, node.radius, point.scale, projection, node.nodeScaleExponent);
+        if (!circleIntersectsViewport(point.x, point.y, radius + 4, source.view.viewport.width, source.view.viewport.height)) continue;
+        projected.push({ node: { ...node, position, ...(node.id === source.retainedNodeId ? { opacity: 1 } : {}) }, point, radius });
+      }
+      this.rebuildHitGrid(projected, grid, source.view.viewport.width, source.view.viewport.height);
+      this.pickIndexBuilds += 1;
+      this.pickIndexes.unshift({ source, geometryRevision: source.frame.geometryRevision, visionKey, grid });
+      if (this.pickIndexes.length > 2) this.pickIndexes.pop();
+    }
+    return this.pickFromGrid(request.point, request.pointerKind ?? 'mouse', source.frame, this.pickVision, grid);
   }
 
   getRendererDiagnostics(): GraphRendererDiagnosticsV2 {
@@ -211,6 +279,8 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     if (this.lifecycle === 'disposed') return;
     this.lifecycle = 'disposed';
     this.scene = null;
+    this.pickIndexes.length = 0;
+    this.pickVision = undefined;
     this.hitGrid.clear();
     this.textWidthCache.clear();
     this.regionContourCache.clear();
@@ -264,15 +334,15 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     return projected;
   }
 
-  private hitCandidates(x: number, y: number, searchRadius: number): readonly ProjectedNode[] {
-    if (searchRadius <= 0) return this.hitGrid.get(this.hitGridKey(x, y)) ?? [];
+  private hitCandidates(x: number, y: number, searchRadius: number, grid = this.hitGrid): readonly ProjectedNode[] {
+    if (searchRadius <= 0) return grid.get(this.hitGridKey(x, y)) ?? [];
     const centerX = Math.floor(x / this.hitCellSize);
     const centerY = Math.floor(y / this.hitCellSize);
     const cellRadius = Math.ceil(searchRadius / this.hitCellSize) + 1;
     const candidates = new Set<ProjectedNode>();
     for (let offsetX = -cellRadius; offsetX <= cellRadius; offsetX += 1) {
       for (let offsetY = -cellRadius; offsetY <= cellRadius; offsetY += 1) {
-        for (const candidate of this.hitGrid.get(`${centerX + offsetX}:${centerY + offsetY}`) ?? []) {
+        for (const candidate of grid.get(`${centerX + offsetX}:${centerY + offsetY}`) ?? []) {
           candidates.add(candidate);
         }
       }
@@ -280,23 +350,23 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     return [...candidates];
   }
 
-  private rebuildHitGrid(nodes: readonly ProjectedNode[]): void {
-    this.hitGrid.clear();
+  private rebuildHitGrid(nodes: readonly ProjectedNode[], grid = this.hitGrid, width = this.width, height = this.height): void {
+    grid.clear();
     for (const node of nodes) {
       if (node.node.opacity <= 0) continue;
       // Picking only needs cells on the canvas, even when zoom makes a disc enormous.
       const minX = Math.max(0, Math.floor((node.point.x - node.radius) / this.hitCellSize));
-      const maxX = Math.min(Math.floor(this.width / this.hitCellSize),
+      const maxX = Math.min(Math.floor(width / this.hitCellSize),
         Math.floor((node.point.x + node.radius) / this.hitCellSize));
       const minY = Math.max(0, Math.floor((node.point.y - node.radius) / this.hitCellSize));
-      const maxY = Math.min(Math.floor(this.height / this.hitCellSize),
+      const maxY = Math.min(Math.floor(height / this.hitCellSize),
         Math.floor((node.point.y + node.radius) / this.hitCellSize));
       for (let x = minX; x <= maxX; x += 1) {
         for (let y = minY; y <= maxY; y += 1) {
           const key = `${x}:${y}`;
-          const bucket = this.hitGrid.get(key);
+          const bucket = grid.get(key);
           if (bucket) bucket.push(node);
-          else this.hitGrid.set(key, [node]);
+          else grid.set(key, [node]);
         }
       }
     }
@@ -306,9 +376,9 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     return `${Math.floor(x / this.hitCellSize)}:${Math.floor(y / this.hitCellSize)}`;
   }
 
-  private visionKey(): string {
-    const state = this.vision.getState();
-    const viewport = this.vision.getViewport();
+  private visionKey(vision = this.vision): string {
+    const state = vision.getState();
+    const viewport = vision.getViewport();
     return [
       state.position.x, state.position.y, state.position.z,
       state.target.x, state.target.y, state.target.z,
@@ -662,6 +732,12 @@ function labelTop(
 
 function clampInteger(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function hitShapePolicyKey(frame: GraphRenderFrameV1): string {
+  const policy = renderPolicy(frame);
+  return [policy.nodeScaleMode, policy.nodeScaleExponent,
+    policy.minimumPerspectiveNodeScale, policy.minimumPerspectiveNodeRadius].join(':');
 }
 
 function projectedRadius(

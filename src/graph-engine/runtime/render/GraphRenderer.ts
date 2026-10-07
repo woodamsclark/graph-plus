@@ -44,6 +44,18 @@ export interface GraphPickRequestV2 {
   readonly pointerKind?: 'mouse' | 'touch' | 'pen';
 }
 
+/** Alternate input geometry/presentation; picking must not install it as the render scene. */
+export interface GraphPickSourceV2 {
+  /** Replace the frame when presentation changes; advance geometryRevision for in-place positions. */
+  readonly frame: GraphRenderFrameV1;
+  readonly view: GraphViewTransformV2;
+  /** Current world positions awaiting drawing. Replace this map or advance frame.geometryRevision when it changes. */
+  readonly positions?: Readonly<Record<string, Vec3>>;
+  readonly nodeIds?: ReadonlySet<string>;
+  /** Keep only this previously acquired target pickable during a removal preview. */
+  readonly retainedNodeId?: string;
+}
+
 export interface GraphPickResultV2 {
   readonly nodeId: string;
   readonly position: Vec3;
@@ -64,7 +76,7 @@ export interface GraphRendererV2 {
   updateTheme(theme: GraphVisualThemeV2): void;
   updateScene(scene: GraphRenderSceneV2, invalidations: readonly SessionInvalidationClassV1[]): void;
   render(): GraphRenderTimingV1;
-  pick(request: GraphPickRequestV2): GraphPickResultV2 | null;
+  pick(request: GraphPickRequestV2, source?: GraphPickSourceV2): GraphPickResultV2 | null;
   getRendererDiagnostics(): GraphRendererDiagnosticsV2;
   dispose(): void;
 }
