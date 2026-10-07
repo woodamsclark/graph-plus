@@ -24,6 +24,7 @@ import './runtime/rendering-v2.test.ts';
 import './runtime/picking-sources.test.ts';
 import './runtime/label-records.test.ts';
 import './runtime/canvas-spatial-cache.test.ts';
+import './runtime/cursor-spatial-query.test.ts';
 import './service/service.test.ts';
 import './service/actions.test.ts';
 import './service/neutral-sample.test.ts';

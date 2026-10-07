@@ -63,6 +63,19 @@ export interface GraphPickResultV2 {
   readonly depth: number;
 }
 
+export interface GraphNearestNodeRequestV2 {
+  readonly point: { readonly x: number; readonly y: number };
+  /** Exclusive center-distance radius in CSS pixels; node disc size does not affect ranking. */
+  readonly radius: number;
+  readonly exclusions?: ReadonlySet<string>;
+  readonly isEligible?: (nodeId: string) => boolean;
+}
+
+export interface GraphNearestNodeResultV2 extends GraphPickResultV2 {
+  readonly point: { readonly x: number; readonly y: number; readonly depth: number };
+  readonly distance: number;
+}
+
 export interface GraphRendererDiagnosticsV2 {
   readonly backendId: GraphRendererBackendIdV2;
   readonly lifecycle: 'created' | 'initialized' | 'disposed';
@@ -80,6 +93,7 @@ export interface GraphRendererV2 {
   updateScene(scene: GraphRenderSceneV2, invalidations: readonly SessionInvalidationClassV1[]): void;
   render(): GraphRenderTimingV1;
   pick(request: GraphPickRequestV2, source?: GraphPickSourceV2): GraphPickResultV2 | null;
+  queryNearest(request: GraphNearestNodeRequestV2, source?: GraphPickSourceV2): GraphNearestNodeResultV2 | null;
   getRendererDiagnostics(): GraphRendererDiagnosticsV2;
   dispose(): void;
 }

@@ -18,6 +18,7 @@ function labelHarness(dimensions: '2d' | '3d', records = false) {
         initialize: () => renderer.initialize(), resize: renderer.resize.bind(renderer),
         updateTheme: renderer.updateTheme.bind(renderer), updateScene,
         render: renderer.render.bind(renderer), pick: renderer.pick.bind(renderer),
+        queryNearest: renderer.queryNearest.bind(renderer),
         getRendererDiagnostics: renderer.getRendererDiagnostics.bind(renderer), dispose: renderer.dispose.bind(renderer),
       };
     },

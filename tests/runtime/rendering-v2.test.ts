@@ -150,6 +150,7 @@ function fakeRenderer(
       labelLayoutMs: 0, labelDrawMs: 0,
     }),
     pick: () => null,
+    queryNearest: () => null,
     getRendererDiagnostics: () => ({ backendId, lifecycle, resources: {} }),
     dispose: () => {
       if (lifecycle === 'disposed') return;

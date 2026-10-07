@@ -180,6 +180,21 @@ lookup serves edges; presentation frames do not create additional ID maps.
 Picking before drawing and drawing itself share the same prepared spatial data.
 Runtime cache counters expose `spatialIndexBuilds`, `nodeLookupRefreshes` and
 `projectedLookupBuilds` alongside the existing projection-cache counter.
+Cursor attraction uses the renderer-neutral `queryNearest()` API over projected
+center cells. Warm queries examine nearby candidates without projecting or scanning
+every node; geometry, camera and viewport changes refresh the shared projection and
+center index. The index is maintained during drawing only while a cursor well is
+active, and is otherwise built lazily when queried. Off, dragging and cursor leave
+do not maintain an unused attraction index.
+Ranking uses center distance strictly inside the CSS-pixel radius, with node-ID
+ties; disc size and depth do not change nearest-center ranking. Positive-depth
+offscreen centers remain eligible, while zero-opacity nodes, pinned/focused/tracked
+subjects and missing working positions are excluded. A centered target keeps well
+ownership rather than handing attraction to a runner-up. Live source overrides use
+current geometry without replacing the drawn scene. Diagnostics expose
+`nearestQueries`, `nearestQueryCandidates`, `lastNearestQueryCandidates` and
+`centerIndexBuilds`. Cold index construction and geometry updates still visit the
+graph; the bounded-work guarantee applies to warm local queries.
 See [View scene contract](graph-engine-view-scene-contract.md#hover-previews-object-activation).
 
 ## 5. Desktop input matrix

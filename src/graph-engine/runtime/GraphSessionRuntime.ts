@@ -1540,21 +1540,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (!cursor || !frame || radius <= 0 || this.moduleView.formActive
       || this.interaction.getDraggedNodeId() !== undefined) return undefined;
     const fixed = new Set([...this.viewState.pinnedNodeIds, ...this.interaction.getCameraTrackingNodeIds()]);
-    let nearest: { nodeId: string; point: { x: number; y: number; depth: number }; distance: number; radius: number } | undefined;
-    for (const node of frame.nodes) {
-      if (node.opacity <= 0 || (fixed.has(node.id) || node.id === this.viewState.focusedNodeId)) continue;
-      const position = this.moduleView.positions[node.id];
-      if (!position) continue;
-      const point = this.vision.worldToScreen(position);
-      if (point.depth <= 0) continue;
-      const distance = Math.hypot(cursor.x - point.x, cursor.y - point.y);
-      if (distance >= radius) continue;
-      if (!nearest || distance < nearest.distance
-        || (distance === nearest.distance && node.id.localeCompare(nearest.nodeId) < 0)) {
-        nearest = { nodeId: node.id, point, distance, radius };
-      }
-    }
-    return nearest;
+    if (this.viewState.focusedNodeId !== undefined) fixed.add(this.viewState.focusedNodeId);
+    const nearest = this.renderer.queryNearest({ point: cursor, radius, exclusions: fixed,
+      isEligible: nodeId => this.moduleView.positions[nodeId] !== undefined,
+    }, { ...this.pickSource(frame), nodeIds: undefined });
+    return nearest ? { nodeId: nearest.nodeId, point: nearest.point, distance: nearest.distance, radius } : undefined;
   }
 
   private resolveCursorAttractionSteps(): Readonly<Record<string, Vec3>> | undefined {
