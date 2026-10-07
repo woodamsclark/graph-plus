@@ -217,6 +217,18 @@ Module admission tolerates timestamp jitter up to 1% of its interval (capped at
 work requests the next animation frame directly, avoiding an interval timer followed
 by another animation frame. Longer delays still use the scheduler's wake timer.
 Settled physics requests no frames or timers and performs no integration work.
+Alpha is the fraction of an ordinary force-driven position/velocity transition
+applied per admitted step, clamped to `[0, 1]`. It scales the transition rather than
+tick cadence or the force field; drag and Space retain their existing full-alpha
+behavior. `targetStepRateHz` reports configured cadence, and
+`effectiveSimulationRateHz` reports that rate multiplied by alpha: at the current
+60 Hz policy, alpha `0.5` corresponds to 30 ordinary-step equivalents per second.
+This is a policy-derived estimate, not measured callback frequency or a guarantee
+under delayed/suspended execution. Stopped physics reports zero for both rates.
+The former runtime diagnostic `effectiveStepRateHz` is replaced by this clearer
+name. Persisted V1 `alphaTarget` remains compatible legacy activity metadata,
+normalized and round-tripped as before; it neither attracts alpha toward a target
+nor controls cooling, reheat or integration. Internally it is `legacyAlphaTarget`.
 See [View scene contract](graph-engine-view-scene-contract.md#hover-previews-object-activation).
 
 ## 5. Desktop input matrix

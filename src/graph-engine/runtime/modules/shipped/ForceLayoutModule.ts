@@ -74,7 +74,8 @@ export interface ForceLayoutDiagnosticsV1 {
   readonly alpha: number;
   readonly running: boolean;
   readonly targetStepRateHz: number;
-  readonly effectiveStepRateHz: number;
+  /** Configured integration rate times alpha; not measured callback frequency. */
+  readonly effectiveSimulationRateHz: number;
   readonly integrationStepCount: number;
   readonly positionBufferSynchronizations: number;
   readonly positionBufferNodeVisits: number;
@@ -106,15 +107,16 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private documentKey = '';
   private pinned = new Set<string>();
   private suspended = false;
+  /** Fraction of an ordinary force-driven state transition applied per admitted tick. */
   private alpha = 1;
   private running = true;
-  private physicsOverrideReturn?: { alpha: number; alphaTarget: number; running: boolean };
+  private physicsOverrideReturn?: { alpha: number; legacyAlphaTarget: number; running: boolean };
   private pinnedKey = '';
   private projectionFilterKey: string | undefined;
   private regionLayoutKey = '';
   private topologyAnalysisCount = 0;
-  private alphaTarget = 0;
-  private dragWasActive = false;
+  /** V1 snapshot metadata only; no solver behavior reads this field. */
+  private legacyAlphaTarget = 0;
   private restoredStatePending = false;
   private integrationStepCount = 0;
   private settledStepCount = 0;
@@ -189,7 +191,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.velocities.clear();
     if (hostileMotion) {
       this.alpha = 1;
-      this.alphaTarget = 0;
+      this.legacyAlphaTarget = 0;
       this.running = true;
       this.settledStepCount = 0;
       this.restoredStatePending = false;
@@ -197,7 +199,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     }
     for (const [id, velocity] of restoredVelocities) this.velocities.set(id, velocity);
     this.alpha = clampNumber(state.alpha, 0, 1, 0);
-    this.alphaTarget = finiteCoordinate(state.alphaTarget) ? clampNumber(state.alphaTarget, 0, 1, 0) : 0;
+    this.legacyAlphaTarget = finiteCoordinate(state.alphaTarget) ? clampNumber(state.alphaTarget, 0, 1, 0) : 0;
     this.running = state.running;
     this.settledStepCount = 0;
     this.restoredStatePending = true;
@@ -207,7 +209,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     return {
       schemaVersion: 1,
       alpha: this.alpha,
-      alphaTarget: this.alphaTarget,
+      alphaTarget: this.legacyAlphaTarget,
       running: this.running,
       velocities: Object.fromEntries([...this.velocities].map(([id, value]) => [id, { ...value }])),
     };
@@ -386,13 +388,12 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     dragActive: boolean,
   ): GraphModuleTickResultV1 | undefined {
     const cursorActive = Object.keys(state.cursorAttractionSteps ?? {}).length > 0;
-    this.alphaTarget = dragActive ? ACTIVE_DRAG_ACTIVITY : 0;
-    // Alpha is a bounded simulation-time scale. Forces always calculate one
-    // ordinary step, then the whole state transition is blended by alpha so
-    // reheating changes only speed, never the force field or its equilibrium.
+    this.legacyAlphaTarget = dragActive ? ACTIVE_DRAG_ACTIVITY : 0;
+    // Alpha is the fraction of one ordinary force-driven position/velocity
+    // transition applied per admitted tick. It does not control tick cadence.
+    // Forces calculate the full step before the state transition is blended.
     if (dragActive) this.alpha = ACTIVE_DRAG_ACTIVITY;
-    if (state.physicsOverrideHeld) { this.alpha = 1; this.alphaTarget = 1; }
-    this.dragWasActive = dragActive;
+    if (state.physicsOverrideHeld) { this.alpha = 1; this.legacyAlphaTarget = 1; }
     if (dragActive) this.settledStepCount = 0;
     const elapsedSeconds = Math.max(0, Math.min(0.25, deltaSeconds || this.targetFrameIntervalMs(dragActive) / 1000));
     if (!state.physicsOverrideHeld && !dragActive && !cursorActive && this.alpha < this.settings.alphaMin) {
@@ -687,6 +688,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   getDiagnostics(): ForceLayoutDiagnosticsV1 {
+    const targetStepRateHz = forceLayoutTargetStepRateHzV1(this.alpha, this.running);
     return {
       topologyAnalysisCount: this.topologyAnalysisCount,
       physicalSpringCount: this.springs.length,
@@ -694,8 +696,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       coordinatedMembershipPairCount: this.membershipPairStrengths.size,
       alpha: this.alpha,
       running: this.running,
-      targetStepRateHz: forceLayoutTargetStepRateHzV1(this.alpha, this.running),
-      effectiveStepRateHz: this.running ? 30 * clampNumber(this.alpha, 0, 1, 0) : 0,
+      targetStepRateHz,
+      effectiveSimulationRateHz: targetStepRateHz * clampNumber(this.alpha, 0, 1, 0),
       integrationStepCount: this.integrationStepCount,
       positionBufferSynchronizations: this.positionBufferSynchronizations,
       positionBufferNodeVisits: this.positionBufferNodeVisits,
@@ -736,12 +738,12 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   private synchronizePhysicsOverride(held: boolean): void {
     if (held) {
-      this.physicsOverrideReturn ??= { alpha: this.alpha, alphaTarget: this.alphaTarget, running: this.running };
-      this.alpha = 1; this.alphaTarget = 1; this.running = true;
+      this.physicsOverrideReturn ??= { alpha: this.alpha, legacyAlphaTarget: this.legacyAlphaTarget, running: this.running };
+      this.alpha = 1; this.legacyAlphaTarget = 1; this.running = true;
     } else if (this.physicsOverrideReturn) {
       const previous = this.physicsOverrideReturn;
       this.physicsOverrideReturn = undefined;
-      this.alpha = previous.alpha; this.alphaTarget = previous.alphaTarget; this.running = previous.running;
+      this.alpha = previous.alpha; this.legacyAlphaTarget = previous.legacyAlphaTarget; this.running = previous.running;
     }
   }
 
@@ -760,7 +762,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private stop(): void {
     this.running = false;
     this.alpha = 0;
-    this.alphaTarget = 0;
+    this.legacyAlphaTarget = 0;
     this.settledStepCount = 0;
     // Frozen layouts cannot retain momentum that might replay on a later thaw.
     this.velocities.clear();

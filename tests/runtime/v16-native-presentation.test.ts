@@ -1494,7 +1494,7 @@ test('activity under-relaxes the whole integration step without changing its des
     'half activity should apply exactly half of the ordinary integration step');
   equal(hot.getDiagnostics().targetStepRateHz, 60, 'hot integration should retain the working branch 60 Hz policy');
   equal(cool.getDiagnostics().targetStepRateHz, 60, 'cool integration should retain the smooth 60 Hz cadence');
-  equal(cool.getDiagnostics().effectiveStepRateHz, 15,
+  equal(cool.getDiagnostics().effectiveSimulationRateHz, 30,
     'half activity should report half the effective simulation rate');
 });
 
