@@ -1492,8 +1492,8 @@ test('activity under-relaxes the whole integration step without changing its des
   const coolMovement = coolResult.positions.left.x - startX;
   assert(Math.abs(coolMovement - hotMovement * 0.5) < 1e-10,
     'half activity should apply exactly half of the ordinary integration step');
-  equal(hot.getDiagnostics().targetStepRateHz, 30, 'hot integration should run at 30 Hz');
-  equal(cool.getDiagnostics().targetStepRateHz, 30, 'cool integration should retain the smooth 30 Hz cadence');
+  equal(hot.getDiagnostics().targetStepRateHz, 60, 'hot integration should retain the working branch 60 Hz policy');
+  equal(cool.getDiagnostics().targetStepRateHz, 60, 'cool integration should retain the smooth 60 Hz cadence');
   equal(cool.getDiagnostics().effectiveStepRateHz, 15,
     'half activity should report half the effective simulation rate');
 });

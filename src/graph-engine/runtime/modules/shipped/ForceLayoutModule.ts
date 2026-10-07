@@ -83,7 +83,6 @@ export interface ForceLayoutDiagnosticsV1 {
 
 const ACTIVE_DRAG_ACTIVITY = 1;
 const FORCE_INTEGRATION_GAIN = 0.6;
-const FIXED_STEP_SECONDS = 1 / 60;
 const DEFAULT_ALPHA_DECAY_PER_SECOND = 1 / 5;
 const RESTORED_SPEED_REJECTION_MULTIPLIER = 4;
 const MAX_LINK_CORRECTION_PER_STEP = 1;
@@ -395,7 +394,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     if (state.physicsOverrideHeld) { this.alpha = 1; this.alphaTarget = 1; }
     this.dragWasActive = dragActive;
     if (dragActive) this.settledStepCount = 0;
-    const elapsedSeconds = Math.max(0, Math.min(0.25, deltaSeconds || FIXED_STEP_SECONDS));
+    const elapsedSeconds = Math.max(0, Math.min(0.25, deltaSeconds || this.targetFrameIntervalMs(dragActive) / 1000));
     if (!state.physicsOverrideHeld && !dragActive && !cursorActive && this.alpha < this.settings.alphaMin) {
       this.stop();
       return { requestNextFrame: false };

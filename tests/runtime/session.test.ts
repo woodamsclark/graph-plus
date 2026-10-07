@@ -493,7 +493,7 @@ test('R-SHELL-04 suspends animation work and disposes every owned lifecycle reso
   equal(disposedSuspensionError, true, 'disposed suspension requests should fail structurally');
 });
 
-test('force cadence stays at 30 Hz while alpha slows integration, then settles fully idle', async () => {
+test('force cadence stays at 60 Hz while alpha slows integration, then settles fully idle', async () => {
   const value = harness();
   value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
     modules: { 'force-layout': { enabled: true } },
@@ -506,25 +506,25 @@ test('force cadence stays at 30 Hz while alpha slows integration, then settles f
     targetStepRateHz?: number;
     integrationStepCount?: number;
   } | undefined;
-  equal(force?.targetStepRateHz, 30, 'hot physics should request a 30 Hz cadence');
-  equal(value.factory.getDiagnostics().sessions[0]?.animationFrameScheduled, false,
-    'diagnostics should distinguish sleeping physics from a queued visual frame');
-  equal(value.factory.getDiagnostics().sessions[0]?.wakeTimerScheduled, true,
-    'diagnostics should expose the delayed physics wake');
-  equal(value.platform.pendingFrames, 0, 'continuous physics should not spin on display refresh callbacks');
-  equal(value.platform.pendingTimers, 1, 'hot physics should sleep between integration steps');
+  equal(force?.targetStepRateHz, 60, 'hot physics should request a 60 Hz cadence');
+  equal(value.factory.getDiagnostics().sessions[0]?.animationFrameScheduled, true,
+    'display-rate physics should queue the next visual frame');
+  equal(value.factory.getDiagnostics().sessions[0]?.wakeTimerScheduled, false,
+    'display-rate physics should avoid a timer followed by another frame');
+  equal(value.platform.pendingFrames, 1, '60 Hz physics should use the next display callback');
+  equal(value.platform.pendingTimers, 0, '60 Hz physics should avoid redundant timer wakes');
 
-  for (let index = 0; index < 30; index += 1) {
-    value.platform.advanceTime(1_000 / 30);
+  for (let index = 0; index < 60; index += 1) {
+    value.platform.advanceTime(1_000 / 60);
     value.platform.flushTimer();
-    timestamp += 1_000 / 30;
+    timestamp += 1_000 / 60;
     value.platform.flushFrame(timestamp);
   }
-  assert(((await session.exportPerformanceSnapshot()).counters?.moduleTicks ?? 0) <= 31,
-    'one second of hot continuous physics should not exceed roughly 30 module ticks');
+  assert(((await session.exportPerformanceSnapshot()).counters?.moduleTicks ?? 0) <= 61,
+    'one second of hot continuous physics should not exceed roughly 60 module ticks');
   const beforeImmediateInput = force?.integrationStepCount ?? 0;
   await session.resetCamera();
-  equal(value.platform.pendingTimers, 0, 'camera input should interrupt a sleeping physics delay');
+  equal(value.platform.pendingTimers, 0, 'camera input should leave no redundant wake timer');
   equal(value.platform.pendingFrames, 1, 'camera input should request an immediate visual frame');
   value.platform.advanceTime(1_000 / 60);
   timestamp += 1_000 / 60;
@@ -541,18 +541,18 @@ test('force cadence stays at 30 Hz while alpha slows integration, then settles f
     value.platform.flushFrame(timestamp);
   }
   force = value.factory.getDiagnostics().sessions[0]?.modules['force-layout'] as typeof force;
-  assert((force?.integrationStepCount ?? 0) - beforeRapidInput <= 31,
-    '60 Hz camera input must not make the expensive force integrator exceed 30 Hz');
+  assert((force?.integrationStepCount ?? 0) - beforeRapidInput <= 61,
+    '60 Hz camera input must not make the expensive force integrator exceed 60 Hz');
 
   force = value.factory.getDiagnostics().sessions[0]?.modules['force-layout'] as typeof force;
   if (force?.targetStepRateHz !== 0) {
-    equal(force?.targetStepRateHz, 30, 'cooling physics should retain smooth 30 Hz scheduling');
+    equal(force?.targetStepRateHz, 60, 'cooling physics should retain smooth 60 Hz scheduling');
   }
 
   for (let index = 0; index < 360 && (value.platform.pendingFrames > 0 || value.platform.pendingTimers > 0); index += 1) {
-    value.platform.advanceTime(1_000 / 30);
+    value.platform.advanceTime(1_000 / 60);
     value.platform.flushTimer();
-    timestamp += 1_000 / 30;
+    timestamp += 1_000 / 60;
     value.platform.flushFrame(timestamp);
   }
   force = value.factory.getDiagnostics().sessions[0]?.modules['force-layout'] as typeof force;

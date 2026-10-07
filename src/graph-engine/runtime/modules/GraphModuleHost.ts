@@ -260,9 +260,13 @@ export class GraphModuleHost {
           continue;
         }
         const elapsed = (this.tickElapsedSeconds.get(module.id) ?? 0) + Math.max(0, deltaSeconds);
+        // Allow small timestamp jitter at the requested rate, without admitting
+        // substantially faster callbacks or carrying catch-up debt after a tick.
+        const toleranceMs = typeof preferredInterval === 'number'
+          ? Math.min(0.5, Math.max(0, preferredInterval) * 0.01) : 0;
         if (this.tickHasRun.has(module.id)
           && typeof preferredInterval === 'number' && Number.isFinite(preferredInterval)
-          && elapsed * 1_000 + 1e-9 < Math.max(0, preferredInterval)) {
+          && elapsed * 1_000 + toleranceMs + 1e-9 < Math.max(0, preferredInterval)) {
           this.tickElapsedSeconds.set(module.id, elapsed);
           requestNextFrame = true;
           const remaining = Math.max(0, preferredInterval - elapsed * 1_000);

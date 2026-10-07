@@ -208,6 +208,15 @@ once per display frame. Force diagnostics expose `nodePositionPatches`,
 `positionBufferSynchronizations` and `positionBufferNodeVisits`; these count
 position synchronization only, not ordinary graph-wide force integration or
 presentation work.
+`GraphModuleHost` owns force tick admission. `ForceLayoutCadence.ts` defines the
+working branch's active 60 Hz rate and its matching interval; alpha does not change
+that callback rate. Each admitted force tick applies at most one integration step,
+with no solver accumulator, catch-up loop or retained backlog after delayed work.
+Module admission tolerates timestamp jitter up to 1% of its interval (capped at
+0.5 ms); the 60 Hz display gate uses the same 1% tolerance. Display-rate continuous
+work requests the next animation frame directly, avoiding an interval timer followed
+by another animation frame. Longer delays still use the scheduler's wake timer.
+Settled physics requests no frames or timers and performs no integration work.
 See [View scene contract](graph-engine-view-scene-contract.md#hover-previews-object-activation).
 
 ## 5. Desktop input matrix

@@ -128,6 +128,7 @@ const RETIRED_GRAPH_SYSTEM_STATE_KEY_V1 = 'graph-system-states-v1';
 const CONSCIOUS_MEMORY_STATE_KEY_V1 = 'conscious-memory-v1';
 const MAX_RESTORED_POSITION_COORDINATE = 1_000_000_000;
 const MIN_PIPELINE_INTERVAL_MS = 1_000 / 60;
+const PIPELINE_INTERVAL_TOLERANCE_MS = MIN_PIPELINE_INTERVAL_MS * 0.01;
 const LARGE_GRAPH_NODE_COUNT = 500;
 const EFFICIENT_PIXEL_RATIO_LIMIT = 2;
 
@@ -257,7 +258,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly onAnimationFrame: FrameRequestCallback = (timestamp) => {
     if (this.isSuspended()) return;
     if (this.lastFrameTimestamp !== null
-      && timestamp - this.lastFrameTimestamp < MIN_PIPELINE_INTERVAL_MS - 0.001) {
+      && timestamp - this.lastFrameTimestamp < MIN_PIPELINE_INTERVAL_MS - PIPELINE_INTERVAL_TOLERANCE_MS) {
       this.scheduleFrame(MIN_PIPELINE_INTERVAL_MS - (timestamp - this.lastFrameTimestamp));
       return;
     }
@@ -356,7 +357,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.activeFrameInvalidations = null;
       this.diagnostics.endDisplayFrame();
     }
-    if (tickResult?.requestNextFrame) this.scheduleFrame(tickResult.nextFrameDelayMs, 'geometry');
+    if (tickResult?.requestNextFrame) {
+      const delay = tickResult.nextFrameDelayMs ?? 0;
+      // A display-rate module needs the next rAF, not a full interval timer
+      // followed by another rAF. The module host still owns tick admission.
+      this.scheduleFrame(delay <= MIN_PIPELINE_INTERVAL_MS ? 0 : delay, 'geometry');
+    }
     const previewDelay = this.projection.nextPreviewFrameDelayMs(this.platform.now());
     if (previewDelay !== undefined) this.scheduleFrame(previewDelay, 'presentation');
     // An observer/module may queue a new semantic change during composition or rendering.
