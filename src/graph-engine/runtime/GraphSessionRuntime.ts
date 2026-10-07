@@ -264,12 +264,13 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.physicsOverrideHeld = held;
       this.moduleHost.updateProfile(this.physicsOverrideProfile(this.profile));
     }
-    if (this.pendingDragGeometry) {
-      this.pendingDragGeometry = false;
-      this.moduleHost.viewChanged(this.viewState);
-      this.refreshFrame(false, 'geometry');
-      this.emitWorldChanged('interaction');
-    }
+  const dragGeometryPending = this.pendingDragGeometry;
+
+  if (dragGeometryPending) {
+    this.pendingDragGeometry = false;
+    this.moduleHost.viewChanged(this.viewState);
+    this.emitWorldChanged('interaction');
+  }
     const interactionMs = duration(interactionStart, this.platform.now());
     const hitTestMs = this.interaction.consumeHitTestDuration();
     this.diagnostics.counters.hitTests += this.interaction.consumeHitTestCount();
@@ -294,6 +295,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const positions = tickResult?.positions;
     const moduleTickMs = duration(moduleStart, this.platform.now());
     const compositionStart = this.platform.now();
+    let geometryCompositionPending = dragGeometryPending;
+    
     if (positions) {
       const requiresComposition = positions !== this.moduleView.positions;
       const nextCameraFollowPoint = this.vision.deriveCentroid(
@@ -308,12 +311,19 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.projectionView = { ...this.projectionView, positions, viewState: this.viewState };
       this.moduleView = { ...this.moduleView, positions, viewState: this.viewState };
       this.emitWorldChanged('layout');
-      if (requiresComposition) this.refreshFrame(false, 'geometry');
-      else {
+      if (requiresComposition) {
+        geometryCompositionPending = true;
+      } else if (!geometryCompositionPending) {
         this.projection.markGeometryDirty();
         this.activeFrameInvalidations.add('geometry');
       }
     }
+
+    let composedThisFrame = false;
+    if (geometryCompositionPending) {
+      this.refreshFrame(false, 'geometry');
+    }
+
     if (tickResult?.camera) {
       this.vision.setState(tickResult.camera);
       this.synchronizeCameraState();
@@ -323,7 +333,15 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.activeFrameInvalidations.add('camera');
     }
     if (this.projection.nextPreviewFrameDelayMs(this.platform.now()) !== undefined) {
-      this.refreshFrame(false, 'presentation');
+      if (!composedThisFrame) {
+        this.refreshFrame(false, 'presentation');
+        composedThisFrame = true;
+      } else {
+        // The geometry composition already sampled the current
+        // highlight animation state, so don't compose twice.
+        this.presentationRevision += 1;
+        this.activeFrameInvalidations.add('presentation');
+      }
     }
     const compositionMs = duration(compositionStart, this.platform.now());
     if (this.isSuspended()) {

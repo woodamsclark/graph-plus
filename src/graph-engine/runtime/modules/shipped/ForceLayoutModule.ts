@@ -111,7 +111,6 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private projectionFilterKey: string | undefined;
   private regionLayoutKey = '';
   private topologyAnalysisCount = 0;
-  private accumulatorSeconds = 0;
   private alphaTarget = 0;
   private dragWasActive = false;
   private restoredStatePending = false;
@@ -385,18 +384,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       this.stop();
       return { requestNextFrame: false };
     }
-    this.accumulatorSeconds += elapsedSeconds;
-    if (this.accumulatorSeconds + 1e-12 < FIXED_STEP_SECONDS) {
-      if (!state.physicsOverrideHeld) this.coolBy(elapsedSeconds, dragActive, cursorActive);
-      return {
-        requestNextFrame: this.running,
-        ...(this.running ? { nextFrameDelayMs: this.targetFrameIntervalMs(dragActive || cursorActive) } : {}),
-      };
-    }
-    this.accumulatorSeconds = Math.min(
-      FIXED_STEP_SECONDS - 1e-12,
-      Math.max(0, this.accumulatorSeconds - FIXED_STEP_SECONDS),
-    );
+    
     let changed = false;
     let maximumMovement = 0;
     {
@@ -753,7 +741,6 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.running = false;
     this.alpha = 0;
     this.alphaTarget = 0;
-    this.accumulatorSeconds = 0;
     this.settledStepCount = 0;
     // Frozen layouts cannot retain momentum that might replay on a later thaw.
     this.velocities.clear();
