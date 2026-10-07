@@ -51,6 +51,8 @@ export class SessionInteractionRuntime {
   private readonly interpreter: GraphInteractionInterpreter;
   private hoveredNodeId: string | undefined;
   private previewedNodeId: string | undefined;
+  /** Visual proposal held for the lifetime of the note preview surface. */
+  private notePreviewPresentation: GraphInteractionPreviewV1 | null = null;
   private previewPoint: GraphScreenPointV1 | undefined;
   private previewSurfaceActive = false;
   private previewReleaseTimer: number | undefined;
@@ -259,6 +261,17 @@ export class SessionInteractionRuntime {
     return this.hoveredNodeId;
   }
 
+  getPresentationHoveredNodeId(): string | undefined {
+    return this.holdsNotePreviewHover() ? this.previewedNodeId : this.hoveredNodeId;
+  }
+
+  private holdsNotePreviewHover(): boolean {
+    // Physical Ctrl owns removal previews; only note-preview hover is retained.
+    return this.previewedNodeId !== undefined
+      && this.notePreviewPresentation?.activation !== 'remove-membership'
+      && this.notePreviewPresentation?.activation !== 'toggle-membership';
+  }
+
   isSelectionPresentationSuspended(): boolean {
     return this.interpreter.isSelectionPresentationSuspended();
   }
@@ -286,6 +299,7 @@ export class SessionInteractionRuntime {
     if (this.previewedNodeId === undefined) return;
     this.previewSurfaceActive = false;
     this.previewedNodeId = undefined;
+    this.notePreviewPresentation = null;
     this.previewPoint = undefined;
     this.updateCursor();
     this.options.onViewStateChanged('interaction');
@@ -498,6 +512,10 @@ export class SessionInteractionRuntime {
         const wasClosing = this.previewReleaseTimer !== undefined;
         this.cancelPreviewRelease();
         if (!wasClosing && this.previewedNodeId === command.nodeId && samePoint(this.previewPoint, command.point)) return;
+        if (this.previewedNodeId !== command.nodeId) {
+          this.notePreviewPresentation = command.nodeId !== undefined && command.nodeId === this.hoveredNodeId
+            ? this.resolveCurrentHoverPreview() : null;
+        }
         this.previewedNodeId = command.nodeId;
         this.previewPoint = command.point ? { ...command.point } : undefined;
         if (command.nodeId === undefined) this.previewSurfaceActive = false;
@@ -670,6 +688,12 @@ export class SessionInteractionRuntime {
     if (this.interpreter.isViewProposalSuspended()) {
       this.options.ego.clearWill();
       return this.interpreter.isCameraGestureActive() ? this.navigationPeek?.preview ?? null : null;
+    }
+    if (this.holdsNotePreviewHover()) {
+      if (this.hoveredNodeId === this.previewedNodeId) {
+        this.notePreviewPresentation = this.resolveCurrentHoverPreview();
+      }
+      return this.notePreviewPresentation;
     }
     return this.resolveCurrentHoverPreview();
   }
@@ -1046,6 +1070,7 @@ export class SessionInteractionRuntime {
     if (!hoverChanged) return false;
     this.hoveredNodeId = undefined;
     this.previewedNodeId = undefined;
+    this.notePreviewPresentation = null;
     this.previewPoint = undefined;
     this.previewSurfaceActive = false;
     this.hoverMod = false;
@@ -1160,6 +1185,7 @@ export class SessionInteractionRuntime {
     this.dragContext = null;
     this.hoveredNodeId = undefined;
     this.previewedNodeId = undefined;
+    this.notePreviewPresentation = null;
     this.previewPoint = undefined;
     this.previewSurfaceActive = false;
     this.hoverMod = false;

@@ -1,4 +1,5 @@
-import { AnimaHoverPreviewAnimationV1 } from '../../src/graph-engine/runtime/anima/AnimaHoverPreviewAnimation.ts';
+import { AnimaHoverPreviewAnimationV1, blendAnimaPreviewFrameV1 } from '../../src/graph-engine/runtime/anima/AnimaHoverPreviewAnimation.ts';
+import type { GraphRenderFrameV1 } from '../../src/graph-engine/runtime/render/GraphRenderTypes.ts';
 import type { GraphInteractionPreviewV1 } from '../../src/graph-engine/runtime/anima/AnimaInteractionPreview.ts';
 import { CanvasGraphRenderer, GraphRendererRegistryV2, type GraphRenderSceneV2 } from '../../src/graph-engine/runtime/render/index.ts';
 import { GraphCameraController } from '../../src/graph-engine/runtime/index.ts';
@@ -9,6 +10,49 @@ import { assert, deepEqual, equal, test } from '../support/harness.ts';
 
 const preview: GraphInteractionPreviewV1 = { kind: 'objects', activation: 'primary',
   addedNodeIds: ['a'], removedNodeIds: [], hoverPathNodeIds: [] };
+
+test('Anima cached highlight targets preserve the moving live world through full strength', () => {
+  const color = { r: 0, g: 0, b: 0, a: 1 };
+  const initial: GraphRenderFrameV1 = {
+    geometryRevision: 1, regions: [], backgroundColor: color,
+    labelFont: { family: 'sans-serif', sizePx: 12, weight: 400, style: 'normal', lineHeightPx: 14.4 },
+    nodes: [{ id: 'a', label: 'a', position: { x: 0, y: 0, z: 0 }, radius: 5,
+      finalColor: color, opacity: 0.25, labelColor: color, labelOpacity: 0.25,
+      labelFontSize: 12, labelStatePriority: 0 }],
+    edges: [{ id: 'aa', sourceId: 'a', targetId: 'a', directed: false, thickness: 1,
+      color, opacity: 0.25, arrowColor: color, arrowOpacity: 0.25 }],
+  };
+  // This target is compiled once, before the live node moves.
+  const cached: GraphRenderFrameV1 = { ...initial,
+    nodes: [{ ...initial.nodes[0], radius: 99, opacity: 1, labelOpacity: 1 },
+      { ...initial.nodes[0], id: 'preview-only' }],
+    edges: [{ ...initial.edges[0], thickness: 99, sourceId: 'preview-only', opacity: 1 }],
+  };
+  const animation = new AnimaHoverPreviewAnimationV1();
+  const layers = (now: number) => animation.update({ context: 'world', preview, hoveredNodeId: 'a', committed: false, now });
+  layers(0);
+  for (const [now, x, expectedStrength] of [[450, 10, 0.5], [700, 20, 1], [800, 30, 1]]) {
+    const live: GraphRenderFrameV1 = { ...initial, geometryRevision: x,
+      nodes: [{ ...initial.nodes[0], position: { x, y: x * 2, z: x * 3 } },
+        { ...initial.nodes[0], id: 'live-only' }],
+    };
+    const strength = layers(now)[0].strength;
+    equal(strength, expectedStrength, 'the highlight reaches and retains full strength');
+    const result = blendAnimaPreviewFrameV1(live, cached, strength);
+    deepEqual(result.nodes[0].position, live.nodes[0].position, 'cached visuals cannot snap a moving node back');
+    deepEqual(result.nodes.map(node => node.id), ['a', 'live-only'], 'membership comes from the live baseline');
+    equal(result.nodes[0].radius, 5, 'node geometry comes from the live baseline');
+    equal(result.geometryRevision, x, 'projection revision follows the live geometry');
+    equal(result.edges[0].sourceId, 'a', 'edge endpoints come from the live baseline');
+    equal(result.edges[0].thickness, 1, 'edge geometry comes from the live baseline');
+    equal(result.nodes[0].opacity, 0.25 + 0.75 * strength, 'highlight visuals interpolate to the cached target');
+    equal(result.edges[0].opacity, 0.25 + 0.75 * strength, 'edge visuals interpolate to the cached target');
+    equal(result.regions, live.regions, 'other world state stays on the live baseline');
+    equal(blendAnimaPreviewFrameV1(live, cached, -1), live, 'negative strength returns the baseline');
+    deepEqual(blendAnimaPreviewFrameV1(live, cached, 2), blendAnimaPreviewFrameV1(live, cached, 1),
+      'strength above one clamps visuals while retaining live geometry');
+  }
+});
 
 test('Anima cancels waiting previews and reverses partial fades without jumping', () => {
   const animation = new AnimaHoverPreviewAnimationV1();
@@ -103,6 +147,68 @@ test('Anima delays and fades each View preview in and out in 2D and 3D without m
   }
 });
 
+
+test('Cmd note preview holds hover styling through card handoff and release until dismissal', async () => {
+  for (const dimensions of ['2d', '3d'] as const) {
+    for (const viewMode of ['overview', 'explore', 'focus'] as const) {
+      let scene: GraphRenderSceneV2 | undefined;
+      const registry = new GraphRendererRegistryV2();
+      registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true, create: ({ createCanvas, now }) => {
+        const renderer = new CanvasGraphRenderer(createCanvas(), now);
+        const update = renderer.updateScene.bind(renderer);
+        renderer.updateScene = next => { scene = next; update(next); };
+        return renderer;
+      } });
+      const value = runtimeHarness({ consumerId: 'graph-plus', profileId: 'default',
+        registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1, rendererRegistry: registry,
+        document: graphDocument({ nodes: ['a', 'b', 'c', 'd'].map(id => graphNode(id)),
+          edges: [graphEdge('ab', 'a', 'b'), graphEdge('bc', 'b', 'c')] }) });
+      Object.defineProperty(value.window.navigator, 'platform', { value: 'MacIntel', configurable: true });
+      value.profiles.setUserOverrides('graph-plus', 'default', { dimensions, modules: {
+        'force-layout': { enabled: false }, anima: { settings: { cursorGravity: 'off' } },
+      } });
+      const session = await value.create();
+      const initial = await session.exportViewState();
+      const camera = new GraphCameraController(initial.camera, dimensions); camera.setViewport(640, 360);
+      await session.restoreViewState({ ...initial, viewMode, selectedNodeIds: viewMode === 'overview' ? [] : ['a'],
+        focusedNodeId: viewMode === 'focus' ? 'a' : undefined,
+        positions: Object.fromEntries(['a', 'b', 'c', 'd'].map((id, i) => [id, camera.screenToWorld(120 + i * 120, 180, 1000)])) });
+      value.platform.flushFrame(value.platform.now());
+      const unchanged = await session.exportViewState();
+      const styling = () => ({ nodes: scene!.nodes, edges: scene!.edges, policy: scene!.policy });
+      const baseline = styling();
+      const canvas = runtimeCanvas(value.container);
+      const move = (x: number, y: number) => {
+        canvas.dispatchEvent(new value.window.PointerEvent('pointermove', {
+          clientX: x, clientY: y, pointerId: 982, pointerType: 'mouse', metaKey: true, bubbles: true,
+        }) as unknown as Event);
+        value.platform.advanceTime(20); value.platform.flushFrame(value.platform.now());
+      };
+      move(240, 180);
+      value.platform.advanceTime(720); value.platform.flushTimer(); value.platform.flushFrame(value.platform.now());
+      const hovered = styling();
+      assert(JSON.stringify(hovered) !== JSON.stringify(baseline), 'the hovered node has distinct styling');
+      move(-100, -100);
+      deepEqual(styling(), hovered, `${dimensions}/${viewMode}: handoff preserves all hover styling`);
+      await session.setPreviewSurfaceActive(true);
+      canvas.dispatchEvent(new value.window.PointerEvent('pointerleave', { pointerId: 982, pointerType: 'mouse' }) as unknown as Event);
+      value.window.dispatchEvent(new value.window.KeyboardEvent('keyup', { key: 'Meta', metaKey: false }));
+      value.platform.advanceTime(20);
+      value.platform.flushFrame(value.platform.now());
+      deepEqual(styling(), hovered, 'card interaction and Cmd release preserve hover styling');
+      value.platform.advanceTime(700); value.platform.flushTimer(); value.platform.flushFrame(value.platform.now());
+      deepEqual(styling(), hovered, 'the hover styling remains after the ordinary fade-out duration');
+      await session.setPreviewSurfaceActive(false);
+      value.platform.flushFrame(value.platform.now());
+      deepEqual(styling(), hovered, 'leaving the card preserves styling until the card disappears');
+      await session.clearPreview(); value.platform.advanceTime(20); value.platform.flushFrame(value.platform.now());
+      value.platform.advanceTime(500); value.platform.flushTimer(); value.platform.flushFrame(value.platform.now());
+      deepEqual(styling(), baseline, 'dismissal restores the baseline styling');
+      deepEqual(await session.exportViewState(), unchanged, 'preview styling never changes the live world');
+      await session.dispose();
+    }
+  }
+});
 
 test('Focus hover keeps its label visible through the delay and grows it continuously to root size', async () => {
   for (const dimensions of ['2d', '3d'] as const) {

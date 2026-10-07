@@ -1504,7 +1504,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       theme: this.themePalette,
       presentationPolicy: DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
       draggedNodeId: this.interaction?.getDraggedNodeId(),
-      hoveredNodeId: this.interaction?.getHoveredNodeId(),
+      hoveredNodeId: this.interaction?.getPresentationHoveredNodeId(),
       selectionPresentationSuspended: this.interaction?.isSelectionPresentationSuspended(),
       selectionNeighborRevealActive: this.interaction?.isSelectionNeighborRevealActive(),
       previewedNodeId: this.interaction?.getPreviewedNodeId(),
@@ -1568,8 +1568,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       ...frame,
       ...(retainedHoverNodeId ? { nodes: frame.nodes.map((node) => node.id === retainedHoverNodeId
         ? { ...node, opacity: 1 } : node) } : {}),
-      // Hover/peek policy owns labels while a node is under the cursor.
-      policy: this.interaction.getHoveredNodeId() !== undefined
+      // Hover/peek policy owns labels while a node or its note preview is active.
+      policy: this.interaction.getPresentationHoveredNodeId() !== undefined
         ? { ...frame.policy, cursorLabelRevealRadiusPx: 0 } : frame.policy,
       cursorScreenPoint: this.interaction.getCursorPoint(),
       revision: this.renderSceneRevision,

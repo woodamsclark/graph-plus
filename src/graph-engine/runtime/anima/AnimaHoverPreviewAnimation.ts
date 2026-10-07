@@ -13,6 +13,7 @@ interface PreviewVisit {
 }
 
 export interface AnimaPreviewLayerV1 {
+  readonly key: string;
   readonly preview: GraphInteractionPreviewV1;
   readonly hoveredNodeId: string;
   readonly strength: number;
@@ -82,11 +83,11 @@ export class AnimaHoverPreviewAnimationV1 {
 export function blendAnimaPreviewFrameV1(
   baseline: GraphRenderFrameV1, preview: GraphRenderFrameV1, strength: number,
 ): GraphRenderFrameV1 {
-  if (strength <= 0) return baseline;
-  if (strength >= 1) return preview;
+  const t = Math.max(0, Math.min(1, strength));
+  if (t <= 0) return baseline;
   const nodes = new Map(preview.nodes.map(node => [node.id, node]));
   const edges = new Map(preview.edges.map(edge => [edge.id, edge]));
-  const lerp = (a: number, b: number) => a + (b - a) * strength;
+  const lerp = (a: number, b: number) => a + (b - a) * t;
   const color = (a: GraphColorV2, b: GraphColorV2): GraphColorV2 => ({
     r: lerp(a.r, b.r), g: lerp(a.g, b.g), b: lerp(a.b, b.b), a: lerp(a.a, b.a),
   });

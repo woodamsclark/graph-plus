@@ -14,6 +14,7 @@ import {
   GraphFrameStore,
   type GraphPresentationPolicyV2,
   type GraphRendererV2,
+  type GraphRenderFrameV1,
   type GraphRenderTimingV1,
 } from '../render/index.ts';
 import type { GraphVisualThemeV2 } from '../theme/index.ts';
@@ -25,6 +26,8 @@ export class SessionProjectionCoordinatorV1 {
   readonly committedFrames = new GraphFrameStore();
   private dirty = true;
   private readonly hoverAnimation = new AnimaHoverPreviewAnimationV1();
+  private previewTargetContext?: string;
+  private readonly previewTargetFrames = new Map<string, GraphRenderFrameV1>();
   private geometryRevision = 0;
   private topologyCache?: {
     readonly document: GraphModuleProjectionStateV1['document'];
@@ -121,19 +124,39 @@ export class SessionProjectionCoordinatorV1 {
       && objectActivationPreview?.activation !== 'toggle-membership';
     if (!animated) {
       this.hoverAnimation.clear();
+      this.previewTargetFrames.clear();
+      this.previewTargetContext = undefined;
       const result = compile(objectActivationPreview);
       this.committedFrames.set(objectActivationPreview ? compile(null).frame : result.frame);
       this.frames.set(result.frame);
       this.dirty = true;
       return result.moduleView;
     }
+
+    const previewContext = JSON.stringify([
+      input.document.documentId,
+      input.document.revision,
+      options.viewState.dimensions,
+      options.viewState.viewMode,
+      options.viewState.focusedNodeId,
+      options.viewState.selectedNodeIds,
+      [...input.renderSelection.nodeIds],
+      [...input.renderSelection.edgeIds],
+    ]);
+
+    if (this.previewTargetContext !== previewContext) {
+      this.previewTargetContext = previewContext;
+      this.previewTargetFrames.clear();
+    }
+
     const layers = this.hoverAnimation.update({
-      context: JSON.stringify([input.document.documentId, input.document.revision, options.viewState.dimensions, options.viewState.viewMode,
-        options.viewState.focusedNodeId, options.viewState.selectedNodeIds,
-        [...input.renderSelection.nodeIds], [...input.renderSelection.edgeIds]]),
-      preview: objectActivationPreview, hoveredNodeId: options.hoveredNodeId,
-      committed: options.previewCommitted === true, now: options.now,
+      context: previewContext,
+      preview: objectActivationPreview,
+      hoveredNodeId: options.hoveredNodeId,
+      committed: options.previewCommitted === true,
+      now: options.now,
     });
+
     const focusLabelEntry = options.viewState.viewMode === 'focus'
       && options.hoveredNodeId !== undefined && options.hoveredNodeId !== options.viewState.focusedNodeId
       && objectActivationPreview?.activation === 'primary';
@@ -144,15 +167,44 @@ export class SessionProjectionCoordinatorV1 {
     let frame = focusLabelEntry ? { ...baseline.frame, nodes: baseline.frame.nodes.map(node =>
       node.id === options.hoveredNodeId ? { ...node, showLabel: true, labelForceVisible: true,
         labelAlwaysVisible: true, labelOpacity: 1, labelFontSize: Math.max(12, node.labelFontSize) } : node) } : baseline.frame;
-    for (const layer of layers) {
-      frame = blendAnimaPreviewFrameV1(frame, compile(layer.preview, layer.hoveredNodeId).frame, layer.strength);
+
+    const activeLayerKeys = new Set(layers.map(layer => layer.key));
+
+    for (const key of this.previewTargetFrames.keys()) {
+      if (!activeLayerKeys.has(key)) {
+        this.previewTargetFrames.delete(key);
+      }
     }
+
+    for (const layer of layers) {
+      let targetFrame = this.previewTargetFrames.get(layer.key);
+
+      if (!targetFrame) {
+        targetFrame = compile(
+          layer.preview,
+          layer.hoveredNodeId,
+        ).frame;
+
+        this.previewTargetFrames.set(layer.key, targetFrame);
+      }
+
+      frame = blendAnimaPreviewFrameV1(
+        frame,
+        targetFrame,
+        layer.strength,
+      );
+    }
+
     this.frames.set(frame);
     this.dirty = true;
     return baseline.moduleView;
   }
 
-  resetPreviewAnimation(): void { this.hoverAnimation.clear(); }
+  resetPreviewAnimation(): void {
+    this.hoverAnimation.clear();
+    this.previewTargetFrames.clear();
+    this.previewTargetContext = undefined;
+  }
 
   nextPreviewFrameDelayMs(now: number): number | undefined {
     return this.hoverAnimation.nextFrameDelayMs(now);
@@ -176,6 +228,9 @@ export class SessionProjectionCoordinatorV1 {
 
   clear(): void {
     this.hoverAnimation.clear();
+    this.previewTargetFrames.clear();
+    this.previewTargetContext = undefined;
+
     this.frames.set(null);
     this.committedFrames.set(null);
     this.dirty = false;

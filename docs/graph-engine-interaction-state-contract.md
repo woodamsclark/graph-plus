@@ -129,7 +129,11 @@ outcome; holding Ctrl after removal cannot preview re-addition or force a hover 
 Ctrl never highlights a route. Explicit Add/Remove menu input retains its toggle behavior. Modifier
 release restores action preview only if this node visit has not been consumed by a click; a removal preview retains its own acquired hit target
 until the pointer leaves even if that preview would void it.
-Leaving restores the committed scene. Hover never commits membership, Focus, View,
+Mod-hover note preview retains its node's hover presentation and admitted visual proposal
+through pointer handoff, card interaction, modifier release, and the card's dismissal delay.
+The preview target owns presentation hover until dismissal; physical hover remains independent
+for input handling. Dismissal releases that presentation and uses the normal hover fade-out.
+Leaving otherwise restores the committed scene. Hover never commits membership, Focus, View,
 Memory, camera movement, or host actions. Option preserves the effective scene. Space
 preserves the scene in Constellation/Focus and explicitly clears user membership in Overview.
 The prospective subject receives the Focus outline and highest-priority label.
