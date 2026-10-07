@@ -174,6 +174,8 @@ export interface GraphModuleFactoryContextV1 {
 }
 
 export interface GraphModuleInstanceV1 {
+  /** Opt in only when dressing is independent of node positions and camera pose. */
+  readonly geometryIndependentPresentation?: boolean;
   setup?(): void;
   updateSettings?(settings: Readonly<Record<string, JsonValue>>): void;
   updateProfileSettings?(settings: Readonly<Record<string, JsonValue>>): void;

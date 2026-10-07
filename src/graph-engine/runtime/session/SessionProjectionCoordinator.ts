@@ -56,7 +56,10 @@ export class SessionProjectionCoordinatorV1 {
   private previewPresentationContext?: string;
   private readonly previewTargetFrames = new Map<string, GraphRenderFrameV1>();
   private geometryRevision = 0;
-  private readonly work = { modulePresentationContributions: 0, animusSnapshots: 0, animaSemanticResolves: 0, fullSceneCompiles: 0 };
+  private geometryOnly = false;
+  private baselineCache?: { input: GraphModulePresentationStateV1; result: PresentationFrame };
+  private consciousnessCache?: { owner: Consciousness; document: GraphModuleProjectionStateV1['document']; key: string; snapshot: ConsciousnessSnapshot };
+  private readonly work = { consciousnessReconciliations: 0, geometryRefreshes: 0, modulePresentationContributions: 0, animusSnapshots: 0, animaSemanticResolves: 0, fullSceneCompiles: 0 };
 
   getDiagnostics(): Readonly<typeof this.work> { return { ...this.work }; }
   private topologyCache?: {
@@ -77,6 +80,8 @@ export class SessionProjectionCoordinatorV1 {
   compose(options: CompositionOptions): GraphModulePresentationStateV1 {
     this.onComposition();
     if (options.invalidation === 'geometry' || options.invalidation === 'content') this.geometryRevision += 1;
+    this.geometryOnly = options.invalidation === 'geometry' && options.host.canReuseGeometryPresentation?.() === true;
+    if (options.invalidation === 'content') this.baselineCache = undefined;
     const consciousness = this.reconcileConsciousness(options);
     const objectActivationPreview = options.resolveObjectActivationPreview?.();
     const input: GraphModulePresentationStateV1 = {
@@ -114,12 +119,19 @@ export class SessionProjectionCoordinatorV1 {
   }
 
   private reconcileConsciousness(options: CompositionOptions): ConsciousnessSnapshot {
+    const document = options.projectionView.document;
+    const key = JSON.stringify([options.viewState.selectedNodeIds, [...options.consciousness.remembered.nodeIds]]);
+    const cached = this.consciousnessCache;
+    if (options.invalidation !== 'content' && cached?.owner === options.consciousness && cached.document === document && cached.key === key) return cached.snapshot;
     const topology = this.topology(options.projectionView.document);
-    return options.consciousness.reconcile({
+    this.work.consciousnessReconciliations += 1;
+    const snapshot = options.consciousness.reconcile({
       attentionNodeIds: options.viewState.selectedNodeIds,
       availableNodeIds: topology.nodeIds,
       relationships: topology.relationships('either'),
     });
+    this.consciousnessCache = { owner: options.consciousness, document, key, snapshot };
+    return snapshot;
   }
 
   private createPresentationFrame(
@@ -129,6 +141,14 @@ export class SessionProjectionCoordinatorV1 {
     hoveredInput: string | null | undefined = input.hoveredNodeId,
   ): PresentationFrame {
     const presentationInput: GraphModulePresentationStateV1 = { ...input, objectActivationPreview: preview, hoveredNodeId: hoveredInput ?? undefined };
+    const cached = this.baselineCache;
+    if (!preview && this.geometryOnly && cached && samePresentationInputs(cached.input, presentationInput)) {
+      this.work.geometryRefreshes += 1;
+      const result = { moduleView: { ...cached.result.moduleView, positions: input.positions, viewState: input.viewState },
+        frame: this.refreshGeometry(cached.result.frame, input.positions) };
+      this.baselineCache = { input: presentationInput, result };
+      return result;
+    }
     this.work.animaSemanticResolves += 1;
     const animaPresentation = createAnimaConsciousnessPresentationV1({
       ...input.consciousness, interaction: createGraphInteractionContextV1(presentationInput),
@@ -139,7 +159,9 @@ export class SessionProjectionCoordinatorV1 {
     const moduleView = this.contributePresentation(host, { ...presentationInput, animaPresentation });
     const snapshot = this.createAnimusSnapshot(presentationInput, moduleView);
     const frame = this.compileScene(presentationInput, moduleView, snapshot);
-    return { moduleView, frame };
+    const result = { moduleView, frame };
+    if (!preview) this.baselineCache = { input: presentationInput, result };
+    return result;
   }
 
   private contributePresentation(host: GraphModuleHost, input: GraphModulePresentationStateV1): GraphModulePresentationStateV1 {
@@ -273,6 +295,11 @@ export class SessionProjectionCoordinatorV1 {
     return { moduleView: baseline.moduleView, frame };
   }
 
+  private refreshGeometry(frame: GraphRenderFrameV1, positions: GraphModulePresentationStateV1['positions']): GraphRenderFrameV1 {
+    return { ...frame, geometryRevision: this.geometryRevision,
+      nodes: frame.nodes.map(node => ({ ...node, position: positions[node.id] ?? node.position })) };
+  }
+
   resetPreviewAnimation(): void {
     this.hoverAnimation.clear();
     this.previewTargetFrames.clear();
@@ -306,6 +333,8 @@ export class SessionProjectionCoordinatorV1 {
     this.previewTargetContext = undefined;
     this.previewPresentationContext = undefined;
 
+    this.baselineCache = undefined;
+    this.consciousnessCache = undefined;
     this.frames.set(null);
     this.committedFrames.set(null);
     this.dirty = false;
@@ -317,4 +346,17 @@ export class SessionProjectionCoordinatorV1 {
     this.topologyCache = { document, topology };
     return topology;
   }
+}
+
+/** Geometry and camera are deliberately absent; structural inputs retain their identities. */
+function samePresentationInputs(a: GraphModulePresentationStateV1, b: GraphModulePresentationStateV1): boolean {
+  return a.document === b.document && a.renderSelection === b.renderSelection
+    && a.nodeRoles === b.nodeRoles && a.edgeRoles === b.edgeRoles && a.regions === b.regions
+    && a.theme === b.theme && a.presentationPolicy === b.presentationPolicy && a.experience === b.experience
+    && a.consciousness === b.consciousness && a.hoveredNodeId === b.hoveredNodeId
+    && a.draggedNodeId === b.draggedNodeId && a.previewedNodeId === b.previewedNodeId
+    && a.selectionPresentationSuspended === b.selectionPresentationSuspended
+    && a.selectionNeighborRevealActive === b.selectionNeighborRevealActive
+    && JSON.stringify([a.viewState.dimensions, a.viewState.viewMode, a.viewState.focusedNodeId, a.viewState.selectedNodeIds, a.viewState.pinnedNodeIds])
+      === JSON.stringify([b.viewState.dimensions, b.viewState.viewMode, b.viewState.focusedNodeId, b.viewState.selectedNodeIds, b.viewState.pinnedNodeIds]);
 }

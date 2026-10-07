@@ -235,6 +235,10 @@ export class GraphModuleHost {
     return state;
   }
 
+  canReuseGeometryPresentation(): boolean {
+    return this.active.every(module => !module.instance.contributeFrame || module.instance.geometryIndependentPresentation === true);
+  }
+
   contribute(state: GraphModulePresentationStateV1): GraphModulePresentationStateV1 {
     return this.runPresentationHook(state);
   }

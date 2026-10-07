@@ -117,3 +117,56 @@ test('removal and toggle previews compile immediately and reset prior animation 
     equal(value.coordinator.committedFrames.get(), null, 'clear releases the committed frame');
   }
 });
+
+
+test('geometry-only composition reuses dressing, Consciousness and compilation for stable shipped semantics', () => {
+  for (const dimensions of ['2d', '3d'] as const) {
+    const value = pipelineFixture(dimensions);
+    value.options.host.canReuseGeometryPresentation = () => true;
+    const nodes = Array.from({ length: 1200 }, (_, i) => graphNode(`n${i}`));
+    const document = graphDocument({ nodes, edges: [] });
+    const positions = Object.fromEntries(nodes.map((node, i) => [node.id, { x: i, y: 0, z: 0 }]));
+    const selection = { nodeIds: new Set(nodes.map(node => node.id)), edgeIds: new Set<string>() };
+    const initial = { ...value.options, projectionView: { ...value.options.projectionView, document, positions, renderSelection: selection } };
+    value.coordinator.compose(initial);
+    const before = value.coordinator.getDiagnostics();
+    for (let i = 0; i < 20; i++) {
+      positions.n0 = { x: i + 1, y: i, z: dimensions === '3d' ? i : 0 };
+      value.coordinator.compose({ ...initial, invalidation: 'geometry', now: i * 20 });
+    }
+    const after = value.coordinator.getDiagnostics();
+    equal(after.geometryRefreshes - before.geometryRefreshes, 20, 'all moving frames refresh only geometry');
+    for (const field of ['modulePresentationContributions', 'consciousnessReconciliations', 'animaSemanticResolves', 'animusSnapshots', 'fullSceneCompiles'] as const) {
+      equal(after[field], before[field], `${field} remains unchanged through 20 moving frames`);
+    }
+    deepEqual(value.coordinator.frames.get()!.nodes[0].position, positions.n0, 'visible geometry tracks replacement position entries');
+    deepEqual(value.coordinator.committedFrames.get()!.nodes[0].position, positions.n0, 'fallback geometry tracks replacement position entries');
+    const reused = value.coordinator.frames.get();
+    value.coordinator.compose({ ...initial, invalidation: 'presentation', now: 400 });
+    deepEqual(value.coordinator.frames.get(), reused, 'fresh compilation matches the reused frame exactly');
+  }
+});
+
+test('geometry reuse expires for changed hover, pins, Memory and content; unknown module dressing remains conservative', () => {
+  const value = pipelineFixture('2d');
+  value.options.host.canReuseGeometryPresentation = () => true;
+  value.coordinator.compose(value.options);
+  let options: Parameters<SessionProjectionCoordinatorV1['compose']>[0] = { ...value.options, invalidation: 'geometry' };
+  value.coordinator.compose(options);
+  equal(value.calls.length, 1, 'stable geometry reuses the baseline');
+  options = { ...options, hoveredNodeId: 'b' };
+  value.coordinator.compose(options);
+  equal(value.calls.length, 2, 'hover changes redress the baseline');
+  options = { ...options, viewState: { ...options.viewState, pinnedNodeIds: ['a'] } };
+  value.coordinator.compose(options);
+  equal(value.calls.length, 3, 'pin changes redress the baseline');
+  options.consciousness.receiveExogenous({ source: 'exogenous', type: 'replace-remembered-subjects', nodeIds: ['a'] },
+    { availableNodeIds: options.projectionView.renderSelection.nodeIds });
+  value.coordinator.compose(options);
+  equal(value.calls.length, 4, 'Memory changes redress the baseline');
+  value.coordinator.compose({ ...options, invalidation: 'content' });
+  equal(value.calls.length, 5, 'content always rebuilds');
+  options.host.canReuseGeometryPresentation = () => false;
+  value.coordinator.compose(options);
+  equal(value.calls.length, 6, 'unclassified module contributions run on geometry');
+});

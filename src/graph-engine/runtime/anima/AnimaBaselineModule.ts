@@ -19,6 +19,7 @@ const FORM_BRANCH_COLORS: readonly GraphColorV2[] = [
  * compatibility, but semantic graph modules no longer emit visual properties.
  */
 export class AnimaBaselineModule implements GraphModuleInstanceV1 {
+  readonly geometryIndependentPresentation = true;
   private baseTheme: GraphVisualThemeV2;
   private theme: GraphVisualThemeV2;
   private settings: Readonly<Record<string, JsonValue>> = {};

@@ -9,6 +9,7 @@ import { animaPhaseOpacity, animaMemoryColor } from '../../anima/AnimaPresentati
 import { createGraphInteractionContextV1 } from '../../interaction/index.ts';
 
 export class AnimaModule implements GraphModuleInstanceV1 {
+  readonly geometryIndependentPresentation = true;
   private readonly labels: GraphLabelManager;
   private topologyCache?: {
     readonly document: Parameters<NonNullable<GraphModuleInstanceV1['contributeFrame']>>[0]['document'];
