@@ -148,6 +148,8 @@ export interface GraphSessionRuntimeDiagnosticsV1 {
   readonly pendingInvalidations: readonly SessionInvalidationClassV1[];
   readonly lastFrameInvalidations: readonly SessionInvalidationClassV1[];
   readonly invalidationCounts: Readonly<Record<SessionInvalidationClassV1, number>>;
+  readonly compositionsThisFrame: number;
+  readonly maxCompositionsPerFrame: number;
   readonly renderCaches: Readonly<Record<string, number>>;
   readonly renderer: {
     readonly selectedBackendId: GraphRendererBackendIdV2;
@@ -232,6 +234,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly activity = new SessionActivityControllerV1();
   private readonly diagnostics = new SessionDiagnosticsV1();
   private activeFrameInvalidations: Set<SessionInvalidationClassV1> | null = null;
+  private readonly pendingCompositionInvalidations = new Set<SessionInvalidationClassV1>();
   private lastFrameTimestamp: number | null = null;
   private fatalModuleError: GraphRequiredModuleErrorV1 | null = null;
   private readonly deferredErrors: GraphSessionErrorV1[] = [];
@@ -255,119 +258,106 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.scheduleFrame(MIN_PIPELINE_INTERVAL_MS - (timestamp - this.lastFrameTimestamp));
       return;
     }
-    this.activeFrameInvalidations = new Set(this.scheduler.beginFrame());
-    const frameStart = this.platform.now();
-    const interactionStart = this.platform.now();
-    this.interaction.tick();
-    const held = this.interaction.isPhysicsOverrideHeld();
-    if (held !== this.physicsOverrideHeld) {
-      this.physicsOverrideHeld = held;
-      this.moduleHost.updateProfile(this.physicsOverrideProfile(this.profile));
-    }
-  const dragGeometryPending = this.pendingDragGeometry;
-
-  if (dragGeometryPending) {
-    this.pendingDragGeometry = false;
-    this.moduleHost.viewChanged(this.viewState);
-    this.emitWorldChanged('interaction');
-  }
-    const interactionMs = duration(interactionStart, this.platform.now());
-    const hitTestMs = this.interaction.consumeHitTestDuration();
-    this.diagnostics.counters.hitTests += this.interaction.consumeHitTestCount();
-    const deltaSeconds = this.lastFrameTimestamp === null ? 1 / 60 : Math.max(0, (timestamp - this.lastFrameTimestamp) / 1000);
-    this.lastFrameTimestamp = timestamp;
-    const moduleStart = this.platform.now();
-    const previousCameraFollowPoint = this.vision.deriveCentroid(
-      this.interaction.getCameraTrackingNodeIds(),
-      this.moduleView.positions,
-    );
-    this.diagnostics.counters.moduleTicks += 1;
-    const tickResult = this.moduleHost.tick({
-      ...this.moduleView,
-      physicsOverrideHeld: held,
-      cursorAttractionSteps: this.resolveCursorAttractionSteps(),
-      draggedNodeId: this.interaction.getDraggedNodeId(),
-      hoveredNodeId: this.interaction.getHoveredNodeId(),
-      selectionPresentationSuspended: this.interaction.isSelectionPresentationSuspended(),
-      selectionNeighborRevealActive: this.interaction.isSelectionNeighborRevealActive(),
-      previewedNodeId: this.interaction.getPreviewedNodeId(),
-    }, deltaSeconds);
-    const positions = tickResult?.positions;
-    const moduleTickMs = duration(moduleStart, this.platform.now());
-    const compositionStart = this.platform.now();
-    let geometryCompositionPending = dragGeometryPending;
-    
-    if (positions) {
-      const requiresComposition = positions !== this.moduleView.positions;
-      const nextCameraFollowPoint = this.vision.deriveCentroid(
-        this.interaction.getCameraTrackingNodeIds(),
-        positions,
+    this.activeFrameInvalidations = new Set([
+      ...this.scheduler.beginFrame(), ...this.pendingCompositionInvalidations,
+    ]);
+    this.diagnostics.beginDisplayFrame();
+    let tickResult: ReturnType<GraphModuleHost['tick']>;
+    try {
+      const frameStart = this.platform.now();
+      const interactionStart = this.platform.now();
+      this.interaction.tick();
+      const held = this.interaction.isPhysicsOverrideHeld();
+      if (held !== this.physicsOverrideHeld) {
+        this.physicsOverrideHeld = held;
+        this.moduleHost.updateProfile(this.physicsOverrideProfile(this.profile));
+      }
+      const dragGeometryPending = this.pendingDragGeometry;
+      if (dragGeometryPending) {
+        this.pendingDragGeometry = false;
+        this.moduleHost.viewChanged(this.viewState);
+        this.emitWorldChanged('interaction');
+      }
+      const interactionMs = duration(interactionStart, this.platform.now());
+      const hitTestMs = this.interaction.consumeHitTestDuration();
+      this.diagnostics.counters.hitTests += this.interaction.consumeHitTestCount();
+      const deltaSeconds = this.lastFrameTimestamp === null ? 1 / 60 : Math.max(0, (timestamp - this.lastFrameTimestamp) / 1000);
+      this.lastFrameTimestamp = timestamp;
+      const moduleStart = this.platform.now();
+      const previousCameraFollowPoint = this.vision.deriveCentroid(
+        this.interaction.getCameraTrackingNodeIds(), this.moduleView.positions,
       );
-      this.viewState = { ...this.viewState, positions };
-      if (previousCameraFollowPoint && nextCameraFollowPoint) {
-        this.vision.translateBy(subtractVec(nextCameraFollowPoint, previousCameraFollowPoint));
+      this.diagnostics.counters.moduleTicks += 1;
+      tickResult = this.moduleHost.tick({
+        ...this.moduleView,
+        physicsOverrideHeld: held,
+        cursorAttractionSteps: this.resolveCursorAttractionSteps(),
+        draggedNodeId: this.interaction.getDraggedNodeId(),
+        hoveredNodeId: this.interaction.getHoveredNodeId(),
+        selectionPresentationSuspended: this.interaction.isSelectionPresentationSuspended(),
+        selectionNeighborRevealActive: this.interaction.isSelectionNeighborRevealActive(),
+        previewedNodeId: this.interaction.getPreviewedNodeId(),
+      }, deltaSeconds);
+      const positions = tickResult?.positions;
+      const moduleTickMs = duration(moduleStart, this.platform.now());
+      let geometryCompositionPending = dragGeometryPending;
+      if (positions) {
+        const requiresComposition = positions !== this.moduleView.positions;
+        const nextCameraFollowPoint = this.vision.deriveCentroid(
+          this.interaction.getCameraTrackingNodeIds(), positions,
+        );
+        this.viewState = { ...this.viewState, positions };
+        if (previousCameraFollowPoint && nextCameraFollowPoint) {
+          this.vision.translateBy(subtractVec(nextCameraFollowPoint, previousCameraFollowPoint));
+          this.synchronizeCameraState();
+        }
+        this.projectionView = { ...this.projectionView, positions, viewState: this.viewState };
+        this.moduleView = { ...this.moduleView, positions, viewState: this.viewState };
+        this.emitWorldChanged('layout');
+        if (requiresComposition) geometryCompositionPending = true;
+        else if (!geometryCompositionPending) {
+          this.projection.markGeometryDirty();
+          this.activeFrameInvalidations.add('geometry');
+        }
+      }
+      if (geometryCompositionPending) this.refreshFrame(false, 'geometry');
+      if (tickResult?.camera) {
+        this.vision.setState(tickResult.camera);
         this.synchronizeCameraState();
+        this.projectionView = { ...this.projectionView, viewState: this.viewState };
+        this.moduleView = { ...this.moduleView, viewState: this.viewState };
+        this.projection.markDirty();
+        this.activeFrameInvalidations.add('camera');
       }
-      this.projectionView = { ...this.projectionView, positions, viewState: this.viewState };
-      this.moduleView = { ...this.moduleView, positions, viewState: this.viewState };
-      this.emitWorldChanged('layout');
-      if (requiresComposition) {
-        geometryCompositionPending = true;
-      } else if (!geometryCompositionPending) {
-        this.projection.markGeometryDirty();
-        this.activeFrameInvalidations.add('geometry');
-      }
-    }
-
-    let composedThisFrame = false;
-    if (geometryCompositionPending) {
-      this.refreshFrame(false, 'geometry');
-    }
-
-    if (tickResult?.camera) {
-      this.vision.setState(tickResult.camera);
-      this.synchronizeCameraState();
-      this.projectionView = { ...this.projectionView, viewState: this.viewState };
-      this.moduleView = { ...this.moduleView, viewState: this.viewState };
-      this.projection.markDirty();
-      this.activeFrameInvalidations.add('camera');
-    }
-    if (this.projection.nextPreviewFrameDelayMs(this.platform.now()) !== undefined) {
-      if (!composedThisFrame) {
+      if (this.projection.nextPreviewFrameDelayMs(this.platform.now()) !== undefined) {
         this.refreshFrame(false, 'presentation');
-        composedThisFrame = true;
-      } else {
-        // The geometry composition already sampled the current
-        // highlight animation state, so don't compose twice.
-        this.presentationRevision += 1;
-        this.activeFrameInvalidations.add('presentation');
       }
-    }
-    const compositionMs = duration(compositionStart, this.platform.now());
-    if (this.isSuspended()) {
+      if (this.isSuspended()) return;
+      const compositionStart = this.platform.now();
+      this.flushPendingComposition();
+      if (this.isSuspended()) return;
+      const compositionMs = duration(compositionStart, this.platform.now());
+      // Cursor-only input can change proximity labels without changing hover or geometry.
+      if (this.activeFrameInvalidations.has('presentation')) this.projection.markDirty();
+      this.updateRendererScene([...this.activeFrameInvalidations]);
+      const render = this.projection.render(this.renderer);
+      if (render) {
+        const latestFramePerformance = {
+          interactionMs, hitTestMs, moduleTickMs, compositionMs, ...render,
+          totalMs: duration(frameStart, this.platform.now()),
+        };
+        const frameCount = this.diagnostics.recordFrame(latestFramePerformance, [...this.activeFrameInvalidations]);
+        this.surface.recordFrame(frameCount);
+      }
+    } finally {
       this.activeFrameInvalidations = null;
-      return;
+      this.diagnostics.endDisplayFrame();
     }
-    // Cursor-only input can change proximity labels without changing hover or geometry.
-    if (this.activeFrameInvalidations.has('presentation')) this.projection.markDirty();
-    this.updateRendererScene([...this.activeFrameInvalidations]);
-    const render = this.projection.render(this.renderer);
-    if (render) {
-      const latestFramePerformance = {
-        interactionMs,
-        hitTestMs,
-        moduleTickMs,
-        compositionMs,
-        ...render,
-        totalMs: duration(frameStart, this.platform.now()),
-      };
-      const frameCount = this.diagnostics.recordFrame(latestFramePerformance, [...this.activeFrameInvalidations]);
-      this.surface.recordFrame(frameCount);
-    }
-    this.activeFrameInvalidations = null;
     if (tickResult?.requestNextFrame) this.scheduleFrame(tickResult.nextFrameDelayMs, 'geometry');
     const previewDelay = this.projection.nextPreviewFrameDelayMs(this.platform.now());
     if (previewDelay !== undefined) this.scheduleFrame(previewDelay, 'presentation');
+    // An observer/module may queue a new semantic change during composition or rendering.
+    if (this.pendingCompositionInvalidations.size > 0) this.scheduleFrame();
   };
 
   constructor(options: GraphSessionRuntimeOptionsV1) {
@@ -446,7 +436,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       });
       this.projection = new SessionProjectionCoordinatorV1(
         () => { this.diagnostics.counters.projectionPasses += 1; },
-        () => { this.diagnostics.counters.frameCompositions += 1; },
+        () => { this.diagnostics.recordComposition(); },
       );
       const capabilities = detectGraphRendererCapabilitiesV2(this.platform.document, this.platform.window);
       this.rendererSelection = selectGraphRendererV2({
@@ -489,14 +479,14 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         hitTest: (point, pointerKind, retainedHoverNodeId) => {
           // A removal preview may hide its own target. Retain only that already acquired
           // subject for picking, using the backend's real projected hit shape.
-          this.updateRendererScene([], retainedHoverNodeId);
+          this.updateRendererScene([], retainedHoverNodeId, undefined, true);
           try {
             const hit = this.renderer.pick({ point, pointerKind });
             if (hit || resolveGraphActiveViewV1(this.viewState).id === 'focus') return hit;
             // A temporary Focus scene cannot revoke non-void source-View hover targets.
             const committed = this.projection.committedFrames.get();
             if (!committed) return null;
-            this.updateRendererScene([], undefined, committed);
+            this.updateRendererScene([], undefined, committed, true);
             return this.renderer.pick({ point, pointerKind });
           } finally { this.updateRendererScene([]); }
         },
@@ -530,8 +520,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       visibilityListenerInstalled = true;
       this.activity.setDocumentSuspension(this.platform.document.hidden);
       this.recomputeView();
+      this.flushPendingComposition();
       if (!restoredLayout) this.fitPositions(Object.values(this.moduleView.positions));
       this.refreshFrame();
+      this.flushPendingComposition();
       this.updateRendererScene(['content']);
       this.renderer.render();
       this.synchronizeRuntimeActivity();
@@ -1299,6 +1291,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       pendingInvalidations: scheduler.pendingInvalidations,
       lastFrameInvalidations: diagnostics.lastFrameInvalidations,
       invalidationCounts: diagnostics.invalidationCounts,
+      compositionsThisFrame: diagnostics.compositionsThisFrame,
+      maxCompositionsPerFrame: diagnostics.maxCompositionsPerFrame,
       renderCaches: this.renderer.getRendererDiagnostics().resources,
       renderer: {
         selectedBackendId: this.renderer.backendId,
@@ -1473,10 +1467,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.updateSurface();
   }
 
-  private refreshFrame(
-    schedule = true,
-    invalidation: SessionInvalidationClassV1 = 'presentation',
-  ): void {
+  private observeCommittedView(): void {
     const view = resolveGraphActiveViewV1(this.viewState);
     if (view.id === 'focus') {
       this.consciousness.ego.intendVision({ kind: 'follow-subject', nodeId: view.subjectNodeId });
@@ -1492,8 +1483,33 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         try { listener({ ...view }); } catch { /* Observers cannot veto committed state. */ }
       }
     }
-    if (invalidation === 'presentation') this.presentationRevision += 1;
+  }
+
+  private refreshFrame(
+    schedule = true,
+    invalidation: SessionInvalidationClassV1 = 'presentation',
+  ): void {
+    this.observeCommittedView();
+    if (this.moduleView) {
+      // Physics/choreography consume current committed structural inputs even
+      // when their renderer presentation is waiting for the display callback.
+      this.moduleView = { ...this.moduleView, ...this.projectionView,
+        viewState: this.viewState, consciousness: this.consciousness.snapshot() };
+    }
     this.activeFrameInvalidations?.add(invalidation);
+    if (invalidation === 'camera' || invalidation === 'ui') this.projection.markDirty();
+    else this.pendingCompositionInvalidations.add(invalidation);
+    if (schedule) this.scheduleFrame(0, invalidation);
+  }
+
+  /** The initial scene and the end of an eligible display callback are the only flush boundaries. */
+  private flushPendingComposition(): void {
+    const pending = this.pendingCompositionInvalidations;
+    if (pending.size === 0) return;
+    const invalidation = pending.has('content') ? 'content' : pending.has('geometry') ? 'geometry' : 'presentation';
+    for (const reason of pending) this.activeFrameInvalidations?.add(reason);
+    if (pending.has('presentation')) this.presentationRevision += 1;
+    pending.clear();
     this.moduleView = this.projection.compose({
       host: this.moduleHost,
       consciousness: this.consciousness,
@@ -1512,7 +1528,6 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       now: this.platform.now(),
       previewCommitted: this.interaction?.isHoverPreviewCommitted(),
     });
-    if (schedule) this.scheduleFrame(0, invalidation);
   }
 
   private resolveCursorFieldTarget(): {
@@ -1560,14 +1575,23 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     return { [nodeId]: { x: target.x - position.x, y: target.y - position.y, z: target.z - position.z } };
   }
 
-  private updateRendererScene(invalidations: readonly SessionInvalidationClassV1[], retainedHoverNodeId?: string, committedFrame?: NonNullable<ReturnType<SessionProjectionCoordinatorV1['frames']['get']>>): void {
+  private updateRendererScene(invalidations: readonly SessionInvalidationClassV1[], retainedHoverNodeId?: string, committedFrame?: NonNullable<ReturnType<SessionProjectionCoordinatorV1['frames']['get']>>, livePicking = false): void {
     const frame = committedFrame ?? this.projection.frames.get();
     if (!frame) return;
+    const useLiveGeometry = livePicking && (this.pendingCompositionInvalidations.size > 0 || this.pendingDragGeometry);
+    // Input may arrive after world mutations and before the display callback.
+    // Project current geometry for picking without compiling another graph scene.
+    let nodes = useLiveGeometry
+      ? frame.nodes.filter(node => this.renderSelection.nodeIds.has(node.id)).map(node => ({
+        ...node, position: this.moduleView.positions[node.id] ?? node.position,
+      }))
+      : frame.nodes;
+    if (retainedHoverNodeId) nodes = nodes.map(node => node.id === retainedHoverNodeId ? { ...node, opacity: 1 } : node);
     this.renderSceneRevision += 1;
     this.renderer.updateScene({
       ...frame,
-      ...(retainedHoverNodeId ? { nodes: frame.nodes.map((node) => node.id === retainedHoverNodeId
-        ? { ...node, opacity: 1 } : node) } : {}),
+      nodes,
+      ...(useLiveGeometry ? { geometryRevision: undefined } : {}),
       // Hover/peek policy owns labels while a node or its note preview is active.
       policy: this.interaction.getPresentationHoveredNodeId() !== undefined
         ? { ...frame.policy, cursorLabelRevealRadiusPx: 0 } : frame.policy,
@@ -1946,6 +1970,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     delayMs = 0,
     invalidation: SessionInvalidationClassV1 = 'presentation',
   ): void {
+    if (this.activeFrameInvalidations !== null) {
+      this.activeFrameInvalidations.add(invalidation);
+      return;
+    }
     this.scheduler.schedule(invalidation, delayMs);
   }
 

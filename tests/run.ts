@@ -19,6 +19,7 @@ import './runtime/modules.test.ts';
 import './runtime/v16-native-presentation.test.ts';
 import './runtime/session.test.ts';
 import './runtime/session-internals.test.ts';
+import './runtime/session-frame-composition.test.ts';
 import './runtime/rendering-v2.test.ts';
 import './service/service.test.ts';
 import './service/actions.test.ts';

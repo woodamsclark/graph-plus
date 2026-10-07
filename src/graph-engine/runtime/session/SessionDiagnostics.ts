@@ -6,6 +6,9 @@ type MutablePerformanceCounters = { -readonly [K in keyof NonNullable<GraphPerfo
 export class SessionDiagnosticsV1 {
   readonly counters: MutablePerformanceCounters = emptyCounters();
   private frameCount = 0;
+  private displayFrameActive = false;
+  private compositionsThisFrame = 0;
+  private maxCompositionsPerFrame = 0;
   private latestFrame = emptyFramePerformance();
   private readonly samples: GraphPerformanceSnapshotV1['latestFrame'][] = [];
   private lastFrameInvalidations: readonly SessionInvalidationClassV1[] = [];
@@ -16,6 +19,25 @@ export class SessionDiagnosticsV1 {
     content: 0,
     ui: 0,
   };
+
+  beginDisplayFrame(): void {
+    this.displayFrameActive = true;
+    this.compositionsThisFrame = 0;
+  }
+
+  recordComposition(): void {
+    this.counters.frameCompositions += 1;
+    if (!this.displayFrameActive) return;
+    this.compositionsThisFrame += 1;
+    this.maxCompositionsPerFrame = Math.max(this.maxCompositionsPerFrame, this.compositionsThisFrame);
+    if (this.compositionsThisFrame === 2) {
+      console.warn('Graph Engine composed more than once during one display callback.');
+    }
+  }
+
+  endDisplayFrame(): void {
+    this.displayFrameActive = false;
+  }
 
   recordFrame(
     frame: GraphPerformanceSnapshotV1['latestFrame'],
@@ -35,6 +57,8 @@ export class SessionDiagnosticsV1 {
     this.samples.length = 0;
     this.latestFrame = emptyFramePerformance();
     Object.assign(this.counters, emptyCounters());
+    this.compositionsThisFrame = 0;
+    this.maxCompositionsPerFrame = 0;
     this.lastFrameInvalidations = [];
     for (const key of Object.keys(this.invalidationCounts) as SessionInvalidationClassV1[]) {
       this.invalidationCounts[key] = 0;
@@ -55,12 +79,16 @@ export class SessionDiagnosticsV1 {
     readonly counters: GraphPerformanceSnapshotV1['counters'];
     readonly lastFrameInvalidations: readonly SessionInvalidationClassV1[];
     readonly invalidationCounts: Readonly<Record<SessionInvalidationClassV1, number>>;
+    readonly compositionsThisFrame: number;
+    readonly maxCompositionsPerFrame: number;
   } {
     return {
       frameCount: this.frameCount,
       counters: { ...this.counters },
       lastFrameInvalidations: [...this.lastFrameInvalidations],
       invalidationCounts: { ...this.invalidationCounts },
+      compositionsThisFrame: this.compositionsThisFrame,
+      maxCompositionsPerFrame: this.maxCompositionsPerFrame,
     };
   }
 }

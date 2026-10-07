@@ -143,6 +143,15 @@ including at full fade strength. Theme, module settings, structural roles, pins,
 Memory and presentation-policy changes invalidate target visuals without restarting
 the current visit's delay or fade. Position-only and camera-only changes retain
 the cached targets. Content transactions invalidate settings and structural targets.
+Each eligible display callback composes the graph at most once, after interaction,
+physics and preview timing have settled. Mutations before the callback accumulate
+content, geometry and presentation causes; diagnostics retain their union. Camera-only
+callbacks update the renderer transform without composing. Committed View state,
+observer notifications and input geometry remain current before the draw. Stable
+in-place solver geometry retains its existing composition-free path. Startup may
+compose outside a display callback to install the initial scene. Runtime diagnostics
+expose `compositionsThisFrame` (the latest callback) and `maxCompositionsPerFrame`;
+a second composition in one callback warns so this invariant is visible.
 See [View scene contract](graph-engine-view-scene-contract.md#hover-previews-object-activation).
 
 ## 5. Desktop input matrix
