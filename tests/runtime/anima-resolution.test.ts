@@ -26,7 +26,7 @@ test('live Anima dressing and scene compilation share one semantic presentation 
       value.platform.advanceTime(20); value.platform.flushFrame(value.platform.now());
       value.platform.advanceTime(720); value.platform.flushTimer(); value.platform.flushFrame(value.platform.now());
       const after = probe.projection.getDiagnostics();
-      equal(after.animaSemanticResolves - before.animaSemanticResolves, calls, 'one resolution serves each dressing/compile input');
+      assert(after.animaSemanticResolves - before.animaSemanticResolves <= calls, 'unchanged semantics reuse their shared result');
       equal(after.fullSceneCompiles - before.fullSceneCompiles, calls, 'baseline and target scenes each compile once');
     } finally { await session.dispose(); }
   }

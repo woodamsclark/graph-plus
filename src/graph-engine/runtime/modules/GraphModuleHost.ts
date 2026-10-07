@@ -606,14 +606,22 @@ function mergeMotionTargets(
   };
 }
 
+// Contributions are immutable patches. Preserve identity for repeated base/patch pairs.
+const contributionMerges = new WeakMap<object, WeakMap<object, object>>();
 function mergeContributions<T extends GraphNodeRenderContributionV1 | GraphEdgeRenderContributionV1>(
   base: Readonly<Record<string, T>>,
   addition: Readonly<Record<string, T>>,
 ): Readonly<Record<string, T>> {
+  if (Object.keys(base).length === 0) return addition;
+  const byAddition = contributionMerges.get(base) ?? new WeakMap<object, object>();
+  const cached = byAddition.get(addition);
+  if (cached) return cached as Readonly<Record<string, T>>;
   const result: Record<string, T> = { ...base };
   for (const [id, contribution] of Object.entries(addition) as Array<[string, T]>) {
     result[id] = { ...base[id], ...contribution } as T;
   }
+  byAddition.set(addition, result);
+  contributionMerges.set(base, byAddition);
   return result;
 }
 

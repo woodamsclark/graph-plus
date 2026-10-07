@@ -1,3 +1,4 @@
+import { AnimaBaselineModule } from '../../src/graph-engine/runtime/anima/AnimaBaselineModule.ts';
 import { graphPlusEngineExperienceContractV1, graphPlusExperiencePolicyV1 } from '../../src/graph-plus/application/GraphPlusExperiencePolicy.ts';
 import { GraphInput } from '../../src/graph-engine/runtime/interaction/GraphInput.ts';
 import { BufferedQueue } from '../../src/graph-engine/runtime/interaction/BufferedQueue.ts';
@@ -2235,4 +2236,38 @@ test('Local Focus ignores background exits and document link hover uses the node
     equal((await session.exportViewState()).focusedNodeId, 'root', 'link leave retains Local root');
     await session.dispose();
   }
+});
+
+
+test('Baseline and Anima reuse static contributions through movement and transient dressing changes', () => {
+  const document = graphDocument({ nodes: [graphNode('a'), graphNode('b')], edges: [graphEdge('ab', 'a', 'b')] });
+  const input = pipeline(document, { nodeIds: new Set(['a', 'b']), edgeIds: new Set(['ab']) });
+  const baseline = new AnimaBaselineModule(DEFAULT_GRAPH_RENDER_THEME_V1, {});
+  const anima = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, {});
+  const base = baseline.contributeFrame(input);
+  const state = { ...input, ...base };
+  const first = anima.contributeFrame(state)!;
+  for (let i = 0; i < 20; i++) {
+    const moving = { ...input, positions: { ...input.positions, a: { x: i, y: 0, z: 0 } } };
+    equal(baseline.contributeFrame(moving), base, 'movement retains baseline patch identity');
+    equal(anima.contributeFrame({ ...state, positions: moving.positions }), first, 'movement retains Anima patch identity');
+  }
+  equal(baseline.getPresentationCacheDiagnostics().staticBuilds, 1, 'baseline records allocate once');
+  equal(anima.getPresentationCacheDiagnostics().structuralBuilds, 1, 'radii, extrema and thickness allocate once');
+  equal(anima.getPresentationCacheDiagnostics().presentationBuilds, 1, 'unchanged transient dressing allocates once');
+  const hovered = anima.contributeFrame({ ...state, hoveredNodeId: 'b' })!;
+  assert(hovered !== first, 'hover updates transient dressing');
+  equal(anima.getPresentationCacheDiagnostics().structuralBuilds, 1, 'hover retains static radii and thickness');
+  const fresh = new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, {}).contributeFrame({ ...state, hoveredNodeId: 'b' });
+  deepEqual(hovered, fresh, 'cached structural data matches a fresh module');
+  baseline.updateSettings({ nodeRadiusScale: 2 });
+  const resized = baseline.contributeFrame(input);
+  assert(resized !== base, 'settings replace baseline contributions');
+  anima.contributeFrame({ ...input, ...resized });
+  equal(anima.getPresentationCacheDiagnostics().structuralBuilds, 2, 'radius settings invalidate structural data');
+  anima.updateSettings({ labelPosition: 'above' });
+  const relabeled = anima.contributeFrame({ ...input, ...resized })!;
+  deepEqual(relabeled, new AnimaModule(DEFAULT_GRAPH_RENDER_THEME_V1, { labelPosition: 'above' }).contributeFrame({ ...input, ...resized }), 'label settings invalidate transient dressing');
+  baseline.onThemeChanged({ ...DEFAULT_GRAPH_RENDER_THEME_V1, revision: 100 });
+  assert(baseline.contributeFrame(input) !== resized, 'theme expires baseline patch');
 });

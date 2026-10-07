@@ -8,8 +8,19 @@ import {
 import { animaPhaseOpacity, animaMemoryColor } from '../../anima/AnimaPresentationValues.ts';
 import { createGraphInteractionContextV1 } from '../../interaction/index.ts';
 
+type PresentationState = Parameters<NonNullable<GraphModuleInstanceV1['contributeFrame']>>[0];
+
 export class AnimaModule implements GraphModuleInstanceV1 {
   readonly geometryIndependentPresentation = true;
+  private structuralBuilds = 0;
+  private presentationBuilds = 0;
+  private presentationCache?: { state: PresentationState; key: string; patch: GraphModulePresentationPatchV1 };
+  private structuralCache?: { state: PresentationState;
+    nodes: readonly { node: PresentationState['document']['nodes'][number]; prior: PresentationState['nodeContributions'][string]; radius: number }[];
+    edges: readonly { edge: PresentationState['document']['edges'][number]; prior: PresentationState['edgeContributions'][string]; thickness: number }[];
+    smallestRadius: number; largestRadius: number;
+  };
+  getPresentationCacheDiagnostics() { return { structuralBuilds: this.structuralBuilds, presentationBuilds: this.presentationBuilds }; }
   private readonly labels: GraphLabelManager;
   private topologyCache?: {
     readonly document: Parameters<NonNullable<GraphModuleInstanceV1['contributeFrame']>>[0]['document'];
@@ -30,6 +41,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
   }
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
+    this.presentationCache = undefined;
     this.labels.updateSettings(settings);
     this.cursorGravity = settings.cursorGravity === 'soft' || settings.cursorGravity === 'off' ? settings.cursorGravity : 'clingy';
   }
@@ -45,8 +57,15 @@ export class AnimaModule implements GraphModuleInstanceV1 {
   contributeFrame(
     state: Parameters<NonNullable<GraphModuleInstanceV1['contributeFrame']>>[0],
   ): GraphModulePresentationPatchV1 | void {
-    const visibleNodes = state.renderSelection.nodeIds;
-    const { visibleEdges, degree } = this.presentationTopology(state);
+    const key = JSON.stringify([state.viewState.dimensions, state.viewState.viewMode, state.viewState.focusedNodeId,
+      state.viewState.pinnedNodeIds, state.hoveredNodeId, state.draggedNodeId,
+      state.previewedNodeId, state.selectionPresentationSuspended, state.selectionNeighborRevealActive, state.objectActivationPreview]);
+    const cached = this.presentationCache;
+    if (cached && cached.key === key && sameStructuralInputs(cached.state, state)
+      && cached.state.consciousness === state.consciousness && cached.state.experience === state.experience
+      && cached.state.presentationPolicy === state.presentationPolicy
+      && cached.state.animaPresentation === state.animaPresentation) return cached.patch;
+    this.presentationBuilds += 1;
     const hoveredId = state.hoveredNodeId;
     const consciousness = state.consciousness;
     const interaction = createGraphInteractionContextV1({
@@ -69,22 +88,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       visibleNodeIds: state.renderSelection.nodeIds,
       visibleEdgeIds: state.renderSelection.edgeIds,
     });
-    const nodesWithRadius = state.document.nodes
-      .filter((node) => visibleNodes.has(node.id))
-      .map((node) => {
-        const prior = state.nodeContributions[node.id];
-        const visibleDegree = degree.get(node.id) ?? 0;
-        const structuralScale = positive(prior?.radiusScale, 1);
-        const radius = positive(prior?.baseRadiusScale, 1)
-          * clamp(3 * Math.sqrt(visibleDegree + 1), 8, 30) * structuralScale;
-        return { node, prior, radius };
-      });
-    let smallestRadius = Number.POSITIVE_INFINITY;
-    let largestRadius = Number.NEGATIVE_INFINITY;
-    for (const { radius } of nodesWithRadius) {
-      smallestRadius = Math.min(smallestRadius, radius);
-      largestRadius = Math.max(largestRadius, radius);
-    }
+    const { nodes: nodesWithRadius, edges: edgesWithThickness, smallestRadius, largestRadius } = this.structuralPresentation(state);
     // Fixed former 100% contrast: smallest nodes respond gently, largest most strongly.
     const maximumScaleExponent = 2;
     const labelRequests: GraphLabelRequestV1[] = Object.entries(presentation.labelRaising.byNodeId)
@@ -138,8 +142,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
           } : {}),
         }];
       }));
-    const edgeContributions = Object.fromEntries(visibleEdges.map((edge) => {
-      const prior = state.edgeContributions[edge.id];
+    const edgeContributions = Object.fromEntries(edgesWithThickness.map(({ edge, prior, thickness }) => {
       const kind = presentation.constellationKindByEdgeId[edge.id];
       const lit = presentation.highlight.highlightedEdgeIds.has(edge.id) && kind === 'ego';
       const memory = kind === 'memory';
@@ -153,7 +156,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       const ordinaryArrowColor = prior?.arrowColor ?? this.palette.colors.arrow;
       return [edge.id, {
         ...prior,
-        thickness: positive(prior?.baseThicknessScale, 1) * positive(prior?.thicknessScale, 1),
+        thickness,
         opacity,
         color: memory ? animaMemoryColor(this.palette.colors.memoryConstellation, memoryStrength) : lit
           ? this.palette.colors.highlightedNode
@@ -166,7 +169,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         arrowOpacity: opacity,
       }];
     }));
-    return {
+    const patch: GraphModulePresentationPatchV1 = {
       nodeContributions,
       edgeContributions,
       presentationPolicy: {
@@ -183,10 +186,42 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         showArrows: state.presentationPolicy?.showArrows === true,
       },
     };
+    this.presentationCache = { state, key, patch };
+    return patch;
   }
 
   onThemeChanged(theme: GraphVisualThemeV2): void {
+    this.presentationCache = undefined;
+    this.structuralCache = undefined;
     this.palette = theme;
+  }
+
+  private structuralPresentation(state: PresentationState): NonNullable<AnimaModule['structuralCache']> {
+    if (this.structuralCache && sameStructuralInputs(this.structuralCache.state, state)) return this.structuralCache;
+    this.structuralBuilds += 1;
+    const visibleNodes = state.renderSelection.nodeIds;
+    const { visibleEdges, degree } = this.presentationTopology(state);
+    const nodesWithRadius = state.document.nodes
+      .filter((node) => visibleNodes.has(node.id))
+      .map((node) => {
+        const prior = state.nodeContributions[node.id];
+        const visibleDegree = degree.get(node.id) ?? 0;
+        const structuralScale = positive(prior?.radiusScale, 1);
+        const radius = positive(prior?.baseRadiusScale, 1)
+          * clamp(3 * Math.sqrt(visibleDegree + 1), 8, 30) * structuralScale;
+        return { node, prior, radius };
+      });
+    let smallestRadius = Number.POSITIVE_INFINITY;
+    let largestRadius = Number.NEGATIVE_INFINITY;
+    for (const { radius } of nodesWithRadius) {
+      smallestRadius = Math.min(smallestRadius, radius);
+      largestRadius = Math.max(largestRadius, radius);
+    }
+    const edges = visibleEdges.map(edge => {
+      const prior = state.edgeContributions[edge.id];
+      return { edge, prior, thickness: positive(prior?.baseThicknessScale, 1) * positive(prior?.thicknessScale, 1) };
+    });
+    return this.structuralCache = { state, nodes: nodesWithRadius, edges, smallestRadius, largestRadius };
   }
 
   private presentationTopology(
@@ -237,4 +272,10 @@ function positive(value: JsonValue | number | undefined, fallback: number): numb
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function sameStructuralInputs(a: PresentationState, b: PresentationState): boolean {
+  return a.document === b.document && a.renderSelection.nodeIds === b.renderSelection.nodeIds
+    && a.renderSelection.edgeIds === b.renderSelection.edgeIds && a.nodeContributions === b.nodeContributions
+    && a.edgeContributions === b.edgeContributions && a.theme === b.theme;
 }

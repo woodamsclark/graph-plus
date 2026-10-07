@@ -149,8 +149,10 @@ export class SessionProjectionCoordinatorV1 {
       this.baselineCache = { input: presentationInput, result };
       return result;
     }
-    this.work.animaSemanticResolves += 1;
-    const animaPresentation = createAnimaConsciousnessPresentationV1({
+    const previousSemantic = !preview && cached && samePresentationInputs(cached.input, presentationInput)
+      ? cached.result.moduleView.animaPresentation : undefined;
+    if (!previousSemantic) this.work.animaSemanticResolves += 1;
+    const animaPresentation = previousSemantic ?? createAnimaConsciousnessPresentationV1({
       ...input.consciousness, interaction: createGraphInteractionContextV1(presentationInput),
       experience: input.experience, objectActivationPreview: preview, document: input.document,
       visibleNodeIds: input.renderSelection.nodeIds, visibleEdgeIds: input.renderSelection.edgeIds,

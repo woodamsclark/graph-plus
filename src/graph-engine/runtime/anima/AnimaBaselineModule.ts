@@ -7,7 +7,7 @@ import {
   type GraphColorV2,
   type GraphVisualThemeV2,
 } from '../theme/index.ts';
-import type { GraphModuleInstanceV1 } from '../modules/GraphModuleTypes.ts';
+import type { GraphModuleInstanceV1, GraphModulePresentationPatchV1, GraphModulePresentationStateV1 } from '../modules/GraphModuleTypes.ts';
 
 const FORM_BRANCH_COLORS: readonly GraphColorV2[] = [
   '#e57373', '#ffb74d', '#ffd54f', '#81c784', '#4db6ac', '#4fc3f7',
@@ -20,6 +20,9 @@ const FORM_BRANCH_COLORS: readonly GraphColorV2[] = [
  */
 export class AnimaBaselineModule implements GraphModuleInstanceV1 {
   readonly geometryIndependentPresentation = true;
+  private staticBuilds = 0;
+  private cache?: { state: GraphModulePresentationStateV1; patch: GraphModulePresentationPatchV1 };
+  getPresentationCacheDiagnostics() { return { staticBuilds: this.staticBuilds }; }
   private baseTheme: GraphVisualThemeV2;
   private theme: GraphVisualThemeV2;
   private settings: Readonly<Record<string, JsonValue>> = {};
@@ -38,6 +41,7 @@ export class AnimaBaselineModule implements GraphModuleInstanceV1 {
   }
 
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
+    this.cache = undefined;
     this.settings = { ...settings };
     const colors = this.baseTheme.colors;
     this.theme = freezeGraphVisualThemeV2({
@@ -64,7 +68,11 @@ export class AnimaBaselineModule implements GraphModuleInstanceV1 {
   }
 
   contributeFrame(state: Parameters<NonNullable<GraphModuleInstanceV1['contributeFrame']>>[0]) {
-    return {
+    const cached = this.cache;
+    if (cached?.state.document === state.document && cached.state.nodeRoles === state.nodeRoles
+      && cached.state.edgeRoles === state.edgeRoles && cached.state.regions === state.regions) return cached.patch;
+    this.staticBuilds += 1;
+    const patch = {
       theme: this.theme,
       presentationPolicy: this.policy,
       nodeContributions: Object.fromEntries(state.document.nodes.map((node) => [node.id, {
@@ -88,6 +96,8 @@ export class AnimaBaselineModule implements GraphModuleInstanceV1 {
           color: regionColor(region.regionNodeId),
         })),
     };
+    this.cache = { state, patch };
+    return patch;
   }
 
   onThemeChanged(theme: GraphVisualThemeV2): void {
