@@ -1,22 +1,12 @@
 import type { JsonValue } from '../../../contracts/v1/index.ts';
-import { desaturateGraphColorV2, multiplyGraphColorAlphaV2, type GraphVisualThemeV2 } from '../../theme/index.ts';
+import { desaturateGraphColorV2, type GraphVisualThemeV2 } from '../../theme/index.ts';
 import type { GraphModuleInstanceV1, GraphModulePresentationPatchV1 } from '../GraphModuleTypes.ts';
 import { GraphLabelManager, type GraphLabelRequestV1 } from './GraphLabelManager.ts';
 import {
   createAnimaConsciousnessPresentationV1,
-  type AnimaPresentationRoleV1,
 } from '../../anima/AnimaAwareness.ts';
+import { animaPhaseOpacity, animaMemoryColor } from '../../anima/AnimaPresentationValues.ts';
 import { createGraphInteractionContextV1 } from '../../interaction/index.ts';
-
-const PRESENTATION_ROLE_OPACITY: Readonly<Record<
-  AnimaPresentationRoleV1,
-  Readonly<{ node: number; edge: number }>
->> = {
-  standard: { node: 1, edge: 1 },
-  highlighted: { node: 1, edge: 1 },
-  dimmed: { node: 0.24, edge: 0.6 },
-  void: { node: 0, edge: 0 },
-};
 
 export class AnimaModule implements GraphModuleInstanceV1 {
   private readonly labels: GraphLabelManager;
@@ -66,7 +56,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
       selectionPresentationSuspended: state.selectionPresentationSuspended,
       selectionNeighborRevealActive: state.selectionNeighborRevealActive,
     });
-    const presentation = createAnimaConsciousnessPresentationV1({
+    const presentation = state.animaPresentation ?? createAnimaConsciousnessPresentationV1({
       attention: consciousness.attention,
       awareness: consciousness.awareness,
       consciousField: consciousness.consciousField,
@@ -119,7 +109,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
           ?? (node.tokens?.includes('kind:tag') ? this.palette.colors.tagNode : undefined)
           ?? this.palette.colors.node;
         const memory = presentation.constellationKindByNodeId[node.id] === 'memory';
-        const color = memory ? multiplyGraphColorAlphaV2(
+        const color = memory ? animaMemoryColor(
           this.palette.colors.memoryConstellation,
           presentation.memoryStrengthByNodeId[node.id] ?? 1,
         ) : role === 'highlighted'
@@ -130,7 +120,7 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         const selected = presentation.expressedAttentionNodeIds.has(node.id);
         const focused = presentation.focusEmphasisNodeIds.has(node.id);
         const pinned = state.viewState.pinnedNodeIds.includes(node.id);
-        const opacity = PRESENTATION_ROLE_OPACITY[role].node;
+        const opacity = animaPhaseOpacity(role, 'node');
         const labelDecision = presentation.labelRaising.byNodeId[node.id];
         return [node.id, {
           ...prior,
@@ -157,19 +147,19 @@ export class AnimaModule implements GraphModuleInstanceV1 {
         presentation.memoryStrengthByNodeId[edge.targetId] ?? 1,
       );
       const role = presentation.highlight.phaseByEdgeId[edge.id] ?? 'void';
-      const opacity = PRESENTATION_ROLE_OPACITY[role].edge;
+      const opacity = animaPhaseOpacity(role, 'edge');
       const ordinaryColor = prior?.color ?? this.palette.colors.edge;
       const ordinaryArrowColor = prior?.arrowColor ?? this.palette.colors.arrow;
       return [edge.id, {
         ...prior,
         thickness: positive(prior?.baseThicknessScale, 1) * positive(prior?.thicknessScale, 1),
         opacity,
-        color: memory ? multiplyGraphColorAlphaV2(this.palette.colors.memoryConstellation, memoryStrength) : lit
+        color: memory ? animaMemoryColor(this.palette.colors.memoryConstellation, memoryStrength) : lit
           ? this.palette.colors.highlightedNode
           : role === 'dimmed'
             ? desaturateGraphColorV2(ordinaryColor, 0.8)
             : ordinaryColor,
-        arrowColor: memory ? multiplyGraphColorAlphaV2(this.palette.colors.memoryConstellation, memoryStrength) : role === 'dimmed'
+        arrowColor: memory ? animaMemoryColor(this.palette.colors.memoryConstellation, memoryStrength) : role === 'dimmed'
           ? desaturateGraphColorV2(ordinaryArrowColor, 0.8)
           : ordinaryArrowColor,
         arrowOpacity: opacity,

@@ -153,6 +153,7 @@ export interface GraphSessionRuntimeDiagnosticsV1 {
   readonly invalidationCounts: Readonly<Record<SessionInvalidationClassV1, number>>;
   readonly compositionsThisFrame: number;
   readonly maxCompositionsPerFrame: number;
+  readonly compositionWork: Readonly<Record<string, number>>;
   readonly renderCaches: Readonly<Record<string, number>>;
   readonly renderer: {
     readonly selectedBackendId: GraphRendererBackendIdV2;
@@ -1301,6 +1302,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       invalidationCounts: diagnostics.invalidationCounts,
       compositionsThisFrame: diagnostics.compositionsThisFrame,
       maxCompositionsPerFrame: diagnostics.maxCompositionsPerFrame,
+      compositionWork: this.projection.getDiagnostics(),
       renderCaches: this.renderer.getRendererDiagnostics().resources,
       renderer: {
         selectedBackendId: this.renderer.backendId,

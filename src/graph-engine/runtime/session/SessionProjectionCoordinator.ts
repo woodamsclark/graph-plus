@@ -2,6 +2,8 @@ import { AnimaHoverPreviewAnimationV1, blendAnimaPreviewFrameV1 } from '../anima
 import type { GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
 import type { GraphViewStateV1, GraphExperienceContractV1 } from '../../contracts/v1/index.ts';
 import { GraphTopologyIndex } from '../../core/document/GraphTopologyIndex.ts';
+import { createAnimaConsciousnessPresentationV1 } from '../anima/AnimaAwareness.ts';
+import { createGraphInteractionContextV1 } from '../interaction/GraphInteractionStatePolicy.ts';
 import { compileAnimaSceneV1 } from '../anima/index.ts';
 import { createAnimusSnapshotV1, type AnimusSnapshotV1 } from '../animus/index.ts';
 import type { Consciousness, ConsciousnessSnapshot } from '../consciousness/index.ts';
@@ -54,6 +56,9 @@ export class SessionProjectionCoordinatorV1 {
   private previewPresentationContext?: string;
   private readonly previewTargetFrames = new Map<string, GraphRenderFrameV1>();
   private geometryRevision = 0;
+  private readonly work = { modulePresentationContributions: 0, animusSnapshots: 0, animaSemanticResolves: 0, fullSceneCompiles: 0 };
+
+  getDiagnostics(): Readonly<typeof this.work> { return { ...this.work }; }
   private topologyCache?: {
     readonly document: GraphModuleProjectionStateV1['document'];
     readonly topology: GraphTopologyIndex;
@@ -123,18 +128,27 @@ export class SessionProjectionCoordinatorV1 {
     preview: GraphInteractionPreviewV1 | null | undefined,
     hoveredInput: string | null | undefined = input.hoveredNodeId,
   ): PresentationFrame {
-    const presentationInput = { ...input, objectActivationPreview: preview, hoveredNodeId: hoveredInput ?? undefined };
-    const moduleView = this.contributePresentation(host, presentationInput);
+    const presentationInput: GraphModulePresentationStateV1 = { ...input, objectActivationPreview: preview, hoveredNodeId: hoveredInput ?? undefined };
+    this.work.animaSemanticResolves += 1;
+    const animaPresentation = createAnimaConsciousnessPresentationV1({
+      ...input.consciousness, interaction: createGraphInteractionContextV1(presentationInput),
+      experience: input.experience, objectActivationPreview: preview, document: input.document,
+      visibleNodeIds: input.renderSelection.nodeIds, visibleEdgeIds: input.renderSelection.edgeIds,
+    });
+
+    const moduleView = this.contributePresentation(host, { ...presentationInput, animaPresentation });
     const snapshot = this.createAnimusSnapshot(presentationInput, moduleView);
     const frame = this.compileScene(presentationInput, moduleView, snapshot);
     return { moduleView, frame };
   }
 
   private contributePresentation(host: GraphModuleHost, input: GraphModulePresentationStateV1): GraphModulePresentationStateV1 {
+    this.work.modulePresentationContributions += 1;
     return host.contribute(input);
   }
 
   private createAnimusSnapshot(input: GraphModulePresentationStateV1, moduleView: GraphModulePresentationStateV1): AnimusSnapshotV1 {
+    this.work.animusSnapshots += 1;
     return createAnimusSnapshotV1({
       document: moduleView.document,
       viewState: input.viewState,
@@ -156,8 +170,10 @@ export class SessionProjectionCoordinatorV1 {
     moduleView: GraphModulePresentationStateV1,
     snapshot: AnimusSnapshotV1,
   ): GraphRenderFrameV1 {
+    this.work.fullSceneCompiles += 1;
     return compileAnimaSceneV1({
       snapshot,
+      animaPresentation: moduleView.animaPresentation,
       consciousness: input.consciousness,
       experience: input.experience,
       objectActivationPreview: input.objectActivationPreview,

@@ -14,21 +14,23 @@ import {
 import {
   DEFAULT_GRAPH_VISUAL_THEME_V2,
   graphColorV2,
-  multiplyGraphColorAlphaV2,
   type GraphColorV2,
   type GraphVisualThemeV2,
 } from '../theme/index.ts';
 import { createAnimaConsciousnessPresentationV1, type AnimaPresentationPhaseV1,
   type AnimaConsciousnessPresentationV1 } from './AnimaAwareness.ts';
 
+import { animaPhaseOpacity, animaMemoryColor } from './AnimaPresentationValues.ts';
+
 /**
- * The sole semantic-to-visual compilation boundary.
+ * Renderer-facing compilation consumes the shared resolved Anima presentation.
  *
  * Animus supplies facts. Module contributions are unresolved Anima inputs. This
- * compiler resolves every renderer-facing color, opacity, width, font, and state
+ * compiler normalizes renderer-facing color, opacity, width, font, and state
  * priority so render backends never need to understand graph interaction state.
  */
 export function compileAnimaSceneV1(options: {
+  readonly animaPresentation?: AnimaConsciousnessPresentationV1;
   readonly snapshot: AnimusSnapshotV1;
   readonly consciousness: ConsciousnessSnapshot;
   readonly experience?: GraphExperienceContractV1;
@@ -43,7 +45,7 @@ export function compileAnimaSceneV1(options: {
   const theme = options.theme ?? DEFAULT_GRAPH_VISUAL_THEME_V2;
   const policy = options.presentationPolicy ?? DEFAULT_GRAPH_PRESENTATION_POLICY_V2;
   const interaction = options.snapshot.interaction;
-  const presentation = createAnimaConsciousnessPresentationV1({
+  const presentation = options.animaPresentation ?? createAnimaConsciousnessPresentationV1({
     ...options.consciousness, experience: options.experience,
     objectActivationPreview: options.objectActivationPreview, interaction, document: options.snapshot.document,
     visibleNodeIds: options.snapshot.displaySelection.nodeIds,
@@ -76,7 +78,7 @@ export function compileAnimaSceneV1(options: {
         const focused = presentation.focusEmphasisNodeIds.has(node.id);
         const hovered = interaction.hoveredNodeId === node.id;
         const phase = presentation.highlight.phaseByNodeId[node.id] ?? 'void';
-        const opacity = Math.min(finiteOpacity(contribution?.opacity, 1), sceneOpacity(phase, 'node'));
+        const opacity = Math.min(finiteOpacity(contribution?.opacity, 1), animaPhaseOpacity(phase, 'node'));
         const label = presentation.labelRaising.byNodeId[node.id];
         const suppressed = policy.labelMode === 'off' || label?.disposition === 'suppress';
         const forced = !suppressed && label?.disposition === 'force';
@@ -90,7 +92,7 @@ export function compileAnimaSceneV1(options: {
             ? {}
             : { nodeScaleExponent: contribution.nodeScaleExponent }),
           finalColor: constrainedColor(presentation.constellationKindByNodeId[node.id] === 'memory'
-            ? multiplyGraphColorAlphaV2(
+            ? animaMemoryColor(
                 theme.colors.memoryConstellation,
                 presentation.memoryStrengthByNodeId[node.id] ?? 1,
               ) : contribution?.finalColor ?? (focused
@@ -145,10 +147,10 @@ function compileEdges(
     .map((edge) => {
       const contribution = contributions?.[edge.id];
       const memoryStrength = Math.min(memoryStrengths[edge.sourceId] ?? 1, memoryStrengths[edge.targetId] ?? 1);
-      const memoryColor = multiplyGraphColorAlphaV2(theme.colors.memoryConstellation, memoryStrength);
+      const memoryColor = animaMemoryColor(theme.colors.memoryConstellation, memoryStrength);
       const explicitColor = constellationKinds[edge.id] === 'memory' ? memoryColor : contribution?.color;
       const color = constrainedColor(explicitColor ?? theme.colors.edge, theme);
-      const opacity = Math.min(finiteOpacity(contribution?.opacity, 1), sceneOpacity(phases[edge.id] ?? 'void', 'edge'));
+      const opacity = Math.min(finiteOpacity(contribution?.opacity, 1), animaPhaseOpacity(phases[edge.id] ?? 'void', 'edge'));
       return {
         id: edge.id,
         sourceId: edge.sourceId,
@@ -211,8 +213,4 @@ function finiteOpacity(value: number | undefined, fallback: number): number {
   return value !== undefined && Number.isFinite(value)
     ? Math.max(0, Math.min(1, value))
     : fallback;
-}
-
-function sceneOpacity(phase: AnimaPresentationPhaseV1, kind: 'node' | 'edge'): number {
-  return phase === 'void' ? 0 : phase === 'dimmed' ? kind === 'node' ? 0.24 : 0.6 : 1;
 }

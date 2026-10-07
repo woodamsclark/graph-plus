@@ -1,3 +1,4 @@
+import type { AnimaConsciousnessPresentationV1 } from '../anima/AnimaAwareness.ts';
 import type { GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
 import type {
   EngineModuleDescriptorV1,
@@ -58,6 +59,8 @@ export interface GraphModulePipelineStateV1 {
   /** Admission policy for noncommitting previews of View interactions. */
   readonly experience?: GraphExperienceContractV1;
   readonly objectActivationPreview?: GraphInteractionPreviewV1 | null;
+  /** One semantic result shared by dressing and scene compilation. */
+  readonly animaPresentation?: AnimaConsciousnessPresentationV1;
   /** Runtime-only interaction state. It is never persisted or exported as graph data. */
   readonly draggedNodeId?: string;
   /** Transient per-step cursor displacement, resolved in screen space by the session. */
