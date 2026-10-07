@@ -195,6 +195,19 @@ current geometry without replacing the drawn scene. Diagnostics expose
 `nearestQueries`, `nearestQueryCandidates`, `lastNearestQueryCandidates` and
 `centerIndexBuilds`. Cold index construction and geometry updates still visit the
 graph; the bounded-work guarantee applies to warm local queries.
+Node dragging patches one entry in the session's private editable/projection maps,
+preserving their position-source identity. `GraphModuleHost.nodePositionChanged()`
+notifies layout modules through an optional `onNodePositionChanged()` hook; Force
+patches that coordinate in its private solver buffer without copying unrelated
+nodes or resetting velocities. A cold or replacement source still receives full
+synchronization on the next admitted tick. Public View exports and restores clone
+positions, so retained snapshots remain independent of subsequent drag edits.
+Camera tracking uses the same before/after centroid delta, and release retains the
+existing pin policy and final-position intent. Drag bursts continue to publish
+once per display frame. Force diagnostics expose `nodePositionPatches`,
+`positionBufferSynchronizations` and `positionBufferNodeVisits`; these count
+position synchronization only, not ordinary graph-wide force integration or
+presentation work.
 See [View scene contract](graph-engine-view-scene-contract.md#hover-previews-object-activation).
 
 ## 5. Desktop input matrix

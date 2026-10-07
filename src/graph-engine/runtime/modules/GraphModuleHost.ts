@@ -307,6 +307,18 @@ export class GraphModuleHost {
     this.invokeLifecycle('onViewChanged', 'view-changed', state);
   }
 
+  nodePositionChanged(nodeId: string, position: Vec3, source: Readonly<Record<string, Vec3>>): void {
+    if (this.fatal || this.disposed) return;
+    for (const module of [...this.active]) {
+      try {
+        module.instance.onNodePositionChanged?.(nodeId, position, source);
+      } catch (error) {
+        this.failActiveModule(module, 'node-position-changed', error);
+        if (this.fatal) break;
+      }
+    }
+  }
+
   themeChanged(theme: GraphVisualThemeV2): void {
     this.themePalette = theme;
     this.invokeLifecycle('onThemeChanged', 'theme-changed', theme);

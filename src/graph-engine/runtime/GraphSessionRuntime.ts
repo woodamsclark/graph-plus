@@ -497,6 +497,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         getNodeSelection: (nodeId) => this.resolveNodeSelection(nodeId),
         isNodeDraggable: () => !this.moduleView?.formActive,
         setViewState: (state) => { this.viewState = state; },
+        patchNodePosition: (nodeId, position) => this.patchDraggedNodePosition(nodeId, position),
         getRenderSelection: () => this.renderSelection,
         getPlanningTopology: () => {
           const document = this.store.readDocument();
@@ -1617,16 +1618,25 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     });
   }
 
+  private patchDraggedNodePosition(nodeId: string, position: Vec3): void {
+    // These are private working maps (including solver-owned buffers). Public
+    // exports/restores clone their positions; never mutate a borrowed snapshot.
+    const positions = this.projectionView.positions as Record<string, Vec3>;
+    positions[nodeId] = { ...position };
+    if (this.viewState.positions !== positions) {
+      (this.viewState.positions as Record<string, Vec3>)[nodeId] = { ...position };
+    }
+    this.viewState = { ...this.viewState };
+    this.moduleHost.nodePositionChanged(nodeId, position, positions);
+  }
+
   private handleRuntimeViewChange(change: GraphRuntimeViewChangeV1): void {
     const draggedNodeId = change === 'positions' ? this.interaction.getDraggedNodeId() : undefined;
-    const draggedPosition = draggedNodeId ? this.viewState.positions[draggedNodeId] : undefined;
     this.projectionView = {
       ...this.projectionView,
       viewState: this.viewState,
       ...(change === 'positions' ? {
-        positions: draggedNodeId && draggedPosition
-          ? { ...this.projectionView.positions, [draggedNodeId]: draggedPosition }
-          : this.viewState.positions,
+        positions: draggedNodeId ? this.projectionView.positions : this.viewState.positions,
       } : {}),
     };
     this.moduleView = { ...this.moduleView, viewState: this.viewState, positions: this.projectionView.positions };

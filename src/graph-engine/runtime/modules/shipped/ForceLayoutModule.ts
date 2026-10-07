@@ -76,6 +76,9 @@ export interface ForceLayoutDiagnosticsV1 {
   readonly targetStepRateHz: number;
   readonly effectiveStepRateHz: number;
   readonly integrationStepCount: number;
+  readonly positionBufferSynchronizations: number;
+  readonly positionBufferNodeVisits: number;
+  readonly nodePositionPatches: number;
 }
 
 const ACTIVE_DRAG_ACTIVITY = 1;
@@ -116,6 +119,9 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private restoredStatePending = false;
   private integrationStepCount = 0;
   private settledStepCount = 0;
+  private positionBufferSynchronizations = 0;
+  private positionBufferNodeVisits = 0;
+  private nodePositionPatches = 0;
 
   constructor(
     private readonly dimensions: GraphDimensionsV1,
@@ -150,6 +156,16 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       this.reheatForChange();
     }
     this.projectionFilterKey = nextProjectionFilterKey;
+  }
+
+  onNodePositionChanged(nodeId: string, position: Vec3, source: Readonly<Record<string, Vec3>>): void {
+    // A cold/replaced source is synchronized on its next admitted tick. A warm
+    // source patches only this solver coordinate, preserving every other buffer.
+    if (source !== this.positions && source !== this.positionSource) return;
+    const target = this.positions[nodeId];
+    if (!target) return;
+    target.x = position.x; target.y = position.y; target.z = this.dimensions === '2d' ? 0 : position.z;
+    this.nodePositionPatches += 1;
   }
 
   restoreState(state: JsonValue): void {
@@ -682,6 +698,9 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       targetStepRateHz: forceLayoutTargetStepRateHzV1(this.alpha, this.running),
       effectiveStepRateHz: this.running ? 30 * clampNumber(this.alpha, 0, 1, 0) : 0,
       integrationStepCount: this.integrationStepCount,
+      positionBufferSynchronizations: this.positionBufferSynchronizations,
+      positionBufferNodeVisits: this.positionBufferNodeVisits,
+      nodePositionPatches: this.nodePositionPatches,
     };
   }
 
@@ -692,6 +711,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     // stop() clears motion, while the document and internal positions stay the
     // same. Cursor entry (or reheat) must rebuild those buffers on the fast path.
     if (!topologyChanged && !sourceChanged && this.velocities.size === state.document.nodes.length) return;
+    this.positionBufferSynchronizations += 1;
+    this.positionBufferNodeVisits += state.document.nodes.length;
     const known = new Set(state.document.nodes.map((node) => node.id));
     if (topologyChanged) {
       for (const id of Object.keys(this.positions)) if (!known.has(id)) delete this.positions[id];
@@ -711,7 +732,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     }
     this.documentKey = key;
     this.bufferDocumentSource = state.document;
-    this.positionSource = this.positions;
+    this.positionSource = state.positions;
   }
 
   private synchronizePhysicsOverride(held: boolean): void {

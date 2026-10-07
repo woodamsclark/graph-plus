@@ -118,6 +118,7 @@ export class SessionInteractionRuntime {
     readonly getNodeSelection: (nodeId: string) => readonly string[];
     readonly isNodeDraggable: (nodeId: string) => boolean;
     readonly setViewState: (state: GraphViewStateV1) => void;
+    readonly patchNodePosition: (nodeId: string, position: Vec3) => void;
     readonly getRenderSelection: () => GraphFilterSelectionV1;
     readonly getPlanningTopology: () => {
       readonly revision: number | string;
@@ -1124,9 +1125,8 @@ export class SessionInteractionRuntime {
     const underPointer = this.options.vision.screenToWorld(point.x, point.y, this.dragContext.depth);
     const position = add(underPointer, this.dragContext.offset);
     const previousCentroid = selectionCentroid(trackingNodeIds, state.positions);
-    const positions = { ...state.positions, [nodeId]: position };
-    const nextCentroid = selectionCentroid(trackingNodeIds, positions);
-    this.commit({ ...state, positions });
+    this.options.patchNodePosition(nodeId, position);
+    const nextCentroid = selectionCentroid(trackingNodeIds, this.options.getViewState().positions);
     if (previousCentroid && nextCentroid) {
       this.options.vision.translateBy(subtract(nextCentroid, previousCentroid));
     }

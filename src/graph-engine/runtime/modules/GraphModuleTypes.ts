@@ -26,6 +26,7 @@ export type GraphModuleHookV1 =
   | 'settings-changed'
   | 'document-changed'
   | 'view-changed'
+  | 'node-position-changed'
   | 'theme-changed'
   | 'project-source'
   | 'project-topology'
@@ -176,6 +177,8 @@ export interface GraphModuleInstanceV1 {
   restoreState?(state: JsonValue): void;
   onDocumentChanged?(document: GraphDocumentV1): void;
   onViewChanged?(state: GraphViewStateV1): void;
+  /** One-node edit to a private working source; replacement sources still require full synchronization. */
+  onNodePositionChanged?(nodeId: string, position: Vec3, source: Readonly<Record<string, Vec3>>): void;
   onThemeChanged?(theme: GraphVisualThemeV2): void;
   projectSource?(state: GraphModuleProjectionStateV1): GraphModuleProjectionPatchV1 | void;
   projectTopology?(state: GraphModuleProjectionStateV1): GraphModuleProjectionPatchV1 | void;
