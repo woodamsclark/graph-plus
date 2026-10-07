@@ -229,6 +229,14 @@ The former runtime diagnostic `effectiveStepRateHz` is replaced by this clearer
 name. Persisted V1 `alphaTarget` remains compatible legacy activity metadata,
 normalized and round-tripped as before; it neither attracts alpha toward a target
 nor controls cooling, reheat or integration. Internally it is `legacyAlphaTarget`.
+Composition exposes named stages in `SessionProjectionCoordinator`: reconcile
+Consciousness, contribute module presentation, create the Animus snapshot, compile
+the scene, and resolve preview presentation. Reconciliation precedes preview
+planning. The preview stage coordinates animation/cache validity and blends visual
+targets onto live geometry; baseline, target and immediate-preview inputs share
+the same presentation-frame path. Preview timing and the committed fallback retain their
+existing behavior; this stage extraction introduces no new semantic resolver or
+invalidation policy.
 See [View scene contract](graph-engine-view-scene-contract.md#hover-previews-object-activation).
 
 ## 5. Desktop input matrix

@@ -3,8 +3,8 @@ import type { GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview
 import type { GraphViewStateV1, GraphExperienceContractV1 } from '../../contracts/v1/index.ts';
 import { GraphTopologyIndex } from '../../core/document/GraphTopologyIndex.ts';
 import { compileAnimaSceneV1 } from '../anima/index.ts';
-import { createAnimusSnapshotV1 } from '../animus/index.ts';
-import type { Consciousness } from '../consciousness/index.ts';
+import { createAnimusSnapshotV1, type AnimusSnapshotV1 } from '../animus/index.ts';
+import type { Consciousness, ConsciousnessSnapshot } from '../consciousness/index.ts';
 import type {
   GraphModuleHost,
   GraphModulePresentationStateV1,
@@ -19,6 +19,30 @@ import {
 } from '../render/index.ts';
 import type { GraphVisualThemeV2 } from '../theme/index.ts';
 import type { SessionInvalidationClassV1 } from './SessionFrameScheduler.ts';
+
+interface CompositionOptions {
+  readonly host: GraphModuleHost;
+  readonly consciousness: Consciousness;
+  readonly experience?: GraphExperienceContractV1;
+  readonly resolveObjectActivationPreview?: () => GraphInteractionPreviewV1 | null;
+  readonly projectionView: GraphModuleProjectionStateV1;
+  readonly viewState: GraphViewStateV1;
+  readonly theme: GraphVisualThemeV2;
+  readonly presentationPolicy: GraphPresentationPolicyV2;
+  readonly draggedNodeId?: string;
+  readonly hoveredNodeId?: string;
+  readonly selectionPresentationSuspended?: boolean;
+  readonly selectionNeighborRevealActive?: boolean;
+  readonly previewedNodeId?: string;
+  readonly invalidation: SessionInvalidationClassV1;
+  readonly now: number;
+  readonly previewCommitted?: boolean;
+}
+
+interface PresentationFrame {
+  readonly moduleView: GraphModulePresentationStateV1;
+  readonly frame: GraphRenderFrameV1;
+}
 
 /** Owns the projection-to-frame boundary and its render dirty state for one session. */
 export class SessionProjectionCoordinatorV1 {
@@ -45,34 +69,12 @@ export class SessionProjectionCoordinatorV1 {
     return host.project(state);
   }
 
-  compose(options: {
-    readonly host: GraphModuleHost;
-    readonly consciousness: Consciousness;
-    readonly experience?: GraphExperienceContractV1;
-    readonly resolveObjectActivationPreview?: () => GraphInteractionPreviewV1 | null;
-    readonly projectionView: GraphModuleProjectionStateV1;
-    readonly viewState: GraphViewStateV1;
-    readonly theme: GraphVisualThemeV2;
-    readonly presentationPolicy: GraphPresentationPolicyV2;
-    readonly draggedNodeId?: string;
-    readonly hoveredNodeId?: string;
-    readonly selectionPresentationSuspended?: boolean;
-    readonly selectionNeighborRevealActive?: boolean;
-    readonly previewedNodeId?: string;
-    readonly invalidation: SessionInvalidationClassV1;
-    readonly now: number;
-    readonly previewCommitted?: boolean;
-  }): GraphModulePresentationStateV1 {
+  compose(options: CompositionOptions): GraphModulePresentationStateV1 {
     this.onComposition();
     if (options.invalidation === 'geometry' || options.invalidation === 'content') this.geometryRevision += 1;
-    const topology = this.topology(options.projectionView.document);
-    const consciousness = options.consciousness.reconcile({
-      attentionNodeIds: options.viewState.selectedNodeIds,
-      availableNodeIds: topology.nodeIds,
-      relationships: topology.relationships('either'),
-    });
+    const consciousness = this.reconcileConsciousness(options);
     const objectActivationPreview = options.resolveObjectActivationPreview?.();
-    const input = {
+    const input: GraphModulePresentationStateV1 = {
       ...options.projectionView,
       viewState: options.viewState,
       consciousness,
@@ -90,51 +92,89 @@ export class SessionProjectionCoordinatorV1 {
       presentationPolicy: options.presentationPolicy,
       motionTargets: {},
     };
-    const compile = (preview: GraphInteractionPreviewV1 | null | undefined, hoveredInput: string | null | undefined = options.hoveredNodeId) => {
-      const hoveredNodeId = hoveredInput ?? undefined;
-      const moduleView = options.host.contribute({ ...input, objectActivationPreview: preview, hoveredNodeId });
-      const snapshot = createAnimusSnapshotV1({
-        document: moduleView.document,
-        viewState: options.viewState,
-        displaySelection: moduleView.renderSelection,
-        positions: moduleView.positions,
-        nodeRoles: moduleView.nodeRoles,
-        edgeRoles: moduleView.edgeRoles,
-        regions: moduleView.regions,
-        draggedNodeId: options.draggedNodeId,
-        hoveredNodeId,
-        previewedNodeId: options.previewedNodeId,
-        selectionPresentationSuspended: options.selectionPresentationSuspended,
-        selectionNeighborRevealActive: options.selectionNeighborRevealActive,
-      });
-      const frame = compileAnimaSceneV1({
-        snapshot,
-        consciousness,
-        experience: options.experience,
-        objectActivationPreview: preview,
-        nodeContributions: moduleView.nodeContributions,
-        edgeContributions: moduleView.edgeContributions,
-        regionContributions: moduleView.regionContributions,
-        theme: moduleView.theme,
-        presentationPolicy: moduleView.presentationPolicy,
-        geometryRevision: this.geometryRevision,
-      });
-      return { moduleView, frame };
-    };
     const animated = options.host.has('anima') && objectActivationPreview?.activation !== 'remove-membership'
       && objectActivationPreview?.activation !== 'toggle-membership';
-    if (!animated) {
-      this.hoverAnimation.clear();
-      this.previewTargetFrames.clear();
-      this.previewTargetContext = undefined;
-      this.previewPresentationContext = undefined;
-      const result = compile(objectActivationPreview);
-      this.committedFrames.set(objectActivationPreview ? compile(null).frame : result.frame);
-      this.frames.set(result.frame);
-      this.dirty = true;
-      return result.moduleView;
+    let result: PresentationFrame;
+    if (animated) {
+      result = this.resolvePreviewPresentation(options, input, objectActivationPreview);
+    } else {
+      this.resetPreviewAnimation();
+      result = this.createPresentationFrame(options.host, input, objectActivationPreview);
+      this.committedFrames.set(objectActivationPreview
+        ? this.createPresentationFrame(options.host, input, null).frame : result.frame);
     }
+    this.frames.set(result.frame);
+    this.dirty = true;
+    return result.moduleView;
+  }
 
+  private reconcileConsciousness(options: CompositionOptions): ConsciousnessSnapshot {
+    const topology = this.topology(options.projectionView.document);
+    return options.consciousness.reconcile({
+      attentionNodeIds: options.viewState.selectedNodeIds,
+      availableNodeIds: topology.nodeIds,
+      relationships: topology.relationships('either'),
+    });
+  }
+
+  private createPresentationFrame(
+    host: GraphModuleHost,
+    input: GraphModulePresentationStateV1,
+    preview: GraphInteractionPreviewV1 | null | undefined,
+    hoveredInput: string | null | undefined = input.hoveredNodeId,
+  ): PresentationFrame {
+    const presentationInput = { ...input, objectActivationPreview: preview, hoveredNodeId: hoveredInput ?? undefined };
+    const moduleView = this.contributePresentation(host, presentationInput);
+    const snapshot = this.createAnimusSnapshot(presentationInput, moduleView);
+    const frame = this.compileScene(presentationInput, moduleView, snapshot);
+    return { moduleView, frame };
+  }
+
+  private contributePresentation(host: GraphModuleHost, input: GraphModulePresentationStateV1): GraphModulePresentationStateV1 {
+    return host.contribute(input);
+  }
+
+  private createAnimusSnapshot(input: GraphModulePresentationStateV1, moduleView: GraphModulePresentationStateV1): AnimusSnapshotV1 {
+    return createAnimusSnapshotV1({
+      document: moduleView.document,
+      viewState: input.viewState,
+      displaySelection: moduleView.renderSelection,
+      positions: moduleView.positions,
+      nodeRoles: moduleView.nodeRoles,
+      edgeRoles: moduleView.edgeRoles,
+      regions: moduleView.regions,
+      draggedNodeId: input.draggedNodeId,
+      hoveredNodeId: input.hoveredNodeId,
+      previewedNodeId: input.previewedNodeId,
+      selectionPresentationSuspended: input.selectionPresentationSuspended,
+      selectionNeighborRevealActive: input.selectionNeighborRevealActive,
+    });
+  }
+
+  private compileScene(
+    input: GraphModulePresentationStateV1,
+    moduleView: GraphModulePresentationStateV1,
+    snapshot: AnimusSnapshotV1,
+  ): GraphRenderFrameV1 {
+    return compileAnimaSceneV1({
+      snapshot,
+      consciousness: input.consciousness,
+      experience: input.experience,
+      objectActivationPreview: input.objectActivationPreview,
+      nodeContributions: moduleView.nodeContributions,
+      edgeContributions: moduleView.edgeContributions,
+      regionContributions: moduleView.regionContributions,
+      theme: moduleView.theme,
+      presentationPolicy: moduleView.presentationPolicy,
+      geometryRevision: this.geometryRevision,
+    });
+  }
+
+  private resolvePreviewPresentation(
+    options: CompositionOptions,
+    input: GraphModulePresentationStateV1,
+    objectActivationPreview: GraphInteractionPreviewV1 | null | undefined,
+  ): PresentationFrame {
     const previewContext = JSON.stringify([
       input.document.documentId,
       input.document.revision,
@@ -160,7 +200,7 @@ export class SessionProjectionCoordinatorV1 {
       options.presentationPolicy,
       options.experience,
       options.viewState.pinnedNodeIds,
-      [...consciousness.remembered.nodeIds],
+      [...input.consciousness.remembered.nodeIds],
       options.draggedNodeId,
       options.previewedNodeId,
       options.selectionPresentationSuspended,
@@ -184,7 +224,7 @@ export class SessionProjectionCoordinatorV1 {
       && objectActivationPreview?.activation === 'primary';
     // Keep the committed small label as the animation's starting point. Hover
     // reveal is immediate; the new root size still waits for the timed peek.
-    const baseline = compile(null, focusLabelEntry ? null : options.hoveredNodeId);
+    const baseline = this.createPresentationFrame(options.host, input, null, focusLabelEntry ? null : options.hoveredNodeId);
     this.committedFrames.set(baseline.frame);
     let frame = focusLabelEntry ? { ...baseline.frame, nodes: baseline.frame.nodes.map(node =>
       node.id === options.hoveredNodeId ? { ...node, showLabel: true, labelForceVisible: true,
@@ -202,10 +242,7 @@ export class SessionProjectionCoordinatorV1 {
       let targetFrame = this.previewTargetFrames.get(layer.key);
 
       if (!targetFrame) {
-        targetFrame = compile(
-          layer.preview,
-          layer.hoveredNodeId,
-        ).frame;
+        targetFrame = this.createPresentationFrame(options.host, input, layer.preview, layer.hoveredNodeId).frame;
 
         this.previewTargetFrames.set(layer.key, targetFrame);
       }
@@ -217,9 +254,7 @@ export class SessionProjectionCoordinatorV1 {
       );
     }
 
-    this.frames.set(frame);
-    this.dirty = true;
-    return baseline.moduleView;
+    return { moduleView: baseline.moduleView, frame };
   }
 
   resetPreviewAnimation(): void {

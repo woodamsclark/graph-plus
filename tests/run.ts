@@ -28,6 +28,7 @@ import './runtime/cursor-spatial-query.test.ts';
 import './runtime/drag-position-patch.test.ts';
 import './runtime/force-cadence.test.ts';
 import './runtime/force-alpha.test.ts';
+import './runtime/composition-pipeline.test.ts';
 import './service/service.test.ts';
 import './service/actions.test.ts';
 import './service/neutral-sample.test.ts';
