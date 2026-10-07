@@ -169,6 +169,17 @@ Those records are cached by label values and node membership/order, so geometry-
 callbacks reuse their array and records. Label mode off supplies the shared empty
 array; changes to text, color, opacity, font size, offset, visibility, priority or
 always-visible state refresh only affected records.
+Canvas unions scene invalidations until spatial preparation. Content and geometry
+invalidate projection; camera/viewport and geometry revisions also refresh it.
+Presentation changes retain projection and update shared node entries, so edge
+lookups and hit buckets read current visuals. Geometry/content invalidation and
+changed radii, viewport clipping, membership or zero-opacity pickability refresh
+the hit grid. Positive-to-positive opacity and color-only fades reuse it.
+One node lookup serves region/presentation work, and one persistent projected
+lookup serves edges; presentation frames do not create additional ID maps.
+Picking before drawing and drawing itself share the same prepared spatial data.
+Runtime cache counters expose `spatialIndexBuilds`, `nodeLookupRefreshes` and
+`projectedLookupBuilds` alongside the existing projection-cache counter.
 See [View scene contract](graph-engine-view-scene-contract.md#hover-previews-object-activation).
 
 ## 5. Desktop input matrix

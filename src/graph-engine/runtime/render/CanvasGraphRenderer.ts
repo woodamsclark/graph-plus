@@ -1,5 +1,6 @@
 import { Vision, type ProjectedGraphPointV1 } from '../vision/index.ts';
 import type { GraphFrameStore } from './GraphFrameStore.ts';
+import type { SessionInvalidationClassV1 } from '../session/SessionFrameScheduler.ts';
 import type {
   GraphPickRequestV2,
   GraphPickSourceV2,
@@ -17,14 +18,9 @@ import { graphColorToCssV2, type GraphFontV2 } from '../theme/index.ts';
 import type { GraphColorV2 } from '../theme/index.ts';
 
 interface ProjectedNode {
-  readonly node: GraphRenderNodeV1;
+  node: GraphRenderNodeV1;
   readonly point: ProjectedGraphPointV1;
-  readonly radius: number;
-}
-
-interface ProjectedGeometry {
-  readonly id: string;
-  readonly point: ProjectedGraphPointV1;
+  radius: number;
 }
 
 interface PickIndex {
@@ -66,7 +62,19 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   private indexedVisionKey = '';
   private projectedGeometryRevision = -1;
   private projectedGeometryVisionKey = '';
-  private projectedGeometry: readonly ProjectedGeometry[] = [];
+  private sourceNodes?: readonly GraphRenderNodeV1[];
+  private readonly nodeById = new Map<string, GraphRenderNodeV1>();
+  private readonly projectedById = new Map<string, ProjectedNode>();
+  private projectedNodes: readonly ProjectedNode[] = [];
+  private visibleNodes: readonly ProjectedNode[] = [];
+  private spatialDirty = true;
+  private indexedWidth = -1;
+  private indexedHeight = -1;
+  private hitShapePolicyKey = '';
+  private readonly pendingInvalidations = new Set<SessionInvalidationClassV1>();
+  private spatialIndexBuilds = 0;
+  private nodeLookupRefreshes = 0;
+  private projectedLookupBuilds = 0;
   private projectionCacheHits = 0;
   private readonly regionContourCache = new Map<string, {
     readonly signature: string;
@@ -119,28 +127,23 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       this.hitGrid.clear();
       this.indexedFrame = null;
       this.indexedVisionKey = '';
+      this.spatialDirty = true;
       return emptyRenderTiming();
     }
     this.clear(frame);
     const projectionStart = this.now();
-    const projected = this.projectFrame(frame);
-    const byId = new Map(projected.map((value) => [value.node.id, value]));
-    const renderNodeById = new Map(frame.nodes.map((node) => [node.id, node] as const));
-    const visible = projected.filter(({ point, radius }) => circleIntersectsViewport(point.x, point.y, radius + 4, this.width, this.height));
-    this.rebuildHitGrid(visible);
-    this.indexedFrame = frame;
-    this.indexedVisionKey = this.visionKey();
+    this.prepareSpatialFrame(frame);
     const projectionMs = elapsed(projectionStart, this.now());
     const regionStart = this.now();
-    this.drawRegions(frame, renderNodeById);
+    this.drawRegions(frame, this.nodeById);
     const regionRenderMs = elapsed(regionStart, this.now());
     const edgeStart = this.now();
-    this.drawEdges(frame, byId);
+    this.drawEdges(frame, this.projectedById);
     const edgeRenderMs = elapsed(edgeStart, this.now());
     const nodeStart = this.now();
-    this.drawNodes(frame, visible);
+    this.drawNodes(frame, this.visibleNodes);
     const nodeRenderMs = elapsed(nodeStart, this.now());
-    const labels = this.drawLabels(frame, visible);
+    const labels = this.drawLabels(frame, this.visibleNodes);
     return { projectionMs, regionRenderMs, edgeRenderMs, nodeRenderMs, ...labels };
   }
 
@@ -151,14 +154,10 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   } | null {
     const frame = this.currentFrame();
     const visionKey = this.visionKey();
-    if (frame && (frame !== this.indexedFrame || visionKey !== this.indexedVisionKey)) {
-      const visible = this.projectFrame(frame)
-        .filter(({ point: projected, radius }) =>
-          circleIntersectsViewport(projected.x, projected.y, radius + 4, this.width, this.height));
-      this.rebuildHitGrid(visible);
-      this.indexedFrame = frame;
-      this.indexedVisionKey = visionKey;
-    }
+    if (frame && (frame !== this.indexedFrame || visionKey !== this.indexedVisionKey
+      || (frame.geometryRevision !== undefined && frame.geometryRevision !== this.projectedGeometryRevision)
+      || this.width !== this.indexedWidth || this.height !== this.indexedHeight
+      || this.pendingInvalidations.size > 0)) this.prepareSpatialFrame(frame);
     return this.pickFromGrid(point, pointerKind, frame, this.vision, this.hitGrid);
   }
 
@@ -209,7 +208,10 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       pickIndexBuilds: this.pickIndexBuilds,
       pickIndexCacheHits: this.pickIndexCacheHits,
       pickIndexEntries: this.pickIndexes.length,
-      projectedGeometryEntries: this.projectedGeometry.length,
+      spatialIndexBuilds: this.spatialIndexBuilds,
+      nodeLookupRefreshes: this.nodeLookupRefreshes,
+      projectedLookupBuilds: this.projectedLookupBuilds,
+      projectedGeometryEntries: this.projectedNodes.length,
       projectionCacheHits: this.projectionCacheHits,
       hitGridCells: this.hitGrid.size,
       textWidthCacheEntries: this.textWidthCache.size,
@@ -219,7 +221,8 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
 
   updateTheme(_theme: import('../theme/index.ts').GraphVisualThemeV2): void {}
 
-  updateScene(scene: GraphRenderSceneV2): void {
+  updateScene(scene: GraphRenderSceneV2, invalidations: readonly SessionInvalidationClassV1[] = []): void {
+    for (const reason of invalidations) this.pendingInvalidations.add(reason);
     this.scene = scene;
     if (!this.vision) this.vision = new Vision(scene.view.camera, scene.view.dimensions);
     else this.vision.setState(scene.view.camera);
@@ -234,7 +237,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     const visionKey = `${source.view.dimensions}:${this.visionKey(this.pickVision)}`;
     // Ordinary picking can use the spatial index installed by the last draw.
     // Alternate sources keep their own indexes and never disturb that index.
-    if (!source.positions && !source.nodeIds && !source.retainedNodeId
+    if (!source.positions && !source.nodeIds && !source.retainedNodeId && this.pendingInvalidations.size === 0
       && source.frame.nodes === this.indexedFrame?.nodes
       && source.frame.geometryRevision === this.indexedFrame?.geometryRevision
       && hitShapePolicyKey(source.frame) === hitShapePolicyKey(this.indexedFrame)
@@ -285,7 +288,13 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     this.hitGrid.clear();
     this.textWidthCache.clear();
     this.regionContourCache.clear();
-    this.projectedGeometry = [];
+    this.projectedNodes = [];
+    this.visibleNodes = [];
+    this.nodeById.clear();
+    this.projectedById.clear();
+    this.sourceNodes = undefined;
+    this.indexedFrame = null;
+    this.pendingInvalidations.clear();
     this.colorCssCache = new WeakMap();
     this.canvas.remove();
   }
@@ -302,37 +311,70 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     return value;
   }
 
+  /** Presentation refreshes update shared entries; only changed hit shapes rebuild the grid. */
+  private prepareSpatialFrame(frame: GraphRenderFrameV1): void {
+    this.projectFrame(frame);
+    if (this.width !== this.indexedWidth || this.height !== this.indexedHeight) this.spatialDirty = true;
+    if (this.spatialDirty) {
+      this.visibleNodes = this.projectedNodes.filter(({ point, radius }) =>
+        circleIntersectsViewport(point.x, point.y, radius + 4, this.width, this.height));
+      this.rebuildHitGrid(this.visibleNodes);
+      this.spatialDirty = false;
+    }
+    this.indexedFrame = frame;
+    this.indexedVisionKey = this.visionKey();
+    this.indexedWidth = this.width;
+    this.indexedHeight = this.height;
+    this.pendingInvalidations.clear();
+  }
+
   private projectFrame(frame: GraphRenderFrameV1): readonly ProjectedNode[] {
     const visionKey = this.visionKey();
-    if (
-      frame.geometryRevision !== undefined
-      && frame.geometryRevision === this.projectedGeometryRevision
-      && visionKey === this.projectedGeometryVisionKey
-    ) {
-      this.projectionCacheHits += 1;
-      const nodes = new Map(frame.nodes.map((node) => [node.id, node] as const));
-      const projection = this.vision.getState().projection;
-      return this.projectedGeometry.flatMap(({ id, point }) => {
-        const node = nodes.get(id);
-        return node ? [{ node, point, radius: projectedRadius(
-          frame, node.radius, point.scale, projection, node.nodeScaleExponent,
-        ) }] : [];
-      });
+    const nodesChanged = frame.nodes !== this.sourceNodes || this.pendingInvalidations.has('content');
+    const membershipChanged = nodesChanged && (frame.nodes.length !== this.nodeById.size
+      || frame.nodes.some(node => !this.nodeById.has(node.id)));
+    if (nodesChanged) {
+      // One canonical lookup serves projection, region geometry and presentation.
+      if (membershipChanged) this.nodeById.clear();
+      for (const node of frame.nodes) this.nodeById.set(node.id, node);
+      this.sourceNodes = frame.nodes;
+      this.nodeLookupRefreshes += 1;
     }
+    const policyKey = hitShapePolicyKey(frame);
     const projection = this.vision.getState().projection;
-    const projected = frame.nodes
-      .map((node) => {
-        const point = this.vision.worldToScreen(node.position);
-        return { node, point, radius: projectedRadius(
-          frame, node.radius, point.scale, projection, node.nodeScaleExponent,
-        ) };
-      })
-      .filter(({ point }) => point.depth > 0)
-      .sort((a, b) => b.point.depth - a.point.depth);
+    const geometryChanged = frame.geometryRevision === undefined || membershipChanged
+      || (frame.geometryRevision !== undefined && frame.geometryRevision !== this.projectedGeometryRevision)
+      || visionKey !== this.projectedGeometryVisionKey
+      || this.pendingInvalidations.has('geometry') || this.pendingInvalidations.has('content');
+    if (!geometryChanged) {
+      this.projectionCacheHits += 1;
+      if (nodesChanged || policyKey !== this.hitShapePolicyKey) {
+        for (const entry of this.projectedNodes) {
+          const node = this.nodeById.get(entry.node.id)!;
+          const radius = projectedRadius(frame, node.radius, entry.point.scale, projection, node.nodeScaleExponent);
+          if (radius !== entry.radius || (node.opacity > 0) !== (entry.node.opacity > 0)) this.spatialDirty = true;
+          // Hit-grid buckets and edge lookups reference this same entry, so they
+          // see current visuals and positions without rebuilding their structures.
+          entry.node = node;
+          entry.radius = radius;
+        }
+      }
+      this.hitShapePolicyKey = policyKey;
+      return this.projectedNodes;
+    }
+    this.projectedNodes = frame.nodes.map(node => {
+      const point = this.vision.worldToScreen(node.position);
+      return { node, point, radius: projectedRadius(frame, node.radius, point.scale, projection, node.nodeScaleExponent) };
+    }).filter(({ point }) => point.depth > 0).sort((a, b) => b.point.depth - a.point.depth);
+    if (this.projectedNodes.length !== this.projectedById.size
+      || this.projectedNodes.some(entry => !this.projectedById.has(entry.node.id))) this.projectedById.clear();
+    for (const entry of this.projectedNodes) this.projectedById.set(entry.node.id, entry);
+    this.projectedLookupBuilds += 1;
     this.projectedGeometryRevision = frame.geometryRevision ?? -1;
     this.projectedGeometryVisionKey = visionKey;
-    this.projectedGeometry = projected.map(({ node, point }) => ({ id: node.id, point }));
-    return projected;
+    this.hitShapePolicyKey = policyKey;
+    this.spatialDirty = true;
+    return this.projectedNodes;
   }
 
   private hitCandidates(x: number, y: number, searchRadius: number, grid = this.hitGrid): readonly ProjectedNode[] {
@@ -352,6 +394,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   }
 
   private rebuildHitGrid(nodes: readonly ProjectedNode[], grid = this.hitGrid, width = this.width, height = this.height): void {
+    if (grid === this.hitGrid) this.spatialIndexBuilds += 1;
     grid.clear();
     for (const node of nodes) {
       if (node.node.opacity <= 0) continue;
