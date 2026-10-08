@@ -237,3 +237,14 @@ function walk(directory: string): string[] {
   }
   return result;
 }
+
+
+test('Canvas and runtime exports expose only the explicit scene input path', () => {
+  const runtime = join(process.cwd(), 'src', 'graph-engine', 'runtime');
+  const renderer = readFileSync(join(runtime, 'render', 'CanvasGraphRenderer.ts'), 'utf8');
+  const exports = readFileSync(join(runtime, 'render', 'index.ts'), 'utf8');
+  const violations: string[] = [];
+  if (/GraphFrameStore|visionOrNow|currentFrame\(/.test(renderer)) violations.push('Canvas retains an alternate frame input');
+  if (/GraphFrameComposer|composeGraphRenderFrameV1/.test(exports)) violations.push('runtime exports a retired composer');
+  deepEqual(violations, [], 'one explicit scene path remains');
+});

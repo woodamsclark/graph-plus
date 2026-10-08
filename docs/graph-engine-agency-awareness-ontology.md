@@ -507,7 +507,7 @@ longer reconstructs conscious state from `AnimusSnapshotV1.interaction.selectedN
 That compatibility interaction fact remains available to older mechanics, but it is
 not Anima's semantic source.
 
-`composeGraphRenderFrameV1()` remains a deprecated compatibility boundary. It may
+The deprecated `composeGraphRenderFrameV1()` boundary is retired from the runtime. Test fixtures may
 translate a legacy selection-shaped caller into a temporary Consciousness snapshot,
 but the compiler beneath it accepts only explicit Consciousness truth.
 

@@ -1,5 +1,4 @@
 import { Vision, type ProjectedGraphPointV1 } from '../vision/index.ts';
-import type { GraphFrameStore } from './GraphFrameStore.ts';
 import type { SessionInvalidationClassV1 } from '../session/SessionFrameScheduler.ts';
 import type {
   GraphPickRequestV2,
@@ -53,7 +52,6 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   readonly interactionElement: HTMLElement;
   private context!: CanvasRenderingContext2D;
   private vision!: Vision;
-  private frames?: GraphFrameStore;
   private scene: GraphRenderSceneV2 | null = null;
   private readonly now: () => number;
   private lifecycle: 'created' | 'initialized' | 'disposed' = 'created';
@@ -97,21 +95,9 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   private width = 0;
   private height = 0;
 
-  constructor(canvas: HTMLCanvasElement, now: () => number);
-  constructor(canvas: HTMLCanvasElement, vision: Vision, frames: GraphFrameStore, now: () => number);
-  constructor(
-    private readonly canvas: HTMLCanvasElement,
-    visionOrNow: Vision | (() => number),
-    frames?: GraphFrameStore,
-    now?: () => number,
-  ) {
+  constructor(private readonly canvas: HTMLCanvasElement, now: () => number) {
     this.interactionElement = canvas;
-    this.now = typeof visionOrNow === 'function' ? visionOrNow : (now ?? (() => performance.now()));
-    if (typeof visionOrNow !== 'function') {
-      this.vision = visionOrNow;
-      this.frames = frames;
-      this.initialize();
-    }
+    this.now = now;
   }
 
   initialize(): void {
@@ -136,7 +122,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   }
 
   render(): GraphRenderTimingV1 {
-    const frame = this.currentFrame();
+    const frame = this.scene;
     if (!frame) {
       this.hitGrid.clear();
       this.indexedFrame = null;
@@ -168,7 +154,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     readonly position: import('../../contracts/v1/index.ts').Vec3;
     readonly depth: number;
   } | null {
-    const frame = this.currentFrame();
+    const frame = this.scene;
     if (frame) this.ensureCurrentSpatialFrame(frame);
     return this.pickFromGrid(point, pointerKind, frame, this.vision, this.hitGrid);
   }
@@ -249,7 +235,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     for (const reason of invalidations) this.pendingInvalidations.add(reason);
     this.scene = scene;
     if (!this.vision) this.vision = new Vision(scene.view.camera, scene.view.dimensions);
-    else this.vision.setState(scene.view.camera);
+    else this.vision.reconfigure(scene.view.camera, scene.view.dimensions);
     this.vision.setViewport(scene.view.viewport.width, scene.view.viewport.height);
   }
 
@@ -320,7 +306,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
         centers = spatial.index.centers;
       } else centers = this.currentCenterGrid();
     } else {
-      const frame = this.currentFrame();
+      const frame = this.scene;
       if (!frame) return null;
       this.ensureCurrentSpatialFrame(frame);
       centers = this.currentCenterGrid();
@@ -399,10 +385,6 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     this.pendingInvalidations.clear();
     this.colorCssCache = new WeakMap();
     this.canvas.remove();
-  }
-
-  private currentFrame(): GraphRenderFrameV1 | null {
-    return this.scene ?? this.frames?.get() ?? null;
   }
 
   private colorCss(color: GraphColorV2): string {

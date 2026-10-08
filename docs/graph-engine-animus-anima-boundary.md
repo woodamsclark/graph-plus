@@ -101,9 +101,10 @@ Anima compilation defect, not something a backend repairs independently.
 ## Compatibility
 
 Public Protocol V1 documents, profiles, persisted view state, module IDs, and settings
-keys remain unchanged. `composeGraphRenderFrameV1()` remains as a deprecated wrapper
-which translates legacy selection into a temporary Consciousness snapshot, constructs
-an Animus snapshot, and delegates to the Anima compiler.
+keys remain unchanged. The deprecated `composeGraphRenderFrameV1()` wrapper has been
+removed from the runtime and its exports. Standalone test fixtures construct explicit
+Consciousness and Animus inputs and call the Anima compiler. Canvas accepts only
+`updateScene()`; it no longer retains an alternate Vision/FrameStore input.
 
 Theme sampling remains in the Obsidian host adapter. It supplies immutable neutral
 tokens to Anima and does not style individual graph primitives.

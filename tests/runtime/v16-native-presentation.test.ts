@@ -1,3 +1,4 @@
+import { compileFixtureFrame, sceneRendererFixture } from '../support/presentationFixtures.ts';
 import { AnimaBaselineModule } from '../../src/graph-engine/runtime/anima/AnimaBaselineModule.ts';
 import { graphPlusEngineExperienceContractV1, graphPlusExperiencePolicyV1 } from '../../src/graph-plus/application/GraphPlusExperiencePolicy.ts';
 import { GraphInput } from '../../src/graph-engine/runtime/interaction/GraphInput.ts';
@@ -7,7 +8,6 @@ import type {
 } from '../../src/graph-engine/runtime/modules/index.ts';
 import {
   CanvasGraphRenderer,
-  composeGraphRenderFrameV1,
   DEFAULT_GRAPH_RENDER_THEME_V1,
   DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
   GraphFrameStore,
@@ -444,7 +444,7 @@ test('Canvas picking stays bounded by the viewport at tight zoom in both project
       ...RESOLVED_FRAME_STYLE,
       policy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'off' },
     });
-    const renderer = new CanvasGraphRenderer(value.document.createElement('canvas'), camera, frames, () => 0);
+    const renderer = sceneRendererFixture(value.document.createElement('canvas'), camera, frames, () => 0);
     renderer.resize(640, 360, 1);
     // Check the moderate regression case before the maximum to fail without a huge allocation.
     for (const scale of [12, 40]) {
@@ -471,7 +471,7 @@ test('Canvas void nodes do not allocate picking cells or obscure a visible node'
   const voidNode = { id: 'void', label: 'void', position: { x: 0, y: 0, z: 10 },
     radius: 24, nodeScaleExponent: 2, ...RESOLVED_NODE_STYLE, opacity: 0 };
   frames.set({ ...RESOLVED_FRAME_STYLE, regions: [], edges: [], nodes: [voidNode] });
-  const renderer = new CanvasGraphRenderer(value.document.createElement('canvas'), camera, frames, () => 0);
+  const renderer = sceneRendererFixture(value.document.createElement('canvas'), camera, frames, () => 0);
   renderer.resize(640, 360, 1);
   renderer.render();
   equal(renderer.getDiagnostics().hitGridCells, 0, 'void-only presentation has no picking cells');
@@ -494,7 +494,7 @@ test('Canvas viewport clipping preserves offscreen-center discs and exact circle
   frames.set({ ...RESOLVED_FRAME_STYLE, regions: [], edges: [], nodes: [
     { id: 'edge', label: 'edge', position: camera.screenToWorld(-20, 180, 100), radius: 24, ...RESOLVED_NODE_STYLE },
   ] });
-  const renderer = new CanvasGraphRenderer(value.document.createElement('canvas'), camera, frames, () => 0);
+  const renderer = sceneRendererFixture(value.document.createElement('canvas'), camera, frames, () => 0);
   renderer.resize(640, 360, 1);
   renderer.render();
   equal(renderer.hitTest({ x: 0, y: 180 })?.nodeId, 'edge', 'the visible sliver of an offscreen-center disc remains pickable');
@@ -846,7 +846,7 @@ test('V1.6 Anima labels retain their CSS size across orthographic zoom', () => {
       labelScaleMode: 'fixed',
     },
   });
-  const renderer = new CanvasGraphRenderer(canvas, camera, frames, () => 0);
+  const renderer = sceneRendererFixture(canvas, camera, frames, () => 0);
   renderer.resize(640, 360, 1);
   renderer.render();
   assert(value.styleAssignments.includes('font:20px sans-serif'),
@@ -876,7 +876,7 @@ test('Canvas skips zero-width node outlines while preserving intentional outline
       ...RESOLVED_NODE_STYLE, strokeColor: DEFAULT_GRAPH_RENDER_THEME_V1.colors.label, strokeWidth: width,
     })), policy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'off' },
   });
-  const renderer = new CanvasGraphRenderer(canvas, camera, frames, () => 0);
+  const renderer = sceneRendererFixture(canvas, camera, frames, () => 0);
   renderer.resize(640, 360, 1); renderer.render();
   equal(strokes, 2, 'zero width never issues a Canvas stroke; positive selection/focus widths still draw');
   renderer.dispose();
@@ -906,7 +906,7 @@ test('label mode Off suppresses even hover-forced labels', () => {
     ],
     policy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'off' },
   });
-  const renderer = new CanvasGraphRenderer(canvas, camera, frames, () => 0);
+  const renderer = sceneRendererFixture(canvas, camera, frames, () => 0);
   renderer.resize(640, 360, 1);
   renderer.render();
   equal(fillTextY.length, 0, 'label mode off must suppress even the explicit hover label override');
@@ -922,7 +922,7 @@ test('node scaling supports calm, world, and exaggerated responses in 2D and 3D'
   }, '2d');
   camera.setViewport(640, 360);
   const frames = new GraphFrameStore();
-  const renderer = new CanvasGraphRenderer(canvas, camera, frames, () => 0);
+  const renderer = sceneRendererFixture(canvas, camera, frames, () => 0);
   renderer.resize(640, 360, 1);
   const node = {
     id: 'a', label: 'a', position: { x: 0, y: 0, z: 0 }, radius: 10,
@@ -958,7 +958,7 @@ test('node scaling supports calm, world, and exaggerated responses in 2D and 3D'
   }, '3d');
   perspectiveCamera.setViewport(640, 360);
   const perspectiveFrames = new GraphFrameStore();
-  const perspectiveRenderer = new CanvasGraphRenderer(canvas, perspectiveCamera, perspectiveFrames, () => 0);
+  const perspectiveRenderer = sceneRendererFixture(canvas, perspectiveCamera, perspectiveFrames, () => 0);
   perspectiveRenderer.resize(640, 360, 1);
   const renderPerspectiveAt = (exponent: number): number => {
     arcRadii.length = 0;
@@ -990,7 +990,7 @@ test('V1.6 renderer anchors labels above or below the resolved node boundary', (
   }, '2d');
   camera.setViewport(640, 360);
   const frames = new GraphFrameStore();
-  const renderer = new CanvasGraphRenderer(canvas, camera, frames, () => 0);
+  const renderer = sceneRendererFixture(canvas, camera, frames, () => 0);
   renderer.resize(640, 360, 1);
   const node = {
     id: 'a', label: 'a', position: { x: 0, y: 0, z: 0 }, radius: 8,
@@ -1022,7 +1022,7 @@ test('V1.6 presentation aggregation preserves reciprocal direction without mutat
     ],
   });
   const selection = { nodeIds: new Set(['a', 'b']), edgeIds: new Set(document.edges.map((edge) => edge.id)) };
-  const frame = composeGraphRenderFrameV1({
+  const frame = compileFixtureFrame({
     document,
     viewState: viewState(document),
     selection,
@@ -1040,7 +1040,7 @@ test('V1.6 frame composition carries future Anima label and arrow targets to ren
     nodes: [graphNode('a'), graphNode('b')],
     edges: [graphEdge('a-b', 'a', 'b', { directed: true })],
   });
-  const frame = composeGraphRenderFrameV1({
+  const frame = compileFixtureFrame({
     document,
     viewState: viewState(document),
     selection: { nodeIds: new Set(['a', 'b']), edgeIds: new Set(['a-b']) },
@@ -1195,7 +1195,7 @@ test('V1.6 new-mode 3D preserves depth while keeping nodes visible and finger-se
       minimumPerspectiveTouchHitRadius: 22,
     },
   });
-  const renderer = new CanvasGraphRenderer(canvas, camera, frames, () => 0);
+  const renderer = sceneRendererFixture(canvas, camera, frames, () => 0);
   renderer.resize(640, 360, 1);
   renderer.render();
   equal(renderer.hitTest({ x: 324, y: 180 })?.nodeId, 'a',
@@ -1245,7 +1245,7 @@ test('V1.6 adaptive labels prefer nearer labels after semantic and structural pr
       minimumPerspectiveNodeScale: 0.5,
     },
   });
-  const renderer = new CanvasGraphRenderer(canvas, camera, frames, () => 0);
+  const renderer = sceneRendererFixture(canvas, camera, frames, () => 0);
   renderer.resize(640, 360, 1);
   renderer.render();
   deepEqual(value.drawArguments
@@ -1289,7 +1289,7 @@ test('adaptive labels hide nodes and label bounds occluded by nearer node discs'
     ...RESOLVED_FRAME_STYLE,
     policy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'adaptive' },
   });
-  const renderer = new CanvasGraphRenderer(canvas, camera, frames, () => 0);
+  const renderer = sceneRendererFixture(canvas, camera, frames, () => 0);
   renderer.resize(640, 360, 1);
   renderer.render();
   deepEqual(value.drawArguments
@@ -1337,7 +1337,7 @@ test('V1.6 adaptive label budget follows camera range and per-node Saliency', ()
         minimumPerspectiveNodeScale: 0.5,
       },
     });
-    const renderer = new CanvasGraphRenderer(canvas, camera, frames, () => 0);
+    const renderer = sceneRendererFixture(canvas, camera, frames, () => 0);
     renderer.resize(640, 360, 1);
     renderer.render();
     return value.drawArguments.filter((call) => call.method === 'fillText').length;
