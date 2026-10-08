@@ -18,6 +18,7 @@ import {
 } from './GraphEngineUiPolicy.ts';
 import { isQuickSettingsToggleKeyV1 } from './GraphEngineQuickSettingsShortcut.ts';
 import { ObsidianGraphUiLayoutV1 } from './ObsidianGraphUiLayout.ts';
+import { resolveClearConstellationActionV1 } from './GraphEngineClearConstellationAction.ts';
 import {
   graphSettingDisplayValueV1,
   graphSettingPresentationV1,
@@ -197,7 +198,8 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       actions.append(this.iconButton('globe', 'Return to Overview', () => { this.context.controls.navigateView('overview'); }));
     }
     if (view.controls.navigationActions.includes('clear-constellation') && viewState.selectedNodeIds.length > 0) {
-      actions.append(this.iconButton('eraser', 'Clear active constellation', () => { this.context.controls.navigateView('clear-constellation'); }));
+      const clear = resolveClearConstellationActionV1(availableViews, viewState.selectedNodeIds, this.context.controls);
+      if (clear) actions.append(this.iconButton('eraser', 'Clear active constellation', clear));
     }
     actions.append(this.iconButton('x', 'Collapse graph controls', () => {
       this.setCollapsed(true);

@@ -1,3 +1,4 @@
+import { resolveClearConstellationActionV1 } from '../../src/obsidian/graph-engine-ui/GraphEngineClearConstellationAction.ts';
 import { readFileSync } from 'node:fs';
 import { Window } from 'happy-dom';
 import {
@@ -140,3 +141,18 @@ function rect(left: number, top: number, width: number, height: number): DOMRect
     toJSON: () => ({}),
   } as DOMRect;
 }
+
+test('Quick Settings retains Global clearing and hides unavailable Focus-only clearing', () => {
+  let navigations = 0;
+  const controls = {
+    navigateView: (action: string) => { equal(action, 'clear-constellation', 'Global retains its clear View intent'); navigations++; },
+    resolveNodeActions: () => [],
+    invokeNodeAction: () => { throw new Error('Global must retain engine navigation'); },
+  };
+  const global = resolveClearConstellationActionV1(['overview', 'explore', 'focus'], ['a'], controls);
+  equal(typeof global, 'function', 'Global offers clear'); global?.();
+  equal(navigations, 1, 'Global navigates through the original deliberate command');
+  equal(resolveClearConstellationActionV1(['focus'], ['a'], controls), undefined,
+    'a Focus-only consumer without a registered clear action must not offer a rejected Overview intent');
+  equal(resolveClearConstellationActionV1(['overview'], [], controls), undefined, 'an empty constellation needs no clear action');
+});

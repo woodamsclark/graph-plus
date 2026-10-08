@@ -4,6 +4,16 @@ Status: Approved target ontology; implementation complete through Phase 12
 
 Date: 2026-09-28
 
+Graph+ release policy update, 2026-10-07: the
+[application architecture](graph-plus-application-architecture.md) and
+[active-note constellation contract](graph-plus-constellation-contract.md) describe
+the shipped consumer policy. Local is Focus-only with multiple Attention members;
+active-note arrivals extend Attention in both modes and move Focus only in Local.
+Losing the active Markdown note retains Local's working constellation and valid
+focused root. Both Graph+ policies disable visual Memory constellations and contribute
+zero Attention-neighborhood Awareness depth. Generic engine Memory and configurable
+cardinality/expansion below remain capabilities available to other experience policies.
+
 View implementation note: the [View and Scene Contract](graph-engine-view-scene-contract.md)
 now implements Overview, Constellation, and Focus as Ego engagement framings. It
 supersedes Phase 12's use of all Awareness as active composition and camera pivot.
@@ -129,12 +139,12 @@ policy and submits the resulting conscious-state change to Graph Engine. Ego
 experiences the changed state; it does not retroactively become the author of that
 change.
 
-For Local Graph+, an Obsidian active-note change replaces each Local presentation's
-existing Attention with the newly active note and ensures that note is within Awareness. This is
-a replacement rather than an additive Attention contribution. A later endogenous node
-selection may consciously replace Attention again through Ego. Global Graph+ may use
-different Attention semantics because its policy does not root the presentation in
-Obsidian's active note.
+For Graph+, an Obsidian active-note change extends each open presentation's working
+Attention constellation. Graph+ submits the complete updated member set through the
+engine's replacement influence; replacement at the protocol boundary does not mean
+discarding prior members. Local also establishes the new focused root; Global preserves
+its View, focused subject, and camera. Later endogenous interactions can change
+Attention through Ego under each presentation's experience contract.
 
 This does not mean every external graph mutation enters Awareness. A vault rename, for
 example, may update canonical graph truth without changing what is presently aware.
@@ -157,8 +167,8 @@ Attention is semantic state rather than a synonym for raw UI selection. Selectin
 nodes is the ordinary endogenous way Ego directs Attention. Once the transition is
 accepted, rendered selection is the interactive and visual expression of Attention;
 it is not a second durable source of truth. Attention may also be redirected
-exogenously: in Local Graph+, an Obsidian active-note change replaces Attention without
-Ego having selected the node.
+exogenously: in Graph+, an Obsidian active-note change extends Attention without Ego
+having selected the node.
 
 ```text
 selection input --> Ego intent --> Consciousness updates Attention
@@ -181,21 +191,17 @@ projected node. An empty Overview remains neutral and cannot enter Constellation
 a click, Memory, or another permitted influence provides an aware subject. Once
 Awareness is non-empty, Anima may contrast its members against peripheral context.
 
-Focus Mode constrains Attention to at most one node. While a rooted Local presentation
-has a valid active subject, its policy requires exactly one. Changing that node replaces
-the previous Attention, whether the change is endogenous through Ego or exogenous
-through Local Graph+. The presentation then derives the appropriate Awareness field
-around the new Attention. A neighbor becoming aware does not make that neighbor
-attended.
+Focus presents one focused subject within Attention; it does not itself impose a
+single-member Attention cap. An experience contract may impose such a cap, but neither
+current Graph+ policy does. Local retains a multi-member working constellation as
+its focused root changes. A neighbor becoming aware does not make that neighbor attended.
 
-When Local Graph+ has no valid active node, Attention and Focus are empty while the
-full shared graph and recent Memory remain available. It does not invent a placeholder
-subject merely to satisfy Focus. A later canonical active-note push establishes the new
-subject without recreating or relaying out the graph.
-
-Global presentations do not inherit Focus's cardinality constraint. Their Attention
-may contain multiple intentionally selected nodes as a constellation, or be empty when
-the experience is not directing attention to a selection.
+When Local Graph+ loses its active Markdown note, the canonical active-root marker is
+cleared while its working Attention and last valid focused root remain. A later
+canonical active-note push adds and focuses the new subject without recreating or
+relaying out the graph. Clearing Local's constellation explicitly retains only its
+focused root; it does not leave Focus. Global also supports multiple Attention members
+and permits empty Attention; entering Overview does not implicitly clear membership.
 
 ## Experience policy expands Awareness into the conscious field
 
@@ -207,8 +213,9 @@ Examples of policy-governed expansion include:
 
 - Local Focus places its active node in Attention and Awareness. Anima derives the
   Focus presentation field from the same full graph used by Global.
-- Global Constellation combines selected Attention and recent Memory into Awareness,
-  then may include a different policy-defined periphery in the conscious field.
+- A consumer enabling visual Memory can combine Attention and remembered subjects
+  into Awareness, then include a policy-defined periphery in the conscious field.
+  Current Graph+ Global and Local disable that Memory projection.
 - Global Overview with neither Attention nor Memory leaves Awareness empty, producing
   the neutral baseline presentation.
 - Hover remains transient presentation influence without changing either durable set.
@@ -233,8 +240,9 @@ canonical graph --> Graph+ projection --> presented graph
 
 Nodes outside Awareness may remain visible as neutral or dim context. Local Graph+
 does not crop this context into a second document; Attention and Awareness describe
-conscious state inside the shared graph. A rootless Local pane retains recent subjects
-through Memory without treating any of them as current Attention.
+conscious state inside the shared graph. A Local pane without an active Markdown note
+retains its working Attention and valid focused root. Bounded workspace history remains
+separate and is not projected as visible Memory in this release.
 
 ## Local click and reveal are separate intents
 
@@ -246,13 +254,14 @@ may subsequently make the same node Obsidian's active note.
 A double click adds a host-facing reveal intent. Graph+ translates that intent and asks
 `ObsidianGraphBridge` to activate the corresponding note. The outbound result does not
 itself perform the canonical Local re-root. When Obsidian publishes the resulting
-active-note change, the shared canonical inbound path replaces Attention and Focus in
-each Local presentation while Global preserves its viewport state.
+active-note change, the shared canonical inbound path extends Attention in every open
+presentation and moves Focus to the new root in Local. Global retains its View, focused
+subject, and camera.
 
 The first click of the double-click gesture changes only the originating presentation's
 Attention and camera. The later canonical active-note push
 re-roots it and applies the same exogenous change to other Local presentations. Global
-presentations do not follow the active-note event.
+presentations admit the note into Attention without following its Focus or camera.
 
 ## Agency is presentation-scoped
 
@@ -264,9 +273,8 @@ every open graph pane.
 Graph+ may host multiple Global and Local presentations through one shared
 `GraphPlusApplication`. The application distributes canonical vault changes and other
 exogenous events to those presentations, and each presentation interprets them under
-its own experience policy. An active-note change can therefore replace the Attention
-of every Local presentation without replacing a Global presentation's Attention,
-Awareness, selection, or camera state.
+its own experience policy. An active-note change therefore extends each presentation's
+Attention independently, moves Local Focus, and preserves Global View, Focus, and camera.
 
 ## Consciousness holds Ego, Attention, and Awareness
 
@@ -459,9 +467,11 @@ experience for existing consumers. The contract contains only host-neutral terms
 
 `GraphPlusExperiencePolicyV1` remains the product-level source of Global and Local
 meaning. `graphPlusEngineExperienceContractV1` translates it when Graph+ creates a
-session. Local therefore becomes single-subject, Focus-only, one-neighborhood
-Awareness without Graph Engine receiving a Local mode or Obsidian concept. Global
-translates to unrestricted constellation Attention and the complete state set.
+session. Local is Focus-only with unrestricted constellation Attention and zero
+policy-contributed Attention-neighborhood Awareness depth, without Graph Engine
+receiving a Local mode or Obsidian concept. Global also uses unrestricted constellation
+Attention and zero neighborhood depth, with the complete state set. Both disable
+visual Memory projection and preserve membership on Overview entry.
 
 Ego's adjudication seam evaluates endogenous commands against this contract before
 effectors run. A contract may accept an intent, reject it, or adjust it—for example,
@@ -484,11 +494,13 @@ not consulted and no endogenous `GraphIntentV1` is emitted. The compatibility
 `selectedNodeIds` mirror, Focus state, Awareness expansion, Anima, and Vision framing
 are updated from the realized result.
 
-Local Graph+ uses this path when applying its canonical active-note subject. A new
-active Markdown note replaces that Local presentation's Attention and Focus, recenters
-its camera without fitting, and preserves canonical graph identity and existing positions. When
-there is no active Markdown note, Local accepts empty exogenous Attention while the
-full graph and recent session Memory remain available.
+Graph+ uses this path to install the union of existing Attention and newly active notes.
+Local also establishes the new focused root and recenters without fitting, preserving
+canonical graph identity and existing positions. When there is no active Markdown note,
+Local retains its working constellation and last valid Focus root. Global admits active
+notes without changing View, Focus, or camera. Closed-pane activity updates bounded
+session history without accumulating pending constellation admissions; reopening seeds
+the current active note rather than replaying closed-pane history.
 
 ### Phase 6 explicit Anima consciousness classes
 

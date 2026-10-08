@@ -90,9 +90,10 @@ for reproducible 1k/5k/10k measurements and the remaining device performance che
 
 ## Validation status for this RC
 
-TypeScript, the complete 477-test suite, the plugin build, clean release packaging,
-and packed-client license inclusion pass. The vault benchmark completes at all three
-sizes and records its synthetic-host limitations separately.
+TypeScript, the complete 484-test suite, and the plugin build pass. Clean release
+packaging and packed-client license inclusion were also validated during release
+hardening. The vault benchmark completes at all three sizes and records its
+synthetic-host limitations separately.
 
 The desktop UI attempt observed Graph+ rendering in Obsidian 1.13.7, then attempted
 a focused disable/re-enable to load the rebuilt bundle. Subsequent native UI actions
@@ -102,3 +103,8 @@ source of the UI timeout has not been established. Obsidian was not force-quit a
 no live checkpoint was deliberately reset or corrupted. No physical mobile surface
 is available in this session. Desktop reload/drag interruption and mobile acceptance
 remain open release checks.
+
+The active-note queue and Focus-only Quick Settings clear regressions are covered by
+the [constellation lifecycle contract](graph-plus-constellation-contract.md). Closed
+panes retain bounded Memory without pending working-constellation admissions; Local
+clearing keeps its focused root.

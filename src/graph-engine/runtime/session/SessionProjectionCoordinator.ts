@@ -277,11 +277,14 @@ export class SessionProjectionCoordinator {
     const focusLabelEntry = options.viewState.viewMode === 'focus'
       && options.hoveredNodeId !== undefined && options.hoveredNodeId !== options.viewState.focusedNodeId
       && objectActivationPreview?.activation === 'primary';
-    // Keep the committed small label as the animation's starting point. Hover
-    // reveal is immediate; the new root size still waits for the timed peek.
+    // Keep the committed small Focus label as the animation's starting point.
+    // Every primary hover keeps its own label visible while proximity is paused;
+    // the destination scene and new root size still wait for the timed peek.
     const baseline = this.createPresentationFrame(options.host, input, null, focusLabelEntry ? null : options.hoveredNodeId);
     this.committedPickState.set(baseline.frame);
-    let frame = focusLabelEntry ? { ...baseline.frame, nodes: baseline.frame.nodes.map(node =>
+    const hoverLabelEntry = options.hoveredNodeId !== undefined
+      && objectActivationPreview?.activation === 'primary' && baseline.frame.policy?.labelMode !== 'off';
+    let frame = hoverLabelEntry ? { ...baseline.frame, nodes: baseline.frame.nodes.map(node =>
       node.id === options.hoveredNodeId ? { ...node, showLabel: true, labelForceVisible: true,
         labelAlwaysVisible: true, labelOpacity: 1, labelFontSize: Math.max(12, node.labelFontSize) } : node) } : baseline.frame;
 

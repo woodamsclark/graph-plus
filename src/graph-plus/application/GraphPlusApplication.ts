@@ -102,6 +102,11 @@ export class GraphPlusPresentationV1<TFile> {
   private readonly pendingActiveConstellationNodes = new Set<string>();
   private rootNodeId?: string;
   private sessionNodeIds: readonly string[];
+  private memoryProjection?: {
+    readonly session: GraphSessionV1;
+    readonly nodeIds: readonly string[];
+    readonly completion: Promise<void>;
+  };
   private enforcingPolicy = false;
   private referenceLayout?: GraphViewStateV1;
   private layoutAuthority: boolean;
@@ -306,13 +311,25 @@ export class GraphPlusPresentationV1<TFile> {
       .filter((nodeId) => nodeId !== snapshot.activeNodeId)
       .slice(-DEFAULT_GRAPH_PLUS_SESSION_NODE_LIMIT_V1);
     if (!this.session || !this.canonicalDocument) return;
-    const result = await this.session.applyExternalInfluence({
-      schemaVersion: 1,
-      type: 'replace-remembered-subjects',
-      nodeIds: this.policy.memoryConstellations === 'enabled' ? this.sessionNodeIds : [],
-    });
-    if (result.status === 'rejected') {
-      throw new Error(`Graph+ session Memory was rejected: ${result.reason}`);
+    const session = this.session;
+    const nodeIds = this.policy.memoryConstellations === 'enabled' ? this.sessionNodeIds : [];
+    if (this.memoryProjection?.session === session && sameNodeIds(nodeIds, this.memoryProjection.nodeIds)) {
+      return this.memoryProjection.completion;
+    }
+    const projection = {
+      session,
+      nodeIds: [...nodeIds],
+      completion: session.applyExternalInfluence({
+        schemaVersion: 1, type: 'replace-remembered-subjects', nodeIds,
+      }).then(result => {
+        if (result.status === 'rejected') throw new Error(`Graph+ session Memory was rejected: ${result.reason}`);
+      }),
+    };
+    this.memoryProjection = projection;
+    try { await projection.completion; } catch (error) {
+      // Failed installs are retryable; identical in-flight installs share completion.
+      if (this.memoryProjection === projection) this.memoryProjection = undefined;
+      throw error;
     }
   }
 
@@ -418,6 +435,7 @@ export class GraphPlusPresentationV1<TFile> {
       else await this.session?.dispose();
     } finally {
       this.session = undefined;
+      this.memoryProjection = undefined;
       this.effectiveSettings = undefined;
       this.document = undefined;
       this.canonicalDocument = undefined;
@@ -444,6 +462,7 @@ export class GraphPlusPresentationV1<TFile> {
       onSessionOverridesChanged: (overrides) => this.adoptSessionOverrides(overrides),
     });
     this.session = session;
+    this.memoryProjection = undefined;
     this.effectiveSettings = await session.exportEffectiveSettings();
     this.document = document;
     this.checkpoint?.attach(session, document);
@@ -689,6 +708,7 @@ export class GraphPlusApplicationV1<TFile> {
   private canonicalDirty = true;
   private disposed = false;
   private activeNodeQueued = false;
+  private activeNodeGeneration = 0;
   private pendingActiveNodeId?: string;
   private readonly pendingConstellationNodeIds = new Set<string>();
   private activeNodeFollow?: Promise<void>;
@@ -707,6 +727,9 @@ export class GraphPlusApplicationV1<TFile> {
     options: GraphPlusPresentationAttachOptionsV1<TFile>,
   ): GraphPlusPresentationV1<TFile> {
     if (this.disposed) throw new Error('Graph+ application is disposed.');
+    // A new presentation starts from bounded Memory and the current active note,
+    // not admissions left over from a previous period with open panes.
+    if (this.presentations.size === 0) this.discardPendingActiveNodes();
     if (options.initialRootNodeId && this.workspaceSession.snapshot().nodeIds.length === 0) {
       this.pendingSessionSnapshot = this.workspaceSession.experienceFileActivation(
         options.initialRootNodeId,
@@ -733,6 +756,7 @@ export class GraphPlusApplicationV1<TFile> {
     const closing = this.closingPresentations.get(presentation);
     if (closing) return closing;
     if (!this.presentations.delete(presentation)) return Promise.resolve();
+    if (this.presentations.size === 0) this.discardPendingActiveNodes();
     const completion = this.closePresentationOnce(presentation);
     this.closingPresentations.set(presentation, completion);
     const finish = () => this.closingPresentations.delete(presentation);
@@ -846,8 +870,10 @@ export class GraphPlusApplicationV1<TFile> {
         event.timestamp ?? this.options.now?.() ?? Date.now(),
       );
       if (event.nodeId !== previousActiveNodeId) {
-        if (event.nodeId) this.pendingConstellationNodeIds.add(event.nodeId);
-        if (this.presentations.size > 0) this.queueActiveNode(event.nodeId, this.pendingSessionSnapshot);
+        if (this.presentations.size > 0) {
+          if (event.nodeId) this.pendingConstellationNodeIds.add(event.nodeId);
+          this.queueActiveNode(event.nodeId, this.pendingSessionSnapshot);
+        }
       }
     }
     for (const listener of this.hostActivityListeners) listener();
@@ -971,17 +997,27 @@ export class GraphPlusApplicationV1<TFile> {
     });
   }
 
+  private discardPendingActiveNodes(): void {
+    this.activeNodeGeneration += 1;
+    this.pendingConstellationNodeIds.clear();
+    this.pendingActiveNodeId = undefined;
+    this.activeNodeQueued = false;
+  }
+
   private async drainActiveNodeQueue(): Promise<void> {
     while (this.activeNodeQueued && !this.disposed && this.presentations.size > 0) {
+      const generation = this.activeNodeGeneration;
       const nodeId = this.pendingActiveNodeId;
       const snapshot = this.pendingSessionSnapshot;
       const admittedNodeIds = [...this.pendingConstellationNodeIds];
       this.pendingConstellationNodeIds.clear();
       this.activeNodeQueued = false;
       await this.followActiveNode(nodeId);
+      if (generation !== this.activeNodeGeneration) continue;
       await Promise.all([...this.presentations].map(
         presentation => presentation.addActiveNodesToConstellation(admittedNodeIds),
       ));
+      if (generation !== this.activeNodeGeneration) continue;
       await Promise.all([...this.presentations].map(
         (presentation) => presentation.applySessionSnapshot(snapshot),
       ));

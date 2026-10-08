@@ -210,6 +210,71 @@ test('Cmd note preview holds hover styling through card handoff and release unti
   }
 });
 
+test('Overview and Constellation keep the approached label drawn through the primary hover handoff', async () => {
+  for (const dimensions of ['2d', '3d'] as const) {
+    for (const viewMode of ['overview', 'explore'] as const) {
+      let scene: GraphRenderSceneV2 | undefined;
+      const registry = new GraphRendererRegistry();
+      registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true, create: ({ createCanvas, now }) => {
+        const renderer = new CanvasGraphRenderer(createCanvas(), now);
+        const update = renderer.updateScene.bind(renderer);
+        renderer.updateScene = next => { scene = next; update(next); }; return renderer;
+      } });
+      const value = runtimeHarness({ consumerId: 'graph-plus', profileId: 'default',
+        registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1, rendererRegistry: registry,
+        document: graphDocument({ nodes: ['root', 'neighbor', 'other'].map(id => graphNode(id)),
+          edges: [graphEdge('rn', 'root', 'neighbor')] }) });
+      value.profiles.setUserOverrides('graph-plus', 'default', { dimensions, modules: {
+        'force-layout': { enabled: false }, anima: { settings: { cursorGravity: 'off' } },
+        rendering: { settings: { labelMode: 'proximity' } },
+      } });
+      const session = await value.create(); const initial = await session.exportViewState();
+      const camera = new GraphCameraController(initial.camera, dimensions); camera.setViewport(640, 360);
+      await session.restoreViewState({ ...initial, viewMode, selectedNodeIds: viewMode === 'overview' ? [] : ['root'],
+        positions: Object.fromEntries(['root', 'neighbor', 'other'].map((id, i) =>
+          [id, camera.screenToWorld(120 + i * 180, 180, 1000)])) });
+      value.platform.flushFrame(value.platform.now());
+      const committed = await session.exportViewState();
+      const canvas = runtimeCanvas(value.container);
+      const move = (x: number) => {
+        value.drawArguments.length = 0;
+        const fields = { clientX: x, clientY: 180, pointerId: 981, pointerType: 'mouse', button: 0 };
+        const event = new value.window.PointerEvent('pointermove', { ...fields, bubbles: true });
+        for (const [key, field] of Object.entries(fields)) Object.defineProperty(event, key, { value: field });
+        canvas.dispatchEvent(event as unknown as Event);
+        value.platform.advanceTime(20); value.platform.flushFrame(value.platform.now());
+      };
+      let labelOnCanvas = false;
+      const drawn = () => {
+        // The scheduler may keep the existing canvas at the zero-strength boundary.
+        // Only a repaint can remove a label that was already drawn.
+        if (value.drawArguments.some(call => call.method === 'clearRect')) {
+          labelOnCanvas = value.drawArguments.some(call => call.method === 'fillText' && call.args[0] === 'neighbor');
+        }
+        return labelOnCanvas;
+      };
+      move(270); assert(drawn(), `${dimensions}/${viewMode}: proximity draws the approached label`);
+      move(300);
+      const readable = () => {
+        assert(drawn(), `${dimensions}/${viewMode}: hovering cannot drop the approached label`);
+        equal(scene!.nodes.find(node => node.id === 'neighbor')!.labelOpacity, 1, 'handoff keeps full label opacity');
+        equal(scene!.policy?.cursorLabelRevealRadiusPx, 0, 'other proximity labels remain paused');
+      };
+      readable();
+      for (const ms of [199, 1, 1, 249, 250]) {
+        value.drawArguments.length = 0;
+        value.platform.advanceTime(ms); value.platform.flushTimer(); value.platform.flushFrame(value.platform.now());
+        readable();
+      }
+      deepEqual(await session.exportViewState(), committed, 'label handoff does not change committed graph or camera state');
+      await session.setSessionOverrides({ modules: { rendering: { settings: { labelMode: 'off' } } } });
+      value.drawArguments.length = 0; value.platform.flushFrame(value.platform.now());
+      assert(!value.drawArguments.some(call => call.method === 'fillText'), 'absolute label Off still suppresses hover labels');
+      await session.dispose();
+    }
+  }
+});
+
 test('Focus hover keeps its label visible through the delay and grows it continuously to root size', async () => {
   for (const dimensions of ['2d', '3d'] as const) {
     let scene: GraphRenderSceneV2 | undefined;

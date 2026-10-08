@@ -2,14 +2,15 @@
 
 Status: Implemented architecture
 
-Date: 2026-09-28
+Date: 2026-10-07
 
-Agency migration note: this document describes the implemented unified application
-shell. The target for Consciousness, Ego, Attention, Awareness, and Local click
-semantics is defined in
-[Graph Engine agency and Awareness ontology](graph-engine-agency-awareness-ontology.md).
-Where the documents differ on those target semantics, the ontology document takes
-precedence. Phases 2 through 10 of that migration are implemented.
+This document describes the implemented unified application shell and the current
+Graph+ release policies. The
+[Graph Engine agency and Awareness ontology](graph-engine-agency-awareness-ontology.md)
+defines the engine ownership model. Generic engine capabilities are constrained by
+the shipped product policy described here and in the
+[active-note constellation contract](graph-plus-constellation-contract.md).
+Phases 2 through 10 of the agency migration are implemented.
 
 ## Purpose
 
@@ -47,10 +48,11 @@ progress retain their internal owners.
 | Show in Graph+ initiated outside Graph+ | Application reveal workflow → external Attention/Focus installation → explicit framing |
 
 `receiveHostEvent` remains a compatibility alias for the unconscious ingress.
-Ego's initial Judgement accepts every valid intention. Received outside reality
-does not need Ego's permission. Once translated and received, it can become
-conscious Attention or Memory. The recent-note trail is an example: its origin is
-outside activity, while its remembered constellations are inside consciousness.
+Ego's Judgement admits, adjusts, or rejects intentions under the experience contract.
+Received outside reality does not need Ego's permission, but its translated influence
+must also satisfy that contract. Active-note arrivals can become conscious Attention.
+The application separately retains bounded recent-note history; the current release
+does not project that history as visible Memory constellations.
 
 Outbound note navigation is an effect of an admitted conscious action. The later
 Obsidian active-note event is a separate received input; the outbound request must
@@ -79,26 +81,31 @@ not write opaque identity metadata into notes or maintain a fallible rename ledg
 | Concern | Global | Local |
 | --- | --- | --- |
 | Document scope | Full vault | The same full vault |
-| Subject inputs | Ego | Ego and active note |
-| Initial View | Overview | Focus on the active note |
+| Subject inputs | Ego and active note | Ego and active note |
+| Initial View | Overview, or restored checkpoint View | Focus on the active note when available |
 | Interaction states | Overview, Constellation, Focus | Focus only |
+| Attention cardinality | Multiple constellation members | Multiple constellation members |
+| Policy-contributed Attention-neighborhood Awareness depth | 0 | 0 |
+| Visual Memory constellations | Disabled | Disabled |
 | Camera | Pane-local | Pane-local |
 | Persistence | Owns the vault checkpoint | Reuses the shared graph world; its viewport state is ephemeral |
-| Active-note following | No | Yes |
-| Canonical root arrival | None | The root enters this Local viewport's Attention and Focus; recent subjects remain in Memory |
+| Active-note Focus following | No | Yes |
+| Active-note arrival while open | Adds the note to Attention without changing View, Focus, or camera | Adds the note to the working Attention constellation and makes it the focused root |
 
 The shared `GraphPlusSessionV1` remembers the three most recently activated distinct
-notes before the active note through Ego/Memory. Presentations receive that trail as remembered subjects,
-not as user-authored Attention. Anima shows connected remembered groups as typed
-Memory constellations with a separate theme color faded to 100%, 50%, and 25% by
-recency; choosing one creates deliberate
-membership through the ordinary Ego plan.
+notes before the active note through Ego/Memory. This bounded history is separate
+from user-authored Attention. Both current Graph+ experience policies disable visual
+Memory constellations, so their remembered-subject projection is empty. Presentations
+install that projection once per engine session and skip unchanged replacements;
+identical in-flight updates share completion, and failed installs remain retryable.
+Active-note arrivals continue to extend the working Attention constellation independently.
 
 The Local root is supplied by canonical active-note truth. A single click can direct
 Attention and Focus; focusing a different note requests an outbound note reveal.
-Canonical arrival replaces the Local root and establishes only that subject in
-Attention. The recent trail remains Memory and does not become selected merely to
-stay visible. A double-click can additionally invoke the registered Open note action.
+Canonical arrival replaces the Local root, retains existing valid Attention members,
+and includes the new root in Attention. A double-click can additionally invoke the
+registered Open note action. Bounded closed-pane history does not seed extra selected
+members when the pane reopens.
 Canonical graph truth, pins, and node positions are fanned out to every presentation.
 Each presentation keeps its own filters, selection, Focus, View, hover, and camera.
 Thus a Global pane can remain in Overview while a Local pane follows the active note
@@ -108,13 +115,24 @@ Graph+ translates this product policy into a host-neutral
 `GraphExperienceContractV1` when it creates a Graph Engine session. The engine sees
 state permissions, Attention cardinality, interaction
 capabilities, and framing constraints. It does not see the Global/Local mode, active
-notes, vaults, or Obsidian. Both modes permit Overview, Constellation, and Focus.
+notes, vaults, or Obsidian. Global permits Overview, Constellation (`explore` in the
+engine contract), and Focus; Local permits only Focus. Neither policy imposes a
+single-subject Attention cap. The policy's neighborhood depth describes committed
+Awareness expansion, separately from transient hover previews.
+
+Entering Global Overview preserves constellation membership. Explicit clearing
+removes Global's active constellation; Local clearing retains its focused root as
+the only member and stays in Focus. The shared Quick Settings control routes Local
+clearing through the registered presentation action rather than requesting Overview.
+Clearing preserves camera framing, shared positions, and pins.
 
 Canonical active-note changes enter the engine through `applyExternalInfluence` after
 Graph+ translates the note into a graph subject. This path bypasses Ego and does not
 emit a user-intent event, but it remains constrained by the neutral experience
-contract. The absence of an active Markdown note clears the Local root, producing empty
-Attention and no Focus subject without removing nodes from the shared graph.
+contract. The absence of an active Markdown note clears the canonical active-root
+marker, but retains the working constellation and the last focused root while that
+node remains in the canonical document. It does not clear Attention or the shared
+graph. Losing active-note truth does not invent a placeholder subject.
 
 ## Host surfaces and compatibility
 
@@ -127,9 +145,13 @@ Views do not subscribe to Obsidian. One `ObsidianGraphBridgeV1` owns vault, meta
 active-leaf, and file-open subscriptions along with outbound note and tag operations.
 It delivers neutral host events to the application. The application coalesces those
 invalidations while Graph+ is open and applies the same refreshed snapshot to all
-presentation sessions. When Graph+ is closed it retains only the dirty marker until
-the next open. Active-note truth is distributed only to policies that follow it and
-never triggers a vault scan by itself.
+presentation sessions. When Graph+ is closed, vault invalidation retains a dirty
+marker until the next open; active-note activity still updates bounded session history
+but accumulates no pending constellation members. The first presentation attachment
+and last detachment discard pending admissions, and a drain spanning that boundary
+cannot admit old members into a newly opened pane. Opening seeds the current active
+note and may restore Global's saved constellation. Active-note truth extends Attention
+in both modes and follows Focus only in Local; it never triggers a vault scan by itself.
 
 Each pane owns an independent Graph Engine rendering session because each DOM surface
 needs its own viewport. The application elects exactly one open presentation to advance
@@ -152,7 +174,14 @@ Automated checks must prove that:
 - both modes receive the same canonical document identity, nodes, and edges;
 - Local Focus changes can request host navigation without independently declaring canonical truth;
 - Local double-click requests reveal without optimistically broadcasting canonical truth;
-- Local canonical arrival focuses only its root while Memory remains a distinct constellation source;
+- active-note arrivals extend Attention in both modes and follow Focus only in Local;
+- Local retains its working constellation and valid focused root when no Markdown note is active;
+- Local permits only Focus, supports multiple Attention members, and clears to its focused root;
+- entering Global Overview preserves membership until an explicit clear action;
+- closed-pane note activity retains bounded history without pending constellation growth,
+  and stale in-flight admissions cannot cross a close/reopen boundary;
+- disabled visual Memory installs its empty projection once per session, coalesces
+  identical updates, and retries failed installs;
 - pins and node positions fan out across presentations without copying viewport state;
 - filters, Attention, Focus, View, and camera remain local to each presentation;
 - exactly one presentation advances layout for the shared graph world;
@@ -165,9 +194,14 @@ The application-level fan-out regression mounts Global plus two Local presentati
 It proves that pins and coordinates are shared while filter and Focus changes remain
 local, that exactly one surface advances layout, that a bridge reveal performs one
 outbound operation without an optimistic root mutation, and that canonical active-note
-events reach each Local policy once without modifying Global. Engine-level regressions separately enforce
-source-typed constellation resolution, Memory color/visibility, and
-Attention-to-Awareness neighborhood expansion.
+events reach each Local policy once and extend Global Attention without moving its
+Focus or camera. Engine-level regressions separately enforce source-typed constellation
+resolution, Memory color/visibility, and configurable Attention-to-Awareness neighborhood
+expansion. Those engine capabilities do not imply that this Graph+ release enables
+visual Memory or policy-contributed neighborhood expansion.
+
+The [active-note constellation contract](graph-plus-constellation-contract.md) records
+the queue lifecycle, Memory change detection, and Local clearing regression coverage.
 
 Historical V1.7.1 and V1.9 documents describe the earlier two-consumer boundary.
 This document supersedes that ownership model while preserving their user-visible
@@ -184,5 +218,8 @@ configuration remain available; dimensions and region controls remain active.
 
 Empty active Attention is valid. The canonical document passes through the existing
 experience projection, structural filtering, layout, and Anima scene assembly.
-Memory can be visible while active composition is empty. With no surviving objects,
-the assembled canvas is empty; no extra explanatory UI is required.
+Empty Attention does not empty the canonical full-vault document or necessarily produce
+an empty canvas: surviving context nodes remain subject to the View and rendering
+policies. Graph Engine supports visible Memory with empty Attention, but both current
+Graph+ policies disable that projection. With no surviving objects, the assembled
+canvas is empty; no extra explanatory UI is required.

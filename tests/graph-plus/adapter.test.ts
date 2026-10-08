@@ -1,3 +1,4 @@
+import { resolveClearConstellationActionV1 } from '../../src/obsidian/graph-engine-ui/GraphEngineClearConstellationAction.ts';
 import type { GraphSessionControlPortV1 } from '../../src/graph-engine/runtime/host/GraphSessionControlPort.ts';
 import type { ConsumerRegistrationV1 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { ConsumerProfileRegistry } from '../../src/graph-engine/core/profile/index.ts';
@@ -329,22 +330,22 @@ test('Graph+ application shares one graph world across viewport-independent pres
   const globalSession = global.getSession();
   assert(firstSession && secondSession && globalSession, 'all presentation sessions should be mounted');
   await globalSession.setSelection([alphaId]);
-  let firstCanonicalReplacements = 0;
-  let secondCanonicalReplacements = 0;
+  let firstMemoryReplacements = 0;
+  let secondMemoryReplacements = 0;
   let firstRememberedNodeIds: readonly string[] | undefined;
   let secondRememberedNodeIds: readonly string[] | undefined;
   const firstApplyExternalInfluence = firstSession.applyExternalInfluence.bind(firstSession);
   const secondApplyExternalInfluence = secondSession.applyExternalInfluence.bind(secondSession);
   firstSession.applyExternalInfluence = async (influence) => {
     if (influence.type === 'replace-remembered-subjects') {
-      firstCanonicalReplacements += 1;
+      firstMemoryReplacements += 1;
       firstRememberedNodeIds = influence.nodeIds;
     }
     return firstApplyExternalInfluence(influence);
   };
   secondSession.applyExternalInfluence = async (influence) => {
     if (influence.type === 'replace-remembered-subjects') {
-      secondCanonicalReplacements += 1;
+      secondMemoryReplacements += 1;
       secondRememberedNodeIds = influence.nodeIds;
     }
     return secondApplyExternalInfluence(influence);
@@ -361,8 +362,7 @@ test('Graph+ application shares one graph world across viewport-independent pres
   for (let index = 0; index < 40 && (
     (await firstSession.exportViewState()).focusedNodeId !== betaId
     || (await secondSession.exportViewState()).focusedNodeId !== betaId
-    || firstCanonicalReplacements !== 1
-    || secondCanonicalReplacements !== 1
+    || !(await globalSession.exportViewState()).selectedNodeIds.includes(betaId)
   ); index += 1) await Promise.resolve();
   equal((await firstSession.exportViewState()).focusedNodeId, betaId,
     'canonical active-note truth should fan out to the originating Local policy');
@@ -372,14 +372,14 @@ test('Graph+ application shares one graph world across viewport-independent pres
     'canonical fan-out retains the previous root as a constellation member');
   deepEqual((await secondSession.exportViewState()).selectedNodeIds, [alphaId, betaId],
     'each Local constellation retains active-note arrivals independently of Memory');
-  equal(firstCanonicalReplacements, 1,
-    'the originating Local presentation should apply the received canonical event once');
-  equal(secondCanonicalReplacements, 1,
-    'a sibling Local presentation should apply the received canonical event once');
-  deepEqual(firstRememberedNodeIds, [],
-    'the release profile should not project recent notes as Memory constellations');
-  deepEqual(secondRememberedNodeIds, [],
-    'the release profile should suppress Memory constellations in every Local pane');
+  equal(firstMemoryReplacements, 0,
+    'active-note changes must not reinstall unchanged empty visual Memory');
+  equal(secondMemoryReplacements, 0,
+    'sibling Local panes must also skip unchanged empty visual Memory');
+  equal(firstRememberedNodeIds, undefined,
+    'no replacement influence should be emitted for the disabled Memory projection');
+  equal(secondRememberedNodeIds, undefined,
+    'disabled Memory projection must not emit a sibling replacement either');
   equal(global.getProjectedDocument()?.nodes.length, global.getDocument()?.nodes.length,
     'active-note truth should not alter the Global presentation');
   deepEqual((await globalSession.exportViewState()).selectedNodeIds, [alphaId, betaId],
@@ -389,8 +389,8 @@ test('Graph+ application shares one graph world across viewport-independent pres
   for (let index = 0; index < 40 && (
     (await firstSession.exportViewState()).focusedNodeId !== undefined
     || (await secondSession.exportViewState()).focusedNodeId !== undefined
-    || firstCanonicalReplacements !== 2
-    || secondCanonicalReplacements !== 2
+    || firstMemoryReplacements !== 0
+    || secondMemoryReplacements !== 0
   ); index += 1) await Promise.resolve();
   assert((local.getLocalDocument()?.nodes.length ?? 0) > 0,
     'dropping out of a note should retain the full graph in the originating Local pane');
@@ -402,10 +402,10 @@ test('Graph+ application shares one graph world across viewport-independent pres
     'each rootless Local presentation retains its working constellation');
   deepEqual((await globalSession.exportViewState()).selectedNodeIds, [alphaId, betaId],
     'rootless Local state should not overwrite Global Attention');
-  equal(firstCanonicalReplacements, 2,
-    'canonical absence should be applied once rather than duplicated with outbound state');
-  equal(secondCanonicalReplacements, 2,
-    'canonical absence should be applied once to each sibling presentation');
+  equal(firstMemoryReplacements, 0,
+    'canonical absence must not reinstall unchanged empty visual Memory');
+  equal(secondMemoryReplacements, 0,
+    'canonical absence also skips unchanged sibling visual Memory');
 
   await application.dispose();
   application.receiveHostEvent({ type: 'canonical-vault-invalidated' });
@@ -651,6 +651,230 @@ class MemoryStore implements GraphPlusCheckpointStoreV1 {
   async load(): Promise<GraphPlusCheckpointV1 | undefined> { return this.value; }
   async save(_vaultId: string, checkpoint: GraphPlusCheckpointV1): Promise<void> { this.value = checkpoint; this.saves += 1; }
 }
+
+test('Global and Local retain bounded note history without repeated empty Memory influences', async () => {
+  const notes = Array.from({ length: 12 }, (_, index) => ({
+    file: { path: `note-${index}.md` }, path: `note-${index}.md`, basename: `note-${index}`,
+    extension: 'md', content: '', tags: [], properties: {},
+  }));
+  const runtime = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
+  runtime.profiles.setUserOverrides('graph-plus', 'default', { modules: { 'force-layout': { enabled: false } } });
+  const memoryInstalls = new Map<object, number>();
+  const core = new GraphEngineProviderCoreV1({ engineVersion: '2.0.0', engineInstanceId: 'memory-change-detection',
+    capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory, sessionUiHost: {
+      mount: ({ session }) => {
+        memoryInstalls.set(session, 0);
+        const apply = session.applyExternalInfluence.bind(session);
+        session.applyExternalInfluence = influence => {
+          if (influence.type === 'replace-remembered-subjects') memoryInstalls.set(session, memoryInstalls.get(session)! + 1);
+          return apply(influence);
+        };
+        return { dispose: () => undefined };
+      },
+    } });
+  const application = new GraphPlusApplicationV1({
+    model: new GraphPlusVaultModelV1({ read: () => ({ vaultId: 'Memory test', notes, resolvedLinks: {} }) },
+      { countDuplicateLinks: true }),
+    navigator: { openNote: async () => undefined, openTag: async () => undefined },
+  });
+  application.receiveHostEvent({ type: 'active-note-changed', nodeId: noteNodeId(notes[0].path) });
+  const panes = [];
+  for (const mode of ['global', 'local'] as const) {
+    const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+    assert(lease.ok, 'each pane obtains its own lease');
+    const pane = application.createPresentation({ mode, lease: lease.lease, container: runtime.container,
+      vaultId: 'Memory test', checkpointStore: new MemoryStore(), initialRootNodeId: noteNodeId(notes[0].path) });
+    await pane.open(); panes.push(pane);
+    equal(memoryInstalls.get(pane.getSession()!), 1, 'each engine session receives one initial empty projection');
+  }
+  for (let index = 1; index < 12; index++) {
+    application.receiveHostEvent({ type: 'active-note-changed', nodeId: noteNodeId(notes[index].path) });
+    for (let i = 0; i < 100; i++) await Promise.resolve();
+  }
+  deepEqual(application.getSessionSnapshot().nodeIds, [8, 9, 10].map(index => noteNodeId(notes[index].path)),
+    'workspace note history still remembers three prior subjects');
+  for (const pane of panes) {
+    await Promise.all(Array.from({ length: 10 }, () => pane.applySessionSnapshot(application.getSessionSnapshot())));
+    equal(memoryInstalls.get(pane.getSession()!), 1, 'changed history and duplicate snapshots must not reinstall empty visual Memory');
+    equal((await pane.getSession()!.exportViewState()).selectedNodeIds.length, 12,
+      'working constellation admissions remain independent of visual Memory');
+  }
+  equal((await panes[1].getSession()!.exportViewState()).focusedNodeId, noteNodeId(notes[11].path),
+    'Local still follows the latest active note');
+  await application.dispose(); await core.dispose();
+});
+
+test('Memory projections share in-flight completion, retry rejection, and reset for a new engine session', async () => {
+  const fixture = snapshot();
+  const runtime = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
+  runtime.profiles.setUserOverrides('graph-plus', 'default', { modules: { 'force-layout': { enabled: false } } });
+  const installs = new Map<object, number>();
+  let rejectFirst = true;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const core = new GraphEngineProviderCoreV1({ engineVersion: '2.0.0', engineInstanceId: 'memory-projection-retry',
+    capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory, sessionUiHost: {
+      mount: ({ session }) => {
+        installs.set(session, 0);
+        const apply = session.applyExternalInfluence.bind(session);
+        session.applyExternalInfluence = async influence => {
+          if (influence.type === 'replace-remembered-subjects') {
+            installs.set(session, installs.get(session)! + 1);
+            if (rejectFirst) { rejectFirst = false; await gate; return { status: 'rejected', reason: 'test-rejection' }; }
+          }
+          return apply(influence);
+        };
+        return { dispose: () => undefined };
+      },
+    } });
+  const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(lease.ok, 'Global obtains a lease');
+  const pane = new GraphPlusConsumerV1({ lease: lease.lease, container: runtime.container,
+    vaultId: fixture.value.vaultId, checkpointStore: new MemoryStore(), source: { read: () => fixture.value },
+    navigator: { openNote: async () => undefined, openTag: async () => undefined } });
+  await pane.open(); const firstSession = pane.getSession()!;
+  const history = { activeNodeId: noteNodeId('Alpha.md'), nodeIds: [noteNodeId('folder/Beta.md')], revision: 1 };
+  const first = pane.applySessionSnapshot(history);
+  const duplicate = pane.applySessionSnapshot(history);
+  equal(installs.get(firstSession), 1, 'simultaneous identical snapshots share a single pending engine install');
+  const outcomes = Promise.allSettled([first, duplicate]);
+  release();
+  deepEqual((await outcomes).map(outcome => outcome.status), ['rejected', 'rejected'], 'both callers observe failed completion');
+  await pane.applySessionSnapshot(history);
+  equal(installs.get(firstSession), 2, 'failed projection must remain retryable');
+  await pane.applySessionSnapshot({ ...history, revision: 2, nodeIds: [] });
+  equal(installs.get(firstSession), 2, 'changed history still has the same disabled projection');
+  equal(await pane.resetLayoutData(), true, 'layout reset mounts a fresh engine session');
+  const nextSession = pane.getSession()!;
+  assert(nextSession !== firstSession, 'reset creates a new engine session');
+  await pane.applySessionSnapshot(history);
+  equal(installs.get(nextSession), 1, 'new session must receive its own initial projection');
+  await pane.close(); await core.dispose();
+});
+
+test('closed Graph+ keeps bounded Memory without pending admissions or stale reopening members', async () => {
+  const notes = Array.from({ length: 12 }, (_, index) => ({
+    file: { path: `note-${index}.md` }, path: `note-${index}.md`, basename: `note-${index}`,
+    extension: 'md', content: '', tags: [], properties: {},
+  }));
+  const runtime = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
+  runtime.profiles.setUserOverrides('graph-plus', 'default', { modules: { 'force-layout': { enabled: false } } });
+  const core = new GraphEngineProviderCoreV1({ engineVersion: '2.0.0', engineInstanceId: 'closed-constellation',
+    capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory });
+  const application = new GraphPlusApplicationV1({
+    model: new GraphPlusVaultModelV1({ read: () => ({ vaultId: 'Closed test', notes, resolvedLinks: {} }) },
+      { countDuplicateLinks: true }),
+    navigator: { openNote: async () => undefined, openTag: async () => undefined },
+  });
+  const activate = (index: number) => application.receiveHostEvent({ type: 'active-note-changed', nodeId: noteNodeId(notes[index].path) });
+  const pending = () => (application as unknown as { pendingConstellationNodeIds: Set<string> }).pendingConstellationNodeIds.size;
+  for (let index = 0; index < 10; index++) activate(index);
+  equal(pending(), 0, 'closed-note activity must not accumulate pending constellation entries');
+  deepEqual(application.getSessionSnapshot().nodeIds, [6, 7, 8].map(index => noteNodeId(notes[index].path)),
+    'closed-note activity still retains three bounded prior Memory subjects');
+  const open = async () => {
+    const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+    assert(lease.ok, 'test pane obtains its own lease');
+    const graph = application.createPresentation({ mode: 'global', lease: lease.lease, container: runtime.container,
+      vaultId: 'Closed test', checkpointStore: new MemoryStore() });
+    await graph.open();
+    return graph;
+  };
+  const graph = await open();
+  deepEqual((await graph.getSession()!.exportViewState()).selectedNodeIds, [noteNodeId(notes[9].path)],
+    'opening seeds only the latest active note, not closed history');
+  activate(10);
+  for (let i = 0; i < 100; i++) await Promise.resolve();
+  deepEqual((await graph.getSession()!.exportViewState()).selectedNodeIds, [9, 10].map(index => noteNodeId(notes[index].path)),
+    'next activation must not admit stale closed notes');
+  const closing = application.closePresentation(graph);
+  for (let index = 0; index < 6; index++) activate(index);
+  equal(pending(), 0, 'last-pane close immediately ends admissions, even before its checkpoint finishes');
+  await closing;
+  const reopened = await open();
+  activate(11);
+  for (let i = 0; i < 100; i++) await Promise.resolve();
+  deepEqual((await reopened.getSession()!.exportViewState()).selectedNodeIds, [5, 11].map(index => noteNodeId(notes[index].path)),
+    'a new opening must not replay the previous closed interval');
+  await application.dispose(); await core.dispose();
+});
+
+test('an in-flight note follow cannot admit its old constellation into a reopened pane', async () => {
+  const fixture = snapshot();
+  const gamma = { file: { path: 'Gamma.md' }, path: 'Gamma.md', basename: 'Gamma', extension: 'md', content: '', tags: [], properties: {} };
+  const runtime = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
+  runtime.profiles.setUserOverrides('graph-plus', 'default', { modules: { 'force-layout': { enabled: false } } });
+  const core = new GraphEngineProviderCoreV1({ engineVersion: '2.0.0', engineInstanceId: 'reopen-in-flight',
+    capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory });
+  const application = new GraphPlusApplicationV1({
+    model: new GraphPlusVaultModelV1({ read: () => ({ ...fixture.value, notes: [...fixture.value.notes, gamma] }) },
+      { countDuplicateLinks: true }),
+    navigator: { openNote: async () => undefined, openTag: async () => undefined },
+  });
+  const open = async (root: string) => {
+    const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+    assert(lease.ok, 'Local pane obtains its own lease');
+    const pane = application.createPresentation({ mode: 'local', lease: lease.lease, container: runtime.container, initialRootNodeId: root });
+    await pane.open(); return pane;
+  };
+  const alpha = noteNodeId('Alpha.md'); const beta = noteNodeId('folder/Beta.md'); const gammaId = noteNodeId('Gamma.md');
+  const old = await open(alpha);
+  let releaseFollow!: () => void;
+  const gate = new Promise<void>(resolve => { releaseFollow = resolve; });
+  old.followActiveNode = async () => { await gate; return true; };
+  application.receiveHostEvent({ type: 'active-note-changed', nodeId: beta });
+  const closing = application.closePresentation(old);
+  application.receiveHostEvent({ type: 'active-note-changed', nodeId: gammaId });
+  const reopened = await open(gammaId);
+  releaseFollow(); await closing;
+  for (let i = 0; i < 100; i++) await Promise.resolve();
+  deepEqual((await reopened.getSession()!.exportViewState()).selectedNodeIds, [gammaId],
+    'an earlier in-flight drain must not add beta to the reopened Local pane');
+  await application.dispose(); await core.dispose();
+});
+
+test('Local Quick Settings clear invokes the presentation action and preserves its focused root', async () => {
+  const fixture = snapshot();
+  const gamma = { file: { path: 'Gamma.md' }, path: 'Gamma.md', basename: 'Gamma', extension: 'md', content: '', tags: [], properties: {} };
+  let current: any = fixture.value;
+  const runtime = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
+  runtime.profiles.setUserOverrides('graph-plus', 'default', { modules: { 'force-layout': { enabled: false } } });
+  let controls: GraphSessionControlPortV1 | undefined;
+  const core = new GraphEngineProviderCoreV1({ engineVersion: '2.0.0', engineInstanceId: 'local-clear-controls',
+    capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory, sessionUiHost: {
+      mount: context => { controls = context.controls; return { dispose: () => undefined }; },
+    } });
+  const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(lease.ok, 'Local obtains its own action registration lease');
+  const pane = new LocalGraphPlusConsumerV1({ lease: lease.lease, container: runtime.container,
+    source: { read: () => current },
+    navigator: { openNote: async () => undefined, openTag: async () => undefined },
+    initialRootNodeId: noteNodeId('Alpha.md') });
+  await pane.open(); const session = pane.getSession()!;
+  const alpha = noteNodeId('Alpha.md'); const beta = noteNodeId('folder/Beta.md');
+  await pane.addActiveNodesToConstellation([beta, noteNodeId('Gamma.md')]);
+  await session.setNodePinned(beta, true);
+  const before = await session.exportViewState();
+  deepEqual(session.getAvailableViews(), ['focus'], 'exercise the actual Focus-only Local experience contract');
+  assert(controls, 'Quick Settings receives real engine controls and registered presentation actions');
+  const clear = resolveClearConstellationActionV1(session.getAvailableViews(), before.selectedNodeIds, controls);
+  assert(clear, 'Local offers an effective clear action');
+  clear(); for (let i = 0; i < 100; i++) await Promise.resolve();
+  const after = await session.exportViewState();
+  deepEqual(after.selectedNodeIds, [alpha], 'clearing removes extra members while retaining the root');
+  equal(after.focusedNodeId, alpha, 'clearing retains Focus on the root');
+  equal(after.viewMode, 'focus', 'clearing cannot request Overview from Local');
+  deepEqual(after.camera, before.camera, 'clearing preserves Local camera framing');
+  deepEqual(after.positions, before.positions, 'clearing does not move nodes');
+  deepEqual(after.pinnedNodeIds, before.pinnedNodeIds, 'clearing preserves pins');
+  clear(); for (let i = 0; i < 100; i++) await Promise.resolve();
+  deepEqual((await session.exportViewState()).selectedNodeIds, [alpha], 'repeated clearing is harmless');
+  current = { ...fixture.value, notes: [...fixture.value.notes, gamma] };
+  await pane.reconcile();
+  deepEqual((await session.exportViewState()).selectedNodeIds, [alpha],
+    'clearing also discards pending members whose canonical nodes arrive later');
+  await pane.close(); await core.dispose();
+});
 
 test('Active notes build a clearable constellation without moving Global framing or changing Views', async () => {
   const fixture = snapshot(); let current: any = fixture.value;

@@ -92,8 +92,9 @@ This permits exploration through visible standard neighbors while keeping "one f
 Updated 2026-10-03. `Constellation.kind` is `ego` or `memory`; source identity
 belongs to Consciousness and is independent of Anima's color or highlight phase.
 Graph+ currently disables visible Memory constellations. Its RC working-constellation
-experiment instead adds active notes to Attention without changing Global View or
-camera, retains previous Focus roots, and clears the group on return to Overview.
+policy instead adds active notes to Attention without changing Global View or
+camera and retains previous Focus roots. Returning to Overview preserves the group;
+clearing is explicit. Local clearing retains its focused root and stays in Focus.
 The following Memory source rules remain available to other consumers. Actual graph
 links group remembered subjects into Memory constellations;
 disconnected remembered notes remain valid singleton constellations. No synthetic
@@ -267,6 +268,10 @@ Each View declares label reveal eligibility in `GRAPH_VIEW_DEFINITIONS_V1.scene.
 Anima evaluates this policy against committed context for object deltas, or admitted prospective context for deliberate View transitions.
 Focused, prospective-focus, and hovered non-void subjects force their labels;
 highlighted subjects, including the transient nearest-constellation path, force theirs.
+
+The primary-hover label remains readable from proximity entry through the 200 ms
+preview delay and 500 ms fade. Proximity reveal for other nodes stays paused during
+the hover; keeping this label visible does not advance the destination scene early.
 Focus is the exception for passive session Memory: its labels remain adaptively eligible
 rather than forced. The Focus root retains its resolved label size while labels for its
 all other Focus node labels render at 50%, except the hovered next-root label.
@@ -542,11 +547,13 @@ only ActiveViewState changes. Anima may void an object without deleting it from 
 projection or allowing it to become a hidden hit target.
 
 Experience may restrict available Views. Global currently permits all three; Local
-starts in Focus over the same canonical graph used by Global.
+permits only Focus over the same canonical graph used by Global. Both support
+multiple Attention members and disable visible Memory constellations.
 At the top permitted View, Back is a no-op; it cannot clear the Local root or change
-the canonical active note. An empty Local root clears Focus without removing the
-shared graph. Global does not follow active notes and retains its own View and
-Consciousness. Each pane owns its camera, filters, View, and Consciousness while the
+the canonical active note. Losing the active Markdown note retains Local's working
+constellation and last valid focused root without removing the shared graph.
+Global adds active-note arrivals to Attention without following their Focus or moving
+its View or camera. Each pane owns its camera, filters, View, and Consciousness while the
 application shares canonical topology, coordinates, and pins.
 
 ## 9. Reconciliation, persistence, and boundary cases
