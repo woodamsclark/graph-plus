@@ -26,3 +26,4 @@ main.js
 # Runtime and review artifacts
 graph-plus-checkpoints/
 outputs/
+releases/

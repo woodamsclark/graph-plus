@@ -85,6 +85,9 @@ If you want to regenerate placement and camera state for the vault, use **Settin
 Community plugins → Graph+ → Reset graph layout data**. This does not change notes,
 links, filters, Form state, colors, labels, or settings.
 
+For this release, keep exactly one **Global graph+** pane open before resetting.
+Close any additional Global panes; opening only a Local pane does not enable reset.
+
 ### Customize graph colors
 
 Use **Settings → Community plugins → Graph+ → Graph+ colors** to override the graph
@@ -137,15 +140,19 @@ See [the graph-engine consumer guide](docs/graph-engine-consumer-guide.md) and t
 
 ## Compatibility
 
-Graph+ 2.0.0-rc.1 has been tested on Obsidian 1.13.7. Desktop and mobile behavior should be
-validated against your own vault and device before relying on it for daily work.
+Graph+ 2.0.0-rc.1 requires Obsidian 1.13.7 or newer. Automated checks cover desktop
+and touch input paths; physical desktop and mobile acceptance is tracked in the
+[release safety checklist](docs/graph-plus-release-safety.md).
 
 ## Installation
 
-Graph+ is available through the Obsidian community plugins browser. For manual
-installation, place `main.js`, `manifest.json`, and `styles.css` in:
+This release candidate uses manual installation. Extract its release ZIP and place
+`main.js`, `manifest.json`, and `styles.css` in your vault's:
 
 `.obsidian/plugins/graph-plus/`
+
+Restart Obsidian or reload the plugin, then enable **Graph+** under **Settings →
+Community plugins**. Community plugin browser availability is not assumed for this RC.
 
 ## Development
 
@@ -155,6 +162,11 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+Use `npm run release` to create a validated RC package containing only the three
+plugin assets. `npm run release:public` requires a stable release version. See
+[release safety and recovery](docs/graph-plus-release-safety.md) for the packaging,
+shutdown, and checkpoint recovery contracts.
 
 ## License
 

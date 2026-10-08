@@ -1,8 +1,9 @@
-import { ItemView, type Plugin, type TFile, type ViewStateResult, type WorkspaceLeaf } from 'obsidian';
+import { ItemView, Modal, Notice, type Plugin, type TFile, type ViewStateResult, type WorkspaceLeaf } from 'obsidian';
 import { mountGraphEngineUnavailableSurfaceV1, type Disposable } from '../graph-engine/public.ts';
 import { noteNodeId } from '../graph-plus/adapter/index.ts';
 import {
   GraphPlusPresentationV1,
+  type GraphPlusApplicationV1,
   type GraphPlusExperienceModeV1,
 } from '../graph-plus/application/index.ts';
 import {
@@ -13,17 +14,21 @@ import { createGraphPlusNotePreviewControllerV1 } from './createGraphPlusNotePre
 import { GraphPlusViewLifecycleV1 } from './GraphPlusViewLifecycle.ts';
 import { createGraphPlusUiContributionsV1 } from './GraphPlusUiContributions.ts';
 import type GraphEnginePlugin from './main.ts';
+import { GraphPlusCheckpointRecoveryErrorV1 } from './settings/GraphPlusCheckpointFileStore.ts';
+import { mountGraphPlusCheckpointRecoverySurfaceV1 } from './GraphPlusCheckpointRecoverySurface.ts';
 
 /** Obsidian hosts one Graph+ application; experience policy supplies Global or Local behavior. */
 export abstract class GraphPlusObsidianViewV1 extends ItemView {
   protected readonly plugin: GraphEnginePlugin;
   protected readonly experienceMode: GraphPlusExperienceModeV1;
   private application?: GraphPlusPresentationV1<TFile>;
+  private applicationOwner?: GraphPlusApplicationV1<TFile>;
   private fallback?: Disposable;
   private lifecycle?: GraphPlusViewLifecycleV1;
   private pendingLens: GraphPlusLensStateV1 = createDefaultGraphPlusLensV1();
   private stateRestored = false;
   private notePreview?: GraphPlusNotePreviewControllerV1<TFile>;
+  private lastCheckpointWarning = 0;
 
   constructor(leaf: WorkspaceLeaf, plugin: Plugin, experienceMode: GraphPlusExperienceModeV1) {
     super(leaf);
@@ -55,6 +60,7 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
     try {
       this.pendingLens = await this.plugin.migrateLegacyLensSettings(this.pendingLens);
       const lease = this.plugin.acquireGraphPlusLease();
+      this.applicationOwner = this.plugin.graphPlusApplication;
       let application!: GraphPlusPresentationV1<TFile>;
       application = this.plugin.graphPlusApplication.createPresentation({
         mode: this.experienceMode,
@@ -75,7 +81,14 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
             contributions: createGraphPlusUiContributionsV1(() => application),
           },
         },
-        onError: (error) => console.error(`[${this.experienceMode} graph+] application error`, error),
+        onError: error => console.error(`[${this.experienceMode} graph+] application error`, error),
+        onCheckpointError: error => {
+          console.error('[graph+] checkpoint save failed', error);
+          if (Date.now() - this.lastCheckpointWarning > 10_000) {
+            this.lastCheckpointWarning = Date.now();
+            new Notice('Graph+ could not save its layout. Existing saved data has not been replaced.');
+          }
+        },
         onNotePreview: (request) => this.notePreview?.update(request),
       });
       this.application = application;
@@ -86,12 +99,13 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
     } catch (error) {
       console.error(`[${this.experienceMode} graph+] failed to open`, error);
       if (this.application) {
-        await this.plugin.graphPlusApplication.closePresentation(this.application).catch(() => undefined);
+        await this.applicationOwner?.closePresentation(this.application).catch(() => undefined);
       }
       this.application = undefined;
-      this.fallback = mountGraphEngineUnavailableSurfaceV1(container, {
-        code: 'initialization-failed',
-        message: error instanceof Error ? error.message : String(error),
+      this.applicationOwner = undefined;
+      if (error instanceof GraphPlusCheckpointRecoveryErrorV1) this.mountRecovery(container, error);
+      else this.fallback = mountGraphEngineUnavailableSurfaceV1(container, {
+        code: 'initialization-failed', message: error instanceof Error ? error.message : String(error),
       });
     }
   }
@@ -99,12 +113,30 @@ export abstract class GraphPlusObsidianViewV1 extends ItemView {
   async onClose(): Promise<void> {
     this.lifecycle?.dispose();
     this.lifecycle = undefined;
-    if (this.application) await this.plugin.graphPlusApplication.closePresentation(this.application);
-    this.application = undefined;
-    this.fallback?.dispose();
-    this.fallback = undefined;
-    this.notePreview?.dispose();
-    this.notePreview = undefined;
+    try {
+      if (this.application) await this.applicationOwner?.closePresentation(this.application);
+    } finally {
+      this.application = undefined;
+      this.applicationOwner = undefined;
+      this.fallback?.dispose();
+      this.fallback = undefined;
+      this.notePreview?.dispose();
+      this.notePreview = undefined;
+    }
+  }
+
+  private mountRecovery(container: HTMLElement, error: GraphPlusCheckpointRecoveryErrorV1): void {
+    this.fallback = mountGraphPlusCheckpointRecoverySurfaceV1(container, {
+      message: error.message,
+      onRetry: async () => { await this.onClose(); await this.onOpen(); },
+      ...(this.plugin.hasPreviousGraphPlusCheckpoint() ? {
+        onRestorePrevious: () => this.plugin.recoverGraphPlusCheckpoint('previous'),
+      } : {}),
+      onReset: async () => {
+        new GraphPlusRecoveryResetModalV1(this.app, () => this.plugin.recoverGraphPlusCheckpoint('reset')).open();
+      },
+      onError: failure => new Notice(failure instanceof Error ? failure.message : String(failure)),
+    });
   }
 
   getLifecycleDiagnostics(): Readonly<Record<string, unknown>> {
@@ -166,4 +198,27 @@ function createWindowClock(container: HTMLElement) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+class GraphPlusRecoveryResetModalV1 extends Modal {
+  constructor(app: Modal['app'], private readonly reset: () => Promise<void>) { super(app); }
+
+  onOpen(): void {
+    this.contentEl.createEl('h2', { text: 'Reset the saved graph layout?' });
+    this.contentEl.createEl('p', {
+      text: 'Graph+ will generate a fresh layout. The failed saved data will be archived for manual recovery. Your notes and plugin settings will be preserved.',
+    });
+    const actions = this.contentEl.createDiv({ cls: 'modal-button-container' });
+    actions.createEl('button', { text: 'Cancel' }).addEventListener('click', () => this.close());
+    const reset = actions.createEl('button', { text: 'Reset saved layout', cls: 'mod-warning' });
+    reset.addEventListener('click', () => {
+      reset.disabled = true;
+      void this.reset().then(() => this.close()).catch(error => {
+        reset.disabled = false;
+        new Notice(error instanceof Error ? error.message : String(error));
+      });
+    });
+  }
+
+  onClose(): void { this.contentEl.empty(); }
 }

@@ -1299,6 +1299,80 @@ test('R-INPUT-05 excludes render-filtered and projection-filtered nodes from hit
   }
 });
 
+test('interrupted drags clear gesture state and temporary pins without late activation', async () => {
+  for (const profileId of ['two-dimensional', 'three-dimensional']) {
+    for (const interruption of ['blur', 'lostpointercapture', 'pointercancel']) {
+      for (const prePinned of [false, true]) {
+        const base = runtimeRegistration();
+        const value = runtimeHarness({ profileId, registration: {
+          ...base, profiles: base.profiles.map(profile => ({
+            ...profile, profileSettings: { dragRelease: 'pin' },
+          })),
+        } });
+        const session = await value.create();
+        const canvas = runtimeCanvas(value.container);
+        await session.setSelection(['a', 'b']);
+        await session.setView('explore');
+        await session.setNodePinned('a', prePinned);
+        const before = await session.exportViewState();
+        const point = await nodePoint(session, 'a');
+        const options = { pointerId: 51, pointerType: interruption === 'pointercancel' ? 'touch' : 'mouse' };
+        pointer(value, canvas, 'pointerdown', point.x, point.y, options);
+        pointer(value, canvas, 'pointermove', point.x + 45, point.y + 20, options);
+        // Intentionally interrupt before the queued down/move reach their first frame.
+        if (interruption === 'blur') value.window.dispatchEvent(new value.window.Event('blur'));
+        else canvas.dispatchEvent(new value.window.PointerEvent(interruption, { pointerId: 51 }) as unknown as Event);
+        value.platform.flushFrame();
+        const stopped = await session.exportViewState();
+        equal(stopped.pinnedNodeIds.includes('a'), prePinned, `${interruption}: retain only the preexisting pin`);
+        assert(!canvas.style.cursor.endsWith(', grabbing'), `${interruption}: leave the dragging pose`);
+        deepEqual(stopped.selectedNodeIds, before.selectedNodeIds, 'cancellation must not activate a subject');
+        pointer(value, canvas, 'pointerup', point.x + 45, point.y + 20, options);
+        value.platform.advanceTime(600);
+        value.platform.flushFrame();
+        const late = await session.exportViewState();
+        deepEqual(late.selectedNodeIds, stopped.selectedNodeIds, 'late release must not commit selection');
+        equal(late.focusedNodeId, stopped.focusedNodeId, 'cancelled long press must not enter Focus');
+        deepEqual(late.camera, stopped.camera, 'late release must not move the camera');
+        // A new gesture must work, including normal capture loss after pointerup.
+        const next = await nodePoint(session, 'a');
+        pointer(value, canvas, 'pointerdown', next.x, next.y, { pointerId: 52 });
+        pointer(value, canvas, 'pointermove', next.x + 20, next.y + 10, { pointerId: 52 });
+        pointer(value, canvas, 'pointerup', next.x + 20, next.y + 10, { pointerId: 52 });
+        canvas.dispatchEvent(new value.window.PointerEvent('lostpointercapture', { pointerId: 52 }) as unknown as Event);
+        value.platform.flushFrame();
+        assert((await session.exportViewState()).pinnedNodeIds.includes('a'), 'completed drag still uses pin release policy');
+        await session.dispose();
+      }
+    }
+  }
+});
+
+test('blur cancels a pending touch hold and all pointers in a camera gesture', async () => {
+  const value = runtimeHarness();
+  const session = await value.create();
+  const canvas = runtimeCanvas(value.container);
+  const point = await nodePoint(session, 'a');
+  pointer(value, canvas, 'pointerdown', point.x, point.y, { pointerId: 61, pointerType: 'touch' });
+  value.window.dispatchEvent(new value.window.Event('blur'));
+  value.platform.advanceTime(600);
+  value.platform.flushFrame();
+  equal((await session.exportViewState()).focusedNodeId, undefined, 'cancelled stationary hold must not focus');
+  pointer(value, canvas, 'pointerdown', 1, 1, { pointerId: 62, pointerType: 'touch' });
+  pointer(value, canvas, 'pointerdown', 100, 100, { pointerId: 63, pointerType: 'touch' });
+  pointer(value, canvas, 'pointermove', 110, 110, { pointerId: 63, pointerType: 'touch' });
+  value.platform.flushFrame();
+  canvas.dispatchEvent(new value.window.PointerEvent('lostpointercapture', { pointerId: 62 }) as unknown as Event);
+  value.platform.flushFrame();
+  const stopped = await session.exportViewState();
+  pointer(value, canvas, 'pointermove', 200, 200, { pointerId: 63, pointerType: 'touch' });
+  pointer(value, canvas, 'pointerup', 200, 200, { pointerId: 63, pointerType: 'touch' });
+  value.platform.flushFrame();
+  deepEqual((await session.exportViewState()).camera, stopped.camera, 'capture loss cancels remaining touch pointers and momentum');
+  assert(!canvas.style.cursor.endsWith(', grabbing'), 'camera gesture must leave grabbing');
+  await session.dispose();
+});
+
 test('R-INPUT-06 updates view position and emits one revision-bearing drag intent', async () => {
   const base = runtimeRegistration();
   const value = runtimeHarness({

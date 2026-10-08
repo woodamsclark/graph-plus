@@ -19,6 +19,7 @@ interface GraphInputBaseV1 {
 }
 
 export type GraphInputEventV1 =
+  | (GraphInputBaseV1 & { readonly type: 'cancel-input' })
   | (GraphInputBaseV1 & {
       readonly type: 'pointer-down';
       readonly pointerId: number;
@@ -118,6 +119,7 @@ interface GraphCommandBaseV1 {
 }
 
 export type GraphRuntimeCommandV1 =
+  | (GraphCommandBaseV1 & { readonly type: 'cancel-input' })
   | (GraphCommandBaseV1 & { readonly type: 'pan-by'; readonly deltaX: number; readonly deltaY: number })
   | (GraphCommandBaseV1 & { readonly type: 'elastic-pan-by'; readonly deltaX: number; readonly deltaY: number })
   | (GraphCommandBaseV1 & { readonly type: 'orbit-by'; readonly deltaX: number; readonly deltaY: number })
@@ -191,6 +193,7 @@ export type GraphRuntimeCommandV1 =
   | (GraphCommandBaseV1 & { readonly type: 'drag-update'; readonly nodeId: string; readonly point: GraphScreenPointV1 })
   | (GraphCommandBaseV1 & {
       readonly type: 'drag-end';
+      readonly cancelled?: boolean;
       readonly nodeId: string;
       readonly point: GraphScreenPointV1;
       readonly pointerKind: GraphPointerKindV1;

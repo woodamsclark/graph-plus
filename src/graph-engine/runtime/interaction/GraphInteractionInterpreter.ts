@@ -226,6 +226,7 @@ export class GraphInteractionInterpreter {
       this.cancelTrackpadPinchMomentum();
     }
     switch (event.type) {
+      case 'cancel-input': this.cancelInput(event); return;
       case 'pointer-down': this.pointerDown(event); return;
       case 'pointer-move': this.pointerMove(event); return;
       case 'pointer-leave': this.pointerLeave(event); return;
@@ -534,6 +535,7 @@ export class GraphInteractionInterpreter {
     if (this.mode.kind === 'drag' && this.mode.pointerId === event.pointerId) {
       this.command(event, {
         type: 'drag-end', nodeId: this.mode.nodeId, point: event.point,
+        cancelled: true,
         pointerKind: this.mode.pointerKind,
       });
     }
@@ -541,6 +543,17 @@ export class GraphInteractionInterpreter {
     this.command(event, { type: 'set-hover', mod: false });
     this.command(event, { type: 'set-preview-hover' });
     if (this.pointers.size < 2) this.touchGesture = null;
+  }
+
+  private cancelInput(event: Extract<GraphInputEventV1, { type: 'cancel-input' }>): void {
+    if (this.mode.kind === 'drag') {
+      this.command(event, {
+        type: 'drag-end', nodeId: this.mode.nodeId, pointerKind: this.mode.pointerKind,
+        point: this.pointers.get(this.mode.pointerId)?.point ?? { x: 0, y: 0 }, cancelled: true,
+      });
+    }
+    this.reset();
+    this.command(event, { type: 'cancel-input' });
   }
 
   private pointerLeave(event: Extract<GraphInputEventV1, { type: 'pointer-leave' }>): void {

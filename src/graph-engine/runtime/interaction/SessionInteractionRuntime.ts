@@ -321,6 +321,7 @@ export class SessionInteractionRuntime {
 
   private registerCommandHandlers(): void {
     const types: readonly GraphRuntimeCommandV1['type'][] = [
+      'cancel-input',
       'pan-by',
       'elastic-pan-by',
       'orbit-by',
@@ -350,6 +351,22 @@ export class SessionInteractionRuntime {
 
   private applyCommand(command: GraphRuntimeCommandV1): void {
     switch (command.type) {
+      case 'cancel-input':
+        this.endNavigationPeek();
+        this.cancelCameraTransition();
+        this.options.ego.clearWill();
+        this.hoverInput = undefined;
+        this.hoveredNodeId = undefined;
+        this.hoverPoint = undefined;
+        this.hoverMod = this.hoverCtrl = false;
+        this.consumedHoverNodeId = undefined;
+        this.consumedHoverPreview = undefined;
+        this.presentedHoverNodeId = undefined;
+        this.presentedHoverPreview = undefined;
+        this.clearPreview();
+        this.updateCursor();
+        this.options.onViewStateChanged('interaction');
+        return;
       case 'pan-by':
         this.getNavigationState();
         if (this.navigationPeek) this.navigationPeek.navigated = true;
@@ -1144,7 +1161,7 @@ export class SessionInteractionRuntime {
     this.updateCursor();
     if (!position) return;
     if (!wasPinned && this.options.getDragConstraintPolicy?.() !== 'transient'
-      && this.options.getDragReleasePolicy() === 'dynamic') {
+      && (command.cancelled || this.options.getDragReleasePolicy() === 'dynamic')) {
       const state = this.options.getViewState();
       this.commit({ ...state, pinnedNodeIds: state.pinnedNodeIds.filter((id) => id !== command.nodeId) });
       this.options.onViewStateChanged('layout');

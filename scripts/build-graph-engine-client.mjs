@@ -51,6 +51,7 @@ const publicFiles = [
 
 await rm(artifactSourceRoot, { recursive: true, force: true });
 await rm(legacyArtifactSourceRoot, { recursive: true, force: true });
+await cp(join(repositoryRoot, 'LICENSE'), join(artifactRoot, 'LICENSE'));
 
 for (const sourcePath of publicFiles) {
   const source = join(repositoryRoot, sourcePath);

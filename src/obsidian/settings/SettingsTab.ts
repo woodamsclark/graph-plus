@@ -101,7 +101,7 @@ export class GraphEngineSettingTab extends PluginSettingTab {
       .setName('Reset graph layout data for this vault')
       .setDesc(canReset
         ? 'Regenerate placement and camera state without changing notes, links, filters, or settings.'
-        : 'Open exactly one graph+ view to make this action available.')
+        : 'Keep one Global graph+ pane open and close any additional Global graph+ panes. A Local graph+ pane does not make this action available.')
       .addButton((button) => button
         .setButtonText('Reset layout…')
         .setWarning()
@@ -113,7 +113,7 @@ export class GraphEngineSettingTab extends PluginSettingTab {
     parent.createEl('h3', { text: 'Miscellany' });
     new Setting(parent)
       .setName('Frank mode')
-      .setDesc('Force every graph color to be red or green. This is a prank.')
+      .setDesc("for Frank's eyes only.")
       .addToggle((toggle) => toggle
         .setValue(this.graphPlus.settings.frankMode)
         .onChange(async (frankMode) => {
@@ -146,7 +146,7 @@ class GraphLayoutResetModal extends Modal {
       reset.disabled = true;
       void this.graphPlus.resetGraphLayoutData().then((success) => {
         this.close();
-        new Notice(success ? 'graph+ layout was regenerated.' : 'Open exactly one graph+ view and try again.');
+        new Notice(success ? 'graph+ layout was regenerated.' : 'Keep one Global graph+ pane open, close any additional Global graph+ panes, and try again.');
       }).catch((error) => {
         reset.disabled = false;
         new Notice(`graph+ layout reset failed: ${error instanceof Error ? error.message : String(error)}`);

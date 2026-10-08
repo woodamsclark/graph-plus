@@ -133,6 +133,39 @@ test('Graph+ modes share one canonical vault read and reconciliation', async () 
   equal(globalNext.document, localNext.document, 'both modes should receive the same reconciled revision');
 });
 
+test('duplicate-link settings reconcile reversibly without replacing the vault model', async () => {
+  const model = new GraphPlusVaultModelV1({ read: () => snapshot().value }, { countDuplicateLinks: true });
+  const first = await model.open();
+  const weight = (value: typeof first) => value.document.edges.find(edge => edge.sourceId === noteNodeId('Alpha.md') && edge.targetId === noteNodeId('folder/Beta.md'))?.weight;
+  equal(weight(first), 3, 'initial repeated-link weight');
+  equal(model.setCountDuplicateLinks(false), true, 'changed option invalidates interpretation');
+  const unweighted = await model.reconcile();
+  equal(weight(unweighted), 1, 'disabled option removes repeat weighting');
+  equal(unweighted.document.documentId, first.document.documentId, 'document identity stays stable');
+  equal(unweighted.document.revision, first.document.revision + 1, 'changed edge advances revision');
+  equal(model.setCountDuplicateLinks(false), false, 'same option is a no-op');
+  equal((await model.reconcile()).document, unweighted.document, 'unchanged interpretation retains revision');
+  model.setCountDuplicateLinks(true);
+  const weighted = await model.reconcile();
+  equal(weight(weighted), 3, 're-enabling restores canonical repeated-link weight');
+  equal(weighted.document.revision, unweighted.document.revision + 1, 'reverse change also advances revision');
+});
+
+test('duplicate-link changes during a vault read use the latest configuration', async () => {
+  let finishRead!: () => void;
+  const gate = new Promise<void>(resolve => { finishRead = resolve; });
+  const model = new GraphPlusVaultModelV1({ read: async () => { await gate; return snapshot().value; } },
+    { countDuplicateLinks: true });
+  const opening = model.open();
+  await Promise.resolve();
+  model.setCountDuplicateLinks(false);
+  finishRead();
+  const result = await opening;
+  equal(result.document.edges.find(edge => edge.sourceId === noteNodeId('Alpha.md')
+    && edge.targetId === noteNodeId('folder/Beta.md'))?.weight, 1,
+    'in-flight adaptation should apply the latest option');
+});
+
 test('Graph+ release policy keeps Memory constellations out of every presentation mode', () => {
   equal(graphPlusExperiencePolicyV1('global').memoryConstellations, 'disabled',
     'Global should not present workspace history as Memory constellations');
@@ -214,6 +247,24 @@ test('Graph+ application shares one graph world across viewport-independent pres
   await Promise.all([global.open(), local.open()]);
   equal(reads, 1, 'concurrent presentation opens should read canonical vault truth once');
 
+  const globalBeforeWeightChange = await global.getSession()!.exportViewState();
+  const localBeforeWeightChange = await local.getSession()!.exportViewState();
+  const globalSessionBeforeWeightChange = global.getSession();
+  await application.setCountDuplicateLinks(false);
+  for (const pane of [global, local]) {
+    equal(pane.getDocument()?.edges.find(edge => edge.sourceId === noteNodeId('Alpha.md') && edge.targetId === noteNodeId('folder/Beta.md'))?.weight, 1,
+      'open Global and Local panes should immediately see unweighted links');
+  }
+  equal(global.getSession(), globalSessionBeforeWeightChange, 'toggle must preserve the mounted session');
+  deepEqual((await global.getSession()!.exportViewState()).camera, globalBeforeWeightChange.camera,
+    'toggle must preserve Global framing');
+  deepEqual((await local.getSession()!.exportViewState()).camera, localBeforeWeightChange.camera,
+    'toggle must preserve Local framing');
+  await application.setCountDuplicateLinks(true);
+  equal(global.getDocument()?.edges.find(edge => edge.sourceId === noteNodeId('Alpha.md') && edge.targetId === noteNodeId('folder/Beta.md'))?.weight, 3,
+    'open panes should support toggling back');
+  const readsBeforeInvalidation = reads;
+
   current = {
     ...fixture.value,
     notes: [...fixture.value.notes, {
@@ -222,13 +273,13 @@ test('Graph+ application shares one graph world across viewport-independent pres
     }],
   };
   application.receiveHostEvent({ type: 'canonical-vault-invalidated' });
-  equal(reads, 1, 'vault invalidation should debounce rather than scan synchronously');
-  for (let index = 0; index < 40 && reads < 2; index += 1) {
+  equal(reads, readsBeforeInvalidation, 'vault invalidation should debounce rather than scan synchronously');
+  for (let index = 0; index < 40 && reads === readsBeforeInvalidation; index += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
-  equal(reads, 2, 'an open Graph+ application should reconcile a debounced vault invalidation');
+  equal(reads, readsBeforeInvalidation + 1, 'an open Graph+ application should reconcile a debounced vault invalidation');
   await secondLocal.open();
-  equal(reads, 2, 'opening another presentation should reuse already synchronized canonical truth');
+  equal(reads, readsBeforeInvalidation + 1, 'opening another presentation should reuse already synchronized canonical truth');
   equal(global.getDocument()?.nodes.some((node) => node.id === noteNodeId('Gamma.md')), true,
     'Global should receive the reconciled canonical revision');
   equal(local.getDocument()?.nodes.some((node) => node.id === noteNodeId('Gamma.md')), true,
@@ -360,7 +411,7 @@ test('Graph+ application shares one graph world across viewport-independent pres
   application.receiveHostEvent({ type: 'canonical-vault-invalidated' });
   application.receiveHostEvent({ type: 'active-note-changed', nodeId: alphaId });
   await application.reconcile();
-  equal(reads, 2, 'disposed applications should ignore late host activity and explicit reconciliation');
+  equal(reads, readsBeforeInvalidation + 1, 'disposed applications should ignore late host activity and explicit reconciliation');
   await core.dispose();
 });
 
@@ -1404,3 +1455,69 @@ test('simultaneous Graph+ and external sessions dispose independently', async ()
 function vectorDistance(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): number {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 }
+
+test('application shutdown includes an already-closing presentation and waits for its pending checkpoint once', async () => {
+  const runtime = runtimeHarness({ registration: graphPlusRegistration });
+  const core = new GraphEngineProviderCoreV1({
+    engineVersion: '2.0.0-rc.1', engineInstanceId: 'pending-checkpoint-unload-test',
+    capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory,
+  });
+  const connection = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(connection.ok, 'Graph+ lease is available');
+  let resume!: () => void; let saving!: () => void;
+  const blocked = new Promise<void>(resolve => { resume = resolve; });
+  const saveStarted = new Promise<void>(resolve => { saving = resolve; });
+  let saved: GraphPlusCheckpointV1 | undefined; let writes = 0;
+  const application = new GraphPlusApplicationV1({
+    model: new GraphPlusVaultModelV1({ read: () => snapshot().value }, { countDuplicateLinks: true }),
+    navigator: { openNote: async () => undefined, openTag: async () => undefined },
+  });
+  const presentation = application.createPresentation({
+    mode: 'global', lease: connection.lease, container: runtime.container, vaultId: 'Test Vault', clock: runtime.platform,
+    checkpointStore: { load: async () => undefined, save: async (_vault, checkpoint) => {
+      writes += 1; saving(); await blocked; saved = checkpoint;
+    } },
+  });
+  await presentation.open();
+  const closing = application.closePresentation(presentation);
+  await saveStarted;
+  equal(application.closePresentation(presentation), closing, 'concurrent host close shares the in-flight operation');
+  const shutdown = application.dispose();
+  equal(application.dispose(), shutdown, 'concurrent application dispose shares completion');
+  let stopped = false;
+  const providerStop = shutdown.then(async () => { stopped = true; await core.dispose(); });
+  await Promise.resolve();
+  equal(stopped, false, 'provider is not stopped while closing checkpoint is pending');
+  assert(presentation.getSession() !== undefined, 'session remains available for pending exports');
+  resume(); await closing; await providerStop;
+  equal(writes, 1, 'the pending presentation is saved exactly once');
+  assert(saved !== undefined && saved.document.nodes.length > 0, 'layout checkpoint completes before provider teardown');
+  equal(runtime.factory.getDiagnostics().sessions.length, 0, 'all sessions are released');
+});
+
+test('application shutdown waits for every presentation even when one final checkpoint fails', async () => {
+  const runtime = runtimeHarness({ registration: graphPlusRegistration });
+  const core = new GraphEngineProviderCoreV1({
+    engineVersion: '2.0.0-rc.1', engineInstanceId: 'failed-checkpoint-unload-test',
+    capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory,
+  });
+  const application = new GraphPlusApplicationV1({
+    model: new GraphPlusVaultModelV1({ read: () => snapshot().value }, { countDuplicateLinks: true }),
+    navigator: { openNote: async () => undefined, openTag: async () => undefined },
+  });
+  for (const mode of ['global', 'local'] as const) {
+    const connection = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+    assert(connection.ok, 'Graph+ lease is available');
+    const presentation = application.createPresentation({
+      mode, lease: connection.lease, container: runtime.container, vaultId: 'Test Vault', clock: runtime.platform,
+      initialRootNodeId: noteNodeId('Alpha.md'),
+      checkpointStore: { load: async () => undefined, save: async () => { throw new Error('failed final checkpoint'); } },
+    });
+    await presentation.open();
+  }
+  let failure: unknown;
+  await application.dispose().catch(error => { failure = error; });
+  assert(failure instanceof Error && failure.message.includes('failed final checkpoint'), 'save failure is preserved for reporting');
+  equal(runtime.factory.getDiagnostics().sessions.length, 0, 'all presentations release their sessions before failure returns');
+  await core.dispose();
+});

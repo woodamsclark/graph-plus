@@ -234,6 +234,20 @@ test('neutral experience policy adjusts endogenous intent before effectors', () 
   }, 'Focus-only policy should preserve the intended subject while keeping the transition in Focus');
 });
 
+test('gesture cleanup remains permitted after interaction permissions change', () => {
+  const identity = { documentId: 'graph', documentRevision: 1 };
+  const commands: GraphRuntimeCommandV1[] = [
+    { type: 'cancel-input', identity, timestamp: 1 },
+    { type: 'drag-end', identity, timestamp: 1, nodeId: 'a', pointerKind: 'mouse', point: { x: 0, y: 0 }, cancelled: true },
+  ];
+  for (const command of commands) {
+    equal(adjudicateGraphExperienceCommandV1({ command,
+      experience: { ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1, permittedInteractions: [] },
+      currentState: 'overview', attentionNodeIds: [],
+    }).status, 'accepted', 'lifecycle cleanup must not be rejected by a new experience policy');
+  }
+});
+
 test('Ego adjudicates every interpreted command before GraphCommander reaches effectors', () => {
   const consciousness = new Consciousness();
   const commands = new BufferedQueue<GraphRuntimeCommandV1>();

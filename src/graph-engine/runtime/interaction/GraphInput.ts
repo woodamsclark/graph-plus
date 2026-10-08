@@ -48,7 +48,11 @@ export class GraphInput {
 
   reset(): void {
     this.clearLongPress();
+    const pointers = [...this.activePointers];
     this.activePointers.clear();
+    for (const pointerId of pointers) {
+      try { this.options.element.releasePointerCapture(pointerId); } catch {}
+    }
     this.mouseInside = false;
     this.lastMod = false;
     this.lastCtrl = false;
@@ -74,6 +78,7 @@ export class GraphInput {
     canvas.addEventListener('pointerleave', this.onPointerLeave, { passive: false });
     canvas.addEventListener('pointerup', this.onPointerUp, { passive: false });
     canvas.addEventListener('pointercancel', this.onPointerCancel, { passive: false });
+    canvas.addEventListener('lostpointercapture', this.onLostPointerCapture);
     canvas.addEventListener('wheel', this.onWheel, { passive: false });
     canvas.addEventListener('contextmenu', this.onContextMenu, { passive: false });
     canvas.addEventListener('keydown', this.onKeyDown);
@@ -90,6 +95,7 @@ export class GraphInput {
     canvas.removeEventListener('pointerleave', this.onPointerLeave);
     canvas.removeEventListener('pointerup', this.onPointerUp);
     canvas.removeEventListener('pointercancel', this.onPointerCancel);
+    canvas.removeEventListener('lostpointercapture', this.onLostPointerCapture);
     canvas.removeEventListener('wheel', this.onWheel);
     canvas.removeEventListener('contextmenu', this.onContextMenu);
     canvas.removeEventListener('keydown', this.onKeyDown);
@@ -133,6 +139,7 @@ export class GraphInput {
 
   private readonly onPointerMove = (event: PointerEvent): void => {
     if (!this.enabled || this.disposed) return;
+    if (event.pointerType !== 'mouse' && !this.activePointers.has(event.pointerId)) return;
     event.preventDefault();
     const point = this.toScreen(event.clientX, event.clientY);
     const pointerKind = pointerKindOf(event.pointerType);
@@ -205,6 +212,7 @@ export class GraphInput {
 
   private readonly onPointerUp = (event: PointerEvent): void => {
     if (!this.enabled || this.disposed) return;
+    if (!this.activePointers.has(event.pointerId)) return;
     event.preventDefault();
     this.activePointers.delete(event.pointerId);
     if (this.longPressPointer?.pointerId === event.pointerId) this.clearLongPress();
@@ -225,19 +233,28 @@ export class GraphInput {
 
   private readonly onPointerCancel = (event: PointerEvent): void => {
     if (!this.enabled || this.disposed) return;
-    this.mouseInside = false;
     event.preventDefault();
-    this.activePointers.delete(event.pointerId);
-    if (this.longPressPointer?.pointerId === event.pointerId) this.clearLongPress();
-    try { this.options.element.releasePointerCapture(event.pointerId); } catch {}
-    this.push({
-      ...this.base(),
-      type: 'pointer-cancel',
-      pointerId: event.pointerId,
-      pointerKind: pointerKindOf(event.pointerType),
-      point: this.toScreen(event.clientX, event.clientY),
-    });
+    if (this.activePointers.has(event.pointerId)) this.cancelInput();
   };
+
+  private readonly onLostPointerCapture = (event: PointerEvent): void => {
+    if (!this.enabled || this.disposed || !this.activePointers.has(event.pointerId)) return;
+    this.cancelInput();
+  };
+
+  private cancelInput(): void {
+    // Preserve queued gesture events so cancellation also works before a frame.
+    const pointers = [...this.activePointers];
+    this.activePointers.clear();
+    this.clearLongPress();
+    this.mouseInside = false;
+    this.lastMod = this.lastCtrl = this.lastMeta = this.lastShift = this.lastAlt = false;
+    this.physicalCtrlHeld = this.spaceHeld = false;
+    for (const pointerId of pointers) {
+      try { this.options.element.releasePointerCapture(pointerId); } catch {}
+    }
+    this.push({ ...this.base(), type: 'cancel-input' });
+  }
 
   private readonly onWheel = (event: WheelEvent): void => {
     if (!this.enabled || this.disposed) return;
@@ -257,8 +274,7 @@ export class GraphInput {
   };
 
   private readonly onWindowBlur = (): void => {
-    this.spaceHeld = false;
-    this.options.onInputQueued?.();
+    if (this.enabled && !this.disposed) this.cancelInput();
   };
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {

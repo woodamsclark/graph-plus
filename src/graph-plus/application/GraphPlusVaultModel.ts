@@ -22,7 +22,8 @@ export interface GraphPlusVaultModelSnapshotV1<TFile> {
  * documents from this snapshot instead of adapting the same vault independently.
  */
 export class GraphPlusVaultModelV1<TFile> {
-  private readonly adapter: VaultGraphAdapterV1<TFile>;
+  private adapter: VaultGraphAdapterV1<TFile>;
+  private countDuplicateLinks: boolean;
   private current?: VaultGraphProjectionV1<TFile>;
   private tail: Promise<void> = Promise.resolve();
   private opening?: Promise<GraphPlusVaultModelSnapshotV1<TFile>>;
@@ -32,7 +33,15 @@ export class GraphPlusVaultModelV1<TFile> {
     private readonly source: GraphPlusVaultSourceV1<TFile>,
     options: { readonly countDuplicateLinks: boolean },
   ) {
+    this.countDuplicateLinks = options.countDuplicateLinks;
     this.adapter = new VaultGraphAdapterV1(options);
+  }
+
+  setCountDuplicateLinks(value: boolean): boolean {
+    if (value === this.countDuplicateLinks) return false;
+    this.countDuplicateLinks = value;
+    this.adapter = new VaultGraphAdapterV1({ countDuplicateLinks: value });
+    return true;
   }
 
   read(): GraphPlusVaultModelSnapshotV1<TFile> | undefined {

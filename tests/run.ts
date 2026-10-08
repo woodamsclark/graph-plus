@@ -1,5 +1,6 @@
 import './contracts/architecture.test.ts';
 import './contracts/client-artifact.test.ts';
+import './contracts/release.test.ts';
 import './contracts/document.test.ts';
 import './core/document-store.test.ts';
 import './core/filter.test.ts';
@@ -34,6 +35,8 @@ import './service/service.test.ts';
 import './service/actions.test.ts';
 import './service/neutral-sample.test.ts';
 import './obsidian/persistence.test.ts';
+import './obsidian/shutdown.test.ts';
+import './obsidian/checkpoint-recovery-ui.test.ts';
 import './obsidian/settings-controller.test.ts';
 import './obsidian/ui-policy.test.ts';
 import './obsidian/note-preview.test.ts';

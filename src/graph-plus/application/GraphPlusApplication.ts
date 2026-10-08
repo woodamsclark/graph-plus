@@ -57,6 +57,7 @@ export interface GraphPlusPresentationOptionsV1<TFile> {
   readonly ui?: GraphSessionUiOptionsV1;
   readonly clock?: GraphPlusCheckpointClockV1;
   readonly onError?: (error: GraphSessionErrorV1 | Error) => void;
+  readonly onCheckpointError?: (error: Error) => void;
   readonly onNotePreview?: (request: {
     readonly nodeId?: string; readonly file?: TFile;
     readonly anchor?: { readonly x: number; readonly y: number };
@@ -92,6 +93,7 @@ export class GraphPlusPresentationV1<TFile> {
   private actionRegistration?: Disposable;
   private opened = false;
   private opening?: Promise<void>;
+  private closing?: Promise<void>;
   private leaseReleased = false;
   private lensQueue: Promise<void> = Promise.resolve();
   private transientRevealNodeId?: string;
@@ -123,6 +125,7 @@ export class GraphPlusPresentationV1<TFile> {
       this.checkpoint = new GraphPlusCheckpointControllerV1(
         options.vaultId, options.checkpointStore, options.clock, 500,
         () => clone(this.lens), stripGraphPlusRenderFilter,
+        error => (this.options.onCheckpointError ?? this.options.onError)?.(error),
       );
     }
   }
@@ -131,6 +134,7 @@ export class GraphPlusPresentationV1<TFile> {
   get experiencePolicy(): GraphPlusExperiencePolicyV1 { return this.policy; }
 
   async open(): Promise<void> {
+    if (this.closing) throw new Error('Graph+ presentation is closing.');
     if (this.opening) return this.opening;
     if (this.opened) return;
     const opening = this.openOnce();
@@ -396,10 +400,16 @@ export class GraphPlusPresentationV1<TFile> {
     } finally { this.resettingLayout = false; }
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    return this.closing ??= this.closeOnce();
+  }
+
+  private async closeOnce(): Promise<void> {
     this.opened = false;
+    this.session?.setSuspended(true);
     await this.opening?.catch(() => undefined);
     await this.lensQueue.catch(() => undefined);
+    this.session?.setSuspended(true);
     this.disposeSessionSubscriptions();
     this.actionRegistration?.dispose();
     this.actionRegistration = undefined;
@@ -670,6 +680,8 @@ export type GraphPlusHostEventV1 = GraphPlusUnconsciousActivityV1;
  */
 export class GraphPlusApplicationV1<TFile> {
   private readonly presentations = new Set<GraphPlusPresentationV1<TFile>>();
+  private readonly closingPresentations = new Map<GraphPlusPresentationV1<TFile>, Promise<void>>();
+  private disposal?: Promise<void>;
   private readonly hostActivityListeners = new Set<() => void>();
   private reconcileTimer?: ReturnType<typeof setTimeout>;
   private reconcileRunning?: Promise<void>;
@@ -717,15 +729,26 @@ export class GraphPlusApplicationV1<TFile> {
     return presentation;
   }
 
-  async closePresentation(presentation: GraphPlusPresentationV1<TFile>): Promise<void> {
-    if (!this.presentations.delete(presentation)) return;
+  closePresentation(presentation: GraphPlusPresentationV1<TFile>): Promise<void> {
+    const closing = this.closingPresentations.get(presentation);
+    if (closing) return closing;
+    if (!this.presentations.delete(presentation)) return Promise.resolve();
+    const completion = this.closePresentationOnce(presentation);
+    this.closingPresentations.set(presentation, completion);
+    const finish = () => this.closingPresentations.delete(presentation);
+    void completion.then(finish, finish);
+    return completion;
+  }
+
+  private async closePresentationOnce(presentation: GraphPlusPresentationV1<TFile>): Promise<void> {
     const wasLayoutAuthority = this.layoutAuthority === presentation;
     if (wasLayoutAuthority) {
       presentation.setLayoutAuthority(false);
       this.layoutAuthority = undefined;
     }
-    await presentation.close();
-    if (wasLayoutAuthority) this.electLayoutAuthority();
+    try { await presentation.close(); } finally {
+      if (wasLayoutAuthority && !this.disposed) this.electLayoutAuthority();
+    }
     if (this.presentations.size === 0) {
       this.canonicalDirty = true;
       this.cancelScheduledReconcile();
@@ -853,19 +876,36 @@ export class GraphPlusApplicationV1<TFile> {
     await Promise.all(locals.map((presentation) => presentation.followActiveNode(nodeId)));
   }
 
-  async dispose(): Promise<void> {
-    if (this.disposed) return;
+  async setCountDuplicateLinks(value: boolean): Promise<void> {
+    if (this.disposed || !this.options.model.setCountDuplicateLinks(value)) return;
+    this.canonicalDirty = true;
+    if (this.reconcileRunning) this.reconcileAgain = true;
+    await this.reconcile();
+  }
+
+  dispose(): Promise<void> {
+    if (this.disposal) return this.disposal;
     this.disposed = true;
     this.cancelScheduledReconcile();
     this.reconcileAgain = false;
     this.activeNodeQueued = false;
+    for (const presentation of this.presentations) presentation.setSuspended(true);
+    return this.disposal = this.disposeOnce();
+  }
+
+  private async disposeOnce(): Promise<void> {
     await this.reconcileRunning?.catch(() => undefined);
     await this.activeNodeFollow?.catch(() => undefined);
     await this.worldStateQueue.catch(() => undefined);
-    await Promise.all([...this.presentations].map((presentation) => presentation.close()));
+    const results = await Promise.allSettled([
+      ...this.closingPresentations.values(),
+      ...[...this.presentations].map((presentation) => this.closePresentation(presentation)),
+    ]);
     this.presentations.clear();
     this.pendingConstellationNodeIds.clear();
     this.hostActivityListeners.clear();
+    const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failed) throw failed.reason;
   }
 
   private async reconcileUntilSettled(): Promise<void> {

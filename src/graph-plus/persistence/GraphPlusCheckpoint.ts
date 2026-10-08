@@ -45,6 +45,7 @@ export class GraphPlusCheckpointControllerV1 {
   private cachedDocument?: GraphDocumentV1;
   private documentGeneration = 0;
   private savedDocumentGeneration = -1;
+  private closing?: Promise<void>;
 
   constructor(
     private readonly vaultId: string,
@@ -53,9 +54,11 @@ export class GraphPlusCheckpointControllerV1 {
     private readonly debounceMs = 500,
     private readonly getLens?: () => GraphPlusLensStateV1,
     private readonly prepareViewState?: (state: GraphViewStateV1) => GraphViewStateV1,
+    private readonly onError?: (error: Error) => void,
   ) {}
 
   attach(session: GraphSessionV1, document?: GraphDocumentV1): void {
+    if (this.closing) throw new Error('Cannot attach a closing checkpoint controller.');
     this.detach();
     this.session = session;
     this.cachedDocument = document;
@@ -77,7 +80,11 @@ export class GraphPlusCheckpointControllerV1 {
     if (this.timer !== undefined) this.clock.clearTimeout(this.timer);
     this.timer = this.clock.setTimeout(() => {
       this.timer = undefined;
-      void this.flush();
+      void this.flush().catch(error => {
+        const failure = error instanceof Error ? error : new Error(String(error));
+        if (this.onError) this.onError(failure);
+        else console.error('[graph+] checkpoint save failed', failure);
+      });
     }, this.debounceMs);
   }
 
@@ -109,7 +116,12 @@ export class GraphPlusCheckpointControllerV1 {
     return this.flushQueue;
   }
 
-  async closeAndDispose(): Promise<void> {
+  closeAndDispose(): Promise<void> {
+    return this.closing ??= this.closeOnce();
+  }
+
+  private async closeOnce(): Promise<void> {
+    this.stopObserving();
     try {
       await this.flush();
     } finally {
@@ -126,13 +138,17 @@ export class GraphPlusCheckpointControllerV1 {
   }
 
   detach(): void {
-    if (this.timer !== undefined) this.clock.clearTimeout(this.timer);
-    this.timer = undefined;
-    this.subscriptions.splice(0).forEach((subscription) => subscription.dispose());
+    this.stopObserving();
     this.session = undefined;
     this.cachedDocument = undefined;
     this.documentGeneration = 0;
     this.savedDocumentGeneration = -1;
+  }
+
+  private stopObserving(): void {
+    if (this.timer !== undefined) this.clock.clearTimeout(this.timer);
+    this.timer = undefined;
+    this.subscriptions.splice(0).forEach((subscription) => subscription.dispose());
   }
 }
 
@@ -143,12 +159,10 @@ export function validateGraphPlusCheckpointV1(value: unknown): GraphPlusCheckpoi
     if (typeof value.savedAt !== 'number' || !Number.isFinite(value.savedAt)) return undefined;
     let viewState: GraphViewStateV1 | undefined;
     if (value.viewState !== undefined) {
-      try {
-        assertGraphViewStateV1(value.viewState);
-        viewState = value.viewState;
-      } catch {
-        viewState = undefined;
-      }
+      assertGraphViewStateV1(value.viewState);
+      if (value.viewState.documentId !== value.document.documentId
+        || value.viewState.documentRevision !== value.document.revision) return undefined;
+      viewState = value.viewState;
     }
     const lens = coerceGraphPlusLensStateV1(value.lens);
     return JSON.parse(JSON.stringify({

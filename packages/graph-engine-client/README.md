@@ -44,3 +44,9 @@ shipped `linear-layout` capability and choose `up`, `down`, `left`, `right`, `in
 V1.6 and V1.7 add optional presentation, camera-fit, input, and session-UI fields while
 retaining protocol V1. Provider-side physics, rendering, performance, and lifecycle
 improvements remain available to older V1 clients without an artifact refresh.
+
+## License
+
+The client is distributed under the Mozilla Public License 2.0, matching its source
+in Graph+. The complete license is included in [LICENSE](LICENSE), including packed
+copies of this package.

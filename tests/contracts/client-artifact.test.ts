@@ -61,6 +61,14 @@ test('Graph+ registers its internal graph-engine provider and exposes independen
   equal(clientPackage.version, '1.7.1', 'public client release version is independently declared');
 });
 
+test('external client includes the source license and declares MPL-2.0', () => {
+  const manifest = JSON.parse(readFileSync(join(artifactRoot, 'package.json'), 'utf8'));
+  equal(manifest.license, 'MPL-2.0', 'client source license');
+  equal(manifest.files.includes('LICENSE'), true, 'packed client includes license');
+  equal(readFileSync(join(artifactRoot, 'LICENSE'), 'utf8'), readFileSync(join(repositoryRoot, 'LICENSE'), 'utf8'),
+    'client license must match source license');
+});
+
 test('external client artifact resolves internally and excludes provider implementation', () => {
   const sourceRoot = join(artifactRoot, 'src');
   const violations: string[] = [];

@@ -38,6 +38,7 @@ import {
 } from './settings/GraphPlusPluginDataStore.ts';
 import { GraphPlusCheckpointFileStoreV1 } from './settings/GraphPlusCheckpointFileStore.ts';
 import { ObsidianGraphBridgeV1 } from './ObsidianGraphBridge.ts';
+import { startGraphPlusShutdownV1, waitForGraphPlusShutdownV1 } from './GraphPlusShutdown.ts';
 
 
 export default class GraphEnginePlugin extends Plugin {
@@ -56,8 +57,13 @@ export default class GraphEnginePlugin extends Plugin {
   private graphBridgeConnection?: Disposable;
   private refreshActiveThemes?: () => void;
   private saveQueue: Promise<void> = Promise.resolve();
+  private unloading = false;
+  private shutdown?: Promise<void>;
+  private recovery?: Promise<void>;
 
   async onload() {
+    await waitForGraphPlusShutdownV1(this.shutdownKey);
+    if (this.unloading) return;
     const migration = migrateGraphPlusPluginDataV1(await this.loadData());
     this.pluginData = migration.data;
     this.settings = this.pluginData.consumers.graphPlus.consumerSettings;
@@ -66,11 +72,7 @@ export default class GraphEnginePlugin extends Plugin {
       countDuplicateLinks: this.settings.countDuplicateLinks,
     });
     this.graphBridge = new ObsidianGraphBridgeV1(this.app);
-    this.sharedGraphPlusApplication = new GraphPlusApplicationV1({
-      model: this.vaultGraphModel,
-      navigator: this.graphBridge,
-      onError: (error) => console.error('[graph+] application error', error),
-    });
+    this.sharedGraphPlusApplication = this.createGraphPlusApplication();
     this.graphBridgeConnection = this.graphBridge.start(
       (event) => this.sharedGraphPlusApplication?.receiveUnconsciousActivity(event),
     );
@@ -235,25 +237,98 @@ export default class GraphEnginePlugin extends Plugin {
   }
 
   onunload() {
-    this.graphBridgeConnection?.dispose();
-    void this.sharedGraphPlusApplication?.dispose();
-    void this.graphPlusLease?.release();
-    void this.graphEngineProvider?.stop();
-    this.graphPlusLease = undefined;
-    this.graphEngineProvider = undefined;
-    this.graphEngineCore = undefined;
-    this.vaultGraphSource = undefined;
-    this.vaultGraphModel = undefined;
-    this.sharedGraphPlusApplication = undefined;
-    this.graphBridge = undefined;
-    this.graphBridgeConnection = undefined;
-    this.refreshActiveThemes = undefined;
+    if (this.shutdown) return;
+    this.unloading = true;
+    this.shutdown = startGraphPlusShutdownV1(this.shutdownKey, {
+      stopActivity: () => this.graphBridgeConnection?.dispose(),
+      closePresentations: async () => {
+        await this.recovery?.catch(() => undefined);
+        await this.sharedGraphPlusApplication?.dispose();
+      },
+      drainPersistence: async () => {
+        const results = await Promise.allSettled([this.checkpointFileStore?.drain(), this.saveQueue]);
+        const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+        if (failure) throw failure.reason;
+      },
+      releaseLease: async () => { await this.graphPlusLease?.release(); },
+      stopProvider: async () => { await this.graphEngineProvider?.stop(); },
+      clearReferences: () => {
+        this.graphPlusLease = undefined;
+        this.graphEngineProvider = undefined;
+        this.graphEngineCore = undefined;
+        this.vaultGraphSource = undefined;
+        this.vaultGraphModel = undefined;
+        this.sharedGraphPlusApplication = undefined;
+        this.graphBridge = undefined;
+        this.graphBridgeConnection = undefined;
+        this.refreshActiveThemes = undefined;
+        this.checkpointFileStore = undefined;
+      },
+    });
+    void this.shutdown.catch(error => {
+      console.error('[graph+] shutdown error', error);
+      new Notice('Graph+ could not finish saving during shutdown. Check the saved layout when reopening.');
+    });
+  }
+
+  private get shutdownKey(): string {
+    return `${this.app.vault.getName()}:${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`}`;
+  }
+
+  private createGraphPlusApplication(): GraphPlusApplicationV1<TFile> {
+    if (!this.vaultGraphModel || !this.graphBridge) throw new Error('Graph+ is unavailable.');
+    return new GraphPlusApplicationV1({
+      model: this.vaultGraphModel,
+      navigator: this.graphBridge,
+      onError: error => console.error('[graph+] application error', error),
+    });
+  }
+
+  hasPreviousGraphPlusCheckpoint(): boolean {
+    return this.checkpointFileStore?.hasPrevious(this.app.vault.getName()) ?? false;
+  }
+
+  recoverGraphPlusCheckpoint(action: 'previous' | 'reset'): Promise<void> {
+    if (this.unloading) return Promise.reject(new Error('Graph+ is shutting down.'));
+    if (this.recovery) return this.recovery;
+    const operation = this.recoverGraphPlusCheckpointOnce(action);
+    this.recovery = operation;
+    const finish = () => { if (this.recovery === operation) this.recovery = undefined; };
+    void operation.then(finish, finish);
+    return operation;
+  }
+
+  private async recoverGraphPlusCheckpointOnce(action: 'previous' | 'reset'): Promise<void> {
+    const store = this.requireCheckpointFileStore();
+    const leaves = [
+      ...this.app.workspace.getLeavesOfType(GRAPH_PLUS_TYPE),
+      ...this.app.workspace.getLeavesOfType(LOCAL_GRAPH_PLUS_TYPE),
+    ];
+    const views = leaves.map(leaf => leaf.view).filter((view): view is GraphPlusView | LocalGraphPlusView =>
+      view instanceof GraphPlusView || view instanceof LocalGraphPlusView);
+    // All presentations must stop saving the discarded world before recovery.
+    await this.sharedGraphPlusApplication?.dispose().catch(error => console.error('[graph+] recovery close', error));
+    await Promise.allSettled(views.map(view => view.onClose()));
+    try {
+      await store.recover(this.app.vault.getName(), action);
+    } finally {
+      if (!this.unloading) {
+        this.sharedGraphPlusApplication = this.createGraphPlusApplication();
+        for (const view of views) await view.onOpen();
+      }
+    }
   }
 
   async updateGraphPlusSettings(settings: GraphPlusConsumerSettingsV1) {
+    if (this.unloading) throw new Error('Graph+ is shutting down.');
     this.settings = { ...settings };
     this.pluginData = withGraphPlusSettingsV1(this.pluginData, this.settings);
     await this.persistPluginData();
+    if (this.sharedGraphPlusApplication) {
+      await this.sharedGraphPlusApplication.setCountDuplicateLinks(this.settings.countDuplicateLinks);
+    } else {
+      this.vaultGraphModel?.setCountDuplicateLinks(this.settings.countDuplicateLinks);
+    }
     this.refreshActiveThemes?.();
     if (!settings.enabled) {
       this.app.workspace.detachLeavesOfType(GRAPH_PLUS_TYPE);
@@ -271,7 +346,7 @@ export default class GraphEnginePlugin extends Plugin {
   }
 
   acquireGraphPlusLease(): GraphEngineLeaseV1 {
-    if (!this.settings.enabled) {
+    if (this.unloading || !this.settings.enabled) {
       throw new GraphEngineServiceErrorV1({ code: 'engine-unavailable', message: 'The bundled graph+ consumer is disabled.' });
     }
     const result = this.graphEngineCore?.connectLocal({
@@ -360,7 +435,7 @@ export default class GraphEnginePlugin extends Plugin {
   }
 
   private async persistEngineSettings(): Promise<void> {
-    if (!this.profiles) return;
+    if (this.unloading || !this.profiles) return;
     this.pluginData = withEngineSettingsV1(
       this.pluginData,
       this.engineSettings?.getGlobalOverrides() ?? this.pluginData.engine.globalSettings,

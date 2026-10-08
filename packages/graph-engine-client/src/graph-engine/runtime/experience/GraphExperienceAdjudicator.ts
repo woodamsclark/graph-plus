@@ -15,6 +15,11 @@ export function adjudicateGraphExperienceCommandV1(options: {
   readonly attentionNodeIds: readonly string[];
   readonly focusedNodeId?: string;
 }): EgoIntentOutcome<GraphRuntimeCommandV1> {
+  // Cleanup remains necessary if the experience changed during a gesture.
+  if (options.command.type === 'cancel-input'
+    || (options.command.type === 'drag-end' && options.command.cancelled)) {
+    return { status: 'accepted', directive: options.command };
+  }
   const capability = commandCapability(options.command);
   if (!options.experience.permittedInteractions.includes(capability)) {
     return { status: 'rejected', reason: `interaction-not-permitted:${capability}` };
@@ -106,6 +111,7 @@ function commandCapability(command: GraphRuntimeCommandV1): GraphEndogenousCapab
     case 'activate-node':
       return 'activate-subject';
     case 'selection-presentation-changed':
+    case 'cancel-input':
     case 'set-hover':
     case 'set-preview-hover':
       return 'inspect-subject';
