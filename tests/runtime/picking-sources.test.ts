@@ -1,3 +1,4 @@
+import { CommittedPickState } from '../../src/graph-engine/runtime/render/CommittedPickState.ts';
 import { CanvasGraphRenderer, GraphRendererRegistryV2, type GraphRenderSceneV2 } from '../../src/graph-engine/runtime/render/index.ts';
 import { runtimeHarness, runtimeCanvas } from '../support/runtimeHarness.ts';
 import { equal, deepEqual, assert, test } from '../support/harness.ts';
@@ -66,7 +67,10 @@ function pickFixture(dimensions: '2d' | '3d') {
   };
   const renderer = new CanvasGraphRenderer(value.document.createElement('canvas'), () => 0);
   renderer.initialize(); renderer.resize(scene.view.viewport); renderer.updateScene(scene); renderer.render();
-  const source = (nodes: readonly GraphRenderNodeV1[]): GraphPickSourceV2 => ({ frame: { ...scene, nodes }, view: scene.view });
+  const source = (nodes: readonly GraphRenderNodeV1[]): GraphPickSourceV2 => {
+    const committed = new CommittedPickState(); committed.set({ ...scene, nodes });
+    return { frame: committed.get()!, view: scene.view };
+  };
   return { renderer, scene, source, node, camera };
 }
 
@@ -149,4 +153,21 @@ test('large alternate pick sources reuse bounded indexes and invalidate in-place
     value.renderer.dispose();
     equal(value.renderer.getDiagnostics().pickIndexEntries, 0, 'disposal releases alternate indexes');
   } finally { value.renderer.dispose(); }
+});
+
+
+test('compact committed geometry preserves full-frame mouse, pen, touch and nearest-center results', () => {
+  for (const dimensions of ['2d', '3d'] as const) {
+    const value = pickFixture(dimensions);
+    try {
+      const nodes = [value.node('back', 320, 1, 6, 100), value.node('front', 320, 1, 4, 80), value.node('void', 400, 0), value.node('edge', 635, 1, 10)];
+      const full = { frame: { ...value.scene, nodes }, view: value.scene.view };
+      const compact = value.source(nodes);
+      for (const pointerKind of ['mouse', 'touch', 'pen'] as const) for (const x of [300, 316, 320, 324, 332, 400, 635, 640]) {
+        deepEqual(value.renderer.pick({ point: { x, y: 180 }, pointerKind }, compact), value.renderer.pick({ point: { x, y: 180 }, pointerKind }, full), 'compact shape matches the full frame');
+      }
+      deepEqual(value.renderer.queryNearest({ point: { x: 330, y: 180 }, radius: 40 }, compact),
+        value.renderer.queryNearest({ point: { x: 330, y: 180 }, radius: 40 }, full), 'compact geometry preserves nearest-center ranking');
+    } finally { value.renderer.dispose(); }
+  }
 });

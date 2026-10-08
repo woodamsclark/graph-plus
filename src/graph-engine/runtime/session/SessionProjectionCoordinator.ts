@@ -5,6 +5,8 @@ import { GraphTopologyIndex } from '../../core/document/GraphTopologyIndex.ts';
 import { createAnimaConsciousnessPresentationV1 } from '../anima/AnimaAwareness.ts';
 import { createGraphInteractionContextV1 } from '../interaction/GraphInteractionStatePolicy.ts';
 import { compileAnimaSceneV1 } from '../anima/index.ts';
+import { compileAnimaPickFrame } from '../anima/AnimaSceneCompiler.ts';
+import { CommittedPickState } from '../render/CommittedPickState.ts';
 import { createAnimusSnapshotV1, type AnimusSnapshotV1 } from '../animus/index.ts';
 import type { Consciousness, ConsciousnessSnapshot } from '../consciousness/index.ts';
 import type {
@@ -49,7 +51,7 @@ interface PresentationFrame {
 /** Owns the projection-to-frame boundary and its render dirty state for one session. */
 export class SessionProjectionCoordinatorV1 {
   readonly frames = new GraphFrameStore();
-  readonly committedFrames = new GraphFrameStore();
+  readonly committedPickState = new CommittedPickState();
   private dirty = true;
   private readonly hoverAnimation = new AnimaHoverPreviewAnimationV1();
   private previewTargetContext?: string;
@@ -59,7 +61,7 @@ export class SessionProjectionCoordinatorV1 {
   private geometryOnly = false;
   private baselineCache?: { input: GraphModulePresentationStateV1; result: PresentationFrame };
   private consciousnessCache?: { owner: Consciousness; document: GraphModuleProjectionStateV1['document']; key: string; snapshot: ConsciousnessSnapshot };
-  private readonly work = { consciousnessReconciliations: 0, geometryRefreshes: 0, modulePresentationContributions: 0, animusSnapshots: 0, animaSemanticResolves: 0, fullSceneCompiles: 0 };
+  private readonly work = { consciousnessReconciliations: 0, geometryRefreshes: 0, modulePresentationContributions: 0, animusSnapshots: 0, animaSemanticResolves: 0, pickGeometryCompiles: 0, fullSceneCompiles: 0 };
 
   getDiagnostics(): Readonly<typeof this.work> { return { ...this.work }; }
   private topologyCache?: {
@@ -110,8 +112,8 @@ export class SessionProjectionCoordinatorV1 {
     } else {
       this.resetPreviewAnimation();
       result = this.createPresentationFrame(options.host, input, objectActivationPreview);
-      this.committedFrames.set(objectActivationPreview
-        ? this.createPresentationFrame(options.host, input, null).frame : result.frame);
+      this.committedPickState.set(objectActivationPreview
+        ? this.createCommittedPickFrame(options.host, input) : result.frame);
     }
     this.frames.set(result.frame);
     this.dirty = true;
@@ -149,6 +151,24 @@ export class SessionProjectionCoordinatorV1 {
       this.baselineCache = { input: presentationInput, result };
       return result;
     }
+    const moduleView = this.dressPresentation(host, presentationInput);
+    const snapshot = this.createAnimusSnapshot(presentationInput, moduleView);
+    const frame = this.compileScene(presentationInput, moduleView, snapshot);
+    const result = { moduleView, frame };
+    if (!preview) this.baselineCache = { input: presentationInput, result };
+    return result;
+  }
+
+  private createCommittedPickFrame(host: GraphModuleHost, input: GraphModulePresentationStateV1) {
+    const moduleView = this.dressPresentation(host, { ...input, objectActivationPreview: null });
+    this.work.pickGeometryCompiles += 1;
+    return compileAnimaPickFrame(moduleView, this.geometryRevision);
+  }
+
+  private dressPresentation(host: GraphModuleHost, presentationInput: GraphModulePresentationStateV1): GraphModulePresentationStateV1 {
+    const input = presentationInput;
+    const preview = input.objectActivationPreview;
+    const cached = this.baselineCache;
     const previousSemantic = !preview && cached && samePresentationInputs(cached.input, presentationInput)
       ? cached.result.moduleView.animaPresentation : undefined;
     if (!previousSemantic) this.work.animaSemanticResolves += 1;
@@ -158,12 +178,7 @@ export class SessionProjectionCoordinatorV1 {
       visibleNodeIds: input.renderSelection.nodeIds, visibleEdgeIds: input.renderSelection.edgeIds,
     });
 
-    const moduleView = this.contributePresentation(host, { ...presentationInput, animaPresentation });
-    const snapshot = this.createAnimusSnapshot(presentationInput, moduleView);
-    const frame = this.compileScene(presentationInput, moduleView, snapshot);
-    const result = { moduleView, frame };
-    if (!preview) this.baselineCache = { input: presentationInput, result };
-    return result;
+    return this.contributePresentation(host, { ...presentationInput, animaPresentation });
   }
 
   private contributePresentation(host: GraphModuleHost, input: GraphModulePresentationStateV1): GraphModulePresentationStateV1 {
@@ -265,7 +280,7 @@ export class SessionProjectionCoordinatorV1 {
     // Keep the committed small label as the animation's starting point. Hover
     // reveal is immediate; the new root size still waits for the timed peek.
     const baseline = this.createPresentationFrame(options.host, input, null, focusLabelEntry ? null : options.hoveredNodeId);
-    this.committedFrames.set(baseline.frame);
+    this.committedPickState.set(baseline.frame);
     let frame = focusLabelEntry ? { ...baseline.frame, nodes: baseline.frame.nodes.map(node =>
       node.id === options.hoveredNodeId ? { ...node, showLabel: true, labelForceVisible: true,
         labelAlwaysVisible: true, labelOpacity: 1, labelFontSize: Math.max(12, node.labelFontSize) } : node) } : baseline.frame;
@@ -319,6 +334,8 @@ export class SessionProjectionCoordinatorV1 {
     this.geometryRevision += 1;
     const frame = this.frames.get();
     if (frame) this.frames.set({ ...frame, geometryRevision: this.geometryRevision });
+    const committed = this.committedPickState.get();
+    if (committed) this.committedPickState.set({ ...committed, geometryRevision: this.geometryRevision });
     this.dirty = true;
   }
 
@@ -338,7 +355,7 @@ export class SessionProjectionCoordinatorV1 {
     this.baselineCache = undefined;
     this.consciousnessCache = undefined;
     this.frames.set(null);
-    this.committedFrames.set(null);
+    this.committedPickState.set(null);
     this.dirty = false;
   }
 

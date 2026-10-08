@@ -1,3 +1,4 @@
+import { compileAnimaPickFrame } from '../../src/graph-engine/runtime/anima/AnimaSceneCompiler.ts';
 import { SessionProjectionCoordinatorV1 } from '../../src/graph-engine/runtime/session/SessionProjectionCoordinator.ts';
 import { Consciousness } from '../../src/graph-engine/runtime/consciousness/index.ts';
 import type { GraphModuleHost, GraphModulePresentationStateV1 } from '../../src/graph-engine/runtime/modules/index.ts';
@@ -47,7 +48,7 @@ test('composition reconciles Attention before preview planning and compiles cont
     const result = value.coordinator.compose(options);
     equal(value.calls.length, 1, 'no-preview composition contributes one baseline');
     equal(value.compositions(), 1, 'one outer composition is recorded');
-    equal(value.coordinator.frames.get(), value.coordinator.committedFrames.get(), 'visible and committed frames share the ordinary baseline');
+    equal(value.coordinator.frames.get()!.nodes.length, value.coordinator.committedPickState.get()!.nodes.length, 'ordinary picking retains the baseline membership');
     equal(result.nodeContributions.outside.opacity, 0.1, 'the returned module presentation retains contributed values');
     equal(value.coordinator.frames.get()!.nodes.find(node => node.id === 'outside')!.opacity, 0.1, 'scene compilation consumes module opacity');
   }
@@ -72,8 +73,8 @@ test('composition crossfades reuse target presentation while visible and committ
     value.coordinator.compose({ ...moving, now: 1160 });
     equal(value.calls.length, 7, 'terminal fade reuses its target');
     deepEqual(value.coordinator.frames.get()!.nodes.find(node => node.id === 'a')!.position, positions.a, 'cached targets never replace live visible positions');
-    deepEqual(value.coordinator.committedFrames.get()!.nodes.find(node => node.id === 'a')!.position, positions.a, 'committed fallback follows live geometry');
-    equal(value.coordinator.frames.get()!.geometryRevision, value.coordinator.committedFrames.get()!.geometryRevision, 'blended and committed frames use the same geometry revision');
+    deepEqual(value.coordinator.committedPickState.get()!.nodes.find(node => node.id === 'a')!.position, positions.a, 'committed fallback follows live geometry');
+    equal(value.coordinator.frames.get()!.geometryRevision, value.coordinator.committedPickState.get()!.geometryRevision, 'blended and committed frames use the same geometry revision');
     equal(value.coordinator.nextPreviewFrameDelayMs(1160), undefined, 'terminal preview leaves no animation wake');
     deepEqual(options.viewState.selectedNodeIds, [], 'composition never commits preview membership');
   }
@@ -110,11 +111,11 @@ test('removal and toggle previews compile immediately and reset prior animation 
     equal(value.calls.length - before, 2, 'immediate preview compiles visible and committed inputs separately');
     equal(value.calls[before].preview, preview, 'the visible compile uses the immediate preview');
     equal(value.calls[before + 1].preview, null, 'fallback compile uses committed presentation');
-    assert(value.coordinator.frames.get() !== value.coordinator.committedFrames.get(), 'the immediate presentation keeps its committed fallback');
+    assert(value.coordinator.frames.get() !== value.coordinator.committedPickState.get(), 'the immediate presentation keeps its committed fallback');
     equal(value.coordinator.nextPreviewFrameDelayMs(460), undefined, 'immediate preview cancels old fade work');
     value.coordinator.clear();
     equal(value.coordinator.frames.get(), null, 'clear releases the visible frame');
-    equal(value.coordinator.committedFrames.get(), null, 'clear releases the committed frame');
+    equal(value.coordinator.committedPickState.get(), null, 'clear releases the committed frame');
   }
 });
 
@@ -140,7 +141,7 @@ test('geometry-only composition reuses dressing, Consciousness and compilation f
       equal(after[field], before[field], `${field} remains unchanged through 20 moving frames`);
     }
     deepEqual(value.coordinator.frames.get()!.nodes[0].position, positions.n0, 'visible geometry tracks replacement position entries');
-    deepEqual(value.coordinator.committedFrames.get()!.nodes[0].position, positions.n0, 'fallback geometry tracks replacement position entries');
+    deepEqual(value.coordinator.committedPickState.get()!.nodes[0].position, positions.n0, 'fallback geometry tracks replacement position entries');
     const reused = value.coordinator.frames.get();
     value.coordinator.compose({ ...initial, invalidation: 'presentation', now: 400 });
     deepEqual(value.coordinator.frames.get(), reused, 'fresh compilation matches the reused frame exactly');
@@ -169,4 +170,25 @@ test('geometry reuse expires for changed hover, pins, Memory and content; unknow
   options.host.canReuseGeometryPresentation = () => false;
   value.coordinator.compose(options);
   equal(value.calls.length, 6, 'unclassified module contributions run on geometry');
+});
+
+
+test('committed fallback retains only picking fields and compiles no extra drawing scene for immediate previews', () => {
+  for (const dimensions of ['2d', '3d'] as const) {
+    const value = pipelineFixture(dimensions);
+    const baseline = value.coordinator.compose(value.options);
+    const visible = value.coordinator.frames.get()!;
+    const minimal = compileAnimaPickFrame(baseline, visible.geometryRevision!);
+    deepEqual(minimal.nodes, visible.nodes.map(({ id, position, radius, opacity, nodeScaleExponent }) =>
+      ({ id, position, radius, opacity, nodeScaleExponent })), 'compact compilation preserves every hit-shape field');
+    const before = value.coordinator.getDiagnostics();
+    value.coordinator.compose({ ...value.options, resolveObjectActivationPreview: () => ({
+      kind: 'objects', activation: 'remove-membership', addedNodeIds: [], removedNodeIds: ['a'], hoverPathNodeIds: [] }) });
+    const after = value.coordinator.getDiagnostics();
+    equal(after.fullSceneCompiles - before.fullSceneCompiles, 1, 'only the visible scene compiles drawing records');
+    equal(after.pickGeometryCompiles - before.pickGeometryCompiles, 1, 'fallback compiles only hit shapes');
+    const committed = value.coordinator.committedPickState.get()!;
+    assert(!('edges' in committed) && !('regions' in committed) && !('labelFont' in committed), 'fallback retains no drawing collections');
+    assert(committed.nodes.every(node => !('label' in node) && !('finalColor' in node)), 'fallback nodes retain no labels or colors');
+  }
 });

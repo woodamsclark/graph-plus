@@ -3,6 +3,8 @@ import type { GraphFrameStore } from './GraphFrameStore.ts';
 import type { SessionInvalidationClassV1 } from '../session/SessionFrameScheduler.ts';
 import type {
   GraphPickRequestV2,
+  GraphPickFrame,
+  GraphPickNode,
   GraphPickSourceV2,
   GraphNearestNodeRequestV2,
   GraphNearestNodeResultV2,
@@ -19,19 +21,21 @@ import type {
 import { graphColorToCssV2, type GraphFontV2 } from '../theme/index.ts';
 import type { GraphColorV2 } from '../theme/index.ts';
 
-interface ProjectedNode {
-  node: GraphRenderNodeV1;
+interface ProjectedPickNode {
+  node: GraphPickNode;
   readonly point: ProjectedGraphPointV1;
   radius: number;
 }
+
+interface ProjectedNode extends ProjectedPickNode { node: GraphRenderNodeV1; }
 
 interface PickIndex {
   readonly source: GraphPickSourceV2;
   readonly geometryRevision: number | undefined;
   readonly visionKey: string;
-  readonly grid: Map<string, ProjectedNode[]>;
-  readonly projected: readonly ProjectedNode[];
-  centers?: Map<string, ProjectedNode[]>;
+  readonly grid: Map<string, ProjectedPickNode[]>;
+  readonly projected: readonly ProjectedPickNode[];
+  centers?: Map<string, ProjectedPickNode[]>;
 }
 
 export interface GraphRenderTimingV1 {
@@ -57,7 +61,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   private colorCssCache = new WeakMap<GraphColorV2, string>();
   private readonly hitGrid = new Map<string, ProjectedNode[]>();
   private readonly hitCellSize = 32;
-  private readonly centerGrid = new Map<string, ProjectedNode[]>();
+  private readonly centerGrid = new Map<string, ProjectedPickNode[]>();
   private centerGridDirty = true;
   private centerIndexBuilds = 0;
   private nearestQueries = 0;
@@ -180,9 +184,9 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   private pickFromGrid(
     point: { readonly x: number; readonly y: number },
     pointerKind: 'mouse' | 'touch' | 'pen',
-    frame: GraphRenderFrameV1 | null,
+    frame: GraphPickFrame | null,
     vision: Vision,
-    grid: Map<string, ProjectedNode[]>,
+    grid: Map<string, ProjectedPickNode[]>,
   ) {
     const minimumTouchRadius = pointerKind === 'touch' && frame !== null
       && renderPolicy(frame).minimumPerspectiveTouchHitRadius !== undefined
@@ -190,9 +194,9 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       ? renderPolicy(frame).minimumPerspectiveTouchHitRadius!
       : 0;
     const candidates = this.hitCandidates(point.x, point.y, minimumTouchRadius, grid);
-    let bestVisible: ProjectedNode | undefined;
+    let bestVisible: ProjectedPickNode | undefined;
     let bestVisibleDistance = Number.POSITIVE_INFINITY;
-    let bestTouch: ProjectedNode | undefined;
+    let bestTouch: ProjectedPickNode | undefined;
     let bestTouchDistance = Number.POSITIVE_INFINITY;
     for (const candidate of candidates) {
       const distance = (point.x - candidate.point.x) ** 2 + (point.y - candidate.point.y) ** 2;
@@ -255,7 +259,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     return this.pickFromGrid(request.point, request.pointerKind ?? 'mouse', source.frame, spatial.vision, spatial.grid);
   }
 
-  private pickSpatialSource(source: GraphPickSourceV2): { vision: Vision; grid: Map<string, ProjectedNode[]>; index?: PickIndex } {
+  private pickSpatialSource(source: GraphPickSourceV2): { vision: Vision; grid: Map<string, ProjectedPickNode[]>; index?: PickIndex } {
     if (!this.pickVision) this.pickVision = new Vision(source.view.camera, source.view.dimensions);
     else this.pickVision.reconfigure(source.view.camera, source.view.dimensions);
     this.pickVision.setViewport(source.view.viewport.width, source.view.viewport.height);
@@ -277,8 +281,8 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       && index.source.retainedNodeId === source.retainedNodeId
       && index.visionKey === visionKey);
     if (cached) { this.pickIndexCacheHits += 1; return { vision: this.pickVision, grid: cached.grid, index: cached }; }
-    const grid = new Map<string, ProjectedNode[]>();
-    const projected: ProjectedNode[] = [];
+    const grid = new Map<string, ProjectedPickNode[]>();
+    const projected: ProjectedPickNode[] = [];
     const projection = this.pickVision.getState().projection;
     for (const node of source.frame.nodes) {
       if (source.nodeIds && !source.nodeIds.has(node.id)) continue;
@@ -305,7 +309,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     this.lastNearestQueryCandidates = 0;
     if (!(request.radius > 0) || !Number.isFinite(request.radius)
       || !Number.isFinite(request.point.x) || !Number.isFinite(request.point.y)) return null;
-    let centers: Map<string, ProjectedNode[]>;
+    let centers: Map<string, ProjectedPickNode[]>;
     if (source) {
       const spatial = this.pickSpatialSource(source);
       if (spatial.index) {
@@ -321,7 +325,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       this.ensureCurrentSpatialFrame(frame);
       centers = this.currentCenterGrid();
     }
-    let best: ProjectedNode | undefined;
+    let best: ProjectedPickNode | undefined;
     let bestDistance = request.radius;
     for (const entry of this.centerCandidates(centers, request)) {
       this.lastNearestQueryCandidates += 1;
@@ -337,7 +341,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       point: { x: best.point.x, y: best.point.y, depth: best.point.depth }, depth: best.point.depth, distance: bestDistance } : null;
   }
 
-  private *centerCandidates(grid: Map<string, ProjectedNode[]>, request: GraphNearestNodeRequestV2): Iterable<ProjectedNode> {
+  private *centerCandidates(grid: Map<string, ProjectedPickNode[]>, request: GraphNearestNodeRequestV2): Iterable<ProjectedPickNode> {
     const minX = Math.floor((request.point.x - request.radius) / this.hitCellSize);
     const maxX = Math.floor((request.point.x + request.radius) / this.hitCellSize);
     const minY = Math.floor((request.point.y - request.radius) / this.hitCellSize);
@@ -353,7 +357,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     }
   }
 
-  private currentCenterGrid(): Map<string, ProjectedNode[]> {
+  private currentCenterGrid(): Map<string, ProjectedPickNode[]> {
     if (this.centerGridDirty) {
       this.rebuildCenterGrid(this.projectedNodes, this.centerGrid);
       this.centerGridDirty = false;
@@ -361,7 +365,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     return this.centerGrid;
   }
 
-  private rebuildCenterGrid(nodes: readonly ProjectedNode[], grid: Map<string, ProjectedNode[]>): void {
+  private rebuildCenterGrid(nodes: readonly ProjectedPickNode[], grid: Map<string, ProjectedPickNode[]>): void {
     grid.clear();
     for (const entry of nodes) {
       if (entry.node.opacity <= 0) continue;
@@ -480,12 +484,12 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     return this.projectedNodes;
   }
 
-  private hitCandidates(x: number, y: number, searchRadius: number, grid = this.hitGrid): readonly ProjectedNode[] {
+  private hitCandidates(x: number, y: number, searchRadius: number, grid: Map<string, ProjectedPickNode[]> = this.hitGrid): readonly ProjectedPickNode[] {
     if (searchRadius <= 0) return grid.get(this.hitGridKey(x, y)) ?? [];
     const centerX = Math.floor(x / this.hitCellSize);
     const centerY = Math.floor(y / this.hitCellSize);
     const cellRadius = Math.ceil(searchRadius / this.hitCellSize) + 1;
-    const candidates = new Set<ProjectedNode>();
+    const candidates = new Set<ProjectedPickNode>();
     for (let offsetX = -cellRadius; offsetX <= cellRadius; offsetX += 1) {
       for (let offsetY = -cellRadius; offsetY <= cellRadius; offsetY += 1) {
         for (const candidate of grid.get(`${centerX + offsetX}:${centerY + offsetY}`) ?? []) {
@@ -496,7 +500,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     return [...candidates];
   }
 
-  private rebuildHitGrid(nodes: readonly ProjectedNode[], grid = this.hitGrid, width = this.width, height = this.height): void {
+  private rebuildHitGrid(nodes: readonly ProjectedPickNode[], grid: Map<string, ProjectedPickNode[]> = this.hitGrid, width = this.width, height = this.height): void {
     if (grid === this.hitGrid) this.spatialIndexBuilds += 1;
     grid.clear();
     for (const node of nodes) {
@@ -881,14 +885,14 @@ function clampInteger(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(value)));
 }
 
-function hitShapePolicyKey(frame: GraphRenderFrameV1): string {
+function hitShapePolicyKey(frame: GraphPickFrame): string {
   const policy = renderPolicy(frame);
   return [policy.nodeScaleMode, policy.nodeScaleExponent,
     policy.minimumPerspectiveNodeScale, policy.minimumPerspectiveNodeRadius].join(':');
 }
 
 function projectedRadius(
-  frame: GraphRenderFrameV1,
+  frame: GraphPickFrame,
   radius: number,
   scale: number,
   projection: 'orthographic' | 'perspective',
@@ -922,7 +926,7 @@ function graphFontToCss(font: GraphFontV2): string {
   return `${font.style} ${font.weight} ${font.sizePx}px/${font.lineHeightPx}px ${font.family}`;
 }
 
-function renderPolicy(frame: GraphRenderFrameV1) {
+function renderPolicy(frame: GraphPickFrame) {
   return frame.policy ?? {};
 }
 

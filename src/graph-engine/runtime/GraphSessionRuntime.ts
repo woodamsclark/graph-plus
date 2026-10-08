@@ -495,7 +495,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
           const hit = this.renderer.pick(request, this.pickSource(frame, retainedHoverNodeId));
           if (hit || resolveGraphActiveViewV1(this.viewState).id === 'focus') return hit;
           // A temporary Focus scene cannot revoke non-void source-View hover targets.
-          const committed = this.projection.committedFrames.get();
+          const committed = this.projection.committedPickState.get();
           return committed ? this.renderer.pick(request, this.pickSource(committed)) : null;
         },
         getDocument: () => this.store.readDocument(),

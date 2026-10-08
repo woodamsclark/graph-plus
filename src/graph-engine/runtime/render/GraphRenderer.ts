@@ -1,7 +1,7 @@
 import type { GraphCameraStateV1, GraphDimensionsV1, Vec3 } from '../../contracts/v1/index.ts';
 import type { SessionInvalidationClassV1 } from '../session/index.ts';
 import type { GraphVisualThemeV2 } from '../theme/index.ts';
-import type { GraphRenderFrameV1 } from './GraphRenderTypes.ts';
+import type { GraphRenderFrameV1, GraphRenderNodeV1 } from './GraphRenderTypes.ts';
 import type { GraphRenderTimingV1 } from './CanvasGraphRenderer.ts';
 
 export type GraphRendererBackendIdV2 = 'canvas2d' | 'webgl' | 'webgl2' | 'webgpu';
@@ -45,10 +45,17 @@ export interface GraphPickRequestV2 {
   readonly pointerKind?: 'mouse' | 'touch' | 'pen';
 }
 
+export type GraphPickNode = Pick<GraphRenderNodeV1, 'id' | 'position' | 'radius' | 'opacity' | 'nodeScaleExponent'>;
+export interface GraphPickFrame {
+  readonly nodes: readonly GraphPickNode[];
+  readonly geometryRevision?: number;
+  readonly policy?: GraphRenderFrameV1['policy'];
+}
+
 /** Alternate input geometry/presentation; picking must not install it as the render scene. */
 export interface GraphPickSourceV2 {
   /** Replace the frame when presentation changes; advance geometryRevision for in-place positions. */
-  readonly frame: GraphRenderFrameV1;
+  readonly frame: GraphPickFrame;
   readonly view: GraphViewTransformV2;
   /** Current world positions awaiting drawing. Replace this map or advance frame.geometryRevision when it changes. */
   readonly positions?: Readonly<Record<string, Vec3>>;

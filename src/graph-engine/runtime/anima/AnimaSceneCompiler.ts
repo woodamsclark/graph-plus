@@ -1,3 +1,5 @@
+import type { GraphPickFrame } from '../render/GraphRenderer.ts';
+import type { GraphModulePresentationStateV1 } from '../modules/GraphModuleTypes.ts';
 import type { GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
 import type { GraphExperienceContractV1 } from '../../contracts/v1/index.ts';
 import type { AnimusSnapshotV1 } from '../animus/index.ts';
@@ -213,4 +215,17 @@ function finiteOpacity(value: number | undefined, fallback: number): number {
   return value !== undefined && Number.isFinite(value)
     ? Math.max(0, Math.min(1, value))
     : fallback;
+}
+
+/** The committed fallback needs only eligibility, world positions and exact hit shapes. */
+export function compileAnimaPickFrame(input: GraphModulePresentationStateV1, geometryRevision: number): GraphPickFrame {
+  const phases = input.animaPresentation!.highlight.phaseByNodeId;
+  return { geometryRevision, policy: input.presentationPolicy,
+    nodes: input.document.nodes.filter(node => input.renderSelection.nodeIds.has(node.id)).map(node => {
+      const contribution = input.nodeContributions[node.id];
+      return { id: node.id, position: input.positions[node.id] ?? { x: 0, y: 0, z: 0 },
+        radius: finitePositive(contribution?.radius, 7 * finitePositive(contribution?.radiusScale, 1)),
+        nodeScaleExponent: contribution?.nodeScaleExponent,
+        opacity: Math.min(finiteOpacity(contribution?.opacity, 1), animaPhaseOpacity(phases[node.id] ?? 'void', 'node')) };
+    }) };
 }
