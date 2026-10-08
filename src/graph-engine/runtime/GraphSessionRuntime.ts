@@ -57,7 +57,7 @@ import {
   resolveGraphUxStateV1,
   resolveGraphActiveViewV1,
   SessionInteractionRuntime,
-  type GraphRuntimeViewChangeV1,
+  type GraphRuntimeViewChange,
 } from './interaction/index.ts';
 import {
   GraphModuleHost,
@@ -72,11 +72,11 @@ import type { SessionRuntimePlatformV1 } from './platform/index.ts';
 import { GraphLabelRecordCache, EMPTY_GRAPH_LABEL_RECORDS } from './render/GraphLabelRecordCache.ts';
 import {
   DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
-  detectGraphRendererCapabilitiesV2,
-  selectGraphRendererV2,
+  detectGraphRendererCapabilities,
+  selectGraphRenderer,
   type GraphRendererBackendIdV2,
   type GraphRendererCapabilitiesV2,
-  type GraphRendererRegistryV2,
+  type GraphRendererRegistry,
   type GraphRendererSelectionV2,
   type GraphRendererV2,
   type GraphPickSourceV2,
@@ -93,14 +93,14 @@ import type {
 } from './actions/index.ts';
 import type { GraphSessionControlPortV1 } from './host/index.ts';
 import {
-  SessionActivityControllerV1,
-  SessionDiagnosticsV1,
-  SessionFrameSchedulerV1,
-  SessionProjectionCoordinatorV1,
-  type SessionInvalidationClassV1,
+  SessionActivityController,
+  SessionDiagnostics,
+  SessionFrameScheduler,
+  SessionProjectionCoordinator,
+  type SessionInvalidationClass,
 } from './session/index.ts';
 
-export interface GraphSessionRuntimeOptionsV1 {
+export interface GraphSessionRuntimeOptions {
   readonly sessionId: string;
   readonly engineInstanceId: string;
   readonly consumerId: string;
@@ -119,7 +119,7 @@ export interface GraphSessionRuntimeOptionsV1 {
   readonly platform: SessionRuntimePlatformV1;
   readonly nodeActions?: GraphNodeActionRuntimeV1;
   readonly reactions?: GraphReactionRuntimeV1;
-  readonly rendererRegistry: GraphRendererRegistryV2;
+  readonly rendererRegistry: GraphRendererRegistry;
   readonly preferredRendererBackend?: GraphRendererBackendIdV2;
   readonly layoutAuthority?: boolean;
 }
@@ -132,7 +132,7 @@ const PIPELINE_INTERVAL_TOLERANCE_MS = MIN_PIPELINE_INTERVAL_MS * 0.01;
 const LARGE_GRAPH_NODE_COUNT = 500;
 const EFFICIENT_PIXEL_RATIO_LIMIT = 2;
 
-export interface GraphSessionRuntimeDiagnosticsV1 {
+export interface GraphSessionRuntimeDiagnostics {
   readonly sessionId: string;
   readonly consumerId: string;
   readonly profileId: string;
@@ -148,9 +148,9 @@ export interface GraphSessionRuntimeDiagnosticsV1 {
   readonly frameScheduled: boolean;
   readonly animationFrameScheduled: boolean;
   readonly wakeTimerScheduled: boolean;
-  readonly pendingInvalidations: readonly SessionInvalidationClassV1[];
-  readonly lastFrameInvalidations: readonly SessionInvalidationClassV1[];
-  readonly invalidationCounts: Readonly<Record<SessionInvalidationClassV1, number>>;
+  readonly pendingInvalidations: readonly SessionInvalidationClass[];
+  readonly lastFrameInvalidations: readonly SessionInvalidationClass[];
+  readonly invalidationCounts: Readonly<Record<SessionInvalidationClass, number>>;
   readonly compositionsThisFrame: number;
   readonly maxCompositionsPerFrame: number;
   readonly compositionWork: Readonly<Record<string, number>>;
@@ -201,7 +201,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly experience: GraphExperienceContractV1;
   private readonly consciousness: Consciousness;
   private vision!: Vision;
-  private projection!: SessionProjectionCoordinatorV1;
+  private projection!: SessionProjectionCoordinator;
   private renderer!: GraphRendererV2;
   private rendererSelection!: GraphRendererSelectionV2;
   private renderSceneRevision = 0;
@@ -235,11 +235,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private readonly worldChangedListeners = new Set<(event: GraphWorldChangedEventV1) => void>();
   private readonly errorListeners = new Set<(error: GraphSessionErrorV1) => void>();
   private readonly overrideListeners = new Set<(overrides: GraphSettingsOverridesV1) => void>();
-  private scheduler!: SessionFrameSchedulerV1;
-  private readonly activity = new SessionActivityControllerV1();
-  private readonly diagnostics = new SessionDiagnosticsV1();
-  private activeFrameInvalidations: Set<SessionInvalidationClassV1> | null = null;
-  private readonly pendingCompositionInvalidations = new Set<SessionInvalidationClassV1>();
+  private scheduler!: SessionFrameScheduler;
+  private readonly activity = new SessionActivityController();
+  private readonly diagnostics = new SessionDiagnostics();
+  private activeFrameInvalidations: Set<SessionInvalidationClass> | null = null;
+  private readonly pendingCompositionInvalidations = new Set<SessionInvalidationClass>();
   private lastFrameTimestamp: number | null = null;
   private fatalModuleError: GraphRequiredModuleErrorV1 | null = null;
   private readonly deferredErrors: GraphSessionErrorV1[] = [];
@@ -370,7 +370,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (this.pendingCompositionInvalidations.size > 0) this.scheduleFrame();
   };
 
-  constructor(options: GraphSessionRuntimeOptionsV1) {
+  constructor(options: GraphSessionRuntimeOptions) {
     this.sessionId = options.sessionId;
     this.engineInstanceId = options.engineInstanceId;
     this.consumerId = options.consumerId;
@@ -388,7 +388,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.modules = options.modules;
     this.layoutAuthority = options.layoutAuthority ?? true;
     this.experience = resolveGraphExperienceContractV1(options.experience);
-    this.scheduler = new SessionFrameSchedulerV1(
+    this.scheduler = new SessionFrameScheduler(
       this.platform,
       () => !this.isSuspended(),
       this.onAnimationFrame,
@@ -444,12 +444,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         platform: this.platform,
         pixelRatioLimit: renderPixelRatioLimit(this.profile, this.store.readDocument().nodes.length),
       });
-      this.projection = new SessionProjectionCoordinatorV1(
+      this.projection = new SessionProjectionCoordinator(
         () => { this.diagnostics.counters.projectionPasses += 1; },
         () => { this.diagnostics.recordComposition(); },
       );
-      const capabilities = detectGraphRendererCapabilitiesV2(this.platform.document, this.platform.window);
-      this.rendererSelection = selectGraphRendererV2({
+      const capabilities = detectGraphRendererCapabilities(this.platform.document, this.platform.window);
+      this.rendererSelection = selectGraphRenderer({
         registry: options.rendererRegistry,
         capabilities,
         context: { createCanvas: () => this.surface.createRendererCanvas(), now: () => this.platform.now() },
@@ -1276,7 +1276,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.diagnostics.reset();
   }
 
-  getDiagnostics(): GraphSessionRuntimeDiagnosticsV1 {
+  getDiagnostics(): GraphSessionRuntimeDiagnostics {
     const document = this.store.readDocument();
     const activity = this.activity.snapshot(this.fatalModuleError !== null);
     const scheduler = this.scheduler.snapshot();
@@ -1497,7 +1497,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   private refreshFrame(
     schedule = true,
-    invalidation: SessionInvalidationClassV1 = 'presentation',
+    invalidation: SessionInvalidationClass = 'presentation',
   ): void {
     this.observeCommittedView();
     if (this.moduleView) {
@@ -1590,7 +1590,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     };
   }
 
-  private updateRendererScene(invalidations: readonly SessionInvalidationClassV1[]): void {
+  private updateRendererScene(invalidations: readonly SessionInvalidationClass[]): void {
     const frame = this.projection.frames.get();
     if (!frame) return;
     this.renderSceneRevision += 1;
@@ -1638,7 +1638,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.moduleHost.nodePositionChanged(nodeId, position, positions);
   }
 
-  private handleRuntimeViewChange(change: GraphRuntimeViewChangeV1): void {
+  private handleRuntimeViewChange(change: GraphRuntimeViewChange): void {
     const draggedNodeId = change === 'positions' ? this.interaction.getDraggedNodeId() : undefined;
     this.projectionView = {
       ...this.projectionView,
@@ -1971,7 +1971,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   private scheduleFrame(
     delayMs = 0,
-    invalidation: SessionInvalidationClassV1 = 'presentation',
+    invalidation: SessionInvalidationClass = 'presentation',
   ): void {
     if (this.activeFrameInvalidations !== null) {
       this.activeFrameInvalidations.add(invalidation);

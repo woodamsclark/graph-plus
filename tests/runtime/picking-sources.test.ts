@@ -1,5 +1,5 @@
 import { CommittedPickState } from '../../src/graph-engine/runtime/render/CommittedPickState.ts';
-import { CanvasGraphRenderer, GraphRendererRegistryV2, type GraphRenderSceneV2 } from '../../src/graph-engine/runtime/render/index.ts';
+import { CanvasGraphRenderer, GraphRendererRegistry, type GraphRenderSceneV2 } from '../../src/graph-engine/runtime/render/index.ts';
 import { runtimeHarness, runtimeCanvas } from '../support/runtimeHarness.ts';
 import { equal, deepEqual, assert, test } from '../support/harness.ts';
 import { GraphCameraController } from '../../src/graph-engine/runtime/camera/index.ts';
@@ -10,7 +10,7 @@ test('pointer hits leave the active renderer scene untouched until the display c
   let sceneUpdates = 0;
   const picks: { scene: GraphRenderSceneV2 | undefined; updates: number }[] = [];
   let scene: GraphRenderSceneV2 | undefined;
-  const registry = new GraphRendererRegistryV2();
+  const registry = new GraphRendererRegistry();
   registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true,
     create: ({ createCanvas, now }) => {
       const renderer = new CanvasGraphRenderer(createCanvas(), now);

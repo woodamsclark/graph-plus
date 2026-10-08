@@ -9,7 +9,7 @@ import type { InputGraphIdentityV1 } from './GraphInteractionTypes.ts';
  * Subject-local autonomic memory. A Reflex retains one short-lived receipt and
  * recognizes a later stimulus without owning the response that follows.
  */
-export class ReflexV1<Receipt extends InteractionReceiptV1> {
+export class Reflex<Receipt extends InteractionReceiptV1> {
   private current: Receipt | null = null;
 
   remember(receipt: Receipt): void {

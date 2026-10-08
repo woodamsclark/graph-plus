@@ -7,7 +7,7 @@ import type {
   GraphRendererSelectionV2,
 } from './GraphRenderer.ts';
 
-export class GraphRendererRegistryV2 {
+export class GraphRendererRegistry {
   private readonly factories = new Map<GraphRendererBackendIdV2, GraphRendererFactoryV2>();
 
   register(factory: GraphRendererFactoryV2): void {
@@ -20,8 +20,8 @@ export class GraphRendererRegistryV2 {
   }
 }
 
-export function createDefaultGraphRendererRegistryV2(): GraphRendererRegistryV2 {
-  const registry = new GraphRendererRegistryV2();
+export function createDefaultGraphRendererRegistry(): GraphRendererRegistry {
+  const registry = new GraphRendererRegistry();
   registry.register({
     backendId: 'canvas2d',
     priority: 0,
@@ -31,7 +31,7 @@ export function createDefaultGraphRendererRegistryV2(): GraphRendererRegistryV2 
   return registry;
 }
 
-export function detectGraphRendererCapabilitiesV2(document: Document, window: Window): GraphRendererCapabilitiesV2 {
+export function detectGraphRendererCapabilities(document: Document, window: Window): GraphRendererCapabilitiesV2 {
   const supports = (contextId: '2d' | 'webgl' | 'webgl2'): boolean => {
     try {
       return document.createElement('canvas').getContext(contextId) !== null;
@@ -47,8 +47,8 @@ export function detectGraphRendererCapabilitiesV2(document: Document, window: Wi
   };
 }
 
-export function selectGraphRendererV2(options: {
-  readonly registry: GraphRendererRegistryV2;
+export function selectGraphRenderer(options: {
+  readonly registry: GraphRendererRegistry;
   readonly capabilities: GraphRendererCapabilitiesV2;
   readonly context: GraphRendererFactoryContextV2;
   readonly preferredBackend?: GraphRendererBackendIdV2;

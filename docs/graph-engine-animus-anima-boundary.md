@@ -121,3 +121,16 @@ tokens to Anima and does not style individual graph primitives.
 - Theme-only changes do not rebuild topology or physics.
 - Visual and hit-test geometry derive from the same resolved scene.
 - Canonical graph and persisted view state never contain Anima presentation values.
+
+
+## Runtime names and compatibility
+
+SessionProjectionCoordinator, SessionFrameScheduler, SessionActivityController,
+SessionDiagnostics, AnimaHoverPreviewAnimation, Reflex and GraphRendererRegistry
+use plain implementation names. Their private records, factory options and runtime
+invalidation types follow the same rule. These objects have no competing versioned
+implementation and do not participate in persisted data or the external client.
+
+Protocol V1 documents, View state and GraphSession interfaces retain their names.
+Module/renderer extension interfaces and copied client contracts also retain their
+version labels. Existing error names/codes remain compatibility identifiers.

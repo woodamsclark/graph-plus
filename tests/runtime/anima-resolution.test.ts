@@ -2,7 +2,7 @@ import { runtimeHarness } from '../support/runtimeHarness.ts';
 import { GRAPH_PLUS_CONSUMER_REGISTRATION_V1 } from '../../src/graph-plus/consumer/GraphPlusRegistration.ts';
 import { equal, assert, test } from '../support/harness.ts';
 import type { GraphModuleHost } from '../../src/graph-engine/runtime/modules/GraphModuleHost.ts';
-import type { SessionProjectionCoordinatorV1 } from '../../src/graph-engine/runtime/session/SessionProjectionCoordinator.ts';
+import type { SessionProjectionCoordinator } from '../../src/graph-engine/runtime/session/SessionProjectionCoordinator.ts';
 
 test('live Anima dressing and scene compilation share one semantic presentation per compiled input', async () => {
   for (const dimensions of ['2d', '3d'] as const) {
@@ -10,7 +10,7 @@ test('live Anima dressing and scene compilation share one semantic presentation 
     value.profiles.setUserOverrides('graph-plus', 'default', { dimensions, modules: { 'force-layout': { enabled: false } } });
     const session = await value.create();
     try {
-      const probe = session as unknown as { moduleHost: GraphModuleHost; projection: SessionProjectionCoordinatorV1 };
+      const probe = session as unknown as { moduleHost: GraphModuleHost; projection: SessionProjectionCoordinator };
       const contribute = probe.moduleHost.contribute.bind(probe.moduleHost);
       let calls = 0;
       probe.moduleHost.contribute = input => {

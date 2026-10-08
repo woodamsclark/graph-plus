@@ -7,7 +7,7 @@ import {
   type InteractionReceiptEventV1,
   type InteractionReceiptV1,
 } from './InteractionReceipt.ts';
-import { ReflexV1 } from './Reflex.ts';
+import { Reflex } from './Reflex.ts';
 import type {
   GraphHitV1,
   GraphInputEventV1,
@@ -128,7 +128,7 @@ export class GraphInteractionInterpreter {
   private dimensions: GraphDimensionsV1;
   private lastPointerPoint: GraphScreenPointV1 | undefined;
   private pendingHover: Extract<GraphInputEventV1, { type: 'pointer-move' }> | null = null;
-  private readonly primaryTapReflex = new ReflexV1<PrimaryTapReceipt>();
+  private readonly primaryTapReflex = new Reflex<PrimaryTapReceipt>();
   private trackpadPinchMomentum: TrackpadPinchMomentum | null = null;
   private trackpadPinchMomentumTimer: number | null = null;
   private readonly tagging = new GraphTaggingController();

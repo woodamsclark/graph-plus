@@ -1,7 +1,7 @@
 import { Consciousness, DEFAULT_GRAPH_RENDER_THEME_V1, type GraphVisualThemeV2 } from '../../src/graph-engine/runtime/index.ts';
-import { CanvasGraphRenderer, GraphRendererRegistryV2, DEFAULT_GRAPH_PRESENTATION_POLICY_V2, type GraphRenderSceneV2 } from '../../src/graph-engine/runtime/render/index.ts';
+import { CanvasGraphRenderer, GraphRendererRegistry, DEFAULT_GRAPH_PRESENTATION_POLICY_V2, type GraphRenderSceneV2 } from '../../src/graph-engine/runtime/render/index.ts';
 import type { GraphModuleHost } from '../../src/graph-engine/runtime/modules/index.ts';
-import { SessionProjectionCoordinatorV1 } from '../../src/graph-engine/runtime/session/SessionProjectionCoordinator.ts';
+import { SessionProjectionCoordinator } from '../../src/graph-engine/runtime/session/SessionProjectionCoordinator.ts';
 import type { GraphViewStateV1 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { GRAPH_PLUS_CONSUMER_REGISTRATION_V1 } from '../../src/graph-plus/consumer/GraphPlusRegistration.ts';
 import { graphDocument, graphNode, graphEdge } from '../support/contractFixtures.ts';
@@ -11,7 +11,7 @@ import { assert, deepEqual, equal, test } from '../support/harness.ts';
 function previewHarness(dimensions: '2d' | '3d') {
   let theme: GraphVisualThemeV2 = DEFAULT_GRAPH_RENDER_THEME_V1;
   let scene: GraphRenderSceneV2 | undefined;
-  const registry = new GraphRendererRegistryV2();
+  const registry = new GraphRendererRegistry();
   registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true, create: ({ createCanvas, now }) => {
     const renderer = new CanvasGraphRenderer(createCanvas(), now);
     const update = renderer.updateScene.bind(renderer);
@@ -106,9 +106,9 @@ test('cached target compilation stays independent of live position and camera up
     if (state.objectActivationPreview) targetCompilations += 1;
     return state;
   } } as unknown as GraphModuleHost;
-  const coordinator = new SessionProjectionCoordinatorV1(() => {}, () => {});
+  const coordinator = new SessionProjectionCoordinator(() => {}, () => {});
   const selection = { nodeIds: new Set(document.nodes.map(node => node.id)), edgeIds: new Set<string>() };
-  const options: Parameters<SessionProjectionCoordinatorV1['compose']>[0] = {
+  const options: Parameters<SessionProjectionCoordinator['compose']>[0] = {
     host, consciousness: new Consciousness(), viewState,
     projectionView: { sourceDocument: document, document, viewState, positions: viewState.positions,
       projectionSelection: selection, renderSelection: selection, formActive: false,

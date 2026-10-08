@@ -296,7 +296,7 @@ interface GraphRendererV2 {
   initialize(context: GraphRendererInitializeContextV2): Promise<void>;
   resize(viewport: GraphRenderViewportV2): void;
   updateTheme(theme: GraphVisualThemeV2): void;
-  updateScene(scene: GraphRenderSceneV2, invalidations: readonly SessionInvalidationClassV1[]): void;
+  updateScene(scene: GraphRenderSceneV2, invalidations: readonly SessionInvalidationClass[]): void;
   render(): GraphRenderTimingV2;
   pick(request: GraphPickRequestV2): GraphPickResultV2 | null;
   getDiagnostics(): GraphRendererDiagnosticsV2;

@@ -1,5 +1,5 @@
 import { Vision, type ProjectedGraphPointV1 } from '../vision/index.ts';
-import type { SessionInvalidationClassV1 } from '../session/SessionFrameScheduler.ts';
+import type { SessionInvalidationClass } from '../session/SessionFrameScheduler.ts';
 import type {
   GraphPickRequestV2,
   GraphPickFrame,
@@ -83,7 +83,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   private indexedWidth = -1;
   private indexedHeight = -1;
   private hitShapePolicyKey = '';
-  private readonly pendingInvalidations = new Set<SessionInvalidationClassV1>();
+  private readonly pendingInvalidations = new Set<SessionInvalidationClass>();
   private spatialIndexBuilds = 0;
   private nodeLookupRefreshes = 0;
   private projectedLookupBuilds = 0;
@@ -231,7 +231,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
 
   updateTheme(_theme: import('../theme/index.ts').GraphVisualThemeV2): void {}
 
-  updateScene(scene: GraphRenderSceneV2, invalidations: readonly SessionInvalidationClassV1[] = []): void {
+  updateScene(scene: GraphRenderSceneV2, invalidations: readonly SessionInvalidationClass[] = []): void {
     for (const reason of invalidations) this.pendingInvalidations.add(reason);
     this.scene = scene;
     if (!this.vision) this.vision = new Vision(scene.view.camera, scene.view.dimensions);

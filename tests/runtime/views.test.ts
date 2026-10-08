@@ -1,7 +1,7 @@
 import { graphPlusEngineExperienceContractV1, graphPlusExperiencePolicyV1 } from '../../src/graph-plus/application/GraphPlusExperiencePolicy.ts';
 import { DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1, GRAPH_VIEW_DEFINITIONS_V1, type GraphSessionV1 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { Judgement } from '../../src/graph-engine/runtime/consciousness/Judgement.ts';
-import { CanvasGraphRenderer, GraphRendererRegistryV2, type GraphRenderSceneV2 } from '../../src/graph-engine/runtime/render/index.ts';
+import { CanvasGraphRenderer, GraphRendererRegistry, type GraphRenderSceneV2 } from '../../src/graph-engine/runtime/render/index.ts';
 import { GraphCameraController, type GraphSessionRuntime } from '../../src/graph-engine/runtime/index.ts';
 import { DEFAULT_GRAPH_RENDER_THEME_V1 } from '../../src/graph-engine/runtime/render/index.ts';
 import { multiplyGraphColorAlphaV2 } from '../../src/graph-engine/runtime/theme/index.ts';
@@ -370,7 +370,7 @@ test('Memory constellation colors, visibility, and adoption agree across Views, 
   for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
     for (const animaEnabled of [false, true]) {
       let scene: GraphRenderSceneV2 | undefined;
-      const registry = new GraphRendererRegistryV2();
+      const registry = new GraphRendererRegistry();
       registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true,
         create: ({ createCanvas, now }) => {
           const renderer = new CanvasGraphRenderer(createCanvas(), now);
@@ -455,7 +455,7 @@ test('Memory constellation colors, visibility, and adoption agree across Views, 
 test('Committed activation holds its admitted preview until pointer leave', async () => {
   for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
     let scene: GraphRenderSceneV2 | undefined;
-    const registry = new GraphRendererRegistryV2();
+    const registry = new GraphRendererRegistry();
     registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true,
       create: ({ createCanvas, now }) => {
         const renderer = new CanvasGraphRenderer(createCanvas(), now);
@@ -511,7 +511,7 @@ test('Committed activation holds its admitted preview until pointer leave', asyn
 test('Overview node drag holds the admitted Constellation preview without replanning it', async () => {
   for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
     let scene: GraphRenderSceneV2 | undefined;
-    const registry = new GraphRendererRegistryV2();
+    const registry = new GraphRendererRegistry();
     registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true,
       create: ({ createCanvas, now }) => {
         const renderer = new CanvasGraphRenderer(createCanvas(), now);
@@ -563,7 +563,7 @@ test('Selective hover previews preserve committed state in 2D and 3D with and wi
   for (const profileId of ['two-dimensional', 'three-dimensional'] as const) {
     for (const animaEnabled of [false, true]) {
       let scene: GraphRenderSceneV2 | undefined;
-      const registry = new GraphRendererRegistryV2();
+      const registry = new GraphRendererRegistry();
       registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true,
         create: ({ createCanvas, now }) => {
           const renderer = new CanvasGraphRenderer(createCanvas(), now);

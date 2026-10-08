@@ -1,7 +1,7 @@
-import { AnimaHoverPreviewAnimationV1, blendAnimaPreviewFrameV1 } from '../../src/graph-engine/runtime/anima/AnimaHoverPreviewAnimation.ts';
+import { AnimaHoverPreviewAnimation, blendAnimaPreviewFrame } from '../../src/graph-engine/runtime/anima/AnimaHoverPreviewAnimation.ts';
 import type { GraphRenderFrameV1 } from '../../src/graph-engine/runtime/render/GraphRenderTypes.ts';
 import type { GraphInteractionPreviewV1 } from '../../src/graph-engine/runtime/anima/AnimaInteractionPreview.ts';
-import { CanvasGraphRenderer, GraphRendererRegistryV2, type GraphRenderSceneV2 } from '../../src/graph-engine/runtime/render/index.ts';
+import { CanvasGraphRenderer, GraphRendererRegistry, type GraphRenderSceneV2 } from '../../src/graph-engine/runtime/render/index.ts';
 import { GraphCameraController } from '../../src/graph-engine/runtime/index.ts';
 import { GRAPH_PLUS_CONSUMER_REGISTRATION_V1 } from '../../src/graph-plus/consumer/GraphPlusRegistration.ts';
 import { graphDocument, graphNode, graphEdge } from '../support/contractFixtures.ts';
@@ -28,7 +28,7 @@ test('Anima cached highlight targets preserve the moving live world through full
       { ...initial.nodes[0], id: 'preview-only' }],
     edges: [{ ...initial.edges[0], thickness: 99, sourceId: 'preview-only', opacity: 1 }],
   };
-  const animation = new AnimaHoverPreviewAnimationV1();
+  const animation = new AnimaHoverPreviewAnimation();
   const layers = (now: number) => animation.update({ context: 'world', preview, hoveredNodeId: 'a', committed: false, now });
   layers(0);
   for (const [now, x, expectedStrength] of [[450, 10, 0.5], [700, 20, 1], [800, 30, 1]]) {
@@ -38,7 +38,7 @@ test('Anima cached highlight targets preserve the moving live world through full
     };
     const strength = layers(now)[0].strength;
     equal(strength, expectedStrength, 'the highlight reaches and retains full strength');
-    const result = blendAnimaPreviewFrameV1(live, cached, strength);
+    const result = blendAnimaPreviewFrame(live, cached, strength);
     deepEqual(result.nodes[0].position, live.nodes[0].position, 'cached visuals cannot snap a moving node back');
     deepEqual(result.nodes.map(node => node.id), ['a', 'live-only'], 'membership comes from the live baseline');
     equal(result.nodes[0].radius, 5, 'node geometry comes from the live baseline');
@@ -48,14 +48,14 @@ test('Anima cached highlight targets preserve the moving live world through full
     equal(result.nodes[0].opacity, 0.25 + 0.75 * strength, 'highlight visuals interpolate to the cached target');
     equal(result.edges[0].opacity, 0.25 + 0.75 * strength, 'edge visuals interpolate to the cached target');
     equal(result.regions, live.regions, 'other world state stays on the live baseline');
-    equal(blendAnimaPreviewFrameV1(live, cached, -1), live, 'negative strength returns the baseline');
-    deepEqual(blendAnimaPreviewFrameV1(live, cached, 2), blendAnimaPreviewFrameV1(live, cached, 1),
+    equal(blendAnimaPreviewFrame(live, cached, -1), live, 'negative strength returns the baseline');
+    deepEqual(blendAnimaPreviewFrame(live, cached, 2), blendAnimaPreviewFrame(live, cached, 1),
       'strength above one clamps visuals while retaining live geometry');
   }
 });
 
 test('Anima cancels waiting previews and reverses partial fades without jumping', () => {
-  const animation = new AnimaHoverPreviewAnimationV1();
+  const animation = new AnimaHoverPreviewAnimation();
   const update = (now: number, id?: string, committed = false, context = 'overview') => animation.update({
     context, preview: id ? preview : null, hoveredNodeId: id, committed, now,
   });
@@ -81,7 +81,7 @@ test('Anima delays and fades each View preview in and out in 2D and 3D without m
   for (const dimensions of ['2d', '3d'] as const) {
     for (const viewMode of ['overview', 'explore', 'focus'] as const) {
       let scene: GraphRenderSceneV2 | undefined;
-      const registry = new GraphRendererRegistryV2();
+      const registry = new GraphRendererRegistry();
       registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true, create: ({ createCanvas, now }) => {
         const renderer = new CanvasGraphRenderer(createCanvas(), now);
         const update = renderer.updateScene.bind(renderer);
@@ -152,7 +152,7 @@ test('Cmd note preview holds hover styling through card handoff and release unti
   for (const dimensions of ['2d', '3d'] as const) {
     for (const viewMode of ['overview', 'explore', 'focus'] as const) {
       let scene: GraphRenderSceneV2 | undefined;
-      const registry = new GraphRendererRegistryV2();
+      const registry = new GraphRendererRegistry();
       registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true, create: ({ createCanvas, now }) => {
         const renderer = new CanvasGraphRenderer(createCanvas(), now);
         const update = renderer.updateScene.bind(renderer);
@@ -213,7 +213,7 @@ test('Cmd note preview holds hover styling through card handoff and release unti
 test('Focus hover keeps its label visible through the delay and grows it continuously to root size', async () => {
   for (const dimensions of ['2d', '3d'] as const) {
     let scene: GraphRenderSceneV2 | undefined;
-    const registry = new GraphRendererRegistryV2();
+    const registry = new GraphRendererRegistry();
     registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true, create: ({ createCanvas, now }) => {
       const renderer = new CanvasGraphRenderer(createCanvas(), now);
       const update = renderer.updateScene.bind(renderer);

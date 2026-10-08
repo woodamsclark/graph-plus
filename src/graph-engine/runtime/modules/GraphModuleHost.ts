@@ -12,7 +12,7 @@ import type {
 } from '../render/index.ts';
 import type { GraphModuleRegistry } from './GraphModuleRegistry.ts';
 import type {
-  ActiveGraphModuleV1,
+  ActiveGraphModule,
   GraphModuleChoreographyPatchV1,
   GraphModuleFailureV1,
   GraphModuleHookV1,
@@ -34,7 +34,7 @@ export class GraphRequiredModuleErrorV1 extends Error {
 }
 
 export class GraphModuleHost {
-  private readonly active: ActiveGraphModuleV1[] = [];
+  private readonly active: ActiveGraphModule[] = [];
   private readonly registry: GraphModuleRegistry;
   private readonly sessionId: string;
   private themePalette: GraphVisualThemeV2;
@@ -211,7 +211,7 @@ export class GraphModuleHost {
           this.onFailure({ moduleId: current.id, policy: current.policy, hook: 'dispose', error });
         }
       }
-      const active: ActiveGraphModuleV1 = {
+      const active: ActiveGraphModule = {
         id: desired.id,
         policy: desired.policy,
         order: definition.order,
@@ -496,7 +496,7 @@ export class GraphModuleHost {
     }
   }
 
-  private failActiveModule(module: ActiveGraphModuleV1, hook: GraphModuleHookV1, error: unknown): void {
+  private failActiveModule(module: ActiveGraphModule, hook: GraphModuleHookV1, error: unknown): void {
     const index = this.active.indexOf(module);
     if (index >= 0) this.active.splice(index, 1);
     try { module.instance.dispose?.(); } catch (disposeError) {

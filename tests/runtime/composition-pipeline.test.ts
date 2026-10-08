@@ -1,5 +1,5 @@
 import { compileAnimaPickFrame } from '../../src/graph-engine/runtime/anima/AnimaSceneCompiler.ts';
-import { SessionProjectionCoordinatorV1 } from '../../src/graph-engine/runtime/session/SessionProjectionCoordinator.ts';
+import { SessionProjectionCoordinator } from '../../src/graph-engine/runtime/session/SessionProjectionCoordinator.ts';
 import { Consciousness } from '../../src/graph-engine/runtime/consciousness/index.ts';
 import type { GraphModuleHost, GraphModulePresentationStateV1 } from '../../src/graph-engine/runtime/modules/index.ts';
 import type { GraphInteractionPreviewV1 } from '../../src/graph-engine/runtime/anima/AnimaInteractionPreview.ts';
@@ -23,8 +23,8 @@ function pipelineFixture(dimensions: '2d' | '3d', animated = true) {
     return { ...state, nodeContributions: { b: { labelFontSize: state.objectActivationPreview ? 32 : 8 }, outside: { opacity: 0.1 } } };
   } } as unknown as GraphModuleHost;
   let compositions = 0;
-  const coordinator = new SessionProjectionCoordinatorV1(() => {}, () => { compositions += 1; });
-  const options: Parameters<SessionProjectionCoordinatorV1['compose']>[0] = { host, consciousness: new Consciousness(), viewState,
+  const coordinator = new SessionProjectionCoordinator(() => {}, () => { compositions += 1; });
+  const options: Parameters<SessionProjectionCoordinator['compose']>[0] = { host, consciousness: new Consciousness(), viewState,
     projectionView: { sourceDocument: document, document, viewState, positions: viewState.positions,
       projectionSelection: selection, renderSelection: selection, formActive: false,
       nodeRoles: {}, edgeRoles: {}, regions: [], regionLayouts: [] },
@@ -152,7 +152,7 @@ test('geometry reuse expires for changed hover, pins, Memory and content; unknow
   const value = pipelineFixture('2d');
   value.options.host.canReuseGeometryPresentation = () => true;
   value.coordinator.compose(value.options);
-  let options: Parameters<SessionProjectionCoordinatorV1['compose']>[0] = { ...value.options, invalidation: 'geometry' };
+  let options: Parameters<SessionProjectionCoordinator['compose']>[0] = { ...value.options, invalidation: 'geometry' };
   value.coordinator.compose(options);
   equal(value.calls.length, 1, 'stable geometry reuses the baseline');
   options = { ...options, hoveredNodeId: 'b' };

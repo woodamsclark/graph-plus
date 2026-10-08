@@ -1,7 +1,7 @@
 import { Window } from 'happy-dom';
 import {
-  SessionActivityControllerV1,
-  SessionFrameSchedulerV1,
+  SessionActivityController,
+  SessionFrameScheduler,
 } from '../../src/graph-engine/runtime/index.ts';
 import { deepEqual, equal, assert, test } from '../support/harness.ts';
 import { InstrumentedPlatform, runtimeHarness } from '../support/runtimeHarness.ts';
@@ -14,8 +14,8 @@ test('V1.9 frame scheduler owns delayed wakes, coalesces invalidations, and clea
   let scheduled = 0;
   let frames = 0;
   let invalidations: readonly string[] = [];
-  let scheduler!: SessionFrameSchedulerV1;
-  scheduler = new SessionFrameSchedulerV1(
+  let scheduler!: SessionFrameScheduler;
+  scheduler = new SessionFrameScheduler(
     platform,
     () => active,
     () => {
@@ -47,7 +47,7 @@ test('V1.9 frame scheduler owns delayed wakes, coalesces invalidations, and clea
 });
 
 test('V1.9 activity controller centralizes manual, document, and disposal state', () => {
-  const activity = new SessionActivityControllerV1();
+  const activity = new SessionActivityController();
   equal(activity.isSuspended(), false, 'a new session should be active');
   equal(activity.setManualSuspension(true), true, 'the first transition should be observable');
   equal(activity.setManualSuspension(true), false, 'an unchanged transition should be ignored');

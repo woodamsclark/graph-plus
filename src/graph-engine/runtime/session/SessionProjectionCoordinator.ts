@@ -1,4 +1,4 @@
-import { AnimaHoverPreviewAnimationV1, blendAnimaPreviewFrameV1 } from '../anima/AnimaHoverPreviewAnimation.ts';
+import { AnimaHoverPreviewAnimation, blendAnimaPreviewFrame } from '../anima/AnimaHoverPreviewAnimation.ts';
 import type { GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
 import type { GraphViewStateV1, GraphExperienceContractV1 } from '../../contracts/v1/index.ts';
 import { GraphTopologyIndex } from '../../core/document/GraphTopologyIndex.ts';
@@ -22,7 +22,7 @@ import {
   type GraphRenderTimingV1,
 } from '../render/index.ts';
 import type { GraphVisualThemeV2 } from '../theme/index.ts';
-import type { SessionInvalidationClassV1 } from './SessionFrameScheduler.ts';
+import type { SessionInvalidationClass } from './SessionFrameScheduler.ts';
 
 interface CompositionOptions {
   readonly host: GraphModuleHost;
@@ -38,7 +38,7 @@ interface CompositionOptions {
   readonly selectionPresentationSuspended?: boolean;
   readonly selectionNeighborRevealActive?: boolean;
   readonly previewedNodeId?: string;
-  readonly invalidation: SessionInvalidationClassV1;
+  readonly invalidation: SessionInvalidationClass;
   readonly now: number;
   readonly previewCommitted?: boolean;
 }
@@ -49,11 +49,11 @@ interface PresentationFrame {
 }
 
 /** Owns the projection-to-frame boundary and its render dirty state for one session. */
-export class SessionProjectionCoordinatorV1 {
+export class SessionProjectionCoordinator {
   readonly frames = new GraphFrameStore();
   readonly committedPickState = new CommittedPickState();
   private dirty = true;
-  private readonly hoverAnimation = new AnimaHoverPreviewAnimationV1();
+  private readonly hoverAnimation = new AnimaHoverPreviewAnimation();
   private previewTargetContext?: string;
   private previewPresentationContext?: string;
   private readonly previewTargetFrames = new Map<string, GraphRenderFrameV1>();
@@ -302,7 +302,7 @@ export class SessionProjectionCoordinatorV1 {
         this.previewTargetFrames.set(layer.key, targetFrame);
       }
 
-      frame = blendAnimaPreviewFrameV1(
+      frame = blendAnimaPreviewFrame(
         frame,
         targetFrame,
         layer.strength,

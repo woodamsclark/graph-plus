@@ -12,7 +12,7 @@ interface PreviewVisit {
   readonly enteredAt: number;
 }
 
-export interface AnimaPreviewLayerV1 {
+export interface AnimaPreviewLayer {
   readonly key: string;
   readonly preview: GraphInteractionPreviewV1;
   readonly hoveredNodeId: string;
@@ -20,7 +20,7 @@ export interface AnimaPreviewLayerV1 {
 }
 
 /** Anima owns transient hover timing. The session supplies its clock and wakeups. */
-export class AnimaHoverPreviewAnimationV1 {
+export class AnimaHoverPreviewAnimation {
   private context?: string;
   private sampledAt = 0;
   private visit?: PreviewVisit;
@@ -32,7 +32,7 @@ export class AnimaHoverPreviewAnimationV1 {
     readonly hoveredNodeId?: string;
     readonly committed: boolean;
     readonly now: number;
-  }): readonly AnimaPreviewLayerV1[] {
+  }): readonly AnimaPreviewLayer[] {
     if (this.context !== input.context || input.committed) this.clear();
     this.context = input.context;
     this.sampledAt = input.now;
@@ -48,7 +48,7 @@ export class AnimaHoverPreviewAnimationV1 {
         enteredAt: input.committed ? input.now - DELAY_MS - FADE_MS : input.now,
       } : undefined;
     }
-    const layers: AnimaPreviewLayerV1[] = [];
+    const layers: AnimaPreviewLayer[] = [];
     if (this.leaving) {
       const strength = this.leaving.strength * Math.max(0, 1 - (input.now - this.leaving.leftAt) / FADE_MS);
       if (strength > 0) layers.push({ ...this.leaving.visit, strength });
@@ -80,7 +80,7 @@ export class AnimaHoverPreviewAnimationV1 {
 }
 
 /** Blend resolved visuals, never graph membership, camera, geometry or View state. */
-export function blendAnimaPreviewFrameV1(
+export function blendAnimaPreviewFrame(
   baseline: GraphRenderFrameV1, preview: GraphRenderFrameV1, strength: number,
 ): GraphRenderFrameV1 {
   const t = Math.max(0, Math.min(1, strength));

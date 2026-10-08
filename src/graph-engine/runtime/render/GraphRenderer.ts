@@ -1,5 +1,5 @@
 import type { GraphCameraStateV1, GraphDimensionsV1, Vec3 } from '../../contracts/v1/index.ts';
-import type { SessionInvalidationClassV1 } from '../session/index.ts';
+import type { SessionInvalidationClass } from '../session/index.ts';
 import type { GraphVisualThemeV2 } from '../theme/index.ts';
 import type { GraphRenderFrameV1, GraphRenderNodeV1 } from './GraphRenderTypes.ts';
 import type { GraphRenderTimingV1 } from './CanvasGraphRenderer.ts';
@@ -97,7 +97,7 @@ export interface GraphRendererV2 {
   initialize(): void | Promise<void>;
   resize(viewport: GraphRenderViewportV2): void;
   updateTheme(theme: GraphVisualThemeV2): void;
-  updateScene(scene: GraphRenderSceneV2, invalidations: readonly SessionInvalidationClassV1[]): void;
+  updateScene(scene: GraphRenderSceneV2, invalidations: readonly SessionInvalidationClass[]): void;
   render(): GraphRenderTimingV1;
   pick(request: GraphPickRequestV2, source?: GraphPickSourceV2): GraphPickResultV2 | null;
   queryNearest(request: GraphNearestNodeRequestV2, source?: GraphPickSourceV2): GraphNearestNodeResultV2 | null;

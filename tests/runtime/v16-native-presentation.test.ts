@@ -11,7 +11,7 @@ import {
   DEFAULT_GRAPH_RENDER_THEME_V1,
   DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
   GraphFrameStore,
-  GraphRendererRegistryV2,
+  GraphRendererRegistry,
   type GraphRenderSceneV2,
 } from '../../src/graph-engine/runtime/render/index.ts';
 import { desaturateGraphColorV2, parseGraphColorV2 } from '../../src/graph-engine/runtime/theme/index.ts';
@@ -205,7 +205,7 @@ test('cursor gravity pulls only the nearest eligible node and never a runner-up 
 test('Overview completes timed previews only on node hover, independently of cursor gravity range', async () => {
   for (const dimensions of ['2d', '3d'] as const) {
     let scene: GraphRenderSceneV2 | undefined;
-    const registry = new GraphRendererRegistryV2();
+    const registry = new GraphRendererRegistry();
     registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true, create: ({ createCanvas, now }) => {
       const renderer = new CanvasGraphRenderer(createCanvas(), now);
       const update = renderer.updateScene.bind(renderer);
@@ -353,7 +353,7 @@ test('proximity mode labels fade identically for Overview standard and Constella
 
 test('live label modes separate absolute Off, cursor proximity, and adaptive labels', async () => {
   let scene: GraphRenderSceneV2 | undefined;
-  const registry = new GraphRendererRegistryV2();
+  const registry = new GraphRendererRegistry();
   registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true, create: ({ createCanvas, now }) => {
     const renderer = new CanvasGraphRenderer(createCanvas(), now); const update = renderer.updateScene.bind(renderer);
     renderer.updateScene = next => { scene = next; update(next); }; return renderer;
@@ -2163,7 +2163,7 @@ test('Space physics override restores an enabled solver to its settled activity 
 
 test('hover suspends cursor label proximity while retaining View labels and resumes on empty space', async () => {
   let scene: GraphRenderSceneV2 | undefined;
-  const registry = new GraphRendererRegistryV2();
+  const registry = new GraphRendererRegistry();
   registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true, create: ({ createCanvas, now }) => {
     const renderer = new CanvasGraphRenderer(createCanvas(), now);
     const update = renderer.updateScene.bind(renderer);
@@ -2196,7 +2196,7 @@ test('hover suspends cursor label proximity while retaining View labels and resu
 test('Local Focus ignores background exits and document link hover uses the node peek lifecycle', async () => {
   for (const dimensions of ['2d', '3d'] as const) {
     let scene: GraphRenderSceneV2 | undefined;
-    const registry = new GraphRendererRegistryV2();
+    const registry = new GraphRendererRegistry();
     registry.register({ backendId: 'canvas2d', priority: 0, supports: () => true, create: ({ createCanvas, now }) => {
       const renderer = new CanvasGraphRenderer(createCanvas(), now);
       const update = renderer.updateScene.bind(renderer);

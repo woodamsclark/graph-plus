@@ -40,7 +40,7 @@ import type {
   GraphScreenPointV1,
 } from './GraphInteractionTypes.ts';
 
-export type GraphRuntimeViewChangeV1 = 'camera' | 'interaction' | 'layout' | 'positions';
+export type GraphRuntimeViewChange = 'camera' | 'interaction' | 'layout' | 'positions';
 
 export class SessionInteractionRuntime {
   private readonly inputEvents = new BufferedQueue<GraphInputEventV1>();
@@ -128,7 +128,7 @@ export class SessionInteractionRuntime {
     readonly resetCamera: () => void;
     readonly getDragReleasePolicy: () => 'pin' | 'dynamic';
     readonly getDragConstraintPolicy?: () => 'persistent-pin' | 'transient';
-    readonly onViewStateChanged: (change: GraphRuntimeViewChangeV1) => void;
+    readonly onViewStateChanged: (change: GraphRuntimeViewChange) => void;
     readonly onIntent: (intent: GraphIntentV1) => void;
     readonly onActivateNode: (nodeId: string) => boolean;
     readonly onInputQueued?: () => void;

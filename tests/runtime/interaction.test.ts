@@ -6,7 +6,7 @@ import {
   ANIMA_STATE_PRESENTATION_POLICIES_V1,
   GRAPH_INTERACTION_STATE_POLICIES_V1,
   GraphCameraController,
-  ReflexV1,
+  Reflex,
   appendInteractionReceiptEventV1,
   decideInteractionReceiptV1,
 } from '../../src/graph-engine/runtime/index.ts';
@@ -79,7 +79,7 @@ test('interaction receipts are immutable evidence adjudicated by a pure matcher'
     ['press', 90], ['release', 100],
   ], 'receipt evidence should retain ordered press and release timing');
 
-  const reflex = new ReflexV1<typeof receipt>();
+  const reflex = new Reflex<typeof receipt>();
   reflex.remember(receipt);
   equal(reflex.recognize({ identity, timestamp: 200, subjectId: 'a' }, matcher).status, 'matched',
     'a Reflex should recognize later local stimulus from its retained receipt');

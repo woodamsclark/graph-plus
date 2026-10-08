@@ -206,7 +206,7 @@ export interface GraphModuleDefinitionV1 {
   readonly create: (context: GraphModuleFactoryContextV1) => GraphModuleInstanceV1;
 }
 
-export interface ActiveGraphModuleV1 {
+export interface ActiveGraphModule {
   readonly id: string;
   readonly policy: EngineModulePolicyV1;
   readonly order: number;

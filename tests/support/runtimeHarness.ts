@@ -13,7 +13,7 @@ import {
   type GraphVisualThemeV2,
   type GraphNodeActionRuntimeV1,
   type GraphRendererBackendIdV2,
-  type GraphRendererRegistryV2,
+  type GraphRendererRegistry,
   type SessionResizeObserverV1,
   type SessionRuntimePlatformV1,
 } from '../../src/graph-engine/runtime/index.ts';
@@ -200,7 +200,7 @@ export function runtimeHarness(options: {
   resolveThemePalette?: (container: HTMLElement) => GraphVisualThemeV2;
   nodeActions?: GraphNodeActionRuntimeV1;
   realTime?: boolean;
-  rendererRegistry?: GraphRendererRegistryV2;
+  rendererRegistry?: GraphRendererRegistry;
   preferredRendererBackend?: GraphRendererBackendIdV2;
 } = {}) {
   const window = new Window();

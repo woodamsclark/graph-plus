@@ -1,4 +1,4 @@
-import { CanvasGraphRenderer, GraphRendererRegistryV2, type GraphRenderSceneV2 } from '../../src/graph-engine/runtime/render/index.ts';
+import { CanvasGraphRenderer, GraphRendererRegistry, type GraphRenderSceneV2 } from '../../src/graph-engine/runtime/render/index.ts';
 import { GraphLabelRecordCache } from '../../src/graph-engine/runtime/render/GraphLabelRecordCache.ts';
 import { GRAPH_PLUS_CONSUMER_REGISTRATION_V1 } from '../../src/graph-plus/consumer/GraphPlusRegistration.ts';
 import { graphDocument, graphNode, graphEdge } from '../support/contractFixtures.ts';
@@ -7,7 +7,7 @@ import { assert, deepEqual, equal, test } from '../support/harness.ts';
 
 function labelHarness(dimensions: '2d' | '3d', records = false) {
   let scene: GraphRenderSceneV2 | undefined;
-  const registry = new GraphRendererRegistryV2();
+  const registry = new GraphRendererRegistry();
   registry.register({ backendId: records ? 'webgl2' : 'canvas2d', priority: 0, supports: () => true,
     create: ({ createCanvas, now }) => {
       const renderer = new CanvasGraphRenderer(createCanvas(), now);
