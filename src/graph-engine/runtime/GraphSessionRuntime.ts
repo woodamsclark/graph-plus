@@ -22,6 +22,8 @@ import type {
   GraphViewStateV1,
   GraphWorldChangedEventV1,
   GraphWorldStateV1,
+  GraphWorldPositionsV1,
+  GraphWorldInvalidatedEventV1,
   GraphActiveViewV1,
   GraphViewIdV1,
   GraphViewUiStateV1,
@@ -30,7 +32,7 @@ import type {
 } from '../contracts/v1/index.ts';
 import { GRAPH_VIEW_DEFINITIONS_V1 } from '../contracts/v1/index.ts';
 import { GraphDocumentStore, GraphTopologyIndex } from '../core/document/index.ts';
-import { evaluateGraphFilterV1, type GraphFilterSelectionV1 } from '../core/filter/index.ts';
+import { validateGraphFilterRequestV1, InvalidGraphFilterErrorV1, type GraphFilterSelectionV1 } from '../core/filter/index.ts';
 import type { EffectiveConsumerProfileV1 } from '../core/profile/index.ts';
 import {
   cloneGraphViewStateV1,
@@ -232,6 +234,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private topologyRevision = 0;
   private readonly intentListeners = new Set<(intent: GraphIntentV1) => void>();
   private readonly graphChangedListeners = new Set<(event: GraphChangedEventV1) => void>();
+  private projectionBatch = false;
+  private projectionPending = false;
+  private readonly worldInvalidatedListeners = new Set<(event: GraphWorldInvalidatedEventV1) => void>();
   private readonly worldChangedListeners = new Set<(event: GraphWorldChangedEventV1) => void>();
   private readonly errorListeners = new Set<(error: GraphSessionErrorV1) => void>();
   private readonly overrideListeners = new Set<(overrides: GraphSettingsOverridesV1) => void>();
@@ -646,20 +651,25 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     if (!this.moduleHost.has(SHIPPED_GRAPH_MODULE_IDS_V1.filtering)) {
       throw new Error('Filtering is unavailable in the active graph profile.');
     }
-    evaluateGraphFilterV1(this.store.readDocument(), filter);
-    this.viewState = cloneGraphViewStateV1({
-      ...this.viewState,
-      activeFilters: {
-        ...this.viewState.activeFilters,
-        [filter.scope]: cloneFilter(filter),
-      },
-    });
+    if (!this.installFilter(filter)) return;
     this.moduleHost.viewChanged(this.viewState);
     this.recomputeView();
   }
 
+  private installFilter(filter: GraphFilterRequestV1): boolean {
+    const errors = validateGraphFilterRequestV1(filter);
+    if (errors.length) throw new InvalidGraphFilterErrorV1(errors);
+    if (JSON.stringify(this.viewState.activeFilters[filter.scope]) === JSON.stringify(filter)) return false;
+    this.viewState = { ...this.viewState, activeFilters: {
+      ...this.viewState.activeFilters, [filter.scope]: cloneFilter(filter),
+    } };
+    return true;
+  }
+
   async clearFilter(scope?: GraphFilterScopeV1): Promise<void> {
     this.requireActive();
+    if (scope === undefined ? Object.keys(this.viewState.activeFilters).length === 0
+      : this.viewState.activeFilters[scope] === undefined) return;
     const activeFilters = { ...this.viewState.activeFilters };
     if (scope === undefined) {
       delete activeFilters.render;
@@ -963,7 +973,29 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     };
   }
 
+  async exportWorldPositions(): Promise<GraphWorldPositionsV1> {
+    this.requireActive();
+    const document = this.store.readDocument();
+    return { schemaVersion: 1, documentId: document.documentId, documentRevision: document.revision,
+      dimensions: this.profile.dimensions, positions: clonePositions(this.viewState.positions),
+      pinnedNodeIds: [...this.viewState.pinnedNodeIds] };
+  }
+
+  async applyWorldPositions(state: GraphWorldPositionsV1): Promise<void> {
+    this.requireActive();
+    this.applyWorldGeometry(state);
+  }
+
   async applyWorldState(state: GraphWorldStateV1): Promise<void> {
+    this.requireActive();
+    const document = this.store.readDocument();
+    if (state.documentId !== document.documentId || state.documentRevision !== document.revision
+      || state.dimensions !== this.profile.dimensions) return;
+    this.moduleHost.restoreCapabilityState('layout', state.layoutModuleState);
+    this.applyWorldGeometry(state);
+  }
+
+  private applyWorldGeometry(state: GraphWorldPositionsV1): void {
     this.requireActive();
     const document = this.store.readDocument();
     if (state.documentId !== document.documentId || state.documentRevision !== document.revision) return;
@@ -976,13 +1008,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const pinnedNodeIds = [...new Set(state.pinnedNodeIds)].filter((nodeId) => known.has(nodeId));
     const geometryChanged = !samePositions(positions, this.viewState.positions)
       || !sameIds(pinnedNodeIds, this.viewState.pinnedNodeIds);
-    this.moduleHost.restoreCapabilityState('layout', state.layoutModuleState);
     if (!geometryChanged) return;
     const previousFollowPoint = this.vision.deriveCentroid(
       this.interaction.getCameraTrackingNodeIds(),
       this.viewState.positions,
     );
-    this.viewState = cloneGraphViewStateV1({ ...this.viewState, positions, pinnedNodeIds });
+    this.viewState = { ...this.viewState, positions, pinnedNodeIds };
     const nextFollowPoint = this.vision.deriveCentroid(
       this.interaction.getCameraTrackingNodeIds(),
       positions,
@@ -1014,6 +1045,40 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.applyResolvedProfile(this.resolveProfile(requested));
     this.sessionOverrides = requested;
     this.emitSessionOverridesChanged();
+  }
+
+  async setSessionOverridesAndFilter(overrides: GraphSettingsOverridesV1, filter: GraphFilterRequestV1): Promise<void> {
+    this.requireActive();
+    if (!this.moduleHost.has(SHIPPED_GRAPH_MODULE_IDS_V1.filtering)) throw new Error('Filtering is unavailable in the active graph profile.');
+    const requested = cloneOverrides(overrides);
+    const nextProfile = this.resolveProfile(requested);
+    const previousState = this.viewState;
+    this.projectionBatch = true;
+    try {
+      const changed = this.installFilter(filter);
+      this.applyResolvedProfile(nextProfile);
+      this.sessionOverrides = requested;
+      if (changed) { this.moduleHost.viewChanged(this.viewState); this.recomputeView(); }
+      this.emitSessionOverridesChanged();
+    } catch (error) {
+      this.viewState = previousState;
+      throw error;
+    } finally {
+      this.projectionBatch = false;
+      if (this.projectionPending) { this.projectionPending = false; this.recomputeView(); }
+    }
+  }
+
+  getDocumentStats(): { readonly nodes: number; readonly edges: number } {
+    this.requireActive();
+    const document = this.store.readDocument();
+    return { nodes: document.nodes.length, edges: document.edges.length };
+  }
+
+  getInteractionState(): Pick<GraphViewStateV1, 'viewMode' | 'focusedNodeId' | 'selectedNodeIds'> {
+    this.requireActive();
+    return { viewMode: this.viewState.viewMode, focusedNodeId: this.viewState.focusedNodeId,
+      selectedNodeIds: [...this.viewState.selectedNodeIds] };
   }
 
   createControlPort(): GraphSessionControlPortV1 {
@@ -1115,12 +1180,30 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.reconfigureDimensions(next);
       return;
     }
-    this.moduleHost.updateProfile(this.physicsOverrideProfile(next));
+    const previous = this.profile;
+    const unchanged = JSON.stringify(previous.profileSettings) === JSON.stringify(next.profileSettings)
+      && JSON.stringify(previous.interaction) === JSON.stringify(next.interaction)
+      && Object.keys(previous.modules).length === Object.keys(next.modules).length
+      && Object.entries(previous.modules).every(([id, module]) => {
+        const other = next.modules[id];
+        return other?.enabled === module.enabled && other.policy === module.policy
+          && JSON.stringify(other.settings) === JSON.stringify(module.settings);
+      });
+    if (unchanged) { this.profile = next; return; }
+    const runtimeProfile = this.physicsOverrideProfile(next);
+    const needsProjection = JSON.stringify(previous.profileSettings) !== JSON.stringify(next.profileSettings)
+      || JSON.stringify(previous.interaction) !== JSON.stringify(next.interaction)
+      || this.moduleHost.profileChangeNeedsProjection(runtimeProfile);
+    this.moduleHost.updateProfile(runtimeProfile);
     this.vision.setPerspectiveZoom(focalLengthMm(next.profileSettings) / 24);
     this.synchronizeCameraState();
     this.profile = next;
     this.refreshRenderQuality();
-    this.recomputeView(false);
+    if (needsProjection) this.recomputeView(false);
+    else {
+      this.projection.invalidatePresentation();
+      this.refreshFrame(true, 'presentation');
+    }
   }
 
   private reconfigureDimensions(next: EffectiveConsumerProfileV1): void {
@@ -1335,6 +1418,10 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     return this.subscribe(this.graphChangedListeners, listener);
   }
 
+  onWorldInvalidated(listener: (event: GraphWorldInvalidatedEventV1) => void): Disposable {
+    return this.subscribe(this.worldInvalidatedListeners, listener);
+  }
+
   onWorldChanged(listener: (event: GraphWorldChangedEventV1) => void): Disposable {
     return this.subscribe(this.worldChangedListeners, listener);
   }
@@ -1367,6 +1454,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     this.viewListeners.clear();
     this.graphChangedListeners.clear();
     this.worldChangedListeners.clear();
+    this.worldInvalidatedListeners.clear();
     this.errorListeners.clear();
     this.overrideListeners.clear();
     this.renderer.dispose();
@@ -1414,6 +1502,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private recomputeView(resetInteraction = true): void {
+    if (this.projectionBatch) { this.projectionPending = true; return; }
     if (resetInteraction) this.interaction.reset();
     const document = this.store.readDocument();
     const previousCameraFollowPoint = this.vision.deriveCentroid(
@@ -2016,6 +2105,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   }
 
   private emitWorldChanged(cause: GraphWorldChangedEventV1['cause']): void {
+    for (const listener of [...this.worldInvalidatedListeners]) {
+      try { listener({ sessionId: this.sessionId, cause }); } catch {}
+    }
     if (!this.worldChangedListeners.size) return;
     const document = this.store.readDocument();
     const state: GraphWorldStateV1 = {

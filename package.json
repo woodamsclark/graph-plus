@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node test.config.js",
     "benchmark": "node scripts/benchmark-graph-engine.mjs",
+    "benchmark:optimizations": "node scripts/benchmark-graph-plus-optimizations.mjs",
     "benchmark:vault": "node --expose-gc scripts/benchmark-graph-plus-vault.mjs",
     "dev": "npm run typecheck && npm run build",
     "release": "node scripts/release-graph-plus.mjs",

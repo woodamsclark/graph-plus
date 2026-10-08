@@ -1,2 +1,2 @@
 export * from './GraphPlusQuery.ts';
-export * from './ObsidianSearchCompatibility.ts';
+export * from './GraphNodeSearch.ts';

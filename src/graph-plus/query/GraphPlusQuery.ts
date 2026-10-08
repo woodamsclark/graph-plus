@@ -1,14 +1,13 @@
 import type {
   GraphDocumentV1,
-  GraphFilterAstV1,
   GraphFilterRequestV1,
   GraphSettingsOverridesV1,
 } from '../../graph-engine/contracts/v1/index.ts';
 import {
-  compileObsidianSearchCompatibilityV1,
-  type ObsidianSearchDocumentV1,
-  type ObsidianSearchIndexV1,
-} from './ObsidianSearchCompatibility.ts';
+  graphNodeSearchIndexV1,
+  matchingGraphNodeIdsV1,
+  type GraphNodeSearchIndexV1,
+} from './GraphNodeSearch.ts';
 
 export interface GraphPlusLensStateV1 {
   readonly query: string;
@@ -40,7 +39,6 @@ export interface GraphPlusLensStateV1 {
 export interface CompiledGraphPlusFilterV1 {
   readonly request: GraphFilterRequestV1;
   readonly visibleNodeIds: readonly string[];
-  readonly error?: string;
 }
 
 export function createDefaultGraphPlusLensV1(showTags = true): GraphPlusLensStateV1 {
@@ -99,33 +97,20 @@ export function coerceGraphPlusLensStateV1(value: unknown): GraphPlusLensStateV1
 export function compileGraphPlusFilterV1(
   document: GraphDocumentV1,
   lens: GraphPlusLensStateV1,
-  searchIndex?: ObsidianSearchIndexV1,
+  searchIndex?: GraphNodeSearchIndexV1,
 ): CompiledGraphPlusFilterV1 {
-  try {
-    const query = compileObsidianSearchCompatibilityV1(lens.query);
-    const connected = connectedNodeIds(document);
-    const ids = document.nodes
-      .filter((node) => lens.showTags || node.attributes?.kind !== 'tag')
-      .filter((node) => lens.showOrphans || connected.has(node.id))
-      .filter((node) => query === undefined || query.matches(
-        searchIndex?.get(node.id) ?? searchDocumentFromNode(node),
-      ))
-      .map((node) => node.id);
-    return {
-      request: {
-        schemaVersion: 1,
-        scope: 'render',
-        node: { op: 'id-in', ids },
-      },
-      visibleNodeIds: ids,
-    };
-  } catch (error) {
-    return {
-      request: { schemaVersion: 1, scope: 'render', node: { op: 'all' } },
-      visibleNodeIds: document.nodes.map((node) => node.id),
-      error: error instanceof Error ? error.message : 'Invalid filter.',
-    };
-  }
+  const matchingIds = lens.query.trim()
+    ? matchingGraphNodeIdsV1(lens.query, searchIndex ?? graphNodeSearchIndexV1(document)) : undefined;
+  const connected = lens.showOrphans ? undefined : connectedNodeIds(document);
+  const ids = document.nodes
+    .filter((node) => lens.showTags || node.attributes?.kind !== 'tag')
+    .filter((node) => lens.showOrphans || connected!.has(node.id))
+    .filter((node) => matchingIds === undefined || matchingIds.has(node.id))
+    .map((node) => node.id);
+  return {
+    request: { schemaVersion: 1, scope: 'render', node: { op: 'id-in', ids } },
+    visibleNodeIds: ids,
+  };
 }
 
 export function graphPlusSessionOverridesV1(lens: GraphPlusLensStateV1): GraphSettingsOverridesV1 {
@@ -177,28 +162,6 @@ function connectedNodeIds(document: GraphDocumentV1): Set<string> {
   return new Set(document.edges.flatMap((edge) => [edge.sourceId, edge.targetId]));
 }
 
-function searchDocumentFromNode(node: GraphDocumentV1['nodes'][number]): ObsidianSearchDocumentV1 {
-  const kind = node.attributes?.kind === 'tag' ? 'tag' : 'note';
-  const path = String(node.attributes?.path ?? node.label);
-  const properties: Record<string, readonly string[]> = {};
-  for (const [key, value] of Object.entries(node.attributes ?? {})) {
-    if (!key.startsWith('property:')) continue;
-    properties[key.slice('property:'.length)] = Array.isArray(value)
-      ? value.map(String)
-      : [String(value)];
-  }
-  return {
-    nodeId: node.id,
-    kind,
-    path,
-    basename: String(node.label ?? path),
-    extension: String(node.attributes?.extension ?? ''),
-    content: '',
-    tags: Array.isArray(node.attributes?.tags) ? node.attributes.tags.map(String) : [],
-    properties,
-  };
-}
-
 function optionalLegacyNumber(
   value: unknown,
   legacyDefault: number,
@@ -212,8 +175,4 @@ function optionalLegacyNumber(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-export function graphPlusFilterAstForIdsV1(ids: readonly string[]): GraphFilterAstV1 {
-  return { op: 'id-in', ids };
 }

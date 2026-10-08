@@ -32,6 +32,8 @@ export interface GraphSessionV1 {
   replaceDocument(document: GraphDocumentV1): Promise<void>;
   applyPatch(patch: GraphPatchV1): Promise<ApplyGraphPatchResultV1>;
   exportDocument(): Promise<GraphDocumentV1>;
+  /** Counts without cloning the canonical document. */
+  getDocumentStats?(): { readonly nodes: number; readonly edges: number };
 
   applyFilter(filter: GraphFilterRequestV1): Promise<void>;
   clearFilter(scope?: GraphFilterScopeV1): Promise<void>;
@@ -60,13 +62,19 @@ export interface GraphSessionV1 {
   fitNodes(nodeIds?: readonly string[], options?: FitNodesOptionsV1): Promise<void>;
   resetCamera(options?: TransitionOptionsV1): Promise<void>;
   exportViewState(): Promise<GraphViewStateV1>;
+  /** Conscious state without exporting positions or module state. */
+  getInteractionState?(): Pick<GraphViewStateV1, 'viewMode' | 'focusedNodeId' | 'selectedNodeIds'>;
   restoreViewState(state: GraphViewStateV1): Promise<void>;
   /** World layout is independent from this surface's camera, filters, and conscious View state. */
   exportWorldState(): Promise<GraphWorldStateV1>;
   applyWorldState(state: GraphWorldStateV1): Promise<void>;
+  exportWorldPositions?(): Promise<GraphWorldPositionsV1>;
+  applyWorldPositions?(state: GraphWorldPositionsV1): Promise<void>;
   setLayoutAuthority(authority: boolean): void;
 
   setSessionOverrides(overrides: GraphSettingsOverridesV1): Promise<void>;
+  /** Install consumer lens settings and a filter with one projection. */
+  setSessionOverridesAndFilter?(overrides: GraphSettingsOverridesV1, filter: GraphFilterRequestV1): Promise<void>;
   exportEffectiveSettings(): Promise<GraphEffectiveSettingsV1>;
   exportPerformanceSnapshot(): Promise<GraphPerformanceSnapshotV1>;
   resetPerformanceMeasurements(): Promise<void>;
@@ -75,6 +83,8 @@ export interface GraphSessionV1 {
   onIntent(listener: (intent: GraphIntentV1) => void): Disposable;
   onGraphChanged(listener: (event: GraphChangedEventV1) => void): Disposable;
   onWorldChanged(listener: (event: GraphWorldChangedEventV1) => void): Disposable;
+  /** Cheap invalidation; consumers export only the state they need. */
+  onWorldInvalidated?(listener: (event: GraphWorldInvalidatedEventV1) => void): Disposable;
   onError(listener: (error: GraphSessionErrorV1) => void): Disposable;
 
   setSuspended(suspended: boolean): void;
@@ -86,6 +96,10 @@ export interface GraphWorldChangedEventV1 {
   readonly cause: 'layout' | 'interaction' | 'pin' | 'document' | 'restore';
   readonly state: GraphWorldStateV1;
 }
+
+/** Shared geometry and pins; excludes serialized force/module state. */
+export type GraphWorldPositionsV1 = Omit<GraphWorldStateV1, 'layoutModuleState'>;
+export type GraphWorldInvalidatedEventV1 = Pick<GraphWorldChangedEventV1, 'sessionId' | 'cause'>;
 
 export interface GraphReplaceAttentionExternalInfluenceV1 {
   readonly schemaVersion: 1;

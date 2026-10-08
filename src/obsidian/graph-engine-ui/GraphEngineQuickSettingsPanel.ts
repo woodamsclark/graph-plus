@@ -107,6 +107,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    void this.context.profileSettings.commitSettings().catch(error => console.error('[graph+] settings commit error', error));
     this.cancelAutoClose();
     this.disposeContributions();
     this.viewSubscription?.dispose();
@@ -231,9 +232,10 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
 
   private async refreshGraphCounts(updateStatus = true): Promise<void> {
     if (this.disposed) return;
-    const document = await this.context.session.exportDocument();
+    const counts = this.context.session.getDocumentStats?.();
+    const document = counts ? undefined : await this.context.session.exportDocument();
     if (this.disposed) return;
-    this.graphCounts = { nodes: document.nodes.length, edges: document.edges.length };
+    this.graphCounts = counts ?? { nodes: document!.nodes.length, edges: document!.edges.length };
     if (updateStatus) this.updateStatus();
   }
 
@@ -518,31 +520,49 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     const setting = new Setting(parent).setName(name);
     if (description) setting.setDesc(description);
     setting.settingEl.classList.add('graphplus-slider-setting', 'graph-engine-slider-setting');
+    let resetElement: HTMLElement;
+    const updateReset = () => {
+      if (resetElement) resetElement.hidden = this.context.profileSettings.getUserOverrides()
+        .modules?.[moduleId]?.settings?.[key] === undefined;
+    };
+    const writeValue = (next: number) => {
+      void this.writeProfileSetting(moduleId, key, toStoredValue(next), 'live');
+      updateReset();
+    };
+    const commit = () => {
+      void this.context.profileSettings.commitSettings().catch(error => console.error('[graph+] settings commit error', error));
+    };
     setting.addSlider((slider) => {
       slider.setLimits(min, max, step).setValue(value).setDynamicTooltip();
       slider.sliderEl.addEventListener('input', () => {
         const next = slider.getValue();
         numberInput.value = formatSliderValue(next, step);
-        void this.writeProfileSetting(moduleId, key, toStoredValue(next));
+        writeValue(next);
       });
-      const numberInput = this.sliderNumberInput(setting, slider, name, min, max, step, (next) => {
-        void this.writeProfileSetting(moduleId, key, toStoredValue(next));
-      });
+      const numberInput = this.sliderNumberInput(setting, slider, name, min, max, step, writeValue);
+      for (const type of ['change', 'pointerup', 'pointercancel', 'lostpointercapture', 'blur', 'keyup']) {
+        slider.sliderEl.addEventListener(type, commit);
+      }
+      numberInput.addEventListener('change', commit);
+      numberInput.addEventListener('blur', commit);
       slider.sliderEl.addEventListener('dblclick', async (event) => {
         event.preventDefault();
-        await this.context.profileSettings.setModuleSetting(moduleId, key, undefined);
+        const write = this.context.profileSettings.setModuleSetting(moduleId, key, undefined);
+        updateReset();
+        await write;
         await this.render();
       });
     });
-    const rawOverrides = this.context.profileSettings.getUserOverrides().modules?.[moduleId]?.settings;
-    const overridden = rawOverrides?.[key] !== undefined;
-    if (overridden) setting.addExtraButton((control) => control
-      .setIcon('rotate-ccw')
-      .setTooltip('Reset to profile default')
-      .onClick(async () => {
-        await this.context.profileSettings.setModuleSetting(moduleId, key, undefined);
+    setting.addExtraButton((control) => {
+      resetElement = control.extraSettingsEl;
+      control.setIcon('rotate-ccw').setTooltip('Reset to profile default').onClick(async () => {
+        const write = this.context.profileSettings.setModuleSetting(moduleId, key, undefined);
+        updateReset();
+        await write;
         await this.render();
-      }));
+      });
+      updateReset();
+    });
   }
 
   private sliderNumberInput(
@@ -598,9 +618,9 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     );
   }
 
-  private writeProfileSetting(moduleId: string, key: string, value: JsonValue | undefined): Promise<void> {
+  private writeProfileSetting(moduleId: string, key: string, value: JsonValue | undefined, mode?: 'live'): Promise<void> {
     this.localSettingWrites += 1;
-    return this.context.profileSettings.setModuleSetting(moduleId, key, value)
+    return this.context.profileSettings.setModuleSetting(moduleId, key, value, mode)
       .finally(() => { this.localSettingWrites = Math.max(0, this.localSettingWrites - 1); });
   }
 

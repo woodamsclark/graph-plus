@@ -46,6 +46,9 @@ export class GraphPlusCheckpointControllerV1 {
   private documentGeneration = 0;
   private savedDocumentGeneration = -1;
   private closing?: Promise<void>;
+  private readonly dirty = new Set<'document' | 'layout' | 'camera' | 'lens' | 'interaction'>();
+  private changeGeneration = 0;
+  private savedState?: string;
 
   constructor(
     private readonly vaultId: string,
@@ -64,23 +67,29 @@ export class GraphPlusCheckpointControllerV1 {
     this.cachedDocument = document;
     this.documentGeneration = 0;
     this.savedDocumentGeneration = document ? 0 : -1;
+    this.dirty.add('document');
     this.subscriptions.push(session.onGraphChanged(() => {
       this.documentGeneration += 1;
-      this.schedule();
+      this.schedule('document');
     }));
     this.subscriptions.push(session.onIntent((intent) => {
-      if (intent.type === 'viewport-changed' || intent.type === 'node-drag-ended'
-        || intent.type === 'selection-changed' || intent.type === 'focus-changed') this.schedule();
+      if (intent.type === 'viewport-changed') this.schedule('camera');
+      else if (intent.type === 'node-drag-ended') this.schedule('layout');
+      else if (intent.type === 'selection-changed' || intent.type === 'focus-changed') this.schedule('interaction');
     }));
-    this.subscriptions.push(session.onWorldChanged(() => this.schedule()));
+    const changed = () => this.schedule('layout');
+    this.subscriptions.push(session.onWorldInvalidated
+      ? session.onWorldInvalidated(changed) : session.onWorldChanged(changed));
   }
 
-  schedule(): void {
+  schedule(domain: 'document' | 'layout' | 'camera' | 'lens' | 'interaction' = 'lens'): void {
     if (!this.session) return;
+    this.dirty.add(domain);
+    this.changeGeneration += 1;
     if (this.timer !== undefined) this.clock.clearTimeout(this.timer);
     this.timer = this.clock.setTimeout(() => {
       this.timer = undefined;
-      void this.flush().catch(error => {
+      void this.flush(false).catch(error => {
         const failure = error instanceof Error ? error : new Error(String(error));
         if (this.onError) this.onError(failure);
         else console.error('[graph+] checkpoint save failed', failure);
@@ -88,12 +97,14 @@ export class GraphPlusCheckpointControllerV1 {
     }, this.debounceMs);
   }
 
-  flush(): Promise<void> {
+  flush(checkCurrentState = true): Promise<void> {
     if (this.timer !== undefined) this.clock.clearTimeout(this.timer);
     this.timer = undefined;
     const session = this.session;
     if (!session) return this.flushQueue;
     this.flushQueue = this.flushQueue.catch(() => undefined).then(async () => {
+      if (!checkCurrentState && this.dirty.size === 0) return;
+      const changeGeneration = this.changeGeneration;
       const generation = this.documentGeneration;
       const needsDocument = !this.cachedDocument || this.savedDocumentGeneration !== generation;
       const documentPromise: Promise<GraphDocumentV1> = needsDocument
@@ -104,14 +115,24 @@ export class GraphPlusCheckpointControllerV1 {
         session.exportViewState(),
       ]);
       const viewState = this.prepareViewState?.(exportedViewState) ?? exportedViewState;
+      const lens = this.getLens?.();
+      const state = JSON.stringify({ viewState, lens });
+      // Explicit flush/close also checks compatibility setters that emit no intent.
+      if (!needsDocument && state === this.savedState) {
+        if (this.changeGeneration === changeGeneration) this.dirty.clear();
+        return;
+      }
       await this.store.save(this.vaultId, {
         document,
         viewState,
-        ...(this.getLens ? { lens: this.getLens() } : {}),
+        ...(lens ? { lens } : {}),
         savedAt: this.clock.now(),
       }, { documentChanged: needsDocument });
+      if (this.session !== session) return;
       this.cachedDocument = document;
       if (this.documentGeneration === generation) this.savedDocumentGeneration = generation;
+      this.savedState = state;
+      if (this.changeGeneration === changeGeneration) this.dirty.clear();
     });
     return this.flushQueue;
   }
@@ -143,6 +164,8 @@ export class GraphPlusCheckpointControllerV1 {
     this.cachedDocument = undefined;
     this.documentGeneration = 0;
     this.savedDocumentGeneration = -1;
+    this.savedState = undefined;
+    this.dirty.clear();
   }
 
   private stopObserving(): void {

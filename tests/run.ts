@@ -38,6 +38,7 @@ import './obsidian/persistence.test.ts';
 import './obsidian/shutdown.test.ts';
 import './obsidian/checkpoint-recovery-ui.test.ts';
 import './obsidian/settings-controller.test.ts';
+import './obsidian/live-settings.test.ts';
 import './obsidian/ui-policy.test.ts';
 import './obsidian/note-preview.test.ts';
 import './graph-plus/adapter.test.ts';

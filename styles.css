@@ -297,6 +297,10 @@
   margin: 0;
 }
 
+.graph-engine-slider-setting [hidden] {
+  display: none !important;
+}
+
 .graphplus-control-section-body .graphplus-slider-setting .setting-item-control {
   grid-column: 1 / -1;
   width: 100%;

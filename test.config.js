@@ -10,6 +10,7 @@ esbuild.buildSync({
   outfile,
   format: 'cjs',
   platform: 'node',
+  alias: { obsidian: path.resolve('tests/support/obsidianUi.ts') },
   external: ['obsidian', 'electron'],
 });
 

@@ -1,3 +1,4 @@
+import { LatestStatePersistenceV1 } from './settings/LatestStatePersistence.ts';
 import { Notice, Plugin, TFile, type WorkspaceLeaf } from 'obsidian';
 import { GraphPlusView, GRAPH_PLUS_TYPE } from './GraphView.ts';
 import { LocalGraphPlusView, LOCAL_GRAPH_PLUS_TYPE } from './LocalGraphView.ts';
@@ -26,6 +27,7 @@ import {
   ObsidianWorkspaceEventBusV1,
 } from './ObsidianWorkspaceEventBus.ts';
 import { GraphEngineSettingsControllerV1 } from './settings/GraphEngineSettingsController.ts';
+import { GraphEngineSettingsUpdatesV1 } from './settings/GraphEngineSettingsUpdates.ts';
 import { ThemeStyleResolver } from './themeStyleResolver.ts';
 import type { GraphVisualThemeV2 } from '../graph-engine/runtime/theme/index.ts';
 import { ObsidianGraphEngineSessionUiHostV1 } from './graph-engine-ui/index.ts';
@@ -46,6 +48,7 @@ export default class GraphEnginePlugin extends Plugin {
   engineSettings!: GraphEngineSettingsControllerV1;
   private pluginData!: GraphPlusPluginDataV1;
   private profiles?: ConsumerProfileRegistry;
+  private settingsUpdates?: GraphEngineSettingsUpdatesV1;
   private graphEngineCore?: GraphEngineProviderCoreV1;
   private graphEngineProvider?: GraphEngineWorkspaceProviderV1;
   private graphPlusLease?: GraphEngineLeaseV1;
@@ -56,7 +59,7 @@ export default class GraphEnginePlugin extends Plugin {
   private graphBridge?: ObsidianGraphBridgeV1;
   private graphBridgeConnection?: Disposable;
   private refreshActiveThemes?: () => void;
-  private saveQueue: Promise<void> = Promise.resolve();
+  private readonly dataPersistence = new LatestStatePersistenceV1<void>(() => this.saveData(this.pluginData));
   private unloading = false;
   private shutdown?: Promise<void>;
   private recovery?: Promise<void>;
@@ -106,6 +109,15 @@ export default class GraphEnginePlugin extends Plugin {
     this.refreshActiveThemes = () => sessionFactory.refreshActiveThemes();
     this.registerEvent(this.app.workspace.on('css-change', () => sessionFactory.refreshActiveThemes()));
     const capabilities = [...new Set(modules.descriptors().flatMap((module) => module.capabilities))];
+    this.settingsUpdates = new GraphEngineSettingsUpdatesV1(
+      window,
+      () => sessionFactory.refreshActiveProfiles(),
+      () => this.persistEngineSettings(),
+      error => {
+        console.error('[graph+] settings update error', error);
+        new Notice('Graph+ could not apply or save graph settings.');
+      },
+    );
     const providerCore = new GraphEngineProviderCoreV1({
       engineVersion: this.manifest.version,
       engineInstanceId,
@@ -113,19 +125,13 @@ export default class GraphEnginePlugin extends Plugin {
       profiles,
       sessions: sessionFactory,
       sessionUiHost: new ObsidianGraphEngineSessionUiHostV1(),
-      onProfilesChanged: () => {
-        sessionFactory.refreshActiveProfiles();
-        return this.persistEngineSettings();
-      },
+      onProfilesChanged: (mode) => this.settingsUpdates!.update(mode),
     });
     this.graphEngineCore = providerCore;
     this.engineSettings = new GraphEngineSettingsControllerV1(
       profiles,
       this.pluginData.engine.globalSettings,
-      () => {
-        sessionFactory.refreshActiveProfiles();
-        return this.persistEngineSettings();
-      },
+      () => this.settingsUpdates!.update(),
       true,
     );
 
@@ -246,7 +252,7 @@ export default class GraphEnginePlugin extends Plugin {
         await this.sharedGraphPlusApplication?.dispose();
       },
       drainPersistence: async () => {
-        const results = await Promise.allSettled([this.checkpointFileStore?.drain(), this.saveQueue]);
+        const results = await Promise.allSettled([this.settingsUpdates?.close(), this.checkpointFileStore?.drain(), this.dataPersistence.drain()]);
         const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
         if (failure) throw failure.reason;
       },
@@ -262,6 +268,7 @@ export default class GraphEnginePlugin extends Plugin {
         this.graphBridge = undefined;
         this.graphBridgeConnection = undefined;
         this.refreshActiveThemes = undefined;
+        this.settingsUpdates = undefined;
         this.checkpointFileStore = undefined;
       },
     });
@@ -435,7 +442,7 @@ export default class GraphEnginePlugin extends Plugin {
   }
 
   private async persistEngineSettings(): Promise<void> {
-    if (this.unloading || !this.profiles) return;
+    if (!this.profiles) return;
     this.pluginData = withEngineSettingsV1(
       this.pluginData,
       this.engineSettings?.getGlobalOverrides() ?? this.pluginData.engine.globalSettings,
@@ -445,9 +452,7 @@ export default class GraphEnginePlugin extends Plugin {
   }
 
   private persistPluginData(): Promise<void> {
-    const snapshot = this.pluginData;
-    this.saveQueue = this.saveQueue.catch(() => undefined).then(() => this.saveData(snapshot));
-    return this.saveQueue;
+    return this.dataPersistence.save(undefined);
   }
 
   private requireCheckpointFileStore(): GraphPlusCheckpointFileStoreV1 {

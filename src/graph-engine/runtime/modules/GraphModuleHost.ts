@@ -139,6 +139,20 @@ export class GraphModuleHost {
     return this.active.some((module) => module.id === moduleId);
   }
 
+  profileChangeNeedsProjection(profile: EffectiveConsumerProfileV1): boolean {
+    const definitions = this.registry.resolve(profile);
+    if (definitions.length !== this.active.length) return true;
+    return definitions.some((definition) => {
+      const current = this.active.find((module) => module.id === definition.descriptor.id);
+      if (!current) return true;
+      if (sameJson(current.settings, profile.modules[current.id].settings)) return false;
+      // Unknown/recreated modules remain conservative. Presentation and physics
+      // modules with live setters can reuse the existing projected document.
+      return !current.instance.updateSettings || !!(current.instance.projectSource
+        || current.instance.projectTopology || current.instance.selectRender);
+    });
+  }
+
   updateProfile(profile: EffectiveConsumerProfileV1): void {
     if (this.fatal || this.disposed) return;
     const definitions = this.registry.resolve(profile);

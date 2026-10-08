@@ -9,6 +9,7 @@ import {
   VaultGraphAdapterV1,
   noteNodeId,
   tagNodeId,
+  type VaultGraphSnapshotV1,
 } from '../../src/graph-plus/adapter/index.ts';
 import {
   GraphPlusApplicationV1,
@@ -24,10 +25,12 @@ import {
   type GraphPlusCheckpointStoreV1,
   type GraphPlusCheckpointV1,
 } from '../../src/graph-plus/persistence/index.ts';
-import { compileGraphPlusFilterV1, createDefaultGraphPlusLensV1, graphPlusSessionOverridesV1 } from '../../src/graph-plus/query/index.ts';
+import { compileGraphPlusFilterV1, createDefaultGraphPlusLensV1, graphPlusSessionOverridesV1, graphNodeSearchIndexV1 } from '../../src/graph-plus/query/index.ts';
+import { lastSimpleSearchQuery, simpleSearchPreparations } from '../support/obsidianSearch.ts';
 import { graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
-import { runtimeCanvas, runtimeHarness, runtimeFixture, runtimeRegistration } from '../support/runtimeHarness.ts';
+import { runtimeCanvas, runtimeHarness, runtimeFixture, runtimeRegistration, InstrumentedPlatform } from '../support/runtimeHarness.ts';
+import { Window } from 'happy-dom';
 
 interface FakeFile { readonly path: string }
 
@@ -67,7 +70,6 @@ function snapshot() {
           path: beta.path,
           basename: 'Beta',
           extension: 'md',
-          content: 'Faith is an unreserved opening of the mind to the truth.',
           tags: ['course/greek'],
           properties: { status: ['Due'] },
         },
@@ -76,7 +78,6 @@ function snapshot() {
           path: alpha.path,
           basename: 'Alpha',
           extension: 'md',
-          content: 'A journal entry about faith and hope.',
           tags: ['course'],
           properties: {},
           frontmatterLinks: [{ relation: 'teacher', targetPath: beta.path }],
@@ -270,7 +271,7 @@ test('Graph+ application shares one graph world across viewport-independent pres
     ...fixture.value,
     notes: [...fixture.value.notes, {
       file: { path: 'Gamma.md' }, path: 'Gamma.md', basename: 'Gamma', extension: 'md',
-      content: '', tags: [], properties: {},
+      tags: [], properties: {},
     }],
   };
   application.receiveHostEvent({ type: 'canonical-vault-invalidated' });
@@ -545,91 +546,153 @@ test('G-ADAPTER deep tag hierarchy emits each structural edge once', () => {
   ], 'shared path prefixes should be structure rather than accumulated evidence weight');
 });
 
-test('Graph+ query translation selects IDs before invoking the generic AST filter', () => {
+test('Graph+ simple search discovers names, tags, and relative paths through the ID filter', () => {
   const projection = new VaultGraphAdapterV1<FakeFile>({ countDuplicateLinks: true }).build(snapshot().value);
-  const lens = createDefaultGraphPlusLensV1();
-  const compiled = compileGraphPlusFilterV1(projection.document, {
-    ...lens,
-    query: 'tag:course/greek [status:due] -file:alpha',
-    showTags: false,
+  const search = (query: string, showTags = true) => compileGraphPlusFilterV1(projection.document, {
+    ...createDefaultGraphPlusLensV1(), query, showTags,
   }, projection.searchIndex);
-  equal(compiled.error, undefined, 'consumer query should parse');
-  equal(compiled.request.scope, 'render', 'Graph+ filtering should affect only this presentation viewport');
-  deepEqual((compiled.request.node as { ids: readonly string[] }).ids, [noteNodeId('folder/Beta.md')], 'consumer should translate its vocabulary to opaque node IDs');
+  deepEqual(search('ALPHA').visibleNodeIds, [noteNodeId('Alpha.md')], 'node names should match through the host matcher');
+  deepEqual(search('folder/Beta.md').visibleNodeIds, [noteNodeId('folder/Beta.md')], 'vault-relative paths should be searchable');
+  deepEqual(search('#course/greek').visibleNodeIds, [noteNodeId('folder/Beta.md'), tagNodeId('course/greek')],
+    'a matching tag should include its tag node and associated note');
+  deepEqual(search('course').visibleNodeIds, [noteNodeId('Alpha.md'), noteNodeId('folder/Beta.md'), tagNodeId('course'), tagNodeId('course/greek')],
+    'parent tags should discover matching descendant tags and their notes');
+  deepEqual(search('course/greek', false).visibleNodeIds, [noteNodeId('folder/Beta.md')],
+    'hiding tag nodes must retain matching associated notes');
+  deepEqual(search('due').visibleNodeIds, [], 'frontmatter properties should stay outside searchable text');
+  deepEqual(search('   ').visibleNodeIds, projection.document.nodes.map((node) => node.id), 'blank search should clear the text filter');
+  equal(search('beta').request.scope, 'render', 'search should affect only this viewport');
+  deepEqual(search('beta').request.node, { op: 'id-in', ids: [noteNodeId('folder/Beta.md')] }, 'search should feed the existing opaque ID filter');
 });
 
-test('Graph+ compatibility search matches note bodies with Obsidian boolean and exclusion syntax', () => {
+test('Graph+ delegates each query unchanged to one public simple-search callback', () => {
   const projection = new VaultGraphAdapterV1<FakeFile>({ countDuplicateLinks: true }).build(snapshot().value);
-  const lens = createDefaultGraphPlusLensV1();
-  const bodySearch = compileGraphPlusFilterV1(projection.document, {
-    ...lens,
-    query: '-journal faith',
-    showTags: false,
-  }, projection.searchIndex);
-  deepEqual(
-    bodySearch.visibleNodeIds,
-    [noteNodeId('folder/Beta.md')],
-    'bare search terms should include note content while exclusions apply to the same searchable note',
-  );
-
-  const phraseSearch = compileGraphPlusFilterV1(projection.document, {
-    ...lens,
-    query: 'content:"unreserved opening"',
-    showTags: false,
-  }, projection.searchIndex);
-  deepEqual(phraseSearch.visibleNodeIds, [noteNodeId('folder/Beta.md')], 'content phrases should match note bodies');
-
-  const groupedSearch = compileGraphPlusFilterV1(projection.document, {
-    ...lens,
-    query: '(file:alpha OR file:beta) -[status:due]',
-    showTags: false,
-  }, projection.searchIndex);
-  deepEqual(groupedSearch.visibleNodeIds, [noteNodeId('Alpha.md')], 'groups, OR, and property exclusions should compose');
+  for (const query of ['alpha OR beta', 'file:alpha', '/Alpha/', '(alpha', '-alpha', '"alpha']) {
+    const before = simpleSearchPreparations;
+    compileGraphPlusFilterV1(projection.document, { ...createDefaultGraphPlusLensV1(), query }, projection.searchIndex);
+    equal(lastSimpleSearchQuery, query, 'Graph+ must not interpret or rewrite search language');
+    equal(simpleSearchPreparations - before, 1, 'each query should prepare one matcher for all nodes');
+  }
+  const before = simpleSearchPreparations;
+  compileGraphPlusFilterV1(projection.document, createDefaultGraphPlusLensV1(), projection.searchIndex);
+  equal(simpleSearchPreparations, before, 'empty input should skip matcher preparation');
 });
 
-test('Graph+ keeps note content transient and refreshes search without revising an unchanged graph', () => {
+test('Graph+ matching tag labels expand metadata membership before visibility controls', () => {
+  const document = {
+    schemaVersion: 1 as const, documentId: 'tag-membership', revision: 0,
+    nodes: [
+      graphNode('note', { label: 'Unrelated name', attributes: { kind: 'note', path: 'folder/note.md' } }),
+      graphNode('tag', { label: '#Discovery', attributes: { kind: 'tag' } }),
+      graphNode('orphan', { label: 'Discovery orphan', attributes: { kind: 'note' } }),
+    ],
+    edges: [{ id: 'membership', sourceId: 'note', targetId: 'tag', tokens: ['relation:tag'] }],
+  };
+  const result = compileGraphPlusFilterV1(document, {
+    ...createDefaultGraphPlusLensV1(), query: 'Discovery', showTags: false, showOrphans: false,
+  });
+  deepEqual(result.visibleNodeIds, ['note'], 'membership should expand a tag name match even without duplicated note tags, while respecting visibility');
+});
+
+test('Graph+ search index follows metadata revisions and reuses unchanged documents', () => {
   const fixture = snapshot();
   const adapter = new VaultGraphAdapterV1<FakeFile>({ countDuplicateLinks: true });
   const first = adapter.build(fixture.value, 7);
-  assert(!JSON.stringify(first.document).includes('unreserved opening'), 'note bodies must stay out of graph documents and checkpoints');
-  const changedContent = adapter.reconcile(first.document, {
+  equal(graphNodeSearchIndexV1(first.document), first.searchIndex, 'filter fallback should reuse the existing index');
+  const unchanged = adapter.reconcile(first.document, fixture.value);
+  equal(unchanged.searchIndex, first.searchIndex, 'unchanged metadata should reuse the searchable index');
+  const renamed = adapter.reconcile(first.document, {
     ...fixture.value,
     notes: fixture.value.notes.map((note) => note.path === 'Alpha.md'
-      ? { ...note, content: 'A private reflection with no matching keyword.' }
+      ? { ...note, path: 'new/Renamed.md', basename: 'Renamed', tags: ['fresh'] }
       : note),
   });
-  equal(changedContent.document, first.document, 'content-only changes should not revise canonical graph topology');
-  equal(changedContent.searchIndex.get(noteNodeId('Alpha.md'))?.content.includes('private reflection'), true, 'content-only changes should refresh the transient search index');
+  assert(renamed.searchIndex !== first.searchIndex, 'metadata changes should produce a fresh index');
+  const search = (query: string) => compileGraphPlusFilterV1(renamed.document, {
+    ...createDefaultGraphPlusLensV1(), query,
+  }, renamed.searchIndex).visibleNodeIds;
+  deepEqual(search('Alpha'), [], 'renames should remove old names and paths');
+  deepEqual(search('new/Renamed.md'), [noteNodeId('new/Renamed.md')], 'renames should index the new path');
+  deepEqual(search('#fresh'), [noteNodeId('new/Renamed.md'), tagNodeId('fresh')], 'tag changes should update membership search');
+  const removed = adapter.reconcile(renamed.document, { ...fixture.value, notes: [], resolvedLinks: {} });
+  equal(removed.searchIndex.size, 0, 'deletions should remove stale entries');
 });
 
-test('Graph+ reads note bodies through the supported Obsidian vault API and caches unchanged files', async () => {
-  const file = {
-    path: 'Faith.md',
-    basename: 'Faith',
-    extension: 'md',
-    stat: { mtime: 10 },
-  };
-  let reads = 0;
+test('Graph+ source uses cached metadata without reading note bodies', async () => {
+  const file = { path: 'Faith.md', basename: 'Faith', extension: 'md', stat: { mtime: 10 } };
+  let bodyReads = 0;
+  let tags = ['#course'];
   const source = new ObsidianVaultGraphSourceV1({
     vault: {
-      getMarkdownFiles: () => [file],
-      getName: () => 'Test Vault',
-      cachedRead: async () => {
-        reads += 1;
-        return 'Faith comes by hearing.';
-      },
+      getMarkdownFiles: () => [file], getName: () => 'Test Vault',
+      cachedRead: () => { bodyReads += 1; throw new Error('Note contents must not be read.'); },
+      read: () => { bodyReads += 1; throw new Error('Note contents must not be read.'); },
     },
     metadataCache: {
-      resolvedLinks: {},
-      getFileCache: () => undefined,
+      resolvedLinks: {}, getFileCache: () => ({ tags: tags.map((tag) => ({ tag })) }),
       getFirstLinkpathDest: () => null,
     },
   } as never);
   const first = await source.read();
+  deepEqual(first.notes[0]?.tags, ['course'], 'cached tags should populate graph metadata');
+  tags = ['#updated'];
+  file.stat.mtime += 1;
   const second = await source.read();
-  equal(first.notes[0]?.content, 'Faith comes by hearing.', 'supported cachedRead content should populate the search snapshot');
-  equal(second.notes[0]?.content, 'Faith comes by hearing.', 'cached content should remain available on later snapshots');
-  equal(reads, 1, 'unchanged file mtimes should not trigger duplicate content reads');
+  deepEqual(second.notes[0]?.tags, ['updated'], 'later snapshots should refresh metadata');
+  equal(bodyReads, 0, 'initial and subsequent metadata snapshots must never read note bodies');
+  assert(!('content' in second.notes[0]), 'snapshots should not retain content');
+});
+
+test('Graph+ simple search preserves constellation reconciliation and uses the mounted metadata index', async () => {
+  const fixture = snapshot();
+  let current: VaultGraphSnapshotV1<FakeFile> = fixture.value;
+  let sourceReads = 0;
+  const runtime = runtimeHarness({ registration: graphPlusRegistration });
+  const core = new GraphEngineProviderCoreV1({
+    engineVersion: '2.0.0', engineInstanceId: 'simple-search-constellation', capabilities: ['render'],
+    profiles: runtime.profiles, sessions: runtime.factory,
+  });
+  const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(lease.ok, 'Graph+ should obtain its session lease');
+  const consumer = new GraphPlusConsumerV1({
+    lease: lease.lease, container: runtime.container,
+    vaultId: fixture.value.vaultId, checkpointStore: new MemoryStore(),
+    source: { read: () => { sourceReads += 1; return current; } },
+    navigator: { openNote: async () => undefined, openTag: async () => undefined },
+    countDuplicateLinks: true,
+  });
+  try {
+    await consumer.open();
+    const session = consumer.getSession();
+    assert(session, 'Graph+ should expose its mounted session');
+    let appliedIds: readonly string[] = [];
+    const applyFilter = session.applyFilter.bind(session);
+    session.applyFilter = async (request) => {
+      appliedIds = (request.node as { ids: readonly string[] }).ids;
+      await applyFilter(request);
+    };
+    const alphaId = noteNodeId('Alpha.md');
+    const betaId = noteNodeId('folder/Beta.md');
+    await session.setSelection([alphaId, betaId]);
+    await session.setView('explore');
+    const before = await session.exportViewState();
+    const readsBeforeSearch = sourceReads;
+    await consumer.setLens({ ...consumer.getLens(), query: '#course/greek', showTags: false });
+    const filtered = await session.exportViewState();
+    deepEqual(filtered.selectedNodeIds, [betaId], 'search should reconcile unavailable constellation members through the existing filter');
+    equal(filtered.viewMode, before.viewMode, 'the remaining constellation should preserve its View');
+    deepEqual(filtered.camera, before.camera, 'search should preserve constellation framing');
+    await consumer.setLens({ ...consumer.getLens(), query: '' });
+    deepEqual((await session.exportViewState()).selectedNodeIds, [betaId], 'clearing search should not automatically add nodes to the constellation');
+    equal(sourceReads, readsBeforeSearch, 'changing search must not trigger vault scans');
+    await consumer.setLens({ ...consumer.getLens(), query: '#course/greek' });
+    current = { ...fixture.value, notes: [fixture.value.notes[0], { ...fixture.value.notes[1], tags: ['course/greek'] }] };
+    await consumer.reconcile();
+    deepEqual(appliedIds, [alphaId, betaId], 'an active query should discover changed graph metadata');
+  } finally {
+    await consumer.close();
+    await core.dispose();
+  }
 });
 
 test('Graph+ leaves generic display and force settings in its engine profile namespace', () => {
@@ -655,7 +718,7 @@ class MemoryStore implements GraphPlusCheckpointStoreV1 {
 test('Global and Local retain bounded note history without repeated empty Memory influences', async () => {
   const notes = Array.from({ length: 12 }, (_, index) => ({
     file: { path: `note-${index}.md` }, path: `note-${index}.md`, basename: `note-${index}`,
-    extension: 'md', content: '', tags: [], properties: {},
+    extension: 'md', tags: [], properties: {},
   }));
   const runtime = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
   runtime.profiles.setUserOverrides('graph-plus', 'default', { modules: { 'force-layout': { enabled: false } } });
@@ -755,7 +818,7 @@ test('Memory projections share in-flight completion, retry rejection, and reset 
 test('closed Graph+ keeps bounded Memory without pending admissions or stale reopening members', async () => {
   const notes = Array.from({ length: 12 }, (_, index) => ({
     file: { path: `note-${index}.md` }, path: `note-${index}.md`, basename: `note-${index}`,
-    extension: 'md', content: '', tags: [], properties: {},
+    extension: 'md', tags: [], properties: {},
   }));
   const runtime = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
   runtime.profiles.setUserOverrides('graph-plus', 'default', { modules: { 'force-layout': { enabled: false } } });
@@ -801,7 +864,7 @@ test('closed Graph+ keeps bounded Memory without pending admissions or stale reo
 
 test('an in-flight note follow cannot admit its old constellation into a reopened pane', async () => {
   const fixture = snapshot();
-  const gamma = { file: { path: 'Gamma.md' }, path: 'Gamma.md', basename: 'Gamma', extension: 'md', content: '', tags: [], properties: {} };
+  const gamma = { file: { path: 'Gamma.md' }, path: 'Gamma.md', basename: 'Gamma', extension: 'md', tags: [], properties: {} };
   const runtime = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
   runtime.profiles.setUserOverrides('graph-plus', 'default', { modules: { 'force-layout': { enabled: false } } });
   const core = new GraphEngineProviderCoreV1({ engineVersion: '2.0.0', engineInstanceId: 'reopen-in-flight',
@@ -835,7 +898,7 @@ test('an in-flight note follow cannot admit its old constellation into a reopene
 
 test('Local Quick Settings clear invokes the presentation action and preserves its focused root', async () => {
   const fixture = snapshot();
-  const gamma = { file: { path: 'Gamma.md' }, path: 'Gamma.md', basename: 'Gamma', extension: 'md', content: '', tags: [], properties: {} };
+  const gamma = { file: { path: 'Gamma.md' }, path: 'Gamma.md', basename: 'Gamma', extension: 'md', tags: [], properties: {} };
   let current: any = fixture.value;
   const runtime = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
   runtime.profiles.setUserOverrides('graph-plus', 'default', { modules: { 'force-layout': { enabled: false } } });
@@ -910,7 +973,7 @@ test('Active notes build a clearable constellation without moving Global framing
   const focused = await session.exportViewState();
   application.receiveHostEvent({ type: 'active-note-changed', nodeId: gamma }); await settle();
   current = { ...current, notes: [...current.notes, { file: { path: 'Gamma.md' }, path: 'Gamma.md', basename: 'Gamma',
-    extension: 'md', content: '', tags: [], properties: {} }] };
+    extension: 'md', tags: [], properties: {} }] };
   application.receiveHostEvent({ type: 'canonical-vault-invalidated' }); await application.reconcile(); await settle();
   deepEqual((await session.exportViewState()).selectedNodeIds, [alpha, beta, gamma], 'new-note arrival is admitted after canonical topology catches up');
   equal((await session.exportViewState()).focusedNodeId, beta, 'Global note activity cannot change the Focus subject');
@@ -985,7 +1048,7 @@ test('G-LAZY consumer mounts saved graph before vault reconciliation and flushes
   const store = new MemoryStore();
   store.value = {
     document: saved,
-    lens: { ...createDefaultGraphPlusLensV1(), query: 'file:beta', showTags: false },
+    lens: { ...createDefaultGraphPlusLensV1(), query: 'beta', showTags: false },
     savedAt: 1,
   };
   let sawMountedBeforeScan = false;
@@ -993,8 +1056,11 @@ test('G-LAZY consumer mounts saved graph before vault reconciliation and flushes
     lease: leaseResult.lease,
     container: runtime.container,
     vaultId: fixture.value.vaultId,
-    source: { read: () => {
+    source: { read: async () => {
       sawMountedBeforeScan = runtime.container.querySelector('[data-graph-engine-session]') !== null;
+      const restored = await consumer.getSession()?.exportViewState();
+      deepEqual(restored?.activeFilters.render?.node, { op: 'id-in', ids: [noteNodeId('folder/Beta.md')] },
+        'saved graph metadata must be searchable before the authoritative vault snapshot arrives');
       return fixture.value;
     } },
     checkpointStore: store,
@@ -1003,11 +1069,11 @@ test('G-LAZY consumer mounts saved graph before vault reconciliation and flushes
   });
   await consumer.open();
   equal(sawMountedBeforeScan, true, 'saved document should mount before authoritative scan starts');
-  equal(consumer.getLens().query, 'file:beta', 'Graph+ should restore its consumer-owned lens from the checkpoint');
+  equal(consumer.getLens().query, 'beta', 'Graph+ should restore its consumer-owned lens from the checkpoint');
   equal(consumer.getLens().showTags, false, 'restored lens toggles should remain consumer-owned');
   await consumer.close();
   assert(store.saves > 0, 'controlled close should checkpoint before session disposal');
-  equal(store.value?.lens?.query, 'file:beta', 'controlled close should persist the active lens with the graph');
+  equal(store.value?.lens?.query, 'beta', 'controlled close should persist the active lens with the graph');
   equal(runtime.container.querySelector('[data-graph-engine-session]'), null, 'close should dispose the mounted session');
 });
 
@@ -1031,7 +1097,7 @@ test('V1.7 layout reset replaces the live session while preserving document and 
     countDuplicateLinks: true,
   });
   await consumer.open();
-  await consumer.setLens({ ...consumer.getLens(), query: 'file:beta' });
+  await consumer.setLens({ ...consumer.getLens(), query: 'beta' });
   const oldSession = consumer.getSession();
   assert(oldSession, 'the initial live session should exist');
   const alphaId = noteNodeId('Alpha.md');
@@ -1039,7 +1105,7 @@ test('V1.7 layout reset replaces the live session while preserving document and 
     'a filtered note should receive a transient reveal through the ordinary focus path');
   equal((await oldSession.exportViewState()).focusedNodeId, alphaId,
     'transient reveal should focus the stable note node');
-  equal(consumer.getLens().query, 'file:beta', 'transient reveal must not rewrite the saved Filter query');
+  equal(consumer.getLens().query, 'beta', 'transient reveal must not rewrite the saved Filter query');
   await oldSession.setNodePinned(alphaId, true);
   await oldSession.setSelection([alphaId]);
   const documentBefore = consumer.getDocument();
@@ -1052,8 +1118,8 @@ test('V1.7 layout reset replaces the live session while preserving document and 
   deepEqual(freshState.selectedNodeIds, [], 'reset should discard selection');
   equal(freshState.focusedNodeId, undefined, 'reset should discard focus');
   deepEqual(consumer.getDocument(), documentBefore, 'reset should preserve the canonical graph document');
-  equal(consumer.getLens().query, 'file:beta', 'reset should preserve the active Filter query');
-  equal(store.value?.lens?.query, 'file:beta', 'fresh checkpoint should preserve consumer lens state');
+  equal(consumer.getLens().query, 'beta', 'reset should preserve the active Filter query');
+  equal(store.value?.lens?.query, 'beta', 'fresh checkpoint should preserve consumer lens state');
   deepEqual(store.value?.viewState?.pinnedNodeIds, [], 'fresh checkpoint should replace discarded layout state');
   await consumer.close();
   await core.dispose();
@@ -1306,7 +1372,7 @@ test('Local Graph+ reuses the full graph while active-note Focus changes', async
   await core.dispose();
 });
 
-test('Local Graph+ ignores content-only vault reconciliation but receives changed canonical topology', async () => {
+test('Local Graph+ ignores unchanged vault metadata but receives changed canonical topology', async () => {
   const fixture = snapshot();
   let current: any = fixture.value;
   const runtime = runtimeHarness({ registration: graphPlusRegistration });
@@ -1334,12 +1400,7 @@ test('Local Graph+ ignores content-only vault reconciliation but receives change
     await replaceDocument(document);
   };
 
-  current = {
-    ...fixture.value,
-    notes: fixture.value.notes.map((note) => note.path === 'Alpha.md'
-      ? { ...note, content: `${note.content} One more typed character.` }
-      : note),
-  };
+  current = { ...fixture.value, notes: fixture.value.notes.map((note) => ({ ...note })) };
   await consumer.reconcile();
   equal(replacements, 0, 'typing without changing local graph membership or links must not replace the session document');
 
@@ -1347,7 +1408,7 @@ test('Local Graph+ ignores content-only vault reconciliation but receives change
   current = {
     ...current,
     notes: [...current.notes, {
-      file: gamma, path: gamma.path, basename: 'Gamma', extension: 'md', content: '', tags: [], properties: {},
+      file: gamma, path: gamma.path, basename: 'Gamma', extension: 'md', tags: [], properties: {},
     }],
     resolvedLinks: { ...current.resolvedLinks, 'Alpha.md': { ...current.resolvedLinks['Alpha.md'], 'Gamma.md': 1 } },
   };
@@ -1593,7 +1654,7 @@ test('Graph+ Mind Map snapshots selection as its root and pauses when filtering 
 
   await consumer.getSession()?.setSelection([otherId]);
   equal(consumer.getLens().form.rootNodeId, rootId, 'later selection should not silently re-root the active Mind Map');
-  await consumer.setLens({ ...consumer.getLens(), query: 'file:alpha' });
+  await consumer.setLens({ ...consumer.getLens(), query: 'alpha' });
   equal(consumer.getLens().form.enabled, false, 'hiding the root should pause Mind Map instead of inventing a replacement root');
   assert(errors.some((message) => message.includes('selected root is hidden')), 'root removal should report an explicit recoverable explanation');
   await consumer.close();
@@ -1744,4 +1805,163 @@ test('application shutdown waits for every presentation even when one final chec
   assert(failure instanceof Error && failure.message.includes('failed final checkpoint'), 'save failure is preserved for reporting');
   equal(runtime.factory.getDiagnostics().sessions.length, 0, 'all presentations release their sessions before failure returns');
   await core.dispose();
+});
+
+test('unchanged canonical reconciliation and equivalent lenses skip projections, exports and checkpoint writes', async () => {
+  const fixture = snapshot();
+  const model = new GraphPlusVaultModelV1({ read: () => fixture.value }, { countDuplicateLinks: true });
+  const runtime = runtimeHarness({ registration: graphPlusRegistration });
+  const core = new GraphEngineProviderCoreV1({ engineVersion: '2.0.0', engineInstanceId: 'no-op-vault', capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory });
+  const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(lease.ok, 'lease opens');
+  let writes = 0;
+  const app = new GraphPlusApplicationV1({ model, navigator: { openNote: async () => {}, openTag: async () => {} } });
+  const presentation = app.createPresentation({ lease: lease.lease, container: runtime.container, vaultId: 'Test Vault', checkpointStore: { load: async () => undefined, save: async () => { writes++; } } });
+  try {
+    await presentation.open();
+    const session = presentation.getSession()!;
+    const checkpoint = (presentation as any).checkpoint as GraphPlusCheckpointControllerV1;
+    await checkpoint.flush();
+    const before = runtime.factory.getDiagnostics().sessions[0].counters!;
+    const index = model.read()!.searchIndex;
+    await app.reconcile();
+    await presentation.setLens(presentation.getLens());
+    equal(model.read()!.searchIndex, index, 'unchanged canonical truth retains its derived search index');
+    const after = runtime.factory.getDiagnostics().sessions[0].counters!;
+    equal(after.projectionPasses, before.projectionPasses, 'no-op canonical and lens updates do not project');
+    equal(after.documentExports, before.documentExports, 'no-op updates never clone documents');
+    equal(after.viewExports, before.viewExports, 'no-op updates never clone view state');
+    await checkpoint.flush();
+    equal(writes, 1, 'explicit flush does not write an unchanged checkpoint');
+    await presentation.clearConstellation();
+    equal(runtime.factory.getDiagnostics().sessions[0].counters!.viewExports, after.viewExports + 1, 'clear uses the lightweight selector; only the explicit checkpoint flush exports a view');
+    equal(session.getDocumentStats!().nodes, model.read()!.document.nodes.length, 'counts retain the canonical tag graph');
+  } finally { await app.dispose(); await core.dispose(); }
+  equal(writes, 1, 'closing an unchanged presentation does not rewrite its checkpoint');
+});
+
+test('single-pane physics stays snapshot-free and multi-pane positions coalesce with safe authority handoff', async () => {
+  const model = new GraphPlusVaultModelV1({ read: () => snapshot().value }, { countDuplicateLinks: true });
+  const runtime = runtimeHarness({ registration: graphPlusRegistration });
+  runtime.profiles.setUserOverrides('graph-plus', 'default', { modules: { 'force-layout': { enabled: true } } });
+  const clock = new InstrumentedPlatform(new Window());
+  const core = new GraphEngineProviderCoreV1({ engineVersion: '2.0.0', engineInstanceId: 'coalesced-world', capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory });
+  const app = new GraphPlusApplicationV1({ model, worldSyncClock: clock, navigator: { openNote: async () => {}, openTag: async () => {} } });
+  const open = async () => {
+    const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+    assert(lease.ok, 'lease opens');
+    const p = app.createPresentation({ lease: lease.lease, container: runtime.container, vaultId: 'Test Vault', checkpointStore: { load: async () => undefined, save: async () => {} } });
+    await p.open(); return p;
+  };
+  const settle = async () => { for (let i = 0; i < 50; i++) await Promise.resolve(); };
+  try {
+    const first = await open();
+    const authority = first.getSession()!;
+    const probe = authority as any;
+    let layoutExports = 0; let positionExports = 0;
+    const original = probe.moduleHost.exportCapabilityState.bind(probe.moduleHost);
+    probe.moduleHost.exportCapabilityState = (...args: any[]) => { layoutExports++; return original(...args); };
+    const positions = authority.exportWorldPositions!.bind(authority);
+    authority.exportWorldPositions = async () => { positionExports++; return positions(); };
+    for (let i = 0; i < 20; i++) probe.emitWorldChanged('layout');
+    await settle();
+    equal(layoutExports, 0, 'checkpoint/application observers do not snapshot physics for a single pane');
+    equal(positionExports, 0, 'a single pane does not synchronize itself');
+    const second = await open();
+    const follower = second.getSession()!;
+    const camera = (await follower.exportViewState()).camera;
+    layoutExports = 0;
+    const id = noteNodeId('Alpha.md');
+    for (let i = 1; i <= 20; i++) {
+      probe.viewState = { ...probe.viewState, positions: { ...probe.viewState.positions, [id]: { x: i, y: 25, z: 0 } } };
+      probe.emitWorldChanged('layout');
+    }
+    equal(clock.pendingFrames, 1, 'rapid physics updates own one transfer frame');
+    clock.flushFrame(); await settle();
+    equal(positionExports, 1, 'one transfer exports the latest positions once');
+    equal(layoutExports, 0, 'steady-state multi-pane physics does not serialize force state');
+    equal((await follower.exportViewState()).positions[id].x, 20, 'the follower receives the final geometry');
+    deepEqual((await follower.exportViewState()).camera, camera, 'world transfer keeps free cameras independent');
+    await authority.setNodePinned(id, true); await settle();
+    equal((await follower.exportViewState()).pinnedNodeIds.includes(id), true, 'pin edits still synchronize');
+    equal(layoutExports, 0, 'pin edits transfer geometry without serializing force state');
+    let release!: () => void;
+    let blocked = true;
+    authority.exportWorldPositions = async () => {
+      positionExports++;
+      const current = await positions();
+      if (blocked) { blocked = false; await new Promise<void>(resolve => { release = resolve; }); }
+      return current;
+    };
+    const beforeBurst = positionExports;
+    probe.emitWorldChanged('layout'); clock.flushFrame(); await settle();
+    for (let x = 21; x <= 24; x++) {
+      probe.viewState = { ...probe.viewState, positions: { ...probe.viewState.positions, [id]: { x, y: 25, z: 0 } } };
+      probe.emitWorldChanged('layout'); clock.flushFrame(); await settle();
+    }
+    equal(positionExports, beforeBurst + 1, 'slow transfers cannot create a per-frame export backlog');
+    release(); await settle(); clock.flushFrame(); await settle();
+    equal(positionExports, beforeBurst + 2, 'only one trailing transfer captures all intervening frames');
+    equal((await follower.exportViewState()).positions[id].x, 24, 'the trailing transfer contains the latest positions');
+    probe.viewState = { ...probe.viewState, positions: { ...probe.viewState.positions, [id]: { x: 30, y: 25, z: 0 } } };
+    probe.emitWorldChanged('layout');
+    const finalWorld = await authority.exportWorldState();
+    await app.closePresentation(first);
+    deepEqual((await follower.exportWorldState()).layoutModuleState, finalWorld.layoutModuleState,
+      'authority handoff transfers force coefficients, alpha and velocities in one full snapshot');
+    equal(clock.pendingFrames, 0, 'closing authority cancels its pending transfer');
+    equal((await follower.exportViewState()).positions[id].x, 30, 'handoff installs fresh world state before electing the follower');
+    equal(runtime.factory.getDiagnostics().sessions[0].layoutAuthority, true, 'exactly the surviving pane advances physics');
+    const third = await open();
+    deepEqual((await third.getSession()!.exportViewState()).positions, (await follower.exportViewState()).positions, 'new panes initialize from live authority geometry');
+  } finally { await app.dispose(); await core.dispose(); }
+});
+
+test('ordinary Graph+ filtering avoids edge traversal when orphans remain visible', () => {
+  const document = runtimeFixture();
+  const untouched = { ...document };
+  Object.defineProperty(untouched, 'edges', { get: () => { throw new Error('unnecessary orphan scan'); } });
+  equal(compileGraphPlusFilterV1(untouched, createDefaultGraphPlusLensV1()).visibleNodeIds.length, 3,
+    'the default lens needs only nodes');
+});
+
+test('failed final world synchronization still checkpoints and disposes every presentation', async () => {
+  const runtime = runtimeHarness({ registration: graphPlusRegistration });
+  const core = new GraphEngineProviderCoreV1({ engineVersion: '2.0.0', engineInstanceId: 'failed-world-shutdown', capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory });
+  let saves = 0;
+  const app = new GraphPlusApplicationV1({ model: new GraphPlusVaultModelV1({ read: () => snapshot().value }, { countDuplicateLinks: true }), navigator: { openNote: async () => {}, openTag: async () => {} } });
+  const panes = [];
+  for (let i = 0; i < 2; i++) {
+    const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+    assert(lease.ok, 'lease opens');
+    const pane = app.createPresentation({ lease: lease.lease, container: runtime.container, vaultId: 'Test Vault', checkpointStore: { load: async () => undefined, save: async () => { saves++; } } });
+    await pane.open(); panes.push(pane);
+  }
+  panes[0].getSession()!.exportWorldState = async () => { throw new Error('world export failed'); };
+  const result = await Promise.allSettled([app.dispose()]);
+  equal(result[0].status, 'rejected', 'handoff failure remains visible to the host');
+  equal(saves, 2, 'both panes attempt their final checkpoint');
+  equal(runtime.factory.getDiagnostics().sessions.length, 0, 'failed synchronization cannot leak engine sessions');
+  await core.dispose();
+});
+
+test('batched lenses still pause a newly enabled Form when its root is hidden', async () => {
+  const runtime = runtimeHarness({ registration: graphPlusRegistration });
+  const core = new GraphEngineProviderCoreV1({ engineVersion: '2.0.0', engineInstanceId: 'hidden-form-batch', capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory });
+  const lease = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+  assert(lease.ok, 'lease opens');
+  const errors: Error[] = [];
+  const pane = new GraphPlusConsumerV1({ lease: lease.lease, container: runtime.container,
+    source: { read: () => snapshot().value }, navigator: { openNote: async () => {}, openTag: async () => {} },
+    vaultId: 'Test Vault', checkpointStore: new MemoryStore(), onError: error => { if (error instanceof Error) errors.push(error); } });
+  try {
+    await pane.open();
+    const before = runtime.factory.getDiagnostics().sessions[0].counters!.projectionPasses;
+    const lens = pane.getLens();
+    await pane.setLens({ ...lens, query: 'Beta', form: { ...lens.form, enabled: true, rootNodeId: noteNodeId('Alpha.md') } });
+    equal(pane.getLens().form.enabled, false, 'a hidden root cannot enable Form in a batched install');
+    equal((await pane.getSession()!.exportEffectiveSettings()).modules.form.enabled, false, 'the engine receives the paused Form state');
+    equal(errors.length, 1, 'the existing pause explanation remains visible');
+    equal(runtime.factory.getDiagnostics().sessions[0].counters!.projectionPasses, before + 1, 'the filter and automatic pause share one projection');
+  } finally { await pane.close(); await core.dispose(); }
 });

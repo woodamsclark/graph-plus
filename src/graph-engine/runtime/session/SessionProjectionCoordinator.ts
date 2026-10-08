@@ -248,8 +248,8 @@ export class SessionProjectionCoordinator {
 
     // Target validity and visit timing have different owners. Theme, settings,
     // pins and semantic changes redress the existing visit without replaying its
-    // delay/fade. Content transactions include module settings and structural
-    // roles; position and camera updates deliberately do not expire targets.
+    // delay/fade. Module setting updates explicitly expire target visuals;
+    // structural roles change with content. Position and camera updates retain targets.
     const presentationContext = JSON.stringify([
       options.theme.revision,
       options.presentationPolicy,
@@ -332,6 +332,12 @@ export class SessionProjectionCoordinator {
   }
 
   markDirty(): void { this.dirty = true; }
+
+  invalidatePresentation(): void {
+    this.baselineCache = undefined;
+    this.previewTargetFrames.clear();
+    this.dirty = true;
+  }
 
   markGeometryDirty(): void {
     this.geometryRevision += 1;

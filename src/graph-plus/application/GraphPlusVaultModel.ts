@@ -5,7 +5,7 @@ import {
   type VaultGraphProjectionV1,
   type VaultGraphSnapshotV1,
 } from '../adapter/index.ts';
-import type { ObsidianSearchIndexV1 } from '../query/index.ts';
+import type { GraphNodeSearchIndexV1 } from '../query/index.ts';
 
 export interface GraphPlusVaultSourceV1<TFile> {
   read(): VaultGraphSnapshotV1<TFile> | Promise<VaultGraphSnapshotV1<TFile>>;
@@ -14,7 +14,7 @@ export interface GraphPlusVaultSourceV1<TFile> {
 export interface GraphPlusVaultModelSnapshotV1<TFile> {
   readonly document: GraphDocumentV1;
   readonly lookup: GraphPlusLookupV1<TFile>;
-  readonly searchIndex: ObsidianSearchIndexV1;
+  readonly searchIndex: GraphNodeSearchIndexV1;
 }
 
 /**

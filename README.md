@@ -94,6 +94,27 @@ Use **Settings → Community plugins → Graph+ → Graph+ colors** to override 
 background, ordinary note nodes, or tag nodes. Each color can be reset independently
 to return that role to the active Obsidian theme. Changes apply to open Graph+ views.
 
+### Adjust the graph live
+
+Quick Settings sliders continuously update the graph while dragging. Runtime
+updates are combined once per animation frame; saves wait for a 250ms quiet period
+or the end of the interaction. Reset appears as soon as a slider has an override.
+See the [live-update contract](docs/graph-engine-quick-settings-live-update-contract.md)
+for validation and lifecycle details.
+
+## Search the graph
+
+The Quick Settings search finds node names, tags, and vault-relative file paths using
+Obsidian's public `prepareSimpleSearch()` matcher. For example, try `Alpha`,
+`#course/greek`, or `folder/Beta.md`. Matching a tag includes its tag node and
+associated notes; Tags, Orphans, and the current View still control visibility.
+
+Search uses a small index of graph metadata that refreshes when metadata changes.
+Input keeps its 120ms debounce. Note contents and frontmatter properties are not
+searched, and Graph+ does not interpret Boolean operators, regular expressions,
+or Obsidian search operators. Previously saved search-language queries should be
+replaced with plain text.
+
 ## Default experience
 
 These are the defaults for a new Graph+ profile. Settings can be changed globally or

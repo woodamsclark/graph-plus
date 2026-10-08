@@ -29,6 +29,20 @@ function selected(ast?: GraphFilterAstV1): string[] {
   return [...evaluateGraphFilterV1(document, request(ast)).nodeIds];
 }
 
+test('ID filters compile membership once and do not inspect topology-only edge fields', () => {
+  const ids = ['a', 'b', 'a'];
+  ids.includes = () => { throw new Error('linear ID lookup'); };
+  const edge = graphEdge('a-b', 'a', 'b');
+  Object.defineProperty(edge, 'directed', { get: () => { throw new Error('topology construction'); } });
+  const input = graphDocument({ nodes: [graphNode('a'), graphNode('b'), graphNode('c')], edges: [edge] });
+  const result = evaluateGraphFilterV1(input, request({ op: 'id-in', ids }, { op: 'id-in', ids: ['a-b'] }));
+  deepEqual([...result.nodeIds], ['a', 'b'], 'duplicate IDs retain the same selection');
+  deepEqual([...result.edgeIds], ['a-b'], 'edge membership uses the same compiled predicate');
+  ids.splice(0, ids.length, 'c');
+  deepEqual([...evaluateGraphFilterV1(input, request({ op: 'id-in', ids })).nodeIds], ['c'],
+    'compilation belongs to one evaluation and cannot retain a mutated request');
+});
+
 test('C-FILTER-01 evaluates boolean AST operations', () => {
   deepEqual(selected({ op: 'all' }), ['a', 'b', 'c', 'd'], 'all should match every node');
   deepEqual(selected({ op: 'none' }), [], 'none should match no node');

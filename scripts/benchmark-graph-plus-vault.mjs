@@ -9,7 +9,9 @@ try {
   const outfile = join(temporary, 'benchmark.mjs');
   await esbuild.build({
     entryPoints: ['scripts/benchmark-graph-plus-vault.ts'], bundle: true,
-    outfile, format: 'esm', platform: 'node', external: ['obsidian', 'electron'],
+    outfile, format: 'esm', platform: 'node',
+    alias: { obsidian: join(process.cwd(), 'tests/support/obsidianSearch.ts') },
+    external: ['obsidian', 'electron'],
   });
   const { run } = await import(pathToFileURL(outfile).href);
   await run();

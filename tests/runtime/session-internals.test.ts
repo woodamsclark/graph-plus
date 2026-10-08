@@ -7,6 +7,81 @@ import { deepEqual, equal, assert, test } from '../support/harness.ts';
 import { InstrumentedPlatform, runtimeHarness } from '../support/runtimeHarness.ts';
 import { GraphPlusViewLifecycleV1 } from '../../src/obsidian/GraphPlusViewLifecycle.ts';
 
+test('unchanged filters and clearing an absent scope perform no projection or world export', async () => {
+  const value = runtimeHarness();
+  const session = await value.create();
+  try {
+    const filter = { schemaVersion: 1 as const, scope: 'render' as const, node: { op: 'id-in' as const, ids: ['a', 'c'] } };
+    await session.applyFilter(filter);
+    const before = value.factory.getDiagnostics().sessions[0].counters!;
+    await session.applyFilter(JSON.parse(JSON.stringify(filter)));
+    await session.clearFilter('projection');
+    const after = value.factory.getDiagnostics().sessions[0].counters!;
+    equal(after.projectionPasses, before.projectionPasses, 'equivalent requests and absent filters must be idle');
+    const stats = session.getDocumentStats!();
+    equal(stats.nodes, 3, 'statistics count canonical nodes');
+    equal(stats.edges, 2, 'statistics count canonical edges');
+    const state = session.getInteractionState!();
+    (state.selectedNodeIds as string[]).push('a');
+    deepEqual(session.getInteractionState!().selectedNodeIds, [], 'selectors cannot mutate Attention');
+    equal(value.factory.getDiagnostics().sessions[0].counters!.documentExports, after.documentExports, 'counts do not export documents');
+    equal(value.factory.getDiagnostics().sessions[0].counters!.viewExports, after.viewExports, 'selectors do not export module state');
+    let rejected = false;
+    try { await session.applyFilter({ ...filter, node: { op: 'unknown' } } as any); } catch { rejected = true; }
+    equal(rejected, true, 'invalid filters are still rejected before changing state');
+    await session.clearFilter('render');
+    equal(value.factory.getDiagnostics().sessions[0].counters!.projectionPasses, before.projectionPasses + 1, 'clearing a present filter still projects');
+  } finally { await session.dispose(); }
+});
+
+test('combined lens settings and filtering project once and retain physics, camera and pins', async () => {
+  const value = runtimeHarness();
+  const session = await value.create();
+  try {
+    await session.setNodePinned('a', true);
+    const original = await session.exportViewState();
+    const before = value.factory.getDiagnostics().sessions[0].counters!.projectionPasses;
+    const overrides = { modules: { form: { enabled: true, settings: { rootNodeId: 'a', direction: 'either' } } } };
+    const filter = { schemaVersion: 1 as const, scope: 'render' as const, node: { op: 'id-in' as const, ids: ['a', 'c'] } };
+    await session.setSessionOverridesAndFilter!(overrides, filter);
+    equal(value.factory.getDiagnostics().sessions[0].counters!.projectionPasses, before + 1, 'one lens install owns one projection');
+    const state = await session.exportViewState();
+    deepEqual(state.pinnedNodeIds, original.pinnedNodeIds, 'pins survive the transaction');
+    deepEqual(state.camera, original.camera, 'camera survives the transaction');
+    await session.setSessionOverridesAndFilter!(overrides, filter);
+    equal(value.factory.getDiagnostics().sessions[0].counters!.projectionPasses, before + 1, 'repeated installs are idle');
+  } finally { await session.dispose(); }
+});
+
+test('lightweight world notifications avoid layout-state exports and preserve full snapshot subscribers', async () => {
+  const value = runtimeHarness();
+  const session = await value.create();
+  const probe = session as any;
+  let exports = 0; let invalidations = 0; let fullSnapshots = 0;
+  const original = probe.moduleHost.exportCapabilityState.bind(probe.moduleHost);
+  probe.moduleHost.exportCapabilityState = (...args: any[]) => { exports++; return original(...args); };
+  const light = session.onWorldInvalidated!(() => { invalidations++; });
+  try {
+    probe.emitWorldChanged('layout');
+    equal(invalidations, 1, 'geometry invalidation remains live');
+    equal(exports, 0, 'lightweight listeners do not serialize layout state');
+    const positions = await session.exportWorldPositions!();
+    equal(exports, 0, 'position exports do not serialize layout state');
+    const before = await session.exportViewState();
+    await session.applyWorldPositions!({ ...positions, documentRevision: positions.documentRevision + 1,
+      positions: { ...positions.positions, a: { x: 300, y: 0, z: 0 } } });
+    deepEqual((await session.exportViewState()).positions, before.positions, 'stale geometry is ignored');
+    await session.applyWorldPositions!({ ...positions, positions: { ...positions.positions, a: { x: 300, y: 0, z: 0 } } });
+    equal((await session.exportViewState()).positions.a.x, 300, 'valid geometry is installed live');
+    deepEqual((await session.exportViewState()).camera, before.camera, 'Overview camera remains independent');
+    const full = session.onWorldChanged(event => { fullSnapshots++; equal(event.state.positions.a.x, 300, 'legacy subscribers retain full snapshots'); });
+    probe.emitWorldChanged('layout');
+    equal(fullSnapshots, 1, 'the legacy event is still delivered');
+    equal(exports, 1, 'full layout serialization is reserved for full snapshot listeners');
+    full.dispose();
+  } finally { light.dispose(); await session.dispose(); }
+});
+
 test('V1.9 frame scheduler owns delayed wakes, coalesces invalidations, and clears exactly once', () => {
   const window = new Window();
   const platform = new InstrumentedPlatform(window);
@@ -88,6 +163,58 @@ test('V1.9 runtime diagnostics classify work and reuse presentation-only project
   equal(diagnostics?.frameScheduled, false, 'suspension should clear every scheduled frame resource');
   deepEqual(diagnostics?.pendingInvalidations, [], 'suspension should clear pending work causes');
   await session.dispose();
+});
+
+test('profile visual settings retain projection, attention, camera and pins while structural settings reproject', async () => {
+  const value = runtimeHarness();
+  const session = await value.create();
+  try {
+    await session.setSelection(['a', 'b']);
+    await session.setNodePinned('a', true);
+    value.platform.flushFrame();
+    const state = await session.exportViewState();
+    const before = value.factory.getDiagnostics().sessions[0].counters?.projectionPasses;
+    for (const scale of [1.2, 1.7, 2.4]) {
+      value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
+        modules: { rendering: { settings: { nodeRadiusScale: scale, edgeThicknessScale: scale } } },
+      });
+      value.factory.refreshActiveProfiles();
+      value.platform.flushFrame();
+    }
+    equal(value.factory.getDiagnostics().sessions[0].counters?.projectionPasses, before,
+      'node size and link thickness should never rebuild the graph projection');
+    const after = await session.exportViewState();
+    deepEqual(after.selectedNodeIds, state.selectedNodeIds, 'visual edits should retain the constellation');
+    deepEqual(after.pinnedNodeIds, state.pinnedNodeIds, 'visual edits should retain pins');
+    deepEqual(after.camera, state.camera, 'visual edits should retain framing');
+    const compositions = value.factory.getDiagnostics().sessions[0].counters?.frameCompositions;
+    value.factory.refreshActiveProfiles(); value.platform.flushFrame();
+    equal(value.factory.getDiagnostics().sessions[0].counters?.frameCompositions, compositions,
+      'an unchanged effective profile should cause no extra composition');
+    await session.setSessionOverrides({ modules: { form: { enabled: true, settings: { rootNodeId: 'a' } } } });
+    assert(value.factory.getDiagnostics().sessions[0].counters!.projectionPasses > before!,
+      'structural module changes must still run the graph projection');
+  } finally { await session.dispose(); }
+});
+
+test('live force profile updates retain the mounted graph projection and force topology analysis', async () => {
+  const value = runtimeHarness();
+  const session = await value.create();
+  try {
+    await session.setSessionOverrides({ modules: { 'force-layout': { enabled: true } } });
+    value.platform.flushFrame(); value.platform.flushFrame();
+    const before = value.factory.getDiagnostics().sessions[0];
+    const analyses = (before.modules['force-layout'] as { topologyAnalysisCount: number }).topologyAnalysisCount;
+    for (const strength of [0.2, 0.4, 0.7]) {
+      await session.setSessionOverrides({ modules: { 'force-layout': { enabled: true, settings: { springStrength: strength } } } });
+      value.platform.flushFrame(); value.platform.flushFrame();
+    }
+    const after = value.factory.getDiagnostics().sessions[0];
+    equal(after.counters?.projectionPasses, before.counters?.projectionPasses,
+      'force coefficients should not rerun the graph projection');
+    equal((after.modules['force-layout'] as { topologyAnalysisCount: number }).topologyAnalysisCount, analyses,
+      'coefficient updates should reuse the mounted solver topology');
+  } finally { await session.dispose(); }
 });
 
 test('shared graph+ lifecycle suspends hidden leaves and releases host listeners on close', () => {

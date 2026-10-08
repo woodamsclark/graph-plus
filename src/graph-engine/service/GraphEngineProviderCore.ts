@@ -19,6 +19,7 @@ import { ConsumerNodeActionRegistryV1 } from './ConsumerNodeActionRegistry.ts';
 import { ConsumerReactionRegistryV1 } from './ConsumerReactionRegistry.ts';
 import type {
   GraphEngineProfileSettingsPortV1,
+  GraphEngineProfileUpdateModeV1,
   GraphEngineSessionUiHostV1,
 } from './GraphEngineSessionUiHost.ts';
 
@@ -28,7 +29,7 @@ export interface GraphEngineProviderCoreOptionsV1 {
   readonly capabilities: readonly string[];
   readonly profiles: ConsumerProfileRegistry;
   readonly sessions: SessionFactory;
-  readonly onProfilesChanged?: () => void | Promise<void>;
+  readonly onProfilesChanged?: (mode?: GraphEngineProfileUpdateModeV1) => void | Promise<void>;
   readonly sessionUiHost?: GraphEngineSessionUiHostV1;
 }
 
@@ -70,7 +71,7 @@ export class GraphEngineProviderCoreV1 {
 
   private readonly profiles: ConsumerProfileRegistry;
   private readonly sessions: SessionFactory;
-  private readonly onProfilesChanged: () => void | Promise<void>;
+  private readonly onProfilesChanged: (mode?: GraphEngineProfileUpdateModeV1) => void | Promise<void>;
   private readonly sessionUiHost?: GraphEngineSessionUiHostV1;
   private readonly nodeActions = new ConsumerNodeActionRegistryV1();
   private readonly reactions = new ConsumerReactionRegistryV1();
@@ -302,17 +303,18 @@ export class GraphEngineProviderCoreV1 {
           throw error;
         }
       },
-      setModuleSetting: async (moduleId, key, value) => {
+      setModuleSetting: async (moduleId, key, value, mode) => {
         const overrides = this.profiles.getUserOverrides(consumerId, profileId);
         this.profiles.setUserOverrides(consumerId, profileId, changeModuleSetting(overrides, moduleId, key, value));
         try {
-          await this.onProfilesChanged();
+          await this.onProfilesChanged(mode);
         } catch (error) {
           this.profiles.setUserOverrides(consumerId, profileId, overrides);
           try { await this.onProfilesChanged(); } catch {}
           throw error;
         }
       },
+      commitSettings: async () => { await this.onProfilesChanged('commit'); },
     };
   }
 

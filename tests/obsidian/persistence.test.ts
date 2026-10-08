@@ -435,3 +435,36 @@ test('failed checkpoint metadata commit rolls back its reference without rolling
   equal(repaired, true, 'corrected metadata is queued after any concurrent settings writes');
   equal(adapter.removes, 0, 'no recovery document is pruned on failure');
 });
+
+test('checkpoint dirtiness preserves changes arriving during a save and skips identical retries', async () => {
+  const document = graphDocument({ nodes: [graphNode('a')], edges: [] });
+  let state = viewState(document, 1);
+  let release!: () => void;
+  let writes = 0;
+  const saved: number[] = [];
+  const session = {
+    onGraphChanged: () => ({ dispose() {} }), onIntent: () => ({ dispose() {} }),
+    onWorldChanged: () => ({ dispose() {} }),
+    exportDocument: async () => document, exportViewState: async () => state,
+    dispose: async () => {},
+  } as unknown as GraphSessionV1;
+  const controller = new GraphPlusCheckpointControllerV1('Vault', {
+    load: async () => undefined,
+    save: async (_, checkpoint) => {
+      writes++; saved.push(checkpoint.viewState!.camera.target.x);
+      if (writes === 1) await new Promise<void>(resolve => { release = resolve; });
+    },
+  });
+  controller.attach(session, document);
+  const first = controller.flush();
+  for (let i = 0; i < 15; i++) await Promise.resolve();
+  state = viewState(document, 2);
+  controller.schedule('camera');
+  const next = controller.flush(false);
+  release(); await first; await next;
+  deepEqual(saved, [1, 2], 'a newer camera edit survives an older in-flight save');
+  controller.schedule('lens'); await controller.flush(false);
+  equal(writes, 2, 'dirty notifications with identical persistent state do not write');
+  await controller.closeAndDispose();
+  equal(writes, 2, 'final recovery flush does not duplicate a successful checkpoint');
+});

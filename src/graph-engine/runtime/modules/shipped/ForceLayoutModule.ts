@@ -55,7 +55,9 @@ interface PreparedSpring {
   readonly sourceId: string;
   readonly targetId: string;
   readonly edgeIds: readonly string[];
-  readonly parameters: WeightedSpringParametersV1;
+  parameters: WeightedSpringParametersV1;
+  readonly topologyPair: GraphTopologyPairV1;
+  readonly recursiveMemberCount: number;
   readonly sourceDegree: number;
   readonly targetDegree: number;
   readonly bias: number;
@@ -102,6 +104,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private topologyRegionKey = '';
   private topology?: GraphTopologyAnalysisV1;
   private springs: readonly PreparedSpring[] = [];
+  private springParametersDirty = false;
+  private componentPackingDirty = false;
   private membershipPairStrengths = new Map<string, number>();
   private componentTargets: ReadonlyMap<string, Vec3> = new Map();
   private documentKey = '';
@@ -133,6 +137,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     if (settings.topologyLayoutPolicy !== undefined
       && !parseGraphTopologyLayoutPolicyV1(settings.topologyLayoutPolicy)) return;
     const nextSettings = readForceSettings(settings);
+    if (JSON.stringify(this.settings) === JSON.stringify(nextSettings)) return;
+    const previous = this.settings;
     const dampingOnlyChange = forceSettingsEqualExceptVelocityDecay(this.settings, nextSettings)
       && this.settings.velocityDecay !== nextSettings.velocityDecay;
     this.settings = nextSettings;
@@ -140,7 +146,12 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     // neither affect the topology-derived spring data nor need to reheat a
     // settled layout.
     if (dampingOnlyChange) return;
-    this.topologyDocumentSource = null;
+    if (JSON.stringify(previous.topologyLayoutPolicy) !== JSON.stringify(nextSettings.topologyLayoutPolicy)) {
+      this.topologyDocumentSource = null;
+    }
+    this.springParametersDirty ||= previous.springStrength !== nextSettings.springStrength
+      || previous.springLength !== nextSettings.springLength || previous.collisionRadius !== nextSettings.collisionRadius;
+    this.componentPackingDirty ||= previous.componentPadding !== nextSettings.componentPadding;
     this.reheatForChange();
   }
 
@@ -271,7 +282,19 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   private synchronizeTopology(state: GraphModulePipelineStateV1): void {
-    if (state.document === this.topologyDocumentSource && this.regionLayoutKey === this.topologyRegionKey) return;
+    if (state.document === this.topologyDocumentSource && this.regionLayoutKey === this.topologyRegionKey) {
+      if (this.springParametersDirty) for (const spring of this.springs) {
+        spring.parameters = deriveWeightedSpringParametersV1(spring.topologyPair, this.settings, {
+          dimensions: this.dimensions, recursiveMemberCount: spring.recursiveMemberCount,
+        });
+      }
+      if (this.componentPackingDirty && this.topology) {
+        this.componentTargets = buildComponentPackingTargetsV1(this.topology.components, this.settings.componentPadding, this.dimensions);
+      }
+      this.springParametersDirty = false;
+      this.componentPackingDirty = false;
+      return;
+    }
     const membershipConnections = state.regionLayouts.flatMap((region) => region.directMemberNodeIds.map((memberId) => ({
       sourceId: region.regionNodeId,
       targetId: memberId,
@@ -286,13 +309,16 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.springs = physicalPairs.map((pair) => {
       const sourceDegree = Math.max(1, degree.get(pair.sourceId) ?? 1);
       const targetDegree = Math.max(1, degree.get(pair.targetId) ?? 1);
+      const recursiveMemberCount = recursiveTargetRegionNodeCountV1(state.document, pair);
       return {
         sourceId: pair.sourceId,
         targetId: pair.targetId,
         edgeIds: pair.edgeIds,
+        topologyPair: pair,
+        recursiveMemberCount,
         parameters: deriveWeightedSpringParametersV1(pair, this.settings, {
           dimensions: this.dimensions,
-          recursiveMemberCount: recursiveTargetRegionNodeCountV1(state.document, pair),
+          recursiveMemberCount,
         }),
         sourceDegree,
         targetDegree,
@@ -317,6 +343,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     );
     this.topologyDocumentSource = state.document;
     this.topologyRegionKey = this.regionLayoutKey;
+    this.springParametersDirty = false;
+    this.componentPackingDirty = false;
   }
 
   private applyComponentCentering(): void {
