@@ -174,6 +174,8 @@ export interface GraphModuleFactoryContextV1 {
 }
 
 export interface GraphModuleInstanceV1 {
+  /** Opt in only when returned patches and their contribution values never mutate after return. */
+  readonly immutablePresentationPatch?: boolean;
   /** Opt in only when dressing is independent of node positions and camera pose. */
   readonly geometryIndependentPresentation?: boolean;
   setup?(): void;

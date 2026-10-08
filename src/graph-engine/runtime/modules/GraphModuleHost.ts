@@ -450,7 +450,7 @@ export class GraphModuleHost {
       if (!callback) continue;
       try {
         const patch = callback.call(module.instance, state);
-        if (patch) state = applyPresentationPatch(state, patch);
+        if (patch) state = applyPresentationPatch(state, patch, module.instance.immutablePresentationPatch === true);
       } catch (error) {
         this.failActiveModule(module, 'contribute-frame', error);
         if (this.fatal) break;
@@ -544,14 +544,15 @@ function applyProjectionPatch(
 function applyPresentationPatch(
   state: GraphModulePresentationStateV1,
   patch: GraphModulePresentationPatchV1,
+  immutable: boolean,
 ): GraphModulePresentationStateV1 {
   return {
     ...state,
     nodeContributions: patch.nodeContributions
-      ? mergeContributions(state.nodeContributions, patch.nodeContributions)
+      ? mergeContributions(state.nodeContributions, patch.nodeContributions, immutable)
       : state.nodeContributions,
     edgeContributions: patch.edgeContributions
-      ? mergeContributions(state.edgeContributions, patch.edgeContributions)
+      ? mergeContributions(state.edgeContributions, patch.edgeContributions, immutable)
       : state.edgeContributions,
     regionContributions: patch.regionContributions ?? state.regionContributions,
     theme: patch.theme ?? state.theme,
@@ -606,22 +607,25 @@ function mergeMotionTargets(
   };
 }
 
-// Contributions are immutable patches. Preserve identity for repeated base/patch pairs.
+// Only explicitly immutable contributions can share repeated base/patch merges.
 const contributionMerges = new WeakMap<object, WeakMap<object, object>>();
 function mergeContributions<T extends GraphNodeRenderContributionV1 | GraphEdgeRenderContributionV1>(
   base: Readonly<Record<string, T>>,
   addition: Readonly<Record<string, T>>,
+  immutable: boolean,
 ): Readonly<Record<string, T>> {
-  if (Object.keys(base).length === 0) return addition;
+  if (immutable && Object.keys(base).length === 0) return addition;
   const byAddition = contributionMerges.get(base) ?? new WeakMap<object, object>();
-  const cached = byAddition.get(addition);
+  const cached = immutable ? byAddition.get(addition) : undefined;
   if (cached) return cached as Readonly<Record<string, T>>;
   const result: Record<string, T> = { ...base };
   for (const [id, contribution] of Object.entries(addition) as Array<[string, T]>) {
     result[id] = { ...base[id], ...contribution } as T;
   }
-  byAddition.set(addition, result);
-  contributionMerges.set(base, byAddition);
+  if (immutable) {
+    byAddition.set(addition, result);
+    contributionMerges.set(base, byAddition);
+  }
   return result;
 }
 

@@ -20,6 +20,7 @@ const FORM_BRANCH_COLORS: readonly GraphColorV2[] = [
  */
 export class AnimaBaselineModule implements GraphModuleInstanceV1 {
   readonly geometryIndependentPresentation = true;
+  readonly immutablePresentationPatch = true;
   private staticBuilds = 0;
   private cache?: { state: GraphModulePresentationStateV1; patch: GraphModulePresentationPatchV1 };
   getPresentationCacheDiagnostics() { return { staticBuilds: this.staticBuilds }; }

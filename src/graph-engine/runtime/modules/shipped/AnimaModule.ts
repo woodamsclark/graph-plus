@@ -12,6 +12,7 @@ type PresentationState = Parameters<NonNullable<GraphModuleInstanceV1['contribut
 
 export class AnimaModule implements GraphModuleInstanceV1 {
   readonly geometryIndependentPresentation = true;
+  readonly immutablePresentationPatch = true;
   private structuralBuilds = 0;
   private presentationBuilds = 0;
   private presentationCache?: { state: PresentationState; key: string; patch: GraphModulePresentationPatchV1 };

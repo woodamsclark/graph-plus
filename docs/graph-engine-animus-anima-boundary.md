@@ -134,3 +134,11 @@ implementation and do not participate in persisted data or the external client.
 Protocol V1 documents, View state and GraphSession interfaces retain their names.
 Module/renderer extension interfaces and copied client contracts also retain their
 version labels. Existing error names/codes remain compatibility identifiers.
+
+
+Presentation modules opt into position/camera-independent dressing with
+`geometryIndependentPresentation`. Separately, `immutablePresentationPatch`
+declares that their returned contribution maps and values will never change after
+return. Only that second declaration permits merged-patch caching. Unclassified
+modules still run their dressing hooks and copy fresh contribution values; a
+working record may change its radius, opacity or other presentation between calls.

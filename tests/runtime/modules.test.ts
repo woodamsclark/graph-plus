@@ -1,3 +1,4 @@
+import type { GraphModuleHost, GraphModulePresentationStateV1 } from '../../src/graph-engine/runtime/modules/index.ts';
 import type {
   ConsumerRegistrationV1,
   GraphSessionErrorV1,
@@ -806,3 +807,21 @@ function pointer(
   Object.defineProperty(event, 'button', { value: 0 });
   canvas.dispatchEvent(event as unknown as Event);
 }
+
+
+test('uncached module patches may reuse a working record without freezing changed hit shapes', async () => {
+  const registry = createShippedGraphModuleRegistryV1();
+  const nodes: Record<string, { radius: number }> = { a: { radius: 8 } };
+  registry.register(definition('working-presentation', 600, {
+    contributeFrame: () => ({ nodeContributions: nodes }),
+  }));
+  const value = runtimeHarness({ modules: registry, registration: withModules({ 'working-presentation': { policy: 'required' } }) });
+  const session = await value.create();
+  try {
+    const probe = session as unknown as { moduleHost: GraphModuleHost; moduleView: GraphModulePresentationStateV1 };
+    const input = { ...probe.moduleView, nodeContributions: {}, edgeContributions: {} };
+    equal(probe.moduleHost.contribute(input).nodeContributions.a.radius, 8, 'initial radius is contributed');
+    nodes.a = { radius: 20 };
+    equal(probe.moduleHost.contribute(input).nodeContributions.a.radius, 20, 'reusing a patch record preserves changed radius');
+  } finally { await session.dispose(); }
+});
