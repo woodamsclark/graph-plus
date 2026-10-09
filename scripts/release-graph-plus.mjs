@@ -39,11 +39,7 @@ async function main() {
   for (const task of ['typecheck', 'test', 'build']) execFileSync('npm', ['run', task], { cwd: repositoryRoot, stdio: 'inherit' });
   const outputDirectory = join(repositoryRoot, 'releases', version);
   await stageRelease(repositoryRoot, outputDirectory);
-  const archive = join(outputDirectory, `graph-plus-${version}.zip`);
-  execFileSync('zip', ['-q', archive, ...RELEASE_ASSETS], { cwd: outputDirectory });
-  const archived = execFileSync('unzip', ['-Z', '-1', archive], { encoding: 'utf8' }).trim().split('\n').sort();
-  if (JSON.stringify(archived) !== JSON.stringify([...RELEASE_ASSETS].sort())) throw new Error('Unexpected ZIP contents.');
-  console.log(`Validated ${version}: ${outputDirectory}\nUpload the three plugin assets individually; use the ZIP for manual installation.`);
+  console.log(`Validated ${version}: ${outputDirectory}\nUpload main.js, manifest.json, and styles.css individually to the matching GitHub release.`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

@@ -161,19 +161,19 @@ See [the graph-engine consumer guide](docs/graph-engine-consumer-guide.md) and t
 
 ## Compatibility
 
-Graph+ 2.0.0-rc.1 requires Obsidian 1.13.7 or newer. Automated checks cover desktop
+Graph+ 2.0.0 requires Obsidian 1.13.7 or newer. Automated checks cover desktop
 and touch input paths; physical desktop and mobile acceptance is tracked in the
 [release safety checklist](docs/graph-plus-release-safety.md).
 
 ## Installation
 
-This release candidate uses manual installation. Extract its release ZIP and place
+For manual installation, download the three release assets and place
 `main.js`, `manifest.json`, and `styles.css` in your vault's:
 
 `.obsidian/plugins/graph-plus/`
 
 Restart Obsidian or reload the plugin, then enable **Graph+** under **Settings →
-Community plugins**. Community plugin browser availability is not assumed for this RC.
+Community plugins**. Community plugin browser availability depends on listing approval.
 
 ## Development
 
@@ -184,7 +184,7 @@ npm test
 npm run build
 ```
 
-Use `npm run release` to create a validated RC package containing only the three
+Use `npm run release` to create a validated release directory containing only the three
 plugin assets. `npm run release:public` requires a stable release version. See
 [release safety and recovery](docs/graph-plus-release-safety.md) for the packaging,
 shutdown, and checkpoint recovery contracts.

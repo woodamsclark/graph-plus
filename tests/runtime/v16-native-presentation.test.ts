@@ -27,7 +27,6 @@ import {
   migrateGraphPlusProfileOverridesV16,
 } from '../../src/graph-plus/consumer/index.ts';
 import {
-  DEFAULT_OBSIDIAN_GRAPH_PLUS_THEME_V2,
   ThemeStyleResolver,
 } from '../../src/obsidian/themeStyleResolver.ts';
 import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures.ts';
@@ -1134,44 +1133,95 @@ test('V1.6 host theme probes resolve native graph roles, opacity, and CSS-variab
   deepEqual(palette.colors.nodeOutline, parseGraphColorV2('rgb(160, 170, 180)'), 'native circle role should drive outlines');
 });
 
-test('V2 default Obsidian theme uses the Graph+ kosmos palette without affecting community themes', () => {
+test('Graph+ converts browser-preserved OKLCH graph colors instead of using the fallback palette', () => {
   const value = runtimeHarness();
-  value.document.body.style.color = 'rgb(220, 220, 220)';
-  value.document.body.style.backgroundColor = 'rgb(30, 30, 30)';
-
-  const defaultPalette = new ThemeStyleResolver(() => value.document.body, () => true).getPalette(7);
-  equal(defaultPalette.revision, 7, 'the hard-coded default-theme palette should retain the requested revision');
-  deepEqual(defaultPalette.colors, DEFAULT_OBSIDIAN_GRAPH_PLUS_THEME_V2.colors,
-    'the stock Obsidian theme should use the restrained Graph+ kosmos colors');
-  deepEqual(defaultPalette.colors.background, parseGraphColorV2('#0b0810'), 'the default graph field should be near-black');
-  deepEqual(defaultPalette.colors.node, parseGraphColorV2('#4b3562'), 'ordinary nodes should be dark plum');
-  deepEqual(defaultPalette.colors.tagNode, parseGraphColorV2('#e1d7eb'), 'tag nodes should be pale lavender-white');
-
-  const style = value.document.createElement('style');
-  style.textContent = '.graph-view.color-fill { color: rgb(12, 34, 56); }';
-  value.document.head.append(style);
-  const communityPalette = new ThemeStyleResolver(() => value.document.body, () => false).getPalette();
-  deepEqual(communityPalette.colors.node, parseGraphColorV2('rgb(12, 34, 56)'),
-    'a selected community theme should continue to own its graph node color');
+  const fills: string[] = [];
+  const Canvas = value.window.HTMLCanvasElement;
+  const previous = Canvas.prototype.getContext;
+  const createElement = value.document.createElement.bind(value.document);
+  const getComputedStyle = value.window.getComputedStyle.bind(value.window);
+  // The DOM test double predates OKLCH. Model the browser preserving this
+  // value; the real-browser CSS matrix verifies the actual conversion.
+  value.document.createElement = ((name: string) => {
+    const element = createElement(name);
+    if (name === 'span') {
+      let color = '';
+      Object.defineProperty(element.style, 'color', {
+        get: () => color,
+        set: (next: string) => { color = next; },
+      });
+    }
+    return element;
+  }) as typeof value.document.createElement;
+  value.window.getComputedStyle = ((element: Parameters<typeof getComputedStyle>[0]) => {
+    const computed = getComputedStyle(element);
+    const color = (element as unknown as HTMLElement).style.color;
+    return color?.startsWith('oklch(')
+      ? new Proxy(computed, { get: (target, key) => key === 'color' ? color : Reflect.get(target, key) })
+      : computed;
+  }) as typeof value.window.getComputedStyle;
+  Canvas.prototype.getContext = (() => ({
+    set fillStyle(color: string) { fills.push(color); },
+    fillRect() {},
+    getImageData() { return { data: new Uint8ClampedArray([140, 101, 133, 255]) }; },
+  })) as unknown as typeof previous;
+  try {
+    value.document.body.style.setProperty('--graph-node', 'oklch(0.557 0.067 332.854)');
+    const palette = new ThemeStyleResolver(() => value.document.body).getPalette();
+    assert(fills.includes('oklch(0.557 0.067 332.854)'),
+      'the browser should convert the theme color that computed styles preserve as OKLCH');
+    deepEqual(palette.colors.node, parseGraphColorV2('#8c6585'),
+      'browser-converted sRGB channels should reach the palette instead of the engine fallback');
+  } finally {
+    Canvas.prototype.getContext = previous;
+    value.document.createElement = createElement;
+    value.window.getComputedStyle = getComputedStyle;
+  }
 });
 
-test('Graph+ resolves its canvas background from the shared presentation surface color', () => {
+test('Graph+ follows the active graph palette in both light and dark themes', () => {
   const value = runtimeHarness();
-  value.document.body.style.setProperty('--graph-plus-surface-background', '#0f0f0f');
+  const style = value.document.createElement('style');
+  style.textContent = [
+    '.theme-dark { --graph-node: #999999; --graph-node-tag: #44cf6e; --graph-node-focused: #a88bfa; --graph-line: #3f3f3f; --background-primary: #1e1e1e; }',
+    '.theme-light { --graph-node: #707070; --graph-node-tag: #08b94e; --graph-node-focused: #7852ee; --graph-line: #dadada; --background-primary: #ffffff; }',
+    '.graph-view.color-fill { color: var(--graph-node); }',
+    '.graph-view.color-fill-tag { color: var(--graph-node-tag); }',
+    '.graph-view.color-fill-focused { color: var(--graph-node-focused); }',
+    '.graph-view.color-line { color: var(--graph-line); }',
+  ].join('\n');
+  value.document.head.append(style);
+  const resolver = new ThemeStyleResolver(() => value.document.body);
+  for (const [mode, node, tag, focus, edge, background] of [
+    ['theme-dark', '#999999', '#44cf6e', '#a88bfa', '#3f3f3f', '#1e1e1e'],
+    ['theme-light', '#707070', '#08b94e', '#7852ee', '#dadada', '#ffffff'],
+  ]) {
+    value.document.body.className = mode;
+    const palette = resolver.getPalette(7);
+    equal(palette.revision, 7, 'theme resolution should retain the requested revision');
+    deepEqual(palette.colors.node, parseGraphColorV2(node), 'ordinary nodes should follow the active theme');
+    deepEqual(palette.colors.tagNode, parseGraphColorV2(tag), 'tags should follow the active theme');
+    deepEqual(palette.colors.highlightedNode, parseGraphColorV2(focus), 'highlighting should follow the active theme');
+    deepEqual(palette.colors.memoryConstellation, parseGraphColorV2(focus), 'Memory should default to the theme highlight');
+    deepEqual(palette.colors.edge, parseGraphColorV2(edge), 'edges should follow the active theme');
+    deepEqual(palette.colors.background, parseGraphColorV2(background), 'the field should follow the active theme');
+  }
+  style.textContent += '\n.theme-light .graph-view.color-fill { color: #123456; }';
+  deepEqual(resolver.getPalette().colors.node, parseGraphColorV2('#123456'),
+    'community theme graph rules should still outrank CSS-variable fallbacks');
+});
 
-  const defaultPalette = new ThemeStyleResolver(
-    () => value.document.body,
-    () => true,
-  ).getPalette();
-  deepEqual(defaultPalette.colors.background, parseGraphColorV2('#0f0f0f'),
-    'the Graph+ surface should replace the stock graph field with its exact background');
-
-  const communityPalette = new ThemeStyleResolver(
-    () => value.document.body,
-    () => false,
-  ).getPalette();
-  deepEqual(communityPalette.colors.background, parseGraphColorV2('#0f0f0f'),
-    'the Graph+ surface should replace a community graph field with its exact background');
+test('Graph+ resolves its canvas background from the themed presentation surface', () => {
+  const value = runtimeHarness();
+  value.document.body.style.setProperty('--background-primary', '#fafafa');
+  value.document.body.style.setProperty('--graph-background', '#ededed');
+  value.document.body.style.setProperty('--graph-plus-surface-background', 'var(--graph-background, var(--background-primary))');
+  const resolver = new ThemeStyleResolver(() => value.document.body);
+  deepEqual(resolver.getPalette().colors.background, parseGraphColorV2('#ededed'),
+    'the surface should inherit the theme graph background');
+  value.document.body.style.removeProperty('--graph-background');
+  deepEqual(resolver.getPalette().colors.background, parseGraphColorV2('#fafafa'),
+    'the surface should fall back to the theme primary background');
 });
 
 test('Graph+ color overrides layer over the active Obsidian palette', () => {
@@ -1179,13 +1229,12 @@ test('Graph+ color overrides layer over the active Obsidian palette', () => {
   value.document.body.style.backgroundColor = 'rgb(30, 30, 30)';
   const palette = new ThemeStyleResolver(
     () => value.document.body,
-    () => true,
     () => ({ background: '#102030', noteNode: '#405060', tagNode: '#708090' }),
   ).getPalette();
   deepEqual(palette.colors.background, parseGraphColorV2('#102030'), 'background override should replace the resolved theme field');
   deepEqual(palette.colors.node, parseGraphColorV2('#405060'), 'note override should replace the ordinary node role');
   deepEqual(palette.colors.tagNode, parseGraphColorV2('#708090'), 'tag override should replace the tag node role');
-  deepEqual(palette.colors.edge, DEFAULT_OBSIDIAN_GRAPH_PLUS_THEME_V2.colors.edge,
+  deepEqual(palette.colors.edge, DEFAULT_GRAPH_RENDER_THEME_V1.colors.edge,
     'unoverridden theme roles should retain their resolved palette values');
 });
 
@@ -1193,7 +1242,6 @@ test('Frank mode forces the semantic palette to pure red and green', () => {
   const value = runtimeHarness();
   const palette = new ThemeStyleResolver(
     () => value.document.body,
-    () => true,
     () => ({ background: '#102030', noteNode: '#405060', tagNode: '#708090' }),
     () => true,
   ).getPalette(11);

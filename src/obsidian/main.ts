@@ -346,7 +346,6 @@ export default class GraphEnginePlugin extends Plugin {
   resolveGraphPlusThemePalette(container = this.app.workspace.containerEl): GraphVisualThemeV2 {
     return new ThemeStyleResolver(
       () => container,
-      () => selectedCommunityTheme(this.app) === '',
       () => this.settings.colors,
       () => this.settings.frankMode,
     ).getPalette();
@@ -459,11 +458,6 @@ export default class GraphEnginePlugin extends Plugin {
     if (!this.checkpointFileStore) throw new Error('graph+ checkpoint storage is unavailable before plugin load.');
     return this.checkpointFileStore;
   }
-}
-
-function selectedCommunityTheme(app: unknown): string {
-  const theme = (app as { customCss?: { theme?: unknown } }).customCss?.theme;
-  return typeof theme === 'string' ? theme.trim() : '';
 }
 
 function createEngineInstanceId(): string {

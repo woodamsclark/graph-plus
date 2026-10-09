@@ -1744,7 +1744,7 @@ function vectorDistance(a: { x: number; y: number; z: number }, b: { x: number; 
 test('application shutdown includes an already-closing presentation and waits for its pending checkpoint once', async () => {
   const runtime = runtimeHarness({ registration: graphPlusRegistration });
   const core = new GraphEngineProviderCoreV1({
-    engineVersion: '2.0.0-rc.1', engineInstanceId: 'pending-checkpoint-unload-test',
+    engineVersion: '2.0.0', engineInstanceId: 'pending-checkpoint-unload-test',
     capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory,
   });
   const connection = core.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
@@ -1783,7 +1783,7 @@ test('application shutdown includes an already-closing presentation and waits fo
 test('application shutdown waits for every presentation even when one final checkpoint fails', async () => {
   const runtime = runtimeHarness({ registration: graphPlusRegistration });
   const core = new GraphEngineProviderCoreV1({
-    engineVersion: '2.0.0-rc.1', engineInstanceId: 'failed-checkpoint-unload-test',
+    engineVersion: '2.0.0', engineInstanceId: 'failed-checkpoint-unload-test',
     capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory,
   });
   const application = new GraphPlusApplicationV1({

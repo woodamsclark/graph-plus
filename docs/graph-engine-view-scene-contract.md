@@ -91,8 +91,8 @@ This permits exploration through visible standard neighbors while keeping "one f
 
 Updated 2026-10-03. `Constellation.kind` is `ego` or `memory`; source identity
 belongs to Consciousness and is independent of Anima's color or highlight phase.
-Graph+ currently disables visible Memory constellations. Its RC working-constellation
-policy instead adds active notes to Attention without changing Global View or
+Graph+ currently disables visible Memory constellations. Its working-constellation
+policy for 2.0.0 instead adds active notes to Attention without changing Global View or
 camera and retains previous Focus roots. Returning to Overview preserves the group;
 clearing is explicit. Local clearing retains its focused root and stays in Focus.
 The following Memory source rules remain available to other consumers. Actual graph

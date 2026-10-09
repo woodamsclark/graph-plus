@@ -25,14 +25,14 @@ test('release staging copies only plugin assets even from a live checkout with p
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('release metadata validates RC consistency and blocks accidental community publication of an RC', async () => {
+test('release metadata validates stable consistency and blocks accidental community publication of an RC', async () => {
   const release = await releaseModule();
   const [manifest, packageJson, lock, versions] = await Promise.all(
     ['manifest.json', 'package.json', 'package-lock.json', 'versions.json'].map(async file =>
       JSON.parse(await readFile(join(process.cwd(), file), 'utf8'))),
   );
   const metadata = { manifest, packageJson, lock, versions };
-  equal(release.validateReleaseMetadata(metadata), manifest.version, 'current metadata agree');
+  equal(release.validateReleaseMetadata(metadata, true), manifest.version, 'current stable metadata agree and pass the public gate');
   const stableVersion = '2.0.0';
   const stable = {
     manifest: { ...manifest, version: stableVersion }, packageJson: { ...packageJson, version: stableVersion },

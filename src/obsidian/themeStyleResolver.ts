@@ -2,31 +2,13 @@ import {
   DEFAULT_GRAPH_VISUAL_THEME_V2,
   freezeGraphVisualThemeV2,
   graphColorV2,
+  graphColorToCssV2,
   parseGraphColorV2,
   type GraphColorV2,
   type GraphFontV2,
   type GraphVisualThemeV2,
 } from '../graph-engine/runtime/theme/index.ts';
 import type { GraphPlusColorOverridesV1 } from '../graph-plus/consumer/index.ts';
-
-export const DEFAULT_OBSIDIAN_GRAPH_PLUS_THEME_V2: GraphVisualThemeV2 = freezeGraphVisualThemeV2({
-  revision: 0,
-  colors: {
-    background: graphColorV2(0x0b / 255, 0x08 / 255, 0x10 / 255),
-    node: graphColorV2(0x4b / 255, 0x35 / 255, 0x62 / 255),
-    tagNode: graphColorV2(0xe1 / 255, 0xd7 / 255, 0xeb / 255),
-    selectedNode: graphColorV2(0x82 / 255, 0x63 / 255, 0x9b / 255),
-    focusedNode: graphColorV2(0xc5 / 255, 0xa8 / 255, 0xd5 / 255),
-    highlightedNode: graphColorV2(0xa5 / 255, 0x7e / 255, 0xb9 / 255),
-    memoryConstellation: DEFAULT_GRAPH_VISUAL_THEME_V2.colors.memoryConstellation,
-    nodeOutline: graphColorV2(0xd8 / 255, 0xca / 255, 0xe2 / 255),
-    edge: graphColorV2(0x72 / 255, 0x5d / 255, 0x7e / 255, 0.48),
-    arrow: graphColorV2(0xa0 / 255, 0x7d / 255, 0xb2 / 255, 0.72),
-    label: graphColorV2(0xf1 / 255, 0xed / 255, 0xf4 / 255),
-    animaAccent: graphColorV2(0xb9 / 255, 0x8d / 255, 0xcd / 255),
-  },
-  labelFont: DEFAULT_GRAPH_VISUAL_THEME_V2.labelFont,
-});
 
 export const FRANK_GRAPH_PLUS_THEME_V2: GraphVisualThemeV2 = freezeGraphVisualThemeV2({
   revision: 0,
@@ -51,7 +33,6 @@ export const FRANK_GRAPH_PLUS_THEME_V2: GraphVisualThemeV2 = freezeGraphVisualTh
 export class ThemeStyleResolver {
   constructor(
     private getRoot: () => HTMLElement = () => document.body,
-    private isDefaultObsidianTheme: () => boolean = () => false,
     private getOverrides: () => GraphPlusColorOverridesV1 = () => ({}),
     private isFrankMode: () => boolean = () => false,
   ) {}
@@ -113,14 +94,6 @@ export class ThemeStyleResolver {
       labelFont: styles ? font(styles) : FRANK_GRAPH_PLUS_THEME_V2.labelFont,
     });
     if (!styles) return this.withOverrides({ ...DEFAULT_GRAPH_VISUAL_THEME_V2, revision });
-    if (this.isDefaultObsidianTheme()) {
-      return this.withOverrides(this.withSurfaceBackground(root, styles, {
-        ...DEFAULT_OBSIDIAN_GRAPH_PLUS_THEME_V2,
-        revision,
-        labelFont: font(styles),
-      }));
-    }
-
     const accent = this.read(
       styles,
       "--color-accent",
@@ -176,7 +149,7 @@ export class ThemeStyleResolver {
         selectedNode: tagNode,
         focusedNode: highlighted,
         highlightedNode: highlighted,
-        memoryConstellation: this.color(root, this.read(styles, '--graph-plus-memory-constellation'), fallback.memoryConstellation),
+        memoryConstellation: this.color(root, this.read(styles, '--graph-plus-memory-constellation'), highlighted),
         nodeOutline: outline,
         edge,
         arrow,
@@ -203,34 +176,31 @@ export class ThemeStyleResolver {
     });
   }
 
-  private withSurfaceBackground(
-    root: HTMLElement,
-    styles: CSSStyleDeclaration,
-    theme: GraphVisualThemeV2,
-  ): GraphVisualThemeV2 {
-    const value = this.read(styles, '--graph-plus-surface-background');
-    if (!value) return theme;
-    return {
-      ...theme,
-      colors: {
-        ...theme.colors,
-        background: this.color(root, value, theme.colors.background),
-      },
-    };
-  }
-
   private color(root: HTMLElement, value: string, fallback: GraphColorV2): GraphColorV2 {
     const parsed = parseGraphColorV2(value);
     if (parsed) return parsed;
     if (!value.trim()) return fallback;
     const element = root.ownerDocument.createElement('span');
     element.style.color = value;
+    if (!element.style.color) return fallback;
     element.style.position = 'absolute';
     element.style.visibility = 'hidden';
     root.append(element);
     try {
       const normalized = root.ownerDocument.defaultView?.getComputedStyle(element).color ?? '';
-      return parseGraphColorV2(normalized) ?? fallback;
+      const parsed = parseGraphColorV2(normalized);
+      if (parsed) return parsed;
+      if (!normalized) return fallback;
+      // Computed styles preserve modern CSS color spaces (e.g. OKLCH).
+      // Let the browser convert them to the renderer's sRGB channels.
+      const canvas = root.ownerDocument.createElement('canvas');
+      canvas.width = canvas.height = 1;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      if (!context) return fallback;
+      context.fillStyle = normalized;
+      context.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = context.getImageData(0, 0, 1, 1).data;
+      return graphColorV2(r / 255, g / 255, b / 255, a / 255);
     } finally {
       element.remove();
     }
@@ -241,10 +211,9 @@ function applyOpacity(color: string, opacityValue: string): string {
   if (!opacityValue.trim()) return color;
   const opacity = Number(opacityValue);
   if (!Number.isFinite(opacity) || opacity >= 1) return color;
-  const channels = color.match(/[0-9]+(?:\.[0-9]+)?/g)?.map(Number);
-  if (!channels || channels.length < 3) return color;
-  const alpha = Math.max(0, Math.min(1, (channels[3] ?? 1) * Math.max(0, opacity)));
-  return `rgba(${channels[0]}, ${channels[1]}, ${channels[2]}, ${Number(alpha.toFixed(4))})`;
+  const parsed = parseGraphColorV2(color);
+  if (parsed) return graphColorToCssV2(parsed, Math.max(0, opacity));
+  return `color-mix(in srgb, ${color} ${Math.max(0, opacity) * 100}%, transparent)`;
 }
 
 function font(styles: CSSStyleDeclaration): GraphFontV2 {

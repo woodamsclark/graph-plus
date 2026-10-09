@@ -4,17 +4,17 @@
 
 `npm run release` validates metadata, checks TypeScript, runs the complete test suite,
 rebuilds the plugin and engine client, and creates `releases/<version>/`. The three
-individual plugin assets are `main.js`, `manifest.json`, and `styles.css`; the ZIP
-contains exactly those same files. Upload the individual assets to GitHub releases.
-The ZIP is for manual installation. Never ZIP the live plugin checkout.
+individual plugin assets are `main.js`, `manifest.json`, and `styles.css`. Upload
+these files individually to GitHub releases; manual installation uses the same files.
+The release task creates no ZIP and excludes docs, source files, and local runtime data.
 
 `npm run release:public` additionally requires a stable `x.y.z` version. It rejects
 an RC before building or packaging. Promote the version only after release acceptance:
 update `manifest.json`, `package.json`, both root version fields in `package-lock.json`,
 and the matching minimum-Obsidian entry in `versions.json`. The GitHub tag must exactly
-match the manifest version, without `v`. The client package has its own version.
+match the manifest version, without `v`. The client package and generated artifact also report `2.0.0`; protocol version 1 is unchanged.
 
-The current build remains `2.0.0-rc.1`. Its compatibility entry and lockfile agree.
+The current stable release is `2.0.0`. Its compatibility entry and lockfile agree.
 No release task uploads, tags, or publishes anything. `releases/` is ignored by Git.
 
 ## Shutdown contract
@@ -56,15 +56,17 @@ Unreadable documents remain in place. Archive or metadata-save failure rejects
 recovery without discarding the current reference. Reset affects only the current
 vault's graph state; other vaults, notes, and plugin settings remain intact.
 
-## Acceptance still needed in Obsidian
+## Device acceptance and recovery checks
 
-On the built RC, verify rapid disable/re-enable after a drag/camera change, normal
+The maintainer reported successful real-device testing of the built plugin on
+2026-10-08. The report does not enumerate individual scenarios. For targeted release
+verification, check rapid disable/re-enable after a drag/camera change, normal
 close/reopen, read-only/unavailable storage warnings, recovery controls, and mobile
 background/resume. Use an isolated test vault to induce corruption or missing files;
 never corrupt a user's live checkpoint for testing. Passing automated tests does
 not establish real-device acceptance or authorize a public release.
 
-## Remaining review changes
+## Release hardening
 
 Blur, pointer cancellation, and unexpected pointer-capture loss terminate the entire
 gesture, release temporary drag pins, retain preexisting pins, cancel touch holds and
@@ -80,29 +82,25 @@ setting is reversible, and no-op changes retain the document revision.
 
 The distributable engine client now declares MPL-2.0 and carries the same full LICENSE
 as its reviewed Graph+ source. The client generator copies that license; its package
-file list includes it. Client version 1.7.1 remains independent from the plugin RC.
+file list includes it. Client version 2.0.0 is aligned with the plugin release; the V1 protocol remains unchanged.
 
-The README documents manual RC installation. Layout reset continues to require one
+The README documents manual installation. Layout reset continues to require one
 Global pane for this release; settings now explain which panes to open or close.
 Frank mode remains opt-in with the description “for Frank's eyes only.” Physics
 cadence is unchanged. See [vault benchmark results](graph-plus-vault-benchmark.md)
 for reproducible 1k/5k/10k measurements and the remaining device performance checks.
 
-## Validation status for this RC
+## Validation status for 2.0.0
 
-TypeScript, the complete 484-test suite, and the plugin build pass. Clean release
+TypeScript, the complete 508-test suite, and the plugin build pass. Clean release
 packaging and packed-client license inclusion were also validated during release
 hardening. The vault benchmark completes at all three sizes and records its
 synthetic-host limitations separately.
 
-The desktop UI attempt observed Graph+ rendering in Obsidian 1.13.7, then attempted
-a focused disable/re-enable to load the rebuilt bundle. Subsequent native UI actions
-and reconnection repeatedly timed out, including after resetting the automation
-connection. Live acceptance of the rebuilt bundle is therefore inconclusive; the
-source of the UI timeout has not been established. Obsidian was not force-quit and
-no live checkpoint was deliberately reset or corrupted. No physical mobile surface
-is available in this session. Desktop reload/drag interruption and mobile acceptance
-remain open release checks.
+An earlier automated desktop UI attempt was inconclusive because native UI actions
+and reconnection timed out. The maintainer subsequently reported that the built
+plugin works correctly on real devices (2026-10-08). Deliberately induced storage
+failure and corruption scenarios were not individually confirmed in that report.
 
 The active-note queue and Focus-only Quick Settings clear regressions are covered by
 the [constellation lifecycle contract](graph-plus-constellation-contract.md). Closed

@@ -18,7 +18,7 @@ state instead of opening a view.
 ## Versioning
 
 The Obsidian plugin, root package, and bundled graph+ consumer are version `1.7.2`.
-The public V1 client remains version `1.7.1` because this host-only addition changes no
+At the V1.7.2 milestone, the public V1 client remained version `1.7.1` because this host-only addition changed no
 public contract. Downstream consumers therefore require no update.
 
 ## Acceptance

@@ -1,4 +1,4 @@
-# RC labels and working constellation
+# Graph+ 2.0.0 labels and working constellation
 
 Updated 2026-10-05. This supersedes the prior independent cursor-label toggle and
 Focus-root neighbor promotion. The existing 0.2-second preview delay and 0.5-second
@@ -108,10 +108,10 @@ hover peeking. The label reveal radius stays 96 CSS pixels in every mode. The ch
 is stored as `anima.cursorGravity` through the normal profile settings path.
 
 Clingy is enabled by default. Gravity pauses for the duration of a node drag.
-RC excludes region capabilities, forces and controls, including saved enabled overrides.
+Graph+ 2.0.0 excludes region capabilities, forces and controls, including saved enabled overrides.
 Drag input bursts compose and publish their final position once per frame.
 
-Graph+ RC reserves plain Space for a temporary physics override: while held, force layout ticks at alpha 1 even if disabled in settings. Release or window blur restores the configured behavior. Holding Space never clears the constellation or changes saved settings.
+Graph+ 2.0.0 reserves plain Space for a temporary physics override: while held, force layout ticks at alpha 1 even if disabled in settings. Release or window blur restores the configured behavior. Holding Space never clears the constellation or changes saved settings.
 
 Cursor proximity label reveal pauses immediately while hovering any node, and resumes in empty space. View and peek label policies continue to apply; cursor gravity is unaffected.
 

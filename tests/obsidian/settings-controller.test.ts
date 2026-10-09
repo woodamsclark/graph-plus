@@ -16,8 +16,8 @@ import { assert, deepEqual, equal, test } from '../support/harness.ts';
 test('Graph+ releases dragged nodes while retaining explicit context-menu pinning', () => {
   const profile = GRAPH_PLUS_CONSUMER_REGISTRATION_V1.profiles[0];
   equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.displayName, 'graph+', 'bundled product name should use lowercase branding');
-  equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.consumerVersion, '2.0.0-rc.1',
-    'bundled Graph+ should match the release candidate');
+  equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.consumerVersion, '2.0.0',
+    'bundled Graph+ should match the stable release');
   equal(profile?.uiDefaults?.quickSettingsVisibility, 'collapsed', 'Graph+ controls should begin as the minimized launcher');
   equal(profile?.uiDefaults?.quickSettingsSections?.camera?.visibility, 'hidden',
     'Graph+ quick settings should not expose a redundant Camera section');
@@ -233,7 +233,7 @@ test('V1.7 global catalog values flow into Graph+ until its profile overrides th
 });
 
 
-test('RC disables regions even with saved enabled overrides and defaults cursor gravity to Clingy', () => {
+test('Graph+ 2.0.0 disables regions even with saved enabled overrides and defaults cursor gravity to Clingy', () => {
   const profiles = new ConsumerProfileRegistry();
   for (const descriptor of createShippedGraphModuleRegistryV1().descriptors()) profiles.registerModule(descriptor);
   profiles.registerConsumer(GRAPH_PLUS_CONSUMER_REGISTRATION_V1);
@@ -241,7 +241,7 @@ test('RC disables regions even with saved enabled overrides and defaults cursor 
   const controller = new GraphEngineSettingsControllerV1(profiles, {}, () => undefined, true);
   const effective = controller.getEffectiveProfile('graph-plus', 'default');
   equal(effective.modules.anima.settings.cursorGravity, 'clingy', 'gravity is enabled and Clingy by default');
-  equal(effective.modules['node-regions'].enabled, false, 'regions are disabled in the RC');
+  equal(effective.modules['node-regions'].enabled, false, 'regions are disabled in Graph+ 2.0.0');
   equal(controller.getProfileDescriptor('graph-plus', 'default').modules['node-regions'].policy, 'forbidden',
     'saved enabled overrides cannot reactivate regions');
 });

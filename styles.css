@@ -1,11 +1,11 @@
 .graphplus-view {
-  --graph-plus-surface-background: #0f0f0f;
+  --graph-plus-surface-background: var(--graph-background, var(--background-primary));
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #0f0f0f;
+  background: var(--graph-plus-surface-background);
 }
 
 .graphplus-recovery {
