@@ -68,10 +68,7 @@ export class ThemeStyleResolver {
     const view = root.ownerDocument.defaultView;
     if (!view) return '';
     const element = root.ownerDocument.createElement('span');
-    element.className = `graph-view ${roleClass}`;
-    element.style.position = 'absolute';
-    element.style.pointerEvents = 'none';
-    element.style.visibility = 'hidden';
+    element.className = `graph-view ${roleClass} graphplus-theme-probe`;
     root.append(element);
     try {
       const inherited = view.getComputedStyle(root);
@@ -181,10 +178,9 @@ export class ThemeStyleResolver {
     if (parsed) return parsed;
     if (!value.trim()) return fallback;
     const element = root.ownerDocument.createElement('span');
-    element.style.color = value;
+    element.className = 'graphplus-theme-probe';
+    element.style.setProperty('color', value);
     if (!element.style.color) return fallback;
-    element.style.position = 'absolute';
-    element.style.visibility = 'hidden';
     root.append(element);
     try {
       const normalized = root.ownerDocument.defaultView?.getComputedStyle(element).color ?? '';

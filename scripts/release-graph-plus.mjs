@@ -11,6 +11,9 @@ export function validateReleaseMetadata({ manifest, packageJson, lock, versions 
   if (publicRelease && !/^\d+\.\d+\.\d+$/.test(version)) {
     throw new Error('Community releases require a stable x.y.z version; finish RC validation before promoting it.');
   }
+  if (publicRelease && (/obsidian/i.test(manifest.description ?? '') || 'main' in manifest)) {
+    throw new Error('Community manifests must omit main and avoid Obsidian in the description.');
+  }
   if (manifest.id !== 'graph-plus' || packageJson.name !== 'graph-plus'
     || packageJson.version !== version || lock.version !== version
     || lock.packages?.['']?.version !== version

@@ -5,6 +5,8 @@ export interface SessionResizeObserverV1 {
 
 export interface SessionRuntimePlatformV1 {
   readonly document: Document;
+  /** Host-provided primary modifier convention; runtime does not inspect navigator. */
+  readonly isMacOS?: boolean;
   readonly window: Window;
   readonly devicePixelRatio: number;
   requestAnimationFrame(callback: FrameRequestCallback): number;
@@ -17,7 +19,7 @@ export interface SessionRuntimePlatformV1 {
 
 export type SessionRuntimePlatformFactoryV1 = (container: HTMLElement) => SessionRuntimePlatformV1;
 
-export function createSessionRuntimePlatformV1(container: HTMLElement): SessionRuntimePlatformV1 {
+export function createSessionRuntimePlatformV1(container: HTMLElement, isMacOS = false): SessionRuntimePlatformV1 {
   const document = container.ownerDocument;
   const window = document.defaultView;
   if (!window) throw new Error('A graph session container must belong to a document with a window.');
@@ -27,6 +29,7 @@ export function createSessionRuntimePlatformV1(container: HTMLElement): SessionR
   return {
     document,
     window,
+    isMacOS,
     get devicePixelRatio() {
       return finitePositive(window.devicePixelRatio) ? window.devicePixelRatio : 1;
     },

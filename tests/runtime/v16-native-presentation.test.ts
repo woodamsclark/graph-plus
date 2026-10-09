@@ -1184,6 +1184,11 @@ test('Graph+ converts browser-preserved OKLCH graph colors instead of using the 
     const element = createElement(name);
     if (name === 'span') {
       let color = '';
+      const setProperty = element.style.setProperty.bind(element.style);
+      element.style.setProperty = (name: string, next: string, priority?: string) => {
+        if (name === 'color') color = next;
+        else setProperty(name, next, priority);
+      };
       Object.defineProperty(element.style, 'color', {
         get: () => color,
         set: (next: string) => { color = next; },

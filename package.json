@@ -1,7 +1,7 @@
 {
   "name": "graph-plus",
   "version": "2.0.0",
-  "description": "Explore your Obsidian vault as an interactive 2D or 3D graph, with persistent node positions and an embeddable graph engine.",
+  "description": "Explore your vault as an interactive 2D or 3D graph, with persistent node positions and an embeddable graph engine.",
   "license": "MPL-2.0",
   "private": true,
   "main": "main.js",
@@ -21,7 +21,6 @@
   "devDependencies": {
     "@types/node": "^20.5.1",
     "esbuild": "^0.18.11",
-    "fast-glob": "^3.3.3",
     "happy-dom": "^20.11.6",
     "obsidian": "^1.11.0",
     "ts-morph": "^27.0.2",

@@ -147,7 +147,7 @@ export class GraphInput {
     if (pointerKind === 'mouse') {
       this.mouseInside = true;
       this.lastMousePoint = point;
-      this.lastMod = platformMod(event, this.options.platform.window);
+      this.lastMod = platformMod(event, this.options.platform);
       this.lastCtrl = event.ctrlKey;
       this.lastMeta = event.metaKey;
       this.lastShift = event.shiftKey;
@@ -164,7 +164,7 @@ export class GraphInput {
       pointerId: event.pointerId,
       pointerKind,
       point,
-      mod: platformMod(event, this.options.platform.window),
+      mod: platformMod(event, this.options.platform),
     });
   };
 
@@ -185,7 +185,7 @@ export class GraphInput {
   private readonly onModifierChange = (event: KeyboardEvent): void => {
     if (!this.enabled || this.disposed) return;
     if (event.key === 'Control') this.physicalCtrlHeld = event.type === 'keydown';
-    const mod = platformMod(event, this.options.platform.window);
+    const mod = platformMod(event, this.options.platform);
     const ctrl = event.ctrlKey;
     const meta = event.metaKey;
     const shift = event.shiftKey;
@@ -357,9 +357,8 @@ export class GraphInput {
   }
 }
 
-function platformMod(event: MouseEvent | PointerEvent | KeyboardEvent, window: Window): boolean {
-  const platform = window.navigator.platform ?? '';
-  return /Mac|iPhone|iPad|iPod/i.test(platform) ? event.metaKey : event.ctrlKey;
+function platformMod(event: MouseEvent | PointerEvent | KeyboardEvent, platform: SessionRuntimePlatformV1): boolean {
+  return platform.isMacOS ? event.metaKey : event.ctrlKey;
 }
 
 function distanceSquared(a: GraphScreenPointV1, b: GraphScreenPointV1): number {

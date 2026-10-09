@@ -14,7 +14,7 @@ export class GraphEngineSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     preserveSettingsScrollV1(containerEl, () => {
       containerEl.empty();
-      containerEl.createEl('h2', { text: 'graph+' });
+      new Setting(containerEl).setName('graph+').setHeading();
       const enginePanel = new GraphEngineSettingsPanelV1(this.graphPlus.engineSettings);
       enginePanel.renderProfiles(containerEl, this.app, () => this.display());
       this.renderGeneral(containerEl);
@@ -25,7 +25,7 @@ export class GraphEngineSettingTab extends PluginSettingTab {
   }
 
   private renderGeneral(parent: HTMLElement): void {
-    parent.createEl('h3', { text: 'graph+' });
+    new Setting(parent).setName('graph+').setHeading();
     const settings = this.graphPlus.settings;
     new Setting(parent).setName('Enable graph+').setDesc('Allow the graph+ view and commands.')
       .addToggle((toggle) => toggle.setValue(settings.enabled).onChange(async (enabled) => {
@@ -54,7 +54,7 @@ export class GraphEngineSettingTab extends PluginSettingTab {
           this.display();
         }));
 
-    parent.createEl('h3', { text: 'Graph+ colors' });
+    new Setting(parent).setName('Graph+ colors').setHeading();
     const palette = this.graphPlus.resolveGraphPlusThemePalette();
     this.renderColorOverride(parent, 'Background', 'Graph canvas background.', 'background', palette.colors.background);
     this.renderColorOverride(parent, 'Note nodes', 'Ordinary note node color.', 'noteNode', palette.colors.node);
@@ -93,9 +93,9 @@ export class GraphEngineSettingTab extends PluginSettingTab {
   }
 
   private renderRecovery(parent: HTMLElement): void {
-    parent.createEl('h3', { text: 'Data and recovery' });
+    new Setting(parent).setName('Data and recovery').setHeading();
     const section = parent.createDiv({ cls: 'graphplus-danger-zone' });
-    section.createEl('h4', { text: 'Danger zone' });
+    new Setting(section).setName('Danger zone').setHeading();
     const canReset = this.graphPlus.canResetGraphLayoutData();
     new Setting(section)
       .setName('Reset graph layout data for this vault')
@@ -110,7 +110,7 @@ export class GraphEngineSettingTab extends PluginSettingTab {
   }
 
   private renderMiscellany(parent: HTMLElement): void {
-    parent.createEl('h3', { text: 'Miscellany' });
+    new Setting(parent).setName('Miscellany').setHeading();
     new Setting(parent)
       .setName('Frank mode')
       .setDesc("for Frank's eyes only.")

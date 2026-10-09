@@ -42,6 +42,8 @@ test('release metadata validates stable consistency and blocks accidental commun
   equal(release.validateReleaseMetadata(stable, true), stableVersion, 'a coherent stable release is accepted');
   for (const [value, publicRelease] of [
     [{ ...metadata, manifest: { ...manifest, version: '2.0.0-rc.1' } }, true],
+    [{ ...metadata, manifest: { ...manifest, description: 'Explore your Obsidian vault.' } }, true],
+    [{ ...metadata, manifest: { ...manifest, main: 'main.js' } }, true],
     [{ ...stable, lock: { ...stable.lock, version: '1.0.0' } }, false],
     [{ ...stable, versions: { [stableVersion]: '0.0.0' } }, false],
   ] as const) {
