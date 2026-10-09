@@ -1,11 +1,26 @@
-.graphplus-view,
-.greater-graph-view {
+.graphplus-view {
+  --graph-plus-surface-background: var(--graph-background, var(--background-primary));
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: transparent;
+  background: var(--graph-plus-surface-background);
+}
+
+.graphplus-recovery {
+  box-sizing: border-box;
+  max-width: 560px;
+  max-height: 100%;
+  overflow: auto;
+  margin: 0 auto;
+  padding: 24px;
+  color: var(--text-normal);
+}
+
+.graphplus-recovery .modal-button-container {
+  flex-wrap: wrap;
+  justify-content: flex-start;
 }
 
 .graphplus-view canvas {
@@ -282,6 +297,10 @@
   margin: 0;
 }
 
+.graph-engine-slider-setting [hidden] {
+  display: none !important;
+}
+
 .graphplus-control-section-body .graphplus-slider-setting .setting-item-control {
   grid-column: 1 / -1;
   width: 100%;
@@ -293,6 +312,14 @@
   min-width: 0;
   width: 100%;
   flex: 1 1 auto;
+}
+
+.graphplus-control-section-body .graphplus-slider-setting .graphplus-slider-number {
+  box-sizing: border-box;
+  flex: 0 0 5.5em;
+  min-width: 0;
+  width: 5.5em;
+  text-align: right;
 }
 
 .graphplus-control-section-body .graphplus-reform-setting {

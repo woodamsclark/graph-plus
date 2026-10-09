@@ -7,7 +7,7 @@ import {
   type JsonValue,
   type Vec3,
 } from '../../../contracts/v1/index.ts';
-import type { GraphModuleInstanceV1, GraphModulePipelineStateV1 } from '../GraphModuleTypes.ts';
+import type { GraphModuleInstanceV1, GraphModuleProjectionStateV1 } from '../GraphModuleTypes.ts';
 
 export interface LinearBuildOutLayoutSettingsV1 {
   readonly buildDirection: GraphLinearBuildDirectionV1;
@@ -52,7 +52,7 @@ export class LinearBuildOutLayoutModule implements GraphModuleInstanceV1 {
     return this.placedDocumentId ? { placedDocumentId: this.placedDocumentId } : null;
   }
 
-  projectTopology(state: GraphModulePipelineStateV1) {
+  projectTopology(state: GraphModuleProjectionStateV1) {
     if (this.placedDocumentId === state.document.documentId) return;
     this.placedDocumentId = state.document.documentId;
     return {

@@ -32,6 +32,7 @@ export interface GraphPlusPluginDataV1 {
       readonly graphDocuments?: Readonly<Record<string, unknown>>;
       readonly viewStates?: Readonly<Record<string, unknown>>;
       readonly checkpoints?: Readonly<Record<string, unknown>>;
+      readonly checkpointBackups?: Readonly<Record<string, unknown>>;
       readonly consumerSettings: GraphPlusConsumerSettingsV1;
       readonly genericLensMigrated?: boolean;
       readonly legacySettings?: unknown;
@@ -218,7 +219,7 @@ export function withGraphPlusCheckpointReferenceV1(
   };
 }
 
-function validateGraphPlusCheckpointReferenceV1(value: unknown): GraphPlusCheckpointReferenceV1 | undefined {
+export function validateGraphPlusCheckpointReferenceV1(value: unknown): GraphPlusCheckpointReferenceV1 | undefined {
   if (!isRecord(value) || value.storageVersion !== 'document-file-v1'
     || typeof value.documentPath !== 'string' || value.documentPath.length === 0
     || typeof value.documentId !== 'string' || value.documentId.length === 0
@@ -228,10 +229,11 @@ function validateGraphPlusCheckpointReferenceV1(value: unknown): GraphPlusCheckp
   if (value.viewState !== undefined) {
     try {
       assertGraphViewStateV1(value.viewState);
-      if (value.viewState.documentId === value.documentId
-        && value.viewState.documentRevision === value.documentRevision) viewState = value.viewState;
+      if (value.viewState.documentId !== value.documentId
+        || value.viewState.documentRevision !== value.documentRevision) return undefined;
+      viewState = value.viewState;
     } catch {
-      viewState = undefined;
+      return undefined;
     }
   }
   const lens = coerceGraphPlusLensStateV1(value.lens);

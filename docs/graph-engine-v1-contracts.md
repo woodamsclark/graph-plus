@@ -6,6 +6,16 @@ Baseline: V1 extraction implemented; V1.1 adds shared UI and node-click actions
 
 Date: 2026-08-22
 
+View update: the [View and Scene Contract](graph-engine-view-scene-contract.md)
+supersedes the historical click, hover, Focus scene, and implicit framing rules below.
+Hover now previews the admitted ordinary object activation; only click commits it.
+
+Migration note: the selection/Ego/Awareness ownership in this contract is superseded by
+[Graph Engine agency and Awareness ontology](graph-engine-agency-awareness-ontology.md).
+Phases 2 through 5 have migrated internal conscious-state ownership, endogenous policy
+routing, and a neutral external-influence input while preserving the public V1
+selection contract as compatibility behavior.
+
 ## 1. Purpose
 
 V1.1 is additive to the V1 service. Existing public type names retain their `V1`
@@ -796,38 +806,46 @@ Generic engine commands include operations such as:
 - apply filter;
 - replace document or apply patch.
 
-Selection and focus are related but distinct session states:
+The reviewed input matrix is checked in as
+[Graph+ UI Interaction Matrix](graph-plus-ui-interaction-matrix.xlsx). It is the
+normative product-level input table. The matching state, transition, camera, rendering,
+and persistence rules are defined in the
+[Graph Engine Interaction State Contract](graph-engine-interaction-state-contract.md).
 
-- **selection** is the zero-or-more-node set explicitly chosen by the user or consumer;
-  it drives selected-node presentation and `selection-changed` intents;
-- **focus** is the optional single node used as the keyboard/navigation and camera
-  interaction reference; it drives focused-node presentation, focused navigation
-  behavior, and `focus-changed` intents.
+The internal presentation architecture follows the
+[Animus / Anima Boundary](graph-engine-animus-anima-boundary.md): Animus produces graph
+facts, Ego defines Awareness membership and centroid, the interaction framework owns
+state policy, Anima resolves
+the complete visual scene, and renderer backends draw without interpreting graph state
+or semantic theme roles.
 
-A normal primary node click may set both states to the same node, but the public API
-keeps them independent for multi-selection, keyboard focus, and consumer-controlled
-camera workflows.
+The internal fixed policy has three states: Overview (whole graph), Explore (selected
+constellation), and Focus (one local root within a constellation). A one-node selection
+enters Explore. Focus is entered only by an explicit focus operation and preserves
+selection membership. Background activation exits Focus to Explore while retaining the
+constellation. Neither transition implicitly moves or fits the camera.
 
-When a primary background drag crosses the pan threshold, the default interaction
-contract clears `focusedNodeId`, clears `selectedNodeIds`, emits each applicable state
-change once, and applies the threshold-crossing pan movement immediately. The camera
-then pans with neither a focused nor selected node. A secondary-button 3D orbit is a
-different gesture and does not implicitly clear either state.
+Center + Fit uses the arithmetic centroid for graph and selection targets and the
+focused node for a local target. It preserves camera angle and up vector. Explore
+follows selection-centroid motion; Focus follows focused-node motion. Reopen restores
+the complete compatible saved view, including camera and interaction state, without an
+implicit fit. Only a new or incompatible view starts in Overview and fits the graph.
 
-V1.1 trials a consistent mobile primary gesture across dimensions:
-
-- one-finger background drag pans in both `2d` and `3d` and follows the normal
-  threshold-based focus/selection clearing contract;
-- one-finger drag beginning on a draggable node remains node drag rather than pan;
-- in `3d`, a two-finger drag with no qualifying pinch change orbits and retains focus
-  and selection, using the focused node as its target when one exists;
-- pinch changes zoom and takes precedence once its scale threshold is crossed;
-- in `2d`, orbit is unavailable; two-finger centroid movement may pan alongside pinch
-  handling but never introduces camera rotation.
-
-Desktop primary-pan and secondary-orbit mappings remain unchanged. This mobile mapping
-is an explicit V1.1 trial and must be evaluated on-device before becoming a long-term
-gesture invariant.
+Every node click toggles constellation membership and preserves camera framing. Adding
+an unselected node also selects the shortest path from it to the nearest current
+constellation member. Remembered-but-unselected nodes are not path targets; choosing a
+Memory constellation first makes it current membership. Ctrl does not change that behavior. The external highlight policy
+can reveal a highlight seed, its immediate neighbors, and its incident links. Explore's
+state contract overrides selection to selected nodes and selected-to-selected links
+only; hover remains the one-hop exception. Focus highlights the constellation, retains
+the focused subject's immediate neighbors as dimmed visible context, and temporarily
+isolates the focused-root-to-hovered-neighbor connection during hover. Anima forces labels
+for highlighted subjects, delegates standard labels to camera-range Saliency, and
+suppresses dimmed and void labels. The Focus preview uses this same destination policy
+without an additional hover layer.
+Dim context nodes use
+24% opacity and 80% desaturation. Cmd-wheel is not a zoom mechanic. Tag nodes use the
+same selection, Focus, label, and presentation rules as ordinary nodes.
 
 Graph+-specific actions such as opening an Obsidian file or using the current note as
 a Form root remain in Graph+.
@@ -836,9 +854,12 @@ a Form root remain in Graph+.
 
 Secondary click on desktop and stationary long-press on mobile are interpreted by
 Graph Engine. When the session context-menu surface is enabled, Graph Engine opens a
-safe-area-aware menu and supplies applicable generic actions such as `Focus node`,
-`Mind map from here`, and `Pin node` or `Unpin node`. Opening the menu does not itself
-change selection or focus.
+safe-area-aware menu and supplies applicable generic actions such as `Mind map from
+here` and `Pin node` or `Unpin node`. Opening the menu does not itself change selection
+or focus.
+
+Focus is a core interaction state. Opening a context menu does not enter it; an explicit
+Focus action may do so through the same session operation used by ordinary interaction.
 
 The consumer may hide individual core actions and may contribute additional
 domain-specific actions. Graph+ can contribute `Open note` or `Open tag`; PatternSmith
@@ -853,7 +874,7 @@ the stock menu does not require the consumer to subscribe to that intent.
 
 ### 11.2 Consumer-registered node actions
 
-Graph Engine owns hit testing, click counting by focus state, gesture thresholds,
+Graph Engine owns hit testing, selection-state activation, gesture thresholds,
 keyboard equivalence, context-menu composition, and action invocation lifecycle.
 Consumers register semantic node actions; they do not receive raw DOM events or replace
 the input interpreter.
@@ -892,19 +913,27 @@ profile stores only ordered action IDs. Duplicate IDs, unknown IDs, action excep
 and stale document revisions fail or no-op locally without corrupting the session or
 another consumer.
 
-Node primary-click behavior is:
+Node primary-click behavior is constellation-first:
 
-1. A stationary primary click on an unfocused node selects and focuses that node.
-2. A later stationary primary click on that already-focused node resolves the first
-   available action in `activationActionIds` and invokes it once.
-3. The resolved activation action is also the first item in that node's context menu.
-4. Enter on the focused node invokes the same resolved action.
-5. If no registered activation action is available, the later click and Enter do
-   nothing; they never fall through to a generic view action.
-6. Crossing a drag or camera-gesture threshold cancels click activation.
+1. An initial stationary click selects one node and enters Explore/Constellation.
+2. Clicking an unselected node adds it and the shortest path back to the existing constellation.
+3. Clicking a selected node removes it from the constellation.
+4. Each toggle preserves camera framing and exits any explicit Focus.
+5. A double-click invokes the first available `activationActionIds` action on that node.
+6. Enter invokes that action only when exactly one node is selected.
+7. Crossing a drag or camera-gesture threshold cancels click activation.
 
-This is focus-state activation, not operating-system double-click timing. Graph+ may
-register `open-node` as its activation action; PatternSmith may register `start-drill`.
+Selection changes are release-gated: pointer-down never selects, and pointer-up toggles
+selection only if no drag or navigation gesture crossed its threshold. Drag release
+ends the drag without also selecting or focusing the node.
+
+Input interpretation emits semantic transition commands. Camera fitting, framing
+preservation, presentation cleanup, and related consequences are owned by the state
+transition runtime rather than queued beside the command that initiates the transition.
+In particular, every background transition out of Focus or Explore preserves the camera.
+
+Graph+ may register `open-node` as its activation action; PatternSmith may register
+`start-drill`.
 Their callbacks own those domain behaviors. The engine context menu places the resolved
 activation action first, then other applicable consumer `contextActionIds`, then its
 applicable core view actions. Opening the menu still does not change focus or selection.
@@ -1250,8 +1279,8 @@ state.
 
 Obsidian has no documented plugin-dependency field or public plugin-manager lookup.
 The primary connection mechanism therefore uses the public Workspace Events API.
-The V1 provider is the installed plugin whose manifest ID is `graph-engine`; consumers
-discover the `graph-engine` capability rather than looking up that plugin through an
+The V1 provider is bundled inside the installed `graph-plus` plugin; consumers discover
+the `graph-engine` capability rather than looking up the host plugin through an
 undocumented plugin manager.
 
 Suggested event names:
@@ -1283,6 +1312,7 @@ interface GraphEngineLeaseV1 {
 
   registerConsumer(registration: ConsumerRegistrationV1): Promise<void>;
   registerNodeActions(actions: readonly GraphNodeActionRegistrationV1[]): Disposable;
+  registerReactions?(reactions: readonly GraphReactionRegistrationV1[]): Disposable;
   createSession(options: GraphSessionOptionsV1): Promise<GraphSessionV1>;
   release(): Promise<void>;
 }
@@ -1468,7 +1498,7 @@ force-layout: required
 filtering: required
 form: optional
 anima: optional, disabled by default in V1
-unmodified wheel: pan when unfocused; rotate when focused
+unmodified wheel: pan in Overview; rotate in Explore and Focus
 ```
 
 ### 18.3 PatternSmith

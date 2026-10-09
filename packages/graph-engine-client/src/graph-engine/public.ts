@@ -17,6 +17,16 @@ export {
 } from './core/state/index.ts';
 export { projectGraphTagsV1 } from './core/tags/index.ts';
 export {
+  Ego,
+  Judgement,
+  type JudgementRuleV1,
+  MemoryV1,
+  faithfullyRememberExperienceV1,
+  type ConsciousObservationV1,
+  type EgoExperienceOutcomeV1,
+  type EgoExperiencePolicyV1,
+} from './runtime/consciousness/index.ts';
+export {
   DEFAULT_GRAPH_TOPOLOGY_LAYOUT_POLICY_V1,
   DEFAULT_GRAPH_TOPOLOGY_PAIR_POLICY_V1,
   parseGraphTopologyLayoutPolicyV1,

@@ -244,9 +244,75 @@ test('S-CONNECT-10 provider leases route registered actions into their mounted s
   const point = await projectedNodePoint(session, 'a');
   dispatchClick(value.runtime.window, canvas, point, 201);
   value.runtime.platform.flushFrame();
+  value.runtime.platform.advanceTime(400);
   dispatchClick(value.runtime.window, canvas, await projectedNodePoint(session, 'a'), 202);
   value.runtime.platform.flushFrame();
+  dispatchClick(value.runtime.window, canvas, await projectedNodePoint(session, 'a'), 203);
+  value.runtime.platform.flushFrame();
   equal(runs, 1, 'a session created through the lease should resolve that consumer action');
+  await result.lease.release();
+});
+
+test('consumer associations pass remembered observations through Reaction and Ego to scoped actions', async () => {
+  const value = provider();
+  const result = value.core.connectLocal({
+    consumerId: 'synthetic-consumer',
+    supportedProtocolVersions: [1],
+    requestedCapabilities: ['render', 'conscious-reactions'],
+  });
+  assert(result.ok, 'local connection should return a lease');
+  await result.lease.registerConsumer(runtimeRegistration());
+  let reactions = 0;
+  result.lease.registerNodeActions([{
+    id: 'remember-selection', label: 'Remember selection', run: () => { reactions += 1; },
+  }]);
+  assert(result.lease.registerReactions, 'reaction capability should expose registration');
+  result.lease.registerReactions([{
+    id: 'third-selection',
+    association: { observation: 'node-selected', occurrences: 3 },
+    reaction: { type: 'invoke-node-action', actionId: 'remember-selection' },
+  }]);
+  const firstSession = await result.lease.createSession({
+    consumerId: 'synthetic-consumer',
+    profileId: 'two-dimensional',
+    container: value.runtime.container,
+    document: runtimeFixture(),
+  });
+  const firstCanvas = value.runtime.container.querySelector<HTMLCanvasElement>('canvas');
+  assert(firstCanvas, 'provider session should mount its canvas');
+  const firstPoint = await projectedNodePoint(firstSession, 'a');
+  dispatchClick(value.runtime.window, firstCanvas, firstPoint, 211);
+  value.runtime.platform.flushFrame();
+  value.runtime.platform.advanceTime(400);
+  dispatchClick(value.runtime.window, firstCanvas, await projectedNodePoint(firstSession, 'a'), 212, true);
+  value.runtime.platform.flushFrame();
+  value.runtime.platform.advanceTime(400);
+  dispatchClick(value.runtime.window, firstCanvas, await projectedNodePoint(firstSession, 'a'), 213);
+  value.runtime.platform.flushFrame();
+  equal(reactions, 0, 'two remembered selections should remain below the three-selection association');
+
+  const persisted = await firstSession.exportViewState();
+  equal(Object.prototype.hasOwnProperty.call(persisted.moduleState, 'conscious-memory-v1'), true,
+    'Consciousness memory should persist through the ordinary view-state boundary');
+  await firstSession.dispose();
+
+  const restoredSession = await result.lease.createSession({
+    consumerId: 'synthetic-consumer',
+    profileId: 'two-dimensional',
+    container: value.runtime.container,
+    document: runtimeFixture(),
+    restoreViewState: persisted,
+  });
+  const restoredCanvas = value.runtime.container.querySelector<HTMLCanvasElement>('canvas');
+  assert(restoredCanvas, 'restored provider session should mount its canvas');
+  const restoredPoint = await projectedNodePoint(restoredSession, 'a');
+  dispatchClick(value.runtime.window, restoredCanvas, restoredPoint, 214, true);
+  value.runtime.platform.flushFrame();
+  value.runtime.platform.advanceTime(400);
+  dispatchClick(value.runtime.window, restoredCanvas, await projectedNodePoint(restoredSession, 'a'), 215);
+  value.runtime.platform.flushFrame();
+  equal(reactions, 1,
+    'restored memory plus a third selection should invoke the scoped consumer action once');
   await result.lease.release();
 });
 
@@ -375,6 +441,7 @@ function dispatchClick(
   canvas: HTMLCanvasElement,
   point: { readonly x: number; readonly y: number },
   pointerId: number,
+  ctrlKey = false,
 ): void {
   for (const type of ['pointerdown', 'pointerup'] as const) {
     const event = new window.PointerEvent(type, {
@@ -385,6 +452,7 @@ function dispatchClick(
       button: 0,
       bubbles: true,
       cancelable: true,
+      ctrlKey,
     });
     Object.defineProperties(event, {
       clientX: { value: point.x },
@@ -392,6 +460,7 @@ function dispatchClick(
       pointerId: { value: pointerId },
       pointerType: { value: 'mouse' },
       button: { value: 0 },
+      ctrlKey: { value: ctrlKey },
     });
     canvas.dispatchEvent(event as unknown as Event);
   }

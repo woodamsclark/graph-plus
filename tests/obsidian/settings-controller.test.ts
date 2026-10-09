@@ -6,22 +6,29 @@ import {
 } from '../../src/graph-plus/consumer/index.ts';
 import { createShippedGraphModuleRegistryV1 } from '../../src/graph-engine/runtime/index.ts';
 import { GraphEngineSettingsControllerV1 } from '../../src/obsidian/settings/GraphEngineSettingsController.ts';
-import { GRAPH_SETTING_PRESENTATIONS_V1 } from '../../src/obsidian/settings/GraphEngineSettingsCatalog.ts';
+import {
+  GRAPH_SETTING_PRESENTATIONS_V1,
+  graphSettingDisplayValueV1,
+  graphSettingStoredValueV1,
+} from '../../src/obsidian/settings/GraphEngineSettingsCatalog.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 
 test('Graph+ releases dragged nodes while retaining explicit context-menu pinning', () => {
   const profile = GRAPH_PLUS_CONSUMER_REGISTRATION_V1.profiles[0];
   equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.displayName, 'graph+', 'bundled product name should use lowercase branding');
-  equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.consumerVersion, '2.0.0', 'bundled Graph+ should match the feature release');
+  equal(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.consumerVersion, '2.0.0',
+    'bundled Graph+ should match the stable release');
   equal(profile?.uiDefaults?.quickSettingsVisibility, 'collapsed', 'Graph+ controls should begin as the minimized launcher');
   equal(profile?.uiDefaults?.quickSettingsSections?.camera?.visibility, 'hidden',
     'Graph+ quick settings should not expose a redundant Camera section');
   deepEqual(GRAPH_PLUS_CONSUMER_REGISTRATION_V1.profiles[0]?.interaction?.contextActionIds,
-    ['open-node'], 'Graph+ should keep note preview as a transient hover interaction');
-  equal(createShippedGraphModuleRegistryV1().get('rendering')?.descriptor.defaultSettings.nodeRadiusScale, 2,
-    'the shipped Graph Engine node-size default should be 2.0');
+    ['open-node', 'clear-constellation'], 'Graph+ exposes opening and member-only clearing in context menus');
+  equal(createShippedGraphModuleRegistryV1().get('rendering')?.descriptor.defaultSettings.nodeRadiusScale, 1,
+    'the shipped Graph Engine node-size default should be 1.00');
   equal(createShippedGraphModuleRegistryV1().get('rendering')?.descriptor.defaultSettings.edgeThicknessScale, 0.1,
     'the shipped Graph Engine link-thickness default should be 0.10');
+  equal(createShippedGraphModuleRegistryV1().get('anima')?.descriptor.defaultSettings.nodeWorldScaleBlend, undefined,
+    'fixed node zoom contrast should have no configurable setting');
   equal(profile?.profileSettings?.dragRelease, 'dynamic', 'drag release should return an unpinned node to the active layout');
   equal(profile?.uiDefaults?.contextMenuEnabled, true, 'the right-click menu should remain available for explicit pinning');
   equal(profile?.uiDefaults?.coreContextActions?.['toggle-pin'], undefined, 'the core Pin node action should remain visible by default');
@@ -171,6 +178,42 @@ test('V1.7 settings catalog exposes only curated typed controls', () => {
   const quality = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'rendering.renderQuality');
   deepEqual(quality?.scopes, ['global', 'profile'], 'render quality should live in full settings without crowding quick settings');
   equal(quality?.control.type, 'select', 'render quality should use named choices rather than free-form text');
+  equal(GRAPH_SETTING_PRESENTATIONS_V1.some((value) => value.id === 'anima.nodeWorldScaleBlend'), false,
+    'the retired contrast slider must not appear in full or quick settings');
+  const gravity = GRAPH_SETTING_PRESENTATIONS_V1.find(value => value.id === 'anima.cursorGravity');
+  deepEqual(gravity?.control.type === 'select' ? gravity.control.options : undefined,
+    { soft: 'Soft', clingy: 'Clingy', off: 'Off' }, 'Cursor gravity exposes the three requested modes');
+  const labels = GRAPH_SETTING_PRESENTATIONS_V1.find(value => value.id === 'rendering.labelMode');
+  deepEqual(labels?.control.type === 'select' ? labels.control.options : undefined,
+    { off: 'Off', proximity: 'Cursor proximity', adaptive: 'Adaptive' }, 'Labels exposes exactly the three requested modes');
+  equal(GRAPH_SETTING_PRESENTATIONS_V1.some(value => value.id === 'anima.cursorLabelProximityEnabled'), false,
+    'the mode dropdown replaces the separate proximity toggle');
+  const repelForce = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'force-layout.repulsionStrength');
+  equal(repelForce?.control.type === 'slider' ? repelForce.control.max : undefined, 1,
+    'repel force should use a normalized slider range');
+  equal(repelForce?.control.type === 'slider' ? repelForce.control.step : undefined, 0.001,
+    'repel force should support fine normalized adjustments');
+  equal(repelForce?.control.type === 'slider' ? repelForce.control.storageExponent : undefined, 2,
+    'repel force should devote more slider travel to commonly tuned lower strengths');
+  if (repelForce) {
+    const displayed = graphSettingDisplayValueV1(repelForce, 1000);
+    assert(typeof displayed === 'number', 'repel force should map stored strengths to a numeric slider position');
+    equal(Math.abs(graphSettingStoredValueV1(repelForce, displayed) as number - 1000) < 1e-9, true,
+      'repel force normalization should round-trip existing stored strengths');
+  }
+  const linkForce = GRAPH_SETTING_PRESENTATIONS_V1.find((value) => value.id === 'force-layout.springStrength');
+  equal(linkForce?.control.type === 'slider' ? linkForce.control.max : undefined, 1,
+    'link force should use a normalized slider range');
+  equal(linkForce?.control.type === 'slider' ? linkForce.control.step : undefined, 0.001,
+    'link force should support fine normalized adjustments');
+  equal(linkForce?.control.type === 'slider' ? linkForce.control.storageExponent : undefined, 2,
+    'link force should devote more slider travel to commonly tuned lower strengths');
+  if (linkForce) {
+    const displayed = graphSettingDisplayValueV1(linkForce, 1);
+    assert(typeof displayed === 'number', 'link force should map stored strengths to a numeric slider position');
+    equal(Math.abs(graphSettingStoredValueV1(linkForce, displayed) as number - 1) < 1e-9, true,
+      'link force normalization should round-trip existing stored strengths');
+  }
 });
 
 test('V1.7 global catalog values flow into Graph+ until its profile overrides them', async () => {
@@ -187,4 +230,18 @@ test('V1.7 global catalog values flow into Graph+ until its profile overrides th
   await controller.setProfileModuleSetting('graph-plus', 'default', 'rendering', 'nodeRadiusScale', undefined);
   equal(controller.getEffectiveProfile('graph-plus', 'default').modules.rendering?.settings.nodeRadiusScale, 2,
     'resetting one profile value should reveal Global again');
+});
+
+
+test('Graph+ 2.0.0 disables regions even with saved enabled overrides and defaults cursor gravity to Clingy', () => {
+  const profiles = new ConsumerProfileRegistry();
+  for (const descriptor of createShippedGraphModuleRegistryV1().descriptors()) profiles.registerModule(descriptor);
+  profiles.registerConsumer(GRAPH_PLUS_CONSUMER_REGISTRATION_V1);
+  profiles.setUserOverrides('graph-plus', 'default', { modules: { 'node-regions': { enabled: true } } });
+  const controller = new GraphEngineSettingsControllerV1(profiles, {}, () => undefined, true);
+  const effective = controller.getEffectiveProfile('graph-plus', 'default');
+  equal(effective.modules.anima.settings.cursorGravity, 'clingy', 'gravity is enabled and Clingy by default');
+  equal(effective.modules['node-regions'].enabled, false, 'regions are disabled in Graph+ 2.0.0');
+  equal(controller.getProfileDescriptor('graph-plus', 'default').modules['node-regions'].policy, 'forbidden',
+    'saved enabled overrides cannot reactivate regions');
 });

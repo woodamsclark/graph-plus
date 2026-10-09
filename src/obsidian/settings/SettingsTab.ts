@@ -1,5 +1,7 @@
 import { App, Modal, Notice, PluginSettingTab, Setting } from 'obsidian';
 import type GraphEnginePlugin from '../main.ts';
+import type { GraphPlusColorOverridesV1 } from '../../graph-plus/consumer/index.ts';
+import type { GraphColorV2 } from '../../graph-engine/runtime/theme/index.ts';
 import { GraphEngineSettingsPanelV1 } from './GraphEngineSettingsPanel.ts';
 import { preserveSettingsScrollV1 } from './SettingsScroll.ts';
 
@@ -12,12 +14,13 @@ export class GraphEngineSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     preserveSettingsScrollV1(containerEl, () => {
       containerEl.empty();
-      containerEl.createEl('h2', { text: 'graph-engine' });
+      containerEl.createEl('h2', { text: 'graph+' });
       const enginePanel = new GraphEngineSettingsPanelV1(this.graphPlus.engineSettings);
       enginePanel.renderProfiles(containerEl, this.app, () => this.display());
       this.renderGeneral(containerEl);
       enginePanel.renderGlobal(containerEl, () => this.display());
       this.renderRecovery(containerEl);
+      this.renderMiscellany(containerEl);
     });
   }
 
@@ -50,6 +53,43 @@ export class GraphEngineSettingTab extends PluginSettingTab {
           );
           this.display();
         }));
+
+    parent.createEl('h3', { text: 'Graph+ colors' });
+    const palette = this.graphPlus.resolveGraphPlusThemePalette();
+    this.renderColorOverride(parent, 'Background', 'Graph canvas background.', 'background', palette.colors.background);
+    this.renderColorOverride(parent, 'Note nodes', 'Ordinary note node color.', 'noteNode', palette.colors.node);
+    this.renderColorOverride(parent, 'Tag nodes', 'Tag node color.', 'tagNode', palette.colors.tagNode);
+  }
+
+  private renderColorOverride(
+    parent: HTMLElement,
+    name: string,
+    description: string,
+    key: keyof GraphPlusColorOverridesV1,
+    inherited: GraphColorV2,
+  ): void {
+    const override = this.graphPlus.settings.colors[key];
+    const setting = new Setting(parent)
+      .setName(name)
+      .setDesc(`${description} ${override ? 'Graph+ override.' : 'Inherited from the active Obsidian theme.'}`)
+      .addColorPicker((picker) => picker
+        .setValue(override ?? colorHex(inherited))
+        .onChange(async (color) => {
+          await this.graphPlus.updateGraphPlusSettings({
+            ...this.graphPlus.settings,
+            colors: { ...this.graphPlus.settings.colors, [key]: color.toLowerCase() },
+          });
+          this.display();
+        }));
+    if (override) setting.addExtraButton((button) => button
+      .setIcon('rotate-ccw')
+      .setTooltip('Use active Obsidian theme')
+      .onClick(async () => {
+        const colors = { ...this.graphPlus.settings.colors };
+        delete colors[key];
+        await this.graphPlus.updateGraphPlusSettings({ ...this.graphPlus.settings, colors });
+        this.display();
+      }));
   }
 
   private renderRecovery(parent: HTMLElement): void {
@@ -61,13 +101,31 @@ export class GraphEngineSettingTab extends PluginSettingTab {
       .setName('Reset graph layout data for this vault')
       .setDesc(canReset
         ? 'Regenerate placement and camera state without changing notes, links, filters, or settings.'
-        : 'Open exactly one graph+ view to make this action available.')
+        : 'Keep one Global graph+ pane open and close any additional Global graph+ panes. A Local graph+ pane does not make this action available.')
       .addButton((button) => button
         .setButtonText('Reset layout…')
         .setWarning()
         .setDisabled(!canReset)
         .onClick(() => new GraphLayoutResetModal(this.app, this.graphPlus).open()));
   }
+
+  private renderMiscellany(parent: HTMLElement): void {
+    parent.createEl('h3', { text: 'Miscellany' });
+    new Setting(parent)
+      .setName('Frank mode')
+      .setDesc("for Frank's eyes only.")
+      .addToggle((toggle) => toggle
+        .setValue(this.graphPlus.settings.frankMode)
+        .onChange(async (frankMode) => {
+          await this.graphPlus.updateGraphPlusSettings({ ...this.graphPlus.settings, frankMode });
+        }));
+  }
+}
+
+function colorHex(color: GraphColorV2): string {
+  const channel = (value: number) => Math.round(Math.max(0, Math.min(1, value)) * 255)
+    .toString(16).padStart(2, '0');
+  return `#${channel(color.r)}${channel(color.g)}${channel(color.b)}`;
 }
 
 class GraphLayoutResetModal extends Modal {
@@ -88,7 +146,7 @@ class GraphLayoutResetModal extends Modal {
       reset.disabled = true;
       void this.graphPlus.resetGraphLayoutData().then((success) => {
         this.close();
-        new Notice(success ? 'graph+ layout was regenerated.' : 'Open exactly one graph+ view and try again.');
+        new Notice(success ? 'graph+ layout was regenerated.' : 'Keep one Global graph+ pane open, close any additional Global graph+ panes, and try again.');
       }).catch((error) => {
         reset.disabled = false;
         new Notice(`graph+ layout reset failed: ${error instanceof Error ? error.message : String(error)}`);

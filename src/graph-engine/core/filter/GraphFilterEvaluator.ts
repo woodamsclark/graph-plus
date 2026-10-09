@@ -36,19 +36,16 @@ export function evaluateGraphFilterV1(
   const errors = validateGraphFilterRequestV1(request);
   if (errors.length) throw new InvalidGraphFilterErrorV1(errors);
 
-  const topology = new GraphTopologyIndex(document);
-  const topologySelections = new WeakMap<GraphFilterAstV1, ReadonlySet<string>>();
-  const nodeIds = new Set(
-    document.nodes
-      .filter((node) => request.node === undefined || evaluateNodeAst(node, request.node, topology, topologySelections))
-      .map((node) => node.id),
-  );
-  const edgeIds = new Set(
-    document.edges
-      .filter((edge) => nodeIds.has(edge.sourceId) && nodeIds.has(edge.targetId))
-      .filter((edge) => request.edge === undefined || evaluateValueAst(edge, request.edge))
-      .map((edge) => edge.id),
-  );
+  // Compile once per evaluation. Topology is built only if a traversing
+  // predicate actually runs; ordinary ID/text/attribute filters need none.
+  let topology: GraphTopologyIndex | undefined;
+  const getTopology = () => topology ??= new GraphTopologyIndex(document);
+  const nodeMatches = compilePredicate(request.node, getTopology);
+  const edgeMatches = compilePredicate(request.edge, getTopology);
+  const nodeIds = new Set(document.nodes.filter(nodeMatches).map(node => node.id));
+  const edgeIds = new Set(document.edges
+    .filter(edge => nodeIds.has(edge.sourceId) && nodeIds.has(edge.targetId) && edgeMatches(edge))
+    .map(edge => edge.id));
   return { nodeIds, edgeIds };
 }
 
@@ -65,42 +62,41 @@ export function validateGraphFilterRequestV1(request: unknown): readonly GraphFi
   return errors;
 }
 
-function evaluateNodeAst(
-  node: GraphNodeV1,
-  ast: GraphFilterAstV1,
-  topology: GraphTopologyIndex,
-  topologySelections: WeakMap<GraphFilterAstV1, ReadonlySet<string>>,
-): boolean {
-  if (ast.op === 'connected-to') {
-    const selection = topologySelections.get(ast)
-      ?? topology.connected(ast.nodeIds, ast.direction ?? 'either');
-    topologySelections.set(ast, selection);
-    return selection.has(node.id);
+function compilePredicate(
+  ast: GraphFilterAstV1 | undefined,
+  getTopology: () => GraphTopologyIndex,
+): (value: GraphNodeV1 | GraphEdgeV1) => boolean {
+  if (!ast) return () => true;
+  if (ast.op === 'id-in') {
+    const ids = new Set(ast.ids);
+    return value => ids.has(value.id);
   }
-  if (ast.op === 'within-depth') {
-    const selection = topologySelections.get(ast)
-      ?? topology.withinDepth(ast.rootNodeIds, ast.maxDepth, ast.direction ?? 'either');
-    topologySelections.set(ast, selection);
-    return selection.has(node.id);
+  if (ast.op === 'connected-to' || ast.op === 'within-depth') {
+    let selection: ReadonlySet<string> | undefined;
+    return value => {
+      selection ??= ast.op === 'connected-to'
+        ? getTopology().connected(ast.nodeIds, ast.direction ?? 'either')
+        : getTopology().withinDepth(ast.rootNodeIds, ast.maxDepth, ast.direction ?? 'either');
+      return selection.has(value.id);
+    };
   }
-  if (ast.op === 'and') return ast.operands.every((operand) => evaluateNodeAst(node, operand, topology, topologySelections));
-  if (ast.op === 'or') return ast.operands.some((operand) => evaluateNodeAst(node, operand, topology, topologySelections));
-  if (ast.op === 'not') return !evaluateNodeAst(node, ast.operand, topology, topologySelections);
-  return evaluateLeaf(node, ast);
-}
-
-function evaluateValueAst(value: GraphNodeV1 | GraphEdgeV1, ast: GraphFilterAstV1): boolean {
-  if (ast.op === 'and') return ast.operands.every((operand) => evaluateValueAst(value, operand));
-  if (ast.op === 'or') return ast.operands.some((operand) => evaluateValueAst(value, operand));
-  if (ast.op === 'not') return !evaluateValueAst(value, ast.operand);
-  return evaluateLeaf(value, ast);
+  if (ast.op === 'and' || ast.op === 'or') {
+    const operands = ast.operands.map(operand => compilePredicate(operand, getTopology));
+    return ast.op === 'and' ? value => operands.every(match => match(value))
+      : value => operands.some(match => match(value));
+  }
+  if (ast.op === 'not') {
+    const match = compilePredicate(ast.operand, getTopology);
+    return value => !match(value);
+  }
+  return value => evaluateLeaf(value, ast);
 }
 
 function evaluateLeaf(value: GraphNodeV1 | GraphEdgeV1, ast: GraphFilterAstV1): boolean {
   switch (ast.op) {
     case 'all': return true;
     case 'none': return false;
-    case 'id-in': return ast.ids.includes(value.id);
+    case 'id-in': return false; // Compiled to Set membership above.
     case 'has-token': return value.tokens?.includes(ast.token) ?? false;
     case 'attribute-equals':
       return scalarEquals(value.attributes?.[ast.attribute], ast.value);

@@ -12,17 +12,20 @@ const publicFiles = [
   'src/graph-engine/public.ts',
   'src/graph-engine/contracts/v1/action.ts',
   'src/graph-engine/contracts/v1/document.ts',
+  'src/graph-engine/contracts/v1/experience.ts',
   'src/graph-engine/contracts/v1/filter.ts',
   'src/graph-engine/contracts/v1/layout.ts',
   'src/graph-engine/contracts/v1/index.ts',
   'src/graph-engine/contracts/v1/patch.ts',
   'src/graph-engine/contracts/v1/profile.ts',
+  'src/graph-engine/contracts/v1/reaction.ts',
   'src/graph-engine/contracts/v1/service.ts',
   'src/graph-engine/contracts/v1/session.ts',
   'src/graph-engine/contracts/v1/tag.ts',
   'src/graph-engine/contracts/v1/ui.ts',
   'src/graph-engine/contracts/v1/values.ts',
   'src/graph-engine/contracts/v1/view-state.ts',
+  'src/graph-engine/contracts/v1/view.ts',
   'src/graph-engine/core/document/GraphTopologyIndex.ts',
   'src/graph-engine/core/filter/GraphFilterEvaluator.ts',
   'src/graph-engine/core/filter/index.ts',
@@ -31,12 +34,24 @@ const publicFiles = [
   'src/graph-engine/core/tags/GraphTagProjector.ts',
   'src/graph-engine/core/tags/index.ts',
   'src/graph-engine/core/topology/GraphTopologyLayoutPolicy.ts',
+  'src/graph-engine/runtime/consciousness/Association.ts',
+  'src/graph-engine/runtime/consciousness/Consciousness.ts',
+  'src/graph-engine/runtime/consciousness/EgoInteractionPlan.ts',
+  'src/graph-engine/runtime/consciousness/Judgement.ts',
+  'src/graph-engine/runtime/consciousness/Memory.ts',
+  'src/graph-engine/runtime/consciousness/Reaction.ts',
+  'src/graph-engine/runtime/consciousness/index.ts',
+  'src/graph-engine/runtime/experience/GraphExperienceContract.ts',
+  'src/graph-engine/runtime/experience/GraphExperienceAdjudicator.ts',
+  'src/graph-engine/runtime/interaction/GraphViewObjectActivation.ts',
+  'src/graph-engine/runtime/interaction/GraphInteractionTypes.ts',
   'src/graph-engine/service/GraphEngineWorkspaceClient.ts',
   'src/graph-engine/service/UnavailableGraphSurface.ts',
 ];
 
 await rm(artifactSourceRoot, { recursive: true, force: true });
 await rm(legacyArtifactSourceRoot, { recursive: true, force: true });
+await cp(join(repositoryRoot, 'LICENSE'), join(artifactRoot, 'LICENSE'));
 
 for (const sourcePath of publicFiles) {
   const source = join(repositoryRoot, sourcePath);

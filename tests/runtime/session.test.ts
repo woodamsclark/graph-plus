@@ -4,6 +4,7 @@ import {
   GraphSessionProfileErrorV1,
   createSessionRuntimePlatformV1,
 } from '../../src/graph-engine/runtime/index.ts';
+import { DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import {
@@ -157,7 +158,7 @@ test('R-SHELL-02 drives documents, events, projection filters, and render filter
   await session.dispose();
 });
 
-test('R-SHELL-03 round-trips consumer-owned view state and supports camera commands', async () => {
+test('R-SHELL-03 restores the compatible saved view without implicit reframing and supports camera commands', async () => {
   const first = harness();
   const session = await first.create();
   await session.setSelection(['b', 'missing', 'b']);
@@ -169,7 +170,7 @@ test('R-SHELL-03 round-trips consumer-owned view state and supports camera comma
   });
   await session.fitNodes(['a', 'b']);
   const saved = await session.exportViewState();
-  deepEqual(saved.selectedNodeIds, ['b'], 'selection should deduplicate and reconcile unknown IDs');
+  deepEqual(saved.selectedNodeIds, ['a'], 'focus admits its subject and filtering removes unavailable members');
   equal(saved.focusedNodeId, 'a', 'focus should export by stable node ID');
   deepEqual(saved.camera.target, { x: 20, y: 30, z: 0 }, 'fit command should target known saved positions');
   await session.fitNodes(['a', 'b'], { centerNodeId: 'a' });
@@ -182,11 +183,16 @@ test('R-SHELL-03 round-trips consumer-owned view state and supports camera comma
   const second = harness();
   const restored = await second.create(JSON.parse(JSON.stringify(saved)));
   const next = await restored.exportViewState();
-  deepEqual(next, saved, 'a generic consumer should be able to persist and restore complete view state');
-  equal(surface(second.container).dataset.renderedNodeCount, '2', 'restored filter should affect the mounted view');
+  deepEqual(next.positions, saved.positions, 'a reopened graph should preserve saved node positions');
+  deepEqual(next.pinnedNodeIds, saved.pinnedNodeIds, 'a reopened graph should preserve explicit pins');
+  deepEqual(next.selectedNodeIds, saved.selectedNodeIds, 'a reopened graph should restore its constellation');
+  equal(next.focusedNodeId, saved.focusedNodeId, 'a reopened graph should restore Focus');
+  deepEqual(next.activeFilters, saved.activeFilters, 'a reopened graph should restore compatible interaction filters');
+  deepEqual(next.camera, saved.camera, 'a reopened graph must retain the saved camera without an implicit fit');
+  equal(surface(second.container).dataset.renderedNodeCount, '2', 'the restored render filter should remain active');
   await restored.focusNode(null);
   const visibleState = await restored.exportViewState();
-  const expectedTarget = midpoint(visibleState.positions.a, visibleState.positions.c);
+  const expectedTarget = visibleState.positions.a;
   await restored.resetCamera();
   deepEqual((await restored.exportViewState()).camera.target, expectedTarget,
     'an unfocused reset should restore the profile angle and fit the complete visible graph');
@@ -203,6 +209,159 @@ test('R-SHELL-03 round-trips consumer-owned view state and supports camera comma
   await restored.dispose();
 });
 
+test('shared world updates geometry without replacing a surface viewport', async () => {
+  const value = harness();
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
+    modules: { 'force-layout': { enabled: true } },
+  });
+  const session = await value.create();
+  await session.focusNode('a');
+  await session.applyFilter({
+    schemaVersion: 1,
+    scope: 'render',
+    node: { op: 'has-token', token: 'keep' },
+  });
+  await session.fitNodes(['a']);
+  const before = await session.exportViewState();
+  const world = await session.exportWorldState();
+  let echoedWorldChanges = 0;
+  session.onWorldChanged(() => { echoedWorldChanges += 1; });
+
+  await session.applyWorldState({
+    ...world,
+    layoutModuleState: {
+      'force-layout': { schemaVersion: 1, alpha: 0, alphaTarget: 0, running: false, velocities: {} },
+    },
+  });
+  session.setLayoutAuthority(false);
+  session.setLayoutAuthority(true);
+  value.platform.flushFrame();
+  const force = value.factory.getDiagnostics().sessions[0]?.modules['force-layout'] as {
+    running?: boolean; targetStepRateHz?: number;
+  } | undefined;
+  equal(force?.running, false,
+    'shared layout-module state should settle a follower even when coordinates already match');
+  equal(force?.targetStepRateHz, 0,
+    'a follower should not restart physics when it later becomes layout authority');
+
+  await session.applyWorldState({
+    ...(await session.exportWorldState()),
+    positions: {
+      ...world.positions,
+      b: { x: 400, y: -250, z: 0 },
+    },
+    pinnedNodeIds: ['b'],
+  });
+
+  const after = await session.exportViewState();
+  deepEqual(after.positions.b, { x: 400, y: -250, z: 0 },
+    'the shared world should install canonical node coordinates');
+  deepEqual(after.pinnedNodeIds, ['b'], 'the shared world should install canonical pins');
+  deepEqual(after.camera, before.camera, 'world synchronization must not replace the surface camera');
+  deepEqual(after.selectedNodeIds, before.selectedNodeIds,
+    'world synchronization must not replace surface Attention');
+  equal(after.focusedNodeId, before.focusedNodeId,
+    'world synchronization must not replace the surface Focus subject');
+  deepEqual(after.activeFilters, before.activeFilters,
+    'world synchronization must not replace surface filters');
+  equal(echoedWorldChanges, 0, 'installing shared geometry should not create a synchronization loop');
+  await session.dispose();
+});
+
+test('neutral experience policy constrains programmatic Attention without exposing host concepts', async () => {
+  const value = harness({
+    experience: {
+      ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1,
+      allowedStates: ['focus'],
+      attention: { maximumNodeCount: 1, overflow: 'preserve-intent-subject' },
+      awareness: { attentionNeighborhoodDepth: 1 },
+    },
+  });
+  const session = await value.create();
+
+  await session.setSelection(['a', 'b']);
+
+  deepEqual((await session.exportViewState()).selectedNodeIds, ['b'],
+    'a single-subject experience should retain only the most recent Attention subject');
+  await session.dispose();
+});
+
+test('exogenous influence bypasses Ego intent while obeying experience invariants', async () => {
+  const value = harness({
+    experience: {
+      ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1,
+      allowedStates: ['focus'],
+      attention: { maximumNodeCount: 1, overflow: 'preserve-intent-subject' },
+      awareness: { attentionNeighborhoodDepth: 1 },
+    },
+  });
+  const session = await value.create();
+  const intents: string[] = [];
+  session.onIntent((intent) => intents.push(intent.type));
+
+  const applied = await session.applyExternalInfluence({
+    schemaVersion: 1,
+    type: 'replace-attention',
+    nodeIds: ['a', 'b'],
+    focusNodeId: 'a',
+    framing: 'fit-state',
+  });
+
+  deepEqual(applied, { status: 'adjusted', attentionNodeIds: ['a'], focusedNodeId: 'a' },
+    'canonical outside truth should preserve its Focus subject while policy reduces Attention');
+  const state = await session.exportViewState();
+  deepEqual(state.selectedNodeIds, ['a'], 'the compatibility selection mirror should follow exogenous Attention');
+  equal(state.focusedNodeId, 'a', 'exogenous framing should establish the permitted Focus subject');
+  deepEqual(state.camera.target, state.positions.a, 'fit-state should frame the externally supplied Focus subject');
+  deepEqual(intents, [], 'outside truth must not be reported as endogenous user intent');
+
+  const rejected = await session.applyExternalInfluence({
+    schemaVersion: 1,
+    type: 'replace-attention',
+    nodeIds: [],
+  });
+  deepEqual(rejected, { status: 'rejected', reason: 'state-not-permitted:overview' },
+    'outside influence should remain constrained by the active experience');
+  deepEqual((await session.exportViewState()).selectedNodeIds, ['a'],
+    'a rejected outside influence must not mutate conscious state');
+  await session.dispose();
+});
+
+test('remembered subjects influence Anima without becoming selected', async () => {
+  const value = harness();
+  const session = await value.create();
+
+  deepEqual(await session.applyExternalInfluence({
+    schemaVersion: 1,
+    type: 'replace-remembered-subjects',
+    nodeIds: ['a', 'missing', 'b'],
+  }), { status: 'adjusted', rememberedNodeIds: ['a', 'b'] },
+  'external Memory should discard subjects absent from the current document');
+  deepEqual((await session.exportViewState()).selectedNodeIds, [],
+    'remembering subjects must not turn them into Attention or compatibility selection');
+  await session.dispose();
+});
+
+test('a Focus-only experience accepts empty exogenous Attention for an empty projection', async () => {
+  const value = harness({
+    document: graphDocument({ documentId: 'blank', nodes: [], edges: [] }),
+    experience: {
+      ...DEFAULT_GRAPH_EXPERIENCE_CONTRACT_V1,
+      allowedStates: ['focus'],
+      attention: { maximumNodeCount: 1, overflow: 'preserve-intent-subject' },
+    },
+  });
+  const session = await value.create();
+
+  deepEqual(await session.applyExternalInfluence({
+    schemaVersion: 1,
+    type: 'replace-attention',
+    nodeIds: [],
+  }), { status: 'accepted', attentionNodeIds: [] },
+  'rootless Focus may remain blank instead of inventing an attended subject');
+  await session.dispose();
+});
+
 function midpoint(
   left: { readonly x: number; readonly y: number; readonly z: number },
   right: { readonly x: number; readonly y: number; readonly z: number },
@@ -212,6 +371,17 @@ function midpoint(
     y: (left.y + right.y) / 2,
     z: (left.z + right.z) / 2,
   };
+}
+
+function averageVector(
+  values: readonly { readonly x: number; readonly y: number; readonly z: number }[],
+): { readonly x: number; readonly y: number; readonly z: number } {
+  const total = values.reduce((sum, value) => ({
+    x: sum.x + value.x,
+    y: sum.y + value.y,
+    z: sum.z + value.z,
+  }), { x: 0, y: 0, z: 0 });
+  return { x: total.x / values.length, y: total.y / values.length, z: total.z / values.length };
 }
 
 test('restored positions outside safe numerical bounds regenerate before rendering', async () => {
@@ -323,7 +493,7 @@ test('R-SHELL-04 suspends animation work and disposes every owned lifecycle reso
   equal(disposedSuspensionError, true, 'disposed suspension requests should fail structurally');
 });
 
-test('adaptive force cadence runs hot at 30 Hz, cools at 15 Hz, and settles fully idle', async () => {
+test('force cadence stays at 60 Hz while alpha slows integration, then settles fully idle', async () => {
   const value = harness();
   value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
     modules: { 'force-layout': { enabled: true } },
@@ -336,25 +506,25 @@ test('adaptive force cadence runs hot at 30 Hz, cools at 15 Hz, and settles full
     targetStepRateHz?: number;
     integrationStepCount?: number;
   } | undefined;
-  equal(force?.targetStepRateHz, 30, 'hot physics should request a 30 Hz cadence');
-  equal(value.factory.getDiagnostics().sessions[0]?.animationFrameScheduled, false,
-    'diagnostics should distinguish sleeping physics from a queued visual frame');
-  equal(value.factory.getDiagnostics().sessions[0]?.wakeTimerScheduled, true,
-    'diagnostics should expose the delayed physics wake');
-  equal(value.platform.pendingFrames, 0, 'continuous physics should not spin on display refresh callbacks');
-  equal(value.platform.pendingTimers, 1, 'hot physics should sleep between integration steps');
+  equal(force?.targetStepRateHz, 60, 'hot physics should request a 60 Hz cadence');
+  equal(value.factory.getDiagnostics().sessions[0]?.animationFrameScheduled, true,
+    'display-rate physics should queue the next visual frame');
+  equal(value.factory.getDiagnostics().sessions[0]?.wakeTimerScheduled, false,
+    'display-rate physics should avoid a timer followed by another frame');
+  equal(value.platform.pendingFrames, 1, '60 Hz physics should use the next display callback');
+  equal(value.platform.pendingTimers, 0, '60 Hz physics should avoid redundant timer wakes');
 
-  for (let index = 0; index < 30; index += 1) {
-    value.platform.advanceTime(1_000 / 30);
+  for (let index = 0; index < 60; index += 1) {
+    value.platform.advanceTime(1_000 / 60);
     value.platform.flushTimer();
-    timestamp += 1_000 / 30;
+    timestamp += 1_000 / 60;
     value.platform.flushFrame(timestamp);
   }
-  assert(((await session.exportPerformanceSnapshot()).counters?.moduleTicks ?? 0) <= 31,
-    'one second of hot continuous physics should not exceed roughly 30 module ticks');
+  assert(((await session.exportPerformanceSnapshot()).counters?.moduleTicks ?? 0) <= 61,
+    'one second of hot continuous physics should not exceed roughly 60 module ticks');
   const beforeImmediateInput = force?.integrationStepCount ?? 0;
   await session.resetCamera();
-  equal(value.platform.pendingTimers, 0, 'camera input should interrupt a sleeping physics delay');
+  equal(value.platform.pendingTimers, 0, 'camera input should leave no redundant wake timer');
   equal(value.platform.pendingFrames, 1, 'camera input should request an immediate visual frame');
   value.platform.advanceTime(1_000 / 60);
   timestamp += 1_000 / 60;
@@ -371,13 +541,18 @@ test('adaptive force cadence runs hot at 30 Hz, cools at 15 Hz, and settles full
     value.platform.flushFrame(timestamp);
   }
   force = value.factory.getDiagnostics().sessions[0]?.modules['force-layout'] as typeof force;
-  assert((force?.integrationStepCount ?? 0) - beforeRapidInput <= 31,
-    '60 Hz camera input must not make the expensive force integrator exceed 30 Hz');
+  assert((force?.integrationStepCount ?? 0) - beforeRapidInput <= 61,
+    '60 Hz camera input must not make the expensive force integrator exceed 60 Hz');
+
+  force = value.factory.getDiagnostics().sessions[0]?.modules['force-layout'] as typeof force;
+  if (force?.targetStepRateHz !== 0) {
+    equal(force?.targetStepRateHz, 60, 'cooling physics should retain smooth 60 Hz scheduling');
+  }
 
   for (let index = 0; index < 360 && (value.platform.pendingFrames > 0 || value.platform.pendingTimers > 0); index += 1) {
-    value.platform.advanceTime(1_000 / 15);
+    value.platform.advanceTime(1_000 / 60);
     value.platform.flushTimer();
-    timestamp += 1_000 / 15;
+    timestamp += 1_000 / 60;
     value.platform.flushFrame(timestamp);
   }
   force = value.factory.getDiagnostics().sessions[0]?.modules['force-layout'] as typeof force;
@@ -388,6 +563,63 @@ test('adaptive force cadence runs hot at 30 Hz, cools at 15 Hz, and settles full
   value.platform.flushFrame(10_000);
   equal((await session.exportPerformanceSnapshot()).counters?.moduleTicks, 0,
     'a settled graph with no input should perform no module work');
+  await session.dispose();
+});
+
+test('layout-affecting filters and dimension changes reheat settled force', async () => {
+  const value = harness();
+  value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
+    modules: { 'force-layout': { enabled: true } },
+  });
+  const session = await value.create();
+  let timestamp = 0;
+  const settle = () => {
+    for (let index = 0; index < 480 && (value.platform.pendingFrames > 0 || value.platform.pendingTimers > 0); index += 1) {
+      value.platform.advanceTime(1_000 / 15);
+      value.platform.flushTimer();
+      timestamp += 1_000 / 15;
+      value.platform.flushFrame(timestamp);
+    }
+  };
+  const forceDiagnostics = () => value.factory.getDiagnostics().sessions[0]?.modules['force-layout'] as {
+    running?: boolean;
+    topologyAnalysisCount?: number;
+    integrationStepCount?: number;
+  } | undefined;
+
+  settle();
+  equal(forceDiagnostics()?.running, false, 'the fixture should settle before visibility changes');
+  const beforeFilterTopology = forceDiagnostics()?.topologyAnalysisCount ?? 0;
+  const beforeFilterSteps = forceDiagnostics()?.integrationStepCount ?? 0;
+  await session.applyFilter({
+    schemaVersion: 1,
+    scope: 'projection',
+    node: { op: 'id-in', ids: ['a', 'c'] },
+  });
+  timestamp += 1_000 / 15;
+  value.platform.flushFrame(timestamp);
+  assert((forceDiagnostics()?.topologyAnalysisCount ?? 0) > beforeFilterTopology,
+    'changing projected visibility should rebuild force topology after settlement');
+  assert((forceDiagnostics()?.integrationStepCount ?? 0) > beforeFilterSteps,
+    'changing projected visibility should restart force integration after settlement');
+
+  settle();
+  equal(forceDiagnostics()?.running, false, 'the filtered fixture should settle before restoring visibility');
+  const beforeClearTopology = forceDiagnostics()?.topologyAnalysisCount ?? 0;
+  await session.clearFilter('projection');
+  timestamp += 1_000 / 15;
+  value.platform.flushFrame(timestamp);
+  assert((forceDiagnostics()?.topologyAnalysisCount ?? 0) > beforeClearTopology,
+    'clearing projected visibility should rebuild force topology after settlement');
+
+  settle();
+  equal(forceDiagnostics()?.running, false, 'the restored fixture should settle before changing dimensions');
+  await session.setSessionOverrides({ dimensions: '3d' });
+  equal(forceDiagnostics()?.running, true, 'dimension conversion should immediately reheat restored force state');
+  timestamp += 1_000 / 15;
+  value.platform.flushFrame(timestamp);
+  assert((forceDiagnostics()?.integrationStepCount ?? 0) > 0,
+    'the replacement 3D force module should resume integration');
   await session.dispose();
 });
 
@@ -448,7 +680,7 @@ test('R-DIM-02..04 switches dimensions on one resource-stable session and preser
   equal(spatial.camera.projection, 'perspective', '3d should reconfigure the camera to perspective');
   assert(Object.values(spatial.positions).every((position) => Number.isFinite(position.x + position.y + position.z)), 'all converted positions should remain finite');
   assert(Object.values(spatial.positions).some((position) => position.z !== 0), 'free 3d layout should gain finite depth');
-  deepEqual(spatial.selectedNodeIds, ['b'], 'selection should survive live conversion');
+  deepEqual(spatial.selectedNodeIds, ['a'], 'the available active composition should survive live conversion');
   equal(spatial.focusedNodeId, 'a', 'focus should survive live conversion');
   deepEqual(spatial.pinnedNodeIds, ['b'], 'pins should survive live conversion');
   equal(spatial.activeFilters.render?.scope, 'render', 'active filters should survive live conversion');
@@ -464,7 +696,7 @@ test('R-DIM-02..04 switches dimensions on one resource-stable session and preser
   const flat = await session.exportViewState();
   equal(flat.camera.projection, 'orthographic', '2d should reconfigure the camera to orthographic');
   equal(Object.values(flat.positions).every((position) => position.z === 0), true, '2d conversion should flatten every position');
-  deepEqual(flat.selectedNodeIds, ['b'], 'selection should survive the return conversion');
+  deepEqual(flat.selectedNodeIds, ['a'], 'the available composition should survive the return conversion');
   equal(flat.focusedNodeId, 'a', 'focus should survive the return conversion');
   equal(value.platform.pendingFrames, 1, 'repeated switching should still retain one scheduled frame');
   equal(value.platform.visibilityListenerAdds, 1, 'repeated switching should not multiply listeners');
@@ -492,7 +724,7 @@ test('R-DIM-03 a valid session dimension override remains isolated from profile 
   await session.dispose();
 });
 
-test('R-MOUNT-07 restores a permitted saved view into the profile active dimension', async () => {
+test('R-MOUNT-07 restores saved interaction state in the active dimension', async () => {
   const first = harness();
   const firstSession = await first.create();
   await firstSession.setSelection(['b']);
@@ -507,8 +739,8 @@ test('R-MOUNT-07 restores a permitted saved view into the profile active dimensi
   const state = await restored.exportViewState();
   equal(state.dimensions, '3d', 'restore should convert a saved allowed dimension into the active profile dimension');
   equal(state.camera.projection, 'perspective', 'converted restore should use the destination projection');
-  deepEqual(state.selectedNodeIds, ['b'], 'restore conversion should preserve selection');
-  equal(state.focusedNodeId, 'a', 'restore conversion should preserve focus');
+  deepEqual(state.selectedNodeIds, ['b', 'a'], 'restore preserves the composition including its admitted Focus subject');
+  equal(state.focusedNodeId, 'a', 'restore conversion should preserve Focus');
   deepEqual(state.pinnedNodeIds, ['b'], 'restore conversion should preserve pins');
   await restored.dispose();
 });

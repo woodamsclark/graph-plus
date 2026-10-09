@@ -1,5 +1,6 @@
 import type { GraphRuntimeCommandV1 } from './GraphInteractionTypes.ts';
 import type { BufferedQueue } from './BufferedQueue.ts';
+import type { EgoIntentOutcome } from '../consciousness/index.ts';
 
 type CommandHandler = (command: GraphRuntimeCommandV1) => void;
 
@@ -19,10 +20,16 @@ export class GraphCommander {
   constructor(
     private readonly commands: BufferedQueue<GraphRuntimeCommandV1>,
     private readonly registry: GraphCommandRegistry,
+    private readonly route: (
+      command: GraphRuntimeCommandV1,
+    ) => EgoIntentOutcome<GraphRuntimeCommandV1>,
   ) {}
 
   tick(): void {
-    for (const command of coalesceCommands(this.commands.drain())) this.registry.dispatch(command);
+    for (const command of coalesceCommands(this.commands.drain())) {
+      const outcome = this.route(command);
+      if (outcome.status !== 'rejected') this.registry.dispatch(outcome.directive);
+    }
   }
 }
 

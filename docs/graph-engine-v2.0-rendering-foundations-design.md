@@ -228,7 +228,7 @@ css-change
 ```
 
 Add `onThemeChanged?(theme: GraphVisualThemeV2)` to the private module lifecycle.
-`RenderingModule` and `AnimaModule` replace their stored snapshot when called. The
+`AnimaBaselineModule` and `AnimaModule` replace their stored snapshot when called. The
 module host must not recreate modules or invoke source/topology/filter projection for
 a theme-only change.
 
@@ -296,7 +296,7 @@ interface GraphRendererV2 {
   initialize(context: GraphRendererInitializeContextV2): Promise<void>;
   resize(viewport: GraphRenderViewportV2): void;
   updateTheme(theme: GraphVisualThemeV2): void;
-  updateScene(scene: GraphRenderSceneV2, invalidations: readonly SessionInvalidationClassV1[]): void;
+  updateScene(scene: GraphRenderSceneV2, invalidations: readonly SessionInvalidationClass[]): void;
   render(): GraphRenderTimingV2;
   pick(request: GraphPickRequestV2): GraphPickResultV2 | null;
   getDiagnostics(): GraphRendererDiagnosticsV2;
@@ -447,9 +447,9 @@ required for V2.0.
   defaults, immutable snapshots, and settings overlays.
 - Replace `src/obsidian/themeStyleResolver.ts` with an Obsidian implementation of the
   theme-source boundary while preserving its current probe precedence.
-- Split theme from presentation policy in `GraphRenderTypes.ts` and migrate color
-  contributions in `RenderingModule`, `AnimaModule`, `FormModule`, and
-  `NodeRegionsModule`.
+- Split theme from presentation policy in `GraphRenderTypes.ts`. Presentation now
+  resides in `AnimaBaselineModule`, `AnimaModule`, and the Anima scene compiler;
+  `FormModule` and `NodeRegionsModule` emit semantic Animus roles only.
 - Add the private theme-change hook to `GraphModuleTypes` and `GraphModuleHost`.
 - Add presentation-only theme recomposition to `SessionProjectionCoordinator` and
   `GraphSessionRuntime`.

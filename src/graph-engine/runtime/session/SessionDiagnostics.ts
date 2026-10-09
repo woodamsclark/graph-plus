@@ -1,15 +1,18 @@
 import type { GraphPerformanceSnapshotV1 } from '../../contracts/v1/index.ts';
-import type { SessionInvalidationClassV1 } from './SessionFrameScheduler.ts';
+import type { SessionInvalidationClass } from './SessionFrameScheduler.ts';
 
 type MutablePerformanceCounters = { -readonly [K in keyof NonNullable<GraphPerformanceSnapshotV1['counters']>]: number };
 
-export class SessionDiagnosticsV1 {
+export class SessionDiagnostics {
   readonly counters: MutablePerformanceCounters = emptyCounters();
   private frameCount = 0;
+  private displayFrameActive = false;
+  private compositionsThisFrame = 0;
+  private maxCompositionsPerFrame = 0;
   private latestFrame = emptyFramePerformance();
   private readonly samples: GraphPerformanceSnapshotV1['latestFrame'][] = [];
-  private lastFrameInvalidations: readonly SessionInvalidationClassV1[] = [];
-  private readonly invalidationCounts: Record<SessionInvalidationClassV1, number> = {
+  private lastFrameInvalidations: readonly SessionInvalidationClass[] = [];
+  private readonly invalidationCounts: Record<SessionInvalidationClass, number> = {
     geometry: 0,
     camera: 0,
     presentation: 0,
@@ -17,9 +20,28 @@ export class SessionDiagnosticsV1 {
     ui: 0,
   };
 
+  beginDisplayFrame(): void {
+    this.displayFrameActive = true;
+    this.compositionsThisFrame = 0;
+  }
+
+  recordComposition(): void {
+    this.counters.frameCompositions += 1;
+    if (!this.displayFrameActive) return;
+    this.compositionsThisFrame += 1;
+    this.maxCompositionsPerFrame = Math.max(this.maxCompositionsPerFrame, this.compositionsThisFrame);
+    if (this.compositionsThisFrame === 2) {
+      console.warn('Graph Engine composed more than once during one display callback.');
+    }
+  }
+
+  endDisplayFrame(): void {
+    this.displayFrameActive = false;
+  }
+
   recordFrame(
     frame: GraphPerformanceSnapshotV1['latestFrame'],
-    invalidations: readonly SessionInvalidationClassV1[],
+    invalidations: readonly SessionInvalidationClass[],
   ): number {
     this.frameCount += 1;
     this.latestFrame = { ...frame };
@@ -35,8 +57,10 @@ export class SessionDiagnosticsV1 {
     this.samples.length = 0;
     this.latestFrame = emptyFramePerformance();
     Object.assign(this.counters, emptyCounters());
+    this.compositionsThisFrame = 0;
+    this.maxCompositionsPerFrame = 0;
     this.lastFrameInvalidations = [];
-    for (const key of Object.keys(this.invalidationCounts) as SessionInvalidationClassV1[]) {
+    for (const key of Object.keys(this.invalidationCounts) as SessionInvalidationClass[]) {
       this.invalidationCounts[key] = 0;
     }
   }
@@ -53,14 +77,18 @@ export class SessionDiagnosticsV1 {
   runtimeSnapshot(): {
     readonly frameCount: number;
     readonly counters: GraphPerformanceSnapshotV1['counters'];
-    readonly lastFrameInvalidations: readonly SessionInvalidationClassV1[];
-    readonly invalidationCounts: Readonly<Record<SessionInvalidationClassV1, number>>;
+    readonly lastFrameInvalidations: readonly SessionInvalidationClass[];
+    readonly invalidationCounts: Readonly<Record<SessionInvalidationClass, number>>;
+    readonly compositionsThisFrame: number;
+    readonly maxCompositionsPerFrame: number;
   } {
     return {
       frameCount: this.frameCount,
       counters: { ...this.counters },
       lastFrameInvalidations: [...this.lastFrameInvalidations],
       invalidationCounts: { ...this.invalidationCounts },
+      compositionsThisFrame: this.compositionsThisFrame,
+      maxCompositionsPerFrame: this.maxCompositionsPerFrame,
     };
   }
 }

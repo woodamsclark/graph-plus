@@ -55,7 +55,9 @@ interface PreparedSpring {
   readonly sourceId: string;
   readonly targetId: string;
   readonly edgeIds: readonly string[];
-  readonly parameters: WeightedSpringParametersV1;
+  parameters: WeightedSpringParametersV1;
+  readonly topologyPair: GraphTopologyPairV1;
+  readonly recursiveMemberCount: number;
   readonly sourceDegree: number;
   readonly targetDegree: number;
   readonly bias: number;
@@ -74,15 +76,26 @@ export interface ForceLayoutDiagnosticsV1 {
   readonly alpha: number;
   readonly running: boolean;
   readonly targetStepRateHz: number;
+  /** Configured integration rate times alpha; not measured callback frequency. */
+  readonly effectiveSimulationRateHz: number;
   readonly integrationStepCount: number;
+  readonly positionBufferSynchronizations: number;
+  readonly positionBufferNodeVisits: number;
+  readonly nodePositionPatches: number;
 }
 
-const NATIVE_ACTIVE_DRAG_ALPHA = 0.3;
-const FIXED_STEP_SECONDS = 1 / 60;
+const ACTIVE_DRAG_ACTIVITY = 1;
+const FORCE_INTEGRATION_GAIN = 0.6;
+const DEFAULT_ALPHA_DECAY_PER_SECOND = 1 / 5;
 const RESTORED_SPEED_REJECTION_MULTIPLIER = 4;
+const MAX_LINK_CORRECTION_PER_STEP = 1;
+const COMPONENT_PACKING_BASE_DISTANCE = 250;
+const SETTLED_MOVEMENT_EPSILON = 0.001;
+const SETTLED_STEP_COUNT = 12;
 
 export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private readonly velocities = new Map<string, MutableVec3>();
+  private readonly previousVelocities = new Map<string, MutableVec3>();
   private readonly forces = new Map<string, MutableVec3>();
   private positions: Record<string, MutableVec3> = {};
   private positionSource: Readonly<Record<string, Vec3>> | null = null;
@@ -91,21 +104,29 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private topologyRegionKey = '';
   private topology?: GraphTopologyAnalysisV1;
   private springs: readonly PreparedSpring[] = [];
+  private springParametersDirty = false;
+  private componentPackingDirty = false;
   private membershipPairStrengths = new Map<string, number>();
   private componentTargets: ReadonlyMap<string, Vec3> = new Map();
   private documentKey = '';
   private pinned = new Set<string>();
   private suspended = false;
+  /** Fraction of an ordinary force-driven state transition applied per admitted tick. */
   private alpha = 1;
   private running = true;
+  private physicsOverrideReturn?: { alpha: number; legacyAlphaTarget: number; running: boolean };
   private pinnedKey = '';
+  private projectionFilterKey: string | undefined;
   private regionLayoutKey = '';
   private topologyAnalysisCount = 0;
-  private accumulatorSeconds = 0;
-  private alphaTarget = 0;
-  private dragWasActive = false;
+  /** V1 snapshot metadata only; no solver behavior reads this field. */
+  private legacyAlphaTarget = 0;
   private restoredStatePending = false;
   private integrationStepCount = 0;
+  private settledStepCount = 0;
+  private positionBufferSynchronizations = 0;
+  private positionBufferNodeVisits = 0;
+  private nodePositionPatches = 0;
 
   constructor(
     private readonly dimensions: GraphDimensionsV1,
@@ -115,8 +136,22 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
     if (settings.topologyLayoutPolicy !== undefined
       && !parseGraphTopologyLayoutPolicyV1(settings.topologyLayoutPolicy)) return;
-    this.settings = readForceSettings(settings);
-    this.topologyDocumentSource = null;
+    const nextSettings = readForceSettings(settings);
+    if (JSON.stringify(this.settings) === JSON.stringify(nextSettings)) return;
+    const previous = this.settings;
+    const dampingOnlyChange = forceSettingsEqualExceptVelocityDecay(this.settings, nextSettings)
+      && this.settings.velocityDecay !== nextSettings.velocityDecay;
+    this.settings = nextSettings;
+    // Damping changes should tame existing motion, not create more of it. They
+    // neither affect the topology-derived spring data nor need to reheat a
+    // settled layout.
+    if (dampingOnlyChange) return;
+    if (JSON.stringify(previous.topologyLayoutPolicy) !== JSON.stringify(nextSettings.topologyLayoutPolicy)) {
+      this.topologyDocumentSource = null;
+    }
+    this.springParametersDirty ||= previous.springStrength !== nextSettings.springStrength
+      || previous.springLength !== nextSettings.springLength || previous.collisionRadius !== nextSettings.collisionRadius;
+    this.componentPackingDirty ||= previous.componentPadding !== nextSettings.componentPadding;
     this.reheatForChange();
   }
 
@@ -128,6 +163,21 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   onViewChanged(state: GraphModulePipelineStateV1['viewState']): void {
     this.synchronizePinnedNodes(state);
+    const nextProjectionFilterKey = JSON.stringify(state.activeFilters.projection ?? null);
+    if (this.projectionFilterKey !== undefined && nextProjectionFilterKey !== this.projectionFilterKey) {
+      this.reheatForChange();
+    }
+    this.projectionFilterKey = nextProjectionFilterKey;
+  }
+
+  onNodePositionChanged(nodeId: string, position: Vec3, source: Readonly<Record<string, Vec3>>): void {
+    // A cold/replaced source is synchronized on its next admitted tick. A warm
+    // source patches only this solver coordinate, preserving every other buffer.
+    if (source !== this.positions && source !== this.positionSource) return;
+    const target = this.positions[nodeId];
+    if (!target) return;
+    target.x = position.x; target.y = position.y; target.z = this.dimensions === '2d' ? 0 : position.z;
+    this.nodePositionPatches += 1;
   }
 
   restoreState(state: JsonValue): void {
@@ -152,15 +202,17 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.velocities.clear();
     if (hostileMotion) {
       this.alpha = 1;
-      this.alphaTarget = 0;
+      this.legacyAlphaTarget = 0;
       this.running = true;
+      this.settledStepCount = 0;
       this.restoredStatePending = false;
       return;
     }
     for (const [id, velocity] of restoredVelocities) this.velocities.set(id, velocity);
-    this.alpha = Math.max(0, state.alpha);
-    this.alphaTarget = finiteCoordinate(state.alphaTarget) ? Math.max(0, state.alphaTarget) : 0;
+    this.alpha = clampNumber(state.alpha, 0, 1, 0);
+    this.legacyAlphaTarget = finiteCoordinate(state.alphaTarget) ? clampNumber(state.alphaTarget, 0, 1, 0) : 0;
     this.running = state.running;
+    this.settledStepCount = 0;
     this.restoredStatePending = true;
   }
 
@@ -168,7 +220,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     return {
       schemaVersion: 1,
       alpha: this.alpha,
-      alphaTarget: this.alphaTarget,
+      alphaTarget: this.legacyAlphaTarget,
       running: this.running,
       velocities: Object.fromEntries([...this.velocities].map(([id, value]) => [id, { ...value }])),
     };
@@ -179,14 +231,17 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   preferredTickIntervalMs(state: GraphModulePipelineStateV1): number | null {
+    this.synchronizePhysicsOverride(state.physicsOverrideHeld === true);
     if (this.suspended || state.formActive || state.document.nodes.length < 2) return null;
     const dragActive = state.draggedNodeId !== undefined
       && state.document.nodes.some((node) => node.id === state.draggedNodeId);
-    if (!this.running && !dragActive) return null;
-    return this.targetFrameIntervalMs(dragActive);
+    const cursorActive = Object.keys(state.cursorAttractionSteps ?? {}).length > 0;
+    if (!this.running && !dragActive && !cursorActive) return null;
+    return this.targetFrameIntervalMs(dragActive || cursorActive);
   }
 
   tick(state: GraphModulePipelineStateV1, deltaSeconds: number) {
+    this.synchronizePhysicsOverride(state.physicsOverrideHeld === true);
     // A restored view can reach the first tick before a view lifecycle event. Keep
     // pin state correct without requiring the session kernel to special-case force.
     this.synchronizePinnedNodes(state.viewState);
@@ -198,7 +253,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     if (this.suspended || state.formActive || state.document.nodes.length < 2) return;
     const dragActive = state.draggedNodeId !== undefined
       && state.document.nodes.some((node) => node.id === state.draggedNodeId);
-    if (dragActive) this.running = true;
+    if (dragActive || Object.keys(state.cursorAttractionSteps ?? {}).length) this.running = true;
     this.synchronizeBuffers(state);
     this.synchronizeTopology(state);
     if (!this.running) return;
@@ -227,7 +282,19 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   private synchronizeTopology(state: GraphModulePipelineStateV1): void {
-    if (state.document === this.topologyDocumentSource && this.regionLayoutKey === this.topologyRegionKey) return;
+    if (state.document === this.topologyDocumentSource && this.regionLayoutKey === this.topologyRegionKey) {
+      if (this.springParametersDirty) for (const spring of this.springs) {
+        spring.parameters = deriveWeightedSpringParametersV1(spring.topologyPair, this.settings, {
+          dimensions: this.dimensions, recursiveMemberCount: spring.recursiveMemberCount,
+        });
+      }
+      if (this.componentPackingDirty && this.topology) {
+        this.componentTargets = buildComponentPackingTargetsV1(this.topology.components, this.settings.componentPadding, this.dimensions);
+      }
+      this.springParametersDirty = false;
+      this.componentPackingDirty = false;
+      return;
+    }
     const membershipConnections = state.regionLayouts.flatMap((region) => region.directMemberNodeIds.map((memberId) => ({
       sourceId: region.regionNodeId,
       targetId: memberId,
@@ -242,13 +309,16 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.springs = physicalPairs.map((pair) => {
       const sourceDegree = Math.max(1, degree.get(pair.sourceId) ?? 1);
       const targetDegree = Math.max(1, degree.get(pair.targetId) ?? 1);
+      const recursiveMemberCount = recursiveTargetRegionNodeCountV1(state.document, pair);
       return {
         sourceId: pair.sourceId,
         targetId: pair.targetId,
         edgeIds: pair.edgeIds,
+        topologyPair: pair,
+        recursiveMemberCount,
         parameters: deriveWeightedSpringParametersV1(pair, this.settings, {
           dimensions: this.dimensions,
-          recursiveMemberCount: recursiveTargetRegionNodeCountV1(state.document, pair),
+          recursiveMemberCount,
         }),
         sourceDegree,
         targetDegree,
@@ -268,16 +338,17 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     }
     this.componentTargets = buildComponentPackingTargetsV1(
       this.topology.components,
-      this.settings.springLength,
       this.settings.componentPadding,
       this.dimensions,
     );
     this.topologyDocumentSource = state.document;
     this.topologyRegionKey = this.regionLayoutKey;
+    this.springParametersDirty = false;
+    this.componentPackingDirty = false;
   }
 
   private applyComponentCentering(): void {
-    const amount = this.settings.centeringStrength * this.alpha;
+    const amount = this.settings.centeringStrength * FORCE_INTEGRATION_GAIN;
     if (amount <= 0) return;
     for (const component of this.topology?.components ?? []) {
       if (component.nodeIds.some((nodeId) => this.pinned.has(nodeId))) continue;
@@ -327,7 +398,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
         const length = Math.max(0.001, Math.hypot(dx, dy, dz));
         const amount = region.membershipStrength
           * Math.tanh((length - region.membershipDistance) / 36)
-          * this.alpha / length;
+          * FORCE_INTEGRATION_GAIN / length;
         const memberDivisor = Math.max(1, memberCounts.get(memberId) ?? 1);
         ownerForce.x += dx * amount / ownerDivisor;
         ownerForce.y += dy * amount / ownerDivisor;
@@ -344,22 +415,33 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     deltaSeconds: number,
     dragActive: boolean,
   ): GraphModuleTickResultV1 | undefined {
-    this.alphaTarget = dragActive ? NATIVE_ACTIVE_DRAG_ALPHA : 0;
-    if (dragActive && !this.dragWasActive) this.alpha = Math.max(this.alpha, NATIVE_ACTIVE_DRAG_ALPHA);
-    this.dragWasActive = dragActive;
-    this.accumulatorSeconds += Math.max(0, Math.min(0.25, deltaSeconds || FIXED_STEP_SECONDS));
-    if (this.accumulatorSeconds + 1e-12 < FIXED_STEP_SECONDS) return {
-      requestNextFrame: true,
-      nextFrameDelayMs: this.targetFrameIntervalMs(dragActive),
-    };
-    this.accumulatorSeconds = Math.min(
-      FIXED_STEP_SECONDS - 1e-12,
-      Math.max(0, this.accumulatorSeconds - FIXED_STEP_SECONDS),
-    );
+    const cursorActive = Object.keys(state.cursorAttractionSteps ?? {}).length > 0;
+    this.legacyAlphaTarget = dragActive ? ACTIVE_DRAG_ACTIVITY : 0;
+    // Alpha is the fraction of one ordinary force-driven position/velocity
+    // transition applied per admitted tick. It does not control tick cadence.
+    // Forces calculate the full step before the state transition is blended.
+    if (dragActive) this.alpha = ACTIVE_DRAG_ACTIVITY;
+    if (state.physicsOverrideHeld) { this.alpha = 1; this.legacyAlphaTarget = 1; }
+    if (dragActive) this.settledStepCount = 0;
+    const elapsedSeconds = Math.max(0, Math.min(0.25, deltaSeconds || this.targetFrameIntervalMs(dragActive) / 1000));
+    if (!state.physicsOverrideHeld && !dragActive && !cursorActive && this.alpha < this.settings.alphaMin) {
+      this.stop();
+      return { requestNextFrame: false };
+    }
+    
     let changed = false;
+    let maximumMovement = 0;
     {
       this.integrationStepCount += 1;
-      this.alpha += (this.alphaTarget - this.alpha) * this.settings.alphaDecay;
+      const integrationScale = clampNumber(this.alpha, 0, 1, 0);
+      for (const node of state.document.nodes) {
+        const velocity = this.velocities.get(node.id)!;
+        let previous = this.previousVelocities.get(node.id);
+        if (!previous) this.previousVelocities.set(node.id, previous = { x: 0, y: 0, z: 0 });
+        previous.x = velocity.x;
+        previous.y = velocity.y;
+        previous.z = velocity.z;
+      }
       this.applyD3Origin(state);
       this.applyD3Links(state);
       this.applyD3ManyBody();
@@ -376,23 +458,37 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
         velocity.y *= 1 - this.settings.velocityDecay;
         velocity.z = this.dimensions === '2d' ? 0 : velocity.z * (1 - this.settings.velocityDecay);
         clampVelocity(velocity, this.settings.maxSpeed, this.dimensions);
+        const previous = this.previousVelocities.get(node.id)!;
+        const fullStepVelocity = { x: velocity.x, y: velocity.y, z: velocity.z };
+        velocity.x = previous.x + (fullStepVelocity.x - previous.x) * integrationScale;
+        velocity.y = previous.y + (fullStepVelocity.y - previous.y) * integrationScale;
+        velocity.z = this.dimensions === '2d'
+          ? 0
+          : previous.z + (fullStepVelocity.z - previous.z) * integrationScale;
         const position = this.positions[node.id];
-        const movement = Math.hypot(velocity.x, velocity.y, velocity.z);
+        const cursorStep = state.cursorAttractionSteps?.[node.id];
+        const movementX = fullStepVelocity.x * integrationScale + (cursorStep?.x ?? 0);
+        const movementY = fullStepVelocity.y * integrationScale + (cursorStep?.y ?? 0);
+        const movementZ = this.dimensions === '2d' ? 0 : fullStepVelocity.z * integrationScale + (cursorStep?.z ?? 0);
+        const movement = Math.hypot(movementX, movementY, movementZ);
+        maximumMovement = Math.max(maximumMovement, movement);
         if (movement > 0.00001) changed = true;
-        position.x += velocity.x;
-        position.y += velocity.y;
-        position.z = this.dimensions === '2d' ? 0 : position.z + velocity.z;
+        position.x += movementX;
+        position.y += movementY;
+        position.z = this.dimensions === '2d' ? 0 : position.z + movementZ;
       }
     }
-    if (!dragActive && this.alpha < this.settings.alphaMin) {
-      this.running = false;
-      this.alpha = 0;
-      this.accumulatorSeconds = 0;
+    if (!dragActive) {
+      this.settledStepCount = maximumMovement <= SETTLED_MOVEMENT_EPSILON
+        ? this.settledStepCount + 1
+        : 0;
     }
+    if (!state.physicsOverrideHeld) this.coolBy(elapsedSeconds, dragActive, cursorActive);
+    if (!state.physicsOverrideHeld && !dragActive && !cursorActive && this.settledStepCount >= SETTLED_STEP_COUNT) this.stop();
     return {
       ...(changed ? { positions: this.positions } : {}),
       requestNextFrame: this.running,
-      ...(this.running ? { nextFrameDelayMs: this.targetFrameIntervalMs(dragActive) } : {}),
+      ...(this.running ? { nextFrameDelayMs: this.targetFrameIntervalMs(dragActive || cursorActive) } : {}),
     };
   }
 
@@ -401,7 +497,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   private applyD3Origin(state: GraphModulePipelineStateV1): void {
-    const strength = this.settings.centeringStrength * this.alpha;
+    const strength = this.settings.centeringStrength * FORCE_INTEGRATION_GAIN;
     for (const node of state.document.nodes) {
       const position = this.positions[node.id];
       const velocity = this.velocities.get(node.id)!;
@@ -413,12 +509,12 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       const target = state.motionTargets?.nodePositions?.[node.id];
       const offset = state.motionTargets?.nodePositionOffsets?.[node.id];
       if (target) {
-        const targetStrength = clampNumber(state.motionTargets?.nodePositionStrength, 0, 1, 0.1) * this.alpha;
+        const targetStrength = clampNumber(state.motionTargets?.nodePositionStrength, 0, 1, 0.1) * FORCE_INTEGRATION_GAIN;
         velocity.x += (target.x - position.x) * targetStrength;
         velocity.y += (target.y - position.y) * targetStrength;
         if (this.dimensions === '3d') velocity.z += (target.z - position.z) * targetStrength;
       } else if (offset) {
-        const targetStrength = clampNumber(state.motionTargets?.nodePositionStrength, 0, 1, 0.1) * this.alpha;
+        const targetStrength = clampNumber(state.motionTargets?.nodePositionStrength, 0, 1, 0.1) * FORCE_INTEGRATION_GAIN;
         velocity.x += offset.x * targetStrength;
         velocity.y += offset.y * targetStrength;
         if (this.dimensions === '3d') velocity.z += offset.z * targetStrength;
@@ -443,20 +539,32 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
         dx = jitter.x * 1e-6; dy = jitter.y * 1e-6; dz = jitter.z * 1e-6;
         length = Math.hypot(dx, dy, dz);
       }
-      const declaredStrength = firstFiniteEdgeValue(pair.edgeIds, state.motionTargets?.edgeStrengthScales, false);
-      const strength = pair.parameters.strength / Math.min(pair.sourceDegree, pair.targetDegree)
-        * finiteNonNegative(declaredStrength, 1)
-        * finiteNonNegative(state.motionTargets?.linkStrengthScale, 1);
+      const strength = this.resolvedLinkStrength(pair, state);
       const declaredLength = firstFiniteEdgeValue(pair.edgeIds, state.motionTargets?.edgeLengths, true);
       const targetLength = (declaredLength ?? pair.parameters.targetLength)
         * finitePositive(state.motionTargets?.linkLengthScale, 1);
-      const amount = (length - targetLength) / length * this.alpha * strength;
+      // A correction above 1 crosses the target distance in one integration
+      // step and feeds an inverted error into the next one. Preserve the
+      // reviewed force equation throughout its stable range, while treating 1
+      // as the strongest meaningful per-step positional correction.
+      const correction = Math.min(MAX_LINK_CORRECTION_PER_STEP, FORCE_INTEGRATION_GAIN * strength);
+      const amount = (length - targetLength) / length * correction;
       dx *= amount; dy *= amount; dz *= amount;
       targetVelocity.x -= dx * pair.bias; targetVelocity.y -= dy * pair.bias; targetVelocity.z -= dz * pair.bias;
       sourceVelocity.x += dx * (1 - pair.bias); sourceVelocity.y += dy * (1 - pair.bias); sourceVelocity.z += dz * (1 - pair.bias);
       clampVelocity(sourceVelocity, this.settings.maxSpeed, this.dimensions);
       clampVelocity(targetVelocity, this.settings.maxSpeed, this.dimensions);
     }
+  }
+
+  private resolvedLinkStrength(
+    pair: PreparedSpring,
+    state: GraphModulePipelineStateV1,
+  ): number {
+    const declaredStrength = firstFiniteEdgeValue(pair.edgeIds, state.motionTargets?.edgeStrengthScales, false);
+    return pair.parameters.strength / Math.min(pair.sourceDegree, pair.targetDegree)
+      * finiteNonNegative(declaredStrength, 1)
+      * finiteNonNegative(state.motionTargets?.linkStrengthScale, 1);
   }
 
   private applyD3ManyBody(): void {
@@ -490,7 +598,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     const size = cell.halfSize * 2;
     if (!cell.children || size * size / squared < thetaSquared) {
       if (squared < minimumSquared) squared = Math.sqrt(minimumSquared * squared);
-      const factor = this.settings.repulsionStrength * cell.mass * this.alpha / squared;
+      const factor = this.settings.repulsionStrength * cell.mass * FORCE_INTEGRATION_GAIN / squared;
       velocity.x += dx * factor;
       velocity.y += dy * factor;
       velocity.z += dz * factor;
@@ -516,7 +624,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   private applyAxialSpring(): void {
     if (this.dimensions !== '3d' || this.settings.axialSpringAxis === 'off') return;
-    const amount = this.settings.axialSpringStiffness * 0.1 * this.alpha;
+    const amount = this.settings.axialSpringStiffness * 0.1 * FORCE_INTEGRATION_GAIN;
     if (amount <= 0) return;
     const axis = this.settings.axialSpringAxis;
     for (const [nodeId, position] of Object.entries(this.positions)) {
@@ -582,7 +690,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       dx = jitter.x * 1e-6; dy = jitter.y * 1e-6; dz = jitter.z * 1e-6;
       distance = Math.hypot(dx, dy, dz);
     }
-    const amount = (minimum - distance) / distance * this.settings.collisionStrength * 0.5;
+    const amount = (minimum - distance) / distance
+      * this.settings.collisionStrength * 0.5 * FORCE_INTEGRATION_GAIN;
     const av = this.velocities.get(nodeId)!;
     const bv = this.velocities.get(otherId)!;
     av.x += dx * amount; av.y += dy * amount; av.z += dz * amount;
@@ -593,6 +702,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   dispose(): void {
     this.velocities.clear();
+    this.previousVelocities.clear();
     this.forces.clear();
     this.positions = {};
     this.positionSource = null;
@@ -606,6 +716,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   getDiagnostics(): ForceLayoutDiagnosticsV1 {
+    const targetStepRateHz = forceLayoutTargetStepRateHzV1(this.alpha, this.running);
     return {
       topologyAnalysisCount: this.topologyAnalysisCount,
       physicalSpringCount: this.springs.length,
@@ -613,8 +724,12 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       coordinatedMembershipPairCount: this.membershipPairStrengths.size,
       alpha: this.alpha,
       running: this.running,
-      targetStepRateHz: forceLayoutTargetStepRateHzV1(this.alpha, this.running),
+      targetStepRateHz,
+      effectiveSimulationRateHz: targetStepRateHz * clampNumber(this.alpha, 0, 1, 0),
       integrationStepCount: this.integrationStepCount,
+      positionBufferSynchronizations: this.positionBufferSynchronizations,
+      positionBufferNodeVisits: this.positionBufferNodeVisits,
+      nodePositionPatches: this.nodePositionPatches,
     };
   }
 
@@ -622,11 +737,16 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     const key = `${state.document.documentId}\u0000${state.document.revision}`;
     const topologyChanged = key !== this.documentKey || state.document !== this.bufferDocumentSource;
     const sourceChanged = state.positions !== this.positionSource && state.positions !== this.positions;
-    if (!topologyChanged && !sourceChanged) return;
+    // stop() clears motion, while the document and internal positions stay the
+    // same. Cursor entry (or reheat) must rebuild those buffers on the fast path.
+    if (!topologyChanged && !sourceChanged && this.velocities.size === state.document.nodes.length) return;
+    this.positionBufferSynchronizations += 1;
+    this.positionBufferNodeVisits += state.document.nodes.length;
     const known = new Set(state.document.nodes.map((node) => node.id));
     if (topologyChanged) {
       for (const id of Object.keys(this.positions)) if (!known.has(id)) delete this.positions[id];
       for (const id of [...this.velocities.keys()]) if (!known.has(id)) this.velocities.delete(id);
+      for (const id of [...this.previousVelocities.keys()]) if (!known.has(id)) this.previousVelocities.delete(id);
       for (const id of [...this.forces.keys()]) if (!known.has(id)) this.forces.delete(id);
     }
     for (const node of state.document.nodes) {
@@ -641,12 +761,40 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     }
     this.documentKey = key;
     this.bufferDocumentSource = state.document;
-    this.positionSource = this.positions;
+    this.positionSource = state.positions;
+  }
+
+  private synchronizePhysicsOverride(held: boolean): void {
+    if (held) {
+      this.physicsOverrideReturn ??= { alpha: this.alpha, legacyAlphaTarget: this.legacyAlphaTarget, running: this.running };
+      this.alpha = 1; this.legacyAlphaTarget = 1; this.running = true;
+    } else if (this.physicsOverrideReturn) {
+      const previous = this.physicsOverrideReturn;
+      this.physicsOverrideReturn = undefined;
+      this.alpha = previous.alpha; this.legacyAlphaTarget = previous.legacyAlphaTarget; this.running = previous.running;
+    }
   }
 
   private reheatForChange(): void {
-    this.alpha = Math.max(this.alpha, 0.3);
+    this.alpha = 1;
     this.running = true;
+    this.settledStepCount = 0;
+  }
+
+  private coolBy(elapsedSeconds: number, dragActive: boolean, cursorActive = false): void {
+    if (dragActive) return;
+    this.alpha = Math.max(0, this.alpha - this.settings.alphaDecay * elapsedSeconds);
+    if (!cursorActive && this.alpha < this.settings.alphaMin) this.stop();
+  }
+
+  private stop(): void {
+    this.running = false;
+    this.alpha = 0;
+    this.legacyAlphaTarget = 0;
+    this.settledStepCount = 0;
+    // Frozen layouts cannot retain momentum that might replay on a later thaw.
+    this.velocities.clear();
+    this.previousVelocities.clear();
   }
 }
 
@@ -661,7 +809,7 @@ export function readForceSettings(settings: Readonly<Record<string, JsonValue>>)
     springLength: finitePositive(settings.springLength, 250),
     centeringStrength: finiteNonNegative(settings.centeringStrength, 0.1),
     velocityDecay: clampNumber(settings.velocityDecay ?? settings.damping, 0, 1, 0.4),
-    alphaDecay: clampNumber(settings.alphaDecay, 0, 1, 0.02276277904418933),
+    alphaDecay: clampNumber(settings.alphaDecay, 0, 1, DEFAULT_ALPHA_DECAY_PER_SECOND),
     alphaMin: finitePositive(settings.alphaMin, 0.001),
     repulsionMinDistance: finitePositive(settings.repulsionMinDistance, 30),
     barnesHutTheta: finitePositive(settings.barnesHutTheta, 0.9),
@@ -710,6 +858,24 @@ function applyLegacyTopologySettings(
 
 function readAxialSpringAxis(value: JsonValue | undefined): GraphAxialSpringAxisV1 {
   return value === 'x' || value === 'y' || value === 'z' ? value : 'off';
+}
+
+function forceSettingsEqualExceptVelocityDecay(left: ForceSettings, right: ForceSettings): boolean {
+  return left.repulsionStrength === right.repulsionStrength
+    && left.springStrength === right.springStrength
+    && left.springLength === right.springLength
+    && left.centeringStrength === right.centeringStrength
+    && left.alphaDecay === right.alphaDecay
+    && left.alphaMin === right.alphaMin
+    && left.repulsionMinDistance === right.repulsionMinDistance
+    && left.barnesHutTheta === right.barnesHutTheta
+    && left.maxSpeed === right.maxSpeed
+    && JSON.stringify(left.topologyLayoutPolicy) === JSON.stringify(right.topologyLayoutPolicy)
+    && left.componentPadding === right.componentPadding
+    && left.collisionRadius === right.collisionRadius
+    && left.collisionStrength === right.collisionStrength
+    && left.axialSpringAxis === right.axialSpringAxis
+    && left.axialSpringStiffness === right.axialSpringStiffness;
 }
 
 function collisionCell(position: Vec3, size: number): { x: number; y: number; z: number } {
@@ -828,15 +994,14 @@ export function coordinateWeightedSpringStrengthV1(
 
 export function buildComponentPackingTargetsV1(
   components: readonly GraphTopologyComponentV1[],
-  springLength: number,
   padding: number,
   dimensions: GraphDimensionsV1,
 ): ReadonlyMap<string, Vec3> {
   const targets = new Map<string, Vec3>();
   if (!components.length) return targets;
   const radii = components.map((component) => Math.max(
-    springLength * 0.35,
-    Math.sqrt(component.nodeIds.length) * springLength * 0.65,
+    COMPONENT_PACKING_BASE_DISTANCE * 0.35,
+    Math.sqrt(component.nodeIds.length) * COMPONENT_PACKING_BASE_DISTANCE * 0.65,
   ));
   targets.set(components[0].id, { x: 0, y: 0, z: 0 });
   let ringRadius = radii[0] + padding;

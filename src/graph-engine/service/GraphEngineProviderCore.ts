@@ -6,16 +6,20 @@ import type {
   GraphEngineLeaseV1,
   GraphEngineRequestV1,
   GraphNodeActionRegistrationV1,
+  GraphReactionRegistrationV1,
   GraphSessionOptionsV1,
   GraphSessionV1,
   GraphSettingsOverridesV1,
   JsonValue,
 } from '../contracts/v1/index.ts';
+import { GRAPH_CONSCIOUS_REACTIONS_CAPABILITY_V1 } from '../contracts/v1/index.ts';
 import { ConsumerProfileRegistry } from '../core/profile/index.ts';
 import { SessionFactory } from '../runtime/index.ts';
 import { ConsumerNodeActionRegistryV1 } from './ConsumerNodeActionRegistry.ts';
+import { ConsumerReactionRegistryV1 } from './ConsumerReactionRegistry.ts';
 import type {
   GraphEngineProfileSettingsPortV1,
+  GraphEngineProfileUpdateModeV1,
   GraphEngineSessionUiHostV1,
 } from './GraphEngineSessionUiHost.ts';
 
@@ -25,7 +29,7 @@ export interface GraphEngineProviderCoreOptionsV1 {
   readonly capabilities: readonly string[];
   readonly profiles: ConsumerProfileRegistry;
   readonly sessions: SessionFactory;
-  readonly onProfilesChanged?: () => void | Promise<void>;
+  readonly onProfilesChanged?: (mode?: GraphEngineProfileUpdateModeV1) => void | Promise<void>;
   readonly sessionUiHost?: GraphEngineSessionUiHostV1;
 }
 
@@ -36,6 +40,7 @@ export interface GraphEngineProviderDiagnosticsV1 {
     readonly consumerId: string;
     readonly sessionCount: number;
     readonly actionRegistrationCount: number;
+    readonly reactionRegistrationCount: number;
   }[];
   readonly runtime: ReturnType<SessionFactory['getDiagnostics']>;
 }
@@ -45,6 +50,7 @@ interface LeaseRecord {
   readonly consumerId: string;
   readonly sessions: Set<GraphSessionV1>;
   readonly actionRegistrations: Set<Disposable>;
+  readonly reactionRegistrations: Set<Disposable>;
   released: boolean;
 }
 
@@ -65,9 +71,10 @@ export class GraphEngineProviderCoreV1 {
 
   private readonly profiles: ConsumerProfileRegistry;
   private readonly sessions: SessionFactory;
-  private readonly onProfilesChanged: () => void | Promise<void>;
+  private readonly onProfilesChanged: (mode?: GraphEngineProfileUpdateModeV1) => void | Promise<void>;
   private readonly sessionUiHost?: GraphEngineSessionUiHostV1;
   private readonly nodeActions = new ConsumerNodeActionRegistryV1();
+  private readonly reactions = new ConsumerReactionRegistryV1();
   private readonly leases = new Set<LeaseRecord>();
   private active = true;
   private nextLeaseId = 1;
@@ -75,7 +82,10 @@ export class GraphEngineProviderCoreV1 {
   constructor(options: GraphEngineProviderCoreOptionsV1) {
     this.engineVersion = requireId(options.engineVersion, 'engine version');
     this.engineInstanceId = requireId(options.engineInstanceId, 'engine instance ID');
-    this.capabilities = uniqueIds(options.capabilities, 'engine capabilities');
+    this.capabilities = uniqueIds([
+      ...options.capabilities,
+      GRAPH_CONSCIOUS_REACTIONS_CAPABILITY_V1,
+    ], 'engine capabilities');
     this.profiles = options.profiles;
     this.sessions = options.sessions;
     this.onProfilesChanged = options.onProfilesChanged ?? (() => undefined);
@@ -119,6 +129,7 @@ export class GraphEngineProviderCoreV1 {
     await Promise.all(leases.map((lease) => this.releaseLease(lease)));
     this.leases.clear();
     this.nodeActions.dispose();
+    this.reactions.dispose();
   }
 
   getDiagnostics(): GraphEngineProviderDiagnosticsV1 {
@@ -128,6 +139,7 @@ export class GraphEngineProviderCoreV1 {
         consumerId: lease.consumerId,
         sessionCount: lease.sessions.size,
         actionRegistrationCount: lease.actionRegistrations.size,
+        reactionRegistrationCount: lease.reactionRegistrations.size,
       }))
       .sort((left, right) => left.consumerId.localeCompare(right.consumerId));
     return {
@@ -158,6 +170,7 @@ export class GraphEngineProviderCoreV1 {
       consumerId: options.consumerId,
       sessions: new Set(),
       actionRegistrations: new Set(),
+      reactionRegistrations: new Set(),
       released: false,
     };
     this.leases.add(record);
@@ -191,6 +204,16 @@ export class GraphEngineProviderCoreV1 {
         record.actionRegistrations.add(registration);
         return registration;
       },
+      registerReactions: (reactions: readonly GraphReactionRegistrationV1[]): Disposable => {
+        this.assertLease(record);
+        const ownedRegistration = this.reactions.register(record.consumerId, record, reactions);
+        const registration: Disposable = { dispose: () => {
+          ownedRegistration.dispose();
+          record.reactionRegistrations.delete(registration);
+        } };
+        record.reactionRegistrations.add(registration);
+        return registration;
+      },
       createSession: async (options: GraphSessionOptionsV1): Promise<GraphSessionV1> => {
         this.assertLease(record);
         if (options.consumerId !== record.consumerId) {
@@ -201,6 +224,7 @@ export class GraphEngineProviderCoreV1 {
         }
         const hosted = await this.sessions.createHostedSession(options, {
           nodeActions: this.nodeActions.runtimeFor(record.consumerId, record),
+          reactions: this.reactions.runtimeFor(record.consumerId, record),
         });
         let ui: Disposable | undefined;
         try {
@@ -252,6 +276,22 @@ export class GraphEngineProviderCoreV1 {
       getDescriptor: () => this.profiles.getProfileDescriptor(consumerId, profileId),
       getEffectiveProfile: () => this.profiles.resolve(consumerId, profileId),
       getUserOverrides: () => this.profiles.getUserOverrides(consumerId, profileId),
+      setDimensions: async (dimensions) => {
+        const descriptor = this.profiles.getProfileDescriptor(consumerId, profileId);
+        const allowed = descriptor.allowedDimensions ?? ['2d', '3d'];
+        if (dimensions !== undefined && !allowed.includes(dimensions)) {
+          throw new Error(`Dimension "${dimensions}" is not permitted for ${consumerId}/${profileId}.`);
+        }
+        const overrides = this.profiles.getUserOverrides(consumerId, profileId);
+        this.profiles.setUserOverrides(consumerId, profileId, { ...overrides, dimensions });
+        try {
+          await this.onProfilesChanged();
+        } catch (error) {
+          this.profiles.setUserOverrides(consumerId, profileId, overrides);
+          try { await this.onProfilesChanged(); } catch {}
+          throw error;
+        }
+      },
       setProfileSetting: async (key, value) => {
         const overrides = this.profiles.getUserOverrides(consumerId, profileId);
         this.profiles.setUserOverrides(consumerId, profileId, changeProfileSetting(overrides, key, value));
@@ -263,17 +303,18 @@ export class GraphEngineProviderCoreV1 {
           throw error;
         }
       },
-      setModuleSetting: async (moduleId, key, value) => {
+      setModuleSetting: async (moduleId, key, value, mode) => {
         const overrides = this.profiles.getUserOverrides(consumerId, profileId);
         this.profiles.setUserOverrides(consumerId, profileId, changeModuleSetting(overrides, moduleId, key, value));
         try {
-          await this.onProfilesChanged();
+          await this.onProfilesChanged(mode);
         } catch (error) {
           this.profiles.setUserOverrides(consumerId, profileId, overrides);
           try { await this.onProfilesChanged(); } catch {}
           throw error;
         }
       },
+      commitSettings: async () => { await this.onProfilesChanged('commit'); },
     };
   }
 
@@ -285,6 +326,8 @@ export class GraphEngineProviderCoreV1 {
     record.sessions.clear();
     for (const registration of [...record.actionRegistrations]) registration.dispose();
     record.actionRegistrations.clear();
+    for (const registration of [...record.reactionRegistrations]) registration.dispose();
+    record.reactionRegistrations.clear();
     await Promise.all(sessions.map((session) => session.dispose()));
     if (![...this.leases].some((lease) => !lease.released && lease.consumerId === record.consumerId)) {
       this.profiles.markConsumerInactive(record.consumerId);

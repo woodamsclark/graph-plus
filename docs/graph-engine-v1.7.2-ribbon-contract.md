@@ -6,7 +6,7 @@ Date: 2026-09-06
 
 ## Behavior
 
-graph-engine registers one native Obsidian ribbon action using the `network` icon
+Graph+ registers one native Obsidian ribbon action using the `network` icon
 and lowercase tooltip **open graph+**. Activating it uses the same global graph+
 activation path as the **open graph+** command: an existing global graph+ leaf is
 revealed, or exactly one is created when none exists.
@@ -18,7 +18,7 @@ state instead of opening a view.
 ## Versioning
 
 The Obsidian plugin, root package, and bundled graph+ consumer are version `1.7.2`.
-The public V1 client remains version `1.7.1` because this host-only addition changes no
+At the V1.7.2 milestone, the public V1 client remained version `1.7.1` because this host-only addition changed no
 public contract. Downstream consumers therefore require no update.
 
 ## Acceptance

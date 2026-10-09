@@ -1,28 +1,37 @@
 import type { Vec3 } from '../../contracts/v1/index.ts';
-import { DEFAULT_GRAPH_VISUAL_THEME_V2, type GraphColorV2, type GraphVisualThemeV2 } from '../theme/index.ts';
+import {
+  DEFAULT_GRAPH_VISUAL_THEME_V2,
+  type GraphColorV2,
+  type GraphFontV2,
+  type GraphVisualThemeV2,
+} from '../theme/index.ts';
 
 export interface GraphRenderNodeV1 {
   readonly id: string;
   readonly label: string;
   readonly position: Vec3;
   readonly radius: number;
-  readonly selected: boolean;
-  readonly focused: boolean;
-  readonly hovered: boolean;
-  /** An authoritative presentation color that wins over renderer interaction fallbacks. */
-  readonly finalColor?: GraphColorV2;
-  readonly color?: GraphColorV2;
-  readonly opacity?: number;
+  /** Optional per-node exponent applied to projected camera scale. */
+  readonly nodeScaleExponent?: number;
+  /** Fully resolved by Anima. The renderer never infers color from graph state. */
+  readonly finalColor: GraphColorV2;
+  readonly opacity: number;
   readonly strokeColor?: GraphColorV2;
   readonly strokeWidth?: number;
-  readonly labelColor?: GraphColorV2;
-  readonly labelOpacity?: number;
-  readonly labelFontSize?: number;
+  readonly labelColor: GraphColorV2;
+  readonly labelOpacity: number;
+  readonly labelFontSize: number;
   /** Final screen-space offset from the normal centered label anchor. */
   readonly labelOffset?: { readonly x: number; readonly y: number };
   readonly showLabel?: boolean;
+  /** Force this interaction label even when the graph-wide label mode is off. */
+  readonly labelForceVisible?: boolean;
   readonly labelPriority?: number;
   readonly labelAlwaysVisible?: boolean;
+  /** Resolved semantic priority; the renderer does not inspect interaction state. */
+  readonly labelStatePriority: number;
+  /** Fraction by which this node's adaptive Saliency threshold is reduced. */
+  readonly labelSaliencyBoost?: number;
 }
 
 export interface GraphRenderEdgeV1 {
@@ -31,16 +40,34 @@ export interface GraphRenderEdgeV1 {
   readonly targetId: string;
   readonly directed: boolean;
   readonly thickness: number;
-  readonly color?: GraphColorV2;
-  readonly opacity?: number;
+  readonly color: GraphColorV2;
+  readonly opacity: number;
   readonly arrowAtSource?: boolean;
   readonly arrowAtTarget?: boolean;
-  readonly arrowColor?: GraphColorV2;
-  readonly arrowOpacity?: number;
+  readonly arrowColor: GraphColorV2;
+  readonly arrowOpacity: number;
   readonly dashed?: boolean;
 }
 
 export interface GraphRenderRegionV1 {
+  readonly id: string;
+  readonly regionNodeId: string;
+  readonly memberNodeIds: readonly string[];
+  readonly directMemberNodeIds: readonly string[];
+  readonly connections: readonly {
+    readonly sourceId: string;
+    readonly targetId: string;
+  }[];
+  readonly padding: number;
+  readonly fillColor: GraphColorV2;
+  readonly fillOpacity: number;
+  readonly strokeColor: GraphColorV2;
+  readonly strokeOpacity: number;
+  readonly strokeWidth: number;
+}
+
+/** Unresolved region input accepted from Animus structural modules. */
+export interface GraphRegionRenderContributionV1 {
   readonly id: string;
   readonly regionNodeId: string;
   readonly memberNodeIds: readonly string[];
@@ -64,6 +91,8 @@ export interface GraphNodeRenderContributionV1 {
   readonly color?: GraphColorV2;
   /** Final world-space radius. When present this wins over the legacy radiusScale. */
   readonly radius?: number;
+  /** Optional per-node exponent applied to projected camera scale. */
+  readonly nodeScaleExponent?: number;
   readonly radiusScale?: number;
   /** Graph-wide multiplier kept separate so structural role scales can compose. */
   readonly baseRadiusScale?: number;
@@ -75,8 +104,14 @@ export interface GraphNodeRenderContributionV1 {
   readonly labelFontSize?: number;
   readonly labelOffset?: { readonly x: number; readonly y: number };
   readonly showLabel?: boolean;
+  /** Force this interaction label even when the graph-wide label mode is off. */
+  readonly labelForceVisible?: boolean;
   readonly labelPriority?: number;
   readonly labelAlwaysVisible?: boolean;
+  /** Anima-resolved label raising priority. */
+  readonly labelStatePriority?: number;
+  /** Fraction by which this label's adaptive Saliency threshold is reduced. */
+  readonly labelSaliencyBoost?: number;
 }
 
 export interface GraphEdgeRenderContributionV1 {
@@ -95,11 +130,19 @@ export interface GraphEdgeRenderContributionV1 {
 }
 
 export interface GraphPresentationPolicyV2 {
-  readonly labelMode?: 'adaptive' | 'all' | 'off';
+  readonly cursorAttractionRadiusPx?: number;
+  readonly cursorAttractionMode?: 'soft' | 'clingy' | 'off';
+  /** Screen-space reach used by proximity label mode; zero disables reveal. */
+  readonly cursorLabelRevealRadiusPx?: number;
+  readonly labelMode?: 'adaptive' | 'all' | 'off' | 'proximity';
   readonly labelPosition?: 'above' | 'below';
   /** Higher values delay ordinary adaptive labels; interaction-required labels remain visible. */
+  readonly adaptiveLabelSaliency?: number;
+  /** @deprecated Compatibility spelling for adaptiveLabelSaliency. */
   readonly adaptiveLabelThreshold?: number;
   readonly nodeScaleMode?: 'linear' | 'sqrt-orthographic';
+  /** Exponent applied to projected camera scale when resolving node radius. */
+  readonly nodeScaleExponent?: number;
   readonly labelScaleMode?: 'fixed' | 'sqrt-orthographic';
   /** New-mode perspective floor for the visible node disc, in CSS pixels. */
   readonly minimumPerspectiveNodeRadius?: number;
@@ -117,7 +160,9 @@ export interface GraphRenderFrameV1 {
   readonly regions: readonly GraphRenderRegionV1[];
   readonly nodes: readonly GraphRenderNodeV1[];
   readonly edges: readonly GraphRenderEdgeV1[];
-  readonly theme: GraphVisualThemeV2;
+  /** Resolved global draw values. Semantic theme roles do not reach renderers. */
+  readonly backgroundColor: GraphColorV2;
+  readonly labelFont: GraphFontV2;
   readonly policy?: GraphPresentationPolicyV2;
 }
 

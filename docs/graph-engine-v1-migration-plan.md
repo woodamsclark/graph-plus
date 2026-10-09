@@ -355,7 +355,7 @@ Work:
 - implement debounced graph/view checkpoints and awaited close flush;
 - migrate legacy saved node positions into namespaced `GraphViewStateV1` without
   destructively removing legacy data on first read;
-- move Graph+ query parsing and note/tag controls into the consumer;
+- keep Graph+ metadata search and note/tag controls in the consumer, using Obsidian's public `prepareSimpleSearch()` matcher;
 - translate public intents into Obsidian navigation/product actions;
 - compare adapter output with committed fixture expectations.
 

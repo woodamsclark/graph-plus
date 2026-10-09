@@ -1,7 +1,7 @@
 import type { Disposable, GraphEngineConnectionErrorV1 } from '../contracts/v1/index.ts';
 
 export const GRAPH_ENGINE_UNAVAILABLE_COPY_V1 =
-  'graph-engine is unavailable or not installed. This feature requires graph-engine.';
+  'Graph+ is unavailable or not installed. This feature requires Graph+.';
 
 export function mountGraphEngineUnavailableSurfaceV1(
   container: HTMLElement,

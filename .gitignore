@@ -17,7 +17,13 @@ yarn-error.log*
 .DS_Store
 .env
 
-data.json
+# Obsidian plugin settings and conflict-copy variants are private runtime data.
+/data*.json
 
 # Compiled JavaScript files
 main.js
+
+# Runtime and review artifacts
+graph-plus-checkpoints/
+outputs/
+releases/

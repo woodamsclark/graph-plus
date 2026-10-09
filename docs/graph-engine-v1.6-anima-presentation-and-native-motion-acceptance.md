@@ -4,6 +4,10 @@ Status: Automated gates pass; live desktop/mobile behavior accepted.
 
 Date: 2026-09-05
 
+View update: the [View and Scene Contract](graph-engine-view-scene-contract.md)
+supersedes the historical click, hover, Focus scene, and implicit framing rules below.
+Hover now previews the admitted ordinary object activation; only click commits it.
+
 Depends on: [V1.6 Anima Presentation and Native Motion Contract](graph-engine-v1.6-anima-presentation-and-native-motion-contract.md)
 
 ## 1. Acceptance principle
@@ -215,11 +219,11 @@ For ordinary colliding labels, explicit structural priority wins first, then lar
 Anima world radius, then perspective proximity, then stable node ID. A distant hub
 therefore reserves space before a nearer low-degree leaf. In perspective 3D, compare
 far and near camera-target scales and assert that dollying closer increases the
-ordinary label budget while keeping the threshold-adjusted result inside `4` through
+ordinary label budget while keeping the Saliency-adjusted result inside `4` through
 `120`.
 
-Graph+ defaults Label threshold to `65` in 2D and `50` in 3D. At one fixed camera and
-viewport, raising the active dimension's threshold reduces ordinary accepted labels
+Graph+ defaults Label saliency to `65` in 2D and `50` in 3D. At one fixed camera and
+viewport, raising the active dimension's Saliency reduces ordinary accepted labels
 without hiding forced labels or changing the other dimension's setting. The control
 is present only while label mode is Adaptive and updates without remounting.
 
@@ -292,20 +296,27 @@ the focused node. Crossing the drag threshold cancels stationary-click activatio
 ### A-V16-FOCUS-02 — Mobile release and restrained framing
 
 A stationary background finger tap clears selection and focus in perspective 3D.
-Focus-triggered fitting magnifies the current camera by no more than `1.75` times in
-both orthographic and perspective modes. Fit-all and reset retain their ordinary
-range.
+Focus-triggered fitting frames the complete focused neighborhood in one action in both
+orthographic and perspective modes, using a centered square safe frame based on the
+viewport's shorter dimension. The current neighborhood fit is the Focus zoom-out
+boundary, and repeated Center + Fit actions are idempotent.
+During initial force settling the fit tracks the focused neighborhood, unless direct
+user camera or node-drag input cancels that automatic framing.
 
 ### A-V16-INPUT-01 — Canvas-like wheel and pinch remain
 
 - Unmodified wheel input pans in 2D.
 - Platform pinch/modified wheel input zooms.
 - Touch pinch zooms.
-- An unfocused one-finger background drag pans 3D.
+- A one-finger background drag pans 3D Overview and orbits around the selected
+  constellation in 3D Explore.
 - A focused one-finger drag orbits and retains focus/selection even when it begins on
   another node; that node does not move and does not acquire neighborhood emphasis.
 - A stationary tap on that node still transfers focus.
-- Focused two-finger translation pans the camera offset and retains focus/selection.
+- In 3D, two-finger centroid movement orbits while finger separation zooms during the
+  same gesture; Focus retains its target and focus/selection.
+- In 2D, two-finger centroid movement pans while finger separation zooms during the
+  same gesture.
 - A stationary background touch miss clears focus and selection.
 - Existing desktop 3D wheel and secondary-drag behavior remains as contracted.
 
@@ -359,10 +370,11 @@ Drag a hub for at least one second:
 - screen pointer error remains at most one CSS pixel;
 - neighbors respond while the drag remains held;
 - no persistent pin is added for an initially unpinned node;
-- drag heat targets `0.3`;
+- drag alpha remains exactly `1` and never exceeds it;
 - release causes no position discontinuity;
-- release returns the heat target to zero without raising alpha to `1`; and
-- the graph cools to rest.
+- release returns the alpha target to zero; and
+- the graph continuously slows and freezes within five seconds without changing its force
+  equilibrium.
 
 An explicitly pinned node remains pinned after the same gesture.
 
@@ -374,7 +386,7 @@ After settlement:
   near their centroid with bounded jitter;
 - add a disconnected batch and assert it starts around/outside the occupied cloud;
 - remove a node and assert surviving positions are retained; and
-- assert each change raises heat to at least `0.3` without a full reset.
+- assert each change thaws alpha to `1` without resetting coordinates.
 
 ### A-V16-FORCE-08 — Large-graph responsiveness
 

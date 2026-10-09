@@ -1,7 +1,9 @@
 import {
   analyzeGraphTopologyV1,
   DEFAULT_GRAPH_TOPOLOGY_LAYOUT_POLICY_V1,
+  shortestPathToAnyV1,
 } from '../../src/graph-engine/core/topology/index.ts';
+import { GraphTopologyIndex } from '../../src/graph-engine/core/document/GraphTopologyIndex.ts';
 import {
   buildComponentPackingTargetsV1,
   coordinateWeightedSpringStrengthV1,
@@ -14,6 +16,43 @@ import { DEFAULT_GRAPH_RENDER_THEME_V1 } from '../../src/graph-engine/runtime/re
 import type { GraphModulePipelineStateV1 } from '../../src/graph-engine/runtime/modules/GraphModuleTypes.ts';
 import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
+
+test('shortest paths resolve deterministically to the nearest selected group member', () => {
+  const relationships = new Map<string, ReadonlySet<string>>([
+    ['outer', new Set(['right', 'left'])],
+    ['left', new Set(['outer', 'selected-b'])],
+    ['right', new Set(['outer', 'selected-a'])],
+    ['selected-a', new Set(['right'])],
+    ['selected-b', new Set(['left'])],
+    ['isolated', new Set()],
+  ]);
+  deepEqual(shortestPathToAnyV1('outer', new Set(['selected-a', 'selected-b']), relationships),
+    ['outer', 'left', 'selected-b'],
+    'equal-length paths should use stable lexical neighbor ordering');
+  equal(shortestPathToAnyV1('isolated', new Set(['selected-a']), relationships), undefined,
+    'disconnected nodes should not invent a bridge');
+});
+
+test('topology index owns deterministic paths for a filtered presentation', () => {
+  const document = graphDocument({
+    nodes: ['x', 'a', 'b', 'c', 'd'].map((id) => graphNode(id)),
+    edges: [
+      graphEdge('xa', 'x', 'a'),
+      graphEdge('ac', 'a', 'c'),
+      graphEdge('xb', 'x', 'b'),
+      graphEdge('bd', 'b', 'd'),
+    ],
+  });
+  const complete = new GraphTopologyIndex(document);
+  deepEqual(complete.shortestPathToAny('x', new Set(['c', 'd'])), ['x', 'a', 'c'],
+    'stable ordered adjacency should resolve equal routes once inside the topology authority');
+  const filtered = new GraphTopologyIndex(document, {
+    nodeIds: new Set(['x', 'b', 'd']),
+    edgeIds: new Set(['xb', 'bd']),
+  });
+  deepEqual(filtered.shortestPathToAny('x', new Set(['c', 'd'])), ['x', 'b', 'd'],
+    'filtered topology should exclude hidden nodes and edges before path search');
+});
 
 test('A-PAIR-01 aggregates physical endpoint pairs without changing canonical edges', () => {
   const document = graphDocument({
@@ -133,10 +172,10 @@ test('A-COMPONENT-01 includes generic region connections and packs deterministic
   });
   const analysis = analyzeGraphTopologyV1(document, [{ sourceId: 'c', targetId: 'd' }]);
   deepEqual(analysis.components.map((component) => component.nodeIds), [['a', 'b'], ['c', 'd']], 'active region relationships should join force components generically');
-  const targets = buildComponentPackingTargetsV1(analysis.components, 120, 80, '2d');
+  const targets = buildComponentPackingTargetsV1(analysis.components, 80, '2d');
   deepEqual(targets.get('a'), { x: 0, y: 0, z: 0 }, 'the largest deterministic component should anchor the collection');
   assert(Math.hypot(targets.get('c')!.x, targets.get('c')!.y) > 0, 'another component should receive a separate packing target');
-  deepEqual([...targets], [...buildComponentPackingTargetsV1(analysis.components, 120, 80, '2d')], 'packing targets should be deterministic');
+  deepEqual([...targets], [...buildComponentPackingTargetsV1(analysis.components, 80, '2d')], 'packing targets should be deterministic');
 });
 
 test('R-REGION-01 shares one bounded pair-level attraction budget', () => {
@@ -256,6 +295,9 @@ test('S-ANALYSIS-01 topology analysis is event-driven rather than frame-driven',
     projectionSelection: selection,
     renderSelection: selection,
     formActive: false,
+    nodeRoles: {},
+    edgeRoles: {},
+    regions: [],
     nodeContributions: {},
     edgeContributions: {},
     regionLayouts: [],
@@ -316,6 +358,9 @@ test('R-DRAG-01 active node drag keeps the force layout responsive until release
     renderSelection: selection,
     formActive: false,
     draggedNodeId: 'a',
+    nodeRoles: {},
+    edgeRoles: {},
+    regions: [],
     nodeContributions: {},
     edgeContributions: {},
     regionLayouts: [],
@@ -333,7 +378,7 @@ test('R-DRAG-01 active node drag keeps the force layout responsive until release
   }
   const held = force.getDiagnostics();
   equal(held.running, true, 'a held drag should prevent force settlement');
-  assert(held.alpha >= 0.3, 'a held drag should retain the native interaction heat floor');
+  equal(held.alpha, 1, 'a held drag should retain the full interaction time scale');
 
   force.tick({ ...state, draggedNodeId: undefined }, 1 / 60);
   const released = force.getDiagnostics();

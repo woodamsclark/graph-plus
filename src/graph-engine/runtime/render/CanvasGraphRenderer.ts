@@ -1,7 +1,12 @@
-import { GraphCameraController, type ProjectedGraphPointV1 } from '../camera/index.ts';
-import type { GraphFrameStore } from './GraphFrameStore.ts';
+import { Vision, type ProjectedGraphPointV1 } from '../vision/index.ts';
+import type { SessionInvalidationClass } from '../session/SessionFrameScheduler.ts';
 import type {
   GraphPickRequestV2,
+  GraphPickFrame,
+  GraphPickNode,
+  GraphPickSourceV2,
+  GraphNearestNodeRequestV2,
+  GraphNearestNodeResultV2,
   GraphRendererDiagnosticsV2,
   GraphRendererV2,
   GraphRenderSceneV2,
@@ -15,15 +20,21 @@ import type {
 import { graphColorToCssV2, type GraphFontV2 } from '../theme/index.ts';
 import type { GraphColorV2 } from '../theme/index.ts';
 
-interface ProjectedNode {
-  readonly node: GraphRenderNodeV1;
+interface ProjectedPickNode {
+  node: GraphPickNode;
   readonly point: ProjectedGraphPointV1;
-  readonly radius: number;
+  radius: number;
 }
 
-interface ProjectedGeometry {
-  readonly id: string;
-  readonly point: ProjectedGraphPointV1;
+interface ProjectedNode extends ProjectedPickNode { node: GraphRenderNodeV1; }
+
+interface PickIndex {
+  readonly source: GraphPickSourceV2;
+  readonly geometryRevision: number | undefined;
+  readonly visionKey: string;
+  readonly grid: Map<string, ProjectedPickNode[]>;
+  readonly projected: readonly ProjectedPickNode[];
+  centers?: Map<string, ProjectedPickNode[]>;
 }
 
 export interface GraphRenderTimingV1 {
@@ -37,10 +48,10 @@ export interface GraphRenderTimingV1 {
 
 export class CanvasGraphRenderer implements GraphRendererV2 {
   readonly backendId = 'canvas2d' as const;
+  readonly labelRepresentation = 'node-fields' as const;
   readonly interactionElement: HTMLElement;
   private context!: CanvasRenderingContext2D;
-  private camera!: GraphCameraController;
-  private frames?: GraphFrameStore;
+  private vision!: Vision;
   private scene: GraphRenderSceneV2 | null = null;
   private readonly now: () => number;
   private lifecycle: 'created' | 'initialized' | 'disposed' = 'created';
@@ -48,11 +59,34 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   private colorCssCache = new WeakMap<GraphColorV2, string>();
   private readonly hitGrid = new Map<string, ProjectedNode[]>();
   private readonly hitCellSize = 32;
+  private readonly centerGrid = new Map<string, ProjectedPickNode[]>();
+  private centerGridDirty = true;
+  private centerIndexBuilds = 0;
+  private nearestQueries = 0;
+  private nearestQueryCandidates = 0;
+  private lastNearestQueryCandidates = 0;
+  private pickVision?: Vision;
+  // Normal preview and committed fallback are the only alternate pick sources.
+  private readonly pickIndexes: PickIndex[] = [];
+  private pickIndexBuilds = 0;
+  private pickIndexCacheHits = 0;
   private indexedFrame: GraphRenderFrameV1 | null = null;
-  private indexedCameraKey = '';
+  private indexedVisionKey = '';
   private projectedGeometryRevision = -1;
-  private projectedGeometryCameraKey = '';
-  private projectedGeometry: readonly ProjectedGeometry[] = [];
+  private projectedGeometryVisionKey = '';
+  private sourceNodes?: readonly GraphRenderNodeV1[];
+  private readonly nodeById = new Map<string, GraphRenderNodeV1>();
+  private readonly projectedById = new Map<string, ProjectedNode>();
+  private projectedNodes: readonly ProjectedNode[] = [];
+  private visibleNodes: readonly ProjectedNode[] = [];
+  private spatialDirty = true;
+  private indexedWidth = -1;
+  private indexedHeight = -1;
+  private hitShapePolicyKey = '';
+  private readonly pendingInvalidations = new Set<SessionInvalidationClass>();
+  private spatialIndexBuilds = 0;
+  private nodeLookupRefreshes = 0;
+  private projectedLookupBuilds = 0;
   private projectionCacheHits = 0;
   private readonly regionContourCache = new Map<string, {
     readonly signature: string;
@@ -61,21 +95,9 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   private width = 0;
   private height = 0;
 
-  constructor(canvas: HTMLCanvasElement, now: () => number);
-  constructor(canvas: HTMLCanvasElement, camera: GraphCameraController, frames: GraphFrameStore, now: () => number);
-  constructor(
-    private readonly canvas: HTMLCanvasElement,
-    cameraOrNow: GraphCameraController | (() => number),
-    frames?: GraphFrameStore,
-    now?: () => number,
-  ) {
+  constructor(private readonly canvas: HTMLCanvasElement, now: () => number) {
     this.interactionElement = canvas;
-    this.now = typeof cameraOrNow === 'function' ? cameraOrNow : (now ?? (() => performance.now()));
-    if (typeof cameraOrNow !== 'function') {
-      this.camera = cameraOrNow;
-      this.frames = frames;
-      this.initialize();
-    }
+    this.now = now;
   }
 
   initialize(): void {
@@ -100,33 +122,30 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   }
 
   render(): GraphRenderTimingV1 {
-    const frame = this.currentFrame();
+    const frame = this.scene;
     if (!frame) {
       this.hitGrid.clear();
       this.indexedFrame = null;
-      this.indexedCameraKey = '';
+      this.indexedVisionKey = '';
+      this.spatialDirty = true;
+      this.centerGrid.clear();
+      this.centerGridDirty = true;
       return emptyRenderTiming();
     }
     this.clear(frame);
     const projectionStart = this.now();
-    const projected = this.projectFrame(frame);
-    const byId = new Map(projected.map((value) => [value.node.id, value]));
-    const renderNodeById = new Map(frame.nodes.map((node) => [node.id, node] as const));
-    const visible = projected.filter(({ point, radius }) => circleIntersectsViewport(point.x, point.y, radius + 4, this.width, this.height));
-    this.rebuildHitGrid(visible);
-    this.indexedFrame = frame;
-    this.indexedCameraKey = this.cameraKey();
+    this.prepareSpatialFrame(frame);
     const projectionMs = elapsed(projectionStart, this.now());
     const regionStart = this.now();
-    this.drawRegions(frame, renderNodeById);
+    this.drawRegions(frame, this.nodeById);
     const regionRenderMs = elapsed(regionStart, this.now());
     const edgeStart = this.now();
-    this.drawEdges(frame, byId);
+    this.drawEdges(frame, this.projectedById);
     const edgeRenderMs = elapsed(edgeStart, this.now());
     const nodeStart = this.now();
-    this.drawNodes(frame, visible);
+    this.drawNodes(frame, this.visibleNodes);
     const nodeRenderMs = elapsed(nodeStart, this.now());
-    const labels = this.drawLabels(frame, visible);
+    const labels = this.drawLabels(frame, this.visibleNodes);
     return { projectionMs, regionRenderMs, edgeRenderMs, nodeRenderMs, ...labels };
   }
 
@@ -135,25 +154,35 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     readonly position: import('../../contracts/v1/index.ts').Vec3;
     readonly depth: number;
   } | null {
-    const frame = this.currentFrame();
-    const cameraKey = this.cameraKey();
-    if (frame && (frame !== this.indexedFrame || cameraKey !== this.indexedCameraKey)) {
-      const visible = this.projectFrame(frame)
-        .filter(({ point: projected, radius }) =>
-          circleIntersectsViewport(projected.x, projected.y, radius + 4, this.width, this.height));
-      this.rebuildHitGrid(visible);
-      this.indexedFrame = frame;
-      this.indexedCameraKey = cameraKey;
-    }
+    const frame = this.scene;
+    if (frame) this.ensureCurrentSpatialFrame(frame);
+    return this.pickFromGrid(point, pointerKind, frame, this.vision, this.hitGrid);
+  }
+
+  private ensureCurrentSpatialFrame(frame: GraphRenderFrameV1): void {
+    const visionKey = this.visionKey();
+    if (frame !== this.indexedFrame || visionKey !== this.indexedVisionKey
+      || (frame.geometryRevision !== undefined && frame.geometryRevision !== this.projectedGeometryRevision)
+      || this.width !== this.indexedWidth || this.height !== this.indexedHeight
+      || this.pendingInvalidations.size > 0) this.prepareSpatialFrame(frame);
+  }
+
+  private pickFromGrid(
+    point: { readonly x: number; readonly y: number },
+    pointerKind: 'mouse' | 'touch' | 'pen',
+    frame: GraphPickFrame | null,
+    vision: Vision,
+    grid: Map<string, ProjectedPickNode[]>,
+  ) {
     const minimumTouchRadius = pointerKind === 'touch' && frame !== null
       && renderPolicy(frame).minimumPerspectiveTouchHitRadius !== undefined
-      && this.camera.getState().projection === 'perspective'
+      && vision.getState().projection === 'perspective'
       ? renderPolicy(frame).minimumPerspectiveTouchHitRadius!
       : 0;
-    const candidates = this.hitCandidates(point.x, point.y, minimumTouchRadius);
-    let bestVisible: ProjectedNode | undefined;
+    const candidates = this.hitCandidates(point.x, point.y, minimumTouchRadius, grid);
+    let bestVisible: ProjectedPickNode | undefined;
     let bestVisibleDistance = Number.POSITIVE_INFINITY;
-    let bestTouch: ProjectedNode | undefined;
+    let bestTouch: ProjectedPickNode | undefined;
     let bestTouchDistance = Number.POSITIVE_INFINITY;
     for (const candidate of candidates) {
       const distance = (point.x - candidate.point.x) ** 2 + (point.y - candidate.point.y) ** 2;
@@ -182,7 +211,17 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
 
   getDiagnostics(): Readonly<Record<string, number>> {
     return {
-      projectedGeometryEntries: this.projectedGeometry.length,
+      pickIndexBuilds: this.pickIndexBuilds,
+      pickIndexCacheHits: this.pickIndexCacheHits,
+      pickIndexEntries: this.pickIndexes.length,
+      centerIndexBuilds: this.centerIndexBuilds,
+      nearestQueries: this.nearestQueries,
+      nearestQueryCandidates: this.nearestQueryCandidates,
+      lastNearestQueryCandidates: this.lastNearestQueryCandidates,
+      spatialIndexBuilds: this.spatialIndexBuilds,
+      nodeLookupRefreshes: this.nodeLookupRefreshes,
+      projectedLookupBuilds: this.projectedLookupBuilds,
+      projectedGeometryEntries: this.projectedNodes.length,
       projectionCacheHits: this.projectionCacheHits,
       hitGridCells: this.hitGrid.size,
       textWidthCacheEntries: this.textWidthCache.size,
@@ -192,15 +231,135 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
 
   updateTheme(_theme: import('../theme/index.ts').GraphVisualThemeV2): void {}
 
-  updateScene(scene: GraphRenderSceneV2): void {
+  updateScene(scene: GraphRenderSceneV2, invalidations: readonly SessionInvalidationClass[] = []): void {
+    for (const reason of invalidations) this.pendingInvalidations.add(reason);
     this.scene = scene;
-    if (!this.camera) this.camera = new GraphCameraController(scene.view.camera, scene.view.dimensions);
-    else this.camera.setState(scene.view.camera);
-    this.camera.setViewport(scene.view.viewport.width, scene.view.viewport.height);
+    if (!this.vision) this.vision = new Vision(scene.view.camera, scene.view.dimensions);
+    else this.vision.reconfigure(scene.view.camera, scene.view.dimensions);
+    this.vision.setViewport(scene.view.viewport.width, scene.view.viewport.height);
   }
 
-  pick(request: GraphPickRequestV2) {
-    return this.hitTest(request.point, request.pointerKind);
+  pick(request: GraphPickRequestV2, source?: GraphPickSourceV2) {
+    if (!source) return this.hitTest(request.point, request.pointerKind);
+    const spatial = this.pickSpatialSource(source);
+    return this.pickFromGrid(request.point, request.pointerKind ?? 'mouse', source.frame, spatial.vision, spatial.grid);
+  }
+
+  private pickSpatialSource(source: GraphPickSourceV2): { vision: Vision; grid: Map<string, ProjectedPickNode[]>; index?: PickIndex } {
+    if (!this.pickVision) this.pickVision = new Vision(source.view.camera, source.view.dimensions);
+    else this.pickVision.reconfigure(source.view.camera, source.view.dimensions);
+    this.pickVision.setViewport(source.view.viewport.width, source.view.viewport.height);
+    const visionKey = `${source.view.dimensions}:${this.visionKey(this.pickVision)}`;
+    // Ordinary picking can use the spatial index installed by the last draw.
+    // Alternate sources keep their own indexes and never disturb that index.
+    if (!source.positions && !source.nodeIds && !source.retainedNodeId && this.pendingInvalidations.size === 0
+      && source.frame.nodes === this.indexedFrame?.nodes
+      && source.frame.geometryRevision === this.indexedFrame?.geometryRevision
+      && hitShapePolicyKey(source.frame) === hitShapePolicyKey(this.indexedFrame)
+      && this.visionKey(this.pickVision) === this.indexedVisionKey) {
+      this.pickIndexCacheHits += 1;
+      return { vision: this.pickVision, grid: this.hitGrid };
+    }
+    const cached = this.pickIndexes.find(index => index.source.frame === source.frame
+      && index.geometryRevision === source.frame.geometryRevision
+      && index.source.positions === source.positions
+      && index.source.nodeIds === source.nodeIds
+      && index.source.retainedNodeId === source.retainedNodeId
+      && index.visionKey === visionKey);
+    if (cached) { this.pickIndexCacheHits += 1; return { vision: this.pickVision, grid: cached.grid, index: cached }; }
+    const grid = new Map<string, ProjectedPickNode[]>();
+    const projected: ProjectedPickNode[] = [];
+    const projection = this.pickVision.getState().projection;
+    for (const node of source.frame.nodes) {
+      if (source.nodeIds && !source.nodeIds.has(node.id)) continue;
+      if (node.opacity <= 0 && node.id !== source.retainedNodeId) continue;
+      const position = source.positions?.[node.id] ?? node.position;
+      const point = this.pickVision.worldToScreen(position);
+      if (point.depth <= 0) continue;
+      const radius = projectedRadius(source.frame, node.radius, point.scale, projection, node.nodeScaleExponent);
+      projected.push({ node: position !== node.position || node.id === source.retainedNodeId
+        ? { ...node, position, ...(node.id === source.retainedNodeId ? { opacity: 1 } : {}) } : node, point, radius });
+    }
+    this.rebuildHitGrid(projected.filter(({ point, radius }) => circleIntersectsViewport(
+      point.x, point.y, radius + 4, source.view.viewport.width, source.view.viewport.height,
+    )), grid, source.view.viewport.width, source.view.viewport.height);
+    this.pickIndexBuilds += 1;
+    const index: PickIndex = { source, geometryRevision: source.frame.geometryRevision, visionKey, grid, projected };
+    this.pickIndexes.unshift(index);
+    if (this.pickIndexes.length > 2) this.pickIndexes.pop();
+    return { vision: this.pickVision, grid, index };
+  }
+
+  queryNearest(request: GraphNearestNodeRequestV2, source?: GraphPickSourceV2): GraphNearestNodeResultV2 | null {
+    this.nearestQueries += 1;
+    this.lastNearestQueryCandidates = 0;
+    if (!(request.radius > 0) || !Number.isFinite(request.radius)
+      || !Number.isFinite(request.point.x) || !Number.isFinite(request.point.y)) return null;
+    let centers: Map<string, ProjectedPickNode[]>;
+    if (source) {
+      const spatial = this.pickSpatialSource(source);
+      if (spatial.index) {
+        if (!spatial.index.centers) {
+          spatial.index.centers = new Map();
+          this.rebuildCenterGrid(spatial.index.projected, spatial.index.centers);
+        }
+        centers = spatial.index.centers;
+      } else centers = this.currentCenterGrid();
+    } else {
+      const frame = this.scene;
+      if (!frame) return null;
+      this.ensureCurrentSpatialFrame(frame);
+      centers = this.currentCenterGrid();
+    }
+    let best: ProjectedPickNode | undefined;
+    let bestDistance = request.radius;
+    for (const entry of this.centerCandidates(centers, request)) {
+      this.lastNearestQueryCandidates += 1;
+      if (request.exclusions?.has(entry.node.id) || request.isEligible?.(entry.node.id) === false) continue;
+      const distance = Math.hypot(request.point.x - entry.point.x, request.point.y - entry.point.y);
+      if (distance >= request.radius) continue;
+      if (!best || distance < bestDistance || (distance === bestDistance && entry.node.id.localeCompare(best.node.id) < 0)) {
+        best = entry; bestDistance = distance;
+      }
+    }
+    this.nearestQueryCandidates += this.lastNearestQueryCandidates;
+    return best ? { nodeId: best.node.id, position: { ...best.node.position },
+      point: { x: best.point.x, y: best.point.y, depth: best.point.depth }, depth: best.point.depth, distance: bestDistance } : null;
+  }
+
+  private *centerCandidates(grid: Map<string, ProjectedPickNode[]>, request: GraphNearestNodeRequestV2): Iterable<ProjectedPickNode> {
+    const minX = Math.floor((request.point.x - request.radius) / this.hitCellSize);
+    const maxX = Math.floor((request.point.x + request.radius) / this.hitCellSize);
+    const minY = Math.floor((request.point.y - request.radius) / this.hitCellSize);
+    const maxY = Math.floor((request.point.y + request.radius) / this.hitCellSize);
+    // Broad queries are bounded by existing entries rather than empty world cells.
+    if (![minX, maxX, minY, maxY].every(Number.isSafeInteger)
+      || (maxX - minX + 1) * (maxY - minY + 1) > Math.max(4096, grid.size)) {
+      for (const bucket of grid.values()) yield* bucket;
+      return;
+    }
+    for (let x = minX; x <= maxX; x += 1) for (let y = minY; y <= maxY; y += 1) {
+      yield* grid.get(`${x}:${y}`) ?? [];
+    }
+  }
+
+  private currentCenterGrid(): Map<string, ProjectedPickNode[]> {
+    if (this.centerGridDirty) {
+      this.rebuildCenterGrid(this.projectedNodes, this.centerGrid);
+      this.centerGridDirty = false;
+    }
+    return this.centerGrid;
+  }
+
+  private rebuildCenterGrid(nodes: readonly ProjectedPickNode[], grid: Map<string, ProjectedPickNode[]>): void {
+    grid.clear();
+    for (const entry of nodes) {
+      if (entry.node.opacity <= 0) continue;
+      const key = this.hitGridKey(entry.point.x, entry.point.y);
+      const bucket = grid.get(key);
+      if (bucket) bucket.push(entry); else grid.set(key, [entry]);
+    }
+    this.centerIndexBuilds += 1;
   }
 
   getRendererDiagnostics(): GraphRendererDiagnosticsV2 {
@@ -211,16 +370,21 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     if (this.lifecycle === 'disposed') return;
     this.lifecycle = 'disposed';
     this.scene = null;
+    this.pickIndexes.length = 0;
+    this.pickVision = undefined;
     this.hitGrid.clear();
+    this.centerGrid.clear();
     this.textWidthCache.clear();
     this.regionContourCache.clear();
-    this.projectedGeometry = [];
+    this.projectedNodes = [];
+    this.visibleNodes = [];
+    this.nodeById.clear();
+    this.projectedById.clear();
+    this.sourceNodes = undefined;
+    this.indexedFrame = null;
+    this.pendingInvalidations.clear();
     this.colorCssCache = new WeakMap();
     this.canvas.remove();
-  }
-
-  private currentFrame(): GraphRenderFrameV1 | null {
-    return this.scene ?? this.frames?.get() ?? null;
   }
 
   private colorCss(color: GraphColorV2): string {
@@ -231,44 +395,86 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     return value;
   }
 
-  private projectFrame(frame: GraphRenderFrameV1): readonly ProjectedNode[] {
-    const cameraKey = this.cameraKey();
-    if (
-      frame.geometryRevision !== undefined
-      && frame.geometryRevision === this.projectedGeometryRevision
-      && cameraKey === this.projectedGeometryCameraKey
-    ) {
-      this.projectionCacheHits += 1;
-      const nodes = new Map(frame.nodes.map((node) => [node.id, node] as const));
-      const projection = this.camera.getState().projection;
-      return this.projectedGeometry.flatMap(({ id, point }) => {
-        const node = nodes.get(id);
-        return node ? [{ node, point, radius: projectedRadius(frame, node.radius, point.scale, projection) }] : [];
-      });
+  /** Presentation refreshes update shared entries; only changed hit shapes rebuild the grid. */
+  private prepareSpatialFrame(frame: GraphRenderFrameV1): void {
+    this.projectFrame(frame);
+    if (this.width !== this.indexedWidth || this.height !== this.indexedHeight) this.spatialDirty = true;
+    if (this.spatialDirty) {
+      this.visibleNodes = this.projectedNodes.filter(({ point, radius }) =>
+        circleIntersectsViewport(point.x, point.y, radius + 4, this.width, this.height));
+      this.rebuildHitGrid(this.visibleNodes);
+      this.spatialDirty = false;
     }
-    const projection = this.camera.getState().projection;
-    const projected = frame.nodes
-      .map((node) => {
-        const point = this.camera.worldToScreen(node.position);
-        return { node, point, radius: projectedRadius(frame, node.radius, point.scale, projection) };
-      })
-      .filter(({ point }) => point.depth > 0)
-      .sort((a, b) => b.point.depth - a.point.depth);
-    this.projectedGeometryRevision = frame.geometryRevision ?? -1;
-    this.projectedGeometryCameraKey = cameraKey;
-    this.projectedGeometry = projected.map(({ node, point }) => ({ id: node.id, point }));
-    return projected;
+    this.indexedFrame = frame;
+    this.indexedVisionKey = this.visionKey();
+    this.indexedWidth = this.width;
+    this.indexedHeight = this.height;
+    this.pendingInvalidations.clear();
+    // Keep the center index ready for the next attraction tick only while the
+    // visible scene has an active cursor well. Off/drag/leave add no index work.
+    if (this.scene?.cursorScreenPoint && (this.scene.policy?.cursorAttractionRadiusPx ?? 0) > 0) this.currentCenterGrid();
   }
 
-  private hitCandidates(x: number, y: number, searchRadius: number): readonly ProjectedNode[] {
-    if (searchRadius <= 0) return this.hitGrid.get(this.hitGridKey(x, y)) ?? [];
+  private projectFrame(frame: GraphRenderFrameV1): readonly ProjectedNode[] {
+    const visionKey = this.visionKey();
+    const nodesChanged = frame.nodes !== this.sourceNodes || this.pendingInvalidations.has('content');
+    const membershipChanged = nodesChanged && (frame.nodes.length !== this.nodeById.size
+      || frame.nodes.some(node => !this.nodeById.has(node.id)));
+    if (nodesChanged) {
+      // One canonical lookup serves projection, region geometry and presentation.
+      if (membershipChanged) this.nodeById.clear();
+      for (const node of frame.nodes) this.nodeById.set(node.id, node);
+      this.sourceNodes = frame.nodes;
+      this.nodeLookupRefreshes += 1;
+    }
+    const policyKey = hitShapePolicyKey(frame);
+    const projection = this.vision.getState().projection;
+    const geometryChanged = frame.geometryRevision === undefined || membershipChanged
+      || (frame.geometryRevision !== undefined && frame.geometryRevision !== this.projectedGeometryRevision)
+      || visionKey !== this.projectedGeometryVisionKey
+      || this.pendingInvalidations.has('geometry') || this.pendingInvalidations.has('content');
+    if (!geometryChanged) {
+      this.projectionCacheHits += 1;
+      if (nodesChanged || policyKey !== this.hitShapePolicyKey) {
+        for (const entry of this.projectedNodes) {
+          const node = this.nodeById.get(entry.node.id)!;
+          const radius = projectedRadius(frame, node.radius, entry.point.scale, projection, node.nodeScaleExponent);
+          if (radius !== entry.radius || (node.opacity > 0) !== (entry.node.opacity > 0)) this.spatialDirty = true;
+          if ((node.opacity > 0) !== (entry.node.opacity > 0)) this.centerGridDirty = true;
+          // Hit-grid buckets and edge lookups reference this same entry, so they
+          // see current visuals and positions without rebuilding their structures.
+          entry.node = node;
+          entry.radius = radius;
+        }
+      }
+      this.hitShapePolicyKey = policyKey;
+      return this.projectedNodes;
+    }
+    this.projectedNodes = frame.nodes.map(node => {
+      const point = this.vision.worldToScreen(node.position);
+      return { node, point, radius: projectedRadius(frame, node.radius, point.scale, projection, node.nodeScaleExponent) };
+    }).filter(({ point }) => point.depth > 0).sort((a, b) => b.point.depth - a.point.depth);
+    if (this.projectedNodes.length !== this.projectedById.size
+      || this.projectedNodes.some(entry => !this.projectedById.has(entry.node.id))) this.projectedById.clear();
+    for (const entry of this.projectedNodes) this.projectedById.set(entry.node.id, entry);
+    this.projectedLookupBuilds += 1;
+    this.projectedGeometryRevision = frame.geometryRevision ?? -1;
+    this.projectedGeometryVisionKey = visionKey;
+    this.hitShapePolicyKey = policyKey;
+    this.spatialDirty = true;
+    this.centerGridDirty = true;
+    return this.projectedNodes;
+  }
+
+  private hitCandidates(x: number, y: number, searchRadius: number, grid: Map<string, ProjectedPickNode[]> = this.hitGrid): readonly ProjectedPickNode[] {
+    if (searchRadius <= 0) return grid.get(this.hitGridKey(x, y)) ?? [];
     const centerX = Math.floor(x / this.hitCellSize);
     const centerY = Math.floor(y / this.hitCellSize);
     const cellRadius = Math.ceil(searchRadius / this.hitCellSize) + 1;
-    const candidates = new Set<ProjectedNode>();
+    const candidates = new Set<ProjectedPickNode>();
     for (let offsetX = -cellRadius; offsetX <= cellRadius; offsetX += 1) {
       for (let offsetY = -cellRadius; offsetY <= cellRadius; offsetY += 1) {
-        for (const candidate of this.hitGrid.get(`${centerX + offsetX}:${centerY + offsetY}`) ?? []) {
+        for (const candidate of grid.get(`${centerX + offsetX}:${centerY + offsetY}`) ?? []) {
           candidates.add(candidate);
         }
       }
@@ -276,19 +482,24 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     return [...candidates];
   }
 
-  private rebuildHitGrid(nodes: readonly ProjectedNode[]): void {
-    this.hitGrid.clear();
+  private rebuildHitGrid(nodes: readonly ProjectedPickNode[], grid: Map<string, ProjectedPickNode[]> = this.hitGrid, width = this.width, height = this.height): void {
+    if (grid === this.hitGrid) this.spatialIndexBuilds += 1;
+    grid.clear();
     for (const node of nodes) {
-      const minX = Math.floor((node.point.x - node.radius) / this.hitCellSize);
-      const maxX = Math.floor((node.point.x + node.radius) / this.hitCellSize);
-      const minY = Math.floor((node.point.y - node.radius) / this.hitCellSize);
-      const maxY = Math.floor((node.point.y + node.radius) / this.hitCellSize);
+      if (node.node.opacity <= 0) continue;
+      // Picking only needs cells on the canvas, even when zoom makes a disc enormous.
+      const minX = Math.max(0, Math.floor((node.point.x - node.radius) / this.hitCellSize));
+      const maxX = Math.min(Math.floor(width / this.hitCellSize),
+        Math.floor((node.point.x + node.radius) / this.hitCellSize));
+      const minY = Math.max(0, Math.floor((node.point.y - node.radius) / this.hitCellSize));
+      const maxY = Math.min(Math.floor(height / this.hitCellSize),
+        Math.floor((node.point.y + node.radius) / this.hitCellSize));
       for (let x = minX; x <= maxX; x += 1) {
         for (let y = minY; y <= maxY; y += 1) {
           const key = `${x}:${y}`;
-          const bucket = this.hitGrid.get(key);
+          const bucket = grid.get(key);
           if (bucket) bucket.push(node);
-          else this.hitGrid.set(key, [node]);
+          else grid.set(key, [node]);
         }
       }
     }
@@ -298,9 +509,9 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     return `${Math.floor(x / this.hitCellSize)}:${Math.floor(y / this.hitCellSize)}`;
   }
 
-  private cameraKey(): string {
-    const state = this.camera.getState();
-    const viewport = this.camera.getViewport();
+  private visionKey(vision = this.vision): string {
+    const state = vision.getState();
+    const viewport = vision.getViewport();
     return [
       state.position.x, state.position.y, state.position.z,
       state.target.x, state.target.y, state.target.z,
@@ -311,8 +522,8 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
 
   private clear(frame: GraphRenderFrameV1): void {
     this.context.clearRect(0, 0, this.width, this.height);
-    if (frame.theme.colors.background.a > 0) {
-      this.context.fillStyle = this.colorCss(frame.theme.colors.background);
+    if (frame.backgroundColor.a > 0) {
+      this.context.fillStyle = this.colorCss(frame.backgroundColor);
       this.context.fillRect(0, 0, this.width, this.height);
     }
   }
@@ -334,7 +545,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       const startY = source.point.y + unitY * source.radius;
       const endX = target.point.x - unitX * target.radius;
       const endY = target.point.y - unitY * target.radius;
-      this.context.strokeStyle = this.colorCss(edge.color ?? frame.theme.colors.edge);
+      this.context.strokeStyle = this.colorCss(edge.color);
       this.context.globalAlpha = clampOpacity(edge.opacity);
       this.context.lineWidth = edge.thickness;
       this.context.setLineDash(edge.dashed ? [4, 5] : []);
@@ -342,8 +553,8 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       this.context.moveTo(startX, startY);
       this.context.lineTo(endX, endY);
       this.context.stroke();
-      this.context.fillStyle = this.colorCss(edge.arrowColor ?? edge.color ?? frame.theme.colors.arrow);
-      this.context.globalAlpha = clampOpacity(edge.arrowOpacity ?? edge.opacity);
+      this.context.fillStyle = this.colorCss(edge.arrowColor);
+      this.context.globalAlpha = clampOpacity(edge.arrowOpacity);
       if (edge.arrowAtTarget ?? edge.directed) drawArrow(this.context, endX, endY, unitX, unitY, Math.max(5, edge.thickness * 3));
       if (edge.arrowAtSource === true) drawArrow(this.context, startX, startY, -unitX, -unitY, Math.max(5, edge.thickness * 3));
     }
@@ -363,17 +574,17 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       right.memberNodeIds.length - left.memberNodeIds.length || left.id.localeCompare(right.id))) {
       const contour = this.regionContour(region, nodes);
       const projected = contour
-        .map((position) => this.camera.worldToScreen(position))
+        .map((position) => this.vision.worldToScreen(position))
         .filter((point) => point.depth > 0);
       if (projected.length < 3) continue;
       this.traceSmoothClosedPath(projected);
-      this.context.globalAlpha = clampOpacity(region.fillOpacity ?? 0.12);
-      this.context.fillStyle = this.colorCss(region.fillColor ?? region.color);
+      this.context.globalAlpha = clampOpacity(region.fillOpacity);
+      this.context.fillStyle = this.colorCss(region.fillColor);
       this.context.fill();
       this.traceSmoothClosedPath(projected);
-      this.context.globalAlpha = clampOpacity(region.strokeOpacity ?? 0.52);
-      this.context.strokeStyle = this.colorCss(region.strokeColor ?? region.color);
-      this.context.lineWidth = region.strokeWidth ?? 1.5;
+      this.context.globalAlpha = clampOpacity(region.strokeOpacity);
+      this.context.strokeStyle = this.colorCss(region.strokeColor);
+      this.context.lineWidth = region.strokeWidth;
       this.context.setLineDash([]);
       this.context.stroke();
     }
@@ -437,17 +648,13 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     this.context.save();
     for (const { node, point, radius } of nodes) {
       this.context.globalAlpha = clampOpacity(node.opacity);
-      this.context.fillStyle = this.colorCss(node.finalColor ?? (node.focused
-        ? frame.theme.colors.focusedNode
-        : node.selected
-          ? frame.theme.colors.selectedNode
-          : node.color ?? frame.theme.colors.node));
+      this.context.fillStyle = this.colorCss(node.finalColor);
       this.context.beginPath();
       this.context.arc(point.x, point.y, radius, 0, Math.PI * 2);
       this.context.fill();
-      if (node.focused || node.selected || node.strokeWidth !== undefined) {
-        this.context.strokeStyle = this.colorCss(node.strokeColor ?? frame.theme.colors.label);
-        this.context.lineWidth = node.strokeWidth ?? (node.focused ? 2 : 1);
+      if (node.strokeWidth !== undefined && node.strokeWidth > 0 && node.strokeColor !== undefined) {
+        this.context.strokeStyle = this.colorCss(node.strokeColor);
+        this.context.lineWidth = node.strokeWidth;
         this.context.stroke();
       }
     }
@@ -460,50 +667,66 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     this.context.save();
     this.context.textAlign = 'center';
     this.context.textBaseline = 'top';
-    this.context.font = graphFontToCss(frame.theme.labelFont);
-    this.context.fillStyle = this.colorCss(frame.theme.colors.label);
-    const candidates = nodes
-      .filter(({ node }) => node.showLabel !== false)
-      .sort(compareLabelCandidates);
+    this.context.font = graphFontToCss(frame.labelFont);
     const layoutStart = this.now();
-    let acceptedCandidates: readonly ProjectedNode[];
-    if (mode === 'all') {
-      acceptedCandidates = candidates;
-    } else {
-      const cameraState = this.camera.getState();
-      const zoom = cameraState.projection === 'perspective'
-        ? this.camera.worldToScreen(cameraState.target).scale
-        : Math.max(0.1, cameraState.zoom);
-      const threshold = Math.max(0, Math.min(100, renderPolicy(frame).adaptiveLabelThreshold ?? 50));
-      const thresholdFactor = 2 ** ((50 - threshold) / 50);
-      const minimumBudget = clampInteger(Math.round(12 * thresholdFactor), 4, 24);
-      const budget = clampInteger(
-        Math.round(this.width * this.height / 12000 * Math.sqrt(zoom) * thresholdFactor),
-        minimumBudget,
-        120,
-      );
-      const occupied: LabelBounds[] = [];
-      const accepted: ProjectedNode[] = [];
-      for (const candidate of candidates) {
-        const forced = candidate.node.focused
-          || candidate.node.selected
-          || candidate.node.hovered
-          || candidate.node.labelAlwaysVisible === true;
-        if (!forced && accepted.length >= budget) continue;
-        const bounds = this.labelBounds(frame, candidate);
-        if (!forced && occupied.some((other) => overlaps(bounds, other))) continue;
-        occupied.push(bounds);
-        accepted.push(candidate);
+    const occupied: LabelBounds[] = [];
+    const accepted: ProjectedNode[] = [];
+    const automaticIds = new Set<string>();
+    const cameraState = this.vision.getState();
+    const zoom = cameraState.projection === 'perspective'
+      ? this.vision.worldToScreen(cameraState.target).scale
+      : Math.max(0.1, cameraState.zoom);
+    const saliency = Math.max(0, Math.min(100,
+      renderPolicy(frame).adaptiveLabelSaliency ?? renderPolicy(frame).adaptiveLabelThreshold ?? 50));
+    // Resolve automatic eligibility independently of proximity. A cursor-only
+    // label must not inherit a full-opacity baseline merely because it is standard.
+    const automaticCandidates = nodes.filter(candidate => candidate.node.showLabel !== false
+      && (mode !== 'proximity' || candidate.node.labelForceVisible === true
+        || candidate.node.labelAlwaysVisible === true)).sort(compareLabelCandidates);
+    for (const candidate of automaticCandidates) {
+      const forced = candidate.node.labelForceVisible === true || candidate.node.labelAlwaysVisible === true;
+      if (mode === 'adaptive') {
+        const boost = Math.max(0, Math.min(1, candidate.node.labelSaliencyBoost ?? 0));
+        const effectiveSaliency = saliency * (1 - boost);
+        // Shift the whole 0–100 range one octave stricter: half the old budget.
+        const saliencyFactor = 2 ** (-effectiveSaliency / 50);
+        const minimumBudget = clampInteger(Math.round(12 * saliencyFactor), 1, 12);
+        const candidateBudget = clampInteger(
+          Math.round(this.width * this.height / 12000 * Math.sqrt(zoom) * saliencyFactor),
+          minimumBudget, 60,
+        );
+        if (!forced && accepted.length >= candidateBudget) continue;
       }
-      acceptedCandidates = accepted;
+      const bounds = this.labelBounds(frame, candidate);
+      if (mode === 'adaptive' && !forced && (labelIsOccludedByCloserNode(
+        candidate, bounds, this.labelOcclusionCandidates(candidate, bounds),
+      ) || occupied.some(other => overlaps(bounds, other)))) continue;
+      occupied.push(bounds);
+      accepted.push(candidate);
+      automaticIds.add(candidate.node.id);
     }
+    // View-required labels are shared by both modes. Proximity replaces only
+    // adaptive admission; void objects, occlusion and collisions still apply.
+    const proximityCandidates = nodes.filter(candidate => !automaticIds.has(candidate.node.id)
+      && this.cursorLabelReveal(frame, candidate) > 0)
+      .sort((a, b) => this.cursorLabelReveal(frame, b) - this.cursorLabelReveal(frame, a) || compareLabelCandidates(a, b));
+    for (const candidate of proximityCandidates) {
+      const bounds = this.labelBounds(frame, candidate);
+      if (labelIsOccludedByCloserNode(candidate, bounds, this.labelOcclusionCandidates(candidate, bounds))
+        || occupied.some(other => overlaps(bounds, other))) continue;
+      occupied.push(bounds);
+      accepted.push(candidate);
+    }
+    const acceptedCandidates = accepted;
     const labelLayoutMs = elapsed(layoutStart, this.now());
     const drawStart = this.now();
-    for (const { node, point, radius } of acceptedCandidates) {
+    for (const candidate of acceptedCandidates) {
+      const { node, point, radius } = candidate;
       const offset = node.labelOffset ?? { x: 0, y: 0 };
-      this.context.globalAlpha = clampOpacity(node.labelOpacity ?? node.opacity);
-      this.context.fillStyle = this.colorCss(node.labelColor ?? frame.theme.colors.label);
-      const font = nodeFont(frame, node, this.camera.getState().zoom, this.camera.getState().projection);
+      const automaticOpacity = automaticIds.has(node.id) ? clampOpacity(node.labelOpacity) : 0;
+      this.context.globalAlpha = Math.max(automaticOpacity, this.cursorLabelReveal(frame, candidate));
+      this.context.fillStyle = this.colorCss(node.labelColor);
+      const font = nodeFont(frame, node, this.vision.getState().zoom, this.vision.getState().projection);
       this.context.font = font;
       this.context.fillText(node.label, point.x + offset.x, labelTop(frame, point.y, radius, font) + offset.y);
     }
@@ -512,8 +735,16 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     return { labelLayoutMs, labelDrawMs };
   }
 
+  private cursorLabelReveal(frame: GraphRenderFrameV1, candidate: ProjectedNode): number {
+    if (renderPolicy(frame).labelMode !== 'proximity') return 0;
+    const cursor = this.scene?.cursorScreenPoint;
+    const radius = renderPolicy(frame).cursorLabelRevealRadiusPx ?? 0;
+    if (!cursor || radius <= 0 || candidate.node.opacity <= 0) return 0;
+    return Math.max(0, 1 - Math.hypot(cursor.x - candidate.point.x, cursor.y - candidate.point.y) / radius);
+  }
+
   private labelBounds(frame: GraphRenderFrameV1, value: ProjectedNode): LabelBounds {
-    this.context.font = nodeFont(frame, value.node, this.camera.getState().zoom, this.camera.getState().projection);
+    this.context.font = nodeFont(frame, value.node, this.vision.getState().zoom, this.vision.getState().projection);
     const cacheKey = `${this.context.font}\u0000${value.node.label}`;
     let width = this.textWidthCache.get(cacheKey);
     if (width === undefined) {
@@ -527,6 +758,20 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     const centerX = value.point.x + offset.x;
     const top = labelTop(frame, value.point.y, value.radius, this.context.font) + offset.y;
     return { left: centerX - width / 2 - 2, right: centerX + width / 2 + 2, top, bottom: top + height + 2 };
+  }
+
+  private labelOcclusionCandidates(candidate: ProjectedNode, bounds: LabelBounds): readonly ProjectedNode[] {
+    const minX = Math.floor(Math.min(candidate.point.x, bounds.left) / this.hitCellSize);
+    const maxX = Math.floor(Math.max(candidate.point.x, bounds.right) / this.hitCellSize);
+    const minY = Math.floor(Math.min(candidate.point.y, bounds.top) / this.hitCellSize);
+    const maxY = Math.floor(Math.max(candidate.point.y, bounds.bottom) / this.hitCellSize);
+    const candidates = new Set<ProjectedNode>();
+    for (let x = minX; x <= maxX; x += 1) {
+      for (let y = minY; y <= maxY; y += 1) {
+        for (const value of this.hitGrid.get(`${x}:${y}`) ?? []) candidates.add(value);
+      }
+    }
+    return [...candidates];
   }
 }
 
@@ -557,19 +802,31 @@ interface LabelBounds {
 }
 
 function compareLabelCandidates(a: ProjectedNode, b: ProjectedNode): number {
-  return labelStatePriority(b) - labelStatePriority(a)
+  return b.node.labelStatePriority - a.node.labelStatePriority
     || (b.node.labelPriority ?? 0) - (a.node.labelPriority ?? 0)
+    || a.point.depth - b.point.depth
     || b.node.radius - a.node.radius
     || b.point.scale - a.point.scale
     || a.node.id.localeCompare(b.node.id);
 }
 
-function labelStatePriority(value: ProjectedNode): number {
-  if (value.node.focused) return 4;
-  if (value.node.selected) return 3;
-  if (value.node.hovered) return 2;
-  if (value.node.labelAlwaysVisible) return 1;
-  return 0;
+function labelIsOccludedByCloserNode(
+  candidate: ProjectedNode,
+  bounds: LabelBounds,
+  nodes: readonly ProjectedNode[],
+): boolean {
+  return nodes.some((other) => {
+    if (other.node.id === candidate.node.id || other.node.opacity <= 0
+      || other.point.depth >= candidate.point.depth) return false;
+    const dx = candidate.point.x - other.point.x;
+    const dy = candidate.point.y - other.point.y;
+    if (dx * dx + dy * dy < other.radius * other.radius) return true;
+    const nearestX = Math.max(bounds.left, Math.min(other.point.x, bounds.right));
+    const nearestY = Math.max(bounds.top, Math.min(other.point.y, bounds.bottom));
+    const labelDx = other.point.x - nearestX;
+    const labelDy = other.point.y - nearestY;
+    return labelDx * labelDx + labelDy * labelDy < other.radius * other.radius;
+  });
 }
 
 function overlaps(a: LabelBounds, b: LabelBounds): boolean {
@@ -610,19 +867,26 @@ function clampInteger(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(value)));
 }
 
+function hitShapePolicyKey(frame: GraphPickFrame): string {
+  const policy = renderPolicy(frame);
+  return [policy.nodeScaleMode, policy.nodeScaleExponent,
+    policy.minimumPerspectiveNodeScale, policy.minimumPerspectiveNodeRadius].join(':');
+}
+
 function projectedRadius(
-  frame: GraphRenderFrameV1,
+  frame: GraphPickFrame,
   radius: number,
   scale: number,
   projection: 'orthographic' | 'perspective',
+  nodeScaleExponent?: number,
 ): number {
-  if (renderPolicy(frame).nodeScaleMode === 'sqrt-orthographic' && projection === 'orthographic') {
-    return radius * Math.sqrt(Math.max(0, scale));
-  }
-  const projected = radius * scale;
+  const policy = renderPolicy(frame);
+  const legacyExponent = projection === 'orthographic' && policy.nodeScaleMode === 'sqrt-orthographic' ? 0.5 : 1;
+  const exponent = Math.max(0, Math.min(2, nodeScaleExponent ?? policy.nodeScaleExponent ?? legacyExponent));
+  const projected = radius * Math.pow(Math.max(0, scale), exponent);
   if (projection !== 'perspective') return projected;
-  const relativeFloor = radius * Math.max(0, renderPolicy(frame).minimumPerspectiveNodeScale ?? 0);
-  return Math.max(renderPolicy(frame).minimumPerspectiveNodeRadius ?? 0, relativeFloor, projected);
+  const relativeFloor = radius * Math.max(0, policy.minimumPerspectiveNodeScale ?? 0);
+  return Math.max(policy.minimumPerspectiveNodeRadius ?? 0, relativeFloor, projected);
 }
 
 function nodeFont(
@@ -630,13 +894,13 @@ function nodeFont(
   node: GraphRenderNodeV1,
   zoom: number,
   projection: 'orthographic' | 'perspective',
+  minimumSize = 1,
 ): string {
-  if (node.labelFontSize === undefined) return graphFontToCss(frame.theme.labelFont);
   const scale = renderPolicy(frame).labelScaleMode === 'sqrt-orthographic' && projection === 'orthographic'
     ? Math.sqrt(Math.max(0, zoom))
     : 1;
-  const size = Math.max(1, node.labelFontSize * scale);
-  const family = frame.theme.labelFont.family;
+  const size = Math.max(minimumSize, node.labelFontSize * scale);
+  const family = frame.labelFont.family;
   return `${size}px ${family || 'sans-serif'}`;
 }
 
@@ -644,8 +908,8 @@ function graphFontToCss(font: GraphFontV2): string {
   return `${font.style} ${font.weight} ${font.sizePx}px/${font.lineHeightPx}px ${font.family}`;
 }
 
-function renderPolicy(frame: GraphRenderFrameV1) {
-  return frame.policy ?? frame.theme as import('./GraphRenderTypes.ts').GraphPresentationPolicyV2;
+function renderPolicy(frame: GraphPickFrame) {
+  return frame.policy ?? {};
 }
 
 function clampOpacity(value: number | undefined): number {

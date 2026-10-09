@@ -22,6 +22,9 @@ export class GraphEngineSettingsPanelV1 {
     for (const category of ['appearance', 'layout-motion'] as const) {
       parent.createEl('h3', { text: CATEGORY_TITLES[category] });
       for (const presentation of presentations(category, 'global')) {
+        const profiles = this.controller.listProfiles();
+        if (profiles.length && profiles.every(profile => this.controller
+          .getProfileDescriptor(profile.consumerId, profile.profileId).modules[presentation.moduleId]?.policy === 'forbidden')) continue;
         const descriptor = this.controller.listModules().find((module) => module.id === presentation.moduleId);
         if (!descriptor) continue;
         const override = this.controller.getGlobalOverrides().modules?.[presentation.moduleId]?.settings?.[presentation.key];
@@ -131,7 +134,8 @@ class GraphEngineProfileSettingsModalV1 extends Modal {
         }));
 
       for (const category of ['appearance', 'layout-motion'] as const) {
-        const values = presentations(category, 'profile').filter((presentation) => descriptor.modules[presentation.moduleId]);
+        const values = presentations(category, 'profile').filter((presentation) => descriptor.modules[presentation.moduleId]
+          && descriptor.modules[presentation.moduleId].policy !== 'forbidden');
         if (values.length === 0) continue;
         content.createEl('h3', { text: CATEGORY_TITLES[category] });
         for (const presentation of values) {

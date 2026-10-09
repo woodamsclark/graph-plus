@@ -1,3 +1,4 @@
+import type { GraphModuleHost, GraphModulePresentationStateV1 } from '../../src/graph-engine/runtime/modules/index.ts';
 import type {
   ConsumerRegistrationV1,
   GraphSessionErrorV1,
@@ -20,7 +21,7 @@ import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import { runtimeCanvas, runtimeHarness, runtimeRegistration, runtimeSurface } from '../support/runtimeHarness.ts';
 
-test('R-MODULE-01 keeps optional Anima inert and round-trips its empty state', async () => {
+test('R-MODULE-01 keeps optional Anima inert and restores compatible persisted module state', async () => {
   const value = runtimeHarness();
   value.profiles.setUserOverrides('synthetic-consumer', 'two-dimensional', {
     modules: { anima: { enabled: true } },
@@ -39,10 +40,57 @@ test('R-MODULE-01 keeps optional Anima inert and round-trips its empty state', a
   const recovered = await value.create(invalidState);
   const errors: GraphSessionErrorV1[] = [];
   recovered.onError((error) => errors.push(error));
-  equal(errors[0]?.moduleId, 'anima', 'invalid optional module state should report the affected module');
-  equal(errors[0]?.recoverable, true, 'invalid optional state should disable only that module');
-  equal((await recovered.exportViewState()).moduleState.anima, undefined, 'rejected optional state should not persist into the next save');
+  equal(errors.length, 1, 'invalid optional persisted module state should report one recoverable restore error');
+  equal(errors[0]?.recoverable, true, 'invalid optional persisted module state should not prevent reopening');
+  equal((await recovered.exportViewState()).moduleState.anima, undefined,
+    'invalid optional persisted module state should disable only that optional module');
   await recovered.dispose();
+});
+
+test('projection and presentation module phases cannot mutate across their boundary', async () => {
+  const registry = createShippedGraphModuleRegistryV1();
+  let projectionSawDownstreamState = false;
+  let presentationSawConsciousness = false;
+  registry.register(definition('projection-boundary-probe', 50, {
+    projectSource: (state: Record<string, unknown>) => {
+      projectionSawDownstreamState = 'consciousness' in state
+        || 'nodeContributions' in state
+        || 'theme' in state;
+      return {
+        nodeContributions: { a: { finalColor: parseGraphColorV2('#010203') } },
+      } as never;
+    },
+  }));
+  registry.register(definition('presentation-boundary-probe', 600, {
+    contributeFrame: (state: Record<string, unknown>) => {
+      presentationSawConsciousness = 'consciousness' in state;
+      return {
+        document: graphDocument({ nodes: [], edges: [] }),
+        renderSelection: { nodeIds: new Set(), edgeIds: new Set() },
+      } as never;
+    },
+  }));
+  const value = runtimeHarness({
+    document: graphDocument({ nodes: [graphNode('a')], edges: [] }),
+    modules: registry,
+    registration: withModules({
+      'projection-boundary-probe': { policy: 'required' },
+      'presentation-boundary-probe': { policy: 'required' },
+    }),
+  });
+  const session = await value.create();
+
+  equal(runtimeSurface(value.container).dataset.renderedNodeCount, '1',
+    'presentation hooks must not replace projected graph membership');
+  equal(projectionSawDownstreamState, false,
+    'projection hooks should run before Consciousness and presentation state exist');
+  equal(presentationSawConsciousness, true,
+    'presentation hooks should receive reconciled Consciousness after projection');
+  assert(value.drawCalls.includes('arc'),
+    'presentation hooks must not remove nodes chosen by projection');
+  assert(!value.styleAssignments.includes('fillStyle:rgb(1, 2, 3)'),
+    'projection hooks must not inject downstream Anima styling');
+  await session.dispose();
 });
 
 test('R-MODULE-02 isolates optional setup and tick failures to one session', async () => {
@@ -317,6 +365,9 @@ test('R-FORM-01..03 keeps 2d Form planar and gives 3d Form deterministic branch 
     projectionSelection: selection,
     renderSelection: selection,
     formActive: false,
+    nodeRoles: {},
+    edgeRoles: {},
+    regions: [],
     nodeContributions: {},
     edgeContributions: {},
     regionLayouts: [],
@@ -435,7 +486,7 @@ test('L-LINEAR-04 initializes an editable build-out without pinning or reflowing
   deepEqual(
     (await session.exportViewState()).camera.target,
     { x: 0, y: -200, z: 0 },
-    'focus should target the projected Linear build-out position',
+    'Focus should recenter onto the projected Linear subject without changing its layout',
   );
   await session.focusNode(null);
   await session.fitNodes();
@@ -756,3 +807,21 @@ function pointer(
   Object.defineProperty(event, 'button', { value: 0 });
   canvas.dispatchEvent(event as unknown as Event);
 }
+
+
+test('uncached module patches may reuse a working record without freezing changed hit shapes', async () => {
+  const registry = createShippedGraphModuleRegistryV1();
+  const nodes: Record<string, { radius: number }> = { a: { radius: 8 } };
+  registry.register(definition('working-presentation', 600, {
+    contributeFrame: () => ({ nodeContributions: nodes }),
+  }));
+  const value = runtimeHarness({ modules: registry, registration: withModules({ 'working-presentation': { policy: 'required' } }) });
+  const session = await value.create();
+  try {
+    const probe = session as unknown as { moduleHost: GraphModuleHost; moduleView: GraphModulePresentationStateV1 };
+    const input = { ...probe.moduleView, nodeContributions: {}, edgeContributions: {} };
+    equal(probe.moduleHost.contribute(input).nodeContributions.a.radius, 8, 'initial radius is contributed');
+    nodes.a = { radius: 20 };
+    equal(probe.moduleHost.contribute(input).nodeContributions.a.radius, 20, 'reusing a patch record preserves changed radius');
+  } finally { await session.dispose(); }
+});

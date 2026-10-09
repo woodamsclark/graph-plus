@@ -2,6 +2,7 @@ import { Window } from 'happy-dom';
 import type {
   ConsumerRegistrationV1,
   GraphDocumentV1,
+  GraphExperienceContractV1,
   GraphSettingsOverridesV1,
 } from '../../src/graph-engine/contracts/v1/index.ts';
 import { ConsumerProfileRegistry } from '../../src/graph-engine/core/profile/index.ts';
@@ -12,7 +13,7 @@ import {
   type GraphVisualThemeV2,
   type GraphNodeActionRuntimeV1,
   type GraphRendererBackendIdV2,
-  type GraphRendererRegistryV2,
+  type GraphRendererRegistry,
   type SessionResizeObserverV1,
   type SessionRuntimePlatformV1,
 } from '../../src/graph-engine/runtime/index.ts';
@@ -192,13 +193,14 @@ export function runtimeHarness(options: {
   consumerId?: string;
   profileId?: string;
   document?: GraphDocumentV1;
+  experience?: GraphExperienceContractV1;
   registration?: ConsumerRegistrationV1;
   modules?: GraphModuleRegistry;
   getGlobalOverrides?: () => GraphSettingsOverridesV1;
   resolveThemePalette?: (container: HTMLElement) => GraphVisualThemeV2;
   nodeActions?: GraphNodeActionRuntimeV1;
   realTime?: boolean;
-  rendererRegistry?: GraphRendererRegistryV2;
+  rendererRegistry?: GraphRendererRegistry;
   preferredRendererBackend?: GraphRendererBackendIdV2;
 } = {}) {
   const window = new Window();
@@ -263,6 +265,7 @@ export function runtimeHarness(options: {
         profileId: options.profileId ?? 'two-dimensional',
         container,
         document: options.document ?? runtimeFixture(),
+        experience: options.experience,
         restoreViewState,
       }, { nodeActions: options.nodeActions }),
   };

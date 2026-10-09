@@ -1,9 +1,9 @@
 import type { GraphDocumentV1 } from '../../../contracts/v1/index.ts';
 import { evaluateGraphFilterV1, type GraphFilterSelectionV1 } from '../../../core/filter/index.ts';
-import type { GraphModuleInstanceV1, GraphModulePipelineStateV1 } from '../GraphModuleTypes.ts';
+import type { GraphModuleInstanceV1, GraphModuleProjectionStateV1 } from '../GraphModuleTypes.ts';
 
 export class FilteringModule implements GraphModuleInstanceV1 {
-  projectSource(state: GraphModulePipelineStateV1) {
+  projectSource(state: GraphModuleProjectionStateV1) {
     const filter = state.viewState.activeFilters.projection;
     if (!filter) return;
     const selection = evaluateGraphFilterV1(state.sourceDocument, filter);
@@ -13,7 +13,7 @@ export class FilteringModule implements GraphModuleInstanceV1 {
     };
   }
 
-  selectRender(state: GraphModulePipelineStateV1) {
+  selectRender(state: GraphModuleProjectionStateV1) {
     const filter = state.viewState.activeFilters.render;
     if (!filter) return { renderSelection: allOf(state.document) };
     return { renderSelection: evaluateGraphFilterV1(state.document, filter) };

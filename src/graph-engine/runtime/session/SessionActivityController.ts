@@ -1,4 +1,4 @@
-export interface SessionActivitySnapshotV1 {
+export interface SessionActivitySnapshot {
   readonly manuallySuspended: boolean;
   readonly documentSuspended: boolean;
   readonly disposed: boolean;
@@ -6,7 +6,7 @@ export interface SessionActivitySnapshotV1 {
 }
 
 /** Single source of truth for whether a session is permitted to perform runtime work. */
-export class SessionActivityControllerV1 {
+export class SessionActivityController {
   private manuallySuspended = false;
   private documentSuspended = false;
   private disposed = false;
@@ -35,7 +35,7 @@ export class SessionActivityControllerV1 {
     return this.disposed || this.manuallySuspended || this.documentSuspended || hasFatalError;
   }
 
-  snapshot(hasFatalError = false): SessionActivitySnapshotV1 {
+  snapshot(hasFatalError = false): SessionActivitySnapshot {
     return {
       manuallySuspended: this.manuallySuspended,
       documentSuspended: this.documentSuspended,

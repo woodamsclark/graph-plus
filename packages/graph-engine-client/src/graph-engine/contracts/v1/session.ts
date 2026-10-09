@@ -1,8 +1,10 @@
+import type { GraphActiveViewV1, GraphViewIdV1, GraphViewUiStateV1 } from './view.ts';
 import type { GraphDocumentV1 } from './document.ts';
+import type { GraphExperienceContractV1 } from './experience.ts';
 import type { GraphFilterRequestV1, GraphFilterScopeV1 } from './filter.ts';
 import type { ApplyGraphPatchResultV1, GraphPatchV1 } from './patch.ts';
 import type { GraphEffectiveSettingsV1, GraphSettingsOverridesV1 } from './profile.ts';
-import type { GraphCameraStateV1, GraphViewStateV1 } from './view-state.ts';
+import type { GraphCameraStateV1, GraphViewStateV1, GraphWorldStateV1 } from './view-state.ts';
 import type { Disposable, Vec3 } from './values.ts';
 import type { GraphSessionUiOptionsV1 } from './ui.ts';
 
@@ -11,9 +13,13 @@ export interface GraphSessionOptionsV1 {
   readonly profileId: string;
   readonly container: HTMLElement;
   readonly document: GraphDocumentV1;
+  /** Optional host-neutral experience constraints; defaults to the unrestricted engine experience. */
+  readonly experience?: GraphExperienceContractV1;
   readonly restoreViewState?: GraphViewStateV1;
   readonly sessionOverrides?: GraphSettingsOverridesV1;
   readonly ui?: GraphSessionUiOptionsV1;
+  /** Only one surface attached to a shared application world should advance layout. */
+  readonly layoutAuthority?: boolean;
   readonly onSessionOverridesChanged?: (
     overrides: GraphSettingsOverridesV1,
   ) => void | Promise<void>;
@@ -26,34 +32,104 @@ export interface GraphSessionV1 {
   replaceDocument(document: GraphDocumentV1): Promise<void>;
   applyPatch(patch: GraphPatchV1): Promise<ApplyGraphPatchResultV1>;
   exportDocument(): Promise<GraphDocumentV1>;
+  /** Counts without cloning the canonical document. */
+  getDocumentStats?(): { readonly nodes: number; readonly edges: number };
 
   applyFilter(filter: GraphFilterRequestV1): Promise<void>;
   clearFilter(scope?: GraphFilterScopeV1): Promise<void>;
 
+  getActiveView(): GraphActiveViewV1;
+  getAvailableViews(): readonly GraphViewIdV1[];
+  /** State installation for consumers; interactive controls use the Ego control port. */
+  setView(viewId: GraphViewIdV1): Promise<void>;
+  getViewUiState(viewId: GraphViewIdV1): GraphViewUiStateV1 | undefined;
+  setViewUiState(viewId: GraphViewIdV1, state: GraphViewUiStateV1): void;
+
+  /** Compatibility state setters; do not represent user intentions or emit their observations. */
   setSelection(nodeIds: readonly string[]): Promise<void>;
   focusNode(nodeId: string | null): Promise<void>;
+  /** Apply host-translated truth without representing it as endogenous Ego intent. */
+  applyExternalInfluence(
+    influence: GraphExternalInfluenceV1,
+  ): Promise<GraphExternalInfluenceResultV1>;
   /** Retain semantic preview while the pointer is inside a consumer preview surface. */
   setPreviewSurfaceActive(active: boolean): Promise<void>;
+  /** Host-translated link hover uses the same temporary node peek as graph hover. */
+  setNodeHover?(nodeId: string | null): Promise<void>;
   /** Dismiss transient semantic preview without changing hover, focus, or selection. */
   clearPreview(): Promise<void>;
   setNodePinned(nodeId: string, pinned: boolean): Promise<void>;
   fitNodes(nodeIds?: readonly string[], options?: FitNodesOptionsV1): Promise<void>;
   resetCamera(options?: TransitionOptionsV1): Promise<void>;
   exportViewState(): Promise<GraphViewStateV1>;
+  /** Conscious state without exporting positions or module state. */
+  getInteractionState?(): Pick<GraphViewStateV1, 'viewMode' | 'focusedNodeId' | 'selectedNodeIds'>;
   restoreViewState(state: GraphViewStateV1): Promise<void>;
+  /** World layout is independent from this surface's camera, filters, and conscious View state. */
+  exportWorldState(): Promise<GraphWorldStateV1>;
+  applyWorldState(state: GraphWorldStateV1): Promise<void>;
+  exportWorldPositions?(): Promise<GraphWorldPositionsV1>;
+  applyWorldPositions?(state: GraphWorldPositionsV1): Promise<void>;
+  setLayoutAuthority(authority: boolean): void;
 
   setSessionOverrides(overrides: GraphSettingsOverridesV1): Promise<void>;
+  /** Install consumer lens settings and a filter with one projection. */
+  setSessionOverridesAndFilter?(overrides: GraphSettingsOverridesV1, filter: GraphFilterRequestV1): Promise<void>;
   exportEffectiveSettings(): Promise<GraphEffectiveSettingsV1>;
   exportPerformanceSnapshot(): Promise<GraphPerformanceSnapshotV1>;
   resetPerformanceMeasurements(): Promise<void>;
 
+  onViewChanged(listener: (view: GraphActiveViewV1) => void): Disposable;
   onIntent(listener: (intent: GraphIntentV1) => void): Disposable;
   onGraphChanged(listener: (event: GraphChangedEventV1) => void): Disposable;
+  onWorldChanged(listener: (event: GraphWorldChangedEventV1) => void): Disposable;
+  /** Cheap invalidation; consumers export only the state they need. */
+  onWorldInvalidated?(listener: (event: GraphWorldInvalidatedEventV1) => void): Disposable;
   onError(listener: (error: GraphSessionErrorV1) => void): Disposable;
 
   setSuspended(suspended: boolean): void;
   dispose(): Promise<void>;
 }
+
+export interface GraphWorldChangedEventV1 {
+  readonly sessionId: string;
+  readonly cause: 'layout' | 'interaction' | 'pin' | 'document' | 'restore';
+  readonly state: GraphWorldStateV1;
+}
+
+/** Shared geometry and pins; excludes serialized force/module state. */
+export type GraphWorldPositionsV1 = Omit<GraphWorldStateV1, 'layoutModuleState'>;
+export type GraphWorldInvalidatedEventV1 = Pick<GraphWorldChangedEventV1, 'sessionId' | 'cause'>;
+
+export interface GraphReplaceAttentionExternalInfluenceV1 {
+  readonly schemaVersion: 1;
+  readonly type: 'replace-attention';
+  readonly nodeIds: readonly string[];
+  readonly focusNodeId?: string;
+  readonly framing?: 'preserve' | 'fit-state' | 'recenter-focus';
+}
+
+export interface GraphReplaceRememberedSubjectsExternalInfluenceV1 {
+  readonly schemaVersion: 1;
+  readonly type: 'replace-remembered-subjects';
+  readonly nodeIds: readonly string[];
+}
+
+export type GraphExternalInfluenceV1 =
+  | GraphReplaceAttentionExternalInfluenceV1
+  | GraphReplaceRememberedSubjectsExternalInfluenceV1;
+
+export type GraphExternalInfluenceResultV1 =
+  | {
+      readonly status: 'accepted' | 'adjusted';
+      readonly attentionNodeIds: readonly string[];
+      readonly focusedNodeId?: string;
+    }
+  | {
+      readonly status: 'accepted' | 'adjusted';
+      readonly rememberedNodeIds: readonly string[];
+    }
+  | { readonly status: 'rejected'; readonly reason: string };
 
 export interface GraphFramePerformanceV1 {
   readonly interactionMs: number;

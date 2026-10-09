@@ -12,12 +12,16 @@ import type {
 } from '../render/index.ts';
 import type { GraphModuleRegistry } from './GraphModuleRegistry.ts';
 import type {
-  ActiveGraphModuleV1,
+  ActiveGraphModule,
+  GraphModuleChoreographyPatchV1,
   GraphModuleFailureV1,
   GraphModuleHookV1,
   GraphModuleInstanceV1,
   GraphModulePipelineStateV1,
+  GraphModulePresentationPatchV1,
+  GraphModulePresentationStateV1,
   GraphModuleProjectionPatchV1,
+  GraphModuleProjectionStateV1,
 } from './GraphModuleTypes.ts';
 
 export class GraphRequiredModuleErrorV1 extends Error {
@@ -30,12 +34,13 @@ export class GraphRequiredModuleErrorV1 extends Error {
 }
 
 export class GraphModuleHost {
-  private readonly active: ActiveGraphModuleV1[] = [];
+  private readonly active: ActiveGraphModule[] = [];
   private readonly registry: GraphModuleRegistry;
   private readonly sessionId: string;
   private themePalette: GraphVisualThemeV2;
   private readonly getDocument: () => GraphDocumentV1;
   private readonly getViewState: () => GraphViewStateV1;
+  private readonly canRunLayout: () => boolean;
   private fatal = false;
   private disposed = false;
   private readonly tickElapsedSeconds = new Map<string, number>();
@@ -49,6 +54,7 @@ export class GraphModuleHost {
     readonly initialModuleState: Readonly<Record<string, JsonValue>>;
     readonly getDocument: () => GraphDocumentV1;
     readonly getViewState: () => GraphViewStateV1;
+    readonly canRunLayout?: () => boolean;
     readonly onFailure: (failure: GraphModuleFailureV1) => void;
   }) {
     this.registry = options.registry;
@@ -56,6 +62,7 @@ export class GraphModuleHost {
     this.themePalette = options.themePalette;
     this.getDocument = options.getDocument;
     this.getViewState = options.getViewState;
+    this.canRunLayout = options.canRunLayout ?? (() => true);
     this.failureListener = options.onFailure;
     const definitions = options.registry.resolve(options.profile);
     const enabled = Object.values(options.profile.modules).filter((module) => module.enabled);
@@ -132,6 +139,20 @@ export class GraphModuleHost {
     return this.active.some((module) => module.id === moduleId);
   }
 
+  profileChangeNeedsProjection(profile: EffectiveConsumerProfileV1): boolean {
+    const definitions = this.registry.resolve(profile);
+    if (definitions.length !== this.active.length) return true;
+    return definitions.some((definition) => {
+      const current = this.active.find((module) => module.id === definition.descriptor.id);
+      if (!current) return true;
+      if (sameJson(current.settings, profile.modules[current.id].settings)) return false;
+      // Unknown/recreated modules remain conservative. Presentation and physics
+      // modules with live setters can reuse the existing projected document.
+      return !current.instance.updateSettings || !!(current.instance.projectSource
+        || current.instance.projectTopology || current.instance.selectRender);
+    });
+  }
+
   updateProfile(profile: EffectiveConsumerProfileV1): void {
     if (this.fatal || this.disposed) return;
     const definitions = this.registry.resolve(profile);
@@ -204,7 +225,7 @@ export class GraphModuleHost {
           this.onFailure({ moduleId: current.id, policy: current.policy, hook: 'dispose', error });
         }
       }
-      const active: ActiveGraphModuleV1 = {
+      const active: ActiveGraphModule = {
         id: desired.id,
         policy: desired.policy,
         order: definition.order,
@@ -218,7 +239,7 @@ export class GraphModuleHost {
     this.active.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   }
 
-  project(initial: GraphModulePipelineStateV1): GraphModulePipelineStateV1 {
+  project(initial: GraphModuleProjectionStateV1): GraphModuleProjectionStateV1 {
     let state = initial;
     state = this.runProjectionHook(state, 'projectSource', 'project-source');
     state = { ...state, renderSelection: allOf(state.document) };
@@ -228,19 +249,27 @@ export class GraphModuleHost {
     return state;
   }
 
-  contribute(state: GraphModulePipelineStateV1): GraphModulePipelineStateV1 {
-    return this.runProjectionHook(state, 'contributeFrame', 'contribute-frame');
+  canReuseGeometryPresentation(): boolean {
+    return this.active.every(module => !module.instance.contributeFrame || module.instance.geometryIndependentPresentation === true);
+  }
+
+  contribute(state: GraphModulePresentationStateV1): GraphModulePresentationStateV1 {
+    return this.runPresentationHook(state);
   }
 
   tick(state: GraphModulePipelineStateV1, deltaSeconds: number): import('./GraphModuleTypes.ts').GraphModuleTickResultV1 | undefined {
     if (this.fatal || this.disposed) return undefined;
-    const choreographed = this.runProjectionHook(state, 'choreograph', 'choreograph');
+    const choreographed = this.runChoreographyHook(state);
     let positions = choreographed.positions;
     let changed = false;
     let requestNextFrame = false;
     let nextFrameDelayMs: number | undefined;
     for (const module of [...this.active]) {
       if (!module.instance.tick) continue;
+      if (module.definition.descriptor.capabilities.includes('layout') && !this.canRunLayout()) {
+        this.tickElapsedSeconds.delete(module.id);
+        continue;
+      }
       try {
         const moduleState = { ...choreographed, positions };
         const preferredInterval = module.instance.preferredTickIntervalMs?.(moduleState);
@@ -249,9 +278,13 @@ export class GraphModuleHost {
           continue;
         }
         const elapsed = (this.tickElapsedSeconds.get(module.id) ?? 0) + Math.max(0, deltaSeconds);
+        // Allow small timestamp jitter at the requested rate, without admitting
+        // substantially faster callbacks or carrying catch-up debt after a tick.
+        const toleranceMs = typeof preferredInterval === 'number'
+          ? Math.min(0.5, Math.max(0, preferredInterval) * 0.01) : 0;
         if (this.tickHasRun.has(module.id)
           && typeof preferredInterval === 'number' && Number.isFinite(preferredInterval)
-          && elapsed * 1_000 + 1e-9 < Math.max(0, preferredInterval)) {
+          && elapsed * 1_000 + toleranceMs + 1e-9 < Math.max(0, preferredInterval)) {
           this.tickElapsedSeconds.set(module.id, elapsed);
           requestNextFrame = true;
           const remaining = Math.max(0, preferredInterval - elapsed * 1_000);
@@ -296,6 +329,18 @@ export class GraphModuleHost {
     this.invokeLifecycle('onViewChanged', 'view-changed', state);
   }
 
+  nodePositionChanged(nodeId: string, position: Vec3, source: Readonly<Record<string, Vec3>>): void {
+    if (this.fatal || this.disposed) return;
+    for (const module of [...this.active]) {
+      try {
+        module.instance.onNodePositionChanged?.(nodeId, position, source);
+      } catch (error) {
+        this.failActiveModule(module, 'node-position-changed', error);
+        if (this.fatal) break;
+      }
+    }
+  }
+
   themeChanged(theme: GraphVisualThemeV2): void {
     this.themePalette = theme;
     this.invokeLifecycle('onThemeChanged', 'theme-changed', theme);
@@ -314,6 +359,23 @@ export class GraphModuleHost {
     }
   }
 
+  restoreCapabilityState(capability: string, state: Readonly<Record<string, JsonValue>>): void {
+    if (this.fatal || this.disposed) return;
+    for (const module of [...this.active]) {
+      if (!module.definition.descriptor.capabilities.includes(capability)
+        || !module.instance.restoreState
+        || !Object.prototype.hasOwnProperty.call(state, module.id)) continue;
+      try {
+        module.instance.restoreState(cloneJson(state[module.id]));
+        this.tickElapsedSeconds.delete(module.id);
+        this.tickHasRun.delete(module.id);
+      } catch (error) {
+        this.failActiveModule(module, 'restore-state', error);
+        if (this.fatal) break;
+      }
+    }
+  }
+
   setSuspended(suspended: boolean): void {
     this.invokeLifecycle('setSuspended', 'suspend', suspended);
   }
@@ -322,6 +384,20 @@ export class GraphModuleHost {
     const result: Record<string, JsonValue> = JSON.parse(JSON.stringify(base)) as Record<string, JsonValue>;
     for (const module of [...this.active]) {
       if (!module.instance.exportState) continue;
+      try {
+        result[module.id] = cloneJson(module.instance.exportState());
+      } catch (error) {
+        this.failActiveModule(module, 'export-state', error);
+        if (this.fatal) break;
+      }
+    }
+    return result;
+  }
+
+  exportCapabilityState(capability: string): Readonly<Record<string, JsonValue>> {
+    const result: Record<string, JsonValue> = {};
+    for (const module of [...this.active]) {
+      if (!module.definition.descriptor.capabilities.includes(capability) || !module.instance.exportState) continue;
       try {
         result[module.id] = cloneJson(module.instance.exportState());
       } catch (error) {
@@ -358,10 +434,10 @@ export class GraphModuleHost {
   private failureListener: ((failure: GraphModuleFailureV1) => void) | undefined;
 
   private runProjectionHook(
-    initial: GraphModulePipelineStateV1,
-    method: 'projectSource' | 'projectTopology' | 'selectRender' | 'contributeFrame' | 'choreograph',
+    initial: GraphModuleProjectionStateV1,
+    method: 'projectSource' | 'projectTopology' | 'selectRender',
     hook: GraphModuleHookV1,
-  ): GraphModulePipelineStateV1 {
+  ): GraphModuleProjectionStateV1 {
     if (this.fatal || this.disposed) return initial;
     let state = initial;
     for (const module of [...this.active]) {
@@ -372,6 +448,44 @@ export class GraphModuleHost {
         if (patch) state = applyProjectionPatch(state, patch);
       } catch (error) {
         this.failActiveModule(module, hook, error);
+        if (this.fatal) break;
+      }
+    }
+    return state;
+  }
+
+  private runPresentationHook(
+    initial: GraphModulePresentationStateV1,
+  ): GraphModulePresentationStateV1 {
+    if (this.fatal || this.disposed) return initial;
+    let state = initial;
+    for (const module of [...this.active]) {
+      const callback = module.instance.contributeFrame;
+      if (!callback) continue;
+      try {
+        const patch = callback.call(module.instance, state);
+        if (patch) state = applyPresentationPatch(state, patch, module.instance.immutablePresentationPatch === true);
+      } catch (error) {
+        this.failActiveModule(module, 'contribute-frame', error);
+        if (this.fatal) break;
+      }
+    }
+    return state;
+  }
+
+  private runChoreographyHook(
+    initial: GraphModulePipelineStateV1,
+  ): GraphModulePipelineStateV1 {
+    if (this.fatal || this.disposed) return initial;
+    let state = initial;
+    for (const module of [...this.active]) {
+      const callback = module.instance.choreograph;
+      if (!callback) continue;
+      try {
+        const patch = callback.call(module.instance, state);
+        if (patch) state = applyChoreographyPatch(state, patch);
+      } catch (error) {
+        this.failActiveModule(module, 'choreograph', error);
         if (this.fatal) break;
       }
     }
@@ -396,7 +510,7 @@ export class GraphModuleHost {
     }
   }
 
-  private failActiveModule(module: ActiveGraphModuleV1, hook: GraphModuleHookV1, error: unknown): void {
+  private failActiveModule(module: ActiveGraphModule, hook: GraphModuleHookV1, error: unknown): void {
     const index = this.active.indexOf(module);
     if (index >= 0) this.active.splice(index, 1);
     try { module.instance.dispose?.(); } catch (disposeError) {
@@ -419,22 +533,68 @@ export class GraphModuleHost {
 }
 
 function applyProjectionPatch(
-  state: GraphModulePipelineStateV1,
+  state: GraphModuleProjectionStateV1,
   patch: GraphModuleProjectionPatchV1,
+): GraphModuleProjectionStateV1 {
+  return {
+    ...state,
+    document: patch.document ?? state.document,
+    positions: patch.positions ?? state.positions,
+    projectionSelection: patch.projectionSelection ?? state.projectionSelection,
+    renderSelection: patch.renderSelection ?? state.renderSelection,
+    formActive: patch.formActive ?? state.formActive,
+    nodeRoles: patch.nodeRoles
+      ? mergeRecords(state.nodeRoles, patch.nodeRoles)
+      : state.nodeRoles,
+    edgeRoles: patch.edgeRoles
+      ? mergeRecords(state.edgeRoles, patch.edgeRoles)
+      : state.edgeRoles,
+    regions: patch.regions ?? state.regions,
+    regionLayouts: patch.regionLayouts ?? state.regionLayouts,
+    commitPositions: patch.commitPositions ?? state.commitPositions,
+  };
+}
+
+function applyPresentationPatch(
+  state: GraphModulePresentationStateV1,
+  patch: GraphModulePresentationPatchV1,
+  immutable: boolean,
+): GraphModulePresentationStateV1 {
+  return {
+    ...state,
+    nodeContributions: patch.nodeContributions
+      ? mergeContributions(state.nodeContributions, patch.nodeContributions, immutable)
+      : state.nodeContributions,
+    edgeContributions: patch.edgeContributions
+      ? mergeContributions(state.edgeContributions, patch.edgeContributions, immutable)
+      : state.edgeContributions,
+    regionContributions: patch.regionContributions ?? state.regionContributions,
+    theme: patch.theme ?? state.theme,
+    presentationPolicy: patch.presentationPolicy ?? state.presentationPolicy,
+  };
+}
+
+function applyChoreographyPatch(
+  state: GraphModulePipelineStateV1,
+  patch: GraphModuleChoreographyPatchV1,
 ): GraphModulePipelineStateV1 {
   return {
     ...state,
-    ...patch,
-    nodeContributions: patch.nodeContributions
-      ? mergeContributions(state.nodeContributions, patch.nodeContributions)
-      : state.nodeContributions,
-    edgeContributions: patch.edgeContributions
-      ? mergeContributions(state.edgeContributions, patch.edgeContributions)
-      : state.edgeContributions,
     motionTargets: patch.motionTargets
       ? mergeMotionTargets(state.motionTargets ?? {}, patch.motionTargets)
       : state.motionTargets,
   };
+}
+
+function mergeRecords<T extends object>(
+  base: Readonly<Record<string, T>>,
+  addition: Readonly<Record<string, T>>,
+): Readonly<Record<string, T>> {
+  const result: Record<string, T> = { ...base };
+  for (const [id, value] of Object.entries(addition) as Array<[string, T]>) {
+    result[id] = { ...base[id], ...value } as T;
+  }
+  return result;
 }
 
 function mergeMotionTargets(
@@ -461,13 +621,24 @@ function mergeMotionTargets(
   };
 }
 
+// Only explicitly immutable contributions can share repeated base/patch merges.
+const contributionMerges = new WeakMap<object, WeakMap<object, object>>();
 function mergeContributions<T extends GraphNodeRenderContributionV1 | GraphEdgeRenderContributionV1>(
   base: Readonly<Record<string, T>>,
   addition: Readonly<Record<string, T>>,
+  immutable: boolean,
 ): Readonly<Record<string, T>> {
+  if (immutable && Object.keys(base).length === 0) return addition;
+  const byAddition = contributionMerges.get(base) ?? new WeakMap<object, object>();
+  const cached = immutable ? byAddition.get(addition) : undefined;
+  if (cached) return cached as Readonly<Record<string, T>>;
   const result: Record<string, T> = { ...base };
   for (const [id, contribution] of Object.entries(addition) as Array<[string, T]>) {
     result[id] = { ...base[id], ...contribution } as T;
+  }
+  if (immutable) {
+    byAddition.set(addition, result);
+    contributionMerges.set(base, byAddition);
   }
   return result;
 }

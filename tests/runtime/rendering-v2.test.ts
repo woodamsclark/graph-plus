@@ -1,10 +1,10 @@
 import {
   DEFAULT_GRAPH_RENDER_THEME_V1,
-  GraphRendererRegistryV2,
-  detectGraphRendererCapabilitiesV2,
+  GraphRendererRegistry,
+  detectGraphRendererCapabilities,
   graphColorToCssV2,
   parseGraphColorV2,
-  selectGraphRendererV2,
+  selectGraphRenderer,
   type GraphRendererV2,
 } from '../../src/graph-engine/runtime/index.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
@@ -48,14 +48,14 @@ test('V2 theme refresh recomposes presentation without rerunning graph projectio
 
 test('V2 capability detection and selection keep API support separate from registered backends', () => {
   const value = runtimeHarness();
-  const capabilities = detectGraphRendererCapabilitiesV2(value.document, value.window as unknown as Window);
+  const capabilities = detectGraphRendererCapabilities(value.document, value.window as unknown as Window);
   equal(capabilities.canvas2d.apiAvailable, true, 'the current fallback API should be detected');
   equal(capabilities.webgl.apiAvailable, false, 'WebGL should be reported independently');
   equal(capabilities.webgl2.apiAvailable, false, 'WebGL2 should be reported independently');
   equal(capabilities.webgpu.apiAvailable, false, 'WebGPU API presence should be reported independently');
 
   let failedDisposals = 0;
-  const registry = new GraphRendererRegistryV2();
+  const registry = new GraphRendererRegistry();
   registry.register({
     backendId: 'webgl2', priority: 10, supports: () => true,
     create: ({ createCanvas }) => fakeRenderer('webgl2', createCanvas(), () => { failedDisposals += 1; }, true),
@@ -65,7 +65,7 @@ test('V2 capability detection and selection keep API support separate from regis
     create: ({ createCanvas }) => fakeRenderer('canvas2d', createCanvas()),
   });
   const canvases: HTMLCanvasElement[] = [];
-  const selection = selectGraphRendererV2({
+  const selection = selectGraphRenderer({
     registry,
     capabilities,
     context: {
@@ -102,7 +102,7 @@ test('V2 session runtime mounts a second renderer without graph or model changes
   let sceneUpdates = 0;
   let renders = 0;
   let disposals = 0;
-  const registry = new GraphRendererRegistryV2();
+  const registry = new GraphRendererRegistry();
   registry.register({
     backendId: 'webgl2', priority: 10, supports: () => true,
     create: ({ createCanvas }) => {
@@ -150,6 +150,7 @@ function fakeRenderer(
       labelLayoutMs: 0, labelDrawMs: 0,
     }),
     pick: () => null,
+    queryNearest: () => null,
     getRendererDiagnostics: () => ({ backendId, lifecycle, resources: {} }),
     dispose: () => {
       if (lifecycle === 'disposed') return;

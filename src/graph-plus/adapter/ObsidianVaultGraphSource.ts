@@ -6,7 +6,6 @@ interface ResolvedLinks {
 }
 
 export class ObsidianVaultGraphSourceV1 {
-  private readonly contentCache = new Map<string, { readonly mtime: number; readonly content: string }>();
   private inFlight?: Promise<VaultGraphSnapshotV1<TFile>>;
 
   constructor(private readonly app: App) {}
@@ -19,11 +18,7 @@ export class ObsidianVaultGraphSourceV1 {
 
   private async readFresh(): Promise<VaultGraphSnapshotV1<TFile>> {
     const files = this.app.vault.getMarkdownFiles();
-    const notes = await Promise.all(files.map((file) => this.readNote(file)));
-    const currentPaths = new Set(files.map((file) => file.path));
-    for (const path of this.contentCache.keys()) {
-      if (!currentPaths.has(path)) this.contentCache.delete(path);
-    }
+    const notes = files.map((file) => this.readNote(file));
     const cache = this.app.metadataCache as unknown as { readonly resolvedLinks?: ResolvedLinks };
     return {
       vaultId: this.app.vault.getName(),
@@ -32,7 +27,7 @@ export class ObsidianVaultGraphSourceV1 {
     };
   }
 
-  private async readNote(file: TFile): Promise<VaultGraphNoteV1<TFile>> {
+  private readNote(file: TFile): VaultGraphNoteV1<TFile> {
     const cache = this.app.metadataCache.getFileCache(file);
     const frontmatter = isRecord(cache?.frontmatter) ? cache.frontmatter : {};
     const tags = new Set<string>();
@@ -60,19 +55,10 @@ export class ObsidianVaultGraphSourceV1 {
       path: file.path,
       basename: file.basename,
       extension: file.extension,
-      content: await this.readContent(file),
       tags: [...tags].filter(Boolean).sort(),
       properties,
       frontmatterLinks,
     };
-  }
-
-  private async readContent(file: TFile): Promise<string> {
-    const cached = this.contentCache.get(file.path);
-    if (cached?.mtime === file.stat.mtime) return cached.content;
-    const content = await this.app.vault.cachedRead(file);
-    this.contentCache.set(file.path, { mtime: file.stat.mtime, content });
-    return content;
   }
 }
 

@@ -45,6 +45,7 @@ export function validateGraphViewStateV1(value: unknown): readonly GraphViewStat
     'pinnedNodeIds',
     'camera',
     'selectedNodeIds',
+    'viewMode',
     'focusedNodeId',
     'activeFilters',
     'moduleState',
@@ -61,6 +62,12 @@ export function validateGraphViewStateV1(value: unknown): readonly GraphViewStat
   validateIdArray(value.pinnedNodeIds, '$.pinnedNodeIds', errors);
   validateCamera(value.camera, '$.camera', errors);
   validateIdArray(value.selectedNodeIds, '$.selectedNodeIds', errors);
+  if (value.viewMode !== undefined
+    && value.viewMode !== 'overview'
+    && value.viewMode !== 'explore'
+    && value.viewMode !== 'focus') {
+    errors.push({ path: '$.viewMode', message: 'View mode must be overview, explore, or focus.' });
+  }
   if (value.focusedNodeId !== undefined) validateId(value.focusedNodeId, '$.focusedNodeId', errors);
   validateFilters(value.activeFilters, '$.activeFilters', errors);
   validateModuleState(value.moduleState, '$.moduleState', errors);
@@ -85,6 +92,7 @@ export function cloneGraphViewStateV1(state: GraphViewStateV1): GraphViewStateV1
     pinnedNodeIds: [...state.pinnedNodeIds],
     camera: cloneCamera(state.camera),
     selectedNodeIds: [...state.selectedNodeIds],
+    ...(state.viewMode === undefined ? {} : { viewMode: state.viewMode }),
     ...(state.focusedNodeId === undefined ? {} : { focusedNodeId: state.focusedNodeId }),
     activeFilters: Object.fromEntries(
       Object.entries(state.activeFilters).map(([scope, filter]) => [scope, cloneFilter(filter)]),

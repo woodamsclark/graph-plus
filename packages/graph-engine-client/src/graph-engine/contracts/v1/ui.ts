@@ -16,18 +16,24 @@ export const GRAPH_QUICK_SETTINGS_SECTION_IDS_V1 = Object.freeze({
 export const GRAPH_QUICK_SETTINGS_CONTROL_IDS_V1 = Object.freeze({
   clearFilter: 'filter.clear',
   mindMap: 'form.mind-map',
+  formDimensions: 'form.dimensions',
+  /** @deprecated Retired control; node zoom contrast is fixed at its former 100% effect. */
+  formNodeZoomSize: 'form.node-zoom-size',
   formDirection: 'form.direction',
   formDepth: 'form.depth',
   formBranchColors: 'form.branch-colors',
   formCrossLinks: 'form.cross-links',
   formDisconnected: 'form.disconnected',
   labels: 'display.labels',
+  labelSaliency: 'display.label-threshold',
+  /** @deprecated Compatibility spelling for labelSaliency. */
   labelThreshold: 'display.label-threshold',
   labelPosition: 'display.label-position',
   nodeSize: 'display.node-size',
   linkThickness: 'display.link-thickness',
   showArrows: 'display.show-arrows',
   resetCamera: 'camera.reset',
+  cursorGravity: 'forces.cursor-gravity',
   centerForce: 'forces.center',
   radialForce: 'forces.radial',
   axialSpringAxis: 'force-layout.axial-spring-axis',
@@ -42,6 +48,7 @@ export const GRAPH_CORE_CONTEXT_ACTION_IDS_V1 = Object.freeze({
   focusNode: 'focus-node',
   mindMapNode: 'mind-map-node',
   togglePin: 'toggle-pin',
+  toggleConstellation: 'toggle-constellation',
 } as const);
 
 export interface GraphSessionUiOptionsV1 {

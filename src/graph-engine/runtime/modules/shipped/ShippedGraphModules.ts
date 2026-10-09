@@ -4,7 +4,7 @@ import { FilteringModule } from './FilteringModule.ts';
 import { ForceLayoutModule, readForceSettings } from './ForceLayoutModule.ts';
 import { FormModule } from './FormModule.ts';
 import { LinearBuildOutLayoutModule } from './LinearBuildOutLayoutModule.ts';
-import { RenderingModule } from './RenderingModule.ts';
+import { AnimaBaselineModule } from '../../anima/index.ts';
 import { NodeRegionsModule } from './NodeRegionsModule.ts';
 import { DEFAULT_GRAPH_TOPOLOGY_LAYOUT_POLICY_V1 } from '../../../core/topology/index.ts';
 import type { JsonValue } from '../../../contracts/v1/index.ts';
@@ -32,13 +32,13 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       defaultSettings: {
         renderQuality: 'automatic',
         labelMode: 'adaptive',
-        nodeRadiusScale: 2,
+        nodeRadiusScale: 1,
         edgeThicknessScale: 0.1,
         showArrows: false,
         tokenColors: {},
       },
     },
-    create: ({ themePalette, settings }) => new RenderingModule(themePalette, settings),
+    create: ({ themePalette, settings }) => new AnimaBaselineModule(themePalette, settings),
   });
   registry.register({
     order: 200,
@@ -120,7 +120,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
         springLength: 250,
         centeringStrength: 0.1,
         velocityDecay: 0.4,
-        alphaDecay: 0.02276277904418933,
+        alphaDecay: 0.2,
         alphaMin: 0.001,
         repulsionMinDistance: 30,
         barnesHutTheta: 0.9,
@@ -144,6 +144,7 @@ export function createShippedGraphModuleRegistryV1(): GraphModuleRegistry {
       capabilities: ['animation'],
       settingsSchemaVersion: 1,
       defaultSettings: {
+        cursorGravity: 'clingy',
         labelPosition: 'above',
         adaptiveLabelThreshold2d: 65,
         adaptiveLabelThreshold3d: 50,

@@ -392,7 +392,9 @@ occur, then pan, orbit, zoom, reset, and fit commands update only the session vi
 #### R-INPUT-03 — Selection and focus
 
 Given visible nodes, when selection and focus interactions occur, then the session
-state changes and exactly one corresponding domain-neutral intent is emitted.
+state changes and exactly one corresponding domain-neutral intent is emitted. A
+stationary primary node click or tap commits its single-click transition immediately
+and issues an immutable, revision-bound interaction receipt.
 
 Selection is a zero-or-more-node chosen set; focus is an optional single
 keyboard/navigation and camera-interaction reference. Given a primary node click, the
@@ -404,11 +406,23 @@ orbit does not implicitly clear either state.
 
 #### R-INPUT-04 — Activation
 
-Given an unfocused hit-tested node, when it receives a stationary primary click, then
-it becomes selected and focused without invoking a consumer action. Given that same
-node remains focused, when it receives a later stationary primary click, then the
-first available registered activation action runs exactly once and the corresponding
-revision-bearing activation intent identifies the node.
+Given a hit-tested node, when two stationary primary clicks or taps arrive within the
+240 ms receipt window, then the already-committed first click remains observable. The
+matching second press reconciles selection and Focus without reframing, and the second
+stationary release runs the first available registered activation action exactly once.
+The receipt retains the ordered press and release timestamps for both taps. A previously
+selected node therefore visibly deselects and reselects; an initially unselected node remains selected.
+The corresponding revision-bearing activation intent identifies the node. Mouse and
+touch use the same receipt contract.
+
+Given a primary press held on a node for 450 ms, it enters Focus directly and neither
+activates nor requests node context. Secondary click remains the node-context path.
+Moving a matching second press beyond the drag threshold begins a reversible Focus camera
+transition and does not activate or drag the node. Movement distance is normalized to
+35% of the smaller viewport dimension; the endpoint is the ordinary viewport-aware
+focused-neighborhood fit. Given existing Focus, a stationary single node click transfers
+Attention, Focus, and camera framing to that node. In Local Graph+, the resulting
+focus-change intent also requests the corresponding note as the active host note.
 
 #### R-INPUT-05 — Filtered hit testing
 
@@ -479,28 +493,39 @@ Given two consumers register identical local action IDs, when their sessions res
 actions, then IDs remain consumer-namespaced. Disposing the registration, lease, or
 provider removes its callbacks, and no stale action can execute after reconnect.
 
-#### R-INPUT-16 — V1.1 click-only extension boundary
+#### R-INPUT-16 — Safe extension boundary
 
 Given the shipped public contract/client, when its API surface is inspected, then it
-offers node click-action registration but no edge/background action registration, raw
-DOM event subscription, modifier remapping, custom gesture recognizer, continuous drag
-callback, custom drag physics, or replacement camera-control hook.
+offers node action registration and declarative Reaction registration but no consumer
+matcher functions, edge/background action registration, raw DOM event subscription,
+modifier remapping, custom gesture recognizer, continuous drag callback, custom drag
+physics, or replacement camera-control hook.
 
-#### R-INPUT-17 — Mobile dimension-consistent primary pan trial
+#### R-INPUT-17 — Mobile state-aware primary navigation
 
-Given either a `2d` or `3d` mobile session and a one-finger drag beginning on the
-background, when the pan threshold is crossed, then the camera pans, focus/selection
-clear exactly once, and no orbit occurs. A one-finger drag beginning on a draggable
-node continues to use node-drag arbitration.
+Given a mobile Overview session and a one-finger drag beginning on the background,
+when the movement threshold is crossed, then the camera pans. Given 3D Explore, the
+same background gesture orbits around the selected constellation and retains it.
+Given 2D Explore, it continues to pan. Given 3D Focus, it orbits around the focused
+target and retains focus/selection. A gesture beginning directly on an eligible node
+drags that node instead of navigating the camera.
 
 #### R-INPUT-18 — Mobile two-finger dimensional behavior
 
-Given a `3d` mobile session, when a two-finger drag crosses the translation threshold
-without qualifying as pinch, then the camera orbits with the same directional mapping
-whether or not a node is focused and retains focus/selection. Given a `2d` session, the
-same gesture never rotates the camera and may translate the pan centroid. In either
-dimension, crossing the pinch scale threshold gives zoom priority and does not also
-produce an accidental node drag or discontinuous orbit.
+Given a `3d` mobile session, when a two-finger gesture crosses the movement threshold,
+centroid translation orbits with the same directional mapping whether or not a node is
+focused, while finger-separation change zooms during that same gesture. Given a `2d`
+session, centroid movement pans while finger-separation change zooms. Neither dimension
+produces an accidental node drag, and Focus retains focus/selection.
+
+#### R-INPUT-19 — Reflex and conscious Reaction
+
+Given a subject-local Reflex, when related stimuli match its short-lived immutable
+receipt, then the owning subject may respond without publishing that evidence to
+Consciousness Memory. Given a consumer's declarative association, when semantic
+observations cross its occurrence threshold, then logarithmically compacted Memory
+produces a Reaction intent, Ego accepts the currently permitted intent, and only an
+action registered by that same consumer lease may run.
 
 ### R-UI — Engine-owned configurable session UI
 
@@ -1054,8 +1079,8 @@ Approval of this revision confirms:
    capabilities.
 2. Consumer extensibility is limited to semantic node click actions in V1.1; drag,
    edge, background, raw-input, and camera remapping remain deferred.
-3. Focused-node click and Enter invoke the same primary action displayed first in the
-   context menu.
+3. Node double-click and single-selection Enter invoke the same primary action displayed
+   first in the context menu.
 4. Dimensions are profile-backed, constrainable, live-switchable, and isolated by
    consumer/profile/session precedence.
 5. Mind Map is planar in 2D and genuinely spatial in 3D while preserving the same

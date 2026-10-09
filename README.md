@@ -11,7 +11,7 @@ spatial, interactive workflow for creating, returning, reflecting, and discoveri
 - Focus on a note and its neighborhood.
 - Filter the graph while leaving your notes and links unchanged.
 - Preview notes while you explore.
-- Use Form, filters, regions, and layout controls to look at the same vault from
+- Use filters, regions, and layout controls to look at the same vault from
   different angles.
 
 Graph+ is for Obsidian users who think through connections—writers, researchers,
@@ -39,20 +39,22 @@ Graph+ has two related views:
 
 - **Global graph** shows the vault-wide graph. Use it to explore broad clusters,
   connections, orphan notes, and the overall shape of your knowledge base.
-- **Local graph** shows a neighborhood around one note. Run `open local graph+` from
-  the command palette, or use it from an active note, then adjust the neighborhood
-  depth to expand or narrow what is around that note.
+- **Local graph** shows the same vault graph in a compact pane, starts in Focus on the
+  active note, and follows subsequent active-note changes.
 
 The global graph is the place for broad discovery and spatial organization. The local
-graph is the place for following one idea, note, or thread without loading the entire
-vault into your immediate view. Both views use the same Graph+ interaction model and
-persist their own graph state.
+graph is the place for following one idea, note, or thread through that same world.
+They are two presentation modes of the same Graph+ application. Node coordinates and
+pins are shared; each pane keeps its own camera, filters, View, selection, and Focus.
+Global starts in Overview, while Local starts in Focus and follows the active note.
 
 ### Explore and navigate
 
-Select nodes to focus on them and reveal their neighborhood. Clear focus to return to
-the broader graph. Drag nodes to arrange the space; Graph+ persists node placement,
-camera framing, pins, focus, and selection as graph state for the vault.
+Choose a constellation in Overview, then click one of its members to enter Focus.
+Add visible candidates to build the constellation; click the background to move back
+one View. Drag nodes to arrange the shared space; Graph+ persists node placement and
+pins for the vault. Camera framing, filters, Focus, and selection belong to the
+individual pane.
 
 On desktop, use pointer, wheel, keyboard, and modifier interactions. On touch devices,
 use one- and two-finger gestures for graph movement and navigation. The exact gesture
@@ -65,8 +67,10 @@ Use the graph controls to:
 - Search for nodes with `Filter nodes…`.
 - Include or hide tag nodes and orphan notes.
 - Reset the current filters.
+<!-- Mind Map deferred; retain these instructions for its return.
 - Switch between ordinary graph exploration and Form mode.
 - Choose a relation and depth when using Form mode.
+-->
 - Change display, force-layout, region, and dimension settings.
 
 These are reversible views of your vault. They do not rewrite Markdown files, rename
@@ -80,6 +84,36 @@ engine preserves the graph document while changing the presentation and camera.
 If you want to regenerate placement and camera state for the vault, use **Settings →
 Community plugins → Graph+ → Reset graph layout data**. This does not change notes,
 links, filters, Form state, colors, labels, or settings.
+
+For this release, keep exactly one **Global graph+** pane open before resetting.
+Close any additional Global panes; opening only a Local pane does not enable reset.
+
+### Customize graph colors
+
+Use **Settings → Community plugins → Graph+ → Graph+ colors** to override the graph
+background, ordinary note nodes, or tag nodes. Each color can be reset independently
+to return that role to the active Obsidian theme. Changes apply to open Graph+ views.
+
+### Adjust the graph live
+
+Quick Settings sliders continuously update the graph while dragging. Runtime
+updates are combined once per animation frame; saves wait for a 250ms quiet period
+or the end of the interaction. Reset appears as soon as a slider has an override.
+See the [live-update contract](docs/graph-engine-quick-settings-live-update-contract.md)
+for validation and lifecycle details.
+
+## Search the graph
+
+The Quick Settings search finds node names, tags, and vault-relative file paths using
+Obsidian's public `prepareSimpleSearch()` matcher. For example, try `Alpha`,
+`#course/greek`, or `folder/Beta.md`. Matching a tag includes its tag node and
+associated notes; Tags, Orphans, and the current View still control visibility.
+
+Search uses a small index of graph metadata that refreshes when metadata changes.
+Input keeps its 120ms debounce. Note contents and frontmatter properties are not
+searched, and Graph+ does not interpret Boolean operators, regular expressions,
+or Obsidian search operators. Previously saved search-language queries should be
+replaced with plain text.
 
 ## Default experience
 
@@ -103,21 +137,22 @@ for the Graph+ profile where supported.
 | Link strength | 1 |
 | Link distance | 250 |
 | Center force | 0.1 |
-| Motion damping | 0.4 |
+| Velocity decay | 0.4 |
 | Collision spacing | 60 |
 | 3D axial spring | Off |
 | Quick settings | Collapsed |
+| Graph colors | Inherited from the active Obsidian theme |
 
 ## For plugin developers
 
-Graph+ is the first priority consumer of `graph-engine`, a host-neutral graph platform.
+Graph+ contains `graph-engine`, its host-neutral internal graph platform.
 
 The core engine is designed for plugins that already own meaningful data. A consumer
-plugin passes graph nodes, edges, profiles, and view state to graph-engine; the engine
+plugin passes graph nodes, edges, profiles, and view state to the internal engine; the engine
 returns a presentable interactive graph surface inside an HTML element owned by that
 plugin. The consumer keeps ownership of its data, domain meaning, and persistence.
 
-Graph-engine owns generic graph layout, rendering, camera movement, hit testing,
+The internal Graph Engine owns generic graph layout, rendering, camera movement, hit testing,
 gestures, filters, modules, and presentation state. This lets another plugin add a
 graph without importing Graph+’s Obsidian-vault interpretation.
 
@@ -126,15 +161,19 @@ See [the graph-engine consumer guide](docs/graph-engine-consumer-guide.md) and t
 
 ## Compatibility
 
-Graph+ 2.0.0 has been tested on Obsidian 1.13.7. Desktop and mobile behavior should be
-validated against your own vault and device before relying on it for daily work.
+Graph+ 2.0.0 requires Obsidian 1.13.7 or newer. Automated checks cover desktop
+and touch input paths; physical desktop and mobile acceptance is tracked in the
+[release safety checklist](docs/graph-plus-release-safety.md).
 
 ## Installation
 
-Graph+ is available through the Obsidian community plugins browser. For manual
-installation, place `main.js`, `manifest.json`, and `styles.css` in:
+For manual installation, download the three release assets and place
+`main.js`, `manifest.json`, and `styles.css` in your vault's:
 
-`.obsidian/plugins/graph-engine/`
+`.obsidian/plugins/graph-plus/`
+
+Restart Obsidian or reload the plugin, then enable **Graph+** under **Settings →
+Community plugins**. Community plugin browser availability depends on listing approval.
 
 ## Development
 
@@ -144,6 +183,11 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+Use `npm run release` to create a validated release directory containing only the three
+plugin assets. `npm run release:public` requires a stable release version. See
+[release safety and recovery](docs/graph-plus-release-safety.md) for the packaging,
+shutdown, and checkpoint recovery contracts.
 
 ## License
 

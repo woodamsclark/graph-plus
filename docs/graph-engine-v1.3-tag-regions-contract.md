@@ -306,30 +306,27 @@ presentation when Anima is disabled.
 The tag-region module adds no new raw gesture and no boundary hit target. Interaction
 continues through canonical nodes and the V1.1 node-action contract.
 
-On the first stationary primary click of an unfocused ordinary node, the engine:
+On a stationary primary click of an ordinary node, the engine:
 
-1. selects that node;
-2. focuses that node;
-3. fits the camera to the resulting selection.
+1. toggles that node's constellation membership;
+2. clears any explicit Focus; and
+3. preserves camera framing.
 
-On the first stationary primary click of an unfocused tag node, the engine atomically:
+On a stationary primary click of a tag node, the engine applies the same rule:
 
-1. computes its currently visible recursive member closure;
-2. selects that closure, including visible child tag nodes and visible leaf members;
-3. focuses the clicked tag node;
-4. fits the camera to the complete resulting selection.
+1. toggles only the tag node's constellation membership;
+2. leaves its recursive region members unchanged; and
+3. preserves camera framing.
 
-Focus remains the single clicked tag node; selection is the zero-or-more descendant
-set. The focused tag node does not need to be added to `selectedNodeIds` merely to
-remain the group action target.
+Tag-region membership remains projection metadata and does not expand the selection.
+Focus can still be entered through an explicit focus operation.
 
-A later stationary primary click on the still-focused tag node resolves the first
-available registered activation action exactly as in V1.1. Enter invokes the same
-action. Graph+ may register `open-node`; PatternSmith may register `start-drill`.
-Clicking a visible child instead applies the normal first-click behavior to that child
-and transfers focus away from the parent tag node.
+A double-click resolves the first available registered activation action and leaves the
+tag node in the constellation. Enter invokes the same action when exactly one node is
+selected. Graph+ may register `open-node`; PatternSmith may register `start-drill`.
+Clicking a visible child toggles that child's own constellation membership.
 
-The camera fit is an engine-owned command and view transition. Zooming or camera fitting
+Camera fitting remains an engine-owned explicit command. Zooming or camera fitting
 does not change:
 
 - region definitions or membership;

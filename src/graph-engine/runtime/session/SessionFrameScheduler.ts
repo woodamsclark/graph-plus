@@ -1,20 +1,20 @@
 import type { SessionRuntimePlatformV1 } from '../platform/index.ts';
 
-export type SessionInvalidationClassV1 = 'geometry' | 'camera' | 'presentation' | 'content' | 'ui';
+export type SessionInvalidationClass = 'geometry' | 'camera' | 'presentation' | 'content' | 'ui';
 
-export interface SessionFrameSchedulerSnapshotV1 {
+export interface SessionFrameSchedulerSnapshot {
   readonly frameScheduled: boolean;
   readonly animationFrameScheduled: boolean;
   readonly wakeTimerScheduled: boolean;
-  readonly pendingInvalidations: readonly SessionInvalidationClassV1[];
+  readonly pendingInvalidations: readonly SessionInvalidationClass[];
 }
 
 /** Owns every animation-frame and delayed-wake resource for one graph session. */
-export class SessionFrameSchedulerV1 {
+export class SessionFrameScheduler {
   private animationFrame: number | null = null;
   private wakeTimer: number | null = null;
   private wakeDueAt: number | null = null;
-  private readonly pendingInvalidations = new Set<SessionInvalidationClassV1>();
+  private readonly pendingInvalidations = new Set<SessionInvalidationClass>();
 
   constructor(
     private readonly platform: SessionRuntimePlatformV1,
@@ -23,7 +23,7 @@ export class SessionFrameSchedulerV1 {
     private readonly onFrameScheduled: () => void,
   ) {}
 
-  schedule(invalidation: SessionInvalidationClassV1, delayMs = 0): void {
+  schedule(invalidation: SessionInvalidationClass, delayMs = 0): void {
     if (!this.canSchedule()) return;
     this.pendingInvalidations.add(invalidation);
     const delay = Number.isFinite(delayMs) ? Math.max(0, delayMs) : 0;
@@ -44,7 +44,7 @@ export class SessionFrameSchedulerV1 {
     }, delay);
   }
 
-  beginFrame(): readonly SessionInvalidationClassV1[] {
+  beginFrame(): readonly SessionInvalidationClass[] {
     const invalidations = [...this.pendingInvalidations];
     this.pendingInvalidations.clear();
     return invalidations;
@@ -57,7 +57,7 @@ export class SessionFrameSchedulerV1 {
     this.pendingInvalidations.clear();
   }
 
-  snapshot(): SessionFrameSchedulerSnapshotV1 {
+  snapshot(): SessionFrameSchedulerSnapshot {
     return {
       frameScheduled: this.animationFrame !== null || this.wakeTimer !== null,
       animationFrameScheduled: this.animationFrame !== null,

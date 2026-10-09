@@ -12,34 +12,24 @@ interface GraphPlusUiConsumerV1 {
   getDocument(): GraphDocumentV1 | undefined;
 }
 
-interface LocalGraphDepthControllerV1 {
-  getLocalDepth(): number;
-  setLocalDepth(depth: number): Promise<void>;
-}
-
 export function createGraphPlusUiContributionsV1(
   getConsumer: () => GraphPlusUiConsumerV1,
-  getLocalDepth?: () => LocalGraphDepthControllerV1,
 ): readonly GraphQuickSettingsContributionV1[] {
   return [
-    ...(getLocalDepth ? [{
-      id: 'graph-plus.local-depth',
-      sectionId: SECTIONS.filter,
-      order: 5,
-      mount: (container: HTMLElement) => mountLocalDepth(container, getLocalDepth()),
-    }] : []),
     {
       id: 'graph-plus.refine-vault',
       sectionId: SECTIONS.filter,
       order: 10,
       mount: (container) => mountRefineVault(container, getConsumer()),
     },
+    /* Mind Map deferred: keep this implementation for a later release.
     {
       id: 'graph-plus.relation',
       sectionId: SECTIONS.form,
       order: 10,
       mount: (container) => mountRelation(container, getConsumer()),
     },
+    */
   ];
 }
 
@@ -91,12 +81,4 @@ function mountRelation(container: HTMLElement, consumer: GraphPlusUiConsumerV1):
       ...consumer.getLens(),
       form: { ...consumer.getLens().form, relation: relation || undefined },
     })));
-}
-
-function mountLocalDepth(container: HTMLElement, controller: LocalGraphDepthControllerV1): void {
-  new Setting(container).setName('Depth').addSlider((slider) => slider
-    .setLimits(1, 8, 1)
-    .setDynamicTooltip()
-    .setValue(controller.getLocalDepth())
-    .onChange((depth) => controller.setLocalDepth(depth)));
 }

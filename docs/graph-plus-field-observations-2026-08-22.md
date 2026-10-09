@@ -56,9 +56,16 @@ without treating the ownership guess as diagnosis.
 - **Revised V1.1 trial 2026-08-25:** Use one-finger background drag for pan in both 2D
   and 3D, preserving one-finger node drag when the gesture begins on a draggable node.
   Use two-finger drag for orbit in 3D; retain focus/selection and orbit around the
-  focused node when present. Pinch retains zoom priority. In 2D, two-finger input never
-  rotates and may pan by centroid movement. This supersedes the earlier one-finger
-  orbit/two-finger pan proposal and remains subject to on-device trial.
+  focused node when present. That trial gave pinch zoom priority. In 2D, two-finger
+  input never rotates and may pan by centroid movement. This superseded the earlier
+  one-finger orbit/two-finger pan proposal and remained subject to on-device trial.
+- **Accepted correction 2026-09-22:** In 3D Explore, one-finger drag pans rather than
+  rotates. Two-finger centroid movement rotates while pinch separation zooms during
+  the same gesture; pinch no longer suppresses rotation. In 2D, the combined gesture
+  pans and zooms.
+- **Superseded 2026-09-30:** Physical-device feedback reversed the 3D Explore portion:
+  a one-finger background drag now orbits around the selected constellation. Overview
+  and 2D Explore continue to pan, and a direct touch on an eligible node still drags it.
 - **Likely ownership:** Shared Graph Engine touch-gesture recognition and camera intent
   mapping, with Graph+ responsible for any consumer-facing gesture guidance.
 - **Acceptance direction:** Verify both dimensions and the complete mapping with and
@@ -239,13 +246,15 @@ without treating the ownership guess as diagnosis.
 - **Observed:** A dragged node initially moves, slips away from the pointer, and is
   pulled toward the center. On release it snaps back to the pointer location, then
   resumes wandering under the force simulation.
-- **Approved fix:** When a free-graph node drag crosses its threshold, select the node,
-  clear camera focus, capture the pointer, preserve the initial pointer-to-node offset,
+- **Approved fix:** When a free-graph node drag crosses its threshold, do not mutate
+  selection or Focus. Capture the pointer, preserve the initial pointer-to-node offset,
   zero node velocity, and treat the node as a kinematic body excluded from force
-  integration for the complete drag. Other nodes may continue responding to it. Graph+
-  defaults to pinning the node at its released position without a corrective snap and
-  persists its pin and position as view state, not canonical graph data. Graph Engine
-  may expose `pin` or `dynamic` release behavior as a consumer-profile policy.
+  integration for the complete drag. Selection may change only on a stationary release
+  that never crossed the drag threshold. Other nodes may continue responding to the
+  dragged node. Graph+ defaults to pinning it at its released position without a
+  corrective snap and persists its pin and position as view state, not canonical graph
+  data. Graph Engine may expose `pin` or `dynamic` release behavior as a consumer-profile
+  policy.
 - **Approved context actions:** Show `Unpin node` for a pinned node and optionally `Pin
   node` for an unpinned node. Unpinning returns the node to force integration from its
   current position with zero inherited drag velocity.

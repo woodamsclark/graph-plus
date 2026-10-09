@@ -13,10 +13,9 @@ export const GRAPH_PLUS_REQUESTED_CAPABILITIES_V1 = [
   'input',
   'filter',
   'projection',
-  'form',
+  // 'form', // Mind Map deferred; the engine module remains available to other consumers.
   'layout',
   'force-layout',
-  'node-regions',
   'animation',
 ] as const;
 
@@ -28,7 +27,7 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
   profiles: [{
     profileId: GRAPH_PLUS_PROFILE_ID_V1,
     displayName: 'Default',
-    descriptorVersion: 9,
+    descriptorVersion: 11,
     dimensions: '2d',
     allowedDimensions: ['2d', '3d'],
     requestedCapabilities: GRAPH_PLUS_REQUESTED_CAPABILITIES_V1,
@@ -41,13 +40,13 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
         display: { visibility: 'shown' },
         camera: { visibility: 'hidden' },
         forces: { visibility: 'shown' },
-        regions: { visibility: 'shown' },
+        regions: { visibility: 'hidden' },
       },
       contextMenuEnabled: true,
     },
     interaction: {
       activationActionIds: ['open-node'],
-      contextActionIds: ['open-node'],
+      contextActionIds: ['open-node', 'clear-constellation'],
     },
     profileSettings: {
       focalLengthMm: 50,
@@ -58,12 +57,16 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
     modules: {
       rendering: {
         policy: 'required',
+        defaults: { labelMode: 'proximity' },
         constraints: {
           renderQuality: { type: 'enum', allowed: ['automatic', 'high-fidelity', 'energy-saver'] },
-          labelMode: { type: 'enum', allowed: ['adaptive', 'all', 'off'] },
+          labelMode: { type: 'enum', allowed: ['off', 'proximity', 'adaptive'] },
         },
       },
       filtering: { policy: 'required' },
+      // Mind Map deferred. Lock it off even for saved enabled overrides.
+      form: { policy: 'forbidden' },
+      /*
       form: {
         policy: 'optional',
         defaultEnabled: false,
@@ -75,6 +78,7 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
           colorBranches: true,
         },
       },
+      */
       'force-layout': {
         policy: 'optional',
         defaultEnabled: true,
@@ -83,19 +87,12 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
           axialSpringStiffness: { type: 'number', min: 0, max: 0.9 },
         },
       },
-      'node-regions': {
-        policy: 'optional',
-        defaultEnabled: true,
-        constraints: {
-          boundariesVisible: { type: 'enum', allowed: [true, false] },
-          membershipStrength: { type: 'number', min: 0, max: 2 },
-          membershipDistance: { type: 'number', min: 10, max: 500 },
-          boundaryPadding: { type: 'number', min: 8, max: 120 },
-        },
-      },
+      'node-regions': { policy: 'forbidden' },
       anima: {
         policy: 'required',
+        defaults: { cursorGravity: 'clingy' },
         constraints: {
+          cursorGravity: { type: 'enum', allowed: ['soft', 'clingy', 'off'] },
           labelPosition: { type: 'enum', allowed: ['above', 'below'] },
           adaptiveLabelThreshold2d: { type: 'number', min: 0, max: 100 },
           adaptiveLabelThreshold3d: { type: 'number', min: 0, max: 100 },
@@ -127,6 +124,14 @@ export function migrateGraphPlusProfileOverridesV17(
     const settings = { ...modules['force-layout'].settings };
     delete settings.weightingMode;
     modules['force-layout'] = { ...modules['force-layout'], settings: Object.keys(settings).length ? settings : undefined };
+  }
+  if (modules.rendering?.settings?.labelMode === 'all') {
+    modules.rendering = { ...modules.rendering, settings: { ...modules.rendering.settings, labelMode: 'adaptive' } };
+  }
+  if (modules.anima?.settings) {
+    const settings = { ...modules.anima.settings };
+    delete settings.cursorLabelProximityEnabled;
+    modules.anima = { ...modules.anima, settings };
   }
   const anima = modules.anima;
   if (anima?.enabled === false) {

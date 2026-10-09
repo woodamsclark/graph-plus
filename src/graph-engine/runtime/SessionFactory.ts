@@ -5,7 +5,7 @@ import type {
 } from '../contracts/v1/index.ts';
 import { ConsumerProfileRegistry } from '../core/profile/index.ts';
 import { GraphSessionRuntime } from './GraphSessionRuntime.ts';
-import type { GraphSessionRuntimeDiagnosticsV1 } from './GraphSessionRuntime.ts';
+import type { GraphSessionRuntimeDiagnostics } from './GraphSessionRuntime.ts';
 import {
   createShippedGraphModuleRegistryV1,
   SHIPPED_GRAPH_MODULE_IDS_V1,
@@ -17,16 +17,17 @@ import {
 } from './platform/index.ts';
 import { DEFAULT_GRAPH_VISUAL_THEME_V2, type GraphVisualThemeV2 } from './theme/index.ts';
 import {
-  createDefaultGraphRendererRegistryV2,
+  createDefaultGraphRendererRegistry,
   type GraphRendererBackendIdV2,
-  type GraphRendererRegistryV2,
+  type GraphRendererRegistry,
 } from './render/index.ts';
 import type { GraphNodeActionRuntimeV1 } from './actions/index.ts';
+import type { GraphReactionRuntimeV1 } from './consciousness/index.ts';
 import type { GraphSessionControlPortV1 } from './host/index.ts';
 
-export type GraphThemePaletteResolverV1 = (container: HTMLElement) => GraphVisualThemeV2;
+export type GraphThemePaletteResolver = (container: HTMLElement) => GraphVisualThemeV2;
 
-export interface SessionFactoryOptionsV1 {
+export interface SessionFactoryOptions {
   readonly engineInstanceId: string;
   readonly profiles: ConsumerProfileRegistry;
   readonly globalOverrides?: GraphSettingsOverridesV1;
@@ -34,23 +35,24 @@ export interface SessionFactoryOptionsV1 {
   readonly createSessionId?: () => string;
   readonly createPlatform?: SessionRuntimePlatformFactoryV1;
   readonly modules?: GraphModuleRegistry;
-  readonly resolveThemePalette?: GraphThemePaletteResolverV1;
-  readonly rendererRegistry?: GraphRendererRegistryV2;
+  readonly resolveThemePalette?: GraphThemePaletteResolver;
+  readonly rendererRegistry?: GraphRendererRegistry;
   readonly preferredRendererBackend?: GraphRendererBackendIdV2;
 }
 
-export interface GraphSessionHostServicesV1 {
+export interface GraphSessionHostServices {
   readonly nodeActions?: GraphNodeActionRuntimeV1;
+  readonly reactions?: GraphReactionRuntimeV1;
 }
 
-export interface HostedGraphSessionV1 {
+export interface HostedGraphSession {
   readonly session: GraphSessionV1;
   readonly controls: GraphSessionControlPortV1;
 }
 
-export interface GraphEngineRuntimeDiagnosticsV1 {
+export interface GraphEngineRuntimeDiagnostics {
   readonly activeSessionCount: number;
-  readonly sessions: readonly GraphSessionRuntimeDiagnosticsV1[];
+  readonly sessions: readonly GraphSessionRuntimeDiagnostics[];
 }
 
 export class GraphSessionProfileErrorV1 extends Error {
@@ -67,13 +69,13 @@ export class SessionFactory {
   private readonly createSessionId: () => string;
   private readonly createPlatform: SessionRuntimePlatformFactoryV1;
   private readonly modules: GraphModuleRegistry;
-  private readonly resolveThemePalette: GraphThemePaletteResolverV1;
-  private readonly rendererRegistry: GraphRendererRegistryV2;
+  private readonly resolveThemePalette: GraphThemePaletteResolver;
+  private readonly rendererRegistry: GraphRendererRegistry;
   private readonly preferredRendererBackend?: GraphRendererBackendIdV2;
   private nextSessionNumber = 1;
   private readonly activeSessions = new Set<GraphSessionRuntime>();
 
-  constructor(options: SessionFactoryOptionsV1) {
+  constructor(options: SessionFactoryOptions) {
     this.engineInstanceId = requireId(options.engineInstanceId, 'engine instance ID');
     this.profiles = options.profiles;
     this.getGlobalOverrides = options.getGlobalOverrides ?? (() => options.globalOverrides ?? {});
@@ -81,22 +83,22 @@ export class SessionFactory {
     this.createPlatform = options.createPlatform ?? createSessionRuntimePlatformV1;
     this.modules = options.modules ?? createShippedGraphModuleRegistryV1();
     this.resolveThemePalette = options.resolveThemePalette ?? (() => DEFAULT_GRAPH_VISUAL_THEME_V2);
-    this.rendererRegistry = options.rendererRegistry ?? createDefaultGraphRendererRegistryV2();
+    this.rendererRegistry = options.rendererRegistry ?? createDefaultGraphRendererRegistry();
     this.preferredRendererBackend = options.preferredRendererBackend;
     for (const descriptor of this.modules.descriptors()) this.profiles.registerModule(descriptor);
   }
 
   async createSession(
     options: GraphSessionOptionsV1,
-    hostServices: GraphSessionHostServicesV1 = {},
+    hostServices: GraphSessionHostServices = {},
   ): Promise<GraphSessionV1> {
     return (await this.createHostedSession(options, hostServices)).session;
   }
 
   async createHostedSession(
     options: GraphSessionOptionsV1,
-    hostServices: GraphSessionHostServicesV1 = {},
-  ): Promise<HostedGraphSessionV1> {
+    hostServices: GraphSessionHostServices = {},
+  ): Promise<HostedGraphSession> {
     const profile = this.profiles.resolve(options.consumerId, options.profileId, {
       globalOverrides: this.getGlobalOverrides(),
       sessionOverrides: options.sessionOverrides,
@@ -124,6 +126,7 @@ export class SessionFactory {
       profileId: options.profileId,
       container: options.container,
       document: options.document,
+      experience: options.experience,
       profile,
       initialSessionOverrides: options.sessionOverrides,
       resolveProfile: (sessionOverrides) => this.profiles.resolve(options.consumerId, options.profileId, {
@@ -135,9 +138,11 @@ export class SessionFactory {
       resolveThemePalette: () => this.resolveThemePalette(options.container),
       rendererRegistry: this.rendererRegistry,
       preferredRendererBackend: this.preferredRendererBackend,
+      layoutAuthority: options.layoutAuthority,
       restoreViewState: options.restoreViewState,
       platform: this.createPlatform(options.container),
       nodeActions: hostServices.nodeActions,
+      reactions: hostServices.reactions,
       onDisposed: () => this.activeSessions.delete(runtime),
     });
     this.activeSessions.add(runtime);
@@ -152,7 +157,7 @@ export class SessionFactory {
     for (const session of [...this.activeSessions]) session.refreshThemePalette();
   }
 
-  getDiagnostics(): GraphEngineRuntimeDiagnosticsV1 {
+  getDiagnostics(): GraphEngineRuntimeDiagnostics {
     const sessions = [...this.activeSessions]
       .map((session) => session.getDiagnostics())
       .sort((left, right) => left.sessionId.localeCompare(right.sessionId));

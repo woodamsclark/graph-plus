@@ -1,8 +1,12 @@
 import type { GraphCameraStateV1 } from '../../src/graph-engine/contracts/v1/index.ts';
-import { GraphCameraController } from '../../src/graph-engine/runtime/camera/index.ts';
+import { GraphCameraController, Vision } from '../../src/graph-engine/runtime/camera/index.ts';
 import { GraphFrameStore, DEFAULT_GRAPH_RENDER_THEME_V1 } from '../../src/graph-engine/runtime/render/index.ts';
 import { GraphHitTester } from '../../src/graph-engine/runtime/interaction/GraphHitTester.ts';
-import { assert, equal, test } from '../support/harness.ts';
+import { assert, deepEqual, equal, test } from '../support/harness.ts';
+
+function vectorDistance(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): number {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
 
 test('R-CAMERA-01 orthographic zoom scales node projection and hit radius together', () => {
   const state: GraphCameraStateV1 = {
@@ -23,11 +27,15 @@ test('R-CAMERA-01 orthographic zoom scales node projection and hit radius togeth
       label: 'a',
       position: { x: 0, y: 0, z: 0 },
       radius: 7,
-      selected: false,
-      focused: false,
-      hovered: false,
+      finalColor: DEFAULT_GRAPH_RENDER_THEME_V1.colors.node,
+      opacity: 1,
+      labelColor: DEFAULT_GRAPH_RENDER_THEME_V1.colors.label,
+      labelOpacity: 1,
+      labelFontSize: DEFAULT_GRAPH_RENDER_THEME_V1.labelFont.sizePx,
+      labelStatePriority: 0,
     }],
-    theme: DEFAULT_GRAPH_RENDER_THEME_V1,
+    backgroundColor: DEFAULT_GRAPH_RENDER_THEME_V1.colors.background,
+    labelFont: DEFAULT_GRAPH_RENDER_THEME_V1.labelFont,
   });
   const hitTester = new GraphHitTester(camera, frames);
   equal(camera.worldToScreen({ x: 0, y: 0, z: 0 }).scale, 1, 'baseline zoom should preserve the canonical node radius');
@@ -53,36 +61,154 @@ test('R-CAMERA-02 perspective dolly scales nodes without changing the default si
   equal(camera.worldToScreen({ x: 0, y: 0, z: 0 }).scale, 2, 'dollying to half the depth should double projected node radius');
 });
 
-test('focus fitting caps magnification in orthographic and perspective cameras', () => {
-  const orthographic = new GraphCameraController({
-    position: { x: 0, y: 0, z: 1000 },
+test('Vision derives an Attention centroid without putting geometry in Consciousness', () => {
+  const vision = new Vision({
+    position: { x: 0, y: 0, z: 10 },
     target: { x: 0, y: 0, z: 0 },
     up: { x: 0, y: 1, z: 0 },
     zoom: 1,
     projection: 'orthographic',
   }, '2d');
-  orthographic.setViewport(640, 360);
-  orthographic.fit([{ x: 100, y: 50, z: 0 }], 48, 1.75);
-  equal(orthographic.getState().zoom, 1.75,
-    'single-node focus should not magnify a 2D view by more than the supplied cap');
 
-  const perspective = new GraphCameraController({
-    position: { x: 0, y: 0, z: 1000 },
-    target: { x: 0, y: 0, z: 0 },
+  deepEqual(vision.deriveCentroid(new Set(['a', 'missing', 'c']), {
+    a: { x: -10, y: 20, z: 4 },
+    c: { x: 30, y: 0, z: -2 },
+  }), { x: 10, y: 10, z: 1 }, 'Vision should derive the pivot from available attended positions');
+  equal(vision.deriveCentroid(new Set(['missing']), {}), undefined,
+    'Vision should leave an empty spatial target unresolved');
+});
+
+test('Vision orbits around an explicit Attention centroid without storing or reframing it', () => {
+  const initial: GraphCameraStateV1 = {
+    position: { x: 30, y: 20, z: 100 },
+    target: { x: 10, y: -5, z: 0 },
     up: { x: 0, y: 1, z: 0 },
     zoom: 50 / 24,
     projection: 'perspective',
+  };
+  const vision = new Vision(initial, '3d');
+  vision.setViewport(640, 360);
+  const pivot = { x: -40, y: 25, z: 10 };
+  const pivotBefore = vision.worldToScreen(pivot);
+  const ordinaryPoint = { x: 80, y: -15, z: 5 };
+  const ordinaryBefore = vision.worldToScreen(ordinaryPoint);
+
+  deepEqual(vision.getState(), initial, 'supplying a pivot must not mutate serialized framing before an operation');
+  deepEqual(vision.worldToScreen(pivot), pivotBefore, 'an Attention centroid alone must not move on screen');
+  deepEqual(vision.worldToScreen(ordinaryPoint), ordinaryBefore, 'Attention alone must not move graph content');
+
+  vision.orbitByPixels(28, -16, pivot);
+  const pivotAfter = vision.worldToScreen(pivot);
+  assert(Math.abs(pivotAfter.x - pivotBefore.x) < 1e-9 && Math.abs(pivotAfter.y - pivotBefore.y) < 1e-9,
+    'orbiting around Attention should keep the off-center pivot fixed on screen');
+  assert(JSON.stringify(vision.getState().position) !== JSON.stringify(initial.position),
+    'orbiting around Attention should move Vision around the supplied pivot');
+});
+
+test('unanchored zoom uses the Attention centroid instead of the serialized framing center', () => {
+  for (const [dimensions, projection] of [
+    ['2d', 'orthographic'],
+    ['3d', 'perspective'],
+  ] as const) {
+    const vision = new Vision({
+      position: { x: 30, y: 20, z: 100 },
+      target: { x: 10, y: -5, z: 0 },
+      up: { x: 0, y: 1, z: 0 },
+      zoom: 50 / 24,
+      projection,
+    }, dimensions);
+    vision.setViewport(640, 360);
+    const pivot = { x: -40, y: 25, z: 10 };
+    const before = vision.worldToScreen(pivot);
+
+    vision.zoomByWheel(-60, undefined, pivot);
+
+    const after = vision.worldToScreen(pivot);
+    assert(Math.abs(after.x - before.x) < 1e-9 && Math.abs(after.y - before.y) < 1e-9,
+      `${projection} target-centered zoom should keep the Attention centroid fixed on screen`);
+  }
+});
+
+test('Vision exposes pose orientation without treating the serialized look-at point as Attention', () => {
+  const vision = new Vision({
+    position: { x: 10, y: 20, z: 30 },
+    target: { x: 10, y: 20, z: 20 },
+    up: { x: 0, y: 1, z: 0 },
+    zoom: 2,
+    projection: 'perspective',
   }, '3d');
-  perspective.setViewport(640, 360);
-  perspective.fit([{ x: 100, y: 50, z: 0 }], 48, 1.75);
-  const state = perspective.getState();
-  const fittedDistance = Math.hypot(
-    state.position.x - state.target.x,
-    state.position.y - state.target.y,
-    state.position.z - state.target.z,
-  );
-  assert(Math.abs(fittedDistance - (1000 / 1.75)) < 1e-9,
-    'single-node focus should not dolly a 3D camera closer than the supplied cap');
+
+  deepEqual(vision.getVisionState(), {
+    pose: {
+      position: { x: 10, y: 20, z: 30 },
+      orientation: {
+        forward: { x: 0, y: 0, z: -1 },
+        up: { x: 0, y: 1, z: 0 },
+      },
+    },
+    zoom: 2,
+    projection: 'perspective',
+  }, 'runtime Vision should expose position plus forward/up orientation');
+});
+
+test('focus zoom-out constraint uses the current exact neighborhood fit', () => {
+  const positions = [{ x: 0, y: 0, z: 0 }, { x: 100, y: 40, z: 0 }];
+  const center = positions[0];
+  const orthographic = new GraphCameraController({
+    position: { x: 0, y: 0, z: 1000 }, target: center,
+    up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic',
+  }, '2d');
+  orthographic.setViewport(360, 640);
+  orthographic.fit(positions, 48, center, 0, 'square');
+  const orthographicFit = orthographic.getState();
+  equal(orthographicFit.zoom, 1.32,
+    'a tall Focus leaf should fit into a square based on its narrower width');
+  orthographic.setState({ ...orthographicFit, zoom: orthographicFit.zoom / 10 });
+  orthographic.constrainZoomOutToFit(positions, 48, center, 'square');
+  equal(orthographic.getState().zoom, orthographicFit.zoom,
+    '2D Focus should not zoom farther out than its exact neighborhood fit');
+
+  const wideOrthographic = new GraphCameraController({
+    position: { x: 0, y: 0, z: 1000 }, target: center,
+    up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic',
+  }, '2d');
+  wideOrthographic.setViewport(640, 360);
+  wideOrthographic.fit(positions, 48, center, 0, 'square');
+  equal(wideOrthographic.getState().zoom, orthographicFit.zoom,
+    'wide and tall Focus leaves with the same short side should use the same square fit');
+
+  const perspective = new GraphCameraController({
+    position: { x: 0, y: 0, z: 1000 }, target: center,
+    up: { x: 0, y: 1, z: 0 }, zoom: 50 / 24, projection: 'perspective',
+  }, '3d');
+  perspective.setViewport(360, 640);
+  perspective.fit(positions, 48, center, 0, 'square');
+  const perspectiveFit = perspective.getState();
+  perspective.setState({ ...perspectiveFit, position: { x: 0, y: 0, z: 10_000 } });
+  perspective.constrainZoomOutToFit(positions, 48, center, 'square');
+  assert(Math.abs(
+    vectorDistance(perspective.getState().position, perspective.getState().target)
+      - vectorDistance(perspectiveFit.position, perspectiveFit.target),
+  ) < 0.000001, '3D Focus should not dolly farther out than its exact neighborhood fit');
+});
+
+test('perspective viewport fitting contains horizontal nodes in portrait and landscape', () => {
+  const positions = [{ x: -100, y: 0, z: 0 }, { x: 100, y: 0, z: 0 }];
+  for (const [width, height] of [[360, 640], [640, 360]] as const) {
+    const camera = new GraphCameraController({
+      position: { x: 0, y: 0, z: 100 }, target: { x: 0, y: 0, z: 0 },
+      up: { x: 0, y: 1, z: 0 }, zoom: 50 / 24, projection: 'perspective',
+    }, '3d');
+    camera.setViewport(width, height);
+    camera.fit(positions, 48);
+    for (const position of positions) {
+      const projected = camera.worldToScreen(position);
+      assert(projected.x >= 48 - 0.000001 && projected.x <= width - 48 + 0.000001,
+        `${width}x${height} perspective fit should respect the usable horizontal frame`);
+      assert(projected.y >= 48 - 0.000001 && projected.y <= height - 48 + 0.000001,
+        `${width}x${height} perspective fit should respect the usable vertical frame`);
+    }
+  }
 });
 
 test('camera fitting can reserve a stable world-space radius before nodes expand', () => {
@@ -91,7 +217,7 @@ test('camera fitting can reserve a stable world-space radius before nodes expand
     up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic',
   }, '2d');
   orthographic.setViewport(640, 360);
-  orthographic.fit([{ x: 0, y: 0, z: 0 }], 48, undefined, { x: 0, y: 0, z: 0 }, 500);
+  orthographic.fit([{ x: 0, y: 0, z: 0 }], 48, { x: 0, y: 0, z: 0 }, 500);
   assert(Math.abs(orthographic.getState().zoom - 0.264) < 1e-9,
     'a 2D predictive fit should reserve the requested radius even while nodes remain near the origin');
 
@@ -100,11 +226,35 @@ test('camera fitting can reserve a stable world-space radius before nodes expand
     up: { x: 0, y: 1, z: 0 }, zoom: 50 / 24, projection: 'perspective',
   }, '3d');
   perspective.setViewport(640, 360);
-  perspective.fit([{ x: 0, y: 0, z: 0 }], 48, undefined, { x: 0, y: 0, z: 0 }, 500);
+  perspective.fit([{ x: 0, y: 0, z: 0 }], 48, { x: 0, y: 0, z: 0 }, 500);
   const state = perspective.getState();
-  equal(Math.hypot(
+  const distance = Math.hypot(
     state.position.x - state.target.x,
     state.position.y - state.target.y,
     state.position.z - state.target.z,
-  ), 2500, 'a 3D predictive fit should dolly for the requested future radius');
+  );
+  assert(Math.abs(distance - (500 * 750 / 132)) < 0.000001,
+    'a 3D predictive fit should reserve the requested radius inside the padded short edge');
+});
+
+test('camera fitting caps the projected scale of a target with no spatial extent', () => {
+  const target = { x: 10, y: 20, z: 0 };
+  const orthographic = new GraphCameraController({
+    position: { x: 0, y: 0, z: 10 }, target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic',
+  }, '2d');
+  orthographic.setViewport(640, 360);
+  orthographic.fit([target], 48, target, 0, 'viewport', 5);
+  equal(orthographic.getState().zoom, 5,
+    'a lone 2D point should use the requested projected-scale ceiling');
+
+  const perspective = new GraphCameraController({
+    position: { x: 0, y: 0, z: 100 }, target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 }, zoom: 50 / 24, projection: 'perspective',
+  }, '3d');
+  perspective.setViewport(640, 360);
+  perspective.fit([target], 48, target, 0, 'viewport', 5);
+  const projected = perspective.worldToScreen(target);
+  assert(Math.abs(projected.scale - 5) < 0.000001,
+    'a lone 3D point should dolly to the same projected-scale ceiling');
 });

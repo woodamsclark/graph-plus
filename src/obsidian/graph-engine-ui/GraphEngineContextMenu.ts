@@ -41,24 +41,33 @@ export class GraphEngineContextMenuV1 implements Disposable {
     const menu = new Menu();
     if (primary) this.addConsumerAction(menu, primary.id, primary.label, primary.icon, intent.nodeId);
     for (const action of others) this.addConsumerAction(menu, action.id, action.label, action.icon, intent.nodeId);
-    const coreVisible = Object.values(CORE).some((id) => graphCoreActionIsShownV1(this.policy, id));
+    const coreVisible = Object.values(CORE).some((id) => id !== CORE.mindMapNode
+      && graphCoreActionIsShownV1(this.policy, id));
     if ((primary || others.length) && coreVisible) menu.addSeparator();
-    if (graphCoreActionIsShownV1(this.policy, CORE.focusNode)) {
+    if (viewState.selectedNodeIds.length > 0 && graphCoreActionIsShownV1(this.policy, CORE.focusNode)) {
       menu.addItem((item) => item.setTitle('Focus node').setIcon('scan-eye').onClick(() => {
-        void this.context.session.focusNode(intent.nodeId);
+        this.context.controls.focusConstellationNode(intent.nodeId, intent.modality);
       }));
     }
+    if (graphCoreActionIsShownV1(this.policy, CORE.toggleConstellation)) {
+      const member = viewState.selectedNodeIds.includes(intent.nodeId);
+      menu.addItem((item) => item.setTitle(member ? 'Remove from constellation' : 'Add to constellation')
+        .setIcon(member ? 'minus' : 'plus').onClick(() => {
+          this.context.controls.toggleConstellationNode(intent.nodeId, intent.modality);
+        }));
+    }
+    /* Mind Map deferred: keep this implementation for a later release.
     if (graphCoreActionIsShownV1(this.policy, CORE.mindMapNode)) {
       menu.addItem((item) => item.setTitle('Mind map from here').setIcon('git-fork').onClick(() => {
         void this.context.controls.setModuleSetting('form', 'rootNodeId', intent.nodeId)
-          .then(() => this.context.controls.setModuleEnabled('form', true))
-          .then(() => this.context.session.fitNodes());
+          .then(() => this.context.controls.setModuleEnabled('form', true));
       }));
     }
+    */
     if (graphCoreActionIsShownV1(this.policy, CORE.togglePin)) {
       const pinned = viewState.pinnedNodeIds.includes(intent.nodeId);
       menu.addItem((item) => item.setTitle(pinned ? 'Unpin node' : 'Pin node').setIcon(pinned ? 'pin-off' : 'pin').onClick(() => {
-        void this.context.session.setNodePinned(intent.nodeId, !pinned);
+        void this.context.controls.setNodePinned(intent.nodeId, !pinned);
       }));
     }
     const bounds = this.context.container.getBoundingClientRect();

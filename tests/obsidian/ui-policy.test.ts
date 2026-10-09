@@ -1,3 +1,6 @@
+import { resolveClearConstellationActionV1 } from '../../src/obsidian/graph-engine-ui/GraphEngineClearConstellationAction.ts';
+import { readFileSync } from 'node:fs';
+import { Window } from 'happy-dom';
 import {
   GRAPH_QUICK_SETTINGS_CONTROL_IDS_V1 as CONTROLS,
   GRAPH_QUICK_SETTINGS_SECTION_IDS_V1 as SECTIONS,
@@ -9,6 +12,8 @@ import {
   resolveGraphSessionUiPolicyV1,
 } from '../../src/obsidian/graph-engine-ui/GraphEngineUiPolicy.ts';
 import { GraphEngineQuickSettingsDisclosureStateV1 } from '../../src/obsidian/graph-engine-ui/GraphEngineQuickSettingsDisclosureState.ts';
+import { isQuickSettingsToggleKeyV1 } from '../../src/obsidian/graph-engine-ui/GraphEngineQuickSettingsShortcut.ts';
+import { ObsidianGraphUiLayoutV1 } from '../../src/obsidian/graph-engine-ui/ObsidianGraphUiLayout.ts';
 import { equal, test } from '../support/harness.ts';
 
 function descriptor(): ConsumerProfileDescriptorV1 {
@@ -66,6 +71,13 @@ test('R-UI-02 hiding UI controls is independent of engine module policy', () => 
   equal(value.modules.form, undefined, 'resolving visibility must not synthesize or mutate module policy');
 });
 
+test('Display Quick Settings keeps Label position immediately after Labels', () => {
+  const source = readFileSync('src/obsidian/graph-engine-ui/GraphEngineQuickSettingsPanel.ts', 'utf8');
+  const display = source.slice(source.indexOf('  private renderDisplay('), source.indexOf('  private async setTransientFormSetting('));
+  const controls = [...display.matchAll(/SECTIONS\.display, CONTROLS\.(\w+)/g)].map(match => match[1]);
+  equal(controls[controls.indexOf('labels') + 1], 'labelPosition', 'no other Display control may separate Labels and Label position');
+});
+
 test('R-UI-04 quick-setting disclosures retain their user state across panel renders', () => {
   const disclosures = new GraphEngineQuickSettingsDisclosureStateV1();
   equal(disclosures.resolve(SECTIONS.forces, false), false, 'a section should begin at its declared default');
@@ -73,4 +85,74 @@ test('R-UI-04 quick-setting disclosures retain their user state across panel ren
   equal(disclosures.resolve(SECTIONS.forces, false), true, 'an opened section should remain open after controls rerender');
   disclosures.remember(SECTIONS.filter, false);
   equal(disclosures.resolve(SECTIONS.filter, true), false, 'a closed default-open section should remain closed after controls rerender');
+});
+
+test('R-UI-11 collapsed launcher clears the Obsidian mobile header row', () => {
+  const window = new Window();
+  const document = window.document as unknown as Document;
+  const leaf = document.createElement('div');
+  const header = document.createElement('div');
+  const hostAction = document.createElement('button');
+  const container = document.createElement('div');
+  const launcher = document.createElement('div');
+  leaf.className = 'workspace-leaf-content';
+  header.className = 'view-header';
+  hostAction.className = 'view-action';
+  launcher.className = 'is-collapsed';
+  document.body.className = 'is-mobile';
+  leaf.append(header, container);
+  header.append(hostAction);
+  container.append(launcher);
+  document.body.append(leaf);
+  container.getBoundingClientRect = () => rect(0, 72, 390, 720);
+  header.getBoundingClientRect = () => rect(0, 72, 390, 44);
+
+  const layout = new ObsidianGraphUiLayoutV1(container, launcher, []);
+
+  equal(launcher.style.getPropertyValue('--graph-engine-controls-top'), '52px',
+    'the launcher should sit below the owning mobile header with an 8px gap');
+  layout.dispose();
+});
+
+test('Tab toggles Quick Settings from the graph without consuming control navigation', () => {
+  const event = (overrides: Partial<KeyboardEvent> = {}) => ({
+    key: 'Tab', defaultPrevented: false, repeat: false, isComposing: false,
+    ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
+    target: { closest: () => null },
+    ...overrides,
+  }) as KeyboardEvent;
+  equal(isQuickSettingsToggleKeyV1(event()), true, 'plain Tab on the graph should toggle Quick Settings');
+  equal(isQuickSettingsToggleKeyV1(event({ shiftKey: true })), false,
+    'Shift-Tab should retain normal reverse focus navigation');
+  equal(isQuickSettingsToggleKeyV1(event({ repeat: true })), false,
+    'holding Tab should not repeatedly flicker the panel');
+  equal(isQuickSettingsToggleKeyV1(event({
+    target: { closest: () => ({}) } as unknown as EventTarget,
+  })), false, 'Tab on an interactive Quick Settings control should retain normal focus navigation');
+});
+
+function rect(left: number, top: number, width: number, height: number): DOMRect {
+  return {
+    left, top, width, height,
+    right: left + width,
+    bottom: top + height,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+test('Quick Settings retains Global clearing and hides unavailable Focus-only clearing', () => {
+  let navigations = 0;
+  const controls = {
+    navigateView: (action: string) => { equal(action, 'clear-constellation', 'Global retains its clear View intent'); navigations++; },
+    resolveNodeActions: () => [],
+    invokeNodeAction: () => { throw new Error('Global must retain engine navigation'); },
+  };
+  const global = resolveClearConstellationActionV1(['overview', 'explore', 'focus'], ['a'], controls);
+  equal(typeof global, 'function', 'Global offers clear'); global?.();
+  equal(navigations, 1, 'Global navigates through the original deliberate command');
+  equal(resolveClearConstellationActionV1(['focus'], ['a'], controls), undefined,
+    'a Focus-only consumer without a registered clear action must not offer a rejected Overview intent');
+  equal(resolveClearConstellationActionV1(['overview'], [], controls), undefined, 'an empty constellation needs no clear action');
 });

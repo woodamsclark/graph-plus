@@ -1,18 +1,23 @@
+import type { AnimaConsciousnessPresentationV1 } from '../anima/AnimaAwareness.ts';
+import type { GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
 import type {
   EngineModuleDescriptorV1,
   EngineModulePolicyV1,
   GraphDimensionsV1,
   GraphDocumentV1,
+  GraphExperienceContractV1,
   GraphViewStateV1,
   JsonValue,
   Vec3,
 } from '../../contracts/v1/index.ts';
 import type { GraphFilterSelectionV1 } from '../../core/filter/index.ts';
+import type { AnimusEdgeRoleV1, AnimusNodeRoleV1, AnimusRegionV1 } from '../animus/index.ts';
+import type { ConsciousnessSnapshot } from '../consciousness/index.ts';
 import type {
   GraphEdgeRenderContributionV1,
   GraphNodeRenderContributionV1,
   GraphPresentationPolicyV2,
-  GraphRenderRegionV1,
+  GraphRegionRenderContributionV1,
 } from '../render/index.ts';
 import type { GraphVisualThemeV2 } from '../theme/index.ts';
 
@@ -22,6 +27,7 @@ export type GraphModuleHookV1 =
   | 'settings-changed'
   | 'document-changed'
   | 'view-changed'
+  | 'node-position-changed'
   | 'theme-changed'
   | 'project-source'
   | 'project-topology'
@@ -48,16 +54,34 @@ export interface GraphModulePipelineStateV1 {
   readonly projectionSelection: GraphFilterSelectionV1;
   readonly renderSelection: GraphFilterSelectionV1;
   readonly formActive: boolean;
+  /** Presentation-scoped Attention and Awareness, installed for frame composition. */
+  readonly consciousness?: ConsciousnessSnapshot;
+  /** Admission policy for noncommitting previews of View interactions. */
+  readonly experience?: GraphExperienceContractV1;
+  readonly objectActivationPreview?: GraphInteractionPreviewV1 | null;
+  /** One semantic result shared by dressing and scene compilation. */
+  readonly animaPresentation?: AnimaConsciousnessPresentationV1;
   /** Runtime-only interaction state. It is never persisted or exported as graph data. */
   readonly draggedNodeId?: string;
+  /** Transient per-step cursor displacement, resolved in screen space by the session. */
+  /** Temporary keyboard hold runs physics at maximum alpha without changing settings. */
+  readonly physicsOverrideHeld?: boolean;
+  readonly cursorAttractionSteps?: Readonly<Record<string, Vec3>>;
   /** Runtime-only hover state supplied to presentation modules. */
   readonly hoveredNodeId?: string;
+  /** Runtime-only held-key dimming suspension; durable selection remains unchanged. */
+  readonly selectionPresentationSuspended?: boolean;
+  /** Runtime-only Ctrl reveal of direct neighbors for the current selection. */
+  readonly selectionNeighborRevealActive?: boolean;
   /** Runtime-only semantic preview state supplied independently from pointer hover. */
   readonly previewedNodeId?: string;
+  readonly nodeRoles: Readonly<Record<string, AnimusNodeRoleV1>>;
+  readonly edgeRoles: Readonly<Record<string, AnimusEdgeRoleV1>>;
+  readonly regions: readonly AnimusRegionV1[];
   readonly nodeContributions: Readonly<Record<string, GraphNodeRenderContributionV1>>;
   readonly edgeContributions: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
   readonly regionLayouts: readonly GraphNodeRegionLayoutV1[];
-  readonly regionContributions: readonly GraphRenderRegionV1[];
+  readonly regionContributions: readonly GraphRegionRenderContributionV1[];
   readonly theme: GraphVisualThemeV2;
   readonly presentationPolicy?: GraphPresentationPolicyV2;
   /** Declarative Anima/layout/camera targets; mechanisms remain owned by their runtimes. */
@@ -66,20 +90,50 @@ export interface GraphModulePipelineStateV1 {
   readonly commitPositions?: boolean;
 }
 
+/** Structural input visible before Consciousness reconciliation or Anima styling. */
+export type GraphModuleProjectionStateV1 = Pick<GraphModulePipelineStateV1,
+  | 'sourceDocument'
+  | 'document'
+  | 'viewState'
+  | 'positions'
+  | 'projectionSelection'
+  | 'renderSelection'
+  | 'formActive'
+  | 'nodeRoles'
+  | 'edgeRoles'
+  | 'regions'
+  | 'regionLayouts'
+  | 'commitPositions'
+>;
+
+/** Downstream frame input after projection and Consciousness reconciliation. */
+export type GraphModulePresentationStateV1 = GraphModulePipelineStateV1 & {
+  readonly consciousness: ConsciousnessSnapshot;
+};
+
 export interface GraphModuleProjectionPatchV1 {
   readonly document?: GraphDocumentV1;
   readonly positions?: Readonly<Record<string, Vec3>>;
   readonly projectionSelection?: GraphFilterSelectionV1;
   readonly renderSelection?: GraphFilterSelectionV1;
   readonly formActive?: boolean;
+  readonly nodeRoles?: Readonly<Record<string, AnimusNodeRoleV1>>;
+  readonly edgeRoles?: Readonly<Record<string, AnimusEdgeRoleV1>>;
+  readonly regions?: readonly AnimusRegionV1[];
+  readonly regionLayouts?: readonly GraphNodeRegionLayoutV1[];
+  readonly commitPositions?: boolean;
+}
+
+export interface GraphModulePresentationPatchV1 {
   readonly nodeContributions?: Readonly<Record<string, GraphNodeRenderContributionV1>>;
   readonly edgeContributions?: Readonly<Record<string, GraphEdgeRenderContributionV1>>;
-  readonly regionLayouts?: readonly GraphNodeRegionLayoutV1[];
-  readonly regionContributions?: readonly GraphRenderRegionV1[];
+  readonly regionContributions?: readonly GraphRegionRenderContributionV1[];
   readonly theme?: GraphVisualThemeV2;
   readonly presentationPolicy?: GraphPresentationPolicyV2;
+}
+
+export interface GraphModuleChoreographyPatchV1 {
   readonly motionTargets?: GraphMotionTargetsV1;
-  readonly commitPositions?: boolean;
 }
 
 export interface GraphNodeRegionLayoutV1 {
@@ -120,21 +174,27 @@ export interface GraphModuleFactoryContextV1 {
 }
 
 export interface GraphModuleInstanceV1 {
+  /** Opt in only when returned patches and their contribution values never mutate after return. */
+  readonly immutablePresentationPatch?: boolean;
+  /** Opt in only when dressing is independent of node positions and camera pose. */
+  readonly geometryIndependentPresentation?: boolean;
   setup?(): void;
   updateSettings?(settings: Readonly<Record<string, JsonValue>>): void;
   updateProfileSettings?(settings: Readonly<Record<string, JsonValue>>): void;
   restoreState?(state: JsonValue): void;
   onDocumentChanged?(document: GraphDocumentV1): void;
   onViewChanged?(state: GraphViewStateV1): void;
+  /** One-node edit to a private working source; replacement sources still require full synchronization. */
+  onNodePositionChanged?(nodeId: string, position: Vec3, source: Readonly<Record<string, Vec3>>): void;
   onThemeChanged?(theme: GraphVisualThemeV2): void;
-  projectSource?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
-  projectTopology?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
-  selectRender?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
-  choreograph?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
+  projectSource?(state: GraphModuleProjectionStateV1): GraphModuleProjectionPatchV1 | void;
+  projectTopology?(state: GraphModuleProjectionStateV1): GraphModuleProjectionPatchV1 | void;
+  selectRender?(state: GraphModuleProjectionStateV1): GraphModuleProjectionPatchV1 | void;
+  choreograph?(state: GraphModulePipelineStateV1): GraphModuleChoreographyPatchV1 | void;
   /** `null` means idle; a number throttles continuous ticks; `undefined` is unthrottled. */
   preferredTickIntervalMs?(state: GraphModulePipelineStateV1): number | null | undefined;
   tick?(state: GraphModulePipelineStateV1, deltaSeconds: number): GraphModuleTickResultV1 | void;
-  contributeFrame?(state: GraphModulePipelineStateV1): GraphModuleProjectionPatchV1 | void;
+  contributeFrame?(state: GraphModulePresentationStateV1): GraphModulePresentationPatchV1 | void;
   exportState?(): JsonValue;
   /** Compact, read-only runtime evidence for lifecycle and performance diagnosis. */
   getDiagnostics?(): unknown;
@@ -148,7 +208,7 @@ export interface GraphModuleDefinitionV1 {
   readonly create: (context: GraphModuleFactoryContextV1) => GraphModuleInstanceV1;
 }
 
-export interface ActiveGraphModuleV1 {
+export interface ActiveGraphModule {
   readonly id: string;
   readonly policy: EngineModulePolicyV1;
   readonly order: number;

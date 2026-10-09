@@ -12,7 +12,11 @@
     "typecheck": "tsc --noEmit",
     "test": "node test.config.js",
     "benchmark": "node scripts/benchmark-graph-engine.mjs",
-    "dev": "npm run typecheck && npm run build"
+    "benchmark:optimizations": "node scripts/benchmark-graph-plus-optimizations.mjs",
+    "benchmark:vault": "node --expose-gc scripts/benchmark-graph-plus-vault.mjs",
+    "dev": "npm run typecheck && npm run build",
+    "release": "node scripts/release-graph-plus.mjs",
+    "release:public": "node scripts/release-graph-plus.mjs --public"
   },
   "devDependencies": {
     "@types/node": "^20.5.1",

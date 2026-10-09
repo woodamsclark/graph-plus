@@ -1,6 +1,7 @@
 import type { ConsumerRegistrationV1 } from './profile.ts';
 import type { GraphSessionOptionsV1, GraphSessionV1 } from './session.ts';
 import type { GraphNodeActionRegistrationV1 } from './action.ts';
+import type { GraphReactionRegistrationV1 } from './reaction.ts';
 import type { Disposable } from './values.ts';
 
 export interface GraphEngineRequestV1 {
@@ -23,6 +24,8 @@ export interface GraphEngineLeaseV1 {
 
   registerConsumer(registration: ConsumerRegistrationV1): Promise<void>;
   registerNodeActions(actions: readonly GraphNodeActionRegistrationV1[]): Disposable;
+  /** Available when capabilities contains conscious-reactions. */
+  registerReactions?(reactions: readonly GraphReactionRegistrationV1[]): Disposable;
   createSession(options: GraphSessionOptionsV1): Promise<GraphSessionV1>;
   release(): Promise<void>;
 }
