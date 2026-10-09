@@ -1,6 +1,6 @@
 {
   "name": "graph-plus",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Explore your vault as an interactive 2D or 3D graph, with persistent node positions and an embeddable graph engine.",
   "license": "MPL-2.0",
   "private": true,

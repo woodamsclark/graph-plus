@@ -16,7 +16,7 @@ only `@graph-plus/graph-engine-client` and obtain the runtime through Workspace 
 
 Protocol version: 1
 
-Artifact version: 2.0.1
+Artifact version: 2.0.2
 
 The artifact version is not a minimum graph-engine version and does not need to match
 the installed provider. Runtime compatibility is negotiated by protocol and requested

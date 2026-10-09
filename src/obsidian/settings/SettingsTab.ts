@@ -14,7 +14,6 @@ export class GraphEngineSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     preserveSettingsScrollV1(containerEl, () => {
       containerEl.empty();
-      new Setting(containerEl).setName('graph+').setHeading();
       const enginePanel = new GraphEngineSettingsPanelV1(this.graphPlus.engineSettings);
       enginePanel.renderProfiles(containerEl, this.app, () => this.display());
       this.renderGeneral(containerEl);
@@ -25,7 +24,7 @@ export class GraphEngineSettingTab extends PluginSettingTab {
   }
 
   private renderGeneral(parent: HTMLElement): void {
-    new Setting(parent).setName('graph+').setHeading();
+    new Setting(parent).setName('General').setHeading();
     const settings = this.graphPlus.settings;
     new Setting(parent).setName('Enable graph+').setDesc('Allow the graph+ view and commands.')
       .addToggle((toggle) => toggle.setValue(settings.enabled).onChange(async (enabled) => {
@@ -54,7 +53,7 @@ export class GraphEngineSettingTab extends PluginSettingTab {
           this.display();
         }));
 
-    new Setting(parent).setName('Graph+ colors').setHeading();
+    new Setting(parent).setName('Colors').setHeading();
     const palette = this.graphPlus.resolveGraphPlusThemePalette();
     this.renderColorOverride(parent, 'Background', 'Graph canvas background.', 'background', palette.colors.background);
     this.renderColorOverride(parent, 'Note nodes', 'Ordinary note node color.', 'noteNode', palette.colors.node);

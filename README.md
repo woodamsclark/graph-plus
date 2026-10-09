@@ -90,7 +90,7 @@ Close any additional Global panes; opening only a Local pane does not enable res
 
 ### Customize graph colors
 
-Use **Settings → Community plugins → Graph+ → Graph+ colors** to override the graph
+Use **Settings → Community plugins → Graph+ → Colors** to override the graph
 background, ordinary note nodes, or tag nodes. Each color can be reset independently
 to return that role to the active Obsidian theme. Changes apply to open Graph+ views.
 
@@ -161,7 +161,7 @@ See [the graph-engine consumer guide](docs/graph-engine-consumer-guide.md) and t
 
 ## Compatibility
 
-Graph+ 2.0.1 requires Obsidian 1.13.7 or newer. Automated checks cover desktop
+Graph+ 2.0.2 requires Obsidian 1.13.7 or newer. Automated checks cover desktop
 and touch input paths; physical desktop and mobile acceptance is tracked in the
 [release safety checklist](docs/graph-plus-release-safety.md).
 

@@ -12,9 +12,9 @@ The release task creates no ZIP and excludes docs, source files, and local runti
 an RC before building or packaging. Promote the version only after release acceptance:
 update `manifest.json`, `package.json`, both root version fields in `package-lock.json`,
 and the matching minimum-Obsidian entry in `versions.json`. The GitHub tag must exactly
-match the manifest version, without `v`. The client package and generated artifact also report `2.0.1`; protocol version 1 is unchanged.
+match the manifest version, without `v`. The client package and generated artifact also report `2.0.2`; protocol version 1 is unchanged.
 
-The current stable release is `2.0.1`. Its compatibility entry and lockfile agree.
+The current stable release is `2.0.2`. Its compatibility entry and lockfile agree.
 No release task uploads, tags, or publishes anything. `releases/` is ignored by Git.
 
 ## Shutdown contract
@@ -82,7 +82,7 @@ setting is reversible, and no-op changes retain the document revision.
 
 The distributable engine client now declares MPL-2.0 and carries the same full LICENSE
 as its reviewed Graph+ source. The client generator copies that license; its package
-file list includes it. Client version 2.0.1 is aligned with the plugin release; the V1 protocol remains unchanged.
+file list includes it. Client version 2.0.2 is aligned with the plugin release; the V1 protocol remains unchanged.
 
 The README documents manual installation. Layout reset continues to require one
 Global pane for this release; settings now explain which panes to open or close.
@@ -114,3 +114,11 @@ for manifest metadata, platform detection, static styling, settings headings, an
 standard MPL-2.0 license text. Type checking, all 512 tests, build, and exact
 three-file release packaging pass. Obsidian directory review and live visual
 acceptance are separate from these automated checks.
+
+## Validation status for 2.0.2
+
+Removes the redundant plugin-name settings heading and names the remaining
+sections General and Colors, addressing the sole error in the 2.0.1 directory
+review. Type checking, all 512 tests, build, and exact three-file release packaging
+pass. Remaining directory warnings and recommendations are unchanged; directory
+review must run again against this release.
