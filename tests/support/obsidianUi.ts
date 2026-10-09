@@ -37,6 +37,7 @@ export class Setting {
     this.settingEl = parent.ownerDocument.createElement('div');
     parent.append(this.settingEl);
   }
+  setHeading() { this.settingEl.classList.add('setting-item-heading'); return this; }
   setName(name: string) { this.settingEl.dataset.name = name; return this; }
   setDesc(description: string) { this.settingEl.dataset.description = description; return this; }
   addSlider(callback: (slider: Slider) => void) { callback(new Slider(this.settingEl)); return this; }

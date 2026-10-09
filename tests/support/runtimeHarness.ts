@@ -21,6 +21,7 @@ import { graphDocument, graphEdge, graphNode } from './contractFixtures.ts';
 import { assert, equal } from './harness.ts';
 
 export class InstrumentedPlatform implements SessionRuntimePlatformV1 {
+  get isMacOS(): boolean { return /Mac|iPhone|iPad|iPod/i.test(this.window.navigator.platform ?? ''); }
   readonly document: Document;
   readonly window: globalThis.Window;
   pixelRatio = 2;

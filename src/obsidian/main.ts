@@ -1,5 +1,6 @@
+import { createSessionRuntimePlatformV1 } from '../graph-engine/runtime/platform/index.ts';
 import { LatestStatePersistenceV1 } from './settings/LatestStatePersistence.ts';
-import { Notice, Plugin, TFile, type WorkspaceLeaf } from 'obsidian';
+import { Notice, Platform, Plugin, TFile, type WorkspaceLeaf } from 'obsidian';
 import { GraphPlusView, GRAPH_PLUS_TYPE } from './GraphView.ts';
 import { LocalGraphPlusView, LOCAL_GRAPH_PLUS_TYPE } from './LocalGraphView.ts';
 import { GraphEngineSettingTab } from './settings/SettingsTab.ts';
@@ -101,6 +102,7 @@ export default class GraphEnginePlugin extends Plugin {
     const engineInstanceId = createEngineInstanceId();
     const sessionFactory = new SessionFactory({
       engineInstanceId,
+      createPlatform: container => createSessionRuntimePlatformV1(container, Platform.isMacOS || Platform.isIosApp),
       profiles,
       modules,
       getGlobalOverrides: () => this.pluginData.engine.globalSettings,

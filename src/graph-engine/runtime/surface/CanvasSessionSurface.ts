@@ -47,21 +47,11 @@ export class CanvasSessionSurface implements SessionSurfaceV1 {
     this.root.className = 'graph-engine-session';
     this.root.dataset.graphEngineSession = options.sessionId;
     this.root.dataset.dimensions = options.dimensions;
-    this.root.style.width = '100%';
-    this.root.style.height = '100%';
-    this.root.style.position = 'relative';
-    this.root.style.overflow = 'hidden';
 
     this.accessibleSummary = this.platform.document.createElement('div');
     this.accessibleSummary.className = 'graph-engine-accessible-summary';
     this.accessibleSummary.setAttribute('role', 'status');
     this.accessibleSummary.setAttribute('aria-live', 'polite');
-    this.accessibleSummary.style.position = 'absolute';
-    this.accessibleSummary.style.width = '1px';
-    this.accessibleSummary.style.height = '1px';
-    this.accessibleSummary.style.overflow = 'hidden';
-    this.accessibleSummary.style.clipPath = 'inset(50%)';
-    this.accessibleSummary.style.whiteSpace = 'nowrap';
 
     this.root.append(this.accessibleSummary);
     this.resizeObserver = this.platform.createResizeObserver(() => this.resize());
@@ -92,10 +82,6 @@ export class CanvasSessionSurface implements SessionSurfaceV1 {
     const canvas = this.platform.document.createElement('canvas');
     canvas.className = 'graph-engine-surface';
     canvas.tabIndex = 0;
-    canvas.style.display = 'block';
-    canvas.style.width = '100%';
-    canvas.style.height = '100%';
-    canvas.style.touchAction = 'none';
     canvas.setAttribute('role', 'application');
     canvas.setAttribute('aria-label', 'Interactive graph surface');
     canvas.width = Math.round(this.viewport.width * this.viewport.devicePixelRatio);
