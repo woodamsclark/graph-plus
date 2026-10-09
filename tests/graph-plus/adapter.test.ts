@@ -1965,3 +1965,70 @@ test('batched lenses still pause a newly enabled Form when its root is hidden', 
     equal(runtime.factory.getDiagnostics().sessions[0].counters!.projectionPasses, before + 1, 'the filter and automatic pause share one projection');
   } finally { await pane.close(); await core.dispose(); }
 });
+
+test('Local physics follows visible pane activity and Space wakes its shared settled world', async () => {
+  const runtime = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
+  runtime.profiles.setUserOverrides('graph-plus', 'default', { modules: {
+    anima: { settings: { cursorGravity: 'off' } },
+  } });
+  const core = new GraphEngineProviderCoreV1({ engineVersion: '2.0.0', engineInstanceId: 'local-physics-handoff',
+    capabilities: ['render'], profiles: runtime.profiles, sessions: runtime.factory });
+  const localRuntime = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
+  localRuntime.profiles.setUserOverrides('graph-plus', 'default', { modules: { anima: { settings: { cursorGravity: 'off' } } } });
+  const localCore = new GraphEngineProviderCoreV1({ engineVersion: '2.0.0', engineInstanceId: 'local-physics-follower',
+    capabilities: ['render'], profiles: localRuntime.profiles, sessions: localRuntime.factory });
+  const application = new GraphPlusApplicationV1({
+    model: new GraphPlusVaultModelV1({ read: () => snapshot().value }, { countDuplicateLinks: true }),
+    navigator: { openNote: async () => {}, openTag: async () => {} },
+  });
+  const settle = async () => { for (let i = 0; i < 100; i++) await Promise.resolve(); };
+  const open = async (mode: 'global' | 'local') => {
+    const paneRuntime = mode === 'local' ? localRuntime : runtime;
+    const paneCore = mode === 'local' ? localCore : core;
+    const connection = paneCore.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: ['render'] });
+    assert(connection.ok, 'lease opens');
+    const container = paneRuntime.container;
+    const pane = application.createPresentation({ mode, container, lease: connection.lease, initialRootNodeId: noteNodeId('Alpha.md'),
+      vaultId: 'Test Vault', checkpointStore: { load: async () => undefined, save: async () => {} } });
+    await pane.open();
+    return { pane, container, session: pane.getSession()! };
+  };
+  try {
+    const global = await open('global');
+    const local = await open('local');
+    const authorities = () => [...runtime.factory.getDiagnostics().sessions, ...localRuntime.factory.getDiagnostics().sessions].filter(s => s.layoutAuthority);
+    equal(runtime.factory.getDiagnostics().sessions[0].layoutAuthority, true, 'the first pane initially owns layout');
+    const saved = await global.session.exportViewState();
+    await global.session.restoreViewState({ ...saved, moduleState: { ...saved.moduleState,
+      'force-layout': { schemaVersion: 1, alpha: 0, alphaTarget: 0, running: false, velocities: {} },
+    } });
+    await settle();
+    runtimeCanvas(local.container).dispatchEvent(new localRuntime.window.KeyboardEvent('keydown', { key: ' ', bubbles: true }) as unknown as Event);
+    await settle();
+    equal(authorities().length, 1, 'interaction never starts a second solver');
+    equal(localRuntime.factory.getDiagnostics().sessions[0].layoutAuthority, true, 'Space transfers physics ownership to Local');
+    const before = await local.session.exportViewState();
+    for (let i = 0; i < 6; i++) localRuntime.platform.flushFrame();
+    const held = await local.session.exportViewState();
+    equal((held.moduleState['force-layout'] as { alpha: number }).alpha, 1, 'Local Space reaches maximum alpha');
+    assert(JSON.stringify(held.positions) !== JSON.stringify(before.positions), 'Local Space moves shared geometry');
+    deepEqual(held.selectedNodeIds, before.selectedNodeIds, 'physics ownership preserves Local Attention');
+    localRuntime.window.dispatchEvent(new localRuntime.window.KeyboardEvent('keyup', { key: ' ' }));
+    for (let i = 0; i < 6; i++) localRuntime.platform.flushFrame();
+    await settle();
+    const released = await local.session.exportViewState();
+    equal((released.moduleState['force-layout'] as { alpha: number }).alpha, 0, 'Space release restores the settled activity');
+    local.pane.setSuspended(true);
+    await settle();
+    equal(runtime.factory.getDiagnostics().sessions[0].layoutAuthority, true, 'hiding Local hands layout to visible Global');
+    global.pane.setSuspended(true);
+    await settle();
+    equal(authorities().length, 0, 'all hidden panes stop advancing layout');
+    local.pane.setSuspended(false);
+    await settle();
+    equal(localRuntime.factory.getDiagnostics().sessions[0].layoutAuthority, true, 'revealing Local resumes its layout authority');
+    runtimeCanvas(global.container).dispatchEvent(new runtime.window.Event('pointermove', { bubbles: true }) as unknown as Event);
+    await settle();
+    equal(localRuntime.factory.getDiagnostics().sessions[0].layoutAuthority, true, 'hidden pane activity cannot take authority');
+  } finally { await application.dispose(); await core.dispose(); await localCore.dispose(); }
+});

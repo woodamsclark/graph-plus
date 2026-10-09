@@ -74,6 +74,8 @@ export interface GraphPlusPresentationOptionsV1<TFile> {
   readonly referenceViewState?: () => GraphViewStateV1 | undefined | Promise<GraphViewStateV1 | undefined>;
   /** Application coordination hooks: graph world is shared while viewport state remains local. */
   readonly onOpened?: () => void | Promise<void>;
+  readonly onLayoutActivity?: () => void;
+  readonly onAvailabilityChanged?: () => void;
   readonly onWorldInvalidated?: (event: GraphWorldInvalidatedEventV1) => void;
   readonly onWorldStateChanged?: (event: GraphWorldChangedEventV1) => void | Promise<void>;
 }
@@ -113,6 +115,7 @@ export class GraphPlusPresentationV1<TFile> {
   private enforcingPolicy = false;
   private referenceLayout?: GraphViewStateV1;
   private layoutAuthority: boolean;
+  private suspended = false;
   private compiledFilter?: {
     readonly document: GraphDocumentV1;
     readonly key: string;
@@ -398,7 +401,13 @@ export class GraphPlusPresentationV1<TFile> {
   async setNodePinned(nodeId: string, pinned: boolean): Promise<void> {
     await this.session?.setNodePinned(nodeId, pinned);
   }
-  setSuspended(suspended: boolean): void { this.session?.setSuspended(suspended); }
+  get isSuspended(): boolean { return this.suspended; }
+  setSuspended(suspended: boolean): void {
+    if (this.suspended === suspended) return;
+    this.suspended = suspended;
+    this.session?.setSuspended(suspended);
+    this.options.onAvailabilityChanged?.();
+  }
   async setPreviewSurfaceActive(active: boolean): Promise<void> { await this.session?.setPreviewSurfaceActive(active); }
   async clearPreview(): Promise<void> { await this.session?.clearPreview(); }
   async hoverDocumentLink(nodeId?: string): Promise<void> {
@@ -473,6 +482,14 @@ export class GraphPlusPresentationV1<TFile> {
       onSessionOverridesChanged: (overrides) => this.adoptSessionOverrides(overrides),
     });
     this.session = session;
+    session.setSuspended(this.suspended);
+    const onActivity = () => {
+      if (!this.suspended) this.options.onLayoutActivity?.();
+    };
+    for (const type of ['pointerdown', 'pointermove', 'keydown']) {
+      this.options.container.addEventListener(type, onActivity, true);
+      this.sessionSubscriptions.push({ dispose: () => this.options.container.removeEventListener(type, onActivity, true) });
+    }
     this.memoryProjection = undefined;
     this.effectiveSettings = await session.exportEffectiveSettings();
     this.document = document;
@@ -759,6 +776,7 @@ export class GraphPlusApplicationV1<TFile> {
   private worldPositionsQueued = false;
   private worldStateQueue: Promise<void> = Promise.resolve();
   private layoutAuthority?: GraphPlusPresentationV1<TFile>;
+  private requestedLayoutAuthority?: GraphPlusPresentationV1<TFile>;
 
   constructor(private readonly options: GraphPlusApplicationOptionsV1<TFile>) {
     this.workspaceSession = options.session ?? new GraphPlusSessionV1();
@@ -787,6 +805,8 @@ export class GraphPlusApplicationV1<TFile> {
       beforeOpen: () => this.reconcileOnOpen(),
       referenceViewState: () => this.exportGlobalViewState(presentation),
       onOpened: () => this.presentationOpened(presentation),
+      onLayoutActivity: () => this.requestLayoutAuthority(presentation),
+      onAvailabilityChanged: () => this.electLayoutAuthority(),
       onWorldStateChanged: (event) => this.queueWorldStateFrom(presentation, event),
       onWorldInvalidated: (event) => this.queueWorldInvalidation(presentation, event.cause),
       initialLayoutAuthority: false,
@@ -947,10 +967,43 @@ export class GraphPlusApplicationV1<TFile> {
   }
 
   private electLayoutAuthority(): void {
-    if (this.layoutAuthority?.getSession() !== undefined) return;
-    this.layoutAuthority = [...this.presentations]
-      .find((presentation) => presentation.getSession() !== undefined);
-    this.layoutAuthority?.setLayoutAuthority(true);
+    if (this.layoutAuthority?.getSession() !== undefined && !this.layoutAuthority.isSuspended) {
+      this.layoutAuthority.setLayoutAuthority(true);
+      return;
+    }
+    const candidate = [...this.presentations]
+      .find((presentation) => presentation.getSession() !== undefined && !presentation.isSuspended);
+    if (candidate) this.requestLayoutAuthority(candidate);
+    else this.layoutAuthority?.setLayoutAuthority(false);
+  }
+
+  private requestLayoutAuthority(presentation: GraphPlusPresentationV1<TFile>): void {
+    if (this.disposed || presentation.isSuspended || !presentation.getSession()) return;
+    if (this.layoutAuthority === presentation) {
+      this.requestedLayoutAuthority = undefined;
+      presentation.setLayoutAuthority(true);
+      return;
+    }
+    if (this.requestedLayoutAuthority === presentation) return;
+    this.requestedLayoutAuthority = presentation;
+    void this.enqueueWorldState(async () => {
+      if (this.disposed || this.requestedLayoutAuthority !== presentation) return;
+      try {
+        if (!this.presentations.has(presentation) || presentation.isSuspended || !presentation.getSession()) return;
+        const previous = this.layoutAuthority;
+        this.cancelWorldSyncFrame();
+        if (previous?.getSession()) {
+          await this.refreshSharedWorldFrom(previous);
+          if (this.requestedLayoutAuthority !== presentation || !this.presentations.has(presentation)
+            || presentation.isSuspended || !presentation.getSession()) return;
+          previous.setLayoutAuthority(false);
+        }
+        this.layoutAuthority = presentation;
+        presentation.setLayoutAuthority(true);
+      } finally {
+        if (this.requestedLayoutAuthority === presentation) this.requestedLayoutAuthority = undefined;
+      }
+    });
   }
 
   /** Compatibility ingress for existing hosts. */
