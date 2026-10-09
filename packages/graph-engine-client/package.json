@@ -1,6 +1,6 @@
 {
   "name": "@graph-plus/graph-engine-client",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "private": false,
   "description": "Host-neutral graph-engine V1 contracts and Workspace Events client artifact.",
   "type": "module",
