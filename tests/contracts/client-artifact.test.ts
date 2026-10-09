@@ -19,7 +19,7 @@ test('external client artifact is synchronized with its reviewed public sources'
     readFileSync(join(artifactRoot, 'artifact-manifest.json'), 'utf8'),
   ) as ArtifactManifest;
   equal(manifest.artifact, '@graph-plus/graph-engine-client', 'artifact name');
-  equal(manifest.artifactVersion, '2.0.0', 'artifact version');
+  equal(manifest.artifactVersion, '2.0.1', 'artifact version');
   equal(manifest.protocolVersion, 1, 'artifact protocol');
 
   const drift: string[] = [];
@@ -55,7 +55,7 @@ test('Graph+ registers its internal graph-engine provider and aligns provider an
   equal(pluginManifest.id, 'graph-plus', 'Obsidian plugin ID');
   equal(pluginManifest.name, 'Graph+', 'Obsidian plugin name');
   equal(rootPackage.name, 'graph-plus', 'root package name');
-  equal(pluginManifest.version, '2.0.0', 'Obsidian stable release version');
+  equal(pluginManifest.version, '2.0.1', 'Obsidian stable release version');
   equal((pluginManifest as { minAppVersion?: string }).minAppVersion, '1.13.7', 'minimum compatible Obsidian version');
   equal(rootPackage.version, pluginManifest.version, 'root package release version');
   equal(clientPackage.version, pluginManifest.version, 'public client release version matches the plugin release');
