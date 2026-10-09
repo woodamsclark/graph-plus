@@ -284,6 +284,47 @@ test('cursor proximity mode reveals nearby labels while Off suppresses every lab
   renderer.dispose();
 });
 
+test('proximity preserves small Focus label sizing across the reveal boundary in measurement and drawing', () => {
+  for (const dimensions of ['2d', '3d'] as const) {
+    for (const alwaysVisible of [false, true]) {
+      const value = runtimeHarness();
+      const canvas = value.document.createElement('canvas');
+      const context = recordingContext([]);
+      const fonts: string[] = [];
+      const measuredFonts: string[] = [];
+      const alphas: number[] = [];
+      context.fillText = () => { fonts.push(context.font); alphas.push(context.globalAlpha); };
+      context.measureText = () => { measuredFonts.push(context.font); return { width: 20 } as TextMetrics; };
+      canvas.getContext = (() => context) as unknown as typeof canvas.getContext;
+      const renderer = new CanvasGraphRenderer(canvas, () => 0);
+      renderer.initialize(); renderer.resize(640, 360, 1);
+      const scene = { regions: [], edges: [], ...RESOLVED_FRAME_STYLE, revision: 1, presentationRevision: 1,
+        view: { dimensions, camera: { position: { x: 0, y: 0, z: 1000 }, target: { x: 0, y: 0, z: 0 },
+          up: { x: 0, y: 1, z: 0 }, zoom: 1,
+          projection: dimensions === '2d' ? 'orthographic' as const : 'perspective' as const },
+          viewport: { width: 640, height: 360, devicePixelRatio: 1 } }, labels: [],
+        nodes: [{ id: 'neighbor', label: 'neighbor', position: { x: 0, y: 0, z: 0 }, radius: 4,
+          ...RESOLVED_NODE_STYLE, labelFontSize: 7, showLabel: alwaysVisible,
+          labelAlwaysVisible: alwaysVisible, labelOpacity: alwaysVisible ? 1 : 0 }],
+        policy: { labelMode: 'proximity' as const, cursorLabelRevealRadiusPx: 96, labelScaleMode: 'fixed' as const },
+      };
+      for (const distance of [97, 96, 95, 48, 1, 97]) {
+        fonts.length = 0; alphas.length = 0;
+        renderer.updateScene({ ...scene, cursorScreenPoint: { x: 320 + distance, y: 180 } }); renderer.render();
+        const visible = alwaysVisible || distance < 96;
+        equal(fonts.length, visible ? 1 : 0, 'only visibility changes at the reveal boundary');
+        if (visible) {
+          equal(parseFloat(fonts[0]), 7, 'proximity preserves the resolved small Focus label size');
+          equal(alphas[0], alwaysVisible ? 1 : 1 - distance / 96, 'cursor-only reveal still fades with distance');
+        }
+      }
+      assert(measuredFonts.length > 0, 'label layout measures the revealed label');
+      assert(measuredFonts.every(font => parseFloat(font) === 7), 'collision bounds use the same unchanged font size');
+      renderer.dispose();
+    }
+  }
+});
+
 test('View-required labels retain their transition opacity in both reveal modes without cursor proximity', () => {
   const value = runtimeHarness();
   const canvas = value.document.createElement('canvas');

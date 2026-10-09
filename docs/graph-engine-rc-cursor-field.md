@@ -27,8 +27,8 @@ camera, saved settings or simulation.
   remain hidden. Cursor-only labels use the same distance fade for standard Overview
   nodes and dim Constellation context. Adaptive mode separately preserves the opacity
   of its automatically admitted labels. Ordinary label collision and nearer-disc occlusion checks remain active.
-  Proximity labels have a 12-pixel readable font floor, shared by text measurement
-  and drawing.
+  Proximity changes label visibility only; measurement and drawing preserve the
+  resolved View label size, including the smaller non-root labels in Focus.
 - Labels offers Off, Cursor proximity (the Graph+ default), and Adaptive. Off suppresses
   every label, including hover, root, selected and structural labels. Cursor proximity
   and Adaptive both retain View-required root, constellation and preview labels.

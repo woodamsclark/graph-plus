@@ -726,7 +726,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
       const automaticOpacity = automaticIds.has(node.id) ? clampOpacity(node.labelOpacity) : 0;
       this.context.globalAlpha = Math.max(automaticOpacity, this.cursorLabelReveal(frame, candidate));
       this.context.fillStyle = this.colorCss(node.labelColor);
-      const font = nodeFont(frame, node, this.vision.getState().zoom, this.vision.getState().projection, this.cursorLabelReveal(frame, candidate) > 0 ? 12 : 1);
+      const font = nodeFont(frame, node, this.vision.getState().zoom, this.vision.getState().projection);
       this.context.font = font;
       this.context.fillText(node.label, point.x + offset.x, labelTop(frame, point.y, radius, font) + offset.y);
     }
@@ -744,7 +744,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
   }
 
   private labelBounds(frame: GraphRenderFrameV1, value: ProjectedNode): LabelBounds {
-    this.context.font = nodeFont(frame, value.node, this.vision.getState().zoom, this.vision.getState().projection, this.cursorLabelReveal(frame, value) > 0 ? 12 : 1);
+    this.context.font = nodeFont(frame, value.node, this.vision.getState().zoom, this.vision.getState().projection);
     const cacheKey = `${this.context.font}\u0000${value.node.label}`;
     let width = this.textWidthCache.get(cacheKey);
     if (width === undefined) {
