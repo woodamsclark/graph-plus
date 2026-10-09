@@ -39,7 +39,7 @@ async function main() {
       JSON.parse(await readFile(join(repositoryRoot, file), 'utf8'))),
   );
   const version = validateReleaseMetadata({ manifest, packageJson, lock, versions }, process.argv.includes('--public'));
-  for (const task of ['typecheck', 'test', 'build']) execFileSync('npm', ['run', task], { cwd: repositoryRoot, stdio: 'inherit' });
+  for (const task of ['build:client', 'lint:submission', 'typecheck', 'test', 'build']) execFileSync('npm', ['run', task], { cwd: repositoryRoot, stdio: 'inherit' });
   const outputDirectory = join(repositoryRoot, 'releases', version);
   await stageRelease(repositoryRoot, outputDirectory);
   console.log(`Validated ${version}: ${outputDirectory}\nUpload main.js, manifest.json, and styles.css individually to the matching GitHub release.`);

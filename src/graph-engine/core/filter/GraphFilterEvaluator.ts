@@ -117,11 +117,11 @@ function evaluateLeaf(value: GraphNodeV1 | GraphEdgeV1, ast: GraphFilterAstV1): 
 }
 
 function scalarEquals(attribute: GraphAttributeValue | undefined, expected: GraphScalar): boolean {
-  return !Array.isArray(attribute) && attribute === expected;
+  return !isUnknownArray(attribute) && attribute === expected;
 }
 
 function attributeContains(attribute: GraphAttributeValue | undefined, expected: GraphScalar): boolean {
-  return Array.isArray(attribute) && attribute.some((value) => value === expected);
+  return isUnknownArray(attribute) && attribute.some((value) => value === expected);
 }
 
 function validateAst(
@@ -147,7 +147,7 @@ function validateAst(
     case 'and':
     case 'or':
       validateKnownKeys(value, ['op', 'operands'], path, errors);
-      if (!Array.isArray(value.operands)) {
+      if (!isUnknownArray(value.operands)) {
         errors.push({ path: `${path}.operands`, message: 'Operands must be an array.' });
         return;
       }
@@ -217,7 +217,7 @@ function validateKnownKeys(
 }
 
 function validateStringArray(value: unknown, path: string, errors: GraphFilterValidationErrorV1[]): void {
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+  if (!isUnknownArray(value) || value.some((entry) => typeof entry !== 'string')) {
     errors.push({ path, message: 'Expected an array of strings.' });
   }
 }
@@ -242,7 +242,12 @@ function isGraphScalar(value: unknown): value is GraphScalar {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
+  if (value === null || typeof value !== 'object' || isUnknownArray(value)) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+/** Preserve unknown element types instead of the built-in any[] narrowing. */
+function isUnknownArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
 }

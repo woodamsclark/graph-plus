@@ -441,10 +441,9 @@ export class GraphModuleHost {
     if (this.fatal || this.disposed) return initial;
     let state = initial;
     for (const module of [...this.active]) {
-      const callback = module.instance[method];
-      if (!callback) continue;
+      if (!module.instance[method]) continue;
       try {
-        const patch = callback.call(module.instance, state);
+        const patch = module.instance[method](state);
         if (patch) state = applyProjectionPatch(state, patch);
       } catch (error) {
         this.failActiveModule(module, hook, error);
@@ -460,10 +459,9 @@ export class GraphModuleHost {
     if (this.fatal || this.disposed) return initial;
     let state = initial;
     for (const module of [...this.active]) {
-      const callback = module.instance.contributeFrame;
-      if (!callback) continue;
+      if (!module.instance.contributeFrame) continue;
       try {
-        const patch = callback.call(module.instance, state);
+        const patch = module.instance.contributeFrame(state);
         if (patch) state = applyPresentationPatch(state, patch, module.instance.immutablePresentationPatch === true);
       } catch (error) {
         this.failActiveModule(module, 'contribute-frame', error);
@@ -479,10 +477,9 @@ export class GraphModuleHost {
     if (this.fatal || this.disposed) return initial;
     let state = initial;
     for (const module of [...this.active]) {
-      const callback = module.instance.choreograph;
-      if (!callback) continue;
+      if (!module.instance.choreograph) continue;
       try {
-        const patch = callback.call(module.instance, state);
+        const patch = module.instance.choreograph(state);
         if (patch) state = applyChoreographyPatch(state, patch);
       } catch (error) {
         this.failActiveModule(module, 'choreograph', error);
@@ -499,10 +496,10 @@ export class GraphModuleHost {
   ): void {
     if (this.fatal || this.disposed) return;
     for (const module of [...this.active]) {
-      const callback = module.instance[method] as ((argument: unknown) => void) | undefined;
+      const callback = module.instance[method]?.bind(module.instance) as ((argument: unknown) => void) | undefined;
       if (!callback) continue;
       try {
-        callback.call(module.instance, value);
+        callback(value);
       } catch (error) {
         this.failActiveModule(module, hook, error);
         if (this.fatal) break;
@@ -591,8 +588,8 @@ function mergeRecords<T extends object>(
   addition: Readonly<Record<string, T>>,
 ): Readonly<Record<string, T>> {
   const result: Record<string, T> = { ...base };
-  for (const [id, value] of Object.entries(addition) as Array<[string, T]>) {
-    result[id] = { ...base[id], ...value } as T;
+  for (const [id, value] of Object.entries<T>(addition)) {
+    result[id] = { ...base[id], ...value };
   }
   return result;
 }
@@ -633,8 +630,8 @@ function mergeContributions<T extends GraphNodeRenderContributionV1 | GraphEdgeR
   const cached = immutable ? byAddition.get(addition) : undefined;
   if (cached) return cached as Readonly<Record<string, T>>;
   const result: Record<string, T> = { ...base };
-  for (const [id, contribution] of Object.entries(addition) as Array<[string, T]>) {
-    result[id] = { ...base[id], ...contribution } as T;
+  for (const [id, contribution] of Object.entries<T>(addition)) {
+    result[id] = { ...base[id], ...contribution };
   }
   if (immutable) {
     byAddition.set(addition, result);

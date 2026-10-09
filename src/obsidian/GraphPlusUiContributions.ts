@@ -22,14 +22,6 @@ export function createGraphPlusUiContributionsV1(
       order: 10,
       mount: (container) => mountRefineVault(container, getConsumer()),
     },
-    /* Mind Map deferred: keep this implementation for a later release.
-    {
-      id: 'graph-plus.relation',
-      sectionId: SECTIONS.form,
-      order: 10,
-      mount: (container) => mountRelation(container, getConsumer()),
-    },
-    */
   ];
 }
 
@@ -63,22 +55,4 @@ function mountRefineVault(container: HTMLElement, consumer: GraphPlusUiConsumerV
       timer = undefined;
     },
   };
-}
-
-function mountRelation(container: HTMLElement, consumer: GraphPlusUiConsumerV1): void {
-  const lens = consumer.getLens();
-  if (!lens.form.enabled) return;
-  const relationOptions: Record<string, string> = { '': 'Any relation' };
-  for (const edge of consumer.getDocument()?.edges ?? []) {
-    for (const token of edge.tokens ?? []) {
-      if (token.startsWith('relation:')) relationOptions[token.slice('relation:'.length)] = token.slice('relation:'.length);
-    }
-  }
-  new Setting(container).setName('Relation').addDropdown((dropdown) => dropdown
-    .addOptions(relationOptions)
-    .setValue(lens.form.relation ?? '')
-    .onChange((relation) => consumer.setLens({
-      ...consumer.getLens(),
-      form: { ...consumer.getLens().form, relation: relation || undefined },
-    })));
 }

@@ -676,8 +676,10 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     const zoom = cameraState.projection === 'perspective'
       ? this.vision.worldToScreen(cameraState.target).scale
       : Math.max(0.1, cameraState.zoom);
+    // Read the legacy spelling only at this compatibility boundary.
+    const labelPolicy: { readonly adaptiveLabelSaliency?: number; readonly adaptiveLabelThreshold?: number } = renderPolicy(frame);
     const saliency = Math.max(0, Math.min(100,
-      renderPolicy(frame).adaptiveLabelSaliency ?? renderPolicy(frame).adaptiveLabelThreshold ?? 50));
+      labelPolicy.adaptiveLabelSaliency ?? labelPolicy.adaptiveLabelThreshold ?? 50));
     // Resolve automatic eligibility independently of proximity. A cursor-only
     // label must not inherit a full-opacity baseline merely because it is standard.
     const automaticCandidates = nodes.filter(candidate => candidate.node.showLabel !== false
@@ -749,7 +751,7 @@ export class CanvasGraphRenderer implements GraphRendererV2 {
     let width = this.textWidthCache.get(cacheKey);
     if (width === undefined) {
       const measured = this.context.measureText?.(value.node.label)?.width;
-      width = Number.isFinite(measured) ? measured! : value.node.label.length * 7;
+      width = Number.isFinite(measured) ? measured : value.node.label.length * 7;
       if (this.textWidthCache.size >= 20_000) this.textWidthCache.clear();
       this.textWidthCache.set(cacheKey, width);
     }

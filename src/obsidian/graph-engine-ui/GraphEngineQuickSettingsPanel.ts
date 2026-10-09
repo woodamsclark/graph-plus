@@ -1,4 +1,4 @@
-import { Setting, setIcon, type SliderComponent } from 'obsidian';
+import { Notice, Setting, setIcon, type SliderComponent } from 'obsidian';
 import {
   GRAPH_VIEW_DEFINITIONS_V1,
   type GraphViewIdV1,
@@ -545,12 +545,14 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
       }
       numberInput.addEventListener('change', commit);
       numberInput.addEventListener('blur', commit);
-      slider.sliderEl.addEventListener('dblclick', async (event) => {
+      slider.sliderEl.addEventListener('dblclick', (event) => {
         event.preventDefault();
-        const write = this.context.profileSettings.setModuleSetting(moduleId, key, undefined);
-        updateReset();
-        await write;
-        await this.render();
+        void (async () => {
+          const write = this.context.profileSettings.setModuleSetting(moduleId, key, undefined);
+          updateReset();
+          await write;
+          await this.render();
+        })().catch(error => new Notice(error instanceof Error ? error.message : String(error)));
       });
     });
     setting.addExtraButton((control) => {
@@ -704,7 +706,7 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
 
   private disposeContributions(): void {
     for (const disposable of this.contributionDisposables.splice(0)) {
-      try { disposable.dispose(); } catch {}
+      try { disposable.dispose(); } catch { /* Dispose the remaining contributions even if one cleanup callback fails. */ }
     }
   }
 

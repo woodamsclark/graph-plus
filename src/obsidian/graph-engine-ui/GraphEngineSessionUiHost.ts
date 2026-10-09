@@ -18,7 +18,7 @@ export class ObsidianGraphEngineSessionUiHostV1 implements GraphEngineSessionUiH
     const overrideSubscription = context.controls.onSessionOverridesChanged((overrides) => {
       try {
         void Promise.resolve(context.sessionOptions.onSessionOverridesChanged?.(overrides)).catch(() => undefined);
-      } catch {}
+      } catch { /* Consumer notifications must not interrupt the host settings transaction. */ }
     });
     quickSettings.mount();
     contextMenu.mount();

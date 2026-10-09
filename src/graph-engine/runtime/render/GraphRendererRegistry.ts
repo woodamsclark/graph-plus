@@ -79,7 +79,7 @@ export function selectGraphRenderer(options: {
         attempts,
       };
     } catch (error) {
-      try { renderer?.dispose(); } catch {}
+      try { renderer?.dispose(); } catch { /* Continue disposing other backends if a failed backend also throws during cleanup. */ }
       attempts.push({ backendId: factory.backendId, ok: false, reason: errorMessage(error) });
     }
   }

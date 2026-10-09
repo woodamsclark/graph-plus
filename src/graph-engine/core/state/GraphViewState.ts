@@ -254,7 +254,7 @@ function validateId(value: unknown, path: string, errors: GraphViewStateValidati
 }
 
 function validateIdArray(value: unknown, path: string, errors: GraphViewStateValidationErrorV1[]): void {
-  if (!Array.isArray(value) || value.some((id) => typeof id !== 'string' || id.trim().length === 0)) {
+  if (!isUnknownArray(value) || value.some((id) => typeof id !== 'string' || id.trim().length === 0)) {
     errors.push({ path, message: 'Expected an array of non-empty IDs.' });
   }
 }
@@ -321,15 +321,15 @@ function cloneJsonRecord(value: Readonly<Record<string, JsonValue>>): Record<str
 }
 
 function cloneJsonValue(value: JsonValue): JsonValue {
-  if (Array.isArray(value)) return value.map(cloneJsonValue);
-  if (value !== null && typeof value === 'object') return cloneJsonRecord(value as Readonly<Record<string, JsonValue>>);
+  if (isUnknownArray(value)) return value.map(cloneJsonValue);
+  if (value !== null && typeof value === 'object') return cloneJsonRecord(value);
   return value;
 }
 
 function isJsonValue(value: unknown): value is JsonValue {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
   if (isFiniteNumber(value)) return true;
-  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (isUnknownArray(value)) return value.every(isJsonValue);
   return isRecord(value) && Object.values(value).every(isJsonValue);
 }
 
@@ -338,7 +338,12 @@ function isFiniteNumber(value: unknown): value is number {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
+  if (value === null || typeof value !== 'object' || isUnknownArray(value)) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+/** Preserve unknown element types instead of the built-in any[] narrowing. */
+function isUnknownArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
 }

@@ -24,7 +24,7 @@ export interface AnimaHighlightSourcePolicyV1 {
 export interface AnimaHighlightPolicyV1 {
   readonly sources: Readonly<Record<AnimaHighlightSourceV1, AnimaHighlightSourcePolicyV1>>;
   readonly highlightedRole: 'highlighted';
-  readonly contextRole: Exclude<AnimaPresentationRoleV1, 'highlighted'>;
+  readonly contextRole: Exclude<AnimaPresentationPhaseV1, 'highlighted'>;
   readonly labels: 'delegate';
 }
 

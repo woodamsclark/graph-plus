@@ -179,7 +179,7 @@ export const DEFAULT_GRAPH_PRESENTATION_POLICY_V2: GraphPresentationPolicyV2 = {
 export type GraphRenderThemeV1 = GraphVisualThemeV2 & GraphPresentationPolicyV2;
 
 /** @deprecated Use separate visual theme and presentation policy values. */
-export const DEFAULT_GRAPH_RENDER_THEME_V1: GraphRenderThemeV1 = {
+export const DEFAULT_GRAPH_RENDER_THEME_V1: GraphVisualThemeV2 & GraphPresentationPolicyV2 = {
   ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2,
   ...DEFAULT_GRAPH_VISUAL_THEME_V2,
 };

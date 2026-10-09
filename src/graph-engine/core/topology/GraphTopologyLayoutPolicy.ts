@@ -62,7 +62,7 @@ export function readGraphTopologyLayoutPolicyV1(value: JsonValue | undefined): G
 
 export function parseGraphTopologyLayoutPolicyV1(value: JsonValue | undefined): GraphTopologyLayoutPolicyV1 | undefined {
   if (!isRecord(value) || value.version !== 1 || !isRecord(value.defaultPairPolicy)
-    || !Array.isArray(value.relationOverrides) || !validCompletePairPolicy(value.defaultPairPolicy)) return undefined;
+    || !isUnknownArray(value.relationOverrides) || !validCompletePairPolicy(value.defaultPairPolicy)) return undefined;
   const base = readPairPolicy(value.defaultPairPolicy, DEFAULT_GRAPH_TOPOLOGY_PAIR_POLICY_V1);
   const overrides: GraphRelationPolicyOverrideV1[] = [];
   const ids = new Set<string>();
@@ -176,7 +176,7 @@ function readPairOverride(value: Record<string, JsonValue>): GraphRelationPolicy
     && (value.recursiveRegionSpacing.mode === 'off' || value.recursiveRegionSpacing.mode === 'target-region-closure')) {
     result.recursiveRegionSpacing = { mode: value.recursiveRegionSpacing.mode };
   }
-  return result as GraphRelationPolicyOverrideV1['override'];
+  return result;
 }
 
 function validCompletePairPolicy(value: Record<string, JsonValue>): boolean {
@@ -240,7 +240,7 @@ function cloneLayoutPolicy(policy: GraphTopologyLayoutPolicyV1): GraphTopologyLa
 }
 
 function compareOverrides(left: GraphRelationPolicyOverrideV1, right: GraphRelationPolicyOverrideV1): number { return left.priority - right.priority || left.id.localeCompare(right.id); }
-function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
+function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> { return value !== null && typeof value === 'object' && !isUnknownArray(value); }
 function finite(value: JsonValue | undefined, fallback: number): number { return typeof value === 'number' && Number.isFinite(value) ? value : fallback; }
 function positive(value: JsonValue | undefined, fallback: number): number { const n = finite(value, fallback); return n > 0 ? n : fallback; }
 function nonNegative(value: JsonValue | undefined, fallback: number): number { const n = finite(value, fallback); return n >= 0 ? n : fallback; }
@@ -250,3 +250,7 @@ function copyNonNegative(source: Record<string, JsonValue>, target: Record<strin
 function finiteValue(value: JsonValue | undefined): value is number { return typeof value === 'number' && Number.isFinite(value); }
 function positiveValue(value: JsonValue | undefined): value is number { return finiteValue(value) && value > 0; }
 function nonNegativeValue(value: JsonValue | undefined): value is number { return finiteValue(value) && value >= 0; }
+
+function isUnknownArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
+}

@@ -16,8 +16,8 @@ export class ConsumerReactionRegistryV1 {
     this.requireActive();
     requireId(consumerId, 'consumer ID');
     const checked = registrations.map(validateReaction);
-    const consumer = this.consumers.get(consumerId) ?? new Map();
-    const owned = consumer.get(owner) ?? new Map();
+    const consumer = this.consumers.get(consumerId) ?? new Map<object, Map<string, GraphReactionRegistrationV1>>();
+    const owned = consumer.get(owner) ?? new Map<string, GraphReactionRegistrationV1>();
     for (const registration of checked) {
       if (owned.has(registration.id)) {
         throw new Error(`Duplicate reaction "${registration.id}" for consumer "${consumerId}".`);

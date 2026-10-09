@@ -1121,10 +1121,6 @@ function deterministicDirection(a: string, b: string, dimensions: GraphDimension
   return { x: Math.cos(angle), y: Math.sin(angle), z: dimensions === '3d' ? Math.sin(angle * 0.7) * 0.5 : 0 };
 }
 
-function magnitude(value: Vec3): number {
-  return Math.hypot(value.x, value.y, value.z);
-}
-
 function firstFiniteEdgeValue(
   edgeIds: readonly string[],
   values: Readonly<Record<string, number>> | undefined,

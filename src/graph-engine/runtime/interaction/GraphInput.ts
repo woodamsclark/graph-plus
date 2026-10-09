@@ -51,7 +51,7 @@ export class GraphInput {
     const pointers = [...this.activePointers];
     this.activePointers.clear();
     for (const pointerId of pointers) {
-      try { this.options.element.releasePointerCapture(pointerId); } catch {}
+      try { this.options.element.releasePointerCapture(pointerId); } catch { /* Pointer capture may already be released or unsupported on this surface. */ }
     }
     this.mouseInside = false;
     this.lastMod = false;
@@ -113,7 +113,7 @@ export class GraphInput {
     if (!this.enabled || this.disposed) return;
     event.preventDefault();
     try { this.options.element.focus({ preventScroll: true }); } catch { this.options.element.focus(); }
-    try { this.options.element.setPointerCapture(event.pointerId); } catch {}
+    try { this.options.element.setPointerCapture(event.pointerId); } catch { /* Pointer capture may already be released or unsupported on this surface. */ }
     this.activePointers.add(event.pointerId);
     const pointerKind = pointerKindOf(event.pointerType);
     if (pointerKind !== 'mouse') this.mouseInside = false;
@@ -216,7 +216,7 @@ export class GraphInput {
     event.preventDefault();
     this.activePointers.delete(event.pointerId);
     if (this.longPressPointer?.pointerId === event.pointerId) this.clearLongPress();
-    try { this.options.element.releasePointerCapture(event.pointerId); } catch {}
+    try { this.options.element.releasePointerCapture(event.pointerId); } catch { /* Pointer capture may already be released or unsupported on this surface. */ }
     this.push({
       ...this.base(),
       type: 'pointer-up',
@@ -251,7 +251,7 @@ export class GraphInput {
     this.lastMod = this.lastCtrl = this.lastMeta = this.lastShift = this.lastAlt = false;
     this.physicalCtrlHeld = this.spaceHeld = false;
     for (const pointerId of pointers) {
-      try { this.options.element.releasePointerCapture(pointerId); } catch {}
+      try { this.options.element.releasePointerCapture(pointerId); } catch { /* Pointer capture may already be released or unsupported on this surface. */ }
     }
     this.push({ ...this.base(), type: 'cancel-input' });
   }

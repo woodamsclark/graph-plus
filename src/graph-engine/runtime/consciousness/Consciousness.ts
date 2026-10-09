@@ -130,7 +130,8 @@ export interface ConsciousnessReconciliation {
   readonly attentionNodeIds: Iterable<string>;
   readonly availableNodeIds: ReadonlySet<string>;
   readonly relationships?: ReadonlyMap<string, ReadonlySet<string>>;
-  /** @deprecated Compatibility input; values contribute to ConsciousField, not Awareness. */
+  readonly consciousFieldNodeIds?: Iterable<string>;
+  /** @deprecated Use consciousFieldNodeIds. Values contribute to ConsciousField, not Awareness. */
   readonly peripheralAwarenessNodeIds?: Iterable<string>;
 }
 
@@ -246,7 +247,9 @@ export class Consciousness {
       options.availableNodeIds,
       consciousFieldNodeIds,
     );
-    for (const nodeId of options.peripheralAwarenessNodeIds ?? []) {
+    const legacyField: { readonly peripheralAwarenessNodeIds?: Iterable<string> } = options;
+    // Legacy input still feeds ConsciousField, never deliberate Awareness.
+    for (const nodeId of [...(options.consciousFieldNodeIds ?? []), ...(legacyField.peripheralAwarenessNodeIds ?? [])]) {
       if (options.availableNodeIds.has(nodeId)) consciousFieldNodeIds.add(nodeId);
     }
     this.currentAttention = { nodeIds: attentionNodeIds };

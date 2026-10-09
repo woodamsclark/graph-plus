@@ -288,7 +288,7 @@ export class GraphEngineProviderCoreV1 {
           await this.onProfilesChanged();
         } catch (error) {
           this.profiles.setUserOverrides(consumerId, profileId, overrides);
-          try { await this.onProfilesChanged(); } catch {}
+          try { await this.onProfilesChanged(); } catch { /* A failed consumer callback must not interrupt provider cleanup or other consumers. */ }
           throw error;
         }
       },
@@ -299,7 +299,7 @@ export class GraphEngineProviderCoreV1 {
           await this.onProfilesChanged();
         } catch (error) {
           this.profiles.setUserOverrides(consumerId, profileId, overrides);
-          try { await this.onProfilesChanged(); } catch {}
+          try { await this.onProfilesChanged(); } catch { /* A failed consumer callback must not interrupt provider cleanup or other consumers. */ }
           throw error;
         }
       },
@@ -310,7 +310,7 @@ export class GraphEngineProviderCoreV1 {
           await this.onProfilesChanged(mode);
         } catch (error) {
           this.profiles.setUserOverrides(consumerId, profileId, overrides);
-          try { await this.onProfilesChanged(); } catch {}
+          try { await this.onProfilesChanged(); } catch { /* A failed consumer callback must not interrupt provider cleanup or other consumers. */ }
           throw error;
         }
       },
@@ -392,7 +392,7 @@ function failure(code: GraphEngineConnectionErrorV1['code'], message: string): G
 }
 
 function uniqueIds(values: readonly string[], label: string): readonly string[] {
-  if (!Array.isArray(values) || values.some((value) => typeof value !== 'string' || value.trim().length === 0)) {
+  if (!isUnknownArray(values) || values.some((value) => typeof value !== 'string' || value.trim().length === 0)) {
     throw new Error(`${label} must contain non-empty strings.`);
   }
   return [...new Set(values)];
@@ -405,4 +405,8 @@ function requireId(value: string, label: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isUnknownArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
 }

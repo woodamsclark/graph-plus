@@ -45,3 +45,7 @@ export class Setting {
 }
 
 export function setIcon(element: HTMLElement, icon: string): void { element.dataset.icon = icon; }
+
+export class Notice {
+  constructor(readonly message: string) {}
+}

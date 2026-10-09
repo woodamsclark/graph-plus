@@ -66,7 +66,10 @@ function flattenValues(value: unknown): string[] {
   if (value === null || value === undefined) return [];
   if (Array.isArray(value)) return value.flatMap(flattenValues);
   if (isRecord(value)) return Object.entries(value).flatMap(([key, nested]) => [key.toLowerCase(), ...flattenValues(nested)]);
-  return [String(value).toLowerCase()];
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return [String(value).toLowerCase()];
+  }
+  return []; // Functions and symbols are not searchable frontmatter values.
 }
 
 function normalizeTag(tag: string): string {

@@ -111,7 +111,7 @@ export function resolveEgoInteractionPlanV1(
     && membershipAction !== 'remove' && action !== 'choose-constellation';
   const constellationPathNodeIds = addsMember
     && GRAPH_VIEW_DEFINITIONS_V1[before.viewId].interactions.membershipAddition === 'candidate-and-nearest-path'
-    ? resolveGraphHoverPathV1(nodeId!, { edges: context.edges ?? [],
+    ? resolveGraphHoverPathV1(nodeId, { edges: context.edges ?? [],
       visibleNodeIds: context.visibleNodeIds, visibleEdgeIds: context.visibleEdgeIds,
       topology: context.topology,
       targetNodeIds: new Set(before.attentionNodeIds) }) : [];

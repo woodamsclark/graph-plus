@@ -1,14 +1,14 @@
 import {
   ANIMA_STATE_PRESENTATION_POLICIES_V1,
-  type AnimaPresentationRoleV1,
+  type AnimaPresentationPhaseV1,
 } from './AnimaAwareness.ts';
 import type { GraphUxStateV1 } from '../interaction/index.ts';
 
 export interface AnimaInteractionPresentationV1 {
-  readonly selection: AnimaPresentationRoleV1;
-  readonly selectionNeighborhood: AnimaPresentationRoleV1;
-  readonly focusedNeighborhood: AnimaPresentationRoleV1;
-  readonly graphContext: AnimaPresentationRoleV1;
+  readonly selection: AnimaPresentationPhaseV1;
+  readonly selectionNeighborhood: AnimaPresentationPhaseV1;
+  readonly focusedNeighborhood: AnimaPresentationPhaseV1;
+  readonly graphContext: AnimaPresentationPhaseV1;
 }
 
 /** @deprecated Compatibility projection of Anima's state-scoped presentation policy. */

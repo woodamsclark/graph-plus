@@ -99,7 +99,7 @@ export class ObsidianGraphBridgeV1 implements GraphPlusNavigatorV1<TFile> {
     const leaf = this.app.workspace.getLeavesOfType('search')[0] ?? this.app.workspace.getRightLeaf(false);
     if (!leaf) return;
     await leaf.setViewState({ type: 'search', active: true, state: { query: `tag:#${tag}` } }, { focus: true });
-    this.app.workspace.revealLeaf(leaf);
+    await this.app.workspace.revealLeaf(leaf);
   }
 
   private track(owner: { offref(ref: EventRef): void }, ref: EventRef): void {

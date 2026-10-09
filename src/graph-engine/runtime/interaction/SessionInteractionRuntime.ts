@@ -516,7 +516,7 @@ export class SessionInteractionRuntime {
         });
         return;
       }
-      case 'set-preview-hover':
+      case 'set-preview-hover': {
         if (command.nodeId === undefined && this.previewSurfaceActive) return;
         if (command.nodeId === undefined && this.previewedNodeId !== undefined) {
           if (this.previewReleaseTimer !== undefined) return;
@@ -546,6 +546,7 @@ export class SessionInteractionRuntime {
           ...(command.point ? { anchor: { ...command.point } } : {}),
         });
         return;
+      }
       case 'drag-start': {
         const preview = this.presentedHoverNodeId === command.nodeId
           ? this.presentedHoverPreview
@@ -607,7 +608,6 @@ export class SessionInteractionRuntime {
   }
 
   private navigationPivot(): Vec3 | undefined {
-    const navigation = this.getNavigationState();
     if (this.navigationPeek) {
       this.navigationPeek.navigated = true;
       return this.options.vision.deriveCentroid(

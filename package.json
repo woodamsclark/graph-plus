@@ -16,11 +16,14 @@
     "benchmark:vault": "node --expose-gc scripts/benchmark-graph-plus-vault.mjs",
     "dev": "npm run typecheck && npm run build",
     "release": "node scripts/release-graph-plus.mjs",
-    "release:public": "node scripts/release-graph-plus.mjs --public"
+    "release:public": "node scripts/release-graph-plus.mjs --public",
+    "lint:submission": "eslint src packages/graph-engine-client/src"
   },
   "devDependencies": {
     "@types/node": "^20.5.1",
     "esbuild": "^0.18.11",
+    "eslint": "^10.12.0",
+    "eslint-plugin-obsidianmd": "^0.4.2",
     "happy-dom": "^20.11.6",
     "obsidian": "^1.11.0",
     "ts-morph": "^27.0.2",

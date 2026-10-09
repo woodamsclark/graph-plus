@@ -1430,7 +1430,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const subscription = this.subscribe(this.errorListeners, listener);
     const deferred = this.deferredErrors.splice(0);
     for (const error of deferred) {
-      try { listener({ ...error }); } catch {}
+      try { listener({ ...error }); } catch { /* Continue cleanup even when a detached surface or optional callback fails. */ }
     }
     return subscription;
   }
@@ -1928,7 +1928,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         && intent.focusedNodeId !== this.observedFocusedNodeId;
       this.observedFocusedNodeId = intent.focusedNodeId;
       return changed
-        ? [{ type: 'node-focused', subjectId: intent.focusedNodeId!, timestamp: intent.timestamp }]
+        ? [{ type: 'node-focused', subjectId: intent.focusedNodeId, timestamp: intent.timestamp }]
         : [];
     }
     return [];
@@ -2106,7 +2106,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   private emitWorldChanged(cause: GraphWorldChangedEventV1['cause']): void {
     for (const listener of [...this.worldInvalidatedListeners]) {
-      try { listener({ sessionId: this.sessionId, cause }); } catch {}
+      try { listener({ sessionId: this.sessionId, cause }); } catch { /* Continue cleanup even when a detached surface or optional callback fails. */ }
     }
     if (!this.worldChangedListeners.size) return;
     const document = this.store.readDocument();
@@ -2120,7 +2120,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       layoutModuleState: this.moduleHost.exportCapabilityState('layout'),
     };
     for (const listener of [...this.worldChangedListeners]) {
-      try { listener({ sessionId: this.sessionId, cause, state }); } catch {}
+      try { listener({ sessionId: this.sessionId, cause, state }); } catch { /* Continue cleanup even when a detached surface or optional callback fails. */ }
     }
   }
 
@@ -2141,7 +2141,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private emitSessionOverridesChanged(): void {
     const overrides = cloneOverrides(this.sessionOverrides);
     for (const listener of [...this.overrideListeners]) {
-      try { listener(cloneOverrides(overrides)); } catch {}
+      try { listener(cloneOverrides(overrides)); } catch { /* Continue cleanup even when a detached surface or optional callback fails. */ }
     }
   }
 }

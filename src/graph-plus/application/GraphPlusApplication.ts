@@ -839,7 +839,7 @@ export class GraphPlusApplicationV1<TFile> {
     }
     try {
       await presentation.close();
-      if (handoffError) throw handoffError;
+      if (handoffError) throw asRuntimeError(handoffError);
     } finally {
       if (wasLayoutAuthority && !this.disposed) this.electLayoutAuthority();
     }
@@ -1007,7 +1007,7 @@ export class GraphPlusApplicationV1<TFile> {
   }
 
   /** Compatibility ingress for existing hosts. */
-  receiveHostEvent(event: GraphPlusHostEventV1): void {
+  receiveHostEvent(event: GraphPlusUnconsciousActivityV1): void {
     this.receiveUnconsciousActivity(event);
   }
 
@@ -1098,7 +1098,7 @@ export class GraphPlusApplicationV1<TFile> {
     this.hostActivityListeners.clear();
     const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
     if (failed) throw failed.reason;
-    if (handoffError) throw handoffError;
+    if (handoffError) throw asRuntimeError(handoffError);
   }
 
   private async reconcileUntilSettled(): Promise<void> {
@@ -1215,4 +1215,9 @@ function sameNodeIds(left: readonly string[], right: readonly string[]): boolean
 }
 function settledForceLayoutState() {
   return { schemaVersion: 1, alpha: 0, alphaTarget: 0, running: false, velocities: {} };
+}
+
+function asRuntimeError(value: unknown): Error {
+  if (value instanceof Error) return value;
+  return Object.assign(new Error(typeof value === "string" ? value : "Graph+ world handoff failed."), { cause: value });
 }

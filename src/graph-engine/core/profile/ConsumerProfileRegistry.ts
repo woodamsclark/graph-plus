@@ -142,7 +142,7 @@ export class ConsumerProfileRegistry {
   }
 
   restoreSnapshot(snapshot: ConsumerProfileRegistrySnapshotV1): void {
-    if (snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.consumers)) {
+    if (snapshot.schemaVersion !== 1 || !isUnknownArray(snapshot.consumers)) {
       throw new Error('Unsupported consumer profile snapshot.');
     }
     const restoredConsumers = new Map<string, StoredConsumer>();
@@ -154,7 +154,7 @@ export class ConsumerProfileRegistry {
       }
       const registration = cloneConsumerRegistration(stored.registration);
       restoredConsumers.set(registration.consumerId, { registration, active: false });
-      for (const [profileId, overrides] of Object.entries(stored.profileOverrides ?? {}) as [string, GraphSettingsOverridesV1][]) {
+      for (const [profileId, overrides] of Object.entries<GraphSettingsOverridesV1>(stored.profileOverrides ?? {})) {
         if (!registration.profiles.some((profile) => profile.profileId === profileId)) {
           throw new Error(`Unknown persisted profile "${registration.consumerId}/${profileId}".`);
         }
@@ -188,7 +188,7 @@ export class ConsumerProfileRegistry {
       readonly sessionOverrides?: GraphSettingsOverridesV1;
     } = {},
   ): EffectiveConsumerProfileV1 {
-    const { registration, profile } = this.requireProfile(consumerId, profileId);
+    const { profile } = this.requireProfile(consumerId, profileId);
     const global = cloneOverrides(options.globalOverrides ?? {});
     const user = cloneOverrides(this.userOverrides.get(profileKey(consumerId, profileId)) ?? {});
     const session = cloneOverrides(options.sessionOverrides ?? {});
@@ -544,7 +544,7 @@ function validateConsumerRegistration(registration: ConsumerRegistrationV1): voi
     }
     validateDimensions(profile.dimensions, 'profile dimensions');
     const allowedDimensions = profile.allowedDimensions ?? ['2d', '3d'];
-    if (!Array.isArray(allowedDimensions) || allowedDimensions.length === 0) {
+    if (!isUnknownArray(allowedDimensions) || allowedDimensions.length === 0) {
       throw new Error('Allowed dimensions must contain at least one dimension.');
     }
     allowedDimensions.forEach((value) => validateDimensions(value, 'allowed dimension'));
@@ -578,7 +578,7 @@ function validateConsumerRegistration(registration: ConsumerRegistrationV1): voi
 function validateConstraint(moduleId: string, setting: string, constraint: ModuleSettingConstraintV1): void {
   if (constraint.type === 'readonly') return;
   if (constraint.type === 'enum') {
-    if (!Array.isArray(constraint.allowed)) throw new Error(`Enum constraint for "${moduleId}.${setting}" needs allowed values.`);
+    if (!isUnknownArray(constraint.allowed)) throw new Error(`Enum constraint for "${moduleId}.${setting}" needs allowed values.`);
     constraint.allowed.forEach(cloneJsonValue);
     return;
   }
@@ -737,8 +737,8 @@ function cloneJsonRecord(record: Readonly<Record<string, JsonValue>>): Record<st
 
 function cloneJsonValue(value: JsonValue): JsonValue {
   if (!isJsonValue(value)) throw new Error('Settings values must be finite JSON values.');
-  if (Array.isArray(value)) return value.map(cloneJsonValue);
-  if (value !== null && typeof value === 'object') return cloneJsonRecord(value as Readonly<Record<string, JsonValue>>);
+  if (isUnknownArray(value)) return value.map(cloneJsonValue);
+  if (value !== null && typeof value === 'object') return cloneJsonRecord(value);
   if (typeof value === 'number' && !Number.isFinite(value)) throw new Error('JSON numbers must be finite.');
   return value;
 }
@@ -751,14 +751,14 @@ function cloneConstraint(constraint: ModuleSettingConstraintV1): ModuleSettingCo
 function isJsonValue(value: unknown): value is JsonValue {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
   if (typeof value === 'number') return Number.isFinite(value);
-  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (isUnknownArray(value)) return value.every(isJsonValue);
   if (!isPlainRecord(value)) return false;
   return Object.values(value).every(isJsonValue);
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
+  if (value === null || typeof value !== 'object' || isUnknownArray(value)) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
 
@@ -775,7 +775,12 @@ function requireId(value: string, label: string): void {
 }
 
 function validateStringArray(value: readonly string[], label: string): void {
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string' || entry.trim().length === 0)) {
+  if (!isUnknownArray(value) || value.some((entry) => typeof entry !== 'string' || entry.trim().length === 0)) {
     throw new Error(`${label} must contain non-empty strings.`);
   }
+}
+
+/** Preserve unknown element types instead of the built-in any[] narrowing. */
+function isUnknownArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
 }

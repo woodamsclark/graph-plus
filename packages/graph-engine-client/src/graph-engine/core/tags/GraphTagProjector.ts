@@ -14,7 +14,7 @@ export function projectGraphTagsV1(
   input: GraphTagProjectionInputV1,
 ): GraphDocumentV1 {
   assertGraphDocumentV1(baseDocument);
-  if (!input || input.version !== 1 || !Array.isArray(input.tags) || !Array.isArray(input.memberships)) {
+  if (!input || input.version !== 1 || !isUnknownArray(input.tags) || !isUnknownArray(input.memberships)) {
     fail('Tag projection must contain version 1 tag and membership arrays.');
   }
 
@@ -25,7 +25,7 @@ export function projectGraphTagsV1(
     if (!tag || typeof tag.nodeId !== 'string' || !tag.nodeId || tagIds.has(tag.nodeId)) {
       fail(`Duplicate, missing, or invalid tag node ID.`);
     }
-    if (tag.parentTagNodeIds !== undefined && !Array.isArray(tag.parentTagNodeIds)) {
+    if (tag.parentTagNodeIds !== undefined && !isUnknownArray(tag.parentTagNodeIds)) {
       fail(`Tag "${tag.nodeId}" parentTagNodeIds must be an array.`);
     }
     if (baseNodeIds.has(tag.nodeId)) fail(`Tag node ID "${tag.nodeId}" collides with a base node.`);
@@ -134,3 +134,8 @@ function assertAcyclic(children: ReadonlyMap<string, ReadonlySet<string>>, sourc
 function pairKey(left: string, right: string): string { return `${left}\u0000${right}`; }
 function splitPairKey(value: string): readonly [string, string] { const at = value.indexOf('\u0000'); return [value.slice(0, at), value.slice(at + 1)]; }
 function fail(message: string): never { throw new InvalidGraphTagProjectionErrorV1(message); }
+
+/** Preserve unknown element types instead of the built-in any[] narrowing. */
+function isUnknownArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
+}

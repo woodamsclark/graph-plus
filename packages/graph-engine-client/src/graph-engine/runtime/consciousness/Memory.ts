@@ -77,7 +77,7 @@ export class MemoryV1 {
     this.bucketsByKey.clear();
     this.totalObservations = 0;
     if (snapshot.schemaVersion !== 1 || !Number.isSafeInteger(snapshot.observationCount)
-      || snapshot.observationCount < 0 || !Array.isArray(snapshot.buckets)) return;
+      || snapshot.observationCount < 0 || !isUnknownArray(snapshot.buckets)) return;
     for (const source of snapshot.buckets) {
       if (!validBucket(source)) continue;
       const bucket = { ...source };
@@ -205,4 +205,9 @@ function validBucket(bucket: MemoryBucketV1): boolean {
     && Number.isFinite(bucket.firstAt) && Number.isFinite(bucket.lastAt)
     && Number.isFinite(bucket.averageAt) && bucket.firstAt <= bucket.averageAt
     && bucket.averageAt <= bucket.lastAt;
+}
+
+/** Preserve unknown element types instead of the built-in any[] narrowing. */
+function isUnknownArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
 }

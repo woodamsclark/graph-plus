@@ -24,7 +24,6 @@ export class GraphEngineSettingTab extends PluginSettingTab {
   }
 
   private renderGeneral(parent: HTMLElement): void {
-    new Setting(parent).setName('General').setHeading();
     const settings = this.graphPlus.settings;
     new Setting(parent).setName('Enable graph+').setDesc('Allow the graph+ view and commands.')
       .addToggle((toggle) => toggle.setValue(settings.enabled).onChange(async (enabled) => {

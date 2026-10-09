@@ -94,6 +94,16 @@ function presentation(options: {
   });
 }
 
+test('ConsciousField merges current and legacy inputs without promoting them into Awareness', () => {
+  const consciousness = new Consciousness();
+  const state = consciousness.reconcile({
+    attentionNodeIds: ['a'], availableNodeIds: new Set(['a', 'b', 'c']),
+    consciousFieldNodeIds: ['b', 'missing'], peripheralAwarenessNodeIds: ['b', 'c'],
+  });
+  deepEqual([...state.awareness.nodeIds], ['a'], 'field contributions must not become deliberate Awareness');
+  deepEqual([...state.consciousField.nodeIds], ['a', 'b', 'c'], 'new and legacy fields merge, deduplicate, and exclude absent nodes');
+});
+
 test('Consciousness holds geometry-free Attention and Awareness while Ego proposes intent', () => {
   const consciousness = new Consciousness();
   const state = consciousness.reconcile({

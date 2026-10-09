@@ -1,6 +1,5 @@
 import type {
   ConsumerProfileDescriptorV1,
-  GraphContextMenuOptionsV1,
   GraphQuickSettingsOptionsV1,
   GraphQuickSettingsSectionOptionsV1,
   GraphSessionUiOptionsV1,

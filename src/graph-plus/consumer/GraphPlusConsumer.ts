@@ -2,7 +2,7 @@
 export {
   GraphPlusApplicationV1,
   GraphPlusPresentationV1,
-  GraphPlusConsumerV1,
+  GraphPlusPresentationV1 as GraphPlusConsumerV1,
   type GraphPlusApplicationOptionsV1,
   type GraphPlusPresentationOptionsV1,
   type GraphPlusConsumerOptionsV1,

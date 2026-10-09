@@ -967,7 +967,7 @@ export class GraphInteractionInterpreter {
     source: { readonly identity: InputGraphIdentityV1; readonly timestamp: number },
     command: GraphRuntimeCommandPayloadV1,
   ): void {
-    this.options.commands.push({ ...command, identity: { ...source.identity }, timestamp: source.timestamp } as GraphRuntimeCommandV1);
+    this.options.commands.push({ ...command, identity: { ...source.identity }, timestamp: source.timestamp });
   }
 }
 

@@ -95,8 +95,8 @@ export function validateGraphDocumentV1(value: unknown): GraphDocumentValidation
     errors.push(error('invalid-revision', '$.revision', 'Revision must be a non-negative safe integer.'));
   }
 
-  const nodes = Array.isArray(value.nodes) ? value.nodes : null;
-  const edges = Array.isArray(value.edges) ? value.edges : null;
+  const nodes = isUnknownArray(value.nodes) ? value.nodes : null;
+  const edges = isUnknownArray(value.edges) ? value.edges : null;
   if (!nodes) errors.push(error('invalid-node', '$.nodes', 'Nodes must be an array.'));
   if (!edges) errors.push(error('invalid-edge', '$.edges', 'Edges must be an array.'));
 
@@ -243,7 +243,7 @@ function validateNodeRegions(
   if (value.version !== 1) {
     errors.push(error('invalid-node-regions', `${path}.version`, 'Expected node-regions version 1.'));
   }
-  if (!Array.isArray(value.definitions)) {
+  if (!isUnknownArray(value.definitions)) {
     errors.push(error('invalid-node-regions', `${path}.definitions`, 'Definitions must be an array.'));
     return;
   }
@@ -262,7 +262,7 @@ function validateNodeRegions(
       'invalid-node-regions',
       errors,
     );
-    if (!Array.isArray(definition.directMemberNodeIds)) {
+    if (!isUnknownArray(definition.directMemberNodeIds)) {
       errors.push(error(
         'invalid-node-regions',
         `${definitionPath}.directMemberNodeIds`,
@@ -362,7 +362,7 @@ function cloneEdge(edge: GraphEdgeV1): GraphEdgeV1 {
 
 function cloneAttributes(attributes: Readonly<Record<string, GraphAttributeValue>>): Record<string, GraphAttributeValue> {
   return Object.fromEntries(
-    Object.entries(attributes).map(([key, value]) => [key, Array.isArray(value) ? [...value] : value]),
+    Object.entries(attributes).map(([key, value]) => [key, isUnknownArray(value) ? [...value] : value]),
   );
 }
 
@@ -385,7 +385,7 @@ function validateOptionalTokens(
   code: GraphDocumentValidationCodeV1,
 ): void {
   if (value.tokens === undefined) return;
-  if (!Array.isArray(value.tokens) || value.tokens.some((token) => typeof token !== 'string')) {
+  if (!isUnknownArray(value.tokens) || value.tokens.some((token) => typeof token !== 'string')) {
     errors.push(error(code, `${path}.tokens`, 'Tokens must be an array of strings.'));
   }
 }
@@ -445,7 +445,7 @@ function validateId(
 
 function isGraphAttributeValue(value: unknown): value is GraphAttributeValue {
   if (isGraphScalar(value)) return true;
-  return Array.isArray(value) && value.every(isGraphScalar);
+  return isUnknownArray(value) && value.every(isGraphScalar);
 }
 
 function isGraphScalar(value: unknown): value is GraphScalar {
@@ -457,8 +457,8 @@ function isFiniteNumber(value: unknown): value is number {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
+  if (value === null || typeof value !== 'object' || isUnknownArray(value)) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
 
@@ -476,4 +476,9 @@ function invalid(
   message: string,
 ): GraphDocumentValidationResultV1 {
   return { valid: false, errors: [error(code, path, message)] };
+}
+
+/** Preserve unknown element types instead of the built-in any[] narrowing. */
+function isUnknownArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
 }

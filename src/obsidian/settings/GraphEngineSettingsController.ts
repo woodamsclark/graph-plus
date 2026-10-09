@@ -132,7 +132,7 @@ export class GraphEngineSettingsControllerV1 {
       await this.save();
     } catch (error) {
       this.globalOverrides = previous;
-      try { await this.save(); } catch {}
+      try { await this.save(); } catch { /* Preserve the original transaction error if persisting its rollback also fails. */ }
       throw error;
     }
   }
@@ -148,7 +148,7 @@ export class GraphEngineSettingsControllerV1 {
       await this.save();
     } catch (error) {
       this.profiles.setUserOverrides(consumerId, profileId, previous);
-      try { await this.save(); } catch {}
+      try { await this.save(); } catch { /* Preserve the original transaction error if persisting its rollback also fails. */ }
       throw error;
     }
   }

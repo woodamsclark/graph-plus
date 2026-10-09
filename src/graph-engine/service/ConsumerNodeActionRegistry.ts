@@ -150,7 +150,7 @@ export class ConsumerNodeActionRegistryV1 {
     if (!consumer) return undefined;
     if (owner) return consumer.get(owner);
     if (consumer.size !== 1) return undefined;
-    return consumer.values().next().value as Map<string, GraphNodeActionRegistrationV1> | undefined;
+    return consumer.values().next().value;
   }
 
   private requireActive(): void {
@@ -161,7 +161,7 @@ export class ConsumerNodeActionRegistryV1 {
 function validateNodeActions(
   actions: readonly GraphNodeActionRegistrationV1[],
 ): readonly GraphNodeActionRegistrationV1[] {
-  if (!Array.isArray(actions)) throw new Error('Node actions must be an array.');
+  if (!isUnknownArray(actions)) throw new Error('Node actions must be an array.');
   const checked = actions.map((action) => {
     requireId(action.id, 'node action ID');
     if (typeof action.label !== 'function') requireId(action.label, 'node action label');
@@ -190,4 +190,9 @@ function requireId(value: string, label: string): void {
 
 function isPromiseLike(value: unknown): value is PromiseLike<void> {
   return value !== null && typeof value === 'object' && typeof (value as PromiseLike<void>).then === 'function';
+}
+
+/** Preserve unknown element types instead of the built-in any[] narrowing. */
+function isUnknownArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
 }
