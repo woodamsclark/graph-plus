@@ -882,7 +882,13 @@ function projectedRadius(
 ): number {
   const policy = renderPolicy(frame);
   const legacyExponent = projection === 'orthographic' && policy.nodeScaleMode === 'sqrt-orthographic' ? 0.5 : 1;
-  const exponent = Math.max(0, Math.min(2, nodeScaleExponent ?? policy.nodeScaleExponent ?? legacyExponent));
+  const sharedExponent = Math.max(0, Math.min(2, policy.nodeScaleExponent ?? legacyExponent));
+  const requestedExponent = Math.max(0, Math.min(2, nodeScaleExponent ?? sharedExponent));
+  // Extra size contrast is a close-up effect. Applying it below unit zoom
+  // shrinks prominent nodes faster and can invert the world-radius ordering.
+  const exponent = projection === 'orthographic' && scale < 1
+    ? Math.min(requestedExponent, sharedExponent)
+    : requestedExponent;
   const projected = radius * Math.pow(Math.max(0, scale), exponent);
   if (projection !== 'perspective') return projected;
   const relativeFloor = radius * Math.max(0, policy.minimumPerspectiveNodeScale ?? 0);

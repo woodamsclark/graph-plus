@@ -952,6 +952,44 @@ test('label mode Off suppresses even hover-forced labels', () => {
   equal(fillTextY.length, 0, 'label mode off must suppress even the explicit hover label override');
 });
 
+test('distant 2D zoom preserves large-node prominence and the visible picking boundary', () => {
+  const arcRadii: number[] = [];
+  const context = recordingContext([], arcRadii);
+  const canvas = { getContext: () => context, remove: () => {} } as unknown as HTMLCanvasElement;
+  const camera = new GraphCameraController({
+    position: { x: 0, y: 0, z: 1000 }, target: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic',
+  }, '2d');
+  camera.setViewport(640, 360);
+  const frames = new GraphFrameStore();
+  const renderer = sceneRendererFixture(canvas, camera, frames, () => 0);
+  renderer.resize(640, 360, 1);
+  for (const zoom of [0.02, 0.1, 0.5, 1, 4]) {
+    camera.setState({ ...camera.getState(), zoom });
+    const radii: number[] = [];
+    for (const [id, radius, nodeScaleExponent] of [['small', 8, 0.5], ['large', 24, 2]] as const) {
+      arcRadii.length = 0;
+      frames.set({
+        regions: [], edges: [], ...RESOLVED_FRAME_STYLE,
+        nodes: [{ id, label: id, position: { x: 0, y: 0, z: 0 }, radius,
+          nodeScaleExponent, ...RESOLVED_NODE_STYLE }],
+        policy: { ...DEFAULT_GRAPH_PRESENTATION_POLICY_V2, labelMode: 'off',
+          nodeScaleMode: 'sqrt-orthographic', nodeScaleExponent: 0.5 },
+      });
+      renderer.render();
+      const expected = radius * Math.pow(zoom, zoom < 1 ? 0.5 : nodeScaleExponent);
+      assert(Math.abs(arcRadii[0] - expected) < 1e-10, 'overview scaling stays gentle; close-up contrast remains');
+      radii.push(arcRadii[0]);
+      equal(renderer.hitTest({ x: 320 + Math.min(expected * 0.9, 200), y: 180 })?.nodeId, id,
+        'the visible disc remains pickable near its edge');
+    }
+    assert(radii[1] > radii[0], 'large nodes must remain larger throughout the 2D zoom range');
+    if (zoom <= 1) assert(Math.abs(radii[1] / radii[0] - 3) < 1e-10,
+      'overview preserves the structural radius ratio');
+  }
+  renderer.dispose();
+});
+
 test('node scaling supports calm, world, and exaggerated responses in 2D and 3D', () => {
   const arcRadii: number[] = [];
   const context = recordingContext([], arcRadii);

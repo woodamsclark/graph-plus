@@ -248,13 +248,16 @@ Equal-sized nodes retain exponent `0.5`.
 In an orthographic 2D view, the effective screen radius is:
 
 ```text
-screenRadius = worldRadius * cameraZoom ^ nodeScaleExponent
+effectiveExponent = cameraZoom < 1 ? min(nodeScaleExponent, 0.5) : nodeScaleExponent
+screenRadius = worldRadius * cameraZoom ^ effectiveExponent
 ```
 
 Node coordinates continue to use the camera's ordinary linear world-to-screen
 projection. Small nodes respond gently to zoom, while larger nodes respond more
-strongly. The former square-root response remains the smallest-node and equal-size
-fallback.
+strongly when zoomed in. Below unit zoom, all Anima nodes share the square-root
+response so larger nodes retain their structural size ratio instead of shrinking
+faster and becoming smaller than low-degree nodes. The transition is continuous
+at unit zoom. Drawing, edge clipping, and picking use the same resolved radius.
 
 This is presentation scaling, not a change to wheel/pinch behavior, camera bounds,
 node positions, force mass, collision radius, or topology.
