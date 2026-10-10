@@ -12,6 +12,9 @@ import {
   resolveGraphSessionUiPolicyV1,
 } from '../../src/obsidian/graph-engine-ui/GraphEngineUiPolicy.ts';
 import { GraphEngineQuickSettingsDisclosureStateV1 } from '../../src/obsidian/graph-engine-ui/GraphEngineQuickSettingsDisclosureState.ts';
+import { GraphEngineQuickSettingsPanelV1 } from '../../src/obsidian/graph-engine-ui/GraphEngineQuickSettingsPanel.ts';
+import { GRAPH_VIEW_DEFINITIONS_V1, type GraphSessionV1, type GraphViewIdV1, type GraphViewUiStateV1 } from '../../src/graph-engine/contracts/v1/index.ts';
+import type { GraphEngineSessionUiMountContextV1 } from '../../src/graph-engine/service/index.ts';
 import { isQuickSettingsToggleKeyV1 } from '../../src/obsidian/graph-engine-ui/GraphEngineQuickSettingsShortcut.ts';
 import { ObsidianGraphUiLayoutV1 } from '../../src/obsidian/graph-engine-ui/ObsidianGraphUiLayout.ts';
 import { equal, test } from '../support/harness.ts';
@@ -85,6 +88,76 @@ test('R-UI-04 quick-setting disclosures retain their user state across panel ren
   equal(disclosures.resolve(SECTIONS.forces, false), true, 'an opened section should remain open after controls rerender');
   disclosures.remember(SECTIONS.filter, false);
   equal(disclosures.resolve(SECTIONS.filter, true), false, 'a closed default-open section should remain closed after controls rerender');
+});
+
+test('mobile constellation entry preserves current Quick Settings visibility', async () => {
+  const window = new Window();
+  const document = window.document as unknown as Document;
+  document.body.classList.add('is-mobile');
+  const container = document.createElement('div');
+  const canvas = document.createElement('canvas');
+  container.append(canvas);
+  document.body.append(container);
+  let activeViewId: GraphViewIdV1 = 'explore';
+  let onViewChanged: Parameters<GraphSessionV1['onViewChanged']>[0] | undefined;
+  const uiStates = new Map<GraphViewIdV1, GraphViewUiStateV1>([
+    ['explore', { quickSettingsOpen: true, expandedSectionIds: ['forces'] }],
+    ['overview', { quickSettingsOpen: false, expandedSectionIds: ['display'] }],
+    ['focus', { quickSettingsOpen: false, expandedSectionIds: [] }],
+  ]);
+  const subscription = { dispose() {} };
+  const context = {
+    container,
+    session: {
+      getActiveView: () => GRAPH_VIEW_DEFINITIONS_V1[activeViewId],
+      getAvailableViews: () => ['overview', 'explore', 'focus'],
+      getViewUiState: (id: GraphViewIdV1) => uiStates.get(id),
+      setViewUiState: (id: GraphViewIdV1, state: GraphViewUiStateV1) => uiStates.set(id, state),
+      onViewChanged: (callback: typeof onViewChanged) => { onViewChanged = callback; return subscription; },
+      onIntent: () => subscription,
+      onGraphChanged: () => subscription,
+      exportViewState: async () => ({ selectedNodeIds: ['a'] }),
+      exportEffectiveSettings: async () => ({}),
+      getDocumentStats: () => ({ nodes: 1, edges: 0 }),
+    },
+    controls: { onSessionOverridesChanged: () => subscription },
+    profileSettings: { commitSettings: async () => {} },
+  } as unknown as GraphEngineSessionUiMountContextV1;
+  const policy = resolveGraphSessionUiPolicyV1(descriptor(), {
+    quickSettings: { sections: Object.fromEntries(Object.values(SECTIONS).map(id => [id, { visibility: 'hidden' }])) },
+  });
+  const panel = new GraphEngineQuickSettingsPanelV1(context, policy);
+  const settle = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
+  const changeView = async (id: GraphViewIdV1) => {
+    activeViewId = id;
+    onViewChanged?.(id === 'focus' ? { id, subjectNodeId: 'a' } : { id });
+    await settle();
+  };
+  try {
+    panel.mount();
+    await settle();
+    const root = container.querySelector<HTMLElement>('[data-graph-engine-quick-settings]')!;
+    equal(root.classList.contains('is-collapsed'), false, 'saved visibility is restored at mount');
+    await changeView('overview');
+    canvas.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }) as unknown as Event);
+    await settle();
+    equal(root.classList.contains('is-collapsed'), true, 'outside touch closes the menu');
+    await changeView('explore');
+    equal(root.classList.contains('is-collapsed'), true, 'first-node entry cannot restore an old open Constellation menu');
+    equal(uiStates.get('explore')?.quickSettingsOpen, false, 'destination records current visibility');
+    equal(uiStates.get('explore')?.expandedSectionIds[0], 'forces', 'Constellation section disclosure survives');
+    await changeView('focus');
+    equal(root.classList.contains('is-collapsed'), true, 'Focus entry also preserves the closed menu');
+    root.querySelector<HTMLButtonElement>('[aria-label="Open graph controls"]')!.click();
+    await settle();
+    equal(root.classList.contains('is-collapsed'), false, 'explicit launcher activation opens the menu');
+    await changeView('overview');
+    equal(root.classList.contains('is-collapsed'), false, 'explicitly opened menu stays open on return');
+    equal(uiStates.get('overview')?.expandedSectionIds[0], 'display', 'Overview section disclosure survives');
+  } finally {
+    panel.dispose();
+    await window.happyDOM.close();
+  }
 });
 
 test('R-UI-11 collapsed launcher clears the Obsidian mobile header row', () => {

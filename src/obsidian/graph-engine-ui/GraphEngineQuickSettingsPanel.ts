@@ -90,8 +90,10 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     this.viewSubscription = this.context.session.onViewChanged((view) => {
       if (this.activeViewId === view.id) return;
       this.activeViewId = view.id;
-      this.collapsed = !(this.context.session.getViewUiState(this.activeViewId)?.quickSettingsOpen
-        ?? this.policy.quickSettings.visibility === 'shown');
+      // View navigation preserves the current menu visibility. Restoring an old
+      // open state here makes a first-node selection unexpectedly open controls.
+      // Expanded sections still belong to the destination View.
+      this.setCollapsed(this.collapsed);
       void this.render();
     });
     this.overrideSubscription = this.context.controls.onSessionOverridesChanged(() => {

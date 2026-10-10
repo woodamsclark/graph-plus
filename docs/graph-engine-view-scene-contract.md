@@ -512,8 +512,11 @@ this committed interest. View framing defines suggested interests and exit behav
 rather than owning the camera. The intent is session-local; the existing saved camera
 pose remains the persistence contract.
 Transient pointer ownership and Reflex receipts stay with interaction recognition.
-Per-View UI state can be retained by the session when switching Views, so returning
-does not unexpectedly collapse controls. The existing `GraphViewStateV1` remains a
+Per-View expanded sections are retained by the session when switching Views. Quick
+Settings preserves its current open/closed state across View changes, including
+first-node entry into Constellation and entry into Focus. Mounting the panel restores
+the active View's saved visibility; navigation never reopens a previously open menu.
+The existing `GraphViewStateV1` remains a
 broader saved-session format; it is not this small `ActiveViewState`.
 
 Quick Settings is part of the View's interface. Its controls declare visibility,
@@ -599,7 +602,8 @@ application shares canonical topology, coordinates, and pins.
   Camera ownership continues to use committed View facts. Primary desktop background
   drag pans in Focus in both dimensions; 2D retains elastic return. Hover paths use the
   same projected topology for presentation and hit eligibility.
-- Quick Settings uses View-declared sections/actions and per-View disclosure. Outside
+- Quick Settings uses View-declared sections/actions and per-View section disclosure,
+  while preserving current menu visibility during View navigation. Outside
   dismissal consumes the activation. Add/Remove constellation is a core object action.
   Experience restrictions suppress unavailable navigation actions.
 - Graph+ Show in Graph+ retains its explicit reveal-and-neighborhood-fit operation;
