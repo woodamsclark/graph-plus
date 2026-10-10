@@ -1,7 +1,7 @@
 {
   "id": "graph-plus",
   "name": "Graph+",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "minAppVersion": "1.13.7",
   "description": "Explore your vault as an interactive 2D or 3D graph, with persistent node positions and an engine that other plugins can embed.",
   "author": "Woodams Clark",

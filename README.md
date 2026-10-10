@@ -161,7 +161,7 @@ See [the graph-engine consumer guide](docs/graph-engine-consumer-guide.md) and t
 
 ## Compatibility
 
-Graph+ 2.0.3 requires Obsidian 1.13.7 or newer. Automated checks cover desktop
+Graph+ 2.0.4 requires Obsidian 1.13.7 or newer. Automated checks cover desktop
 and touch input paths; physical desktop and mobile acceptance is tracked in the
 [release safety checklist](docs/graph-plus-release-safety.md).
 

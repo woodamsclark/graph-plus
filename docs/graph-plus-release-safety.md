@@ -12,9 +12,9 @@ The release task creates no ZIP and excludes docs, source files, and local runti
 an RC before building or packaging. Promote the version only after release acceptance:
 update `manifest.json`, `package.json`, both root version fields in `package-lock.json`,
 and the matching minimum-Obsidian entry in `versions.json`. The GitHub tag must exactly
-match the manifest version, without `v`. The client package and generated artifact also report `2.0.3`; protocol version 1 is unchanged.
+match the manifest version, without `v`. The client package and generated artifact also report `2.0.4`; protocol version 1 is unchanged.
 
-The current stable release is `2.0.3`. Its compatibility entry and lockfile agree.
+The current stable release is `2.0.4`. Its compatibility entry and lockfile agree.
 No release task uploads, tags, or publishes anything. `releases/` is ignored by Git.
 
 ## Shutdown contract
@@ -82,7 +82,7 @@ setting is reversible, and no-op changes retain the document revision.
 
 The distributable engine client now declares MPL-2.0 and carries the same full LICENSE
 as its reviewed Graph+ source. The client generator copies that license; its package
-file list includes it. Client version 2.0.3 is aligned with the plugin release; the V1 protocol remains unchanged.
+file list includes it. Client version 2.0.4 is aligned with the plugin release; the V1 protocol remains unchanged.
 
 The README documents manual installation. Layout reset continues to require one
 Global pane for this release; settings now explain which panes to open or close.
@@ -133,3 +133,15 @@ now runs the Obsidian submission checker before packaging. Type checking, all
 513 tests, build, and exact three-file packaging pass. The local checker reports
 zero errors and 52 documented warnings; directory acceptance and live device
 verification remain separate.
+
+## Validation status for 2.0.4
+
+Hotfix for Quick Settings: View navigation preserves the current menu visibility,
+so first-node entry into Constellation cannot restore a stale open menu. Mobile
+panels fit their content and scroll within the available safe-area height. Expanded
+sections remain specific to each View. Mobile selection behavior was verified by
+the user; content sizing remains subject to live device verification.
+
+Release preflight passes TypeScript, all 514 tests, build, and exact three-file
+packaging. The submission checker reports zero errors and the same 52 documented
+warnings as 2.0.3.
