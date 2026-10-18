@@ -1,53 +1,85 @@
-# Active-note constellation lifecycle and clearing
+# Shared working constellation
 
-## Working constellation versus Memory
+Updated 2026-10-18. Working membership belongs to the Graph+ application, above
+Global and Local panes. This supersedes the per-presentation membership lifecycle.
 
-Workspace note activity always updates the bounded Graph+ session Memory (three
-previous notes and the current active note). A working constellation is separate:
-it accumulates active-note arrivals only while Graph+ presentations are attached.
-Closed-pane history must not enter a future working constellation implicitly.
+## Ownership and presentation
 
-The first presentation attachment discards any prior pending admissions. The last
-presentation detachment immediately discards pending admissions and invalidates the
-in-flight drain, before waiting for checkpoint saves or session disposal. A drain
-that was awaiting Local note-following must not admit its captured members into a
-presentation attached after that boundary. Opening still applies its initial session
-snapshot and seeds the current active note; saved Global constellations remain saved.
-Memory does not reset when panes close, and ordinary rapid switching with open panes
-still admits every arrival rather than losing intermediate notes during coalescing.
+`GraphPlusApplicationV1` owns one `GraphPlusConstellationV1`. Active-note arrivals
+while any presentation is attached, deliberate graph admissions, removals, and
+clear actions update that set. Each presentation installs a filtered projection
+through the engine's external-influence boundary. Peer installations emit no user
+selection/focus intentions and preserve camera framing, coordinates, and pins.
 
-## Change detection for visual Memory
+Opening Global after visiting A, B, C in Local must show the same A/B/C working
+constellation. This applies in either opening order and with multiple panes.
+Membership is independent of the three-note bounded Memory history. Hover and
+document-link peeking never admit members.
 
-Global and Local currently disable visual Memory constellations. Bounded note history
-still updates on every activation, but an unchanged projected remembered-subject list
-is installed only once per engine session. Repeated and identical in-flight snapshots
-share the same completion rather than sending another influence that invalidates
-presentation work. Failed installs are retryable, and a newly mounted engine session
-starts with a fresh projection cache. Working Attention and Local note-following are
-independent and continue to update normally.
+Focus subject, View, camera, hover, and filters remain local to each pane. Global
+can stay in Overview while Local follows the active note in Focus. A pane filter
+can hide members but cannot remove them from the application; removing the filter
+reprojects them. Deliberate edits report membership deltas so concurrent edits in
+different panes do not overwrite one another's additions or hidden members.
 
-## Clear action in Quick Settings
+## Lifetime and persistence
 
-Global retains the engine's deliberate clear-constellation View command. A Focus-only
-experience cannot request Overview with empty Attention. Its Quick Settings clear
-control resolves a registered consumer clear action on a selected member instead.
-Graph+'s action runs `GraphPlusPresentationV1.clearConstellation()`: Local retains
-its focused root as the only selected member and stays in Focus. Clearing cancels
-pending per-presentation admissions and preserves camera framing, layout, and pins.
-A Focus-only consumer without an available registered clear action has no clear
-button, rather than a button that requests a rejected transition.
+Closing every pane retains the application constellation. While all panes are
+closed, note activity updates bounded Memory but does not accumulate new working
+members. Reopening seeds the current active note without replaying closed history.
+An old in-flight Local follow cannot change a newly opened pane's focused root.
+Rapid note switching with open panes admits every arrival even when the Local
+follow queue coalesces its latest subject.
+
+Application membership is persisted independently in
+`consumers.graphPlus.workingConstellationNodeIds`, including Local-only changes.
+On first use without that field, the application migrates the existing saved
+Global checkpoint selection once, even when Local opens first. Thereafter, shared
+application state takes precedence over stale Global checkpoint selection. An
+explicit empty saved array is authoritative. Global still saves its viewport and
+the shared graph world through its existing checkpoint controller; Local viewport
+state remains ephemeral. Explicit checkpoint recovery restores membership from
+the recovered checkpoint, or clears it on reset.
+
+Unknown active-note IDs wait for canonical metadata without being rendered.
+Reconciliation removes deleted known nodes. Explicit clear cancels unknown pending
+members, so their later canonical arrival cannot resurrect the cleared group.
+
+## Clearing and required Local roots
+
+Clear constellation applies to the application from either pane, through Quick
+Settings, the member context action, or the application API. With no open Local
+pane it empties membership. Local is Focus-only, so each open Local focused root
+is a required member: clearing retains those roots in the shared set and therefore
+in every unfiltered pane. Removing a required root from a peer cannot invalidate
+Local Focus. Closing a Local pane does not automatically remove its former root.
+
+Global retains the engine's deliberate clear-constellation View command; its
+committed empty selection requests the shared clear. Local Quick Settings invokes
+the registered presentation clear action instead of requesting forbidden Overview.
+Clearing preserves camera framing, layout, and pins. A Global Focus whose subject
+is explicitly removed can retreat to Constellation under the normal engine policy.
+
+## Visual Memory
+
+Global and Local disable visual Memory constellations. Bounded note history still
+updates on activation. The unchanged remembered-subject projection installs once
+per engine session, coalesces identical in-flight requests, and retries failed
+installs. It does not own or reconstruct the working constellation.
 
 ## Cause and regression coverage
 
-Commit `82b93d8` introduced the application pending constellation set, but added active
-notes before checking for presentations; its drain ran only for open presentations.
-Commit `a834813` introduced the shared Quick Settings clear navigation path, which
-assumed Overview was available. Local's Focus-only contract made that path ineffective.
+The previous implementation admitted note visits only to currently attached
+presentations. Opening another pane restored its own selection and current note,
+so it missed the trail built in an existing pane. Sharing world geometry did not
+share Attention, because engine world state intentionally excludes viewport state.
+The fix adds application-owned membership rather than broadening engine world state.
 
-Regression tests exercise ten closed-note activations, bounded Memory, subsequent
-opening and note changes, another closed interval, an in-flight follow spanning
-close/reopen, and real Local engine controls invoking the registered presentation
-action. Local tests verify root/Focus retention, unchanged camera/positions/pins,
-repeated clearing, and cancellation of pending not-yet-canonical members. Generic
-control tests retain Global navigation and hide unavailable Focus-only actions.
-Automated tests do not establish a physical Obsidian smoke-test result.
+`tests/graph-plus/shared-constellation.test.ts` covers Local-first trails beyond
+bounded Memory, later and multiple Global panes, real engine membership/clear
+controls, concurrent edits, independent Focus/camera/geometry, transient hover,
+filter restoration, pending/deleted nodes, legacy migration, Local-only persistence,
+stale checkpoints, explicit empty restores, and clearing during in-flight following.
+Adapter tests cover closed activity and close/reopen boundaries; persistence tests
+cover the additive saved field and migration. Automated tests do not establish a
+physical Obsidian smoke-test result.

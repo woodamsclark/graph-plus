@@ -815,7 +815,7 @@ test('Memory projections share in-flight completion, retry rejection, and reset 
   await pane.close(); await core.dispose();
 });
 
-test('closed Graph+ keeps bounded Memory without pending admissions or stale reopening members', async () => {
+test('closed Graph+ keeps bounded Memory and retains application membership without admitting closed activity', async () => {
   const notes = Array.from({ length: 12 }, (_, index) => ({
     file: { path: `note-${index}.md` }, path: `note-${index}.md`, basename: `note-${index}`,
     extension: 'md', tags: [], properties: {},
@@ -830,7 +830,7 @@ test('closed Graph+ keeps bounded Memory without pending admissions or stale reo
     navigator: { openNote: async () => undefined, openTag: async () => undefined },
   });
   const activate = (index: number) => application.receiveHostEvent({ type: 'active-note-changed', nodeId: noteNodeId(notes[index].path) });
-  const pending = () => (application as unknown as { pendingConstellationNodeIds: Set<string> }).pendingConstellationNodeIds.size;
+  const pending = () => application.getConstellationNodeIds().length;
   for (let index = 0; index < 10; index++) activate(index);
   equal(pending(), 0, 'closed-note activity must not accumulate pending constellation entries');
   deepEqual(application.getSessionSnapshot().nodeIds, [6, 7, 8].map(index => noteNodeId(notes[index].path)),
@@ -852,17 +852,17 @@ test('closed Graph+ keeps bounded Memory without pending admissions or stale reo
     'next activation must not admit stale closed notes');
   const closing = application.closePresentation(graph);
   for (let index = 0; index < 6; index++) activate(index);
-  equal(pending(), 0, 'last-pane close immediately ends admissions, even before its checkpoint finishes');
+  equal(pending(), 2, 'last-pane close retains shared membership and does not admit closed activity');
   await closing;
   const reopened = await open();
   activate(11);
   for (let i = 0; i < 100; i++) await Promise.resolve();
-  deepEqual((await reopened.getSession()!.exportViewState()).selectedNodeIds, [5, 11].map(index => noteNodeId(notes[index].path)),
-    'a new opening must not replay the previous closed interval');
+  deepEqual((await reopened.getSession()!.exportViewState()).selectedNodeIds, [9, 10, 5, 11].map(index => noteNodeId(notes[index].path)),
+    'a new opening retains application membership and seeds the current note without replaying the closed interval');
   await application.dispose(); await core.dispose();
 });
 
-test('an in-flight note follow cannot admit its old constellation into a reopened pane', async () => {
+test('application membership survives an in-flight follow spanning pane close and reopen', async () => {
   const fixture = snapshot();
   const gamma = { file: { path: 'Gamma.md' }, path: 'Gamma.md', basename: 'Gamma', extension: 'md', tags: [], properties: {} };
   const runtime = runtimeHarness({ registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1 });
@@ -891,8 +891,10 @@ test('an in-flight note follow cannot admit its old constellation into a reopene
   const reopened = await open(gammaId);
   releaseFollow(); await closing;
   for (let i = 0; i < 100; i++) await Promise.resolve();
-  deepEqual((await reopened.getSession()!.exportViewState()).selectedNodeIds, [gammaId],
-    'an earlier in-flight drain must not add beta to the reopened Local pane');
+  deepEqual((await reopened.getSession()!.exportViewState()).selectedNodeIds, [alpha, beta, gammaId],
+    'pane lifetime does not discard notes already admitted to the application constellation');
+  equal((await reopened.getSession()!.exportViewState()).focusedNodeId, gammaId,
+    'an old in-flight follow cannot replace the reopened pane root');
   await application.dispose(); await core.dispose();
 });
 

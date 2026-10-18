@@ -36,6 +36,7 @@ import {
   migrateGraphPlusPluginDataV1,
   withEngineSettingsV1,
   withGraphPlusGenericLensMigratedV1,
+  withGraphPlusConstellationV1,
   withGraphPlusSettingsV1,
   type GraphPlusPluginDataV1,
 } from './settings/GraphPlusPluginDataStore.ts';
@@ -284,6 +285,11 @@ export default class GraphEnginePlugin extends Plugin {
     return new GraphPlusApplicationV1({
       model: this.vaultGraphModel,
       navigator: this.graphBridge,
+      initialConstellationNodeIds: this.pluginData.consumers.graphPlus.workingConstellationNodeIds,
+      onConstellationChanged: async nodeIds => {
+        this.pluginData = withGraphPlusConstellationV1(this.pluginData, nodeIds);
+        await this.persistPluginData();
+      },
       onError: error => console.error('[graph+] application error', error),
     });
   }
@@ -315,6 +321,9 @@ export default class GraphEnginePlugin extends Plugin {
     await Promise.allSettled(views.map(view => view.onClose()));
     try {
       await store.recover(this.app.vault.getName(), action);
+      const recovered = await store.load(this.app.vault.getName());
+      this.pluginData = withGraphPlusConstellationV1(this.pluginData, recovered?.viewState?.selectedNodeIds ?? []);
+      await this.persistPluginData();
     } finally {
       if (!this.unloading) {
         this.sharedGraphPlusApplication = this.createGraphPlusApplication();

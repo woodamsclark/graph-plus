@@ -45,7 +45,9 @@ Graph+ has two related views:
 The global graph is the place for broad discovery and spatial organization. The local
 graph is the place for following one idea, note, or thread through that same world.
 They are two presentation modes of the same Graph+ application. Node coordinates and
-pins are shared; each pane keeps its own camera, filters, View, selection, and Focus.
+pins and working constellation are shared; each pane keeps its own camera, filters,
+View, and Focus. A constellation built while visiting notes in Local is available
+when you open Global.
 Global starts in Overview, while Local starts in Focus and follows the active note.
 
 ### Explore and navigate
@@ -53,8 +55,9 @@ Global starts in Overview, while Local starts in Focus and follows the active no
 Choose a constellation in Overview, then click one of its members to enter Focus.
 Add visible candidates to build the constellation; click the background to move back
 one View. Drag nodes to arrange the shared space; Graph+ persists node placement and
-pins for the vault. Camera framing, filters, Focus, and selection belong to the
-individual pane.
+pins and the working constellation for the vault. Camera framing, filters, and Focus
+belong to the individual pane. Clearing the constellation updates every pane and
+retains any open Local focused roots.
 
 On desktop, use pointer, wheel, keyboard, and modifier interactions. On touch devices,
 use one- and two-finger gestures for graph movement and navigation. The exact gesture
@@ -161,7 +164,7 @@ See [the graph-engine consumer guide](docs/graph-engine-consumer-guide.md) and t
 
 ## Compatibility
 
-Graph+ 2.0.4 requires Obsidian 1.13.7 or newer. Automated checks cover desktop
+Graph+ 2.0.5 requires Obsidian 1.13.7 or newer. Automated checks cover desktop
 and touch input paths; physical desktop and mobile acceptance is tracked in the
 [release safety checklist](docs/graph-plus-release-safety.md).
 

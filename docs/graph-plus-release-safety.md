@@ -12,9 +12,9 @@ The release task creates no ZIP and excludes docs, source files, and local runti
 an RC before building or packaging. Promote the version only after release acceptance:
 update `manifest.json`, `package.json`, both root version fields in `package-lock.json`,
 and the matching minimum-Obsidian entry in `versions.json`. The GitHub tag must exactly
-match the manifest version, without `v`. The client package and generated artifact also report `2.0.4`; protocol version 1 is unchanged.
+match the manifest version, without `v`. The client package and generated artifact also report `2.0.5`; protocol version 1 is unchanged.
 
-The current stable release is `2.0.4`. Its compatibility entry and lockfile agree.
+The current stable release is `2.0.5`. Its compatibility entry and lockfile agree.
 No release task uploads, tags, or publishes anything. `releases/` is ignored by Git.
 
 ## Shutdown contract
@@ -82,7 +82,7 @@ setting is reversible, and no-op changes retain the document revision.
 
 The distributable engine client now declares MPL-2.0 and carries the same full LICENSE
 as its reviewed Graph+ source. The client generator copies that license; its package
-file list includes it. Client version 2.0.4 is aligned with the plugin release; the V1 protocol remains unchanged.
+file list includes it. Client version 2.0.5 is aligned with the plugin release; the V1 protocol remains unchanged.
 
 The README documents manual installation. Layout reset continues to require one
 Global pane for this release; settings now explain which panes to open or close.
@@ -145,3 +145,20 @@ the user; content sizing remains subject to live device verification.
 Release preflight passes TypeScript, all 514 tests, build, and exact three-file
 packaging. The submission checker reports zero errors and the same 52 documented
 warnings as 2.0.3.
+
+## Validation status for 2.0.5
+
+Working constellation membership now belongs to the application, above Global and
+Local panes. Later-opened panes inherit the full trail; additions, removals, and
+clearing synchronize across panes while Focus, camera, hover, and filters remain
+independent. Shared clearing retains required open Local focused roots. Local-only
+changes persist independently of Global checkpoints, and legacy membership migrates
+once without allowing stale viewport selection to overwrite the shared state.
+
+Type checking, all 525 tests, build, and exact three-file release packaging pass.
+The submission checker reports zero errors and 51 warnings. Targeted regression
+coverage includes later-opened panes, concurrent membership edits, transient hover,
+filters, Local-only persistence, legacy migration, empty restores, stale checkpoints,
+canonical deletion, layout reset, and in-flight pane lifetime boundaries. No live
+Obsidian or physical mobile acceptance was performed for this update. All release
+builds were produced in the local checkout, without changing the iCloud installation.

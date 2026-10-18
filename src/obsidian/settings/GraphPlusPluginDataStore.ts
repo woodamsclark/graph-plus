@@ -35,6 +35,8 @@ export interface GraphPlusPluginDataV1 {
       readonly checkpointBackups?: Readonly<Record<string, unknown>>;
       readonly consumerSettings: GraphPlusConsumerSettingsV1;
       readonly genericLensMigrated?: boolean;
+      /** Application membership; an empty array is an explicitly cleared constellation. */
+      readonly workingConstellationNodeIds?: readonly string[];
       readonly legacySettings?: unknown;
     };
     readonly [consumerId: string]: unknown;
@@ -93,6 +95,9 @@ export function migrateGraphPlusPluginDataV1(raw: unknown): GraphPlusPluginDataM
           ...(graphPlus ?? {}),
           dataSchemaVersion: GRAPH_PLUS_CONSUMER_DATA_SCHEMA_VERSION,
           consumerSettings,
+          workingConstellationNodeIds: Array.isArray(graphPlus?.workingConstellationNodeIds)
+            && graphPlus.workingConstellationNodeIds.every(id => typeof id === 'string')
+            ? [...new Set(graphPlus.workingConstellationNodeIds)] : undefined,
           ...(!graphPlus?.legacySettings && hasLegacySettings(root) ? { legacySettings: cloneJson(root) } : {}),
         },
       },
@@ -145,6 +150,19 @@ export function withGraphPlusGenericLensMigratedV1(
         ...data.consumers.graphPlus,
         genericLensMigrated: true,
       },
+    },
+  };
+}
+
+export function withGraphPlusConstellationV1(
+  data: GraphPlusPluginDataV1,
+  nodeIds: readonly string[],
+): GraphPlusPluginDataV1 {
+  return {
+    ...data,
+    consumers: {
+      ...data.consumers,
+      graphPlus: { ...data.consumers.graphPlus, workingConstellationNodeIds: [...new Set(nodeIds)] },
     },
   };
 }

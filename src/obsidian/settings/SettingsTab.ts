@@ -134,7 +134,7 @@ class GraphLayoutResetModal extends Modal {
   onOpen(): void {
     this.contentEl.createEl('h2', { text: `Reset graph+ layout for “${this.app.vault.getName()}”?` });
     this.contentEl.createEl('p', {
-      text: 'Node placement, camera framing, pins, focus, and selection will be lost. Vault content, graph filters, Form, colors, labels, and settings will remain unchanged.',
+      text: 'Node placement, camera framing, pins, and pane focus will be reset. The working constellation, vault content, graph filters, form, colors, labels, and settings will be preserved.',
     });
     const actions = this.contentEl.createDiv({ cls: 'modal-button-container' });
     const cancel = actions.createEl('button', { text: 'Cancel' });

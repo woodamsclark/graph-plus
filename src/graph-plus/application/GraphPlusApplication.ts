@@ -8,6 +8,7 @@ import type {
 } from '../../graph-engine/contracts/v1/index.ts';
 import { reconcileGraphViewStateV1 } from '../../graph-engine/public.ts';
 import { GraphPlusLookupV1 } from '../adapter/index.ts';
+import { GraphPlusConstellationV1 } from './GraphPlusConstellation.ts';
 import { projectGraphPlusExperienceDocumentV1 } from './GraphPlusDocumentProjection.ts';
 import {
   graphPlusEngineExperienceContractV1,
@@ -74,6 +75,10 @@ export interface GraphPlusPresentationOptionsV1<TFile> {
   readonly referenceViewState?: () => GraphViewStateV1 | undefined | Promise<GraphViewStateV1 | undefined>;
   /** Application coordination hooks: graph world is shared while viewport state remains local. */
   readonly onOpened?: () => void | Promise<void>;
+  /** Managed presentations project application membership and report deliberate edits. */
+  readonly onConstellationAdmission?: (nodeIds: readonly string[]) => Promise<void>;
+  readonly onConstellationEdit?: (added: readonly string[], removed: readonly string[]) => void;
+  readonly onConstellationClear?: () => Promise<void>;
   readonly onLayoutActivity?: () => void;
   readonly onAvailabilityChanged?: () => void;
   readonly onWorldInvalidated?: (event: GraphWorldInvalidatedEventV1) => void;
@@ -105,6 +110,8 @@ export class GraphPlusPresentationV1<TFile> {
   private resettingLayout = false;
   private visibleNodeIds = new Set<string>();
   private readonly pendingActiveConstellationNodes = new Set<string>();
+  private sharedConstellationNodeIds?: readonly string[];
+  private projectedConstellationNodeIds: readonly string[] = [];
   private rootNodeId?: string;
   private sessionNodeIds: readonly string[];
   private memoryProjection?: {
@@ -176,7 +183,7 @@ export class GraphPlusPresentationV1<TFile> {
       else await this.openLocal();
       if (this.options.initialSession) {
         await this.applySessionSnapshot(this.options.initialSession);
-        if (this.options.initialSession.activeNodeId) {
+        if (this.options.initialSession.activeNodeId && !this.options.onConstellationAdmission) {
           await this.addActiveNodesToConstellation([this.options.initialSession.activeNodeId]);
         }
       }
@@ -275,7 +282,7 @@ export class GraphPlusPresentationV1<TFile> {
   getSession(): GraphSessionV1 | undefined { return this.session; }
   getSessionContainerWindow(): Window | null { return this.options.container.ownerDocument.defaultView; }
 
-  async followActiveNode(nodeId?: string): Promise<boolean> {
+  async followActiveNode(nodeId?: string, admitToConstellation = true): Promise<boolean> {
     if (!this.policy.followActiveNote || !this.session) return false;
     if (nodeId === undefined) {
       if (this.rootNodeId === undefined && this.document?.nodes.length === 0) {
@@ -293,14 +300,20 @@ export class GraphPlusPresentationV1<TFile> {
     ].slice(-DEFAULT_GRAPH_PLUS_SESSION_NODE_LIMIT_V1);
     if (this.rootNodeId === nodeId) {
       await this.enforceExperiencePolicy();
+      if (admitToConstellation) await this.options.onConstellationAdmission?.([nodeId]);
       return true;
     }
     this.rootNodeId = nodeId;
     await this.enforceExperiencePolicy();
+    if (admitToConstellation) await this.options.onConstellationAdmission?.([nodeId]);
     return true;
   }
 
   async addActiveNodesToConstellation(nodeIds: readonly string[]): Promise<void> {
+    if (this.options.onConstellationAdmission) {
+      if (nodeIds.length > 0) await this.options.onConstellationAdmission(nodeIds);
+      return;
+    }
     if (!this.session || !this.document || this.resettingLayout) return;
     for (const id of nodeIds) this.pendingActiveConstellationNodes.add(id);
     if (this.pendingActiveConstellationNodes.size === 0) return;
@@ -349,11 +362,44 @@ export class GraphPlusPresentationV1<TFile> {
   }
 
   async clearConstellation(): Promise<void> {
+    if (this.options.onConstellationClear) return this.options.onConstellationClear();
     this.pendingActiveConstellationNodes.clear();
     const state = await this.interactionState();
     if (!state) return;
     // Local remains Focus-only; its root is the minimum required Attention subject.
     await this.session?.setSelection(this.policy.mode === 'local' && state.focusedNodeId ? [state.focusedNodeId] : []);
+  }
+
+  /** Local's required Focus root belongs to the shared constellation too. */
+  getRequiredConstellationNodeId(): string | undefined {
+    if (this.mode !== 'local' || !this.session) return undefined;
+    const root = this.session.getInteractionState?.().focusedNodeId ?? this.rootNodeId;
+    return root && this.document?.nodes.some(node => node.id === root) ? root : undefined;
+  }
+
+  /** Install membership without emitting user selection/focus intentions or moving the camera. */
+  async applySharedConstellation(nodeIds: readonly string[]): Promise<void> {
+    this.sharedConstellationNodeIds = [...nodeIds];
+    if (!this.session || !this.document) return;
+    const state = await this.interactionState();
+    if (!state) return;
+    const members = nodeIds.filter(id => this.visibleNodeIds.has(id));
+    const preferredFocus = state.focusedNodeId ?? (this.mode === 'local' ? this.rootNodeId : undefined);
+    const focusNodeId = preferredFocus && members.includes(preferredFocus) ? preferredFocus : undefined;
+    // An empty/filtered Local graph has no available Focus subject to install.
+    if (this.mode === 'local' && members.length === 0 && this.document.nodes.length > 0) {
+      this.projectedConstellationNodeIds = [...state.selectedNodeIds];
+      return;
+    }
+    if (!sameNodeIds(members, state.selectedNodeIds) || state.focusedNodeId !== focusNodeId) {
+      const result = await this.session.applyExternalInfluence({
+        schemaVersion: 1, type: 'replace-attention', nodeIds: members,
+        ...(focusNodeId ? { focusNodeId } : {}), framing: 'preserve',
+      });
+      if (result.status === 'rejected') throw new Error(`Shared constellation was rejected: ${result.reason}`);
+      this.checkpoint?.schedule('interaction');
+    }
+    this.projectedConstellationNodeIds = [...(await this.interactionState())!.selectedNodeIds];
   }
 
   async recenterFocusedNode(): Promise<void> {
@@ -506,6 +552,18 @@ export class GraphPlusPresentationV1<TFile> {
   }
 
   private handleIntent(intent: GraphIntentV1, session: GraphSessionV1): void {
+    if (intent.type === 'selection-changed' && this.options.onConstellationEdit) {
+      const previous = this.projectedConstellationNodeIds;
+      this.projectedConstellationNodeIds = [...intent.selectedNodeIds];
+      if (intent.selectedNodeIds.length === 0) {
+        void this.options.onConstellationClear?.().catch(error => this.options.onError?.(asError(error)));
+      } else {
+        this.options.onConstellationEdit(
+          intent.selectedNodeIds.filter(id => !previous.includes(id)),
+          previous.filter(id => !intent.selectedNodeIds.includes(id)),
+        );
+      }
+    }
     if (intent.type === 'preview-changed') {
       const entry = intent.nodeId ? this.lookup.get(intent.nodeId) : undefined;
       if (intent.nodeId && entry?.kind !== 'note') {
@@ -573,6 +631,7 @@ export class GraphPlusPresentationV1<TFile> {
       schemaVersion: 1, type: 'replace-attention', nodeIds, focusNodeId: nodeId, framing,
     });
     if (result?.status === 'rejected') throw new Error(`Graph+ application input was rejected: ${result.reason}`);
+    await this.options.onConstellationAdmission?.([nodeId]);
   }
 
   private projectDocument(): GraphDocumentV1 {
@@ -715,6 +774,8 @@ export class GraphPlusPresentationV1<TFile> {
       else { await this.session.setSessionOverrides(overrides); await this.session.applyFilter(request); }
       this.effectiveSettings = await this.session.exportEffectiveSettings();
     } else await this.session.applyFilter(request);
+    if (this.sharedConstellationNodeIds) await this.applySharedConstellation(this.sharedConstellationNodeIds);
+    else this.projectedConstellationNodeIds = [...(await this.interactionState())!.selectedNodeIds];
     return visibleNodeIds;
   }
 
@@ -732,12 +793,16 @@ export interface GraphPlusApplicationOptionsV1<TFile> {
   readonly now?: () => number;
   readonly reconcileDelayMs?: number;
   readonly worldSyncClock?: Pick<Window, 'requestAnimationFrame' | 'cancelAnimationFrame'>;
+  /** Undefined migrates the existing saved Global constellation on first presentation open. */
+  readonly initialConstellationNodeIds?: readonly string[];
+  readonly onConstellationChanged?: (nodeIds: readonly string[]) => void | Promise<void>;
 }
 
 export type GraphPlusPresentationAttachOptionsV1<TFile> = Omit<
   GraphPlusPresentationOptionsV1<TFile>,
   | 'model' | 'navigator' | 'source' | 'countDuplicateLinks' | 'beforeOpen' | 'referenceViewState'
   | 'onOpened' | 'onWorldStateChanged' | 'onWorldInvalidated' | 'initialLayoutAuthority'
+  | 'onConstellationAdmission' | 'onConstellationEdit' | 'onConstellationClear'
 >;
 
 /** Activity outside Graph+; application policy translates it into conscious state. */
@@ -767,7 +832,10 @@ export class GraphPlusApplicationV1<TFile> {
   private activeNodeQueued = false;
   private activeNodeGeneration = 0;
   private pendingActiveNodeId?: string;
-  private readonly pendingConstellationNodeIds = new Set<string>();
+  private readonly constellation: GraphPlusConstellationV1;
+  private constellationRestore?: Promise<void>;
+  private constellationQueue: Promise<void> = Promise.resolve();
+  private persistedConstellationNodeIds?: readonly string[];
   private activeNodeFollow?: Promise<void>;
   private pendingSessionSnapshot: GraphPlusSessionSnapshotV1;
   private readonly workspaceSession: GraphPlusSessionV1;
@@ -779,6 +847,7 @@ export class GraphPlusApplicationV1<TFile> {
   private requestedLayoutAuthority?: GraphPlusPresentationV1<TFile>;
 
   constructor(private readonly options: GraphPlusApplicationOptionsV1<TFile>) {
+    this.constellation = new GraphPlusConstellationV1(options.initialConstellationNodeIds);
     this.workspaceSession = options.session ?? new GraphPlusSessionV1();
     this.pendingSessionSnapshot = this.workspaceSession.snapshot();
   }
@@ -787,8 +856,8 @@ export class GraphPlusApplicationV1<TFile> {
     options: GraphPlusPresentationAttachOptionsV1<TFile>,
   ): GraphPlusPresentationV1<TFile> {
     if (this.disposed) throw new Error('Graph+ application is disposed.');
-    // A new presentation starts from bounded Memory and the current active note,
-    // not admissions left over from a previous period with open panes.
+    // Stop stale Local-follow work at the attachment boundary; membership belongs
+    // to the application and survives closing every presentation.
     if (this.presentations.size === 0) this.discardPendingActiveNodes();
     if (options.initialRootNodeId && this.workspaceSession.snapshot().nodeIds.length === 0) {
       this.pendingSessionSnapshot = this.workspaceSession.experienceFileActivation(
@@ -796,15 +865,29 @@ export class GraphPlusApplicationV1<TFile> {
         this.options.now?.() ?? Date.now(),
       );
     }
+    const activeNodeId = this.workspaceSession.snapshot().activeNodeId;
+    if (activeNodeId) this.constellation.add([activeNodeId]);
     let presentation!: GraphPlusPresentationV1<TFile>;
     presentation = new GraphPlusPresentationV1({
       ...options,
       model: this.options.model,
       navigator: this.options.navigator,
       initialSession: this.workspaceSession.snapshot(),
-      beforeOpen: () => this.reconcileOnOpen(),
+      beforeOpen: async () => {
+        await this.restoreConstellation(options);
+        await this.reconcileOnOpen();
+      },
       referenceViewState: () => this.exportGlobalViewState(presentation),
-      onOpened: () => this.presentationOpened(presentation),
+      onOpened: async () => {
+        await this.synchronizeConstellation();
+        await this.presentationOpened(presentation);
+      },
+      onConstellationAdmission: nodeIds => this.admitConstellation(nodeIds),
+      onConstellationEdit: (added, removed) => {
+        this.constellation.edit(added, removed);
+        void this.synchronizeConstellation().catch(error => this.options.onError?.(asError(error)));
+      },
+      onConstellationClear: () => this.clearConstellation(),
       onLayoutActivity: () => this.requestLayoutAuthority(presentation),
       onAvailabilityChanged: () => this.electLayoutAuthority(),
       onWorldStateChanged: (event) => this.queueWorldStateFrom(presentation, event),
@@ -828,6 +911,8 @@ export class GraphPlusApplicationV1<TFile> {
   }
 
   private async closePresentationOnce(presentation: GraphPlusPresentationV1<TFile>): Promise<void> {
+    // A projection already in flight must finish before its target session is disposed.
+    await this.constellationQueue.catch(() => undefined);
     const wasLayoutAuthority = this.layoutAuthority === presentation;
     let handoffError: unknown;
     if (wasLayoutAuthority) {
@@ -859,6 +944,51 @@ export class GraphPlusApplicationV1<TFile> {
 
   getSessionSnapshot(): GraphPlusSessionSnapshotV1 {
     return this.workspaceSession.snapshot();
+  }
+
+  getConstellationNodeIds(): readonly string[] { return this.constellation.snapshot(); }
+
+  private restoreConstellation(options: GraphPlusPresentationAttachOptionsV1<TFile>): Promise<void> {
+    if (this.constellation.isRestored) return Promise.resolve();
+    if (this.constellationRestore) return this.constellationRestore;
+    const operation = (async () => {
+      const saved = options.vaultId ? await options.checkpointStore?.load(options.vaultId) : undefined;
+      this.constellation.restore(saved?.viewState?.selectedNodeIds ?? [], saved?.document.nodes.map(node => node.id));
+    })();
+    this.constellationRestore = operation;
+    void operation.catch(() => { if (this.constellationRestore === operation) this.constellationRestore = undefined; });
+    return operation;
+  }
+
+  private admitConstellation(nodeIds: readonly string[]): Promise<void> {
+    this.constellation.add(nodeIds);
+    return this.synchronizeConstellation();
+  }
+
+  async clearConstellation(): Promise<void> {
+    this.constellation.clear(this.requiredConstellationNodeIds());
+    return this.synchronizeConstellation();
+  }
+
+  private requiredConstellationNodeIds(): string[] {
+    return [...this.presentations].flatMap(presentation => {
+      const id = presentation.getRequiredConstellationNodeId();
+      return id ? [id] : [];
+    });
+  }
+
+  private synchronizeConstellation(): Promise<void> {
+    const operation = this.constellationQueue.catch(() => undefined).then(async () => {
+      this.constellation.add(this.requiredConstellationNodeIds());
+      const nodeIds = this.constellation.snapshot();
+      await Promise.all([...this.presentations].map(presentation => presentation.applySharedConstellation(nodeIds)));
+      if (!this.persistedConstellationNodeIds || !sameNodeIds(nodeIds, this.persistedConstellationNodeIds)) {
+        await this.options.onConstellationChanged?.(nodeIds);
+        this.persistedConstellationNodeIds = nodeIds;
+      }
+    });
+    this.constellationQueue = operation;
+    return operation;
   }
 
   private async exportGlobalViewState(
@@ -1031,7 +1161,7 @@ export class GraphPlusApplicationV1<TFile> {
       );
       if (event.nodeId !== previousActiveNodeId) {
         if (this.presentations.size > 0) {
-          if (event.nodeId) this.pendingConstellationNodeIds.add(event.nodeId);
+          if (event.nodeId) this.constellation.add([event.nodeId]);
           this.queueActiveNode(event.nodeId, this.pendingSessionSnapshot);
         }
       }
@@ -1058,8 +1188,10 @@ export class GraphPlusApplicationV1<TFile> {
 
   async followActiveNode(nodeId?: string): Promise<void> {
     if (this.disposed) return;
+    if (nodeId) this.constellation.add([nodeId]);
     const locals = [...this.presentations].filter((presentation) => presentation.experiencePolicy.followActiveNote);
-    await Promise.all(locals.map((presentation) => presentation.followActiveNode(nodeId)));
+    await Promise.all(locals.map((presentation) => presentation.followActiveNode(nodeId, false)));
+    await this.synchronizeConstellation();
   }
 
   async setCountDuplicateLinks(value: boolean): Promise<void> {
@@ -1083,6 +1215,7 @@ export class GraphPlusApplicationV1<TFile> {
   private async disposeOnce(): Promise<void> {
     await this.reconcileRunning?.catch(() => undefined);
     await this.activeNodeFollow?.catch(() => undefined);
+    await this.constellationQueue.catch(() => undefined);
     await this.worldStateQueue.catch(() => undefined);
     let handoffError: unknown;
     if (this.layoutAuthority) {
@@ -1094,7 +1227,6 @@ export class GraphPlusApplicationV1<TFile> {
       ...[...this.presentations].map((presentation) => this.closePresentation(presentation)),
     ]);
     this.presentations.clear();
-    this.pendingConstellationNodeIds.clear();
     this.hostActivityListeners.clear();
     const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
     if (failed) throw failed.reason;
@@ -1113,6 +1245,8 @@ export class GraphPlusApplicationV1<TFile> {
         const locals = presentations.filter((presentation) => presentation.mode === 'local');
         await Promise.all(globals.map((presentation) => presentation.applyCanonicalSnapshot(snapshot)));
         await Promise.all(locals.map((presentation) => presentation.applyCanonicalSnapshot(snapshot)));
+        this.constellation.reconcile(snapshot.document.nodes.map(node => node.id));
+        await this.synchronizeConstellation();
         const layoutAuthority = this.layoutAuthority?.getSession() !== undefined
           ? this.layoutAuthority
           : globals.find((presentation) => presentation.getSession() !== undefined)
@@ -1167,7 +1301,6 @@ export class GraphPlusApplicationV1<TFile> {
 
   private discardPendingActiveNodes(): void {
     this.activeNodeGeneration += 1;
-    this.pendingConstellationNodeIds.clear();
     this.pendingActiveNodeId = undefined;
     this.activeNodeQueued = false;
   }
@@ -1177,14 +1310,8 @@ export class GraphPlusApplicationV1<TFile> {
       const generation = this.activeNodeGeneration;
       const nodeId = this.pendingActiveNodeId;
       const snapshot = this.pendingSessionSnapshot;
-      const admittedNodeIds = [...this.pendingConstellationNodeIds];
-      this.pendingConstellationNodeIds.clear();
       this.activeNodeQueued = false;
       await this.followActiveNode(nodeId);
-      if (generation !== this.activeNodeGeneration) continue;
-      await Promise.all([...this.presentations].map(
-        presentation => presentation.addActiveNodesToConstellation(admittedNodeIds),
-      ));
       if (generation !== this.activeNodeGeneration) continue;
       await Promise.all([...this.presentations].map(
         (presentation) => presentation.applySessionSnapshot(snapshot),

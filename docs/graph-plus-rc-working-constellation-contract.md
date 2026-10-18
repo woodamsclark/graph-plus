@@ -4,6 +4,11 @@ Updated 2026-10-05. This supersedes the prior independent cursor-label toggle an
 Focus-root neighbor promotion. The existing 0.2-second preview delay and 0.5-second
 fade in/out remain.
 
+The [shared constellation contract](graph-plus-constellation-contract.md), updated
+2026-10-18, supersedes per-pane membership and clearing below. Membership and its
+persistence now belong to the application; Focus, View, camera, hover, and filters
+remain pane-local.
+
 ## Labels
 
 Display Quick Settings offers exactly three choices:
@@ -38,7 +43,8 @@ Attention with a singleton and could erase the prior Focus trail.
 
 ## Active notes and clearing
 
-Active-note events add their node to each open Graph+ working constellation. Global
+Active-note events add their node to the application working constellation while
+Graph+ is open; every pane projects that same membership. Global
 arrival preserves View, Focus subject, camera and geometry. Local continues its
 existing active-note Focus following while retaining earlier members. This is active
 membership, not a second remembered-node layer or bounded historical Memory trail.
@@ -51,8 +57,8 @@ not yet in canonical graph data waits for canonical reconciliation before admiss
 Returning from Constellation or Focus to Overview preserves constellation membership,
 including pending unavailable-note admissions. A constellation member's secondary-click
 context menu includes Clear constellation; non-members do not offer it. Explicit clear
-removes the working group and cancels pending admissions. Local remains Focus-only and
-retains its required root while removing the other members. A later distinct note
+removes the shared working group and cancels pending admissions, retaining any open
+Local focused roots as required members in every pane. Local remains Focus-only. A later distinct note
 activation starts building the group again.
 
 Regression coverage lives in `views.test.ts`, `ego.test.ts`,

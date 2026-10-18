@@ -42,6 +42,7 @@ import './obsidian/live-settings.test.ts';
 import './obsidian/ui-policy.test.ts';
 import './obsidian/note-preview.test.ts';
 import './graph-plus/adapter.test.ts';
+import './graph-plus/shared-constellation.test.ts';
 import { runTests } from './support/harness.ts';
 
 void runTests();

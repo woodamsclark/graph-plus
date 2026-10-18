@@ -14,11 +14,28 @@ import {
   withGraphPlusGenericLensMigratedV1,
   readGraphPlusCheckpointReferenceV1,
   withGraphPlusSettingsV1,
+  withGraphPlusConstellationV1,
 } from '../../src/obsidian/settings/GraphPlusPluginDataStore.ts';
 import { createDefaultGraphPlusLensV1 } from '../../src/graph-plus/query/index.ts';
 import { graphDocument, graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import { runtimeRegistration } from '../support/runtimeHarness.ts';
+
+test('application constellation persistence preserves empty clears and survives unrelated settings updates', () => {
+  const legacy = migrateGraphPlusPluginDataV1({}).data;
+  equal(legacy.consumers.graphPlus.workingConstellationNodeIds, undefined, 'legacy data requests checkpoint migration');
+  const saved = withGraphPlusConstellationV1(legacy, ['note:A.md', 'note:B.md', 'note:A.md']);
+  const updated = withGraphPlusSettingsV1(saved, saved.consumers.graphPlus.consumerSettings);
+  deepEqual(migrateGraphPlusPluginDataV1(updated).data.consumers.graphPlus.workingConstellationNodeIds,
+    ['note:A.md', 'note:B.md'], 'application members round-trip without duplication');
+  const cleared = withGraphPlusConstellationV1(updated, []);
+  deepEqual(migrateGraphPlusPluginDataV1(cleared).data.consumers.graphPlus.workingConstellationNodeIds,
+    [], 'an explicit clear must not fall back to a stale Global checkpoint');
+  const corrupt = { ...saved, consumers: { ...saved.consumers,
+    graphPlus: { ...saved.consumers.graphPlus, workingConstellationNodeIds: ['valid', 42] } } };
+  equal(migrateGraphPlusPluginDataV1(corrupt).data.consumers.graphPlus.workingConstellationNodeIds,
+    undefined, 'invalid saved membership falls back to the existing checkpoint migration');
+});
 
 test('profile snapshots restore registrations inactive and retain overrides through re-registration', () => {
   const first = new ConsumerProfileRegistry();

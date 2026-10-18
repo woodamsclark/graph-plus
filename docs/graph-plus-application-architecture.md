@@ -24,8 +24,9 @@ The application is divided into three ownership layers:
    Graph Engine leases, and one `ObsidianGraphBridge` for inbound events and outbound
    host operations.
 2. The shared `GraphPlusApplicationV1` owns canonical vault reconciliation and the
-   graph world: document identity, node coordinates, and explicit pins. Presentation
-   sessions own their viewport state: camera, View, Attention/Focus, hover, and filters.
+   graph world: document identity, node coordinates, and explicit pins. It also owns
+   the shared working constellation and its persistence. Presentation sessions own
+   camera, View, Focus, hover, filters, and a projection of shared membership.
 3. Graph Engine owns Ego, Awareness, Vision, interaction transitions, layout, Anima,
    rendering, and the public session contract.
 
@@ -85,10 +86,11 @@ not write opaque identity metadata into notes or maintain a fallible rename ledg
 | Initial View | Overview, or restored checkpoint View | Focus on the active note when available |
 | Interaction states | Overview, Constellation, Focus | Focus only |
 | Attention cardinality | Multiple constellation members | Multiple constellation members |
+| Working membership | One application constellation | The same application constellation |
 | Policy-contributed Attention-neighborhood Awareness depth | 0 | 0 |
 | Visual Memory constellations | Disabled | Disabled |
 | Camera | Pane-local | Pane-local |
-| Persistence | Owns the vault checkpoint | Reuses the shared graph world; its viewport state is ephemeral |
+| Persistence | Saves world and viewport checkpoint; application saves membership | Application saves membership; viewport state is ephemeral |
 | Active-note Focus following | No | Yes |
 | Active-note arrival while open | Adds the note to Attention without changing View, Focus, or camera | Adds the note to the working Attention constellation and makes it the focused root |
 
@@ -107,7 +109,9 @@ and includes the new root in Attention. A double-click can additionally invoke t
 registered Open note action. Bounded closed-pane history does not seed extra selected
 members when the pane reopens.
 Canonical graph truth, pins, and node positions are fanned out to every presentation.
-Each presentation keeps its own filters, selection, Focus, View, hover, and camera.
+Each presentation keeps its own filters, Focus, View, hover, and camera. Selection
+projects the application's working constellation, so opening Global after a Local
+note trail inherits all admitted members, including those beyond bounded Memory.
 Thus a Global pane can remain in Overview while a Local pane follows the active note
 in Focus without either pane rewriting the other's experience.
 
@@ -121,8 +125,8 @@ single-subject Attention cap. The policy's neighborhood depth describes committe
 Awareness expansion, separately from transient hover previews.
 
 Entering Global Overview preserves constellation membership. Explicit clearing
-removes Global's active constellation; Local clearing retains its focused root as
-the only member and stays in Focus. The shared Quick Settings control routes Local
+clears the application constellation, retaining every open Local focused root as
+a required shared member. Local stays in Focus. The shared Quick Settings control routes Local
 clearing through the registered presentation action rather than requesting Overview.
 Clearing preserves camera framing, shared positions, and pins.
 
@@ -147,10 +151,12 @@ It delivers neutral host events to the application. The application coalesces th
 invalidations while Graph+ is open and applies the same refreshed snapshot to all
 presentation sessions. When Graph+ is closed, vault invalidation retains a dirty
 marker until the next open; active-note activity still updates bounded session history
-but accumulates no pending constellation members. The first presentation attachment
-and last detachment discard pending admissions, and a drain spanning that boundary
-cannot admit old members into a newly opened pane. Opening seeds the current active
-note and may restore Global's saved constellation. Active-note truth extends Attention
+but admits no new working members. Closing panes retains application membership.
+The first attachment and last detachment invalidate stale Local-follow work; a drain
+spanning that boundary cannot change a newly opened pane's root. Opening seeds the
+current active note and projects the shared constellation. Legacy checkpoint membership
+migrates once; the independent application membership field then takes precedence
+over saved viewport selection, even with only Local panes open. Active-note truth extends Attention
 in both modes and follows Focus only in Local; it never triggers a vault scan by itself.
 
 Each pane owns an independent Graph Engine rendering session because each DOM surface
@@ -179,11 +185,13 @@ Automated checks must prove that:
 - Local permits only Focus, supports multiple Attention members, and clears to its focused root;
 - entering Global Overview preserves membership until an explicit clear action;
 - closed-pane note activity retains bounded history without pending constellation growth,
-  and stale in-flight admissions cannot cross a close/reopen boundary;
+  and stale in-flight following cannot replace a reopened pane's root;
 - disabled visual Memory installs its empty projection once per session, coalesces
   identical updates, and retries failed installs;
 - pins and node positions fan out across presentations without copying viewport state;
-- filters, Attention, Focus, View, and camera remain local to each presentation;
+- working constellation membership and clear actions fan out across every presentation;
+- Local-only membership persists independently of Global checkpoints;
+- filters only hide shared members, and Focus, View, hover, and camera remain pane-local;
 - exactly one presentation advances layout for the shared graph world;
 - Local loads existing full-graph coordinates, keeps force settled, and performs one
   initial Focus-neighborhood fit;
