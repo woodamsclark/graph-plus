@@ -2,11 +2,12 @@
   "artifact": "@graph-plus/graph-engine-client",
   "artifactVersion": "2.0.5",
   "protocolVersion": 1,
-  "contentSha256": "7ec31d411777d1969ed63964515222df6a96099e18f67f9ea4bfb7d9d0c30365",
+  "contentSha256": "adfb73df7f1ce3c0f4686ef6800aec1878ccfa6dcb8f66a976393822ff92e04a",
   "generatedFrom": "src/graph-engine/public.ts",
   "publicFiles": [
     "src/graph-engine/public.ts",
     "src/graph-engine/contracts/v1/action.ts",
+    "src/graph-engine/contracts/v1/attachment.ts",
     "src/graph-engine/contracts/v1/document.ts",
     "src/graph-engine/contracts/v1/experience.ts",
     "src/graph-engine/contracts/v1/filter.ts",

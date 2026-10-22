@@ -1,3 +1,4 @@
+import { isGraphEdgeAttachmentV1, isGraphNodeAttachmentV1, type GraphEdgeAttachmentV1, type GraphNodeAttachmentV1 } from './attachment.ts';
 import type { GraphAttributeValue, GraphScalar, Vec3 } from './values.ts';
 
 export interface GraphDocumentV1 {
@@ -20,6 +21,8 @@ export interface GraphNodeRegionsDocumentV1 {
 }
 
 export interface GraphNodeV1 {
+  /** Node-owned attachment symmetry; omitted means freely attaching (count 1). */
+  readonly attachment?: GraphNodeAttachmentV1;
   readonly id: string;
   readonly label?: string;
   readonly tokens?: readonly string[];
@@ -28,6 +31,8 @@ export interface GraphNodeV1 {
 }
 
 export interface GraphEdgeV1 {
+  /** Per-link assignments to the source and target node patterns. */
+  readonly attachment?: GraphEdgeAttachmentV1;
   readonly id: string;
   readonly sourceId: string;
   readonly targetId: string;
@@ -108,7 +113,7 @@ export function validateGraphDocumentV1(value: unknown): GraphDocumentValidation
       errors.push(error('invalid-node', path, 'Node must be an object.'));
       continue;
     }
-    validateKnownKeys(node, ['id', 'label', 'tokens', 'attributes', 'positionHint'], path, errors);
+    validateKnownKeys(node, ['id', 'label', 'tokens', 'attributes', 'positionHint', 'attachment'], path, errors);
     const idValid = validateId(node.id, `${path}.id`, 'invalid-node', errors);
     if (idValid) {
       if (nodeIds.has(node.id as string)) {
@@ -119,6 +124,9 @@ export function validateGraphDocumentV1(value: unknown): GraphDocumentValidation
     validateOptionalString(node, 'label', path, errors, 'invalid-node');
     validateOptionalTokens(node, path, errors, 'invalid-node');
     validateOptionalAttributes(node, path, errors, 'invalid-node');
+    if (node.attachment !== undefined && !isGraphNodeAttachmentV1(node.attachment)) {
+      errors.push(error('invalid-node', `${path}.attachment`, 'Attachment must have a positive whole-number count, a valid opening width, and spring stiffness.'));
+    }
     if (node.positionHint !== undefined) validateVec3(node.positionHint, `${path}.positionHint`, errors);
   }
 
@@ -131,7 +139,7 @@ export function validateGraphDocumentV1(value: unknown): GraphDocumentValidation
       errors.push(error('invalid-edge', path, 'Edge must be an object.'));
       continue;
     }
-    validateKnownKeys(edge, ['id', 'sourceId', 'targetId', 'directed', 'weight', 'tokens', 'attributes'], path, errors);
+    validateKnownKeys(edge, ['id', 'sourceId', 'targetId', 'directed', 'weight', 'tokens', 'attributes', 'attachment'], path, errors);
     const idValid = validateId(edge.id, `${path}.id`, 'invalid-edge', errors);
     if (idValid) {
       if (edgeIds.has(edge.id as string)) {
@@ -141,6 +149,9 @@ export function validateGraphDocumentV1(value: unknown): GraphDocumentValidation
     }
     const sourceValid = validateId(edge.sourceId, `${path}.sourceId`, 'invalid-edge', errors);
     const targetValid = validateId(edge.targetId, `${path}.targetId`, 'invalid-edge', errors);
+    if (edge.attachment !== undefined && !isGraphEdgeAttachmentV1(edge.attachment)) {
+      errors.push(error('invalid-edge', `${path}.attachment`, 'Edge attachment must contain sourceSlot/targetSlot as non-negative whole-number slots or null.'));
+    }
     if (edge.directed !== undefined && typeof edge.directed !== 'boolean') {
       errors.push(error('invalid-edge', `${path}.directed`, 'Directed must be a boolean.'));
     }
@@ -345,6 +356,8 @@ function cloneNode(node: GraphNodeV1): GraphNodeV1 {
     ...(node.tokens === undefined ? {} : { tokens: [...node.tokens] }),
     ...(node.attributes === undefined ? {} : { attributes: cloneAttributes(node.attributes) }),
     ...(node.positionHint === undefined ? {} : { positionHint: { ...node.positionHint } }),
+    ...(node.attachment === undefined ? {} : { attachment: { ...node.attachment, ...(node.attachment.orientation === undefined ? {} : { orientation: node.attachment.orientation.mode === 'free'
+      ? { mode: 'free' as const } : { ...node.attachment.orientation, rotation: { ...node.attachment.orientation.rotation } } }) } }),
   };
 }
 
@@ -355,6 +368,7 @@ function cloneEdge(edge: GraphEdgeV1): GraphEdgeV1 {
     targetId: edge.targetId,
     ...(edge.directed === undefined ? {} : { directed: edge.directed }),
     ...(edge.weight === undefined ? {} : { weight: edge.weight }),
+    ...(edge.attachment === undefined ? {} : { attachment: { ...edge.attachment } }),
     ...(edge.tokens === undefined ? {} : { tokens: [...edge.tokens] }),
     ...(edge.attributes === undefined ? {} : { attributes: cloneAttributes(edge.attributes) }),
   };

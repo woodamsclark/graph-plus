@@ -17,7 +17,7 @@ import {
   withGraphPlusConstellationV1,
 } from '../../src/obsidian/settings/GraphPlusPluginDataStore.ts';
 import { createDefaultGraphPlusLensV1 } from '../../src/graph-plus/query/index.ts';
-import { graphDocument, graphNode } from '../support/contractFixtures.ts';
+import { graphDocument, graphEdge, graphNode } from '../support/contractFixtures.ts';
 import { assert, deepEqual, equal, test } from '../support/harness.ts';
 import { runtimeRegistration } from '../support/runtimeHarness.ts';
 
@@ -484,4 +484,18 @@ test('checkpoint dirtiness preserves changes arriving during a save and skips id
   equal(writes, 2, 'dirty notifications with identical persistent state do not write');
   await controller.closeAndDispose();
   equal(writes, 2, 'final recovery flush does not duplicate a successful checkpoint');
+});
+
+
+test('checkpoint save and reload retains per-node attachment and leaves old nodes unrestricted', () => {
+  const initial = migrateGraphPlusPluginDataV1({}).data;
+  const document = graphDocument({ nodes: [graphNode('hub', { attachment: { count: 6, stiffness: 'firm' } }), graphNode('free')],
+    edges: [graphEdge('hub-free', 'hub', 'free', { attachment: { sourceSlot: 4, targetSlot: null } })] });
+  const stored = withGraphPlusCheckpointV1(initial, 'Attachments', { document, savedAt: 10 });
+  const reloaded = migrateGraphPlusPluginDataV1(JSON.parse(JSON.stringify(stored))).data;
+  const checkpoint = readGraphPlusCheckpointV1(reloaded, 'Attachments');
+  assert(checkpoint, 'saved checkpoint is compatible with the expanded document contract');
+  deepEqual(checkpoint.document.nodes[0].attachment, { count: 6, stiffness: 'firm' }, 'quality survives persisted plugin data');
+  equal(checkpoint.document.nodes[1].attachment, undefined, 'old unrestricted nodes acquire no preference');
+  deepEqual(checkpoint.document.edges[0].attachment, { sourceSlot: 4, targetSlot: null }, 'link endpoint assignments survive checkpoint persistence');
 });
