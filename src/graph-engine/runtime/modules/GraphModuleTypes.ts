@@ -153,6 +153,8 @@ export interface GraphModuleTickResultV1 {
 }
 
 export interface GraphMotionTargetsV1 {
+  /** Transient node quality overrides; null means freely attaching for that tick. */
+  readonly nodeAttachments?: Readonly<Record<string, import('../../contracts/v1/index.ts').GraphNodeAttachmentV1 | null>>;
   readonly nodePositions?: Readonly<Record<string, Vec3>>;
   readonly nodePositionOffsets?: Readonly<Record<string, Vec3>>;
   readonly nodePositionStrength?: number;

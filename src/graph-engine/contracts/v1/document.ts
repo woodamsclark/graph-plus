@@ -1,3 +1,4 @@
+import { isGraphNodeAttachmentV1, type GraphNodeAttachmentV1 } from './attachment.ts';
 import type { GraphAttributeValue, GraphScalar, Vec3 } from './values.ts';
 
 export interface GraphDocumentV1 {
@@ -20,6 +21,8 @@ export interface GraphNodeRegionsDocumentV1 {
 }
 
 export interface GraphNodeV1 {
+  /** Node-owned attachment symmetry; omitted means freely attaching (count 1). */
+  readonly attachment?: GraphNodeAttachmentV1;
   readonly id: string;
   readonly label?: string;
   readonly tokens?: readonly string[];
@@ -108,7 +111,7 @@ export function validateGraphDocumentV1(value: unknown): GraphDocumentValidation
       errors.push(error('invalid-node', path, 'Node must be an object.'));
       continue;
     }
-    validateKnownKeys(node, ['id', 'label', 'tokens', 'attributes', 'positionHint'], path, errors);
+    validateKnownKeys(node, ['id', 'label', 'tokens', 'attributes', 'positionHint', 'attachment'], path, errors);
     const idValid = validateId(node.id, `${path}.id`, 'invalid-node', errors);
     if (idValid) {
       if (nodeIds.has(node.id as string)) {
@@ -119,6 +122,9 @@ export function validateGraphDocumentV1(value: unknown): GraphDocumentValidation
     validateOptionalString(node, 'label', path, errors, 'invalid-node');
     validateOptionalTokens(node, path, errors, 'invalid-node');
     validateOptionalAttributes(node, path, errors, 'invalid-node');
+    if (node.attachment !== undefined && !isGraphNodeAttachmentV1(node.attachment)) {
+      errors.push(error('invalid-node', `${path}.attachment`, 'Attachment must have a positive whole-number count, a valid opening width, and spring stiffness.'));
+    }
     if (node.positionHint !== undefined) validateVec3(node.positionHint, `${path}.positionHint`, errors);
   }
 
@@ -345,6 +351,7 @@ function cloneNode(node: GraphNodeV1): GraphNodeV1 {
     ...(node.tokens === undefined ? {} : { tokens: [...node.tokens] }),
     ...(node.attributes === undefined ? {} : { attributes: cloneAttributes(node.attributes) }),
     ...(node.positionHint === undefined ? {} : { positionHint: { ...node.positionHint } }),
+    ...(node.attachment === undefined ? {} : { attachment: { ...node.attachment } }),
   };
 }
 

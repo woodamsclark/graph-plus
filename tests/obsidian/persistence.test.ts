@@ -485,3 +485,15 @@ test('checkpoint dirtiness preserves changes arriving during a save and skips id
   await controller.closeAndDispose();
   equal(writes, 2, 'final recovery flush does not duplicate a successful checkpoint');
 });
+
+
+test('checkpoint save and reload retains per-node attachment and leaves old nodes unrestricted', () => {
+  const initial = migrateGraphPlusPluginDataV1({}).data;
+  const document = graphDocument({ nodes: [graphNode('hub', { attachment: { count: 6, stiffness: 'firm' } }), graphNode('free')], edges: [] });
+  const stored = withGraphPlusCheckpointV1(initial, 'Attachments', { document, savedAt: 10 });
+  const reloaded = migrateGraphPlusPluginDataV1(JSON.parse(JSON.stringify(stored))).data;
+  const checkpoint = readGraphPlusCheckpointV1(reloaded, 'Attachments');
+  assert(checkpoint, 'saved checkpoint is compatible with the expanded document contract');
+  deepEqual(checkpoint.document.nodes[0].attachment, { count: 6, stiffness: 'firm' }, 'quality survives persisted plugin data');
+  equal(checkpoint.document.nodes[1].attachment, undefined, 'old unrestricted nodes acquire no preference');
+});

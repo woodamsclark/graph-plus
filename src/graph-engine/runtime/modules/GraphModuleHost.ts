@@ -601,6 +601,9 @@ function mergeMotionTargets(
   return {
     ...base,
     ...override,
+    nodeAttachments: override.nodeAttachments
+      ? { ...(base.nodeAttachments ?? {}), ...override.nodeAttachments }
+      : base.nodeAttachments,
     nodePositions: override.nodePositions
       ? { ...(base.nodePositions ?? {}), ...override.nodePositions }
       : base.nodePositions,

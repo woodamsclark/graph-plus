@@ -194,3 +194,25 @@ test('C-VERSION-01 rejects unsupported document schemas independently', () => {
   }
   equal(thrown, true, 'assertion helper should throw the structural validation error');
 });
+
+
+test('node attachment is validated, deeply cloned, built, and serialized with its owner', () => {
+  const attachment = { count: 4, openingDegrees: 10, stiffness: 0.3 };
+  const document = createGraphDocumentBuilderV1().addNode({ id: 'hub', attachment })
+    .addNode({ id: 'free' }).build({ documentId: 'attachments' });
+  const clone = cloneGraphDocumentV1(document);
+  deepEqual(clone.nodes[0].attachment, attachment, 'builder and clone retain the node quality');
+  assert(clone.nodes[0].attachment !== document.nodes[0].attachment, 'attachment is copied by value');
+  attachment.count = 6;
+  equal(document.nodes[0].attachment?.count, 4, 'caller mutation cannot change built document');
+  const restored: unknown = JSON.parse(JSON.stringify(document));
+  assertGraphDocumentV1(restored);
+  deepEqual(restored, document, 'JSON round trip preserves attachment without separate settings');
+  equal(restored.nodes[1].attachment, undefined, 'unrestricted node stays free without injecting defaults');
+  for (const invalid of [{ count: 0 }, { count: 1.5 }, { count: null }, { count: 4, openingDegrees: 100 },
+    { count: 4, stiffness: Infinity }, { count: 4, unknown: true }]) {
+    const result = validateGraphDocumentV1({ ...document, nodes: [{ id: 'hub', attachment: invalid }] });
+    assert(!result.valid, 'invalid attachment is rejected at document boundary');
+    assert(result.errors.some(error => error.path === '$.nodes[0].attachment'), 'error identifies the node quality');
+  }
+});

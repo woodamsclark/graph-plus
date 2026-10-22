@@ -1,4 +1,5 @@
-import type { GraphDimensionsV1, GraphDocumentV1, GraphTopologyLayoutPolicyV1, JsonValue, Vec3 } from '../../../contracts/v1/index.ts';
+import { isGraphNodeAttachmentV1 } from '../../../contracts/v1/index.ts';
+import type { GraphNodeAttachmentV1, GraphDimensionsV1, GraphDocumentV1, GraphTopologyLayoutPolicyV1, JsonValue, Vec3 } from '../../../contracts/v1/index.ts';
 import {
   analyzeGraphTopologyV1,
   parseGraphTopologyLayoutPolicyV1,
@@ -14,6 +15,7 @@ import type {
   GraphModuleTickResultV1,
 } from '../GraphModuleTypes.ts';
 import { forceLayoutIntervalMsV1, forceLayoutTargetStepRateHzV1 } from './ForceLayoutCadence.ts';
+import { angularSpringStiffnessV1, connectionAngleErrorsV1 } from './ConnectionAngles.ts';
 
 export type GraphAxialSpringAxisV1 = 'off' | 'x' | 'y' | 'z';
 
@@ -133,6 +135,11 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     private settings: ForceSettings,
   ) {}
 
+  private connectionNeighbors = new Map<string, string[]>();
+  private nodeAttachments = new Map<string, GraphNodeAttachmentV1>();
+  private attachmentTargetsKey = '';
+  private attachmentDocumentSource: GraphDocumentV1 | null = null;
+
   updateSettings(settings: Readonly<Record<string, JsonValue>>): void {
     if (settings.topologyLayoutPolicy !== undefined
       && !parseGraphTopologyLayoutPolicyV1(settings.topologyLayoutPolicy)) return;
@@ -231,6 +238,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   preferredTickIntervalMs(state: GraphModulePipelineStateV1): number | null {
+    this.synchronizeNodeAttachments(state);
     this.synchronizePhysicsOverride(state.physicsOverrideHeld === true);
     if (this.suspended || state.formActive || state.document.nodes.length < 2) return null;
     const dragActive = state.draggedNodeId !== undefined
@@ -241,6 +249,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   tick(state: GraphModulePipelineStateV1, deltaSeconds: number) {
+    this.synchronizeNodeAttachments(state);
     this.synchronizePhysicsOverride(state.physicsOverrideHeld === true);
     // A restored view can reach the first tick before a view lifecycle event. Keep
     // pin state correct without requiring the session kernel to special-case force.
@@ -258,6 +267,29 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.synchronizeTopology(state);
     if (!this.running) return;
     return this.tickD3Compatible(state, deltaSeconds, dragActive);
+  }
+
+  private synchronizeNodeAttachments(state: GraphModulePipelineStateV1): void {
+    if (this.dimensions !== '2d') return;
+    const nodes = state.document.nodes;
+    const overrides = state.motionTargets?.nodeAttachments;
+    const key = JSON.stringify(overrides ?? null);
+    if (state.document === this.attachmentDocumentSource && key === this.attachmentTargetsKey) return;
+    const previouslyActive = this.nodeAttachments.size > 0;
+    this.nodeAttachments.clear();
+    for (const node of nodes) {
+      const overridden = overrides && Object.prototype.hasOwnProperty.call(overrides, node.id);
+      const requested = overridden ? overrides[node.id] : node.attachment;
+      // Malformed animation targets fall back to the node's saved quality.
+      const attachment = requested === null ? undefined
+        : isGraphNodeAttachmentV1(requested) ? requested : node.attachment;
+      if (attachment && (attachment.count ?? 1) > 1 && angularSpringStiffnessV1(attachment) > 0) {
+        this.nodeAttachments.set(node.id, attachment);
+      }
+    }
+    this.attachmentTargetsKey = key;
+    this.attachmentDocumentSource = state.document;
+    if (previouslyActive || this.nodeAttachments.size) this.reheatForChange();
   }
 
   private synchronizePinnedNodes(state: GraphModulePipelineStateV1['viewState']): void {
@@ -300,6 +332,16 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       targetId: memberId,
     })));
     this.topology = analyzeGraphTopologyV1(state.document, membershipConnections, this.settings.topologyLayoutPolicy);
+    this.connectionNeighbors.clear();
+    for (const pair of this.topology.pairs) {
+      if (!pair.edgeIds.length || pair.sourceId === pair.targetId) continue;
+      for (const [owner, neighbor] of [[pair.sourceId, pair.targetId], [pair.targetId, pair.sourceId]]) {
+        const neighbors = this.connectionNeighbors.get(owner) ?? [];
+        neighbors.push(neighbor);
+        this.connectionNeighbors.set(owner, neighbors);
+      }
+    }
+    for (const neighbors of this.connectionNeighbors.values()) neighbors.sort();
     const physicalPairs = this.topology.pairs.filter((pair) => pair.affinity > 0);
     const degree = new Map<string, number>();
     for (const pair of physicalPairs) {
@@ -444,6 +486,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       }
       this.applyD3Origin(state);
       this.applyD3Links(state);
+      this.applyConnectionAngleSprings(state);
       this.applyD3ManyBody();
       this.applyD3RegionAndComponentForces(state);
       this.applyAxialSpring();
@@ -565,6 +608,53 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     return pair.parameters.strength / Math.min(pair.sourceDegree, pair.targetDegree)
       * finiteNonNegative(declaredStrength, 1)
       * finiteNonNegative(state.motionTargets?.linkStrengthScale, 1);
+  }
+
+  private applyConnectionAngleSprings(state: GraphModulePipelineStateV1): void {
+    if (this.dimensions !== '2d') return;
+    if (!this.nodeAttachments.size) return;
+    const mobile = (id: string) => !this.pinned.has(id) && id !== state.draggedNodeId;
+    const corrections = new Map<string, { x: number; y: number }>();
+    const add = (id: string, x: number, y: number) => {
+      const correction = corrections.get(id) ?? { x: 0, y: 0 };
+      correction.x += x;
+      correction.y += y;
+      corrections.set(id, correction);
+    };
+    for (const [ownerId, pattern] of this.nodeAttachments) {
+      const neighborIds = this.connectionNeighbors.get(ownerId) ?? [];
+      const stiffness = angularSpringStiffnessV1(pattern);
+      const owner = this.positions[ownerId];
+      const neighbors = neighborIds.flatMap(id => {
+        const position = this.positions[id];
+        if (!position || !owner) return [];
+        const dx = position.x - owner.x, dy = position.y - owner.y;
+        const length = Math.hypot(dx, dy);
+        return length < 1e-6 ? [] : [{ id, dx, dy, length, angle: Math.atan2(dy, dx) }];
+      });
+      if (neighbors.length < 2) continue;
+      const errors = connectionAngleErrorsV1(neighbors.map(neighbor => neighbor.angle), pattern);
+      // A common torque scale balances the free pattern even with unequal lengths.
+      const radius = neighbors.reduce((minimum, neighbor) => Math.min(minimum, neighbor.length), Infinity);
+      const gain = stiffness * FORCE_INTEGRATION_GAIN / neighbors.length;
+      for (let i = 0; i < neighbors.length; i++) {
+        const neighbor = neighbors[i];
+        const ownerMobile = mobile(ownerId), neighborMobile = mobile(neighbor.id);
+        const mobility = Number(ownerMobile) + Number(neighborMobile);
+        if (!mobility) continue;
+        const amount = -errors[i] * radius * radius / (neighbor.length * neighbor.length) * gain / mobility;
+        const x = -neighbor.dy * amount, y = neighbor.dx * amount;
+        if (neighborMobile) add(neighbor.id, x, y);
+        if (ownerMobile) add(ownerId, -x, -y);
+      }
+    }
+    for (const [id, correction] of corrections) {
+      const velocity = this.velocities.get(id);
+      if (!velocity) continue;
+      velocity.x += correction.x;
+      velocity.y += correction.y;
+      clampVelocity(velocity, this.settings.maxSpeed, this.dimensions);
+    }
   }
 
   private applyD3ManyBody(): void {
@@ -701,6 +791,9 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   dispose(): void {
+    this.connectionNeighbors.clear();
+    this.nodeAttachments.clear();
+    this.attachmentDocumentSource = null;
     this.velocities.clear();
     this.previousVelocities.clear();
     this.forces.clear();

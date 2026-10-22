@@ -50,3 +50,8 @@ improvements remain available to older V1 clients without an artifact refresh.
 The client is distributed under the Mozilla Public License 2.0, matching its source
 in Graph+. The complete license is included in [LICENSE](LICENSE), including packed
 copies of this package.
+
+The shipped force layout offers the `node-attachment-2d` capability. Define
+`attachment: { count: 4, stiffness: 'firm' }` directly on a node. Missing attachment
+or count 1 is unrestricted. The quality travels with document exports and node
+patches. See [the node attachment guide](../../docs/connection-angles-2d.md).

@@ -11,6 +11,7 @@ const legacyArtifactSourceRoot = join(artifactRoot, 'graph-engine');
 const publicFiles = [
   'src/graph-engine/public.ts',
   'src/graph-engine/contracts/v1/action.ts',
+  'src/graph-engine/contracts/v1/attachment.ts',
   'src/graph-engine/contracts/v1/document.ts',
   'src/graph-engine/contracts/v1/experience.ts',
   'src/graph-engine/contracts/v1/filter.ts',

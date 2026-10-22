@@ -1,3 +1,4 @@
+export * from './attachment.ts';
 export * from './action.ts';
 export * from './document.ts';
 export * from './experience.ts';
