@@ -3,7 +3,7 @@ import { createShippedGraphModuleRegistryV1 } from '../../src/graph-engine/runti
 import { GRAPH_NODE_ATTACHMENT_CAPABILITY_V1 } from '../../packages/graph-engine-client/src/graph-engine/public.ts';
 import { ForceLayoutModule, readForceSettings } from '../../src/graph-engine/runtime/modules/shipped/ForceLayoutModule.ts';
 import { connectionAngleErrorsV1 } from '../../src/graph-engine/runtime/modules/shipped/ConnectionAngles.ts';
-import { isGraphNodeAttachmentV1 } from '../../src/graph-engine/contracts/v1/index.ts';
+import { graphAttachmentRotation2DV1, isGraphNodeAttachmentV1 } from '../../src/graph-engine/contracts/v1/index.ts';
 import type { GraphNodeAttachmentV1, GraphDimensionsV1, GraphViewStateV1, Vec3 } from '../../src/graph-engine/contracts/v1/index.ts';
 import type { GraphModulePipelineStateV1 } from '../../src/graph-engine/runtime/modules/GraphModuleTypes.ts';
 import { DEFAULT_GRAPH_RENDER_THEME_V1 } from '../../src/graph-engine/runtime/render/index.ts';
@@ -19,7 +19,7 @@ const config = (count = 4): GraphNodeAttachmentV1 => ({ count, stiffness: 'firm'
 
 function fixture(attachment: GraphNodeAttachmentV1 | null = config(), dimensions: GraphDimensionsV1 = '2d', rotation = 0, duplicate = false) {
   const positions: Record<string, Vec3> = { hub: { x: 0, y: 0, z: 0 } };
-  for (const [i, angle] of [0, 65, 188, 278].entries()) positions[`n${i}`] = {
+  for (const [i, angle] of [0, 80, 188, 278].entries()) positions[`n${i}`] = {
     x: 100 * Math.cos(radians(angle) + rotation), y: 100 * Math.sin(radians(angle) + rotation), z: dimensions === '3d' ? 20 : 0,
   };
   const document = graphDocument({ nodes: Object.keys(positions).map(id => graphNode(id, id === 'hub' && attachment ? { attachment } : {})),
@@ -131,11 +131,12 @@ test('changing node qualities and transient Anima targets wakes settled attachme
   value.state = { ...value.state, motionTargets: { nodeAttachments: { hub: config(3) } } };
   assert(value.force.preferredTickIntervalMs(value.state) !== null, 'animation wakes sleeping layout');
   step(value, 100);
-  assert(patternError(value.state.positions, 3) < patternError(stopped, 3) * 0.01, 'animation changes node symmetry live');
+  equal(value.force.getDiagnostics().attachmentSlots.owners.hub.count, 3, 'animation changes node symmetry live');
+  assert(value.force.getDiagnostics().attachmentSlots.owners.hub.bindings.length <= 3, 'animation honors slot capacity');
   deepEqual(value.state.document.nodes.find(node => node.id === 'hub')?.attachment, config(), 'animation leaves saved node quality untouched');
   value.state = { ...value.state, motionTargets: undefined };
   step(value, 150);
-  assert(patternError(value.state.positions) < 1e-6, 'ending animation returns control to the saved node quality');
+  equal(value.force.getDiagnostics().attachmentSlots.owners.hub.count, 4, 'ending animation returns control to the saved node quality');
 });
 
 test('leased nodes carry attachment through creation, export, JSON storage, and live patches', async () => {
@@ -167,7 +168,7 @@ test('leased nodes carry attachment through creation, export, JSON storage, and 
   } finally { await result.lease.release(); await provider.dispose(); }
 });
 
-test('new neighbors inherit the node pattern and removing neighbors drops their angular forces', () => {
+test('new neighbors overflow full attachment slots and removing neighbors releases occupancy', () => {
   const value = fixture();
   step(value, 200);
   const newPosition = { x: 95, y: 35, z: 0 };
@@ -176,12 +177,44 @@ test('new neighbors inherit the node pattern and removing neighbors drops their 
     edges: [...value.state.document.edges, graphEdge('new-edge', 'hub', 'new')] };
   value.state = { ...value.state, document, sourceDocument: document,
     positions: { ...value.state.positions, new: newPosition } };
-  const positions = step(value, 100);
-  const angles = Object.entries(positions).filter(([id]) => id !== 'hub').map(([, p]) => Math.atan2(p.y, p.x));
-  const errors = connectionAngleErrorsV1(angles, { count: 4 });
-  assert(errors.every(error => Math.abs(error) < 0.001), 'arriving neighbor automatically joins existing pattern');
+  step(value, 100);
+  const bindings = value.force.getDiagnostics().attachmentSlots.owners.hub.bindings;
+  equal(bindings.length, 4, 'existing four occupants retain the four available slots');
+  assert(!bindings.some(binding => binding.neighborId === 'new'), 'overflow neighbor floats freely');
   const removed = { ...document, revision: 2, nodes: document.nodes.filter(node => node.id !== 'new'),
     edges: document.edges.filter(edge => edge.id !== 'new-edge') };
   value.state = { ...value.state, document: removed, sourceDocument: removed };
   assert(!Object.prototype.hasOwnProperty.call(step(value), 'new'), 'removed node is purged from solver buffers');
+});
+
+
+test('force integration enforces locked rays after other forces and retains bindings through snapshots', () => {
+  const attachment: GraphNodeAttachmentV1 = { count: 4, rigidity: 'locked',
+    orientation: { mode: 'locked', rotation: graphAttachmentRotation2DV1(0) } };
+  const value = fixture(attachment);
+  step(value);
+  const bound = value.force.getDiagnostics().attachmentSlots.owners.hub.bindings;
+  equal(bound.length, 4, 'four neighbors acquire the four slots');
+  value.force.updateSettings({ ...inert, repulsionStrength: 1000, springStrength: 0.2, springLength: 130, collisionRadius: 10 });
+  const positions = step(value, 60);
+  for (const binding of bound) {
+    const position = positions[binding.neighborId];
+    const angle = Math.atan2(position.y, position.x);
+    near(Math.atan2(Math.sin(angle - binding.slot * Math.PI / 2), Math.cos(angle - binding.slot * Math.PI / 2)), 0,
+      'hard angular projection survives repulsion, collision and length forces', 1e-6);
+  }
+  const saved = JSON.parse(JSON.stringify(value.force.exportState())) as ReturnType<ForceLayoutModule['exportState']>;
+  const restored = fixture(attachment);
+  restored.state = { ...restored.state, positions: structuredClone(value.state.positions) };
+  restored.force.restoreState(saved);
+  step(restored);
+  deepEqual(restored.force.getDiagnostics().attachmentSlots.owners.hub.bindings, bound, 'force snapshots preserve occupants');
+  const originalSlot = bound.find(binding => binding.neighborId === 'n1')!.slot;
+  value.state = { ...value.state, draggedNodeId: 'n1',
+    positions: { ...value.state.positions, n1: { x: 80, y: 80, z: 0 } } };
+  const attempted = step(value);
+  const actual = Math.atan2(attempted.n1.y, attempted.n1.x);
+  near(Math.atan2(Math.sin(actual - originalSlot * Math.PI / 2), Math.cos(actual - originalSlot * Math.PI / 2)), 0,
+    'dragging cannot eject a locked occupant', 1e-6);
+  deepEqual(value.force.getDiagnostics().attachmentSlots.owners.hub.bindings, bound, 'dragging does not reassign locked slots');
 });

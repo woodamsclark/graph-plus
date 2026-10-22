@@ -1,5 +1,5 @@
 import { isGraphNodeAttachmentV1 } from '../../../contracts/v1/index.ts';
-import type { GraphNodeAttachmentV1, GraphDimensionsV1, GraphDocumentV1, GraphTopologyLayoutPolicyV1, JsonValue, Vec3 } from '../../../contracts/v1/index.ts';
+import type { GraphAttachmentSlotsStateV1, GraphNodeAttachmentV1, GraphDimensionsV1, GraphDocumentV1, GraphTopologyLayoutPolicyV1, JsonValue, Vec3 } from '../../../contracts/v1/index.ts';
 import {
   analyzeGraphTopologyV1,
   parseGraphTopologyLayoutPolicyV1,
@@ -15,7 +15,8 @@ import type {
   GraphModuleTickResultV1,
 } from '../GraphModuleTypes.ts';
 import { forceLayoutIntervalMsV1, forceLayoutTargetStepRateHzV1 } from './ForceLayoutCadence.ts';
-import { angularSpringStiffnessV1, connectionAngleErrorsV1 } from './ConnectionAngles.ts';
+import { angularSpringStiffnessV1 } from './ConnectionAngles.ts';
+import { AttachmentSlots2D } from './AttachmentSlots2D.ts';
 
 export type GraphAxialSpringAxisV1 = 'off' | 'x' | 'y' | 'z';
 
@@ -84,6 +85,9 @@ export interface ForceLayoutDiagnosticsV1 {
   readonly positionBufferSynchronizations: number;
   readonly positionBufferNodeVisits: number;
   readonly nodePositionPatches: number;
+  readonly attachmentSlots: GraphAttachmentSlotsStateV1;
+  readonly rejectedAttachmentBindings: number;
+  readonly blockedAttachmentMoves: number;
 }
 
 const ACTIVE_DRAG_ACTIVITY = 1;
@@ -135,6 +139,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     private settings: ForceSettings,
   ) {}
 
+  private readonly attachmentSlots = new AttachmentSlots2D();
+  private attachmentMovement = 0;
   private connectionNeighbors = new Map<string, string[]>();
   private nodeAttachments = new Map<string, GraphNodeAttachmentV1>();
   private attachmentTargetsKey = '';
@@ -185,6 +191,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     if (!target) return;
     target.x = position.x; target.y = position.y; target.z = this.dimensions === '2d' ? 0 : position.z;
     this.nodePositionPatches += 1;
+    if (this.attachmentSlots.hasLocks || [...this.nodeAttachments.values()].some(attachment => attachment.rigidity === 'locked')) this.reheatForChange();
   }
 
   restoreState(state: JsonValue): void {
@@ -195,6 +202,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       throw new Error('Force layout state is not a valid V1 snapshot.');
     }
     if (state.forceModel !== undefined && state.forceModel !== 'd3-compatible') return;
+    this.attachmentSlots.restore(state.attachmentSlots);
     const restoredVelocities = new Map<string, MutableVec3>();
     let hostileMotion = false;
     for (const [id, value] of Object.entries(state.velocities)) {
@@ -224,8 +232,10 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   exportState(): JsonValue {
+    const attachmentSlots = this.attachmentSlots.snapshot();
     return {
       schemaVersion: 1,
+      ...(Object.keys(attachmentSlots.owners).length ? { attachmentSlots } : {}),
       alpha: this.alpha,
       alphaTarget: this.legacyAlphaTarget,
       running: this.running,
@@ -239,6 +249,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   preferredTickIntervalMs(state: GraphModulePipelineStateV1): number | null {
     this.synchronizeNodeAttachments(state);
+    if ((this.attachmentSlots.hasLocks || [...this.nodeAttachments.values()].some(attachment => attachment.rigidity === 'locked')) && state.positions !== this.positions && state.positions !== this.positionSource) this.reheatForChange();
     this.synchronizePhysicsOverride(state.physicsOverrideHeld === true);
     if (this.suspended || state.formActive || state.document.nodes.length < 2) return null;
     const dragActive = state.draggedNodeId !== undefined
@@ -283,7 +294,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       // Malformed animation targets fall back to the node's saved quality.
       const attachment = requested === null ? undefined
         : isGraphNodeAttachmentV1(requested) ? requested : node.attachment;
-      if (attachment && (attachment.count ?? 1) > 1 && angularSpringStiffnessV1(attachment) > 0) {
+      if (attachment && (attachment.count ?? 1) > 1 && (attachment.rigidity === 'locked' || angularSpringStiffnessV1(attachment) > 0)) {
         this.nodeAttachments.set(node.id, attachment);
       }
     }
@@ -487,6 +498,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       this.applyD3Origin(state);
       this.applyD3Links(state);
       this.applyConnectionAngleSprings(state);
+      maximumMovement = Math.max(maximumMovement, this.attachmentMovement);
+      changed ||= this.attachmentMovement > 0.00001;
       this.applyD3ManyBody();
       this.applyD3RegionAndComponentForces(state);
       this.applyAxialSpring();
@@ -519,6 +532,13 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
         position.x += movementX;
         position.y += movementY;
         position.z = this.dimensions === '2d' ? 0 : position.z + movementZ;
+      }
+      if (this.dimensions === '2d') {
+        const mobile = (id: string) => !this.pinned.has(id) && id !== state.draggedNodeId;
+        const correction = this.attachmentSlots.enforce(this.positions, mobile);
+        maximumMovement = Math.max(maximumMovement, correction);
+        changed ||= correction > 0.00001;
+        this.attachmentSlots.constrainVelocities(this.positions, this.velocities, mobile);
       }
     }
     if (!dragActive) {
@@ -611,49 +631,39 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   private applyConnectionAngleSprings(state: GraphModulePipelineStateV1): void {
+    this.attachmentMovement = 0;
     if (this.dimensions !== '2d') return;
-    if (!this.nodeAttachments.size) return;
     const mobile = (id: string) => !this.pinned.has(id) && id !== state.draggedNodeId;
-    const corrections = new Map<string, { x: number; y: number }>();
-    const add = (id: string, x: number, y: number) => {
-      const correction = corrections.get(id) ?? { x: 0, y: 0 };
-      correction.x += x;
-      correction.y += y;
-      corrections.set(id, correction);
-    };
-    for (const [ownerId, pattern] of this.nodeAttachments) {
-      const neighborIds = this.connectionNeighbors.get(ownerId) ?? [];
-      const stiffness = angularSpringStiffnessV1(pattern);
-      const owner = this.positions[ownerId];
-      const neighbors = neighborIds.flatMap(id => {
-        const position = this.positions[id];
-        if (!position || !owner) return [];
-        const dx = position.x - owner.x, dy = position.y - owner.y;
-        const length = Math.hypot(dx, dy);
-        return length < 1e-6 ? [] : [{ id, dx, dy, length, angle: Math.atan2(dy, dx) }];
-      });
-      if (neighbors.length < 2) continue;
-      const errors = connectionAngleErrorsV1(neighbors.map(neighbor => neighbor.angle), pattern);
-      // A common torque scale balances the free pattern even with unequal lengths.
-      const radius = neighbors.reduce((minimum, neighbor) => Math.min(minimum, neighbor.length), Infinity);
-      const gain = stiffness * FORCE_INTEGRATION_GAIN / neighbors.length;
-      for (let i = 0; i < neighbors.length; i++) {
-        const neighbor = neighbors[i];
-        const ownerMobile = mobile(ownerId), neighborMobile = mobile(neighbor.id);
-        const mobility = Number(ownerMobile) + Number(neighborMobile);
-        if (!mobility) continue;
-        const amount = -errors[i] * radius * radius / (neighbor.length * neighbor.length) * gain / mobility;
-        const x = -neighbor.dy * amount, y = neighbor.dx * amount;
-        if (neighborMobile) add(neighbor.id, x, y);
-        if (ownerMobile) add(ownerId, -x, -y);
+    const before = new Map<string, MutableVec3>();
+    for (const [id, pattern] of this.nodeAttachments) if (pattern.rigidity === 'locked') {
+      for (const nodeId of [id, ...(this.connectionNeighbors.get(id) ?? [])]) {
+        if (this.positions[nodeId]) before.set(nodeId, { ...this.positions[nodeId] });
       }
     }
-    for (const [id, correction] of corrections) {
-      const velocity = this.velocities.get(id);
-      if (!velocity) continue;
-      velocity.x += correction.x;
-      velocity.y += correction.y;
-      clampVelocity(velocity, this.settings.maxSpeed, this.dimensions);
+    const springs = this.attachmentSlots.prepare(this.nodeAttachments, this.connectionNeighbors, this.positions, mobile);
+    for (const [id, point] of before) this.attachmentMovement = Math.max(this.attachmentMovement,
+      Math.hypot(point.x - this.positions[id].x, point.y - this.positions[id].y));
+    const grouped = new Map<string, typeof springs>();
+    for (const spring of springs) {
+      const group = grouped.get(spring.ownerId) ?? [];
+      group.push(spring); grouped.set(spring.ownerId, group);
+    }
+    for (const [id, bindings] of grouped) {
+      const owner = this.positions[id];
+      const radius = bindings.reduce((min, binding) => {
+        const neighbor = this.positions[binding.neighborId];
+        return Math.min(min, Math.hypot(neighbor.x - owner.x, neighbor.y - owner.y));
+      }, Infinity);
+      for (const binding of bindings) {
+        const neighbor = this.positions[binding.neighborId];
+        const dx = neighbor.x - owner.x, dy = neighbor.y - owner.y, squared = dx * dx + dy * dy;
+        const ma = Number(mobile(id)), mb = Number(mobile(binding.neighborId)), mobility = ma + mb;
+        if (!mobility || squared < 1e-12) continue;
+        const amount = -binding.error * radius * radius / squared * binding.stiffness * FORCE_INTEGRATION_GAIN / bindings.length / mobility;
+        const ownerVelocity = this.velocities.get(id)!, neighborVelocity = this.velocities.get(binding.neighborId)!;
+        ownerVelocity.x += dy * amount * ma; ownerVelocity.y -= dx * amount * ma;
+        neighborVelocity.x -= dy * amount * mb; neighborVelocity.y += dx * amount * mb;
+      }
     }
   }
 
@@ -793,6 +803,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   dispose(): void {
     this.connectionNeighbors.clear();
     this.nodeAttachments.clear();
+    this.attachmentSlots.clear();
     this.attachmentDocumentSource = null;
     this.velocities.clear();
     this.previousVelocities.clear();
@@ -823,6 +834,9 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       positionBufferSynchronizations: this.positionBufferSynchronizations,
       positionBufferNodeVisits: this.positionBufferNodeVisits,
       nodePositionPatches: this.nodePositionPatches,
+      attachmentSlots: this.attachmentSlots.snapshot(),
+      rejectedAttachmentBindings: this.attachmentSlots.rejectedBindings,
+      blockedAttachmentMoves: this.attachmentSlots.blockedMoves,
     };
   }
 

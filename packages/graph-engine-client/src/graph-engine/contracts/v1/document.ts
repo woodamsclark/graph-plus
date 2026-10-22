@@ -351,7 +351,8 @@ function cloneNode(node: GraphNodeV1): GraphNodeV1 {
     ...(node.tokens === undefined ? {} : { tokens: [...node.tokens] }),
     ...(node.attributes === undefined ? {} : { attributes: cloneAttributes(node.attributes) }),
     ...(node.positionHint === undefined ? {} : { positionHint: { ...node.positionHint } }),
-    ...(node.attachment === undefined ? {} : { attachment: { ...node.attachment } }),
+    ...(node.attachment === undefined ? {} : { attachment: { ...node.attachment, ...(node.attachment.orientation === undefined ? {} : { orientation: node.attachment.orientation.mode === 'free'
+      ? { mode: 'free' as const } : { ...node.attachment.orientation, rotation: { ...node.attachment.orientation.rotation } } }) } }),
   };
 }
 

@@ -55,3 +55,9 @@ The shipped force layout offers the `node-attachment-2d` capability. Define
 `attachment: { count: 4, stiffness: 'firm' }` directly on a node. Missing attachment
 or count 1 is unrestricted. The quality travels with document exports and node
 patches. See [the node attachment guide](../../docs/connection-angles-2d.md).
+
+The testing branch also advertises `node-attachment-slots-2d`: finite-capacity,
+stable occupants, releasable spring bindings, hard binding locks, and independent
+free/spring/locked quaternion orientation. Request that capability when adopting
+these features. Runtime slot occupants and phase live in force-layout module
+state; save full view/world state to preserve them across sessions.

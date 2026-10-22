@@ -15,9 +15,9 @@ pack that directory; pin the testing commit rather than treating its unchanged
 2.0.5 package label as a newly published release. Direct installation of the
 repository root is not installation of this nested client package.
 
-Add `node-attachment-2d` to toolbar+'s requested capabilities, both when acquiring
+Add `node-attachment-slots-2d` to toolbar+'s requested capabilities, both when acquiring
 the lease and in its consumer profile. TypeScript consumers can import
-`GRAPH_NODE_ATTACHMENT_CAPABILITY_V1` from the generated client. Toolbar+'s
+`GRAPH_NODE_ATTACHMENT_SLOTS_CAPABILITY_V1` from the generated client. Toolbar+'s
 current JavaScript consumer can request the string directly.
 
 An older Graph+ provider will reject the requested capability. Keep the existing
@@ -36,7 +36,7 @@ Pass the property on the nodes in the document supplied to the leased session:
 ```
 
 This gives the center eight preferred directions 45 degrees apart. The pattern
-can turn freely; it does not fix north. Multiple links may share a direction.
+can turn freely; it does not fix north. Each slot holds one neighbor; overflow remains free.
 Missing attachment or count 1 means unrestricted. Stiffness is numeric 0–1 or
 `off`, `soft`, `firm`, or `stiff`. See [the full contract](connection-angles-2d.md).
 
@@ -77,7 +77,31 @@ Graph+ layout with a node that has at least two visible connected neighbors.
   ordinary action nodes.
 - An older provider produces a clear unavailable-capability outcome.
 
-The Graph+ suite currently passes 535 tests, including document validation,
+The Graph+ suite currently passes 543 tests, including document validation,
 cloning, JSON/checkpoint storage, leased-session node patches, spring convergence,
 free rotation, pins, duplicate edges, and transient animation targets. The 3D
 document retains attachment, but spherical forces are intentionally deferred.
+
+## Binding and orientation lock testing
+
+Use `rigidity: "locked"` to prevent an occupant from escaping or switching slots.
+Leave orientation free to let the whole pattern turn, or anchor the hub in world
+space with `orientation: { mode: "locked", rotation: { x: 0, y: 0, z: 0, w: 1 } }`.
+That identity rotation aligns slot zero with world +X. A different planar angle
+can be converted with `graphAttachmentRotation2DV1` from the client contract.
+
+For spring mode, higher `stiffness` both restores the direction more strongly
+and raises the escape threshold. Check that a sufficiently displaced occupant
+can detach and later acquire a different empty slot. Check that a closer newcomer
+cannot steal an occupied locked slot, and that excess neighbors stay free.
+
+Locked constraints veto incompatible movement, including pointer and external
+position updates. Toolbar+'s own per-frame position corrections may repeatedly
+request moves Graph+ rejects; inspect those corrections when testing, rather than
+interpreting a blocked drag as a binding failure. Keep a single layout authority.
+
+Persist Graph+ view/world module state as well as the node declarations if
+occupants should survive closing/reopening the toolbar session. Position-only
+snapshots omit slot identities. Inspect `attachmentSlots`,
+`rejectedAttachmentBindings`, and `blockedAttachmentMoves` in force diagnostics.
+The provider remains 2D-only for these features.
