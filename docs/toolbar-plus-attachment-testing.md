@@ -77,7 +77,7 @@ Graph+ layout with a node that has at least two visible connected neighbors.
   ordinary action nodes.
 - An older provider produces a clear unavailable-capability outcome.
 
-The Graph+ suite currently passes 543 tests, including document validation,
+The Graph+ suite currently passes 549 tests, including document validation,
 cloning, JSON/checkpoint storage, leased-session node patches, spring convergence,
 free rotation, pins, duplicate edges, and transient animation targets. The 3D
 document retains attachment, but spherical forces are intentionally deferred.
@@ -105,3 +105,24 @@ occupants should survive closing/reopening the toolbar session. Position-only
 snapshots omit slot identities. Inspect `attachmentSlots`,
 `rejectedAttachmentBindings`, and `blockedAttachmentMoves` in force diagnostics.
 The provider remains 2D-only for these features.
+
+## Assign a command link to a specific position
+
+The provider now supports `edge-attachment-assignments-2d`. Request this additional
+capability in the lease and consumer profile. A command's generated Graph+ edge
+can carry `attachment: { sourceSlot: 3 }` when `sourceId` is its owning hub/node.
+Use `targetSlot` instead when the owning node is `targetId`; each endpoint is
+independent, even on an undirected link.
+
+Indices are zero-based. Keep this property in toolbar+'s saved connection model,
+include it in document revision comparisons, and forward it when regenerating
+edges. Submit normal `replace-edge` patches or document replacements to change it.
+A request persists until explicitly edited. Omission restores automatic binding;
+null forces that endpoint to stay unbound. Explicit spring assignments may stretch
+but do not jump to other positions.
+
+Inspect the force-layout `attachmentSlots.requests` statuses and binding `edgeIds`
+to confirm effective assignments. Occupied/out-of-range requests stay unbound;
+Graph+ never silently substitutes a different position. Slot identity alone does
+not set a world heading: configure the owning node's pattern orientation as well
+when a command needs a particular screen/world direction.

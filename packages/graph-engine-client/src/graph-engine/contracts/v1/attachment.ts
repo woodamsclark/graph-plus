@@ -2,6 +2,25 @@
 export const GRAPH_NODE_ATTACHMENT_CAPABILITY_V1 = 'node-attachment-2d';
 
 export const GRAPH_NODE_ATTACHMENT_SLOTS_CAPABILITY_V1 = 'node-attachment-slots-2d';
+export const GRAPH_EDGE_ATTACHMENT_ASSIGNMENTS_CAPABILITY_V1 = 'edge-attachment-assignments-2d';
+
+/** Endpoint-specific slot requests on a graph edge. Slot indices start at zero. */
+export type GraphEdgeAttachmentV1 = {
+  /** Slot on sourceId's pattern; omitted is automatic, null explicitly leaves it unbound. */
+  readonly sourceSlot?: number | null;
+  /** Slot on targetId's pattern, independently from the source endpoint. */
+  readonly targetSlot?: number | null;
+};
+
+export function isGraphEdgeAttachmentV1(value: unknown): value is GraphEdgeAttachmentV1 {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  const attachment = value as Record<string, unknown>;
+  return Object.keys(attachment).every(key => (key === 'sourceSlot' || key === 'targetSlot')
+    && (attachment[key] === undefined || attachment[key] === null
+      || typeof attachment[key] === 'number' && Number.isSafeInteger(attachment[key]) && attachment[key] >= 0));
+}
 
 /** Finite spring strengths, not hard position locks. */
 export const GRAPH_ANGULAR_SPRING_PRESETS_V1 = Object.freeze({
@@ -26,14 +45,30 @@ export function graphAttachmentRotation2DV1(degrees: number): GraphAttachmentRot
   return { x: 0, y: 0, z: Math.sin(halfAngle), w: Math.cos(halfAngle) };
 }
 
-export type GraphAttachmentBindingV1 = { readonly neighborId: string; readonly slot: number };
+export type GraphAttachmentBindingV1 = {
+  readonly neighborId: string;
+  readonly slot: number;
+  /** Parallel links share one physical binding between their endpoint nodes. */
+  readonly edgeIds?: readonly string[];
+};
+export type GraphAttachmentAssignmentV1 = { readonly neighborId: string; readonly edgeId: string; readonly slot: number | null };
+export type GraphEdgeAttachmentStatusV1 = {
+  readonly edgeId: string;
+  readonly endpoint: 'source' | 'target';
+  readonly ownerId: string;
+  readonly neighborId: string;
+  readonly requestedSlot: number | null;
+  readonly status: 'bound' | 'unbound' | 'occupied' | 'out-of-range' | 'inactive' | 'free' | 'conflicting';
+};
 /** Occupants and pattern pose are saved in force-layout module state, separately from node declarations. */
 export type GraphAttachmentSlotsStateV1 = {
   readonly version: 1;
+  readonly requests?: readonly GraphEdgeAttachmentStatusV1[];
   readonly owners: Readonly<Record<string, {
     readonly count: number;
     readonly phaseRadians: number;
     readonly bindings: readonly GraphAttachmentBindingV1[];
+    readonly assignments?: readonly GraphAttachmentAssignmentV1[];
   }>>;
 };
 

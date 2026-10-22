@@ -16,7 +16,7 @@ import type {
 } from '../GraphModuleTypes.ts';
 import { forceLayoutIntervalMsV1, forceLayoutTargetStepRateHzV1 } from './ForceLayoutCadence.ts';
 import { angularSpringStiffnessV1 } from './ConnectionAngles.ts';
-import { AttachmentSlots2D } from './AttachmentSlots2D.ts';
+import { AttachmentSlots2D, type AttachmentEndpoint2D } from './AttachmentSlots2D.ts';
 
 export type GraphAxialSpringAxisV1 = 'off' | 'x' | 'y' | 'z';
 
@@ -141,6 +141,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   private readonly attachmentSlots = new AttachmentSlots2D();
   private attachmentMovement = 0;
+  private connectionEndpoints: readonly AttachmentEndpoint2D[] = [];
   private connectionNeighbors = new Map<string, string[]>();
   private nodeAttachments = new Map<string, GraphNodeAttachmentV1>();
   private attachmentTargetsKey = '';
@@ -343,6 +344,10 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       targetId: memberId,
     })));
     this.topology = analyzeGraphTopologyV1(state.document, membershipConnections, this.settings.topologyLayoutPolicy);
+    this.connectionEndpoints = state.document.edges.flatMap(edge => [
+      { edgeId: edge.id, ownerId: edge.sourceId, neighborId: edge.targetId, endpoint: 'source' as const, slot: edge.attachment?.sourceSlot },
+      { edgeId: edge.id, ownerId: edge.targetId, neighborId: edge.sourceId, endpoint: 'target' as const, slot: edge.attachment?.targetSlot },
+    ]);
     this.connectionNeighbors.clear();
     for (const pair of this.topology.pairs) {
       if (!pair.edgeIds.length || pair.sourceId === pair.targetId) continue;
@@ -640,7 +645,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
         if (this.positions[nodeId]) before.set(nodeId, { ...this.positions[nodeId] });
       }
     }
-    const springs = this.attachmentSlots.prepare(this.nodeAttachments, this.connectionNeighbors, this.positions, mobile);
+    const springs = this.attachmentSlots.prepare(this.nodeAttachments, this.connectionNeighbors, this.positions, mobile, this.connectionEndpoints);
     for (const [id, point] of before) this.attachmentMovement = Math.max(this.attachmentMovement,
       Math.hypot(point.x - this.positions[id].x, point.y - this.positions[id].y));
     const grouped = new Map<string, typeof springs>();
@@ -802,6 +807,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   dispose(): void {
     this.connectionNeighbors.clear();
+    this.connectionEndpoints = [];
     this.nodeAttachments.clear();
     this.attachmentSlots.clear();
     this.attachmentDocumentSource = null;

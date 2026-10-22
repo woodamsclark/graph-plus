@@ -1,11 +1,13 @@
-import type { GraphAttachmentSlotsStateV1, GraphNodeAttachmentV1, Vec3 } from '../../../contracts/v1/index.ts';
+import type { GraphAttachmentSlotsStateV1, GraphEdgeAttachmentStatusV1, GraphNodeAttachmentV1, Vec3 } from '../../../contracts/v1/index.ts';
 import { angularSpringStiffnessV1, connectionAngleErrorsV1 } from './ConnectionAngles.ts';
 
 const TAU = Math.PI * 2;
 const TOLERANCE = 1e-6;
 type Point = { x: number; y: number; z: number };
 type Positions = Record<string, Point>;
-type Owner = { count: number; phase: number; locked: boolean; bindings: Map<string, number> };
+type Assignment = { edgeId: string; slot: number | null };
+type Owner = { count: number; phase: number; locked: boolean; bindings: Map<string, number>; assignments: Map<string, Assignment> };
+export type AttachmentEndpoint2D = { edgeId: string; ownerId: string; neighborId: string; endpoint: 'source' | 'target'; slot?: number | null };
 type Binding = { ownerId: string; neighborId: string; slot: number };
 export type AttachmentSpring2D = Binding & { error: number; stiffness: number };
 export const wrapAttachmentAngle2D = (angle: number) => ((angle + Math.PI) % TAU + TAU) % TAU - Math.PI;
@@ -16,6 +18,9 @@ export class AttachmentSlots2D {
   private patterns: ReadonlyMap<string, GraphNodeAttachmentV1> = new Map();
   private feasiblePositions = new Map<string, Point>();
   private feasiblePhases = new Map<string, number>();
+  private endpoints: readonly AttachmentEndpoint2D[] = [];
+  private requestedEndpoints: readonly AttachmentEndpoint2D[] = [];
+  private endpointGroups = new Map<string, Map<string, AttachmentEndpoint2D[]>>();
   rejectedBindings = 0;
   blockedMoves = 0;
 
@@ -26,8 +31,21 @@ export class AttachmentSlots2D {
     neighbors: ReadonlyMap<string, readonly string[]>,
     positions: Positions,
     mobile: (id: string) => boolean,
+    endpoints: readonly AttachmentEndpoint2D[] = [],
   ): AttachmentSpring2D[] {
     this.patterns = patterns;
+    if (this.endpoints !== endpoints) {
+      this.endpoints = endpoints;
+      this.requestedEndpoints = endpoints.filter(endpoint => endpoint.slot !== undefined);
+      this.endpointGroups.clear();
+      for (const endpoint of endpoints) {
+        if (endpoint.ownerId === endpoint.neighborId) continue;
+        const owner = this.endpointGroups.get(endpoint.ownerId) ?? new Map<string, AttachmentEndpoint2D[]>();
+        const group = owner.get(endpoint.neighborId) ?? [];
+        group.push(endpoint); owner.set(endpoint.neighborId, group); this.endpointGroups.set(endpoint.ownerId, owner);
+      }
+      for (const owner of this.endpointGroups.values()) for (const group of owner.values()) group.sort((a, b) => a.edgeId.localeCompare(b.edgeId));
+    }
     for (const id of this.owners.keys()) if (!patterns.has(id) || !positions[id]) this.owners.delete(id);
     const pending: Binding[] = [];
     const released = new Set<string>();
@@ -41,11 +59,12 @@ export class AttachmentSlots2D {
       if (!owner || owner.count !== count) {
         const angles = linked.map(neighbor => direction(origin, positions[neighbor]));
         const errors = connectionAngleErrorsV1(angles, { count });
-        owner = { count, phase: angles.length ? angles[0] - errors[0] : 0, locked: false, bindings: new Map() };
+        owner = { count, phase: angles.length ? angles[0] - errors[0] : 0, locked: false, bindings: new Map(), assignments: new Map() };
         this.owners.set(id, owner);
       }
       const available = new Set(connected);
       for (const neighbor of owner.bindings.keys()) if (!available.has(neighbor)) owner.bindings.delete(neighbor);
+      this.synchronizeAssignments(id, owner);
       this.updatePhase(id, owner, positions);
       const locked = pattern.rigidity === 'locked';
       if (locked && !owner.locked) {
@@ -58,6 +77,7 @@ export class AttachmentSlots2D {
         const stop = Math.max((pattern.openingDegrees ?? 0) * Math.PI / 360,
           spacing * (0.22 + 0.27 * angularSpringStiffnessV1(pattern)));
         for (const [neighbor, slot] of owner.bindings) {
+          if (owner.assignments.has(neighbor)) continue;
           if (Math.abs(wrapAttachmentAngle2D(direction(origin, positions[neighbor]) - owner.phase - slot * spacing)) > stop) {
             owner.bindings.delete(neighbor);
             released.add(`${id}\0${neighbor}`);
@@ -68,11 +88,21 @@ export class AttachmentSlots2D {
     // Retained locks have priority over new binding requests.
     this.enforce(positions, mobile);
     for (const binding of pending) this.admit(binding, positions, mobile);
+    // Persistent explicit requests precede automatic capture and reserve vacant slots.
+    for (const [ownerId, owner] of [...this.owners].sort(([a], [b]) => a.localeCompare(b))) {
+      for (const [neighborId, assignment] of [...owner.assignments].sort(([, a], [, b]) => a.edgeId.localeCompare(b.edgeId))) {
+        if (assignment.slot === null || assignment.slot >= owner.count || !positions[neighborId]
+          || distance(positions[ownerId], positions[neighborId]) <= 1e-6) continue;
+        this.admit({ ownerId, neighborId, slot: assignment.slot }, positions, mobile);
+      }
+    }
     for (const [id, owner] of [...this.owners].sort(([a], [b]) => a.localeCompare(b))) {
       const origin = positions[id];
       const spacing = TAU / owner.count;
+      const reserved = new Set([...owner.assignments.values()].flatMap(assignment =>
+        assignment.slot !== null && assignment.slot < owner.count ? [assignment.slot] : []));
       const candidates = (neighbors.get(id) ?? []).filter(neighbor => positions[neighbor]
-        && !owner.bindings.has(neighbor) && !released.has(`${id}\0${neighbor}`)
+        && !owner.assignments.has(neighbor) && !owner.bindings.has(neighbor) && !released.has(`${id}\0${neighbor}`)
         && distance(origin, positions[neighbor]) > 1e-6)
         .map(neighborId => ({ neighborId, angle: direction(origin, positions[neighborId]) }))
         .sort((a, b) => Math.abs(wrapAttachmentAngle2D((a.angle - owner.phase) * owner.count) / owner.count)
@@ -83,10 +113,10 @@ export class AttachmentSlots2D {
         const nearest = Math.round(wrapAttachmentAngle2D(candidate.angle - owner.phase) / spacing);
         let slot: number | undefined;
         // Search only as far as existing occupants; never allocate an array of count slots.
-        for (let offset = 0; offset <= occupied.size && slot === undefined; offset++) {
+        for (let offset = 0; offset <= occupied.size + reserved.size && offset < owner.count && slot === undefined; offset++) {
           for (const step of offset ? [offset, -offset] : [0]) {
             const index = ((nearest + step) % owner.count + owner.count) % owner.count;
-            if (!occupied.has(index)) { slot = index; break; }
+            if (!occupied.has(index) && !reserved.has(index)) { slot = index; break; }
           }
         }
         if (slot === undefined) continue;
@@ -107,6 +137,44 @@ export class AttachmentSlots2D {
       }
     }
     return springs;
+  }
+
+  private synchronizeAssignments(id: string, owner: Owner): void {
+    const groups = this.endpointGroups.get(id);
+    for (const neighbor of owner.assignments.keys()) {
+      if (!groups?.get(neighbor)?.some(endpoint => endpoint.slot !== undefined)) owner.assignments.delete(neighbor);
+    }
+    for (const [neighbor, group] of groups ?? []) {
+      const requests = group.filter(endpoint => endpoint.slot !== undefined);
+      if (!requests.length) continue;
+      const previous = owner.assignments.get(neighbor);
+      const request = requests.find(endpoint => endpoint.edgeId === previous?.edgeId) ?? requests[0];
+      const slot = request.slot as number | null;
+      if (previous ? previous.edgeId !== request.edgeId || previous.slot !== slot : owner.bindings.get(neighbor) !== slot) {
+        // Changing this link's explicit request is an intentional endpoint reconfiguration.
+        owner.bindings.delete(neighbor);
+      }
+      owner.assignments.set(neighbor, { edgeId: request.edgeId, slot });
+      if (slot === null || slot >= owner.count) owner.bindings.delete(neighbor);
+    }
+  }
+
+  private requestStatuses(): GraphEdgeAttachmentStatusV1[] {
+    return this.requestedEndpoints.map(endpoint => {
+      const owner = this.owners.get(endpoint.ownerId);
+      const requestedSlot = endpoint.slot as number | null;
+      const selected = owner?.assignments.get(endpoint.neighborId);
+      let status: GraphEdgeAttachmentStatusV1['status'];
+      if (!owner || endpoint.ownerId === endpoint.neighborId) status = 'inactive';
+      else if (selected?.slot !== requestedSlot) status = 'conflicting';
+      else if (requestedSlot === null) status = 'free';
+      else if (requestedSlot >= owner.count) status = 'out-of-range';
+      else if (owner.bindings.get(endpoint.neighborId) === requestedSlot) status = 'bound';
+      else if ([...owner.bindings.values()].includes(requestedSlot)) status = 'occupied';
+      else status = 'unbound';
+      return { edgeId: endpoint.edgeId, endpoint: endpoint.endpoint, ownerId: endpoint.ownerId,
+        neighborId: endpoint.neighborId, requestedSlot, status };
+    });
   }
 
   private updatePhase(id: string, owner: Owner, positions: Positions): void {
@@ -217,9 +285,14 @@ export class AttachmentSlots2D {
   }
 
   snapshot(): GraphAttachmentSlotsStateV1 {
-    return { version: 1, owners: Object.fromEntries([...this.owners].map(([id, owner]) => [id, {
+    const requests = this.requestStatuses();
+    return { version: 1, ...(requests.length ? { requests } : {}), owners: Object.fromEntries([...this.owners].map(([id, owner]) => [id, {
       count: owner.count, phaseRadians: owner.phase,
-      bindings: [...owner.bindings].map(([neighborId, slot]) => ({ neighborId, slot })),
+      bindings: [...owner.bindings].map(([neighborId, slot]) => {
+        const edgeIds = this.endpointGroups.get(id)?.get(neighborId)?.map(endpoint => endpoint.edgeId);
+        return { neighborId, slot, ...(edgeIds?.length ? { edgeIds } : {}) };
+      }),
+      ...(owner.assignments.size ? { assignments: [...owner.assignments].map(([neighborId, assignment]) => ({ neighborId, ...assignment })) } : {}),
     }])) };
   }
 
@@ -237,11 +310,21 @@ export class AttachmentSlots2D {
           || slots.has(binding.slot) || bindings.has(binding.neighborId)) { valid = false; break; }
         slots.add(binding.slot); bindings.set(binding.neighborId, binding.slot);
       }
-      if (valid) this.owners.set(id, { count: entry.count, phase: entry.phaseRadians, locked: false, bindings });
+      const assignments = new Map<string, Assignment>();
+      if (entry.assignments !== undefined) {
+        if (!Array.isArray(entry.assignments)) valid = false;
+        else for (const assignment of entry.assignments as unknown[]) {
+          if (!record(assignment) || typeof assignment.neighborId !== 'string' || !assignment.neighborId
+            || typeof assignment.edgeId !== 'string' || !assignment.edgeId || assignments.has(assignment.neighborId)
+            || !(assignment.slot === null || typeof assignment.slot === 'number' && Number.isSafeInteger(assignment.slot) && assignment.slot >= 0)) { valid = false; break; }
+          assignments.set(assignment.neighborId, { edgeId: assignment.edgeId, slot: assignment.slot });
+        }
+      }
+      if (valid) this.owners.set(id, { count: entry.count, phase: entry.phaseRadians, locked: false, bindings, assignments });
     }
   }
 
-  clear(): void { this.owners.clear(); this.feasiblePositions.clear(); this.feasiblePhases.clear(); }
+  clear(): void { this.owners.clear(); this.feasiblePositions.clear(); this.feasiblePhases.clear(); this.endpoints = []; this.requestedEndpoints = []; this.endpointGroups.clear(); }
 }
 
 function direction(a: Vec3, b: Vec3): number { return Math.atan2(b.y - a.y, b.x - a.x); }

@@ -216,3 +216,24 @@ test('node attachment is validated, deeply cloned, built, and serialized with it
     assert(result.errors.some(error => error.path === '$.nodes[0].attachment'), 'error identifies the node quality');
   }
 });
+
+
+test('edge endpoint attachment assignments validate and travel through builders, cloning, and JSON', () => {
+  const assignment = { sourceSlot: 3, targetSlot: null };
+  const document = createGraphDocumentBuilderV1().addNode({ id: 'a', attachment: { count: 4 } })
+    .addNode({ id: 'b', attachment: { count: 6 } })
+    .addEdge({ id: 'ab', sourceId: 'a', targetId: 'b', attachment: assignment })
+    .build({ documentId: 'assigned-links' });
+  const clone = cloneGraphDocumentV1(document);
+  assignment.sourceSlot = 1;
+  equal(document.edges[0].attachment?.sourceSlot, 3, 'builder owns its assignment copy');
+  assert(clone.edges[0].attachment !== document.edges[0].attachment, 'edge assignment cloned by value');
+  const restored: unknown = JSON.parse(JSON.stringify(clone));
+  assertGraphDocumentV1(restored);
+  deepEqual(restored.edges[0].attachment, { sourceSlot: 3, targetSlot: null }, 'both endpoint assignments survive saving');
+  for (const attachment of [{ sourceSlot: -1 }, { targetSlot: 0.5 }, { sourceSlot: Infinity }, { slot: 1 }, []]) {
+    const result = validateGraphDocumentV1({ ...document, edges: [{ ...document.edges[0], attachment }] });
+    assert(!result.valid, 'invalid endpoint assignment rejected at the document boundary');
+    assert(result.errors.some(error => error.path === '$.edges[0].attachment'), 'error identifies the edge assignment');
+  }
+});

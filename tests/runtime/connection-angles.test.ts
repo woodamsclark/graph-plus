@@ -218,3 +218,33 @@ test('force integration enforces locked rays after other forces and retains bind
     'dragging cannot eject a locked occupant', 1e-6);
   deepEqual(value.force.getDiagnostics().attachmentSlots.owners.hub.bindings, bound, 'dragging does not reassign locked slots');
 });
+
+test('live edge patches can reassign locked connection positions through the document contract', async () => {
+  const value = fixture({ count: 8, rigidity: 'locked', orientation: { mode: 'locked', rotation: graphAttachmentRotation2DV1(0) } });
+  const install = (slot: number) => {
+    const document = { ...value.state.document, revision: value.state.document.revision + 1,
+      edges: value.state.document.edges.map(edge => edge.id === 'e1' ? { ...edge, attachment: { sourceSlot: slot } } : edge) };
+    value.state = { ...value.state, document, sourceDocument: document };
+  };
+  install(3); step(value);
+  const binding = () => value.force.getDiagnostics().attachmentSlots.owners.hub.bindings.find(binding => binding.edgeIds?.includes('e1'));
+  equal(binding()?.slot, 3, 'edge selects a specific locked source position');
+  install(2); step(value);
+  equal(binding()?.slot, 2, 'explicit edit reconfigures that connection without global reassignment');
+  const state = value.force.getDiagnostics().attachmentSlots;
+  equal(state.requests?.find(request => request.edgeId === 'e1')?.status, 'bound', 'consumer can inspect effective per-link state');
+
+  const runtime = runtimeHarness({ consumerId: 'graph-plus', profileId: 'default', registration: GRAPH_PLUS_CONSUMER_REGISTRATION_V1,
+    document: value.state.document });
+  const session = await runtime.create();
+  try {
+    const document = await session.exportDocument();
+    const edge = document.edges.find(edge => edge.id === 'e1')!;
+    deepEqual(edge.attachment, { sourceSlot: 2 }, 'leased document export carries requested position');
+    const result = await session.applyPatch({ schemaVersion: 1, patchId: 'assign-slot', baseRevision: document.revision,
+      operations: [{ type: 'replace-edge', edge: { ...edge, attachment: { sourceSlot: 5, targetSlot: null } } }] });
+    assert(result.applied, 'downstream consumer assigns both endpoints using a normal edge patch');
+    const exported = await session.exportDocument();
+    deepEqual(exported.edges.find(edge => edge.id === 'e1')?.attachment, { sourceSlot: 5, targetSlot: null }, 'per-link assignments are canonical saved truth');
+  } finally { await session.dispose(); }
+});

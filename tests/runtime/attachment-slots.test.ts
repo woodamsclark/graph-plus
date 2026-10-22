@@ -125,3 +125,89 @@ test('orientation spring rigidity is independent and quaternion definitions are 
     assert(!isGraphNodeAttachmentV1({ count: 4, orientation }), 'invalid orientation rejected');
   }
 });
+
+test('explicit edge assignments persist until edited and clearing them restores automatic jumping', () => {
+  const slots = new AttachmentSlots2D(), positions = { hub: point(0, 0), a: point(0) };
+  const patterns = new Map<string, GraphNodeAttachmentV1>([['hub', { count: 4, stiffness: 'soft', orientation: fixed() }]]);
+  const neighbors = new Map([['hub', ['a']]]);
+  const endpoint = (slot?: number | null) => [{ edgeId: 'ha', ownerId: 'hub', neighborId: 'a', endpoint: 'source' as const, slot }];
+  const run = (slot?: number | null) => slots.prepare(patterns, neighbors, positions, id => id !== 'hub', endpoint(slot));
+  const springs = run(1);
+  equal(slots.snapshot().owners.hub.bindings[0].slot, 1, 'plugin can assign a slot beyond the automatic capture threshold');
+  assert(springs.length === 1 && springs[0].error !== 0, 'spring drives the explicitly assigned target');
+  positions.a = point(270);
+  for (let i = 0; i < 10; i++) run(1);
+  equal(slots.snapshot().owners.hub.bindings[0].slot, 1, 'disturbance cannot reassign an explicit reservation');
+  equal(slots.snapshot().requests?.[0].status, 'bound', 'effective assignment is queryable by link endpoint');
+  run(0);
+  equal(slots.snapshot().owners.hub.bindings[0].slot, 0, 'explicit request can reassign the occupant');
+  positions.a = point(70); run();
+  equal(slots.snapshot().owners.hub.bindings.length, 0, 'clearing assignment restores release behavior');
+  positions.a = point(90); run();
+  equal(slots.snapshot().owners.hub.bindings[0].slot, 1, 'automatic link can acquire another slot');
+  run(null);
+  equal(slots.snapshot().owners.hub.bindings.length, 0, 'null explicitly unbinds this endpoint');
+  equal(slots.snapshot().requests?.[0].status, 'free', 'explicit free status is observable');
+});
+
+test('source and target assignments address different node patterns independently', () => {
+  const slots = new AttachmentSlots2D(), positions = { hub: point(0, 0), leaf: point(0) };
+  const pattern: GraphNodeAttachmentV1 = { count: 4, rigidity: 'locked', orientation: fixed() };
+  const patterns = new Map([['hub', pattern], ['leaf', pattern]]);
+  const neighbors = new Map([['hub', ['leaf']], ['leaf', ['hub']]]);
+  const endpoints = [
+    { edgeId: 'link', ownerId: 'hub', neighborId: 'leaf', endpoint: 'source' as const, slot: 1 },
+    { edgeId: 'link', ownerId: 'leaf', neighborId: 'hub', endpoint: 'target' as const, slot: 3 },
+  ];
+  slots.prepare(patterns, neighbors, positions, id => id !== 'hub', endpoints);
+  equal(slots.snapshot().owners.hub.bindings[0].slot, 1, 'source slot belongs to hub');
+  equal(slots.snapshot().owners.leaf.bindings[0].slot, 3, 'target slot belongs to leaf');
+  assert(slots.snapshot().requests?.every(request => request.status === 'bound'), 'both endpoint assignments satisfied');
+  near(positions.leaf.x, 0, 'geometry follows the requested source direction');
+  assert(positions.leaf.y > 0, 'source slot one points along world +Y');
+});
+
+test('occupied and out-of-range explicit requests stay unbound instead of using another slot', () => {
+  const slots = new AttachmentSlots2D();
+  const positions = { hub: point(0, 0), a: point(0), b: point(90), c: point(180), d: point(270), extra: point(12) };
+  const pattern: GraphNodeAttachmentV1 = { count: 4, rigidity: 'locked', orientation: fixed() };
+  const patterns = new Map([['hub', pattern]]);
+  const neighbors = new Map([['hub', ['a', 'b', 'c', 'd']]]);
+  slots.prepare(patterns, neighbors, positions, id => id !== 'hub');
+  neighbors.set('hub', ['a', 'b', 'c', 'd', 'extra']);
+  const requests = [
+    { edgeId: 'new-link', ownerId: 'hub', neighborId: 'extra', endpoint: 'source' as const, slot: 3 as number | null },
+    { edgeId: 'old-link', ownerId: 'hub', neighborId: 'd', endpoint: 'source' as const, slot: undefined as number | null | undefined },
+  ];
+  const run = () => slots.prepare(patterns, neighbors, positions, id => id !== 'hub', requests.map(request => ({ ...request })));
+  run();
+  equal(slots.snapshot().requests?.[0].status, 'occupied', 'occupied target is reported');
+  assert(!slots.snapshot().owners.hub.bindings.some(binding => binding.neighborId === 'extra'), 'no fallback into another slot');
+  requests[1].slot = null; run();
+  assert(slots.snapshot().owners.hub.bindings.some(binding => binding.neighborId === 'extra' && binding.slot === 3), 'requested link acquires the vacated position');
+  requests[0].slot = 7; run();
+  equal(slots.snapshot().requests?.[0].status, 'out-of-range', 'out-of-range request remains explicit');
+  assert(!slots.snapshot().owners.hub.bindings.some(binding => binding.neighborId === 'extra'), 'invalid index is not clamped or wrapped');
+  patterns.set('hub', { ...pattern, count: 8 }); run();
+  assert(slots.snapshot().owners.hub.bindings.some(binding => binding.neighborId === 'extra' && binding.slot === 7), 'request activates when the node later offers that position');
+});
+
+test('parallel links share geometry and retain a stable controlling assignment through restore', () => {
+  const slots = new AttachmentSlots2D(), positions = { hub: point(0, 0), a: point(0) };
+  const patterns = new Map<string, GraphNodeAttachmentV1>([['hub', { count: 4, rigidity: 'locked', orientation: fixed() }]]);
+  const neighbors = new Map([['hub', ['a']]]);
+  const original = { edgeId: 'z-first', ownerId: 'hub', neighborId: 'a', endpoint: 'source' as const, slot: 0 };
+  const later = { ...original, edgeId: 'a-later', slot: 1 };
+  slots.prepare(patterns, neighbors, positions, id => id !== 'hub', [original]);
+  slots.prepare(patterns, neighbors, positions, id => id !== 'hub', [later, original]);
+  const snapshot = slots.snapshot();
+  equal(snapshot.owners.hub.bindings[0].slot, 0, 'new parallel claim cannot steal control');
+  deepEqual(snapshot.owners.hub.bindings[0].edgeIds, ['a-later', 'z-first'], 'effective binding identifies every parallel link');
+  equal(snapshot.requests?.find(request => request.edgeId === 'a-later')?.status, 'conflicting', 'incompatible parallel claim is reported');
+  const restored = new AttachmentSlots2D();
+  restored.restore(JSON.parse(JSON.stringify(snapshot)));
+  restored.prepare(patterns, neighbors, positions, id => id !== 'hub', [later, original]);
+  deepEqual(restored.snapshot(), snapshot, 'per-link control and occupancy survive saving');
+  restored.prepare(new Map(), neighbors, positions, id => id !== 'hub', [original]);
+  equal(restored.snapshot().requests?.[0].status, 'inactive', 'a slot request does not enable a node attachment quality');
+});

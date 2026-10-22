@@ -61,3 +61,9 @@ stable occupants, releasable spring bindings, hard binding locks, and independen
 free/spring/locked quaternion orientation. Request that capability when adopting
 these features. Runtime slot occupants and phase live in force-layout module
 state; save full view/world state to preserve them across sessions.
+
+For explicit link placement, request `edge-attachment-assignments-2d` and set
+`edge.attachment.sourceSlot` and/or `targetSlot` (zero-based). Omission is automatic,
+null is explicitly unbound, and numeric assignments persist until edited. These
+are stored on edges and changed through ordinary edge patches. Runtime snapshots
+include binding `edgeIds` and per-endpoint request statuses.

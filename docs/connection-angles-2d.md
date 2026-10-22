@@ -152,3 +152,81 @@ use document patches. This provides an animation hook, not an Anima editor UI.
 Count, rigidity, and quaternion orientation are dimension-independent stored
 qualities. Current slot generation and constraint solving apply only in 2D.
 3D documents retain the complete quality; spherical slot generation is deferred.
+
+## Explicit per-link slot assignments
+
+A downstream plugin can persist which position a specific edge should use at
+both endpoints. Request `GRAPH_EDGE_ATTACHMENT_ASSIGNMENTS_CAPABILITY_V1`
+(`edge-attachment-assignments-2d`) when adopting this API.
+
+```ts
+const edge = {
+  id: 'hub-command',
+  sourceId: 'hub',
+  targetId: 'command',
+  attachment: {
+    sourceSlot: 3, // zero-based slot on hub's pattern
+    targetSlot: null, // leave the command endpoint unbound
+  },
+};
+```
+
+Source and target refer to the stored endpoint IDs, including for undirected
+links. Slot indices start at zero and keep their meaning when a free pattern
+rotates: slot 3 is an identity in that pattern, not a fixed screen direction.
+Use locked world orientation when an application needs a stable heading too.
+
+An explicit assignment remains until changed. Its slot is reserved for that
+neighbor. A spring binding can stretch and yields according to its stiffness,
+but cannot jump into another slot while this explicit assignment remains. A hard
+binding still enforces its direction geometrically. Automatic links retain the
+release/recapture behavior described above.
+
+To reassign a link, submit a `replace-edge` operation in a normal document patch,
+preserving its other fields:
+
+```ts
+const document = await session.exportDocument();
+const edge = document.edges.find(edge => edge.id === 'hub-command')!;
+await session.applyPatch({
+  schemaVersion: 1, patchId: 'assign-command-position', baseRevision: document.revision,
+  operations: [{ type: 'replace-edge', edge: {
+    ...edge, attachment: { ...edge.attachment, sourceSlot: 2 },
+  } }],
+});
+```
+
+Changing a request explicitly reconfigures that endpoint, including a previously
+locked assignment. It releases that connection's previous slot before trying the
+new one. An occupied or incompatible request stays unbound; it does not evict an
+existing occupant or silently choose another position. A vacant requested slot
+is reserved against new automatic captures. An out-of-range slot stays unbound
+until a later count change makes it valid. A request does not enable an otherwise
+unrestricted node.
+
+Omit an endpoint field to return it to automatic assignment, retaining its
+current binding until the normal release rules permit movement. Set it to null
+to explicitly release that endpoint and prevent automatic recapture. Removing the
+whole edge `attachment` object returns both endpoints to automatic behavior.
+
+Declarations are validated, cloned, patched, exported, and saved as part of the
+edge in the graph document. Runtime slot snapshots also retain the controlling
+link for an explicit assignment. Binding entries include `edgeIds`, and the
+snapshot's `requests` array reports each explicit edge endpoint with `edgeId`,
+`ownerId`, `neighborId`, `requestedSlot`, and a status:
+
+- `bound`: assigned to the requested slot; a spring binding may still be stretched.
+- `occupied`: a retained occupant is using that position.
+- `out-of-range`: the current pattern does not offer that slot index.
+- `inactive`: no active attachment pattern is available at this endpoint.
+- `free`: the endpoint explicitly requests null.
+- `conflicting`: another parallel link controls this physical neighbor with a
+  different request.
+- `unbound`: the request is not currently geometrically admissible.
+
+Parallel edges between the same two nodes share physical geometry and one slot
+per endpoint. Compatible requests share that binding. The current controlling
+explicit edge remains stable; new incompatible parallel requests are reported
+without stealing control. When first selecting a controller, edge ID provides a
+stable tie-break. Persist full view/world state to preserve that choice across
+sessions. Consumers can match any binding's `edgeIds` to their canonical edges.
