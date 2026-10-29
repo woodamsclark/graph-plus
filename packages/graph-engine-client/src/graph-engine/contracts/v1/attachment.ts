@@ -1,8 +1,12 @@
+import type { Vec3 } from './values.ts';
+
 /** Capability for node-owned attachment springs in the shipped 2D force layout. */
 export const GRAPH_NODE_ATTACHMENT_CAPABILITY_V1 = 'node-attachment-2d';
 
 export const GRAPH_NODE_ATTACHMENT_SLOTS_CAPABILITY_V1 = 'node-attachment-slots-2d';
 export const GRAPH_EDGE_ATTACHMENT_ASSIGNMENTS_CAPABILITY_V1 = 'edge-attachment-assignments-2d';
+export const GRAPH_NODE_ATTACHMENT_SLOTS_3D_CAPABILITY_V1 = 'node-attachment-slots-3d';
+export const GRAPH_EDGE_ATTACHMENT_ASSIGNMENTS_3D_CAPABILITY_V1 = 'edge-attachment-assignments-3d';
 
 /** Endpoint-specific slot requests on a graph edge. Slot indices start at zero. */
 export type GraphEdgeAttachmentV1 = {
@@ -30,7 +34,7 @@ export const GRAPH_ANGULAR_SPRING_PRESETS_V1 = Object.freeze({
   stiff: 0.8,
 });
 
-/** Unit quaternion in graph/world coordinates, shared by 2D and future 3D patterns. */
+/** Unit quaternion in graph/world coordinates, shared by 2D and 3D patterns. */
 export type GraphAttachmentRotationV1 = { readonly x: number; readonly y: number; readonly z: number; readonly w: number };
 
 export type GraphAttachmentOrientationV1 =
@@ -63,10 +67,14 @@ export type GraphEdgeAttachmentStatusV1 = {
 /** Occupants and pattern pose are saved in force-layout module state, separately from node declarations. */
 export type GraphAttachmentSlotsStateV1 = {
   readonly version: 1;
+  /** Omitted on legacy 2D snapshots. Spatial slot indices use a different pattern. */
+  readonly dimensions?: '2d' | '3d';
   readonly requests?: readonly GraphEdgeAttachmentStatusV1[];
   readonly owners: Readonly<Record<string, {
     readonly count: number;
     readonly phaseRadians: number;
+    /** Full runtime pattern pose for 3D snapshots. */
+    readonly rotation?: GraphAttachmentRotationV1;
     readonly bindings: readonly GraphAttachmentBindingV1[];
     readonly assignments?: readonly GraphAttachmentAssignmentV1[];
   }>>;
@@ -74,7 +82,7 @@ export type GraphAttachmentSlotsStateV1 = {
 
 /**
  * Intrinsic attachment preference carried by a graph node.
- * Count is dimension-independent: 2D uses a circle; future 3D support can use a sphere.
+ * Count is dimension-independent: 2D uses a circle; 3D uses indexed spherical directions.
  * Missing attachment or count 1 means freely attaching. No global default is applied.
  */
 export type GraphNodeAttachmentV1 = {
@@ -123,3 +131,31 @@ function validOrientation(value: unknown): boolean {
   const stiffness = orientation.stiffness;
   return stiffness === undefined || (typeof stiffness === 'number' && Number.isFinite(stiffness) && stiffness >= 0 && stiffness <= 1);
 }
+
+/** Stable indexed patterns. Changing count intentionally reconfigures the pattern. */
+export function graphAttachmentSlotDirection3DV1(count: number, slot: number): Vec3 {
+  if (!Number.isSafeInteger(count) || count < 1 || !Number.isSafeInteger(slot) || slot < 0 || slot >= count) throw new Error('Attachment slot requires a positive count and an index within its pattern.');
+  if (count === 1) return { x: 1, y: 0, z: 0 };
+  if (count === 2) return { x: slot === 0 ? 1 : -1, y: 0, z: 0 };
+  if (count === 3) return { x: Math.cos(slot * Math.PI * 2 / 3), y: Math.sin(slot * Math.PI * 2 / 3), z: 0 };
+  if (count === 4) return unitDirection([
+    { x: 1, y: 1, z: 1 }, { x: 1, y: -1, z: -1 }, { x: -1, y: 1, z: -1 }, { x: -1, y: -1, z: 1 },
+  ][slot]);
+  if (count === 6) return [
+    { x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 },
+    { x: -1, y: 0, z: 0 }, { x: 0, y: -1, z: 0 }, { x: 0, y: 0, z: -1 },
+  ][slot];
+  if (count === 8) return unitDirection({ x: slot & 4 ? -1 : 1, y: slot & 2 ? -1 : 1, z: slot & 1 ? -1 : 1 });
+  if (count === 12) {
+    const phi = (1 + Math.sqrt(5)) / 2;
+    const a = slot & 1 ? -1 : 1, b = slot & 2 ? -phi : phi;
+    return unitDirection(slot < 4 ? { x: 0, y: a, z: b } : slot < 8 ? { x: a, y: b, z: 0 } : { x: b, y: 0, z: a });
+  }
+  const z = 1 - 2 * (slot + 0.5) / count;
+  const radius = Math.sqrt(Math.max(0, 1 - z * z));
+  const angle = slot * Math.PI * (3 - Math.sqrt(5));
+  return { x: radius * Math.cos(angle), y: radius * Math.sin(angle), z };
+}
+
+
+function unitDirection(value: Vec3): Vec3 { const r = Math.hypot(value.x, value.y, value.z); return { x: value.x / r, y: value.y / r, z: value.z / r }; }

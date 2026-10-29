@@ -1,5 +1,8 @@
 # Toolbar+ attachment testing handoff
 
+The current 2D/3D candidate is `rc/attachments`; see [the RC handoff](rc-attachments.md)
+for spatial capabilities, matching builds, and experiment separation.
+
 This branch adds a persistent, node-owned `attachment` quality to Graph+. Toolbar+
 can adopt it for testing without a public release or an npm publication. It does
 not change toolbar+ source or its saved configuration.
@@ -79,8 +82,7 @@ Graph+ layout with a node that has at least two visible connected neighbors.
 
 The Graph+ suite currently passes 549 tests, including document validation,
 cloning, JSON/checkpoint storage, leased-session node patches, spring convergence,
-free rotation, pins, duplicate edges, and transient animation targets. The 3D
-document retains attachment, but spherical forces are intentionally deferred.
+free rotation, pins, duplicate edges, and transient animation targets. The RC adds spatial forces and locks; see the linked RC handoff for its current validation results.
 
 ## Binding and orientation lock testing
 
@@ -104,7 +106,7 @@ Persist Graph+ view/world module state as well as the node declarations if
 occupants should survive closing/reopening the toolbar session. Position-only
 snapshots omit slot identities. Inspect `attachmentSlots`,
 `rejectedAttachmentBindings`, and `blockedAttachmentMoves` in force diagnostics.
-The provider remains 2D-only for these features.
+The RC also supports these features in 3D with separately negotiated spatial capabilities.
 
 ## Assign a command link to a specific position
 

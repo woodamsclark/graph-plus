@@ -1,4 +1,4 @@
-# Node-owned attachment slots and orientation
+# Node-owned attachment slots and orientation (2D and 3D)
 
 Attachment is a quality stored on each graph node. Missing attachment, omitted
 count, or count 1 means freely attaching. There is no graph-wide attachment default.
@@ -66,7 +66,7 @@ attachment: {
 
 Rotation is stored as a unit quaternion `{ x, y, z, w }`, suitable for both 2D and
 future 3D patterns. The 2D helper takes counterclockwise degrees from world +X.
-The 2D solver uses the quaternion's Z-axis twist; planar rotations have x = y = 0.
+The 3D solver uses the full quaternion. The 2D solver uses the quaternion's Z-axis twist; planar rotations have x = y = 0.
 A quaternion with no Z twist uses zero twist in 2D. The full value survives saving
 and exporting, including components reserved for future spatial orientation.
 
@@ -96,7 +96,7 @@ fatal session errors. Unbound neighbors retain ordinary layout behavior.
 
 Request `GRAPH_NODE_ATTACHMENT_SLOTS_CAPABILITY_V1` (`node-attachment-slots-2d`) in
 both the lease request and consumer profile, and enable the shipped force layout.
-The earlier `node-attachment-2d` capability is also advertised, but only the slots
+For 3D request the spatial capabilities described below. The earlier `node-attachment-2d` capability is also advertised, but only the slots
 capability guarantees this binding/lock behavior. Use the regenerated client
 contract from this testing branch; no stable package release has been published.
 
@@ -150,8 +150,12 @@ use document patches. This provides an animation hook, not an Anima editor UI.
 ## 3D
 
 Count, rigidity, and quaternion orientation are dimension-independent stored
-qualities. Current slot generation and constraint solving apply only in 2D.
-3D documents retain the complete quality; spherical slot generation is deferred.
+qualities. The RC supports spherical slot generation, angular springs, and hard geometric
+locks in 3D. Request `node-attachment-slots-3d` and, for explicit edge indices,
+`edge-attachment-assignments-3d`. Use `graphAttachmentSlotDirection3DV1(count, slot)`
+from the matching client to inspect stable local directions. Full quaternion
+orientation and spatial occupancy are saved in dimension-tagged snapshots. See
+[the RC handoff](rc-attachments.md) for pattern shapes, adoption, and validation.
 
 ## Explicit per-link slot assignments
 

@@ -99,9 +99,9 @@ test('angular spring dynamics are equivariant under rotation and respect dragged
   deepEqual(step(dragged, 10).n1, original, 'drag authority wins over angular spring');
 });
 
-test('attachment is off by default and count one is freely attaching; 3D preserves it without applying forces', () => {
+test('attachment is off by default and count one is freely attaching', () => {
   for (const value of [fixture(null), fixture({}), fixture(config(1)),
-    fixture({ count: 4, stiffness: 'off' }), fixture(config(), '3d')]) {
+    fixture({ count: 4, stiffness: 'off' })]) {
     const initial = structuredClone(value.state.positions);
     deepEqual(step(value, 5), initial, 'unrestricted nodes preserve existing layout');
   }

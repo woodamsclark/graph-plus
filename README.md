@@ -198,3 +198,7 @@ Graph+ is available under the Mozilla Public License 2.0. See [LICENSE](LICENSE)
 
 For node-owned attachment symmetry, storage, and leased-plugin usage, see
 [2D connection angles](docs/connection-angles-2d.md).
+
+Attachment integration candidate: [`rc/attachments`](docs/rc-attachments.md) adds
+opt-in 2D/3D attachment constraints for downstream testing. Gravity and experimental
+grabbing remain on separate experiment branches.

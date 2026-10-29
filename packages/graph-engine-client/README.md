@@ -67,3 +67,13 @@ For explicit link placement, request `edge-attachment-assignments-2d` and set
 null is explicitly unbound, and numeric assignments persist until edited. These
 are stored on edges and changed through ordinary edge patches. Runtime snapshots
 include binding `edgeIds` and per-endpoint request statuses.
+
+## Attachment release candidate
+
+`rc/attachments` includes opt-in 2D and 3D attachment constraints. Request
+`GRAPH_NODE_ATTACHMENT_SLOTS_3D_CAPABILITY_V1` and
+`GRAPH_EDGE_ATTACHMENT_ASSIGNMENTS_3D_CAPABILITY_V1` for spatial scenes.
+`graphAttachmentSlotDirection3DV1(count, slot)` returns the deterministic local
+unit direction addressed by an index. Use the provider and client from the same
+RC commit; package labels alone do not identify this unpublished candidate.
+See [the RC handoff](../../docs/rc-attachments.md) for adoption and saved-state rules.

@@ -16,7 +16,7 @@ import type {
 } from '../GraphModuleTypes.ts';
 import { forceLayoutIntervalMsV1, forceLayoutTargetStepRateHzV1 } from './ForceLayoutCadence.ts';
 import { angularSpringStiffnessV1 } from './ConnectionAngles.ts';
-import { AttachmentSlots2D, type AttachmentEndpoint2D } from './AttachmentSlots2D.ts';
+import { AttachmentSlots, type AttachmentEndpoint } from './AttachmentSlots.ts';
 
 export type GraphAxialSpringAxisV1 = 'off' | 'x' | 'y' | 'z';
 
@@ -137,11 +137,11 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   constructor(
     private readonly dimensions: GraphDimensionsV1,
     private settings: ForceSettings,
-  ) {}
+  ) { this.attachmentSlots = new AttachmentSlots(dimensions); }
 
-  private readonly attachmentSlots = new AttachmentSlots2D();
+  private readonly attachmentSlots: AttachmentSlots;
   private attachmentMovement = 0;
-  private connectionEndpoints: readonly AttachmentEndpoint2D[] = [];
+  private connectionEndpoints: readonly AttachmentEndpoint[] = [];
   private connectionNeighbors = new Map<string, string[]>();
   private nodeAttachments = new Map<string, GraphNodeAttachmentV1>();
   private attachmentTargetsKey = '';
@@ -282,7 +282,6 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   private synchronizeNodeAttachments(state: GraphModulePipelineStateV1): void {
-    if (this.dimensions !== '2d') return;
     const nodes = state.document.nodes;
     const overrides = state.motionTargets?.nodeAttachments;
     const key = JSON.stringify(overrides ?? null);
@@ -538,7 +537,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
         position.y += movementY;
         position.z = this.dimensions === '2d' ? 0 : position.z + movementZ;
       }
-      if (this.dimensions === '2d') {
+      {
         const mobile = (id: string) => !this.pinned.has(id) && id !== state.draggedNodeId;
         const correction = this.attachmentSlots.enforce(this.positions, mobile);
         maximumMovement = Math.max(maximumMovement, correction);
@@ -637,7 +636,6 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   private applyConnectionAngleSprings(state: GraphModulePipelineStateV1): void {
     this.attachmentMovement = 0;
-    if (this.dimensions !== '2d') return;
     const mobile = (id: string) => !this.pinned.has(id) && id !== state.draggedNodeId;
     const before = new Map<string, MutableVec3>();
     for (const [id, pattern] of this.nodeAttachments) if (pattern.rigidity === 'locked') {
@@ -647,7 +645,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     }
     const springs = this.attachmentSlots.prepare(this.nodeAttachments, this.connectionNeighbors, this.positions, mobile, this.connectionEndpoints);
     for (const [id, point] of before) this.attachmentMovement = Math.max(this.attachmentMovement,
-      Math.hypot(point.x - this.positions[id].x, point.y - this.positions[id].y));
+      Math.hypot(point.x - this.positions[id].x, point.y - this.positions[id].y, this.dimensions === '3d' ? point.z - this.positions[id].z : 0));
     const grouped = new Map<string, typeof springs>();
     for (const spring of springs) {
       const group = grouped.get(spring.ownerId) ?? [];
@@ -657,15 +655,23 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       const owner = this.positions[id];
       const radius = bindings.reduce((min, binding) => {
         const neighbor = this.positions[binding.neighborId];
-        return Math.min(min, Math.hypot(neighbor.x - owner.x, neighbor.y - owner.y));
+        return Math.min(min, Math.hypot(neighbor.x - owner.x, neighbor.y - owner.y, this.dimensions === '3d' ? neighbor.z - owner.z : 0));
       }, Infinity);
       for (const binding of bindings) {
         const neighbor = this.positions[binding.neighborId];
-        const dx = neighbor.x - owner.x, dy = neighbor.y - owner.y, squared = dx * dx + dy * dy;
+        const dx = neighbor.x - owner.x, dy = neighbor.y - owner.y, dz = this.dimensions === '3d' ? neighbor.z - owner.z : 0, squared = dx * dx + dy * dy + dz * dz;
         const ma = Number(mobile(id)), mb = Number(mobile(binding.neighborId)), mobility = ma + mb;
         if (!mobility || squared < 1e-12) continue;
         const amount = -binding.error * radius * radius / squared * binding.stiffness * FORCE_INTEGRATION_GAIN / bindings.length / mobility;
         const ownerVelocity = this.velocities.get(id)!, neighborVelocity = this.velocities.get(binding.neighborId)!;
+        if (binding.tangent) {
+          const scale = binding.error * radius * radius / Math.sqrt(squared) * binding.stiffness * FORCE_INTEGRATION_GAIN / bindings.length / mobility;
+          for (const axis of ['x', 'y', 'z'] as const) {
+            ownerVelocity[axis] -= binding.tangent[axis] * scale * ma;
+            neighborVelocity[axis] += binding.tangent[axis] * scale * mb;
+          }
+          continue;
+        }
         ownerVelocity.x += dy * amount * ma; ownerVelocity.y -= dx * amount * ma;
         neighborVelocity.x -= dy * amount * mb; neighborVelocity.y += dx * amount * mb;
       }
