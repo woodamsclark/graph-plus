@@ -1,3 +1,4 @@
+import { elasticGrabForce, validateGrabPolicy, type GrabConstraint } from '../../interaction/GrabConstraint.ts';
 import type { GraphDimensionsV1, GraphDocumentV1, GraphTopologyLayoutPolicyV1, JsonValue, Vec3 } from '../../../contracts/v1/index.ts';
 import {
   analyzeGraphTopologyV1,
@@ -114,6 +115,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   /** Fraction of an ordinary force-driven state transition applied per admitted tick. */
   private alpha = 1;
   private running = true;
+  private singleNodeGrabSettling = false;
   private physicsOverrideReturn?: { alpha: number; legacyAlphaTarget: number; running: boolean };
   private pinnedKey = '';
   private projectionFilterKey: string | undefined;
@@ -232,9 +234,9 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   preferredTickIntervalMs(state: GraphModulePipelineStateV1): number | null {
     this.synchronizePhysicsOverride(state.physicsOverrideHeld === true);
-    if (this.suspended || state.formActive || state.document.nodes.length < 2) return null;
-    const dragActive = state.draggedNodeId !== undefined
-      && state.document.nodes.some((node) => node.id === state.draggedNodeId);
+    if (this.suspended || state.formActive || (state.document.nodes.length < 2 && !this.activeGrab(state) && !this.singleNodeGrabSettling)) return null;
+    const dragActive = this.activeGrab(state) !== undefined || (state.grabConstraint === undefined
+      && state.draggedNodeId !== undefined && state.document.nodes.some(node => node.id === state.draggedNodeId));
     const cursorActive = Object.keys(state.cursorAttractionSteps ?? {}).length > 0;
     if (!this.running && !dragActive && !cursorActive) return null;
     return this.targetFrameIntervalMs(dragActive || cursorActive);
@@ -250,10 +252,11 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       if (this.restoredStatePending) this.restoredStatePending = false;
       else this.reheatForChange();
     }
-    if (this.suspended || state.formActive || state.document.nodes.length < 2) return;
-    const dragActive = state.draggedNodeId !== undefined
-      && state.document.nodes.some((node) => node.id === state.draggedNodeId);
+    if (this.suspended || state.formActive || (state.document.nodes.length < 2 && !this.activeGrab(state) && !this.singleNodeGrabSettling)) return;
+    const dragActive = this.activeGrab(state) !== undefined || (state.grabConstraint === undefined
+      && state.draggedNodeId !== undefined && state.document.nodes.some(node => node.id === state.draggedNodeId));
     if (dragActive || Object.keys(state.cursorAttractionSteps ?? {}).length) this.running = true;
+    if (this.activeGrab(state) && state.document.nodes.length === 1) this.singleNodeGrabSettling = true;
     this.synchronizeBuffers(state);
     this.synchronizeTopology(state);
     if (!this.running) return;
@@ -415,6 +418,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     deltaSeconds: number,
     dragActive: boolean,
   ): GraphModuleTickResultV1 | undefined {
+    const grab = this.activeGrab(state);
+    const exactNodeId = state.grabConstraint === undefined ? state.draggedNodeId : grab?.mode === 'exact' ? grab.nodeId : undefined;
     const cursorActive = Object.keys(state.cursorAttractionSteps ?? {}).length > 0;
     this.legacyAlphaTarget = dragActive ? ACTIVE_DRAG_ACTIVITY : 0;
     // Alpha is the fraction of one ordinary force-driven position/velocity
@@ -442,15 +447,31 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
         previous.y = velocity.y;
         previous.z = velocity.z;
       }
+      // A hard constraint is established before other nodes evaluate their springs.
+      if (grab?.mode === 'exact') {
+        const position = this.positions[grab.nodeId];
+        const z = this.dimensions === '2d' ? 0 : grab.target.z;
+        changed ||= position.x !== grab.target.x || position.y !== grab.target.y || position.z !== z;
+        position.x = grab.target.x; position.y = grab.target.y; position.z = z;
+        const velocity = this.velocities.get(grab.nodeId)!;
+        velocity.x = velocity.y = velocity.z = 0;
+      }
       this.applyD3Origin(state);
       this.applyD3Links(state);
       this.applyD3ManyBody();
       this.applyD3RegionAndComponentForces(state);
       this.applyAxialSpring();
       this.applyD3Collision(state.document);
+      if (grab?.mode === 'elastic') {
+        const force = elasticGrabForce(grab, this.positions[grab.nodeId], this.previousVelocities.get(grab.nodeId)!, this.dimensions);
+        const velocity = this.velocities.get(grab.nodeId)!;
+        velocity.x += force.x * FORCE_INTEGRATION_GAIN;
+        velocity.y += force.y * FORCE_INTEGRATION_GAIN;
+        velocity.z += force.z * FORCE_INTEGRATION_GAIN;
+      }
       for (const node of state.document.nodes) {
         const velocity = this.velocities.get(node.id)!;
-        if (this.pinned.has(node.id) || node.id === state.draggedNodeId) {
+        if (this.pinned.has(node.id) || node.id === exactNodeId) {
           velocity.x = 0; velocity.y = 0; velocity.z = 0;
           continue;
         }
@@ -490,6 +511,16 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       requestNextFrame: this.running,
       ...(this.running ? { nextFrameDelayMs: this.targetFrameIntervalMs(dragActive || cursorActive) } : {}),
     };
+  }
+
+  private activeGrab(state: GraphModulePipelineStateV1): GrabConstraint | undefined {
+    const grab = state.grabConstraint;
+    if (!grab || grab.mode === 'off' || !state.document.nodes.some(node => node.id === grab.nodeId)
+      || !state.renderSelection.nodeIds.has(grab.nodeId)
+      || (grab.mode === 'elastic' && state.viewState.pinnedNodeIds.includes(grab.nodeId))
+      || ![grab.target.x, grab.target.y, grab.target.z].every(Number.isFinite)) return undefined;
+    validateGrabPolicy(grab);
+    return grab;
   }
 
   private targetFrameIntervalMs(dragActive: boolean): number {
@@ -789,6 +820,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   private stop(): void {
     this.running = false;
+    this.singleNodeGrabSettling = false;
     this.alpha = 0;
     this.legacyAlphaTarget = 0;
     this.settledStepCount = 0;

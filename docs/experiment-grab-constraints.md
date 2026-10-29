@@ -66,3 +66,84 @@ normal cooling and eventually stop the simulation.
 - Should elastic release pin a node? Initial recommendation: **no**, because pinning converts a temporary negotiation into permanent positional authority.
 - Should a pinned node be grabbable elastically? Initial recommendation: maintain pin until a deliberate unpin transition, rather than silently fighting two authorities.
 - Should maximum force operate before or after general solver speed clamping? The cap applies to the grab contribution, then existing global speed safety remains in place.
+
+## Implemented experiment
+
+The optional `GraphModulePipelineStateV1.grabConstraint` is the solver boundary.
+It takes precedence over `draggedNodeId`, including an explicit `off` constraint.
+Without it, existing exact dragging, position patches, pin policies, visuals,
+and user profiles follow their existing paths.
+
+`runtime/interaction/GrabConstraint.ts` contains the internal policy types,
+world-space `GrabController`, and spring/damper calculation. Input adapters can
+capture a contact, update it in world coordinates, and end it without selection,
+camera, pin, or snapshot dependencies. Each capture copies its policy and offset;
+later policy edits affect the next capture. This state is never serialized.
+
+`SessionInteractionRuntime` maps screen coordinates into that world-space input.
+Elastic/off updates do not patch node positions or change pins. Elastic capture
+refuses pinned nodes; a pin applied during capture cancels it. Removed, filtered,
+or no-longer-draggable nodes also cancel. Cancellation, input reset, disabling,
+disposal, and replacement grabs clear the transient constraint. Late updates
+cannot resurrect it. Release emits the actual solved position using the existing
+drag-ended intent, without authoring a pin, restoring a position, or writing velocity.
+
+In 3D the elastic target uses a screen-parallel plane through the original world
+anchor, recalculating depth after camera motion and preserving the original world
+contact offset. This is an explicit experimental plane policy, not surface picking
+or a depth handle. Existing exact pointer mapping remains unchanged.
+
+The force module applies elastic force after the ordinary force passes and before
+velocity decay, speed clamping, and position integration. Damping reads pre-step
+physical velocity, rather than velocity already modified by other force passes.
+The combined spring/damper vector is capped before the existing integration gain
+of `0.6`; general velocity decay and `maxSpeed` still apply afterward. Exact solver
+constraints assign position before neighbors evaluate forces and skip integration.
+
+An active elastic/exact constraint keeps alpha at 1 and prevents settled early
+termination. Removing it immediately resumes ordinary cooling. A single-node
+layout can now run while grabbed and finish settling after release; ungrabbed
+single-node layouts retain their previous idle behavior. Pins remain authoritative
+over elastic constraints. Invalid or hidden targets cannot silently fall back to
+the legacy exact drag input.
+
+### Trying coefficients internally
+
+On a concrete `GraphSessionRuntime` (not its public `GraphSessionV1` interface):
+
+```ts
+runtime.setExperimentalGrabPolicy({
+  mode: 'elastic', stiffness: 0.15, damping: 0.6, maxForce: 12,
+});
+runtime.setExperimentalGrabPolicy({ mode: 'off' });
+runtime.setExperimentalGrabPolicy({ mode: 'exact' }); // default
+```
+
+`GraphSessionRuntimeOptions.experimentalGrabPolicy` also accepts an initial policy.
+These are internal experiment hooks; there is no settings, profile, service, or
+public client API change. `EXPERIMENTAL_ELASTIC_GRAB` supplies the example values.
+They are starting coefficients for experimentation, not calibrated UI ranges.
+
+Coefficients use the engine's existing per-admitted-step units, not SI units or
+delta-time-scaled acceleration. `maxForce: null` is uncapped; zero caps the entire
+grab contribution. Zero stiffness removes attraction but nonzero damping still
+brakes motion. `off` removes both effects. Coefficients must be finite and
+nonnegative; overflowed force calculations are discarded. Global speed safety
+bounds extreme finite coefficients, but does not guarantee smoothness for arbitrary
+uncapped spring/damper values. A timestep/integrator redesign is outside this experiment.
+
+### Verification
+
+- 14 new tests cover coefficients, combined force caps, damping/oscillation,
+  connected spring response, momentum-preserving release versus an ordinary solver,
+  cold wakeup and eventual cooling (including isolated nodes), exact/off precedence,
+  invalid/pinned/removed/filtered targets, extreme coefficient stability, real pointer
+  input in 2D/3D, cancellation, reset/disable, policy capture, rapid grabs, contact
+  offsets, and camera remapping.
+- Full suite: 539 tests passed, including existing exact drag/pin behavior and
+  1,200-node position-patch compatibility tests.
+- Typecheck, lint of changed engine files, client generation, plugin build, and
+  `git diff --check` passed.
+- Validation is automated; interactive feel on real desktop/mobile hardware remains
+  an experiment. No gravity, platform profiles, user-profile changes, or UI changes
+  are included, and integration into `main` has not been attempted.

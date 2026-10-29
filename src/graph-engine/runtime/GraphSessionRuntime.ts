@@ -1,3 +1,4 @@
+import type { GrabPolicy } from './interaction/GrabConstraint.ts';
 import type {
   ApplyGraphPatchResultV1,
   Disposable,
@@ -103,6 +104,8 @@ import {
 } from './session/index.ts';
 
 export interface GraphSessionRuntimeOptions {
+  /** Internal experiment only; deliberately absent from the public session contract and profiles. */
+  readonly experimentalGrabPolicy?: GrabPolicy;
   readonly sessionId: string;
   readonly engineInstanceId: string;
   readonly consumerId: string;
@@ -303,6 +306,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         physicsOverrideHeld: held,
         cursorAttractionSteps: this.resolveCursorAttractionSteps(),
         draggedNodeId: this.interaction.getDraggedNodeId(),
+        grabConstraint: this.interaction.getGrabConstraint(),
         hoveredNodeId: this.interaction.getHoveredNodeId(),
         selectionPresentationSuspended: this.interaction.isSelectionPresentationSuspended(),
         selectionNeighborRevealActive: this.interaction.isSelectionNeighborRevealActive(),
@@ -530,6 +534,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         onActivateNode: (nodeId) => this.invokePrimaryNodeAction(nodeId),
         onInputQueued: () => this.scheduleFrame(0, 'presentation'),
       });
+      if (options.experimentalGrabPolicy) this.interaction.setExperimentalGrabPolicy(options.experimentalGrabPolicy);
       this.platform.document.addEventListener('visibilitychange', this.onVisibilityChange);
       visibilityListenerInstalled = true;
       this.activity.setDocumentSuspension(this.platform.document.hidden);
@@ -908,6 +913,11 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       type: 'camera-reset',
       ...(focusedNodeId ? { focusedNodeId } : {}),
     });
+  }
+
+  /** Internal experiment hook, intentionally omitted from GraphSessionV1. Affects the next capture. */
+  setExperimentalGrabPolicy(policy: GrabPolicy): void {
+    this.interaction.setExperimentalGrabPolicy(policy);
   }
 
   async exportViewState(): Promise<GraphViewStateV1> {
