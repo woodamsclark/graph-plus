@@ -25,6 +25,10 @@ interface ForceSettings {
   readonly springStrength: number;
   readonly springLength: number;
   readonly centeringStrength: number;
+  /** Uniform acceleration along the world Y axis; zero preserves existing layouts. */
+  readonly gravityY: number;
+  /** Optional transient, bounded spring attraction. Never changes pins or authored positions. */
+  readonly nodePull: { readonly nodeId: string; readonly target: Vec3; readonly strength: number; readonly maxForce: number } | null;
   readonly velocityDecay: number;
   readonly alphaDecay: number;
   readonly alphaMin: number;
@@ -569,6 +573,15 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     for (const node of state.document.nodes) {
       const position = this.positions[node.id];
       const velocity = this.velocities.get(node.id)!;
+      velocity.y += this.settings.gravityY * FORCE_INTEGRATION_GAIN;
+      const pull = this.settings.nodePull;
+      if (pull?.nodeId === node.id && !this.pinned.has(node.id)) {
+        const dx = pull.target.x - position.x, dy = pull.target.y - position.y;
+        const dz = this.dimensions === '2d' ? 0 : pull.target.z - position.z;
+        const distance = Math.hypot(dx, dy, dz);
+        const amount = Math.min(pull.strength, pull.maxForce / Math.max(distance, 1e-9)) * FORCE_INTEGRATION_GAIN;
+        velocity.x += dx * amount; velocity.y += dy * amount; velocity.z += dz * amount;
+      }
       if (strength > 0) {
         velocity.x += -position.x * strength;
         velocity.y += -position.y * strength;
@@ -921,6 +934,8 @@ export function readForceSettings(settings: Readonly<Record<string, JsonValue>>)
     springStrength: finiteNonNegative(settings.springStrength, 1),
     springLength: finitePositive(settings.springLength, 250),
     centeringStrength: finiteNonNegative(settings.centeringStrength, 0.1),
+    gravityY: clampNumber(settings.gravityY, -100, 100, 0),
+    nodePull: readNodePull(settings.nodePull),
     velocityDecay: clampNumber(settings.velocityDecay ?? settings.damping, 0, 1, 0.4),
     alphaDecay: clampNumber(settings.alphaDecay, 0, 1, DEFAULT_ALPHA_DECAY_PER_SECOND),
     alphaMin: finitePositive(settings.alphaMin, 0.001),
@@ -978,6 +993,8 @@ function forceSettingsEqualExceptVelocityDecay(left: ForceSettings, right: Force
     && left.springStrength === right.springStrength
     && left.springLength === right.springLength
     && left.centeringStrength === right.centeringStrength
+    && left.gravityY === right.gravityY
+    && JSON.stringify(left.nodePull) === JSON.stringify(right.nodePull)
     && left.alphaDecay === right.alphaDecay
     && left.alphaMin === right.alphaMin
     && left.repulsionMinDistance === right.repulsionMinDistance
@@ -1245,6 +1262,13 @@ function firstFiniteEdgeValue(
     if (Number.isFinite(value) && (positive ? value > 0 : value >= 0)) return value;
   }
   return undefined;
+}
+
+function readNodePull(value: JsonValue | undefined): ForceSettings['nodePull'] {
+  if (!isRecord(value) || typeof value.nodeId !== 'string' || !value.nodeId || !isRecord(value.target)) return null;
+  const { x, y, z } = value.target;
+  if (!finiteCoordinate(x) || !finiteCoordinate(y) || !finiteCoordinate(z)) return null;
+  return { nodeId: value.nodeId, target: { x, y, z }, strength: clampNumber(value.strength, 0, 1, 0.35), maxForce: clampNumber(value.maxForce, 0, 100, 12) };
 }
 
 function finitePositive(value: JsonValue | undefined, fallback: number): number {
