@@ -1,3 +1,4 @@
+import type { GrabConstraint } from '../interaction/GrabConstraint.ts';
 import type { AnimaConsciousnessPresentationV1 } from '../anima/AnimaAwareness.ts';
 import type { GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
 import type {
@@ -64,6 +65,8 @@ export interface GraphModulePipelineStateV1 {
   readonly animaPresentation?: AnimaConsciousnessPresentationV1;
   /** Runtime-only interaction state. It is never persisted or exported as graph data. */
   readonly draggedNodeId?: string;
+  /** Optional transient constraint; takes precedence over the legacy kinematic drag input. */
+  readonly grabConstraint?: GrabConstraint;
   /** Transient per-step cursor displacement, resolved in screen space by the session. */
   /** Temporary keyboard hold runs physics at maximum alpha without changing settings. */
   readonly physicsOverrideHeld?: boolean;

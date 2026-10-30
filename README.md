@@ -201,4 +201,5 @@ For node-owned attachment symmetry, storage, and leased-plugin usage, see
 
 Attachment integration candidate: [`rc/attachments`](docs/rc-attachments.md) adds
 opt-in 2D/3D attachment constraints and [vector gravity](docs/rc-gravity.md) for downstream
-testing. Node-pull and experimental grabbing remain on separate experiment branches.
+testing, plus opt-in [internal grab constraints](docs/experiment-grab-constraints.md).
+The older settings-based node-pull prototype remains on its experiment branch.

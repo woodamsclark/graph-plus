@@ -9,6 +9,12 @@ Gravity is now an explicit default-off X/Y/Z force input, modulated by ordinary
 simulation alpha. It is available in plugin Settings and Quick Settings. See
 [the gravity settings and consumer API](rc-gravity.md) for updates and cooling behavior.
 
+## Internal grab constraints
+
+Exact/elastic/off grab constraints are included as an opt-in internal runtime hook.
+Default dragging remains Exact; there is no public consumer API, settings control,
+or device profile selection yet. See [grab constraints](experiment-grab-constraints.md).
+
 ## Current consumer API
 
 Use `setGraph` for a complete description and `patchGraph` for atomic incremental
@@ -31,13 +37,13 @@ edits. See [the current policy contract and complete consumer example](attachmen
 
 | Branch | Scope |
 | --- | --- |
-| `rc/attachments` | 2D/3D attachments and alpha-cooled vector gravity; no experimental grabs |
+| `rc/attachments` | 2D/3D attachments, alpha-cooled vector gravity, and opt-in internal grab constraints |
 | `experiment/gravity-node-pull` | Checkpoint of the existing uniform-Y-gravity and settings-based node-pull prototype |
 | `experiment/grab-constraints` | Exact/elastic/off transient grab experiment |
 
 The settings-based node pull is an earlier prototype, not the newer grab API.
-The RC now includes separately implemented vector gravity; the old node-pull
-and grab implementations remain excluded. Default exact dragging remains as before;
+The RC includes vector gravity and the newer transient grab constraints; the old
+settings-based node-pull prototype remains excluded. Default exact dragging remains as before;
 accepted hard attachment locks can still veto incompatible movement.
 
 The RC starts with the three committed attachment changes through `439ccde`.
@@ -145,7 +151,7 @@ authored node/edge declarations survive dimension changes and are re-admitted.
 
 ## Validation and remaining hands-on checks
 
-The RC passes 597 tests, including 21 3D tests, 13 policy/API tests, and 14 vector-gravity/settings tests, existing 2D behavior, client
+The RC passes 613 tests (including 16 grab and integration tests), including 21 3D tests, 13 policy/API tests, and 14 vector-gravity/settings tests, existing 2D behavior, client
 artifact consistency, leased capability negotiation and edge patches, persistence,
 quaternion fitting, spring convergence, hard-lock conflicts, drag/position patches,
 and a 24-hub/144-binding repeated-disturbance stress case. Typecheck, build, and

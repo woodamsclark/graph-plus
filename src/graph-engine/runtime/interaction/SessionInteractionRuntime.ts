@@ -1,3 +1,4 @@
+import { GrabController, validateGrabPolicy, type GrabConstraint, type GrabPolicy } from './GrabConstraint.ts';
 import { presentEgoInteractionPlanV1, type GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
 import { isEgoInteractionPlanCurrentV1, realizeEgoViewDirectiveV1, sameEgoInteractionV1,
   type EgoInteractionInputV1, type EgoInteractionContextV1, type EgoInteractionStateV1 } from '../consciousness/EgoInteractionPlan.ts';
@@ -86,7 +87,12 @@ export class SessionInteractionRuntime {
   } | undefined;
   private hitTestMs = 0;
   private hitTestCount = 0;
+  private readonly grab = new GrabController();
+  private grabPolicy: GrabPolicy = { mode: 'exact' };
   private dragContext: {
+    readonly mode: GrabPolicy['mode'];
+    readonly anchor: Vec3;
+    point: GraphScreenPointV1;
     readonly nodeId: string;
     readonly depth: number;
     readonly offset: Vec3;
@@ -195,6 +201,7 @@ export class SessionInteractionRuntime {
   tick(): void {
     this.interpreter.tick();
     this.commander.tick();
+    this.reconcileGrab();
     this.updateCursor();
   }
 
@@ -310,6 +317,33 @@ export class SessionInteractionRuntime {
     });
   }
 
+  /** Internal playground hook; policy changes apply to the next grab. */
+  setExperimentalGrabPolicy(policy: GrabPolicy): void {
+    validateGrabPolicy(policy);
+    this.grabPolicy = { ...policy };
+  }
+
+  getGrabConstraint(): GrabConstraint | undefined {
+    this.reconcileGrab();
+    return this.grab.current;
+  }
+
+  private reconcileGrab(): void {
+    const context = this.dragContext;
+    if (!context || context.mode === 'exact') return;
+    if (!this.options.getDocument().nodes.some(node => node.id === context.nodeId)
+      || !this.options.getRenderSelection().nodeIds.has(context.nodeId)
+      || !this.options.isNodeDraggable(context.nodeId)
+      || (context.mode === 'elastic' && this.options.getViewState().pinnedNodeIds.includes(context.nodeId))) {
+      this.grab.end(); this.dragContext = null; this.dragHoverPreview = undefined;
+      return;
+    }
+    // Recompute the screen-parallel plane through the captured world anchor when
+    // the camera moves. Never derive the target from the moving solver position.
+    const depth = this.options.vision.worldToScreen(context.anchor).depth;
+    this.grab.update(this.options.vision.screenToWorld(context.point.x, context.point.y, depth));
+  }
+
   getDraggedNodeId(): string | undefined {
     return this.dragContext?.nodeId;
   }
@@ -352,6 +386,7 @@ export class SessionInteractionRuntime {
   private applyCommand(command: GraphRuntimeCommandV1): void {
     switch (command.type) {
       case 'cancel-input':
+        if (this.dragContext?.mode !== 'exact') { this.grab.end(); this.dragContext = null; this.dragHoverPreview = undefined; }
         this.endNavigationPeek();
         this.cancelCameraTransition();
         this.options.ego.clearWill();
@@ -1119,16 +1154,24 @@ export class SessionInteractionRuntime {
     if (!position) return;
     const projected = this.options.vision.worldToScreen(position);
     const underPointer = this.options.vision.screenToWorld(point.x, point.y, projected.depth);
+    const wasPinned = this.options.getViewState().pinnedNodeIds.includes(nodeId);
+    if (this.grabPolicy.mode === 'elastic' && wasPinned) return;
+    // Finish an interrupted drag before replacing its captured contact and policy.
+    if (this.dragContext) this.endNodeDrag({ type: 'drag-end', ...this.currentIntentBase(),
+      identity: { documentId: this.options.getDocument().documentId, documentRevision: this.options.getDocument().revision },
+      nodeId: this.dragContext.nodeId, point, cancelled: true, pointerKind: 'mouse' });
     const state = this.options.getViewState();
-    const wasPinned = state.pinnedNodeIds.includes(nodeId);
+    if (this.grabPolicy.mode !== 'exact') this.grab.begin(nodeId, position, underPointer, this.grabPolicy);
     this.dragContext = {
+      mode: this.grabPolicy.mode,
+      anchor: { ...position }, point: { ...point },
       nodeId,
       depth: projected.depth,
       offset: subtract(position, underPointer),
       wasPinned,
     };
     this.dragHoverPreview = hoverPreview;
-    if (!wasPinned && this.options.getDragConstraintPolicy?.() !== 'transient') {
+    if (this.grabPolicy.mode === 'exact' && !wasPinned && this.options.getDragConstraintPolicy?.() !== 'transient') {
       this.commit({ ...state, pinnedNodeIds: [...state.pinnedNodeIds, nodeId] });
       this.options.onViewStateChanged('layout');
     }
@@ -1137,6 +1180,12 @@ export class SessionInteractionRuntime {
 
   private updateNodeDrag(nodeId: string, point: GraphScreenPointV1): void {
     if (!this.dragContext || this.dragContext.nodeId !== nodeId) return;
+    if (this.dragContext.mode !== 'exact') {
+      this.dragContext.point = { ...point };
+      this.reconcileGrab();
+      this.options.onViewStateChanged('interaction');
+      return;
+    }
     const state = this.options.getViewState();
     const trackingNodeIds = this.getCameraTrackingNodeIds();
     const underPointer = this.options.vision.screenToWorld(point.x, point.y, this.dragContext.depth);
@@ -1155,12 +1204,15 @@ export class SessionInteractionRuntime {
     if (!this.dragContext || this.dragContext.nodeId !== command.nodeId) return;
     const position = this.options.getViewState().positions[command.nodeId];
     const wasPinned = this.dragContext.wasPinned;
+    const mode = this.dragContext.mode;
+    this.grab.end();
     this.dragContext = null;
     this.dragHoverPreview = undefined;
     this.hoveredNodeId = command.pointerKind === 'touch' ? undefined : command.nodeId;
     this.updateCursor();
+    if (mode !== 'exact') this.options.onViewStateChanged('interaction');
     if (!position) return;
-    if (!wasPinned && this.options.getDragConstraintPolicy?.() !== 'transient'
+    if (mode === 'exact' && !wasPinned && this.options.getDragConstraintPolicy?.() !== 'transient'
       && (command.cancelled || this.options.getDragReleasePolicy() === 'dynamic')) {
       const state = this.options.getViewState();
       this.commit({ ...state, pinnedNodeIds: state.pinnedNodeIds.filter((id) => id !== command.nodeId) });
@@ -1199,6 +1251,7 @@ export class SessionInteractionRuntime {
     this.interpreter.reset();
     this.inputEvents.clear();
     this.commands.clear();
+    this.grab.end();
     this.dragContext = null;
     this.hoveredNodeId = undefined;
     this.previewedNodeId = undefined;

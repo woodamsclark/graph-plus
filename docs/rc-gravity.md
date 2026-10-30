@@ -85,8 +85,9 @@ authority and the global speed limit remain authoritative. There is no floor,
 automatic anchoring, mass variation, inverse-square attraction, or viewport-relative
 direction. With no anchor or centering force, the graph can drift until it cools.
 
-This is independent from the settings-based node-pull prototype and the transient
-grab-constraint experiment; neither is merged into the RC.
+This is independent from the old settings-based node-pull prototype, which remains
+excluded. The RC also includes opt-in internal transient grab constraints; elastic
+grabs compose with gravity and remain subject to hard attachment constraints.
 
 ## Verification
 
