@@ -1,6 +1,7 @@
 import type { AnimaConsciousnessPresentationV1 } from '../anima/AnimaAwareness.ts';
 import type { GraphInteractionPreviewV1 } from '../anima/AnimaInteractionPreview.ts';
 import type {
+  GraphAttachmentAssignmentFailureV1,
   EngineModuleDescriptorV1,
   EngineModulePolicyV1,
   GraphDimensionsV1,
@@ -144,6 +145,8 @@ export interface GraphNodeRegionLayoutV1 {
 }
 
 export interface GraphModuleTickResultV1 {
+  /** Runtime strict-admission failures; an empty array clears the previous failure state. */
+  readonly attachmentFailures?: readonly GraphAttachmentAssignmentFailureV1[];
   readonly positions?: Readonly<Record<string, Vec3>>;
   readonly camera?: import('../../contracts/v1/index.ts').GraphCameraStateV1;
   /** Keeps the session awake for another eligible pipeline frame. */

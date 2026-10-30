@@ -1,8 +1,9 @@
+import type { GraphAttachmentAssignmentFailureV1 } from './attachment.ts';
 import type { GraphActiveViewV1, GraphViewIdV1, GraphViewUiStateV1 } from './view.ts';
 import type { GraphDocumentV1 } from './document.ts';
 import type { GraphExperienceContractV1 } from './experience.ts';
 import type { GraphFilterRequestV1, GraphFilterScopeV1 } from './filter.ts';
-import type { ApplyGraphPatchResultV1, GraphPatchV1 } from './patch.ts';
+import type { ApplyGraphPatchResultV1, GraphPatchV1, SetGraphResultV1 } from './patch.ts';
 import type { GraphEffectiveSettingsV1, GraphSettingsOverridesV1 } from './profile.ts';
 import type { GraphCameraStateV1, GraphViewStateV1, GraphWorldStateV1 } from './view-state.ts';
 import type { Disposable, Vec3 } from './values.ts';
@@ -29,7 +30,13 @@ export interface GraphSessionV1 {
   readonly sessionId: string;
   readonly engineInstanceId: string;
 
+  /** Supply the complete graph description. */
+  setGraph(graph: GraphDocumentV1): Promise<SetGraphResultV1>;
+  /** Submit an atomic incremental graph edit. */
+  patchGraph(patch: GraphPatchV1): Promise<ApplyGraphPatchResultV1>;
+  /** Compatibility name; prefer setGraph. Throws on validation or strict assignment failure. */
   replaceDocument(document: GraphDocumentV1): Promise<void>;
+  /** Compatibility name; prefer patchGraph. */
   applyPatch(patch: GraphPatchV1): Promise<ApplyGraphPatchResultV1>;
   exportDocument(): Promise<GraphDocumentV1>;
   /** Counts without cloning the canonical document. */
@@ -273,7 +280,9 @@ export interface GraphChangedEventV1 {
 }
 
 export interface GraphSessionErrorV1 {
+  readonly attachmentFailures?: readonly GraphAttachmentAssignmentFailureV1[];
   readonly code:
+    | 'attachment-assignment'
     | 'invalid-document'
     | 'stale-revision'
     | 'module-failed'

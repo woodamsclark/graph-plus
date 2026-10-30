@@ -1,5 +1,9 @@
 # Toolbar+ attachment testing handoff
 
+Attachment now requires `enabled: true`. Enabled nodes default to loose assignment;
+strict assignment returns a rejected graph edit when a point cannot be established.
+Use `setGraph` / `patchGraph`; see [the policy API example](attachment-policy.md).
+
 The current 2D/3D candidate is `rc/attachments`; see [the RC handoff](rc-attachments.md)
 for spatial capabilities, matching builds, and experiment separation.
 
@@ -34,7 +38,7 @@ Pass the property on the nodes in the document supplied to the leased session:
 {
   id: "center",
   // Keep the existing label, attributes, positionHint, etc.
-  attachment: { count: 8, stiffness: "firm", openingDegrees: 0 }
+  attachment: { enabled: true, count: 8, stiffness: "firm", openingDegrees: 0 }
 }
 ```
 

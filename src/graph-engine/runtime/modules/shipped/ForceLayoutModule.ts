@@ -1,4 +1,3 @@
-import { isGraphNodeAttachmentV1 } from '../../../contracts/v1/index.ts';
 import type { GraphAttachmentSlotsStateV1, GraphNodeAttachmentV1, GraphDimensionsV1, GraphDocumentV1, GraphTopologyLayoutPolicyV1, JsonValue, Vec3 } from '../../../contracts/v1/index.ts';
 import {
   analyzeGraphTopologyV1,
@@ -15,7 +14,7 @@ import type {
   GraphModuleTickResultV1,
 } from '../GraphModuleTypes.ts';
 import { forceLayoutIntervalMsV1, forceLayoutTargetStepRateHzV1 } from './ForceLayoutCadence.ts';
-import { angularSpringStiffnessV1 } from './ConnectionAngles.ts';
+import { activeAttachmentPatterns, attachmentFailuresFromState } from './GraphAttachmentAssignment.ts';
 import { AttachmentSlots, type AttachmentEndpoint } from './AttachmentSlots.ts';
 
 export type GraphAxialSpringAxisV1 = 'off' | 'x' | 'y' | 'z';
@@ -144,6 +143,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   private connectionEndpoints: readonly AttachmentEndpoint[] = [];
   private connectionNeighbors = new Map<string, string[]>();
   private nodeAttachments = new Map<string, GraphNodeAttachmentV1>();
+  private hasStrictAttachments = false;
   private attachmentTargetsKey = '';
   private attachmentDocumentSource: GraphDocumentV1 | null = null;
 
@@ -169,7 +169,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.reheatForChange();
   }
 
-  onDocumentChanged(): void {
+  onDocumentChanged(document?: GraphDocumentV1): void {
+    if (document && this.bufferDocumentSource && document.documentId !== this.bufferDocumentSource.documentId) this.attachmentSlots.clear();
     this.documentKey = '';
     this.topologyDocumentSource = null;
     this.reheatForChange();
@@ -282,22 +283,14 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   }
 
   private synchronizeNodeAttachments(state: GraphModulePipelineStateV1): void {
-    const nodes = state.document.nodes;
     const overrides = state.motionTargets?.nodeAttachments;
     const key = JSON.stringify(overrides ?? null);
     if (state.document === this.attachmentDocumentSource && key === this.attachmentTargetsKey) return;
+    this.hasStrictAttachments = state.document.nodes.some(node => node.attachment?.enabled === true && node.attachment.assignment === 'strict');
     const previouslyActive = this.nodeAttachments.size > 0;
     this.nodeAttachments.clear();
-    for (const node of nodes) {
-      const overridden = overrides && Object.prototype.hasOwnProperty.call(overrides, node.id);
-      const requested = overridden ? overrides[node.id] : node.attachment;
-      // Malformed animation targets fall back to the node's saved quality.
-      const attachment = requested === null ? undefined
-        : isGraphNodeAttachmentV1(requested) ? requested : node.attachment;
-      if (attachment && (attachment.count ?? 1) > 1 && (attachment.rigidity === 'locked' || angularSpringStiffnessV1(attachment) > 0)) {
-        this.nodeAttachments.set(node.id, attachment);
-      }
-    }
+    for (const [id, attachment] of activeAttachmentPatterns(state.document, overrides)) this.nodeAttachments.set(id, attachment);
+    if (!this.nodeAttachments.size) this.attachmentSlots.clear();
     this.attachmentTargetsKey = key;
     this.attachmentDocumentSource = state.document;
     if (previouslyActive || this.nodeAttachments.size) this.reheatForChange();
@@ -554,6 +547,8 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     if (!state.physicsOverrideHeld && !dragActive && !cursorActive && this.settledStepCount >= SETTLED_STEP_COUNT) this.stop();
     return {
       ...(changed ? { positions: this.positions } : {}),
+      attachmentFailures: this.hasStrictAttachments
+        ? attachmentFailuresFromState(state.document, this.attachmentSlots.snapshot()) : [],
       requestNextFrame: this.running,
       ...(this.running ? { nextFrameDelayMs: this.targetFrameIntervalMs(dragActive || cursorActive) } : {}),
     };

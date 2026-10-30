@@ -77,3 +77,10 @@ include binding `edgeIds` and per-endpoint request statuses.
 unit direction addressed by an index. Use the provider and client from the same
 RC commit; package labels alone do not identify this unpublished candidate.
 See [the RC handoff](../../docs/rc-attachments.md) for adoption and saved-state rules.
+
+Current RC updates use `setGraph` / `patchGraph` and return an `applied` result.
+Request `GRAPH_UPDATE_API_CAPABILITY_V1` and
+`GRAPH_ATTACHMENT_ASSIGNMENT_POLICY_CAPABILITY_V1` when adopting these contracts.
+Attachments require `enabled: true`; enabled nodes default to loose assignment.
+Strict policies reject unsuccessful graph edits atomically. See
+[the policy example](../../docs/attachment-policy.md).

@@ -68,7 +68,7 @@ export class GraphDocumentStore {
     });
   }
 
-  applyPatch(patch: GraphPatchV1): ApplyGraphPatchResultV1 {
+  applyPatch(patch: GraphPatchV1, validateCandidate?: (document: GraphDocumentV1) => GraphPatchErrorV1 | undefined): ApplyGraphPatchResultV1 {
     const headerError = validatePatchHeader(patch);
     if (headerError) return rejected(this.document.revision, patchIdOf(patch), headerError);
     if (patch.baseRevision !== this.document.revision) {
@@ -112,6 +112,10 @@ export class GraphDocumentStore {
         message: validation.errors.map((entry) => `${entry.path}: ${entry.message}`).join('; '),
       });
     }
+
+    // Runtime policies inspect the fully staged graph before anything becomes observable.
+    const candidateError = validateCandidate?.(next);
+    if (candidateError) return rejected(previousRevision, patch.patchId, candidateError);
 
     const storedPatch = clonePatch(patch);
     this.document = cloneGraphDocumentV1(next);

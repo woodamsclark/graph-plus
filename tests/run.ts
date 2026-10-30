@@ -32,6 +32,7 @@ import './runtime/force-alpha.test.ts';
 import './runtime/connection-angles.test.ts';
 import './runtime/attachment-slots.test.ts';
 import './runtime/attachment-slots-3d.test.ts';
+import './runtime/attachment-policy.test.ts';
 import './runtime/composition-pipeline.test.ts';
 import './runtime/anima-resolution.test.ts';
 import './service/service.test.ts';

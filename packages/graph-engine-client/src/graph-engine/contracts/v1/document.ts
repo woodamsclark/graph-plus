@@ -125,7 +125,7 @@ export function validateGraphDocumentV1(value: unknown): GraphDocumentValidation
     validateOptionalTokens(node, path, errors, 'invalid-node');
     validateOptionalAttributes(node, path, errors, 'invalid-node');
     if (node.attachment !== undefined && !isGraphNodeAttachmentV1(node.attachment)) {
-      errors.push(error('invalid-node', `${path}.attachment`, 'Attachment must have a positive whole-number count, a valid opening width, and spring stiffness.'));
+      errors.push(error('invalid-node', `${path}.attachment`, 'Attachment must have a valid enabled flag, assignment policy, positive whole-number count, opening width, and stiffness.'));
     }
     if (node.positionHint !== undefined) validateVec3(node.positionHint, `${path}.positionHint`, errors);
   }

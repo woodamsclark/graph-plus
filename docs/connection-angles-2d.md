@@ -1,7 +1,9 @@
 # Node-owned attachment slots and orientation (2D and 3D)
 
-Attachment is a quality stored on each graph node. Missing attachment, omitted
-count, or count 1 means freely attaching. There is no graph-wide attachment default.
+Attachment is a quality stored on each graph node and is disabled unless
+`attachment.enabled` is explicitly true. Enabled nodes default to `assignment: 'loose'`.
+Use `assignment: 'strict'` to reject graph updates that cannot assign their endpoints.
+Count 1 has no indexed pattern. See [assignment policies and graph APIs](attachment-policy.md).
 
 ```ts
 import { graphAttachmentRotation2DV1, type GraphNodeV1 } from '@graph-plus/graph-engine-client';
@@ -9,6 +11,7 @@ import { graphAttachmentRotation2DV1, type GraphNodeV1 } from '@graph-plus/graph
 const hub: GraphNodeV1 = {
   id: 'hub',
   attachment: {
+    enabled: true,
     count: 8,
     rigidity: 'locked',
     orientation: { mode: 'locked', rotation: graphAttachmentRotation2DV1(0) },
@@ -52,6 +55,7 @@ its occupants can still release if their binding rigidity is spring.
 
 ```ts
 attachment: {
+  enabled: true,
   count: 4,
   stiffness: 'firm',
   orientation: {
@@ -139,7 +143,7 @@ specific node qualities without overwriting saved declarations:
 
 ```ts
 return { motionTargets: { nodeAttachments: {
-  hub: { count: 6, stiffness: 'firm', orientation: { mode: 'free' } },
+  hub: { enabled: true, count: 6, stiffness: 'firm', orientation: { mode: 'free' } },
 } } };
 ```
 

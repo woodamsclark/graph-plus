@@ -1,4 +1,5 @@
 import type {
+  GraphAttachmentAssignmentFailureV1,
   GraphDocumentV1,
   GraphViewStateV1,
   JsonValue,
@@ -264,6 +265,7 @@ export class GraphModuleHost {
     let changed = false;
     let requestNextFrame = false;
     let nextFrameDelayMs: number | undefined;
+    let attachmentFailures: readonly GraphAttachmentAssignmentFailureV1[] | undefined;
     for (const module of [...this.active]) {
       if (!module.instance.tick) continue;
       if (module.definition.descriptor.capabilities.includes('layout') && !this.canRunLayout()) {
@@ -293,6 +295,7 @@ export class GraphModuleHost {
         }
         this.tickElapsedSeconds.delete(module.id);
         const result = module.instance.tick(moduleState, elapsed);
+        if (result?.attachmentFailures !== undefined) attachmentFailures = [...(attachmentFailures ?? []), ...result.attachmentFailures];
         this.tickHasRun.add(module.id);
         if (result?.positions) {
           positions = result.positions;
@@ -313,7 +316,8 @@ export class GraphModuleHost {
       }
     }
     const camera = choreographed.motionTargets?.camera;
-    return changed || camera || requestNextFrame ? {
+    return changed || camera || requestNextFrame || attachmentFailures !== undefined ? {
+      ...(attachmentFailures === undefined ? {} : { attachmentFailures }),
       ...(changed ? { positions } : {}),
       ...(camera ? { camera } : {}),
       ...(requestNextFrame || camera ? { requestNextFrame: true } : {}),

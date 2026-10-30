@@ -1,6 +1,9 @@
 import type { Vec3 } from './values.ts';
 
 /** Capability for node-owned attachment springs in the shipped 2D force layout. */
+export const GRAPH_ATTACHMENT_ASSIGNMENT_POLICY_CAPABILITY_V1 = 'attachment-assignment-policy';
+export const GRAPH_UPDATE_API_CAPABILITY_V1 = 'graph-update-api';
+
 export const GRAPH_NODE_ATTACHMENT_CAPABILITY_V1 = 'node-attachment-2d';
 
 export const GRAPH_NODE_ATTACHMENT_SLOTS_CAPABILITY_V1 = 'node-attachment-slots-2d';
@@ -83,9 +86,13 @@ export type GraphAttachmentSlotsStateV1 = {
 /**
  * Intrinsic attachment preference carried by a graph node.
  * Count is dimension-independent: 2D uses a circle; 3D uses indexed spherical directions.
- * Missing attachment or count 1 means freely attaching. No global default is applied.
+ * Disabled by default; enabled nodes default to loose assignment. Count 1 has no indexed pattern.
  */
 export type GraphNodeAttachmentV1 = {
+  /** Attachment mechanics are disabled unless explicitly enabled. */
+  readonly enabled?: boolean;
+  /** Loose permits connections without a point; strict rejects graph edits that cannot assign every endpoint. */
+  readonly assignment?: 'loose' | 'strict';
   /** Positive whole-number direction count. Defaults to 1 (unrestricted). */
   readonly count?: number;
   /** Spring bindings can release; locked bindings retain their slot until explicitly unlocked/reconfigured. */
@@ -103,7 +110,9 @@ export function isGraphNodeAttachmentV1(value: unknown): value is GraphNodeAttac
   const prototype: unknown = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) return false;
   const attachment = value as Record<string, unknown>;
-  if (Object.keys(attachment).some(key => !['count', 'openingDegrees', 'stiffness', 'rigidity', 'orientation'].includes(key))) return false;
+  if (Object.keys(attachment).some(key => !['enabled', 'assignment', 'count', 'openingDegrees', 'stiffness', 'rigidity', 'orientation'].includes(key))) return false;
+  if (attachment.enabled !== undefined && typeof attachment.enabled !== 'boolean') return false;
+  if (attachment.assignment !== undefined && attachment.assignment !== 'loose' && attachment.assignment !== 'strict') return false;
   const count = attachment.count === undefined ? 1 : attachment.count;
   if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 1) return false;
   if (attachment.rigidity !== undefined && attachment.rigidity !== 'spring' && attachment.rigidity !== 'locked') return false;
@@ -159,3 +168,23 @@ export function graphAttachmentSlotDirection3DV1(count: number, slot: number): V
 
 
 function unitDirection(value: Vec3): Vec3 { const r = Math.hypot(value.x, value.y, value.z); return { x: value.x / r, y: value.y / r, z: value.z / r }; }
+
+/** Structured failure for an enabled strict owner's unsatisfied endpoint. */
+export interface GraphAttachmentAssignmentFailureV1 {
+  readonly edgeId: string;
+  readonly endpoint: 'source' | 'target';
+  readonly ownerId: string;
+  readonly neighborId: string;
+  readonly requestedSlot?: number | null;
+  readonly reason: 'occupied' | 'out-of-range' | 'inactive' | 'free' | 'conflicting' | 'unbound' | 'layout-unavailable';
+  readonly message: string;
+}
+
+/** Legacy replacement/session creation throw this typed error for strict admission failures. */
+export class GraphAttachmentAssignmentErrorV1 extends Error {
+  readonly code = 'attachment-assignment' as const;
+  constructor(readonly failures: readonly GraphAttachmentAssignmentFailureV1[]) {
+    super(failures.map(failure => failure.message).join('; '));
+    this.name = 'GraphAttachmentAssignmentErrorV1';
+  }
+}

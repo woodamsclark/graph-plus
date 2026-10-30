@@ -7,7 +7,7 @@ import { createShippedGraphModuleRegistryV1 } from '../../src/graph-engine/runti
 import { GraphEngineProviderCoreV1 } from '../../src/graph-engine/service/GraphEngineProviderCore.ts';
 import { GRAPH_PLUS_CONSUMER_REGISTRATION_V1 } from '../../src/graph-plus/consumer/GraphPlusRegistration.ts';
 import { graphAttachmentSlotDirection3DV1, GRAPH_NODE_ATTACHMENT_SLOTS_3D_CAPABILITY_V1,
-  GRAPH_EDGE_ATTACHMENT_ASSIGNMENTS_3D_CAPABILITY_V1 } from '../../packages/graph-engine-client/src/graph-engine/public.ts';
+  GRAPH_EDGE_ATTACHMENT_ASSIGNMENTS_3D_CAPABILITY_V1, GRAPH_ATTACHMENT_ASSIGNMENT_POLICY_CAPABILITY_V1, GRAPH_UPDATE_API_CAPABILITY_V1 } from '../../packages/graph-engine-client/src/graph-engine/public.ts';
 import type { GraphAttachmentRotationV1, GraphAttachmentSlotsStateV1, GraphNodeAttachmentV1, GraphViewStateV1, JsonValue, Vec3 } from '../../src/graph-engine/contracts/v1/index.ts';
 import type { GraphModulePipelineStateV1 } from '../../src/graph-engine/runtime/modules/GraphModuleTypes.ts';
 import { DEFAULT_GRAPH_RENDER_THEME_V1 } from '../../src/graph-engine/runtime/render/index.ts';
@@ -41,7 +41,7 @@ function solverFixture(pattern: GraphNodeAttachmentV1 | null = { count: 6, stiff
     const v = attachmentSlotDirection3D(6, i);
     positions[`n${i}`] = rotate3(rotation, scale3(normalize3({ x: v.x + 0.04, y: v.y + 0.07, z: v.z + 0.09 }), 100));
   }
-  const document = graphDocument({ nodes: Object.keys(positions).map(id => graphNode(id, id === 'hub' && pattern ? { attachment: pattern } : {})),
+  const document = graphDocument({ nodes: Object.keys(positions).map(id => graphNode(id, id === 'hub' && pattern ? { attachment: { enabled: true, ...pattern } } : {})),
     edges: Array.from({ length: 6 }, (_, i) => graphEdge(`e${i}`, 'hub', `n${i}`, { attachment: { sourceSlot: i } })) });
   const viewState: GraphViewStateV1 = { schemaVersion: 1, documentId: document.documentId, documentRevision: 0,
     consumerId: 'graph-plus', profileId: 'default', dimensions: '3d', positions, pinnedNodeIds: ['hub'],
@@ -217,6 +217,16 @@ test('3D attachment is opt-in and disabled/count-one qualities preserve existing
   }
 });
 
+test('disabled attachments discard restored occupancy even when the restored solver is cold', () => {
+  const active = solverFixture({ count: 6, rigidity: 'locked', orientation: fixed() }); steps(active);
+  const saved = JSON.parse(JSON.stringify(active.force.exportState()));
+  const disabled = solverFixture({ enabled: false, count: 6, rigidity: 'locked', orientation: fixed() });
+  disabled.force.restoreState({ ...saved, alpha: 0, running: false });
+  equal(disabled.force.preferredTickIntervalMs(disabled.state), null, 'disabled restored attachments do not wake physics');
+  equal(Object.keys(disabled.force.getDiagnostics().attachmentSlots.owners).length, 0, 'disabled node does not retain stale saved occupants');
+  active.force.dispose(); disabled.force.dispose();
+});
+
 test('3D full force snapshots preserve assignments and spatial pose', () => {
   const f = solverFixture({ count: 6, rigidity: 'locked' }); steps(f, 10);
   const restored = solverFixture({ count: 6, rigidity: 'locked' });
@@ -299,7 +309,7 @@ test('3D many-hub lock stress keeps all indexed directions finite under repeated
 
 test('3D node edits and transient attachment animation wake settled layouts and leave declarations intact', () => {
   const f = solverFixture(null); steps(f, 20);
-  f.state = { ...f.state, motionTargets: { nodeAttachments: { hub: { count: 6, stiffness: 'firm', orientation: fixed() } } } };
+  f.state = { ...f.state, motionTargets: { nodeAttachments: { hub: { enabled: true, count: 6, stiffness: 'firm', orientation: fixed() } } } };
   assert(f.force.preferredTickIntervalMs(f.state) !== null, 'spatial animation wakes a settled solver'); steps(f, 30);
   equal(f.force.getDiagnostics().attachmentSlots.owners.hub.count, 6, 'spatial pattern is active');
   equal(f.state.document.nodes[0].attachment, undefined, 'animation leaves document untouched');
@@ -313,12 +323,14 @@ test('3D attachment capabilities are available to leased consumers with client c
   value.profiles.setUserOverrides('graph-plus', 'default', { dimensions: '3d' });
   const capabilities = [...new Set(createShippedGraphModuleRegistryV1().descriptors().flatMap(module => module.capabilities))];
   const provider = new GraphEngineProviderCoreV1({ engineVersion: '2.0.5', engineInstanceId: 'spatial-rc-test', capabilities, profiles: value.profiles, sessions: value.factory });
-  const result = provider.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: [GRAPH_NODE_ATTACHMENT_SLOTS_3D_CAPABILITY_V1, GRAPH_EDGE_ATTACHMENT_ASSIGNMENTS_3D_CAPABILITY_V1] });
+  const result = provider.connectLocal({ consumerId: 'graph-plus', supportedProtocolVersions: [1], requestedCapabilities: [GRAPH_NODE_ATTACHMENT_SLOTS_3D_CAPABILITY_V1, GRAPH_EDGE_ATTACHMENT_ASSIGNMENTS_3D_CAPABILITY_V1, GRAPH_ATTACHMENT_ASSIGNMENT_POLICY_CAPABILITY_V1, GRAPH_UPDATE_API_CAPABILITY_V1] });
   assert(result.ok, 'client negotiates spatial capabilities');
   const session = await result.lease.createSession({ consumerId: 'graph-plus', profileId: 'default', container: value.container, document: f.state.document });
   try {
-    const document = await session.exportDocument(); const edge = document.edges[0];
-    const applied = await session.applyPatch({ schemaVersion: 1, patchId: 'spatial-slot', baseRevision: document.revision, operations: [{ type: 'replace-edge', edge: { ...edge, attachment: { sourceSlot: 2, targetSlot: null } } }] });
+    const document = await session.exportDocument();
+    assert((await session.setGraph(document)).applied, 'leased setGraph accepts complete graph data');
+    const edge = document.edges[0];
+    const applied = await session.patchGraph({ schemaVersion: 1, patchId: 'spatial-slot', baseRevision: document.revision, operations: [{ type: 'replace-edge', edge: { ...edge, attachment: { sourceSlot: 2, targetSlot: null } } }] });
     assert(applied.applied, 'consumer can reassign spatial edge endpoints');
     const exported = JSON.parse(JSON.stringify(await session.exportDocument()));
     deepEqual(exported.edges[0].attachment, { sourceSlot: 2, targetSlot: null }, 'saved edge retains explicit assignment');

@@ -15,14 +15,14 @@ import { assert, deepEqual, equal, test } from '../support/harness.ts';
 const radians = (degrees: number) => degrees * Math.PI / 180;
 const near = (a: number, b: number, message: string, tolerance = 1e-8) => assert(Math.abs(a - b) < tolerance, `${message}: ${a} vs ${b}`);
 const inert = { repulsionStrength: 0, springStrength: 0, centeringStrength: 0, collisionRadius: 0, alphaDecay: 0, velocityDecay: 0.4 };
-const config = (count = 4): GraphNodeAttachmentV1 => ({ count, stiffness: 'firm' });
+const config = (count = 4): GraphNodeAttachmentV1 => ({ enabled: true, count, stiffness: 'firm' });
 
 function fixture(attachment: GraphNodeAttachmentV1 | null = config(), dimensions: GraphDimensionsV1 = '2d', rotation = 0, duplicate = false) {
   const positions: Record<string, Vec3> = { hub: { x: 0, y: 0, z: 0 } };
   for (const [i, angle] of [0, 80, 188, 278].entries()) positions[`n${i}`] = {
     x: 100 * Math.cos(radians(angle) + rotation), y: 100 * Math.sin(radians(angle) + rotation), z: dimensions === '3d' ? 20 : 0,
   };
-  const document = graphDocument({ nodes: Object.keys(positions).map(id => graphNode(id, id === 'hub' && attachment ? { attachment } : {})),
+  const document = graphDocument({ nodes: Object.keys(positions).map(id => graphNode(id, id === 'hub' && attachment ? { attachment: { enabled: true, ...attachment } } : {})),
     edges: [0, 1, 2, 3].map(i => graphEdge(`e${i}`, 'hub', `n${i}`)).concat(duplicate ? [graphEdge('duplicate', 'hub', 'n1')] : []) });
   const viewState: GraphViewStateV1 = { schemaVersion: 1, documentId: document.documentId, documentRevision: 0,
     consumerId: 'synthetic-consumer', profileId: 'two-dimensional', dimensions, positions, pinnedNodeIds: ['hub'],
@@ -113,7 +113,7 @@ test('attachment is off by default and count one is freely attaching', () => {
 
 function setAttachment(value: ReturnType<typeof fixture>, attachment: GraphNodeAttachmentV1) {
   const document = { ...value.state.document, revision: value.state.document.revision + 1,
-    nodes: value.state.document.nodes.map(node => node.id === 'hub' ? { ...node, attachment } : node) };
+    nodes: value.state.document.nodes.map(node => node.id === 'hub' ? { ...node, attachment: { enabled: true, ...attachment } } : node) };
   value.state = { ...value.state, document, sourceDocument: document };
 }
 

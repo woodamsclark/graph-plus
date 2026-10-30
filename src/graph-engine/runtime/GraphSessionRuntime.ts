@@ -1,3 +1,5 @@
+import { strictAttachmentFailures } from './modules/shipped/GraphAttachmentAssignment.ts';
+import { GraphAttachmentAssignmentErrorV1, InvalidGraphDocumentErrorV1, type GraphPatchErrorV1, type SetGraphResultV1 } from '../contracts/v1/index.ts';
 import type {
   ApplyGraphPatchResultV1,
   Disposable,
@@ -243,6 +245,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
   private scheduler!: SessionFrameScheduler;
   private readonly activity = new SessionActivityController();
   private readonly diagnostics = new SessionDiagnostics();
+  private lastAttachmentFailureKey = '';
   private activeFrameInvalidations: Set<SessionInvalidationClass> | null = null;
   private readonly pendingCompositionInvalidations = new Set<SessionInvalidationClass>();
   private lastFrameTimestamp: number | null = null;
@@ -308,6 +311,15 @@ export class GraphSessionRuntime implements GraphSessionV1 {
         selectionNeighborRevealActive: this.interaction.isSelectionNeighborRevealActive(),
         previewedNodeId: this.interaction.getPreviewedNodeId(),
       }, deltaSeconds);
+      if (tickResult?.attachmentFailures !== undefined) {
+        const failures = tickResult.attachmentFailures;
+        const key = failures.length ? JSON.stringify(failures) : '';
+        if (key !== this.lastAttachmentFailureKey) {
+          this.lastAttachmentFailureKey = key;
+          if (failures.length) this.emitError({ code: 'attachment-assignment', recoverable: true,
+            message: failures.map(failure => failure.message).join('; '), attachmentFailures: failures });
+        }
+      }
       const positions = tickResult?.positions;
       const moduleTickMs = duration(moduleStart, this.platform.now());
       let geometryCompositionPending = dragGeometryPending;
@@ -535,6 +547,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.activity.setDocumentSuspension(this.platform.document.hidden);
       this.recomputeView();
       this.flushPendingComposition();
+      const assignmentError = this.attachmentValidationError(this.store.readDocument());
+      if (assignmentError?.attachmentFailures) throw new GraphAttachmentAssignmentErrorV1(assignmentError.attachmentFailures);
       if (!restoredLayout) this.fitPositions(Object.values(this.moduleView.positions));
       this.refreshFrame();
       this.flushPendingComposition();
@@ -557,6 +571,46 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     }
   }
 
+  async setGraph(graph: GraphDocumentV1): Promise<SetGraphResultV1> {
+    this.requireActive();
+    try {
+      const revision = graph?.revision;
+      await this.replaceDocument(graph);
+      return { applied: true, revision };
+    } catch (error) {
+      if (!(error instanceof GraphAttachmentAssignmentErrorV1) && !(error instanceof InvalidGraphDocumentErrorV1)) throw error;
+      return { applied: false, revision: this.store.revision, error: {
+        code: error instanceof GraphAttachmentAssignmentErrorV1 ? 'attachment-assignment' : 'invalid-document',
+        message: error.message,
+        ...(error instanceof GraphAttachmentAssignmentErrorV1 ? { attachmentFailures: error.failures } : {}),
+      } };
+    }
+  }
+
+  async patchGraph(patch: GraphPatchV1): Promise<ApplyGraphPatchResultV1> {
+    return this.applyPatch(patch);
+  }
+
+  private attachmentValidationError(document: GraphDocumentV1): GraphPatchErrorV1 | undefined {
+    if (!document.nodes.some(node => node.attachment?.enabled === true && node.attachment.assignment === 'strict')) return undefined;
+    const previous = this.store.readDocument();
+    const sameGraph = previous.documentId === document.documentId;
+    const positions = Object.fromEntries(document.nodes.map((node, index) => [node.id,
+      sameGraph && this.viewState.positions[node.id] ? { ...this.viewState.positions[node.id] }
+        : !usesGeneratedInitialPositions(this.profile.profileSettings) && node.positionHint ? { ...node.positionHint }
+          : defaultNodePosition(index, this.profile.dimensions),
+    ]));
+    const state = this.moduleHost.exportCapabilityState('layout')['force-layout'];
+    const slots = state && typeof state === 'object' && !Array.isArray(state) ? (state as Readonly<Record<string, JsonValue>>).attachmentSlots : undefined;
+    const failures = strictAttachmentFailures(document, {
+      dimensions: this.profile.dimensions, positions,
+      pinnedNodeIds: sameGraph ? this.viewState.pinnedNodeIds : [],
+      layoutEnabled: this.moduleHost.has('force-layout') && !this.moduleView.formActive,
+      ...(sameGraph ? { previous: { document: previous, positions: this.viewState.positions, slots } } : {}),
+    });
+    return failures.length ? { code: 'attachment-assignment', message: failures.map(failure => failure.message).join('; '), attachmentFailures: failures } : undefined;
+  }
+
   async replaceDocument(document: GraphDocumentV1): Promise<void> {
     this.requireActive();
     const previous = this.store.readDocument();
@@ -564,6 +618,8 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     try {
       const nextStore = new GraphDocumentStore(document);
       const next = nextStore.readDocument();
+      const assignmentError = this.attachmentValidationError(next);
+      if (assignmentError?.attachmentFailures) throw new GraphAttachmentAssignmentErrorV1(assignmentError.attachmentFailures);
       this.store = nextStore;
       this.refreshRenderQuality(next.nodes.length);
       this.viewState = previous.documentId === next.documentId
@@ -593,8 +649,9 @@ export class GraphSessionRuntime implements GraphSessionV1 {
       this.emitWorldChanged('document');
     } catch (error) {
       this.emitError({
-        code: 'invalid-document',
+        code: error instanceof GraphAttachmentAssignmentErrorV1 ? 'attachment-assignment' : 'invalid-document',
         message: errorMessage(error),
+        ...(error instanceof GraphAttachmentAssignmentErrorV1 ? { attachmentFailures: error.failures } : {}),
         recoverable: true,
       });
       throw error;
@@ -603,7 +660,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   async applyPatch(patch: GraphPatchV1): Promise<ApplyGraphPatchResultV1> {
     this.requireActive();
-    const result = this.store.applyPatch(patch);
+    const result = this.store.applyPatch(patch, next => this.attachmentValidationError(next));
     if (!result.applied) {
       if (result.error.code === 'stale-revision') {
         this.emitError({
@@ -1430,7 +1487,7 @@ export class GraphSessionRuntime implements GraphSessionV1 {
     const subscription = this.subscribe(this.errorListeners, listener);
     const deferred = this.deferredErrors.splice(0);
     for (const error of deferred) {
-      try { listener({ ...error }); } catch { /* Continue cleanup even when a detached surface or optional callback fails. */ }
+      try { listener(cloneSessionError(error)); } catch { /* Continue cleanup even when a detached surface or optional callback fails. */ }
     }
     return subscription;
   }
@@ -2126,12 +2183,12 @@ export class GraphSessionRuntime implements GraphSessionV1 {
 
   private emitError(error: GraphSessionErrorV1): void {
     if (!this.errorListeners.size) {
-      this.deferredErrors.push({ ...error });
+      this.deferredErrors.push(cloneSessionError(error));
       return;
     }
     for (const listener of [...this.errorListeners]) {
       try {
-        listener({ ...error });
+        listener(cloneSessionError(error));
       } catch {
         // Error listeners are isolated from the session and from one another.
       }
@@ -2379,4 +2436,8 @@ function cloneOverrides(value: GraphSettingsOverridesV1): GraphSettingsOverrides
 
 function cloneJsonRecord(value: Readonly<Record<string, import('../contracts/v1/index.ts').JsonValue>>): Readonly<Record<string, import('../contracts/v1/index.ts').JsonValue>> {
   return JSON.parse(JSON.stringify(value)) as Readonly<Record<string, import('../contracts/v1/index.ts').JsonValue>>;
+}
+
+function cloneSessionError(error: GraphSessionErrorV1): GraphSessionErrorV1 {
+  return { ...error, ...(error.attachmentFailures ? { attachmentFailures: error.attachmentFailures.map(failure => ({ ...failure })) } : {}) };
 }

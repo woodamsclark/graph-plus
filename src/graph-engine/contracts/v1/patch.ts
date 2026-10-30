@@ -1,3 +1,4 @@
+import type { GraphAttachmentAssignmentFailureV1 } from './attachment.ts';
 import type { GraphEdgeV1, GraphNodeRegionsDocumentV1, GraphNodeV1 } from './document.ts';
 
 export interface GraphPatchV1 {
@@ -36,6 +37,7 @@ export type ApplyGraphPatchResultV1 =
 
 export interface GraphPatchErrorV1 {
   readonly code:
+    | 'attachment-assignment'
     | 'stale-revision'
     | 'duplicate-id'
     | 'missing-node'
@@ -45,4 +47,14 @@ export interface GraphPatchErrorV1 {
     | 'invalid-operation';
   readonly message: string;
   readonly operationIndex?: number;
+  readonly attachmentFailures?: readonly GraphAttachmentAssignmentFailureV1[];
 }
+
+/** Complete graph replacement; failures leave the previous graph and world unchanged. */
+export type SetGraphResultV1 =
+  | { readonly applied: true; readonly revision: number }
+  | { readonly applied: false; readonly revision: number; readonly error: {
+      readonly code: 'invalid-document' | 'attachment-assignment';
+      readonly message: string;
+      readonly attachmentFailures?: readonly GraphAttachmentAssignmentFailureV1[];
+    } };

@@ -3,6 +3,14 @@
 Branch: `rc/attachments`. This is the integration candidate for attachment features,
 not a stable release or an automatic plugin installation. `main` stays unchanged.
 
+## Current consumer API
+
+Use `setGraph` for a complete description and `patchGraph` for atomic incremental
+edits. Both return an `applied` result. Attachments are now explicitly disabled
+unless `attachment.enabled === true`; enabled nodes default to loose assignment.
+Strict node policies return detailed failures without committing unsuccessful graph
+edits. See [the current policy contract and complete consumer example](attachment-policy.md).
+
 ## Included
 
 - Existing node-owned 2D attachment patterns, finite occupancy, spring bindings,
@@ -80,6 +88,7 @@ Node and edge declarations use the existing attachment fields. For example:
 const hub = {
   id: 'hub',
   attachment: {
+    enabled: true,
     count: 6,
     rigidity: 'locked',
     orientation: { mode: 'locked', rotation: { x: 0, y: 0, z: 0, w: 1 } },
@@ -129,7 +138,7 @@ authored node/edge declarations survive dimension changes and are re-admitted.
 
 ## Validation and remaining hands-on checks
 
-The RC passes 569 tests, including 20 new 3D tests, existing 2D behavior, client
+The RC passes 583 tests, including 21 3D tests and 13 policy/API tests, existing 2D behavior, client
 artifact consistency, leased capability negotiation and edge patches, persistence,
 quaternion fitting, spring convergence, hard-lock conflicts, drag/position patches,
 and a 24-hub/144-binding repeated-disturbance stress case. Typecheck, build, and
