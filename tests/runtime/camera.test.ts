@@ -46,7 +46,7 @@ test('R-CAMERA-01 orthographic zoom scales node projection and hit radius togeth
   assert(hitTester.hit({ x: 330, y: 180 })?.nodeId === 'a', 'the hit radius should expand with the rendered node radius');
 });
 
-test('R-CAMERA-02 perspective dolly scales nodes without changing the default size', () => {
+test('R-CAMERA-02 perspective dolly scales node radii and world spacing together', () => {
   const state: GraphCameraStateV1 = {
     position: { x: 0, y: 0, z: 100 },
     target: { x: 0, y: 0, z: 0 },
@@ -56,9 +56,12 @@ test('R-CAMERA-02 perspective dolly scales nodes without changing the default si
   };
   const camera = new GraphCameraController(state, '3d');
   camera.setViewport(640, 360);
-  equal(camera.worldToScreen({ x: 0, y: 0, z: 0 }).scale, 1, 'the stock perspective camera should retain its established node size');
+  equal(camera.worldToScreen({ x: 0, y: 0, z: 0 }).scale, 7.5, 'radius uses the same pixels per world unit as spacing');
+  equal(camera.worldToScreen({ x: 1, y: 0, z: 0 }).x - 320, 7.5, 'one world unit matches the radius scale');
   camera.setState({ ...state, position: { x: 0, y: 0, z: 50 } });
-  equal(camera.worldToScreen({ x: 0, y: 0, z: 0 }).scale, 2, 'dollying to half the depth should double projected node radius');
+  equal(camera.worldToScreen({ x: 0, y: 0, z: 0 }).scale, 15, 'dollying to half the depth should double projected node radius');
+  camera.setViewport(640, 720);
+  equal(camera.worldToScreen({ x: 0, y: 0, z: 0 }).scale, 30, 'viewport resizing scales radii along with world spacing');
 });
 
 test('Vision derives an Attention centroid without putting geometry in Consciousness', () => {

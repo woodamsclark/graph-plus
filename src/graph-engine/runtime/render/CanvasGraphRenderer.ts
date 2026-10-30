@@ -888,7 +888,7 @@ function projectedRadius(
   const requestedExponent = Math.max(0, Math.min(2, nodeScaleExponent ?? sharedExponent));
   // Extra size contrast is a close-up effect. Applying it below unit zoom
   // shrinks prominent nodes faster and can invert the world-radius ordering.
-  const exponent = projection === 'orthographic' && scale < 1
+  const exponent = scale < 1
     ? Math.min(requestedExponent, sharedExponent)
     : requestedExponent;
   const projected = radius * Math.pow(Math.max(0, scale), exponent);

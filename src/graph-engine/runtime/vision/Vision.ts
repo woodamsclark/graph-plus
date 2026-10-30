@@ -38,8 +38,6 @@ const MIN_ZOOM = 0.02;
 const MAX_ZOOM = 40;
 const MIN_PERSPECTIVE_DISTANCE = 10;
 const MAX_PERSPECTIVE_DISTANCE = 10_000_000;
-const DEFAULT_PERSPECTIVE_DISTANCE = 100;
-const DEFAULT_PERSPECTIVE_ZOOM = 50 / 24;
 const MIN_PROJECTED_SCALE = 0.02;
 const MAX_PROJECTED_SCALE = 40;
 
@@ -141,8 +139,7 @@ export class Vision {
       y: centerY + viewY * focal / safeDepth,
       depth,
       scale: clamp(
-        (this.state.zoom / DEFAULT_PERSPECTIVE_ZOOM)
-          * (DEFAULT_PERSPECTIVE_DISTANCE / safeDepth),
+        focal / safeDepth,
         MIN_PROJECTED_SCALE,
         MAX_PROJECTED_SCALE,
       ),
@@ -375,7 +372,7 @@ export class Vision {
     });
     const scaleDistanceForFit = maximumProjectedScale === undefined
       ? 0
-      : (Math.max(MIN_ZOOM, this.state.zoom) / DEFAULT_PERSPECTIVE_ZOOM) * DEFAULT_PERSPECTIVE_DISTANCE
+      : Math.max(1, this.viewport.height) * Math.max(MIN_ZOOM, this.state.zoom)
         / finitePositive(maximumProjectedScale, Number.POSITIVE_INFINITY);
     const distanceForFit = Math.max(positionDistanceForFit, scaleDistanceForFit);
     this.state = {
@@ -423,7 +420,7 @@ export class Vision {
     });
     const scaleMaximumDistance = maximumProjectedScale === undefined
       ? 0
-      : (Math.max(MIN_ZOOM, this.state.zoom) / DEFAULT_PERSPECTIVE_ZOOM) * DEFAULT_PERSPECTIVE_DISTANCE
+      : Math.max(1, this.viewport.height) * Math.max(MIN_ZOOM, this.state.zoom)
         / finitePositive(maximumProjectedScale, Number.POSITIVE_INFINITY);
     const maximumDistance = Math.max(positionMaximumDistance, scaleMaximumDistance);
     const offset = subtract(this.state.position, this.state.target);

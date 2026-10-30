@@ -952,20 +952,22 @@ test('label mode Off suppresses even hover-forced labels', () => {
   equal(fillTextY.length, 0, 'label mode off must suppress even the explicit hover label override');
 });
 
-test('distant 2D zoom preserves large-node prominence and the visible picking boundary', () => {
+test('both dimensions preserve large-node prominence and matching visible picking boundaries', () => {
+  for (const dimensions of ['2d', '3d'] as const) {
   const arcRadii: number[] = [];
   const context = recordingContext([], arcRadii);
   const canvas = { getContext: () => context, remove: () => {} } as unknown as HTMLCanvasElement;
   const camera = new GraphCameraController({
     position: { x: 0, y: 0, z: 1000 }, target: { x: 0, y: 0, z: 0 },
-    up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: 'orthographic',
-  }, '2d');
+    up: { x: 0, y: 1, z: 0 }, zoom: 1, projection: dimensions === '2d' ? 'orthographic' : 'perspective',
+  }, dimensions);
   camera.setViewport(640, 360);
   const frames = new GraphFrameStore();
   const renderer = sceneRendererFixture(canvas, camera, frames, () => 0);
   renderer.resize(640, 360, 1);
   for (const zoom of [0.02, 0.1, 0.5, 1, 4]) {
-    camera.setState({ ...camera.getState(), zoom });
+    camera.setState({ ...camera.getState(), zoom: dimensions === '2d' ? zoom : 1,
+      position: { x: 0, y: 0, z: dimensions === '2d' ? 1000 : 360 / zoom } });
     const radii: number[] = [];
     for (const [id, radius, nodeScaleExponent] of [['small', 8, 0.5], ['large', 24, 2]] as const) {
       arcRadii.length = 0;
@@ -983,11 +985,12 @@ test('distant 2D zoom preserves large-node prominence and the visible picking bo
       equal(renderer.hitTest({ x: 320 + Math.min(expected * 0.9, 200), y: 180 })?.nodeId, id,
         'the visible disc remains pickable near its edge');
     }
-    assert(radii[1] > radii[0], 'large nodes must remain larger throughout the 2D zoom range');
+    assert(radii[1] > radii[0], 'large nodes must remain larger throughout either zoom range');
     if (zoom <= 1) assert(Math.abs(radii[1] / radii[0] - 3) < 1e-10,
       'overview preserves the structural radius ratio');
   }
   renderer.dispose();
+  }
 });
 
 test('node scaling supports calm, world, and exaggerated responses in 2D and 3D', () => {
@@ -1052,10 +1055,10 @@ test('node scaling supports calm, world, and exaggerated responses in 2D and 3D'
     perspectiveRenderer.render();
     return arcRadii[0];
   };
-  assert(Math.abs(renderPerspectiveAt(0.5) - 10 * Math.sqrt(2)) < 1e-10,
+  assert(Math.abs(renderPerspectiveAt(0.5) - 10 * Math.sqrt(15)) < 1e-10,
     'the gentle response should apply to perspective depth');
-  equal(renderPerspectiveAt(1), 20, 'world response should remain linear in perspective');
-  equal(renderPerspectiveAt(2), 40, 'the exaggerated response should also apply in 3D');
+  equal(renderPerspectiveAt(1), 150, 'world response uses projected pixels per world unit');
+  equal(renderPerspectiveAt(2), 2250, 'the exaggerated response should also apply in 3D');
 });
 
 test('V1.6 renderer anchors labels above or below the resolved node boundary', () => {
