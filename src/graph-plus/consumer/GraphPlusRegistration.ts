@@ -83,6 +83,10 @@ export const GRAPH_PLUS_CONSUMER_REGISTRATION_V1: ConsumerRegistrationV1 = {
         policy: 'optional',
         defaultEnabled: true,
         constraints: {
+          gravityEnabled: { type: 'enum', allowed: [false, true] },
+          gravityX: { type: 'number', min: -100, max: 100 },
+          gravityY: { type: 'number', min: -100, max: 100 },
+          gravityZ: { type: 'number', min: -100, max: 100 },
           axialSpringAxis: { type: 'enum', allowed: ['off', 'x', 'y', 'z'] },
           axialSpringStiffness: { type: 'number', min: 0, max: 0.9 },
         },

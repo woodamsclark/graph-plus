@@ -451,6 +451,24 @@ export class GraphEngineQuickSettingsPanelV1 implements Disposable {
     const forces = effective.modules['force-layout'];
     if (forces?.enabled) {
       const settings = forces.settings;
+      const gravityHost = div(body, 'graph-engine-conditional-control');
+      gravityHost.hidden = settings.gravityEnabled !== true;
+      if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.gravity)) {
+        const presentation = graphSettingPresentationV1('force-layout.gravityEnabled');
+        new Setting(body).setName(presentation.name).setDesc(presentation.description)
+          .addToggle(toggle => toggle.setValue(settings.gravityEnabled === true).onChange(async enabled => {
+            await this.context.profileSettings.setModuleSetting('force-layout', 'gravityEnabled', enabled);
+            gravityHost.hidden = !enabled;
+          }));
+      }
+      for (const axis of ['X', 'Y', 'Z'] as const) {
+        if (axis === 'Z' && effective.dimensions !== '3d') continue;
+        if (graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS[`gravity${axis}`])) {
+          this.catalogSlider(gravityHost, `force-layout.gravity${axis}`, readNumber(settings[`gravity${axis}`], 0));
+        }
+      }
+      // Put the enable control before its axes without rebuilding active sliders.
+      body.appendChild(gravityHost);
       let axialStiffnessHost: HTMLDivElement | undefined;
       if (effective.dimensions === '3d'
         && graphUiControlIsShownV1(this.policy, SECTIONS.forces, CONTROLS.axialSpringAxis)) {

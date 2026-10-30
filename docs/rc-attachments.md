@@ -3,6 +3,12 @@
 Branch: `rc/attachments`. This is the integration candidate for attachment features,
 not a stable release or an automatic plugin installation. `main` stays unchanged.
 
+## Gravity
+
+Gravity is now an explicit default-off X/Y/Z force input, modulated by ordinary
+simulation alpha. It is available in plugin Settings and Quick Settings. See
+[the gravity settings and consumer API](rc-gravity.md) for updates and cooling behavior.
+
 ## Current consumer API
 
 Use `setGraph` for a complete description and `patchGraph` for atomic incremental
@@ -25,12 +31,13 @@ edits. See [the current policy contract and complete consumer example](attachmen
 
 | Branch | Scope |
 | --- | --- |
-| `rc/attachments` | 2D and 3D attachments; no gravity or experimental grabs |
+| `rc/attachments` | 2D/3D attachments and alpha-cooled vector gravity; no experimental grabs |
 | `experiment/gravity-node-pull` | Checkpoint of the existing uniform-Y-gravity and settings-based node-pull prototype |
 | `experiment/grab-constraints` | Exact/elastic/off transient grab experiment |
 
 The settings-based node pull is an earlier prototype, not the newer grab API.
-Neither experiment is included in this RC. Default exact dragging remains as before;
+The RC now includes separately implemented vector gravity; the old node-pull
+and grab implementations remain excluded. Default exact dragging remains as before;
 accepted hard attachment locks can still veto incompatible movement.
 
 The RC starts with the three committed attachment changes through `439ccde`.
@@ -138,7 +145,7 @@ authored node/edge declarations survive dimension changes and are re-admitted.
 
 ## Validation and remaining hands-on checks
 
-The RC passes 583 tests, including 21 3D tests and 13 policy/API tests, existing 2D behavior, client
+The RC passes 597 tests, including 21 3D tests, 13 policy/API tests, and 14 vector-gravity/settings tests, existing 2D behavior, client
 artifact consistency, leased capability negotiation and edge patches, persistence,
 quaternion fitting, spring convergence, hard-lock conflicts, drag/position patches,
 and a 24-hub/144-binding repeated-disturbance stress case. Typecheck, build, and

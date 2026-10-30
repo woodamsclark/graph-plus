@@ -1,3 +1,17 @@
+/** Constant, live-updatable world-space force components in force-layout settings. */
+export const GRAPH_UNIFORM_FORCE_CAPABILITY_V1 = 'force-layout-uniform-force';
+
+/** Optional `force-layout` settings. Existing alpha, damping and speed limits still apply. */
+export interface GraphUniformForceSettingsV1 {
+  /** Defaults to false; disabling preserves component values. */
+  readonly gravityEnabled?: boolean;
+  /** Signed world-space components in solver units, each clamped to -100..100; default zero. */
+  readonly gravityX?: number;
+  readonly gravityY?: number;
+  /** Retained in 2D settings but only applied in 3D. */
+  readonly gravityZ?: number;
+}
+
 export const GRAPH_LINEAR_BUILD_DIRECTIONS_V1 = [
   'up',
   'down',

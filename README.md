@@ -200,5 +200,5 @@ For node-owned attachment symmetry, storage, and leased-plugin usage, see
 [2D connection angles](docs/connection-angles-2d.md).
 
 Attachment integration candidate: [`rc/attachments`](docs/rc-attachments.md) adds
-opt-in 2D/3D attachment constraints for downstream testing. Gravity and experimental
-grabbing remain on separate experiment branches.
+opt-in 2D/3D attachment constraints and [vector gravity](docs/rc-gravity.md) for downstream
+testing. Node-pull and experimental grabbing remain on separate experiment branches.

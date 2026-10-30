@@ -84,3 +84,10 @@ Request `GRAPH_UPDATE_API_CAPABILITY_V1` and
 Attachments require `enabled: true`; enabled nodes default to loose assignment.
 Strict policies reject unsuccessful graph edits atomically. See
 [the policy example](../../docs/attachment-policy.md).
+
+The RC also provides default-off, alpha-cooled uniform gravity via
+`GRAPH_UNIFORM_FORCE_CAPABILITY_V1`. Set `gravityEnabled` and signed
+`gravityX` / `gravityY` / `gravityZ` in force-layout settings; Z applies only in 3D.
+`GraphUniformForceSettingsV1` describes these optional settings. Live updates replace
+the coefficients and reheat normal simulation; a constant vector still cools.
+See [vector gravity](../../docs/rc-gravity.md).

@@ -24,6 +24,11 @@ interface ForceSettings {
   readonly springStrength: number;
   readonly springLength: number;
   readonly centeringStrength: number;
+  /** Constant world-space acceleration in solver units per admitted step. */
+  readonly gravityEnabled: boolean;
+  readonly gravityX: number;
+  readonly gravityY: number;
+  readonly gravityZ: number;
   readonly velocityDecay: number;
   readonly alphaDecay: number;
   readonly alphaMin: number;
@@ -119,6 +124,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
   /** Fraction of an ordinary force-driven state transition applied per admitted tick. */
   private alpha = 1;
   private running = true;
+  private singleNodeForceSettling = false;
   private physicsOverrideReturn?: { alpha: number; legacyAlphaTarget: number; running: boolean };
   private pinnedKey = '';
   private projectionFilterKey: string | undefined;
@@ -153,13 +159,15 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     const nextSettings = readForceSettings(settings);
     if (JSON.stringify(this.settings) === JSON.stringify(nextSettings)) return;
     const previous = this.settings;
+    const inertGravityChange = forceSettingsEqualExceptGravity(previous, nextSettings)
+      && sameEffectiveGravity(previous, nextSettings, this.dimensions);
     const dampingOnlyChange = forceSettingsEqualExceptVelocityDecay(this.settings, nextSettings)
       && this.settings.velocityDecay !== nextSettings.velocityDecay;
     this.settings = nextSettings;
     // Damping changes should tame existing motion, not create more of it. They
     // neither affect the topology-derived spring data nor need to reheat a
     // settled layout.
-    if (dampingOnlyChange) return;
+    if (dampingOnlyChange || inertGravityChange) return;
     if (JSON.stringify(previous.topologyLayoutPolicy) !== JSON.stringify(nextSettings.topologyLayoutPolicy)) {
       this.topologyDocumentSource = null;
     }
@@ -253,7 +261,9 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     this.synchronizeNodeAttachments(state);
     if ((this.attachmentSlots.hasLocks || [...this.nodeAttachments.values()].some(attachment => attachment.rigidity === 'locked')) && state.positions !== this.positions && state.positions !== this.positionSource) this.reheatForChange();
     this.synchronizePhysicsOverride(state.physicsOverrideHeld === true);
-    if (this.suspended || state.formActive || state.document.nodes.length < 2) return null;
+    const forceActive = this.hasUniformForce(state);
+    if (this.suspended || state.formActive || !state.document.nodes.length
+      || (state.document.nodes.length === 1 && !forceActive && !this.singleNodeForceSettling)) return null;
     const dragActive = state.draggedNodeId !== undefined
       && state.document.nodes.some((node) => node.id === state.draggedNodeId);
     const cursorActive = Object.keys(state.cursorAttractionSteps ?? {}).length > 0;
@@ -272,10 +282,13 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
       if (this.restoredStatePending) this.restoredStatePending = false;
       else this.reheatForChange();
     }
-    if (this.suspended || state.formActive || state.document.nodes.length < 2) return;
+    const forceActive = this.hasUniformForce(state);
+    if (this.suspended || state.formActive || !state.document.nodes.length
+      || (state.document.nodes.length === 1 && !forceActive && !this.singleNodeForceSettling)) return;
     const dragActive = state.draggedNodeId !== undefined
       && state.document.nodes.some((node) => node.id === state.draggedNodeId);
     if (dragActive || Object.keys(state.cursorAttractionSteps ?? {}).length) this.running = true;
+    if (forceActive && state.document.nodes.length === 1) this.singleNodeForceSettling = true;
     this.synchronizeBuffers(state);
     this.synchronizeTopology(state);
     if (!this.running) return;
@@ -554,15 +567,28 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
     };
   }
 
+  private hasUniformForce(state: GraphModulePipelineStateV1): boolean {
+    const settings = this.settings;
+    if (!settings.gravityEnabled || (settings.gravityX === 0 && settings.gravityY === 0
+      && (this.dimensions === '2d' || settings.gravityZ === 0))) return false;
+    const pinned = new Set(state.viewState.pinnedNodeIds);
+    return state.document.nodes.some(node => !pinned.has(node.id) && node.id !== state.draggedNodeId);
+  }
+
   private targetFrameIntervalMs(dragActive: boolean): number {
     return forceLayoutIntervalMsV1(this.alpha, dragActive);
   }
 
   private applyD3Origin(state: GraphModulePipelineStateV1): void {
     const strength = this.settings.centeringStrength * FORCE_INTEGRATION_GAIN;
+    const gravity = this.settings.gravityEnabled;
+    const gx = gravity ? this.settings.gravityX * FORCE_INTEGRATION_GAIN : 0;
+    const gy = gravity ? this.settings.gravityY * FORCE_INTEGRATION_GAIN : 0;
+    const gz = gravity && this.dimensions === '3d' ? this.settings.gravityZ * FORCE_INTEGRATION_GAIN : 0;
     for (const node of state.document.nodes) {
       const position = this.positions[node.id];
       const velocity = this.velocities.get(node.id)!;
+      velocity.x += gx; velocity.y += gy; velocity.z += gz;
       if (strength > 0) {
         velocity.x += -position.x * strength;
         velocity.y += -position.y * strength;
@@ -903,6 +929,7 @@ export class ForceLayoutModule implements GraphModuleInstanceV1 {
 
   private stop(): void {
     this.running = false;
+    this.singleNodeForceSettling = false;
     this.alpha = 0;
     this.legacyAlphaTarget = 0;
     this.settledStepCount = 0;
@@ -922,6 +949,10 @@ export function readForceSettings(settings: Readonly<Record<string, JsonValue>>)
     springStrength: finiteNonNegative(settings.springStrength, 1),
     springLength: finitePositive(settings.springLength, 250),
     centeringStrength: finiteNonNegative(settings.centeringStrength, 0.1),
+    gravityEnabled: settings.gravityEnabled === true,
+    gravityX: clampNumber(settings.gravityX, -100, 100, 0),
+    gravityY: clampNumber(settings.gravityY, -100, 100, 0),
+    gravityZ: clampNumber(settings.gravityZ, -100, 100, 0),
     velocityDecay: clampNumber(settings.velocityDecay ?? settings.damping, 0, 1, 0.4),
     alphaDecay: clampNumber(settings.alphaDecay, 0, 1, DEFAULT_ALPHA_DECAY_PER_SECOND),
     alphaMin: finitePositive(settings.alphaMin, 0.001),
@@ -974,11 +1005,23 @@ function readAxialSpringAxis(value: JsonValue | undefined): GraphAxialSpringAxis
   return value === 'x' || value === 'y' || value === 'z' ? value : 'off';
 }
 
+function forceSettingsEqualExceptGravity(left: ForceSettings, right: ForceSettings): boolean {
+  const neutral = { gravityEnabled: false, gravityX: 0, gravityY: 0, gravityZ: 0 };
+  return JSON.stringify({ ...left, ...neutral }) === JSON.stringify({ ...right, ...neutral });
+}
+
+function sameEffectiveGravity(left: ForceSettings, right: ForceSettings, dimensions: GraphDimensionsV1): boolean {
+  return (['gravityX', 'gravityY', ...(dimensions === '3d' ? ['gravityZ'] as const : [])] as const)
+    .every(axis => (left.gravityEnabled ? left[axis] : 0) === (right.gravityEnabled ? right[axis] : 0));
+}
+
 function forceSettingsEqualExceptVelocityDecay(left: ForceSettings, right: ForceSettings): boolean {
   return left.repulsionStrength === right.repulsionStrength
     && left.springStrength === right.springStrength
     && left.springLength === right.springLength
     && left.centeringStrength === right.centeringStrength
+    && left.gravityEnabled === right.gravityEnabled
+    && left.gravityX === right.gravityX && left.gravityY === right.gravityY && left.gravityZ === right.gravityZ
     && left.alphaDecay === right.alphaDecay
     && left.alphaMin === right.alphaMin
     && left.repulsionMinDistance === right.repulsionMinDistance

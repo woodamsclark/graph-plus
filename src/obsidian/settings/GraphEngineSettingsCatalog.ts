@@ -54,6 +54,11 @@ export const GRAPH_SETTING_PRESENTATIONS_V1: readonly GraphSettingPresentationV1
   entry('node-regions.boundariesVisible', 'appearance', 'node-regions', 'boundariesVisible', 'Region boundaries', 'Show region boundary shapes in 2D.',
     { type: 'toggle' }),
 
+  entry('force-layout.gravityEnabled', 'layout-motion', 'force-layout', 'gravityEnabled', 'Gravity', 'Apply a world-space force while physics runs. Motion follows simulation cooling; off preserves the configured values.',
+    { type: 'toggle' }),
+  ...(['X', 'Y', 'Z'] as const).map(axis => entry(`force-layout.gravity${axis}`, 'layout-motion', 'force-layout', `gravity${axis}`, `Gravity ${axis}`,
+    `Force along world ${axis}, scaled by simulation activity. Negative values reverse direction.${axis === 'Z' ? ' Used in 3D only.' : ''}`,
+    { type: 'slider', min: -100, max: 100, step: 0.1 })),
   entry('force-layout.centeringStrength', 'layout-motion', 'force-layout', 'centeringStrength', 'Center force', 'Pull the graph toward its center.',
     { type: 'slider', min: 0, max: 1, step: 0.001 }),
   entry('force-layout.repulsionStrength', 'layout-motion', 'force-layout', 'repulsionStrength', 'Repel force', 'Push nodes apart.',
